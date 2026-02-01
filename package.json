@@ -1,0 +1,41 @@
+{
+  "name": "sabalanerp",
+  "version": "1.0.0",
+  "description": "ERP system with Next.js frontend and Express.js backend",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && npm run dev",
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && npm run build",
+    "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
+    "start:frontend": "cd frontend && npm run start",
+    "start:backend": "cd backend && npm run start",
+    "install:all": "npm install && cd frontend && npm install && cd ../backend && npm install",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "db:create": "node setup-database.js",
+    "db:migrate": "cd backend && npx prisma migrate dev",
+    "db:generate": "cd backend && npx prisma generate",
+    "db:studio": "cd backend && npx prisma studio",
+    "setup": "npm run install:all && npm run docker:up && sleep 10 && npm run db:create && npm run db:migrate && npm run db:generate"
+  },
+  "keywords": [
+    "erp",
+    "nextjs",
+    "express",
+    "typescript",
+    "postgresql"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "pg": "^8.11.3"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}

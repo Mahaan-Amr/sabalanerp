@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la \"d:\\\\sabalanerp\\\\backend\\\\prisma\"\" 2>/dev/null || echo \"Directory not found \")",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(npm run build:*)",
+      "Bash(node -e \"const fs=require\\(''fs''\\); const code=fs.readFileSync\\(''src/app/dashboard/sales/contracts/create/page.tsx'',''utf8''\\); let open=0,close=0; for\\(let c of code\\){if\\(c===''{''\\)open++;if\\(c===''}''\\)close++;} console.log\\(''Open braces:'',open,''Close braces:'',close,''Diff:'',open-close\\);\":*)",
+      "Bash(1)",
+      "Bash(npx tsc:*)",
+      "Bash(node -e:*)",
+      "Bash(echo:*)"
+    ]
+  }
+}

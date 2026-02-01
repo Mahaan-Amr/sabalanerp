@@ -1,0 +1,221 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Import Persian Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Vazir:wght@300;400;500;600;700&display=swap');
+@import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazir-font@v30.1.0/dist/font-face.css');
+
+/* CSS Variables for Theme System */
+:root {
+  /* Light Mode Colors */
+  --primary-silver: #80868b;
+  --primary-gold: #ffbf00;
+  --primary-teal: #14b8a6;
+  --background: #ffffff;
+  --surface: rgba(255, 255, 255, 0.8);
+  --text-primary: #202124;
+  --text-secondary: #5f6368;
+  --border: rgba(128, 134, 139, 0.3);
+  --shadow: rgba(0, 0, 0, 0.1);
+  --glass-bg: rgba(255, 255, 255, 0.1);
+  --glass-border: rgba(255, 255, 255, 0.2);
+}
+
+/* Dark Mode Colors (Default) */
+[data-theme="dark"] {
+  --primary-silver: #808080;
+  --primary-gold: #b8860b;
+  --primary-teal: #06b6d4;
+  --background: #1a1a1a;
+  --surface: rgba(30, 30, 30, 0.8);
+  --text-primary: #ffffff;
+  --text-secondary: #b0b0b0;
+  --border: rgba(128, 128, 128, 0.3);
+  --shadow: rgba(0, 0, 0, 0.3);
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.1);
+}
+
+/* Light Mode Override */
+[data-theme="light"] {
+  --primary-silver: #80868b;
+  --primary-gold: #ffbf00;
+  --primary-teal: #14b8a6;
+  --background: #ffffff;
+  --surface: rgba(255, 255, 255, 0.8);
+  --text-primary: #202124;
+  --text-secondary: #5f6368;
+  --border: rgba(128, 134, 139, 0.3);
+  --shadow: rgba(0, 0, 0, 0.1);
+  --glass-bg: rgba(255, 255, 255, 0.1);
+  --glass-border: rgba(255, 255, 255, 0.2);
+}
+
+/* Base Styles */
+* {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--text-primary);
+  font-family: 'Vazir', 'Samim', sans-serif;
+  direction: rtl; /* RTL for Persian */
+  text-align: right;
+}
+
+/* Apple Glass Liquid Design Components */
+@layer components {
+  /* Glass Liquid Card */
+  .glass-liquid-card {
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    border-radius: 28px;
+    border: 1px solid var(--glass-border);
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transform: translateZ(0);
+    box-shadow: 0 8px 32px var(--shadow);
+  }
+
+  .glass-liquid-card:hover {
+    transform: translateY(-2px) scale(1.02);
+    background: var(--glass-bg);
+    backdrop-filter: blur(25px);
+    box-shadow: 0 12px 40px var(--shadow);
+  }
+
+  /* Glass Liquid Button */
+  .glass-liquid-btn {
+    background: var(--glass-bg);
+    backdrop-filter: blur(16px);
+    border-radius: 20px;
+    border: 1px solid var(--glass-border);
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transform: translateZ(0);
+    color: var(--text-primary);
+    font-weight: 500;
+    padding: 12px 20px;
+    min-width: fit-content;
+  }
+
+  .glass-liquid-btn:hover {
+    transform: translateY(-1px) scale(1.05);
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    box-shadow: 0 8px 24px var(--shadow);
+  }
+
+  .glass-liquid-btn-primary {
+    background: var(--primary-gold);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 20px;
+  }
+
+  .glass-liquid-btn-primary:hover {
+    background: var(--primary-teal);
+    transform: translateY(-2px) scale(1.05);
+  }
+
+  /* Glass Liquid Input */
+  .glass-liquid-input {
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    border-radius: 20px;
+    border: 1px solid var(--glass-border);
+    transition: all 0.3s ease;
+    color: var(--text-primary);
+    padding: 12px 16px;
+    width: 100%;
+  }
+
+  .glass-liquid-input:focus {
+    outline: none;
+    border: 1px solid var(--primary-teal);
+    background: var(--glass-bg);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.1);
+  }
+
+  .glass-liquid-input::placeholder {
+    color: var(--text-secondary);
+  }
+
+  /* Theme Toggle Button */
+  .theme-toggle {
+    background: var(--glass-bg);
+    backdrop-filter: blur(16px);
+    border-radius: 24px;
+    border: 1px solid var(--glass-border);
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .theme-toggle:hover {
+    transform: scale(1.1);
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+  }
+
+  /* Liquid Animation Classes */
+  .animate-liquid {
+    animation: liquid 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  }
+
+  .animate-glass-hover {
+    animation: glass-hover 0.3s ease-out;
+  }
+
+  .animate-theme-transition {
+    animation: theme-transition 0.3s ease-in-out;
+  }
+
+  /* Utility Classes */
+  .text-primary {
+    color: var(--text-primary);
+  }
+
+  .text-secondary {
+    color: var(--text-secondary);
+  }
+
+  .bg-primary {
+    background-color: var(--background);
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--primary-silver);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary-gold);
+}
+
+/* Selection Colors */
+::selection {
+  background: var(--primary-teal);
+  color: white;
+}
+
+::-moz-selection {
+  background: var(--primary-teal);
+  color: white;
+}

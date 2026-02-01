@@ -1,0 +1,953 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                     String                @id @default(cuid())
+  email                  String                @unique
+  username               String                @unique
+  password               String
+  firstName              String
+  lastName               String
+  role                   UserRole              @default(USER)
+  isActive               Boolean               @default(true)
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+  departmentId           String?
+  attendanceRecords      AttendanceRecord[]
+  comments               Comment[]
+  createdTemplates       ContractTemplate[]
+  approvedContracts      Contract[]            @relation("ContractApprovedBy")
+  createdContracts       Contract[]            @relation("ContractCreatedBy")
+  signedContracts        Contract[]            @relation("ContractSignedBy")
+  approvedExceptions     ExceptionRequest[]    @relation("ExceptionApprover")
+  exceptionRequests      ExceptionRequest[]    @relation("ExceptionEmployee")
+  rejectedExceptions     ExceptionRequest[]    @relation("ExceptionRejecter")
+  approvedMissions       MissionAssignment[]   @relation("MissionApprover")
+  assignedMissions       MissionAssignment[]   @relation("MissionAssigner")
+  missionAssignments     MissionAssignment[]   @relation("MissionEmployee")
+  orders                 Order[]
+  posts                  Post[]
+  profile                Profile?
+  approvedSalesContracts SalesContract[]       @relation("SalesContractApprovedBy")
+  createdSalesContracts  SalesContract[]       @relation("SalesContractCreatedBy")
+  signedSalesContracts   SalesContract[]       @relation("SalesContractSignedBy")
+  securityPersonnel      SecurityPersonnel?
+  department             Department?           @relation(fields: [departmentId], references: [id])
+  grantedPermissions     WorkspacePermission[] @relation("PermissionGranter")
+  workspacePermissions   WorkspacePermission[]
+  grantedFeaturePermissions FeaturePermission[] @relation("FeaturePermissionGranter")
+  featurePermissions     FeaturePermission[]
+
+  @@map("users")
+}
+
+model Profile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  avatar    String?
+  bio       String?
+  phone     String?
+  address   String?
+  city      String?
+  country   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+model Post {
+  id        String    @id @default(cuid())
+  title     String
+  content   String
+  published Boolean   @default(false)
+  authorId  String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  comments  Comment[]
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@map("posts")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String
+  postId    String
+  authorId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@map("comments")
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  orderNumber String      @unique
+  status      OrderStatus @default(PENDING)
+  total       Decimal     @db.Decimal(10, 2)
+  customerId  String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  customer    User        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("orders")
+}
+
+model Department {
+  id             String          @id @default(cuid())
+  name           String          @unique
+  namePersian    String          @unique
+  description    String?
+  isActive       Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  contracts      Contract[]
+  salesContracts SalesContract[] @relation("SalesContractDepartment")
+  users          User[]
+
+  @@map("departments")
+}
+
+model Customer {
+  id          String     @id @default(cuid())
+  firstName   String
+  lastName    String
+  companyName String?
+  email       String?
+  phone       String?
+  address     String?
+  city        String?
+  country     String     @default("ایران")
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  contracts   Contract[]
+
+  @@map("customers")
+}
+
+model ContractTemplate {
+  id             String          @id @default(cuid())
+  name           String
+  namePersian    String
+  description    String?
+  content        String
+  variables      Json?
+  isActive       Boolean         @default(true)
+  createdBy      String
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  calculations   Json?
+  category       String?
+  structure      Json?
+  createdByUser  User            @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+  contracts      Contract[]
+  salesContracts SalesContract[] @relation("SalesContractTemplate")
+
+  @@map("contract_templates")
+}
+
+model Contract {
+  id             String            @id @default(cuid())
+  contractNumber String            @unique
+  title          String
+  titlePersian   String
+  content        String
+  status         ContractStatus    @default(DRAFT)
+  customerId     String
+  departmentId   String
+  templateId     String?
+  createdBy      String
+  approvedBy     String?
+  signedBy       String?
+  signedAt       DateTime?
+  printedAt      DateTime?
+  totalAmount    Decimal?          @db.Decimal(15, 2)
+  currency       String            @default("تومان")
+  notes          String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  calculations   Json?
+  contractData   Json?
+  signatures     Json?
+  approvedByUser User?             @relation("ContractApprovedBy", fields: [approvedBy], references: [id])
+  createdByUser  User              @relation("ContractCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade)
+  customer       Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  department     Department        @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  signedByUser   User?             @relation("ContractSignedBy", fields: [signedBy], references: [id])
+  template       ContractTemplate? @relation(fields: [templateId], references: [id])
+
+  @@map("contracts")
+}
+
+model Shift {
+  id                String              @id @default(cuid())
+  name              String              @unique
+  namePersian       String              @unique
+  startTime         String
+  endTime           String
+  duration          Int
+  isActive          Boolean             @default(true)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  attendanceRecords AttendanceRecord[]
+  securityPersonnel SecurityPersonnel[]
+
+  @@map("shifts")
+}
+
+model SecurityPersonnel {
+  id                String             @id @default(cuid())
+  userId            String             @unique
+  shiftId           String
+  position          String
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  attendanceRecords AttendanceRecord[]
+  shift             Shift              @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("security_personnel")
+}
+
+model AttendanceRecord {
+  id                  String            @id @default(cuid())
+  employeeId          String
+  securityPersonnelId String
+  date                DateTime
+  shiftId             String
+  entryTime           String?
+  exitTime            String?
+  status              AttendanceStatus  @default(PRESENT)
+  exceptionType       String?
+  exceptionTime       String?
+  exceptionDuration   Int?
+  digitalSignature    String?
+  notes               String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  employee            User              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  securityPersonnel   SecurityPersonnel @relation(fields: [securityPersonnelId], references: [id], onDelete: Cascade)
+  shift               Shift             @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@map("attendance_records")
+}
+
+model ExceptionRequest {
+  id                 String          @id @default(cuid())
+  employeeId         String
+  exceptionType      ExceptionType
+  status             ExceptionStatus @default(PENDING)
+  startDate          DateTime
+  endDate            DateTime?
+  startTime          String?
+  endTime            String?
+  duration           Int?
+  reason             String
+  description        String?
+  emergencyContact   String?
+  medicalCertificate String?
+  approvedBy         String?
+  rejectedBy         String?
+  approvedAt         DateTime?
+  rejectedAt         DateTime?
+  rejectionReason    String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  approver           User?           @relation("ExceptionApprover", fields: [approvedBy], references: [id])
+  employee           User            @relation("ExceptionEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  rejecter           User?           @relation("ExceptionRejecter", fields: [rejectedBy], references: [id])
+
+  @@map("exception_requests")
+}
+
+model MissionAssignment {
+  id              String          @id @default(cuid())
+  employeeId      String
+  assignedBy      String
+  missionType     String
+  missionLocation String
+  missionPurpose  String
+  startDate       DateTime
+  endDate         DateTime?
+  startTime       String
+  endTime         String?
+  status          ExceptionStatus @default(PENDING)
+  approvedBy      String?
+  approvedAt      DateTime?
+  notes           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  approver        User?           @relation("MissionApprover", fields: [approvedBy], references: [id])
+  assigner        User            @relation("MissionAssigner", fields: [assignedBy], references: [id], onDelete: Cascade)
+  employee        User            @relation("MissionEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@map("mission_assignments")
+}
+
+model WorkspacePermission {
+  id              String    @id @default(cuid())
+  userId          String
+  workspace       String
+  permissionLevel String
+  grantedBy       String?
+  grantedAt       DateTime  @default(now())
+  expiresAt       DateTime?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  granter         User?     @relation("PermissionGranter", fields: [grantedBy], references: [id])
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspace])
+  @@map("workspace_permissions")
+}
+
+model RoleWorkspacePermission {
+  id              String   @id @default(cuid())
+  role            String
+  workspace       String
+  permissionLevel String
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([role, workspace])
+  @@map("role_workspace_permissions")
+}
+
+model FeaturePermission {
+  id              String    @id @default(cuid())
+  userId          String
+  workspace       String
+  feature         String
+  permissionLevel String
+  grantedBy       String?
+  grantedAt       DateTime  @default(now())
+  expiresAt       DateTime?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  granter         User?     @relation("FeaturePermissionGranter", fields: [grantedBy], references: [id])
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspace, feature])
+  @@map("feature_permissions")
+}
+
+model RoleFeaturePermission {
+  id              String   @id @default(cuid())
+  role            String
+  workspace       String
+  feature         String
+  permissionLevel String
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([role, workspace, feature])
+  @@map("role_feature_permissions")
+}
+
+model SalesContract {
+  id             String            @id @default(cuid())
+  contractNumber String            @unique
+  title          String
+  titlePersian   String
+  content        String
+  status         ContractStatus    @default(DRAFT)
+  customerId     String
+  departmentId   String
+  templateId     String?
+  createdBy      String
+  approvedBy     String?
+  signedBy       String?
+  signedAt       DateTime?
+  printedAt      DateTime?
+  totalAmount    Decimal?          @db.Decimal(15, 2)
+  currency       String            @default("تومان")
+  notes          String?
+  contractData   Json?
+  calculations   Json?
+  signatures     Json?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  items                ContractItem[]
+  deliveries           Delivery[]
+  payments             Payment[]
+  verificationCodes    ContractVerificationCode[]
+  isSigned             Boolean                    @default(false)
+  signedByPhoneNumber  String?
+  verificationCodeId    String?                    @unique
+  verificationCode     ContractVerificationCode?  @relation("VerifiedCode", fields: [verificationCodeId], references: [id])
+  approvedByUser        User?                     @relation("SalesContractApprovedBy", fields: [approvedBy], references: [id])
+  createdByUser        User                       @relation("SalesContractCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade)
+  customer             CrmCustomer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  department           Department                 @relation("SalesContractDepartment", fields: [departmentId], references: [id], onDelete: Cascade)
+  signedByUser         User?                      @relation("SalesContractSignedBy", fields: [signedBy], references: [id])
+  template             ContractTemplate?          @relation("SalesContractTemplate", fields: [templateId], references: [id])
+
+  @@map("sales_contracts")
+}
+
+model CrmCustomer {
+  id                       String             @id @default(cuid())
+  companyName              String?
+  customerType             String             @default("Individual")
+  industry                 String?
+  status                   String             @default("Active")
+  primaryContactId         String?            @unique
+  address                  String?
+  city                     String?
+  country                  String             @default("ایران")
+  communicationPreferences Json?
+  customFields             Json?
+  isActive                 Boolean            @default(true)
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+  brandName                String?
+  brandNameDescription     String?
+  firstName                String
+  homeAddress              String?
+  homeNumber               String?
+  isBlacklisted            Boolean            @default(false)
+  isLocked                 Boolean            @default(false)
+  lastName                 String
+  nationalCode             String?
+  projectManagerName       String?
+  projectManagerNumber     String?
+  workAddress              String?
+  workNumber               String?
+  communications           CrmCommunication[]
+  contacts                 CrmContact[]       @relation("CustomerContacts")
+  primaryContact           CrmContact?        @relation("CustomerPrimaryContact", fields: [primaryContactId], references: [id])
+  leads                    CrmLead[]
+  phoneNumbers             PhoneNumber[]
+  projectAddresses         ProjectAddress[]
+  salesContracts           SalesContract[]
+
+  @@map("crm_customers")
+}
+
+model ProjectAddress {
+  id                   String      @id @default(cuid())
+  customerId           String
+  address              String
+  city                 String
+  postalCode           String?
+  projectName          String?
+  projectType          String?
+  projectManagerName   String?
+  projectManagerNumber String?
+  isActive             Boolean     @default(true)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  customer             CrmCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("project_addresses")
+}
+
+model PhoneNumber {
+  id         String      @id @default(cuid())
+  customerId String
+  number     String
+  type       String
+  isPrimary  Boolean     @default(false)
+  isActive   Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  customer   CrmCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("phone_numbers")
+}
+
+model CrmContact {
+  id                   String             @id @default(cuid())
+  customerId           String
+  firstName            String
+  lastName             String
+  position             String?
+  email                String?
+  phone                String?
+  mobile               String?
+  isPrimary            Boolean            @default(false)
+  communicationHistory Json?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  communications       CrmCommunication[]
+  customer             CrmCustomer        @relation("CustomerContacts", fields: [customerId], references: [id], onDelete: Cascade)
+  primaryFor           CrmCustomer?       @relation("CustomerPrimaryContact")
+
+  @@map("crm_contacts")
+}
+
+model CrmLead {
+  id            String       @id @default(cuid())
+  customerId    String?
+  source        String
+  status        String       @default("New")
+  score         Int          @default(0)
+  companyName   String
+  contactName   String
+  email         String?
+  phone         String?
+  notes         String?
+  assignedTo    String?
+  expectedValue Decimal?     @db.Decimal(15, 2)
+  probability   Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  customer      CrmCustomer? @relation(fields: [customerId], references: [id])
+
+  @@map("crm_leads")
+}
+
+model CrmCommunication {
+  id          String      @id @default(cuid())
+  customerId  String
+  contactId   String?
+  type        String
+  subject     String
+  content     String
+  direction   String
+  status      String      @default("Sent")
+  scheduledAt DateTime?
+  completedAt DateTime?
+  attachments Json?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  contact     CrmContact? @relation(fields: [contactId], references: [id])
+  customer    CrmCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("crm_communications")
+}
+
+model Product {
+  id                          String            @id @default(cuid())
+  code                        String            @unique
+  name                        String
+  namePersian                 String
+  cuttingDimensionCode        String
+  cuttingDimensionName        String
+  cuttingDimensionNamePersian String
+  stoneTypeCode               String
+  stoneTypeName               String
+  stoneTypeNamePersian        String
+  widthCode                   String
+  widthValue                  Decimal           @db.Decimal(5, 2)
+  widthName                   String
+  thicknessCode               String
+  thicknessValue              Decimal           @db.Decimal(5, 2)
+  thicknessName               String
+  mineCode                    String
+  mineName                    String
+  mineNamePersian             String
+  finishCode                  String
+  finishName                  String
+  finishNamePersian           String
+  colorCode                   String
+  colorName                   String
+  colorNamePersian            String
+  qualityCode                 String
+  qualityName                 String
+  qualityNamePersian          String
+  basePrice                   Decimal?          @db.Decimal(15, 2)
+  currency                    String            @default("ریال")
+  isAvailable                 Boolean           @default(true)
+  leadTime                    Int?
+  description                 String?
+  images                      String[]
+  isActive                    Boolean           @default(true)
+  availableInLongitudinalContracts Boolean      @default(true)
+  availableInStairContracts    Boolean           @default(true)
+  availableInSlabContracts     Boolean           @default(true)
+  availableInVolumetricContracts Boolean         @default(true)
+  deletedAt                   DateTime?
+  createdAt                   DateTime          @default(now())
+  updatedAt                   DateTime          @updatedAt
+  contractItems               ContractItem[]
+  deliveryProducts            DeliveryProduct[]
+
+  @@map("products")
+}
+
+model ContractItem {
+  id                   String        @id @default(cuid())
+  contractId           String
+  productId            String
+  productType          String?       // نوع محصول: 'longitudinal' | 'stair' | etc.
+  quantity             Decimal       @db.Decimal(10, 2)
+  unitPrice            Decimal       @db.Decimal(15, 2)
+  totalPrice           Decimal       @db.Decimal(15, 2)
+  description          String?
+  // Mandatory pricing fields
+  isMandatory          Boolean       @default(false)
+  mandatoryPercentage  Decimal?      @db.Decimal(5, 2)
+  originalTotalPrice   Decimal?      @db.Decimal(15, 2)
+  // Stair system linking fields
+  stairSystemId        String?       // ID to link multiple items belonging to same stair system
+  stairPartType        String?       // نوع بخش پله: 'tread' | 'riser' | 'landing' (کف پله, خیز پله, پاگرد)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  contract             SalesContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  product              Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("contract_items")
+}
+
+model Delivery {
+  id                   String            @id @default(cuid())
+  contractId           String
+  deliveryDate         DateTime
+  deliveryAddress      String
+  status               DeliveryStatus    @default(SCHEDULED)
+  driver               String?
+  vehicle              String?
+  notes                String?
+  customerConfirmation Boolean           @default(false)
+  deliveredAt          DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  contract             SalesContract     @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  products             DeliveryProduct[]
+
+  @@map("deliveries")
+}
+
+model DeliveryProduct {
+  id                String   @id @default(cuid())
+  deliveryId        String
+  productId         String
+  quantity          Decimal  @db.Decimal(10, 2)
+  deliveredQuantity Decimal? @db.Decimal(10, 2)
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  delivery          Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("delivery_products")
+}
+
+// ==================== INVENTORY MASTER DATA ====================
+
+model CutType {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String?
+  namePersian String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("cut_types")
+}
+
+model StoneMaterial {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String?
+  namePersian String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("stone_materials")
+}
+
+model CutWidth {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String?
+  namePersian String
+  value       Decimal  @db.Decimal(5, 2)
+  unit        String   @default("cm")
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("cut_widths")
+}
+
+model StairStandardLength {
+  id          String   @id @default(cuid())
+  label       String?
+  value       Decimal  @db.Decimal(8, 3)
+  unit        String   @default("m")
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([value, unit])
+  @@map("stair_standard_lengths")
+}
+
+model Thickness {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String?
+  namePersian String
+  value       Decimal  @db.Decimal(5, 2)
+  unit        String   @default("cm")
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("thicknesses")
+}
+
+model Mine {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String?
+  namePersian String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("mines")
+}
+
+model FinishType {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String?
+  namePersian String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("finish_types")
+}
+
+model Color {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String?
+  namePersian String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("colors")
+}
+
+model Service {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String?
+  namePersian String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("services")
+}
+
+model CuttingType {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String?
+  namePersian   String
+  description   String?
+  pricePerMeter Decimal? @db.Decimal(10, 2) // قیمت به ازای هر متر (تومان)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("cutting_types")
+}
+
+model SubService {
+  id              String            @id @default(cuid())
+  code            String            @unique
+  name            String?
+  namePersian     String
+  description     String?
+  pricePerMeter   Decimal           @db.Decimal(10, 2) // هزینه هر متر ساب (تومان)
+  calculationBase String            @default("length") // "length" | "squareMeters" - بر اساس طول یا متر مربع
+  isActive        Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@map("sub_services")
+}
+
+model LayerType {
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  pricePerLayer Decimal  @db.Decimal(12, 2)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("layer_types")
+}
+
+model StoneFinishing {
+  id                   String   @id @default(cuid())
+  name                 String?
+  namePersian          String
+  description          String?
+  pricePerSquareMeter  Decimal  @db.Decimal(12, 2)
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("stone_finishings")
+}
+
+model Payment {
+  id            String               @id @default(cuid())
+  contractId    String
+  paymentMethod PaymentMethod
+  totalAmount   Decimal              @db.Decimal(15, 2)
+  currency      String               @default("ریال")
+  status        PaymentStatus        @default(PENDING)
+  paymentDate   DateTime?            // Date when payment was made (PAID) or due date (WILL_BE_PAID)
+  checkNumber   String?              // Check number for CHECK payment type
+  cashType      String?              // Cash payment type/category (e.g., فوری, عادی, پیش‌پرداخت, پس‌پرداخت)
+  nationalCode  String?
+  notes         String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  installments  PaymentInstallment[]
+  contract      SalesContract        @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+model PaymentInstallment {
+  id                String            @id @default(cuid())
+  paymentId         String
+  installmentNumber Int
+  amount            Decimal           @db.Decimal(15, 2)
+  dueDate           DateTime
+  status            InstallmentStatus @default(PENDING)
+  paidAt            DateTime?
+  notes             String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  payment           Payment           @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@map("payment_installments")
+}
+
+enum UserRole {
+  ADMIN
+  USER
+  MODERATOR
+  SALES
+  MANAGER
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum ContractStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SIGNED
+  PRINTED
+  CANCELLED
+  EXPIRED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  MISSION
+  HOURLY_LEAVE
+  SICK_LEAVE
+  VACATION
+}
+
+enum ExceptionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum ExceptionType {
+  MISSION
+  HOURLY_LEAVE
+  SICK_LEAVE
+  VACATION
+  ABSENCE
+  EMERGENCY_LEAVE
+  PERSONAL_LEAVE
+}
+
+enum DeliveryStatus {
+  SCHEDULED
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  RECEIPT
+  CHECK
+}
+
+enum PaymentStatus {
+  PENDING
+  PARTIAL
+  COMPLETED
+  CANCELLED
+}
+
+enum InstallmentStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+model ContractVerificationCode {
+  id            String          @id @default(cuid())
+  contractId    String?          // Nullable - created before contract exists
+  phoneNumber   String
+  code          String           // 6-digit code
+  expiresAt     DateTime
+  verified      Boolean          @default(false)
+  verifiedAt    DateTime?
+  attempts      Int              @default(0) // Track failed attempts
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  contract      SalesContract?   @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  verifiedContract SalesContract? @relation("VerifiedCode")
+
+  @@unique([contractId, phoneNumber]) // One active code per contract+phone
+  @@map("contract_verification_codes")
+}

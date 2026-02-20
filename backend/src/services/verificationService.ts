@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Verification Service
  * Manages contract verification codes, validation, and cleanup
  */
@@ -52,7 +52,7 @@ class VerificationService {
       if (recentCodes >= 3) {
         return {
           success: false,
-          error: 'تعداد درخواست‌های ارسال کد تایید بیش از حد مجاز است. لطفاً یک ساعت دیگر تلاش کنید.'
+          error: 'تعداد درخواست‌های ارسال کد برای این شماره بیش از حد مجاز است. لطفاً بعداً دوباره تلاش کنید.'
         };
       }
 
@@ -98,7 +98,7 @@ class VerificationService {
       const environment = process.env.SMS_IR_ENVIRONMENT || 'sandbox';
       if (environment === 'sandbox') {
         console.log('='.repeat(60));
-        console.log('🔐 VERIFICATION CODE (SANDBOX MODE)');
+        console.log('? VERIFICATION CODE (SANDBOX MODE)');
         console.log('='.repeat(60));
         console.log(`Contract ID: ${contractId || 'N/A'}`);
         console.log(`Phone Number: ${phoneNumber}`);
@@ -176,7 +176,7 @@ class VerificationService {
       if (verificationCode.attempts >= this.maxAttempts) {
         return {
           success: false,
-          error: 'تعداد تلاش‌های مجاز برای این کد تمام شده است'
+          error: 'تعداد دفعات وارد کردن کد بیش از حد مجاز است'
         };
       }
 
@@ -192,7 +192,7 @@ class VerificationService {
       if (verificationCode.code !== code) {
         return {
           success: false,
-          error: 'کد تایید اشتباه است'
+          error: 'کد تایید نامعتبر است'
         };
       }
 
@@ -295,4 +295,5 @@ class VerificationService {
 // Export singleton instance
 export const verificationService = new VerificationService();
 export default verificationService;
+
 

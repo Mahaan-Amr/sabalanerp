@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -22,7 +22,7 @@ interface CuttingType {
   name?: string;
   namePersian: string;
   description?: string;
-  pricePerMeter?: number | null; // قیمت به ازای هر متر (تومان)
+  pricePerMeter?: number | null; // ?? ? ?? ? ?? (???)
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -34,8 +34,8 @@ interface SubService {
   name?: string;
   namePersian: string;
   description?: string;
-  pricePerMeter: number; // هزینه هر متر ابزار (تومان)
-  calculationBase: 'length' | 'squareMeters'; // بر اساس طول یا متر مربع
+  pricePerMeter: number; // ??? ? ?? ??? (???)
+  calculationBase: 'length' | 'squareMeters'; // ? ?? ?? ? ?? ??
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -211,7 +211,7 @@ const ServicesPage: React.FC = () => {
   };
 
   const handleDelete = async (type: 'service' | 'cutting-type' | 'sub-service' | 'stair-length' | 'layer-type' | 'stone-finishing', id: string) => {
-    if (!confirm('آیا مطمئن هستید که می‌خواهید این مورد را حذف کنید؟')) {
+    if (!confirm('?? ??? ??? ? ??? ?? ?? ? ?? ???')) {
       return;
     }
 
@@ -271,12 +271,12 @@ const ServicesPage: React.FC = () => {
 
   const handleSaveStairLength = async () => {
     if (!stairLengthForm.value?.trim()) {
-      alert('لطفاً مقدار طول را وارد کنید');
+      alert('??? ??? ?? ? ?? ??');
       return;
     }
     const numericValue = parseFloat(stairLengthForm.value);
     if (isNaN(numericValue) || numericValue <= 0) {
-      alert('مقدار طول باید عددی بزرگتر از صفر باشد');
+      alert('??? ?? ?? ?? ??? ? ?? ??');
       return;
     }
 
@@ -297,7 +297,7 @@ const ServicesPage: React.FC = () => {
       resetStairLengthForm();
     } catch (error) {
       console.error('Error saving stair standard length:', error);
-      alert('خطا در ذخیره طول استاندارد پله');
+      alert('?? ? ??? ?? ??? ??');
     } finally {
       setSavingStairLength(false);
     }
@@ -324,16 +324,16 @@ const ServicesPage: React.FC = () => {
 
   const handleSaveLayerType = async () => {
     if (!layerTypeForm.name.trim()) {
-      alert('لطفاً نام نوع لایه را وارد کنید');
+      alert('??? ?? ?? ?? ? ?? ??');
       return;
     }
     if (!layerTypeForm.pricePerLayer.trim()) {
-      alert('لطفاً قیمت نوع لایه را وارد کنید');
+      alert('??? ?? ?? ?? ? ?? ??');
       return;
     }
     const numericValue = parseFloat(layerTypeForm.pricePerLayer);
     if (isNaN(numericValue) || numericValue <= 0) {
-      alert('قیمت باید عددی بزرگتر از صفر باشد');
+      alert('?? ?? ?? ??? ? ?? ??');
       return;
     }
 
@@ -355,7 +355,7 @@ const ServicesPage: React.FC = () => {
       resetLayerTypeForm();
     } catch (error) {
       console.error('Error saving layer type:', error);
-      alert('خطا در ذخیره نوع لایه');
+      alert('?? ? ??? ?? ??');
     } finally {
       setSavingLayerType(false);
     }
@@ -391,15 +391,15 @@ const ServicesPage: React.FC = () => {
   );
 
   const tabLabels: Record<typeof activeTab, string> = {
-    services: 'خدمات',
-    'cutting-types': 'انواع برش',
-    'sub-services': 'ابزارها',
-    'stair-lengths': 'طول‌های استاندارد پله',
-    'layer-types': 'نوع لایه',
-    'stone-finishings': 'پرداخت‌ها'
+    services: '???',
+    'cutting-types': '??? ??',
+    'sub-services': '??',
+    'stair-lengths': '?? ??? ??',
+    'layer-types': '?? ??',
+    'stone-finishings': '???'
   };
 
-  const searchPlaceholder = `جستجو در ${tabLabels[activeTab]}...`;
+  const searchPlaceholder = `??? ? ${tabLabels[activeTab]}...`;
 
   if (loading) {
     return (
@@ -415,10 +415,10 @@ const ServicesPage: React.FC = () => {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
-            مدیریت خدمات
+            ??? ???
           </h1>
           <p className="text-slate-600 dark:text-slate-400">
-            مدیریت خدمات برش و انواع برش ارائه شده به مشتریان
+            ??? ??? ?? ? ??? ?? ??? ?? ? ??
           </p>
         </div>
 
@@ -435,7 +435,7 @@ const ServicesPage: React.FC = () => {
             >
               <div className="flex items-center justify-center space-x-2 space-x-reverse">
                 <FaTools className="w-4 h-4" />
-                <span>خدمات</span>
+                <span>???</span>
               </div>
             </button>
             <button
@@ -448,7 +448,7 @@ const ServicesPage: React.FC = () => {
             >
               <div className="flex items-center justify-center space-x-2 space-x-reverse">
                 <FaCut className="w-4 h-4" />
-                <span>انواع برش</span>
+                <span>??? ??</span>
               </div>
             </button>
             <button
@@ -461,7 +461,7 @@ const ServicesPage: React.FC = () => {
             >
               <div className="flex items-center justify-center space-x-2 space-x-reverse">
                 <FaLayerGroup className="w-4 h-4" />
-                <span>ابزارها</span>
+                <span>??</span>
               </div>
             </button>
             <button
@@ -474,7 +474,7 @@ const ServicesPage: React.FC = () => {
             >
               <div className="flex items-center justify-center space-x-2 space-x-reverse">
                 <FaRuler className="w-4 h-4" />
-                <span>طول‌های استاندارد پله</span>
+                <span>?? ??? ??</span>
               </div>
             </button>
             <button
@@ -487,7 +487,7 @@ const ServicesPage: React.FC = () => {
             >
               <div className="flex items-center justify-center space-x-2 space-x-reverse">
                 <FaShapes className="w-4 h-4" />
-                <span>نوع لایه</span>
+                <span>?? ??</span>
               </div>
             </button>
             <button
@@ -500,7 +500,7 @@ const ServicesPage: React.FC = () => {
             >
               <div className="flex items-center justify-center space-x-2 space-x-reverse">
                 <FaPaintBrush className="w-4 h-4" />
-                <span>پرداخت‌ها</span>
+                <span>???</span>
               </div>
             </button>
           </div>
@@ -524,13 +524,13 @@ const ServicesPage: React.FC = () => {
             >
               <FaPlus className="w-4 h-4" />
               <span>
-                افزودن {activeTab === 'services'
-                  ? 'خدمت'
+                ??? {activeTab === 'services'
+                  ? '??'
                   : activeTab === 'cutting-types'
-                  ? 'نوع برش'
+                  ? '?? ??'
                   : activeTab === 'sub-services'
-                  ? 'ابزار'
-                  : 'پرداخت'}
+                  ? '???'
+                  : '???'}
               </span>
             </button>
           )}
@@ -541,14 +541,14 @@ const ServicesPage: React.FC = () => {
           {activeTab === 'services' ? (
             <div className="p-6">
               <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mb-4">
-                لیست خدمات
+                ?? ???
               </h2>
               
               {filteredServices.length === 0 ? (
                 <div className="text-center py-8">
                   <FaTools className="w-12 h-12 text-slate-400 mx-auto mb-4" />
                   <p className="text-slate-500 dark:text-slate-400">
-                    {searchTerm ? 'خدمتی یافت نشد' : 'هنوز خدمتی تعریف نشده است'}
+                    {searchTerm ? '??? ?? ??' : '?? ??? ??? ?? ??'}
                   </p>
                 </div>
               ) : (
@@ -556,12 +556,12 @@ const ServicesPage: React.FC = () => {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-slate-700">
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">کد</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام فارسی</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام انگلیسی</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">توضیحات</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">وضعیت</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">عملیات</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?? ???</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?? ??</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">??</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -585,7 +585,7 @@ const ServicesPage: React.FC = () => {
                                 ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400'
                                 : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400'
                             }`}>
-                              {service.isActive ? 'فعال' : 'غیرفعال'}
+                              {service.isActive ? '??' : '??'}
                             </span>
                           </td>
                           <td className="py-3 px-4">
@@ -593,7 +593,7 @@ const ServicesPage: React.FC = () => {
                               <button
                                 onClick={() => handleToggleStatus('service', service.id)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
-                                title={service.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
+                                title={service.isActive ? '?? ??' : '?? ??'}
                               >
                                 {service.isActive ? (
                                   <FaToggleOn className="w-4 h-4 text-green-500" />
@@ -604,14 +604,14 @@ const ServicesPage: React.FC = () => {
                               <button
                                 onClick={() => router.push(`/dashboard/inventory/services/services/edit/${service.id}`)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                                title="ویرایش"
+                                title="???"
                               >
                                 <FaEdit className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={() => handleDelete('service', service.id)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                                title="حذف"
+                                title="??"
                               >
                                 <FaTrash className="w-4 h-4" />
                               </button>
@@ -627,14 +627,14 @@ const ServicesPage: React.FC = () => {
           ) : activeTab === 'cutting-types' ? (
             <div className="p-6">
               <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mb-4">
-                لیست انواع برش
+                ?? ??? ??
               </h2>
               
               {filteredCuttingTypes.length === 0 ? (
                 <div className="text-center py-8">
                   <FaCut className="w-12 h-12 text-slate-400 mx-auto mb-4" />
                   <p className="text-slate-500 dark:text-slate-400">
-                    {searchTerm ? 'نوع برشی یافت نشد' : 'هنوز نوع برشی تعریف نشده است'}
+                    {searchTerm ? '?? ?? ?? ??' : '?? ?? ?? ??? ?? ??'}
                   </p>
                 </div>
               ) : (
@@ -642,12 +642,12 @@ const ServicesPage: React.FC = () => {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-slate-700">
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">کد</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام فارسی</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام انگلیسی</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">توضیحات</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">وضعیت</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">عملیات</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?? ???</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?? ??</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">??</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -667,7 +667,7 @@ const ServicesPage: React.FC = () => {
                           </td>
                           <td className="py-3 px-4 text-slate-900 dark:text-slate-100">
                             {cuttingType.pricePerMeter 
-                              ? `${cuttingType.pricePerMeter.toLocaleString('fa-IR')} تومان`
+                              ? `${cuttingType.pricePerMeter.toLocaleString('fa-IR')} ???`
                               : '-'}
                           </td>
                           <td className="py-3 px-4">
@@ -676,7 +676,7 @@ const ServicesPage: React.FC = () => {
                                 ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400'
                                 : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400'
                             }`}>
-                              {cuttingType.isActive ? 'فعال' : 'غیرفعال'}
+                              {cuttingType.isActive ? '??' : '??'}
                             </span>
                           </td>
                           <td className="py-3 px-4">
@@ -684,7 +684,7 @@ const ServicesPage: React.FC = () => {
                               <button
                                 onClick={() => handleToggleStatus('cutting-type', cuttingType.id)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
-                                title={cuttingType.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
+                                title={cuttingType.isActive ? '?? ??' : '?? ??'}
                               >
                                 {cuttingType.isActive ? (
                                   <FaToggleOn className="w-4 h-4 text-green-500" />
@@ -695,14 +695,14 @@ const ServicesPage: React.FC = () => {
                               <button
                                 onClick={() => router.push(`/dashboard/inventory/services/cutting-types/edit/${cuttingType.id}`)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                                title="ویرایش"
+                                title="???"
                               >
                                 <FaEdit className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={() => handleDelete('cutting-type', cuttingType.id)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                                title="حذف"
+                                title="??"
                               >
                                 <FaTrash className="w-4 h-4" />
                               </button>
@@ -718,14 +718,14 @@ const ServicesPage: React.FC = () => {
           ) : activeTab === 'sub-services' ? (
             <div className="p-6">
               <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mb-4">
-                لیست ابزارها
+                ?? ??
               </h2>
               
               {filteredSubServices.length === 0 ? (
                 <div className="text-center py-8">
                   <FaLayerGroup className="w-12 h-12 text-slate-400 mx-auto mb-4" />
                   <p className="text-slate-500 dark:text-slate-400">
-                    {searchTerm ? 'ابزاری یافت نشد' : 'هنوز ابزاری تعریف نشده است'}
+                    {searchTerm ? '??? ?? ??' : '?? ??? ??? ?? ??'}
                   </p>
                 </div>
               ) : (
@@ -733,14 +733,14 @@ const ServicesPage: React.FC = () => {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-slate-700">
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">کد</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام فارسی</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام انگلیسی</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">توضیحات</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">هزینه/متر</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">مبنای محاسبه</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">وضعیت</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">عملیات</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?? ???</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?? ??</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">??</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???/??</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">??? ???</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -759,10 +759,10 @@ const ServicesPage: React.FC = () => {
                             {subService.description || '-'}
                           </td>
                           <td className="py-3 px-4 text-slate-900 dark:text-slate-100">
-                            {subService.pricePerMeter.toLocaleString('fa-IR')} تومان
+                            {subService.pricePerMeter.toLocaleString('fa-IR')} ???
                           </td>
                           <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
-                            {subService.calculationBase === 'length' ? 'طول' : 'متر مربع'}
+                            {subService.calculationBase === 'length' ? '??' : '?? ??'}
                           </td>
                           <td className="py-3 px-4">
                             <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
@@ -770,7 +770,7 @@ const ServicesPage: React.FC = () => {
                                 ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400'
                                 : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400'
                             }`}>
-                              {subService.isActive ? 'فعال' : 'غیرفعال'}
+                              {subService.isActive ? '??' : '??'}
                             </span>
                           </td>
                           <td className="py-3 px-4">
@@ -778,7 +778,7 @@ const ServicesPage: React.FC = () => {
                               <button
                                 onClick={() => handleToggleStatus('sub-service', subService.id)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
-                                title={subService.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
+                                title={subService.isActive ? '?? ??' : '?? ??'}
                               >
                                 {subService.isActive ? (
                                   <FaToggleOn className="w-4 h-4 text-green-500" />
@@ -789,14 +789,14 @@ const ServicesPage: React.FC = () => {
                               <button
                                 onClick={() => router.push(`/dashboard/inventory/services/sub-services/edit/${subService.id}`)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                                title="ویرایش"
+                                title="???"
                               >
                                 <FaEdit className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={() => handleDelete('sub-service', subService.id)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                                title="حذف"
+                                title="??"
                               >
                                 <FaTrash className="w-4 h-4" />
                               </button>
@@ -812,25 +812,25 @@ const ServicesPage: React.FC = () => {
           ) : activeTab === 'stair-lengths' ? (
             <div className="p-6">
               <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mb-4">
-                طول‌های استاندارد پله
+                ?? ??? ??
               </h2>
               <div className="bg-slate-50 dark:bg-slate-900/30 border border-slate-200 dark:border-slate-700 rounded-xl p-4 mb-6">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      عنوان (اختیاری)
+                      ??? (??)
                     </label>
                     <input
                       type="text"
                       value={stairLengthForm.label}
                       onChange={(e) => setStairLengthForm(prev => ({ ...prev, label: e.target.value }))}
                       className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-                      placeholder="مثال: طول استاندارد ۱.۲۰"
+                      placeholder="??: ?? ??? ?.?"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      مقدار طول
+                      ??? ??
                     </label>
                     <input
                       type="number"
@@ -839,32 +839,32 @@ const ServicesPage: React.FC = () => {
                       value={stairLengthForm.value}
                       onChange={(e) => setStairLengthForm(prev => ({ ...prev, value: e.target.value }))}
                       className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-                      placeholder="مثال: 1.20"
+                      placeholder="??: 1.20"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      واحد
+                      ??
                     </label>
                     <select
                       value={stairLengthForm.unit}
                       onChange={(e) => setStairLengthForm(prev => ({ ...prev, unit: e.target.value as 'm' | 'cm' }))}
                       className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
                     >
-                      <option value="m">متر</option>
-                      <option value="cm">سانتی‌متر</option>
+                      <option value="m">??</option>
+                      <option value="cm">???</option>
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      توضیحات
+                      ??
                     </label>
                     <input
                       type="text"
                       value={stairLengthForm.description}
                       onChange={(e) => setStairLengthForm(prev => ({ ...prev, description: e.target.value }))}
                       className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-                      placeholder="مثال: طول استاندارد محبوب برای پله"
+                      placeholder="??: ?? ??? ??? ?? ??"
                     />
                   </div>
                 </div>
@@ -874,18 +874,18 @@ const ServicesPage: React.FC = () => {
                     disabled={savingStairLength}
                     className="px-6 py-2 bg-teal-500 hover:bg-teal-600 disabled:bg-teal-400 text-white rounded-lg transition-colors"
                   >
-                    {savingStairLength ? 'در حال ذخیره...' : editingStairLengthId ? 'به‌روزرسانی طول استاندارد' : 'افزودن طول استاندارد'}
+                    {savingStairLength ? '? ?? ???...' : editingStairLengthId ? '?? ?? ???' : '??? ?? ???'}
                   </button>
                   {editingStairLengthId && (
                     <button
                       onClick={resetStairLengthForm}
                       className="px-4 py-2 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors"
                     >
-                      انصراف از ویرایش
+                      ??? ? ???
                     </button>
                   )}
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    این طول‌ها برای قیمت‌گذاری پله در قرارداد استفاده می‌شوند.
+                    ?? ??? ?? ??? ?? ? ?? ?? ??.
                   </p>
                 </div>
               </div>
@@ -893,7 +893,7 @@ const ServicesPage: React.FC = () => {
                 <div className="text-center py-8">
                   <FaRuler className="w-12 h-12 text-slate-400 mx-auto mb-4" />
                   <p className="text-slate-500 dark:text-slate-400">
-                    {savingStairLength ? 'در حال ذخیره...' : 'طول استانداردی ثبت نشده است'}
+                    {savingStairLength ? '? ?? ???...' : '?? ??? ?? ?? ??'}
                   </p>
                 </div>
               ) : (
@@ -901,11 +901,11 @@ const ServicesPage: React.FC = () => {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-slate-700">
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">عنوان</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">مقدار</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">توضیحات</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">وضعیت</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">عملیات</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">??</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -915,7 +915,7 @@ const ServicesPage: React.FC = () => {
                             {length.label || '-'}
                           </td>
                           <td className="py-3 px-4 text-slate-900 dark:text-slate-100 font-mono">
-                            {length.value.toLocaleString('fa-IR', { maximumFractionDigits: 2 })} {length.unit === 'm' ? 'متر' : 'سانتی‌متر'}
+                            {length.value.toLocaleString('fa-IR', { maximumFractionDigits: 2 })} {length.unit === 'm' ? '??' : '???'}
                           </td>
                           <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
                             {length.description || '-'}
@@ -926,7 +926,7 @@ const ServicesPage: React.FC = () => {
                                 ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400'
                                 : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400'
                             }`}>
-                              {length.isActive ? 'فعال' : 'غیرفعال'}
+                              {length.isActive ? '??' : '??'}
                             </span>
                           </td>
                           <td className="py-3 px-4">
@@ -934,7 +934,7 @@ const ServicesPage: React.FC = () => {
                               <button
                                 onClick={() => handleToggleStatus('stair-length', length.id)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
-                                title={length.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
+                                title={length.isActive ? '?? ??' : '?? ??'}
                               >
                                 {length.isActive ? (
                                   <FaToggleOn className="w-4 h-4 text-green-500" />
@@ -945,14 +945,14 @@ const ServicesPage: React.FC = () => {
                               <button
                                 onClick={() => handleEditStairLength(length)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                                title="ویرایش"
+                                title="???"
                               >
                                 <FaEdit className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={() => handleDelete('stair-length', length.id)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                                title="حذف"
+                                title="??"
                               >
                                 <FaTrash className="w-4 h-4" />
                               </button>
@@ -968,25 +968,25 @@ const ServicesPage: React.FC = () => {
           ) : activeTab === 'layer-types' ? (
             <div className="p-6">
               <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mb-4">
-                نوع لایه
+                ?? ??
               </h2>
               <div className="bg-slate-50 dark:bg-slate-900/30 border border-slate-200 dark:border-slate-700 rounded-xl p-4 mb-6">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      نام نوع لایه
+                      ?? ?? ??
                     </label>
                     <input
                       type="text"
                       value={layerTypeForm.name}
                       onChange={(e) => setLayerTypeForm(prev => ({ ...prev, name: e.target.value }))}
                       className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-                      placeholder="مثال: ابزار دوبل"
+                      placeholder="??: ??? ??"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      قیمت هر لایه (تومان)
+                      ?? ? ?? (???)
                     </label>
                     <input
                       type="number"
@@ -995,19 +995,19 @@ const ServicesPage: React.FC = () => {
                       value={layerTypeForm.pricePerLayer}
                       onChange={(e) => setLayerTypeForm(prev => ({ ...prev, pricePerLayer: e.target.value }))}
                       className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-                      placeholder="مثال: 50000"
+                      placeholder="??: 50000"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      توضیحات
+                      ??
                     </label>
                     <input
                       type="text"
                       value={layerTypeForm.description}
                       onChange={(e) => setLayerTypeForm(prev => ({ ...prev, description: e.target.value }))}
                       className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-                      placeholder="مثال: هزینه اضافی برای لایه خاص"
+                      placeholder="??: ??? ??? ?? ?? ??"
                     />
                   </div>
                 </div>
@@ -1017,18 +1017,18 @@ const ServicesPage: React.FC = () => {
                     disabled={savingLayerType}
                     className="px-6 py-2 bg-teal-500 hover:bg-teal-600 disabled:bg-teal-400 text-white rounded-lg transition-colors"
                   >
-                    {savingLayerType ? 'در حال ذخیره...' : editingLayerTypeId ? 'به‌روزرسانی نوع لایه' : 'افزودن نوع لایه'}
+                    {savingLayerType ? '? ?? ???...' : editingLayerTypeId ? '?? ?? ??' : '??? ?? ??'}
                   </button>
                   {editingLayerTypeId && (
                     <button
                       onClick={resetLayerTypeForm}
                       className="px-4 py-2 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors"
                     >
-                      انصراف از ویرایش
+                      ??? ? ???
                     </button>
                   )}
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    این هزینه به ازای هر لایه به صورت خودکار در قرارداد‌ها اعمال می‌شود.
+                    ?? ??? ? ?? ? ?? ? ?? ??? ? ??? ??? ???.
                   </p>
                 </div>
               </div>
@@ -1036,7 +1036,7 @@ const ServicesPage: React.FC = () => {
                 <div className="text-center py-8">
                   <FaShapes className="w-12 h-12 text-slate-400 mx-auto mb-4" />
                   <p className="text-slate-500 dark:text-slate-400">
-                    {savingLayerType ? 'در حال ذخیره...' : 'نوع لایه‌ای ثبت نشده است'}
+                    {savingLayerType ? '? ?? ???...' : '?? ?? ?? ?? ??'}
                   </p>
                 </div>
               ) : (
@@ -1044,11 +1044,11 @@ const ServicesPage: React.FC = () => {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-slate-700">
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">قیمت هر لایه</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">توضیحات</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">وضعیت</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">عملیات</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">??</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?? ? ??</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">??</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1058,7 +1058,7 @@ const ServicesPage: React.FC = () => {
                             {layerType.name}
                           </td>
                           <td className="py-3 px-4 text-slate-900 dark:text-slate-100 font-mono">
-                            {layerType.pricePerLayer.toLocaleString('fa-IR')} تومان
+                            {layerType.pricePerLayer.toLocaleString('fa-IR')} ???
                           </td>
                           <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
                             {layerType.description || '-'}
@@ -1069,7 +1069,7 @@ const ServicesPage: React.FC = () => {
                                 ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400'
                                 : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400'
                             }`}>
-                              {layerType.isActive ? 'فعال' : 'غیرفعال'}
+                              {layerType.isActive ? '??' : '??'}
                             </span>
                           </td>
                           <td className="py-3 px-4">
@@ -1077,7 +1077,7 @@ const ServicesPage: React.FC = () => {
                               <button
                                 onClick={() => handleToggleStatus('layer-type', layerType.id)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
-                                title={layerType.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
+                                title={layerType.isActive ? '?? ??' : '?? ??'}
                               >
                                 {layerType.isActive ? (
                                   <FaToggleOn className="w-4 h-4 text-green-500" />
@@ -1088,14 +1088,14 @@ const ServicesPage: React.FC = () => {
                               <button
                                 onClick={() => handleEditLayerType(layerType)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                                title="ویرایش"
+                                title="???"
                               >
                                 <FaEdit className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={() => handleDelete('layer-type', layerType.id)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                                title="حذف"
+                                title="??"
                               >
                                 <FaTrash className="w-4 h-4" />
                               </button>
@@ -1111,13 +1111,13 @@ const ServicesPage: React.FC = () => {
           ) : (
             <div className="p-6">
               <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mb-4">
-                پرداخت‌ها (Stone Finishing)
+                ??? (Stone Finishing)
               </h2>
               {filteredStoneFinishings.length === 0 ? (
                 <div className="text-center py-8">
                   <FaPaintBrush className="w-12 h-12 text-slate-400 mx-auto mb-4" />
                   <p className="text-slate-500 dark:text-slate-400">
-                    {searchTerm ? 'پرداختی یافت نشد' : 'هنوز پرداختی ثبت نشده است'}
+                    {searchTerm ? '?? ?? ??' : '?? ?? ?? ?? ??'}
                   </p>
                 </div>
               ) : (
@@ -1125,12 +1125,12 @@ const ServicesPage: React.FC = () => {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-slate-700">
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام فارسی</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام انگلیسی</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">قیمت هر متر مربع</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">توضیحات</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">وضعیت</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">عملیات</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?? ???</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?? ??</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?? ? ?? ??</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">??</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">???</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1143,7 +1143,7 @@ const ServicesPage: React.FC = () => {
                             {finishing.name || '-'}
                           </td>
                           <td className="py-3 px-4 text-slate-900 dark:text-slate-100 font-mono">
-                            {finishing.pricePerSquareMeter.toLocaleString('fa-IR')} تومان
+                            {finishing.pricePerSquareMeter.toLocaleString('fa-IR')} ???
                           </td>
                           <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
                             {finishing.description || '-'}
@@ -1154,7 +1154,7 @@ const ServicesPage: React.FC = () => {
                                 ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400'
                                 : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400'
                             }`}>
-                              {finishing.isActive ? 'فعال' : 'غیرفعال'}
+                              {finishing.isActive ? '??' : '??'}
                             </span>
                           </td>
                           <td className="py-3 px-4">
@@ -1162,7 +1162,7 @@ const ServicesPage: React.FC = () => {
                               <button
                                 onClick={() => handleToggleStatus('stone-finishing', finishing.id)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
-                                title={finishing.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
+                                title={finishing.isActive ? '?? ??' : '?? ??'}
                               >
                                 {finishing.isActive ? (
                                   <FaToggleOn className="w-4 h-4 text-green-500" />
@@ -1173,14 +1173,14 @@ const ServicesPage: React.FC = () => {
                               <button
                                 onClick={() => router.push(`/dashboard/inventory/services/stone-finishings/edit/${finishing.id}`)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                                title="ویرایش"
+                                title="???"
                               >
                                 <FaEdit className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={() => handleDelete('stone-finishing', finishing.id)}
                                 className="p-2 text-slate-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                                title="حذف"
+                                title="??"
                               >
                                 <FaTrash className="w-4 h-4" />
                               </button>
@@ -1201,3 +1201,4 @@ const ServicesPage: React.FC = () => {
 };
 
 export default ServicesPage;
+

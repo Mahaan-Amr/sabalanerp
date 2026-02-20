@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React from 'react';
 import { FaExclamationTriangle, FaTimes, FaExclamationCircle } from 'react-icons/fa';
@@ -16,9 +16,9 @@ interface ErrorModalProps {
 export default function ErrorModal({
   isOpen,
   onClose,
-  title = 'خطا',
+  title = '??',
   message,
-  buttonText = 'باشه',
+  buttonText = '??',
   showIcon = true,
   details
 }: ErrorModalProps) {
@@ -75,3 +75,4 @@ export default function ErrorModal({
     </div>
   );
 }
+

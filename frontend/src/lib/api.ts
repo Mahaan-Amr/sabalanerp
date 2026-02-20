@@ -1,10 +1,11 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
+const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
 
 // Create axios instance
 const api = axios.create({
-  baseURL: `${API_URL}/api`,
+  baseURL: API_BASE,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -136,6 +137,7 @@ export const dashboardAPI = {
 export const workspacePermissionsAPI = {
   getUserWorkspaces: () => api.get('/workspace-permissions/user-workspaces'),
   getUserPermissions: () => api.get('/workspace-permissions'),
+  getRolePermissions: () => api.get('/workspace-permissions/role-permissions'),
   createUserPermission: (data: any) => api.post('/workspace-permissions', data),
   updateUserPermission: (id: string, data: any) => api.put(`/workspace-permissions/${id}`, data),
   deleteUserPermission: (id: string) => api.delete(`/workspace-permissions/${id}`),
@@ -172,6 +174,9 @@ export const salesAPI = {
   signContract: (id: string, note?: string) => api.put(`/sales/contracts/${id}/sign`, { note }),
   
   printContract: (id: string, note?: string) => api.put(`/sales/contracts/${id}/print`, { note }),
+
+  getContractPdf: (contractId: string, params?: { fresh?: boolean }) =>
+    api.get(`/sales/contracts/${contractId}/pdf`, { params }),
   
   deleteContract: (id: string) => api.delete(`/sales/contracts/${id}`),
   
@@ -188,15 +193,18 @@ export const salesAPI = {
   
   createPayment: (contractId: string, paymentData: any) => api.post(`/sales/contracts/${contractId}/payments`, paymentData),
   
-  // Verification (Digital Signature)
-  sendVerificationCode: (contractId: string, phoneNumber: string) =>
-    api.post(`/sales/contracts/${contractId}/send-verification`, { phoneNumber }),
-  
-  verifyCode: (contractId: string, code: string, phoneNumber: string) =>
-    api.post(`/sales/contracts/${contractId}/verify-code`, { code, phoneNumber }),
-  
-  getVerificationTime: (contractId: string, phoneNumber: string) =>
-    api.get(`/sales/contracts/${contractId}/verification-time`, { params: { phoneNumber } }),
+  // Digital confirmation
+  sendForConfirmation: (contractId: string) =>
+    api.post(`/sales/contracts/${contractId}/send-for-confirmation`),
+
+  resendConfirmation: (contractId: string) =>
+    api.post(`/sales/contracts/${contractId}/resend-confirmation`),
+
+  getConfirmationStatus: (contractId: string) =>
+    api.get(`/sales/contracts/${contractId}/confirmation-status`),
+
+  cancelContract: (contractId: string) =>
+    api.post(`/sales/contracts/${contractId}/cancel`),
   
   // Contract Items
   createContractItem: (contractId: string, itemData: any) => api.post(`/sales/contracts/${contractId}/items`, itemData),
@@ -436,11 +444,39 @@ export const contractTemplatesAPI = {
 };
 
 // Customers API
+const warnLegacyCustomersApiUsage = (action: string) => {
+  if (typeof window === 'undefined') return;
+  console.warn('[legacy-customers-api-usage]', {
+    action,
+    path: window.location.pathname,
+    source: 'frontend/src/lib/api.ts',
+    message: 'Use crmAPI for new sales contract flow.'
+  });
+};
+
+const publicApi = axios.create({
+  baseURL: `${API_BASE}/public`,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
+
+export const publicContractsAPI = {
+  getConfirmationContract: (token: string) =>
+    publicApi.get(`/contracts/confirm/${token}`),
+
+  verifyConfirmationCode: (token: string, code: string) =>
+    publicApi.post(`/contracts/confirm/${token}/verify`, { code }),
+
+  resendConfirmationCode: (token: string) =>
+    publicApi.post(`/contracts/confirm/${token}/resend`)
+};
+
 export const customersAPI = {
   getAll: (params?: { page?: number; limit?: number; search?: string }) =>
-    api.get('/customers', { params }),
+    (warnLegacyCustomersApiUsage('getAll'), api.get('/customers', { params })),
   
-  getById: (id: string) => api.get(`/customers/${id}`),
+  getById: (id: string) => (warnLegacyCustomersApiUsage('getById'), api.get(`/customers/${id}`)),
   
   create: (customerData: {
     firstName: string;
@@ -451,7 +487,7 @@ export const customersAPI = {
     address?: string;
     city?: string;
     country?: string;
-  }) => api.post('/customers', customerData),
+  }) => (warnLegacyCustomersApiUsage('create'), api.post('/customers', customerData)),
   
   update: (id: string, customerData: {
     firstName: string;
@@ -462,9 +498,9 @@ export const customersAPI = {
     address?: string;
     city?: string;
     country?: string;
-  }) => api.put(`/customers/${id}`, customerData),
+  }) => (warnLegacyCustomersApiUsage('update'), api.put(`/customers/${id}`, customerData)),
   
-  delete: (id: string) => api.delete(`/customers/${id}`),
+  delete: (id: string) => (warnLegacyCustomersApiUsage('delete'), api.delete(`/customers/${id}`)),
 };
 
 
@@ -558,6 +594,7 @@ export const securityAPI = {
 export const permissionsAPI = {
   // Feature permissions
   getFeaturePermissions: (params?: any) => api.get('/permissions/features', { params }),
+  getFeatureDefinitions: () => api.get('/permissions/features/definitions'),
   createFeaturePermission: (data: any) => api.post('/permissions/features', data),
   updateFeaturePermission: (id: string, data: any) => api.put(`/permissions/features/${id}`, data),
   deleteFeaturePermission: (id: string) => api.delete(`/permissions/features/${id}`),
@@ -591,7 +628,7 @@ export const servicesAPI = {
   deleteCuttingType: (id: string) => api.delete(`/cutting-types/${id}`),
   toggleCuttingTypeStatus: (id: string) => api.patch(`/cutting-types/${id}/toggle`),
   
-  // Sub Services (ابزارها)
+  // Sub Services (??)
   getSubServices: (params?: any) => api.get('/sub-services', { params }),
   getSubService: (id: string) => api.get(`/sub-services/${id}`),
   createSubService: (data: any) => api.post('/sub-services', data),
@@ -615,7 +652,7 @@ export const servicesAPI = {
   deleteLayerType: (id: string) => api.delete(`/layer-types/${id}`),
   toggleLayerTypeStatus: (id: string) => api.patch(`/layer-types/${id}/toggle`),
 
-  // Stone finishing services (پرداخت‌ها)
+  // Stone finishing services (???)
   getStoneFinishings: (params?: any) => api.get('/stone-finishings', { params }),
   getStoneFinishing: (id: string) => api.get(`/stone-finishings/${id}`),
   createStoneFinishing: (data: any) => api.post('/stone-finishings', data),
@@ -625,3 +662,4 @@ export const servicesAPI = {
 };
 
 export default api;
+

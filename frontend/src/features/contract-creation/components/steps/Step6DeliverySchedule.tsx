@@ -1,10 +1,11 @@
-// Step 6: Delivery Schedule Component
+﻿// Step 6: Delivery Schedule Component
 // Delivery schedule management
 
-import React from 'react';
-import { FaPlus, FaTrash, FaEdit } from 'react-icons/fa';
+import React, { useCallback } from 'react';
+import { FaPlus, FaTrash, FaChevronUp, FaChevronDown } from 'react-icons/fa';
 import PersianCalendarComponent from '@/components/PersianCalendar';
-import type { ContractWizardData, DeliverySchedule } from '../../types/contract.types';
+import FormattedNumberInput from '@/components/FormattedNumberInput';
+import type { ContractWizardData, DeliverySchedule, DeliveryProductItem } from '../../types/contract.types';
 
 interface Step6DeliveryScheduleProps {
   wizardData: ContractWizardData;
@@ -20,7 +21,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
   const handleAddDelivery = () => {
     const newDelivery: DeliverySchedule = {
       deliveryDate: '',
-      projectManagerName: '',
+      projectManagerName: wizardData.project?.projectManagerName ?? '',
       receiverName: '',
       deliveryAddress: wizardData.project?.address || '',
       driver: '',
@@ -44,6 +45,32 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
     updateWizardData({ deliveries: newDeliveries });
   };
 
+  // Total quantity already assigned for a product across deliveries, optionally excluding one delivery
+  const getTotalDeliveredForProduct = useCallback((productIndex: number, excludeDeliveryIndex?: number): number => {
+    return wizardData.deliveries.reduce((sum, d, i) => {
+      if (excludeDeliveryIndex !== undefined && i === excludeDeliveryIndex) return sum;
+      const dp = d.products?.find(p => p.productIndex === productIndex);
+      return sum + (dp?.quantity ?? 0);
+    }, 0);
+  }, [wizardData.deliveries]);
+
+  const handleDeliveryProductQuantityChange = (deliveryIndex: number, productIndex: number, quantity: number, productId: string) => {
+    const delivery = wizardData.deliveries[deliveryIndex];
+    const current = delivery.products ?? [];
+    const existing = current.find(p => p.productIndex === productIndex);
+    let newProducts: DeliveryProductItem[];
+    if (quantity <= 0) {
+      newProducts = current.filter(p => p.productIndex !== productIndex);
+    } else if (existing) {
+      newProducts = current.map(p =>
+        p.productIndex === productIndex ? { ...p, productId, quantity } : p
+      );
+    } else {
+      newProducts = [...current, { productIndex, productId, quantity }];
+    }
+    handleUpdateDelivery(deliveryIndex, { products: newProducts });
+  };
+
   return (
     <div className="space-y-6">
       <div className="text-center">
@@ -51,7 +78,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
           برنامه تحویل
         </h3>
         <p className="text-gray-600 dark:text-gray-300">
-          تعیین تاریخ و آدرس تحویل
+          برنامه تحویل را مشخص کنید
         </p>
       </div>
       
@@ -65,20 +92,20 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
             className="px-4 py-2 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white rounded-lg transition-all duration-200 font-medium flex items-center gap-2"
           >
             <FaPlus className="w-4 h-4" />
-            افزودن تحویل جدید
+            افزودن تحویل
           </button>
         </div>
 
         {wizardData.deliveries.length === 0 ? (
           <div className="p-8 text-center border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
             <p className="text-gray-500 dark:text-gray-400 mb-4">
-              هیچ تحویلی اضافه نشده است
+              هنوز برنامه تحویلی ثبت نشده است
             </p>
             <button
               onClick={handleAddDelivery}
               className="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors"
             >
-              افزودن اولین تحویل
+              ایجاد برنامه تحویل
             </button>
           </div>
         ) : (
@@ -112,6 +139,9 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                       onChange={(date: string) => handleUpdateDelivery(index, { deliveryDate: date })}
                       className="w-full"
                     />
+                    {errors[`delivery_${index}_date`] && (
+                      <p className="text-red-500 text-xs mt-1">{errors[`delivery_${index}_date`]}</p>
+                    )}
                   </div>
 
                   <div>
@@ -129,50 +159,136 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      راننده (اختیاری)
+                      نام مدیر پروژه
                     </label>
                     <input
                       type="text"
-                      value={delivery.driver || ''}
-                      onChange={(e) => handleUpdateDelivery(index, { driver: e.target.value })}
+                      value={delivery.projectManagerName || ''}
+                      onChange={(e) => handleUpdateDelivery(index, { projectManagerName: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
-                      placeholder="نام راننده"
+                      placeholder="نام مدیر پروژه"
                     />
+                    {errors[`delivery_${index}_projectManager`] && (
+                      <p className="text-red-500 text-xs mt-1">{errors[`delivery_${index}_projectManager`]}</p>
+                    )}
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      وسیله نقلیه (اختیاری)
+                      نام تحویل‌گیرنده
                     </label>
                     <input
                       type="text"
-                      value={delivery.vehicle || ''}
-                      onChange={(e) => handleUpdateDelivery(index, { vehicle: e.target.value })}
+                      value={delivery.receiverName || ''}
+                      onChange={(e) => handleUpdateDelivery(index, { receiverName: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
-                      placeholder="شماره پلاک یا نوع وسیله"
+                      placeholder="نام تحویل‌گیرنده"
                     />
+                    {errors[`delivery_${index}_receiver`] && (
+                      <p className="text-red-500 text-xs mt-1">{errors[`delivery_${index}_receiver`]}</p>
+                    )}
                   </div>
                 </div>
 
                 <div className="mt-4">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    یادداشت (اختیاری)
+                    توضیحات (اختیاری)
                   </label>
                   <textarea
                     value={delivery.notes || ''}
                     onChange={(e) => handleUpdateDelivery(index, { notes: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
                     rows={3}
-                    placeholder="یادداشت‌های مربوط به این تحویل"
+                    placeholder="توضیحات مربوط به این تحویل"
                   />
                 </div>
 
-                {delivery.products && delivery.products.length > 0 && (
-                  <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {delivery.products.length} محصول در این تحویل
+                {wizardData.products.length > 0 && (
+                  <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
+                    <h6 className="text-sm font-semibold text-gray-800 dark:text-white mb-1">
+                      محصولات این تحویل
+                    </h6>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">
+                      تعداد هر محصول را برای این تحویل مشخص کنید. مجموع تعدادها نباید از تعداد کل قرارداد بیشتر شود.
                     </p>
+                    <div className="space-y-4">
+                      {wizardData.products.map((product, productIndex) => {
+                        const contractQty = product.quantity ?? 0;
+                        const alreadyAssigned = getTotalDeliveredForProduct(productIndex, index);
+                        const maxForThisDelivery = Math.max(0, contractQty - alreadyAssigned);
+                        const currentQty = delivery.products?.find(p => p.productIndex === productIndex)?.quantity ?? 0;
+                        const remaining = maxForThisDelivery;
+                        const productLabel = product.stoneName || product.product?.namePersian || `محصول ${productIndex + 1}`;
+                        const setQty = (value: number) => handleDeliveryProductQuantityChange(index, productIndex, Math.max(0, Math.min(maxForThisDelivery, value)), product.productId);
+                        return (
+                          <div
+                            key={productIndex}
+                            className="p-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800/50 space-y-2"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-sm font-medium text-gray-800 dark:text-white">
+                                {productLabel}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setQty(currentQty - 1)}
+                                  disabled={currentQty <= 0}
+                                  className="p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  aria-label="کم کردن"
+                                >
+                                  <FaChevronDown className="w-3.5 h-3.5" />
+                                </button>
+                                <FormattedNumberInput
+                                  value={currentQty}
+                                  onChange={(value) => handleDeliveryProductQuantityChange(index, productIndex, value, product.productId)}
+                                  min={0}
+                                  max={maxForThisDelivery}
+                                  className="w-20 px-2 py-1.5 text-sm text-center border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setQty(currentQty + 1)}
+                                  disabled={currentQty >= maxForThisDelivery}
+                                  className="p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  aria-label="زیاد کردن"
+                                >
+                                  <FaChevronUp className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3 text-xs">
+                              <span className="text-gray-500 dark:text-gray-400">
+                                کل قرارداد: <strong className="text-gray-700 dark:text-gray-300">{contractQty}</strong>
+                              </span>
+                              <span className="text-gray-500 dark:text-gray-400">
+                                ارسال‌شده در تحویل‌های دیگر: <strong className="text-gray-700 dark:text-gray-300">{alreadyAssigned}</strong>
+                              </span>
+                              <span className="text-teal-600 dark:text-teal-400 font-medium">
+                                مانده: <strong>{remaining}</strong>
+                              </span>
+                              {remaining > 0 && currentQty < remaining && (
+                                <button
+                                  type="button"
+                                  onClick={() => setQty(remaining)}
+                                  className="text-teal-600 dark:text-teal-400 hover:underline font-medium"
+                                >
+                                  پر کردن ({remaining})
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {errors[`delivery_${index}_products`] && (
+                      <p className="text-red-500 text-sm mt-2">{errors[`delivery_${index}_products`]}</p>
+                    )}
                   </div>
+                )}
+
+                {errors[`delivery_${index}_products`] && !wizardData.products.length && (
+                  <p className="text-red-500 text-sm mt-2">{errors[`delivery_${index}_products`]}</p>
                 )}
               </div>
             ))}
@@ -186,4 +302,5 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
     </div>
   );
 };
+
 

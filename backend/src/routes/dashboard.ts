@@ -1,6 +1,7 @@
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -8,7 +9,7 @@ const prisma = new PrismaClient();
 // @desc    Get dashboard statistics
 // @route   GET /api/dashboard/stats
 // @access  Private
-router.get('/stats', protect, async (req: any, res) => {
+router.get('/stats', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_STATS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res) => {
   try {
     const userId = req.user.id;
     const userRole = req.user.role;
@@ -190,7 +191,7 @@ router.get('/stats', protect, async (req: any, res) => {
 // @desc    Get user profile with department info
 // @route   GET /api/dashboard/profile
 // @access  Private
-router.get('/profile', protect, async (req: any, res) => {
+router.get('/profile', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_PROFILE_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res) => {
   try {
     const userId = req.user.id;
 

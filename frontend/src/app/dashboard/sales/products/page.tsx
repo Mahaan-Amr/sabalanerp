@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -18,7 +18,7 @@ const generateFullProductName = (product: Product): string => {
   const parts = [
     product.stoneTypeNamePersian,
     product.cuttingDimensionNamePersian,
-    `عرض ${product.widthValue}×ضخامت ${product.thicknessValue}cm`,
+    `عرض ${product.widthValue}Ã—ضخامت ${product.thicknessValue}cm`,
     product.mineNamePersian,
     product.finishNamePersian,
     product.colorNamePersian,
@@ -184,23 +184,23 @@ const ProductsPage: React.FC = () => {
       const response = await salesAPI.deleteProduct(deleteConfirm.product.id);
       
       if (response.data.success) {
-        setModalMessage('محصول با موفقیت حذف شد');
+        setModalMessage('Ù…Ø­ØµÙˆل با Ù…Ùˆفقیت حذف شد');
         setShowSuccessModal(true);
         setDeleteConfirm({ show: false, product: null });
         fetchProducts(); // Refresh the list
       } else {
-        setModalMessage('خطا در حذف محصول');
+        setModalMessage('خطا در حذف Ù…Ø­ØµÙˆل');
         setModalDetails(response.data.error);
         setShowErrorModal(true);
       }
     } catch (error: any) {
       console.error('Error deleting product:', error);
       if (error.response?.data?.error) {
-        setModalMessage('خطا در حذف محصول');
+        setModalMessage('خطا در حذف Ù…Ø­ØµÙˆل');
         setModalDetails(error.response.data.error);
         setShowErrorModal(true);
       } else {
-        setModalMessage('خطا در حذف محصول');
+        setModalMessage('خطا در حذف Ù…Ø­ØµÙˆل');
         setModalDetails('خطای غیرمنتظره رخ داده است');
         setShowErrorModal(true);
       }
@@ -232,17 +232,17 @@ const ProductsPage: React.FC = () => {
       console.log('Update response:', response.data);
       
       if (response.data.success) {
-        setModalMessage(`وضعیت ${product.namePersian} با موفقیت تغییر کرد`);
+        setModalMessage(`Ùˆضعیت ${product.namePersian} با Ù…Ùˆفقیت تغییر کرد`);
         setShowSuccessModal(true);
         fetchProducts(); // Refresh the list
       } else {
-        setModalMessage('خطا در تغییر وضعیت');
+        setModalMessage('خطا در تغییر Ùˆضعیت');
         setModalDetails(response.data.error || 'خطای غیرمنتظره رخ داده است');
         setShowErrorModal(true);
       }
     } catch (error: any) {
       console.error('Error toggling status:', error);
-      setModalMessage('خطا در تغییر وضعیت');
+      setModalMessage('خطا در تغییر Ùˆضعیت');
       setModalDetails(error.response?.data?.error || 'خطای غیرمنتظره رخ داده است');
       setShowErrorModal(true);
     } finally {
@@ -272,10 +272,10 @@ const ProductsPage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
-                کاتالوگ محصولات
+                کاتالوگ Ù…Ø­ØµÙˆلات
               </h1>
               <p className="text-slate-600 dark:text-slate-400">
-                مدیریت و مشاهده تمام محصولات موجود در سیستم
+                مدیریت و مشاهده تمام Ù…Ø­ØµÙˆلات Ù…ÙˆØ¬Ùˆد در سیستم
               </p>
             </div>
             
@@ -288,7 +288,7 @@ const ProductsPage: React.FC = () => {
                   className="glass-liquid-btn-secondary px-4 py-3 text-slate-700 dark:text-slate-300 font-medium hover:scale-105 transition-all duration-200 flex items-center gap-2"
                 >
                   <FaFileExcel className="w-4 h-4" />
-                  <span>وارد/صادر کردن</span>
+                  <span>Ùˆارد/صادر کردن</span>
                 </button>
               )}
               
@@ -297,7 +297,7 @@ const ProductsPage: React.FC = () => {
                 <Link href="/dashboard/sales/products/create">
                   <button className="glass-liquid-btn-primary px-6 py-3 text-white font-medium hover:scale-105 transition-all duration-200 flex items-center gap-2">
                     <FaPlus className="w-4 h-4" />
-                    <span>ایجاد محصول جدید</span>
+                    <span>ایجاد Ù…Ø­ØµÙˆل جدید</span>
                   </button>
                 </Link>
               )}
@@ -318,7 +318,7 @@ const ProductsPage: React.FC = () => {
                   type="text"
                   value={searchTerm}
                   onChange={(e) => handleSearchChange(e.target.value)}
-                  placeholder="جستجو در نام، کد یا توضیحات..."
+                  placeholder="جستجو در نام، کد یا ØªÙˆضیحات..."
                   className="w-full px-4 py-2 bg-white/50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                 />
               </div>
@@ -326,12 +326,12 @@ const ProductsPage: React.FC = () => {
               {/* Stone Type Filter */}
               <div>
                 <EnhancedDropdown
-                  label="نوع سنگ"
+                  label="Ù†Ùˆع سنگ"
                   value={filterType}
                   onChange={handleFilterTypeChange}
-                  placeholder="همه انواع"
+                  placeholder="همه Ø§Ù†Ùˆاع"
                   options={[
-                    { value: 'all', label: 'همه انواع' },
+                    { value: 'all', label: 'همه Ø§Ù†Ùˆاع' },
                     ...stoneTypes.map(type => ({ value: type, label: type }))
                   ]}
                   searchable={true}
@@ -358,12 +358,12 @@ const ProductsPage: React.FC = () => {
               {/* Finish Filter */}
               <div>
                 <EnhancedDropdown
-                  label="نوع پرداخت"
+                  label="Ù†Ùˆع پرداخت"
                   value={filterFinish}
                   onChange={handleFilterFinishChange}
-                  placeholder="همه انواع"
+                  placeholder="همه Ø§Ù†Ùˆاع"
                   options={[
-                    { value: 'all', label: 'همه انواع' },
+                    { value: 'all', label: 'همه Ø§Ù†Ùˆاع' },
                     ...finishes.map(finish => ({ value: finish, label: finish }))
                   ]}
                   searchable={true}
@@ -374,13 +374,13 @@ const ProductsPage: React.FC = () => {
               {/* Status Filter */}
               <div>
                 <EnhancedDropdown
-                  label="وضعیت"
+                  label="Ùˆضعیت"
                   value={filterStatus}
                   onChange={handleFilterStatusChange}
-                  placeholder="همه وضعیت‌ها"
+                  placeholder="همه Ùˆضعیت‌ها"
                   options={[
-                    { value: 'all', label: 'همه وضعیت‌ها' },
-                    { value: 'active', label: 'فعال' },
+                    { value: 'all', label: 'همه Ùˆضعیت‌ها' },
+                    { value: 'active', label: 'فعا�' },
                     { value: 'inactive', label: 'غیرفعال' }
                   ]}
                   searchable={false}
@@ -405,7 +405,7 @@ const ProductsPage: React.FC = () => {
                           ? 'bg-white dark:bg-slate-600 text-teal-600 dark:text-teal-400 shadow-sm'
                           : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                       }`}
-                      title="مخفی کردن محصولات حذف شده"
+                      title="مخفی کردن Ù…Ø­ØµÙˆلات حذف شده"
                     >
                       <FaEyeSlash className="w-3 h-3" />
                       مخفی
@@ -417,7 +417,7 @@ const ProductsPage: React.FC = () => {
                           ? 'bg-white dark:bg-slate-600 text-teal-600 dark:text-teal-400 shadow-sm'
                           : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                       }`}
-                      title="نمایش محصولات حذف شده"
+                      title="نمایش Ù…Ø­ØµÙˆلات حذف شده"
                     >
                       <FaEye className="w-3 h-3" />
                       نمایش
@@ -450,7 +450,7 @@ const ProductsPage: React.FC = () => {
                         ? 'bg-white dark:bg-slate-600 text-teal-600 dark:text-teal-400 shadow-sm'
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                     }`}
-                    title="نمایش جدولی"
+                    title="نمایش Ø¬Ø¯Ùˆلی"
                   >
                     <FaList className="w-4 h-4" />
                   </button>
@@ -532,7 +532,7 @@ const ProductsPage: React.FC = () => {
                     
                     {product.deletedAt && (
                       <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
-                        حذف شده
+                        حذف شد�!
                       </span>
                     )}
                     
@@ -562,7 +562,7 @@ const ProductsPage: React.FC = () => {
                   <div className="flex items-center gap-2">
                     {product.leadTime && (
                       <span className="text-xs text-slate-500 dark:text-slate-400">
-                        {product.leadTime} روز
+                        {product.leadTime} Ø±Ùˆز
                       </span>
                     )}
                     
@@ -583,7 +583,7 @@ const ProductsPage: React.FC = () => {
                         <button
                           onClick={(e) => handleDeleteClick(product, e)}
                           className="p-1.5 text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400 transition-colors"
-                          title="حذف محصول"
+                          title="حذف Ù…Ø­ØµÙˆل"
                         >
                           <FaTrash className="w-3 h-3" />
                         </button>
@@ -601,13 +601,13 @@ const ProductsPage: React.FC = () => {
               <table className="w-full">
                 <thead className="bg-slate-50 dark:bg-slate-700/50">
                   <tr>
-                    <th className="text-right py-4 px-6 font-medium text-slate-800 dark:text-slate-200">نام کامل محصول</th>
-                    <th className="text-right py-4 px-6 font-medium text-slate-800 dark:text-slate-200">نام محصول</th>
+                    <th className="text-right py-4 px-6 font-medium text-slate-800 dark:text-slate-200">نام کامل Ù…Ø­ØµÙˆل</th>
+                    <th className="text-right py-4 px-6 font-medium text-slate-800 dark:text-slate-200">نام Ù…Ø­ØµÙˆل</th>
                     <th className="text-right py-4 px-6 font-medium text-slate-800 dark:text-slate-200">ابعاد</th>
                     <th className="text-right py-4 px-6 font-medium text-slate-800 dark:text-slate-200">معدن</th>
                     <th className="text-right py-4 px-6 font-medium text-slate-800 dark:text-slate-200">پرداخت</th>
                     <th className="text-right py-4 px-6 font-medium text-slate-800 dark:text-slate-200">قیمت</th>
-                    <th className="text-right py-4 px-6 font-medium text-slate-800 dark:text-slate-200">وضعیت</th>
+                    <th className="text-right py-4 px-6 font-medium text-slate-800 dark:text-slate-200">Ùˆضعیت</th>
                     <th className="text-right py-4 px-6 font-medium text-slate-800 dark:text-slate-200">عملیات</th>
                   </tr>
                 </thead>
@@ -665,7 +665,7 @@ const ProductsPage: React.FC = () => {
                           
                           {product.deletedAt && (
                             <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
-                              حذف شده
+                              حذف شد�!
                             </span>
                           )}
                           
@@ -693,7 +693,7 @@ const ProductsPage: React.FC = () => {
                           
                           {product.leadTime && (
                             <span className="text-xs text-slate-500 dark:text-slate-400">
-                              {product.leadTime} روز
+                              {product.leadTime} Ø±Ùˆز
                             </span>
                           )}
                         </div>
@@ -718,7 +718,7 @@ const ProductsPage: React.FC = () => {
                                 handleDeleteClick(product, e);
                               }}
                               className="p-2 text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400 transition-colors"
-                              title="حذف محصول"
+                              title="حذف Ù…Ø­ØµÙˆل"
                             >
                               <FaTrash className="w-4 h-4" />
                             </button>
@@ -824,7 +824,7 @@ const ProductsPage: React.FC = () => {
                 disabled={currentPage === totalPages}
                 className="px-3 py-2 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-600 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm"
               >
-                بعدی
+                بعد�R
               </button>
             </div>
           </div>
@@ -832,7 +832,7 @@ const ProductsPage: React.FC = () => {
 
         {/* Results Summary */}
         <div className="mt-6 text-center text-slate-600 dark:text-slate-400">
-          نمایش {((currentPage - 1) * itemsPerPage) + 1} تا {Math.min(currentPage * itemsPerPage, totalProducts)} از {totalProducts} محصول
+          نمایش {((currentPage - 1) * itemsPerPage) + 1} تا {Math.min(currentPage * itemsPerPage, totalProducts)} از {totalProducts} Ù…Ø­ØµÙˆل
         </div>
       </div>
 
@@ -841,11 +841,11 @@ const ProductsPage: React.FC = () => {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-slate-800 rounded-lg p-6 max-w-md w-full mx-4">
             <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-4">
-              تأیید حذف محصول
+              تأیید حذف Ù…Ø­ØµÙˆل
             </h3>
             
             <p className="text-slate-600 dark:text-slate-400 mb-6">
-              آیا مطمئن هستید که می‌خواهید محصول{' '}
+              آیا مطمئن هستید که Ù…ÛŒâ€ŒØ®Ùˆاهید Ù…Ø­ØµÙˆل{' '}
               <span className="font-medium text-slate-800 dark:text-slate-200">
                 {deleteConfirm.product.namePersian}
               </span>{' '}
@@ -853,7 +853,7 @@ const ProductsPage: React.FC = () => {
             </p>
             
             <p className="text-sm text-amber-600 dark:text-amber-400 mb-6">
-              ⚠️ این عمل قابل بازگشت نیست. اگر محصول در قراردادها یا تحویل‌ها استفاده شده باشد، حذف آن امکان‌پذیر نخواهد بود.
+              ⚠️ این عمل قابل بازگشت نیست. اگر Ù…Ø­ØµÙˆل در قراردادها یا ØªØ­Ùˆیل‌ها استفاده شده باشد، حذف آن امکان‌پذیر Ù†Ø®Ùˆاهد Ø¨Ùˆد.
             </p>
             
             <div className="flex gap-3 justify-end">
@@ -862,7 +862,7 @@ const ProductsPage: React.FC = () => {
                 disabled={deleting}
                 className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors disabled:opacity-50"
               >
-                انصراف
+                ا� صراف
               </button>
               
               <button
@@ -873,12 +873,12 @@ const ProductsPage: React.FC = () => {
                 {deleting ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    در حال حذف...
+                    در حا� حذف...
                   </>
                 ) : (
                   <>
                     <FaTrash className="w-4 h-4" />
-                    حذف محصول
+                    حذف Ù…Ø­ØµÙˆل
                   </>
                 )}
               </button>
@@ -891,9 +891,9 @@ const ProductsPage: React.FC = () => {
       <SuccessModal
         isOpen={showSuccessModal}
         onClose={() => setShowSuccessModal(false)}
-        title="عملیات موفق"
+        title="عملیات Ù…Ùˆفق"
         message={modalMessage}
-        buttonText="باشه"
+        buttonText="باش�!"
         autoClose={true}
         autoCloseDelay={2000}
       />
@@ -905,7 +905,7 @@ const ProductsPage: React.FC = () => {
         title="خطا"
         message={modalMessage}
         details={modalDetails}
-        buttonText="باشه"
+        buttonText="باش�!"
       />
 
       {/* Import/Export Modal */}
@@ -916,8 +916,8 @@ const ProductsPage: React.FC = () => {
           // Refresh products list after successful import
           fetchProducts();
           setShowSuccessModal(true);
-          setModalMessage('محصولات با موفقیت وارد شدند');
-          setModalDetails(`${results.success} محصول موفق و ${results.failed} محصول ناموفق`);
+          setModalMessage('Ù…Ø­ØµÙˆلات با Ù…Ùˆفقیت Ùˆارد شدند');
+          setModalDetails(`${results.success} Ù…Ø­ØµÙˆل Ù…Ùˆفق و ${results.failed} Ù…Ø­ØµÙˆل Ù†Ø§Ù…Ùˆفق`);
         }}
         currentFilters={{
           search: searchTerm,

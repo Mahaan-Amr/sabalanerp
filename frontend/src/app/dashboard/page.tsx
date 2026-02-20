@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -87,7 +87,7 @@ const statusColors = {
 };
 
 const statusLabels = {
-  DRAFT: 'پیش نویس',
+  DRAFT: 'پیش Ù†Ùˆیس',
   PENDING_APPROVAL: 'در انتظار تایید',
   APPROVED: 'تایید شده',
   SIGNED: 'امضا شده',
@@ -128,7 +128,7 @@ export default function DashboardPage() {
       if (response.data.success) {
         setStats(response.data.data);
       } else {
-        setError('خطا در دریافت اطلاعات داشبورد');
+        setError('خطا در دریافت اطلاعات Ø¯Ø§Ø´Ø¨Ùˆرد');
       }
     } catch (error: any) {
       console.error('Error fetching dashboard data:', error);
@@ -214,7 +214,7 @@ export default function DashboardPage() {
       <div className="glass-liquid-card p-6 text-center">
         <FaFileContract className="mx-auto text-4xl text-gray-400 mb-4" />
         <h2 className="text-xl font-semibold text-white mb-2">اطلاعاتی یافت نشد</h2>
-        <p className="text-gray-400">هنوز داده‌ای برای نمایش وجود ندارد</p>
+        <p className="text-gray-400">Ù‡Ù†Ùˆز داده‌ای برای نمایش ÙˆØ¬Ùˆد ندارد</p>
       </div>
     );
   }
@@ -223,7 +223,7 @@ export default function DashboardPage() {
     <div className="space-y-6">
       {/* Welcome Section */}
       <div className="glass-liquid-card p-6">
-        <h1 className="text-2xl font-bold text-white mb-2">خوش آمدید به داشبورد سبلان ERP</h1>
+        <h1 className="text-2xl font-bold text-white mb-2">Ø®Ùˆش آمدید به Ø¯Ø§Ø´Ø¨Ùˆرد سبلان ERP</h1>
         <p className="text-gray-300">نگاهی کلی به فعالیت‌ها و آمار سیستم</p>
       </div>
 
@@ -249,7 +249,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex-1">
                   <h3 className="text-white font-semibold">مدیریت کاربران</h3>
-                  <p className="text-gray-400 text-sm">ایجاد، ویرایش و مدیریت کاربران سیستم</p>
+                  <p className="text-gray-400 text-sm">ایجاد، Ùˆیرایش و مدیریت کاربران سیستم</p>
                 </div>
               </div>
             </Link>
@@ -265,7 +265,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex-1">
                   <h3 className="text-white font-semibold">مدیریت دسترسی‌ها</h3>
-                  <p className="text-gray-400 text-sm">تنظیم مجوزها و دسترسی‌های کاربران</p>
+                  <p className="text-gray-400 text-sm">تنظیم Ù…Ø¬Ùˆزها و دسترسی‌های کاربران</p>
                 </div>
               </div>
             </Link>
@@ -393,7 +393,7 @@ export default function DashboardPage() {
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-400 text-sm">پیش نویس</p>
+              <p className="text-gray-400 text-sm">پیش Ù†Ùˆیس</p>
               <p className="text-2xl font-bold text-white">{stats.contracts.draft}</p>
             </div>
             <div className="glass-liquid-card p-3">
@@ -444,7 +444,7 @@ export default function DashboardPage() {
             className="glass-liquid-btn p-4 flex items-center gap-3 hover:bg-white/10 transition-all duration-200"
           >
             <FaUsers className="h-5 w-5" />
-            <span>افزودن مشتری جدید</span>
+            <span>Ø§ÙØ²Ùˆدن مشتری جدید</span>
           </Link>
           
           <Link 
@@ -473,7 +473,7 @@ export default function DashboardPage() {
           {stats.recentContracts.length === 0 ? (
             <div className="text-center py-8">
               <FaFileContract className="mx-auto text-4xl text-gray-400 mb-4" />
-              <p className="text-gray-400">هنوز قراردادی ایجاد نشده است</p>
+              <p className="text-gray-400">Ù‡Ù†Ùˆز قراردادی ایجاد نشده است</p>
             </div>
           ) : (
             stats.recentContracts.map((contract) => (
@@ -489,7 +489,7 @@ export default function DashboardPage() {
                       {contract.customer.companyName && ` (${contract.customer.companyName})`}
                     </p>
                     <p className="text-gray-500 text-xs">
-                      {contract.department.namePersian} • {contract.createdByUser.firstName} {contract.createdByUser.lastName}
+                      {contract.department.namePersian} ⬢ {contract.createdByUser.firstName} {contract.createdByUser.lastName}
                     </p>
                     <p className="text-gray-500 text-xs">{formatDate(contract.createdAt)}</p>
                   </div>
@@ -532,7 +532,7 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-xl font-semibold text-white mb-2">میانگین قرارداد</h2>
               <p className="text-3xl font-bold text-gold-400">{formatAmount(stats.revenue.average)}</p>
-              <p className="text-gray-400 text-sm">ارزش متوسط هر قرارداد</p>
+              <p className="text-gray-400 text-sm">ارزش Ù…ØªÙˆسط هر قرارداد</p>
             </div>
             <div className="glass-liquid-card p-4">
               <FaFileContract className="h-8 w-8 text-gold-400" />

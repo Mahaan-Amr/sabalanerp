@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Circle Drawing Tool
  * Allows users to draw circles on the canvas
  */
@@ -12,7 +12,7 @@ import { CADShape } from '../types/CADTypes';
 export class CircleTool extends BaseTool {
   name = 'circle';
   icon = 'FaCircle';
-  displayName = 'دایره';
+  displayName = '???';
   
   private isDrawing = false;
   private centerPoint: { x: number; y: number } | null = null;
@@ -147,4 +147,5 @@ export class CircleTool extends BaseTool {
     return 'crosshair';
   }
 }
+
 

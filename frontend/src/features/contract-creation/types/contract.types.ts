@@ -1,4 +1,4 @@
-// Contract Creation Types
+﻿// Contract Creation Types
 // All TypeScript interfaces and types for contract creation feature
 
 export interface CrmCustomer {
@@ -73,50 +73,51 @@ export interface Product {
 
 export interface StoneCut {
   id: string;
-  originalWidth: number; // عرض اصلی سنگ
-  cutWidth: number; // عرض برش خورده
-  remainingWidth: number; // عرض باقی‌مانده
-  length: number; // طول برش
-  cuttingCost: number; // هزینه برش
-  cuttingCostPerMeter: number; // هزینه برش به ازای هر متر
+  originalWidth: number; // ?? ?? ??
+  cutWidth: number; // ?? ?? ???
+  remainingWidth: number; // ?? ???
+  length: number; // ?? ??
+  cuttingCost: number; // ??? ??
+  cuttingCostPerMeter: number; // ??? ?? ? ?? ? ??
   orientation?: 'longitudinal' | 'cross';
 }
 
 export interface RemainingStone {
   id: string;
-  width: number; // عرض باقی‌مانده (in cm)
-  length: number; // طول باقی‌مانده (in meters)
-  squareMeters: number; // متر مربع باقی‌مانده
-  isAvailable: boolean; // آیا قابل استفاده است
-  sourceCutId: string; // شناسه برش اصلی
-  position?: { // موقعیت در سنگ اصلی (برای نمایش در canvas) - فقط برای پارتیشن‌ها
-    startWidth: number; // شروع عرض (in cm)
-    startLength: number; // شروع طول (in meters)
+  width: number; // ?? ??? (in cm)
+  length: number; // ?? ??? (in meters)
+  squareMeters: number; // ?? ?? ???
+  isAvailable: boolean; // ?? ?? ?? ??
+  sourceCutId: string; // ??? ?? ??
+  position?: { // ??? ? ?? ?? (?? ??? ? canvas) - ?? ?? ???
+    startWidth: number; // ?? ?? (in cm)
+    startLength: number; // ?? ?? (in meters)
   };
   // Cutting cost fields for partitions (when created from remaining stone)
-  cuttingCost?: number; // هزینه برش برای این پارتیشن
-  cuttingCostPerMeter?: number; // هزینه برش به ازای هر متر
-  cutType?: 'longitudinal' | 'cross' | null; // نوع برش
-  quantity?: number; // تعداد (برای محاسبه هزینه برش)
+  cuttingCost?: number; // ??? ?? ?? ?? ??
+  cuttingCostPerMeter?: number; // ??? ?? ? ?? ? ??
+  cutType?: 'longitudinal' | 'cross' | null; // ?? ??
+  quantity?: number; // ??? (?? ??? ??? ??)
 }
 
 export interface SlabStandardDimensionEntry {
   id: string; // Unique ID for this entry
-  standardLengthCm: number; // طول استاندارد (in cm)
-  standardWidthCm: number; // عرض استاندارد (in cm)
-  quantity: number; // تعداد این ابعاد استاندارد
+  standardLengthCm: number; // ?? ??? (in cm)
+  standardWidthCm: number; // ?? ??? (in cm)
+  quantity: number; // ??? ?? ??? ???
 }
 
 export interface StonePartition {
   id: string;
-  width: number; // عرض پارتیشن (in cm)
-  length: number; // طول پارتیشن (in meters)
-  squareMeters: number; // متر مربع (محاسبه شده)
-  position?: { // موقعیت در سنگ اصلی (برای نمایش در canvas)
-    startWidth: number; // شروع عرض (in cm)
-    startLength: number; // شروع طول (in meters)
+  width: number; // ?? ?? (in cm)
+  length: number; // ?? ?? (in meters)
+  quantity: number; // partition piece count
+  squareMeters: number; // ?? ?? (??? ??)
+  position?: { // ??? ? ?? ?? (?? ??? ? canvas)
+    startWidth: number; // ?? ?? (in cm)
+    startLength: number; // ?? ?? (in meters)
   };
-  validationError?: string; // خطای اعتبارسنجی برای این پارتیشن خاص
+  validationError?: string; // ?? ??? ?? ?? ?? ??
 }
 
 export interface SubService {
@@ -125,8 +126,8 @@ export interface SubService {
   name?: string;
   namePersian: string;
   description?: string;
-  pricePerMeter: number; // هزینه هر متر ابزار (تومان)
-  calculationBase: 'length' | 'squareMeters'; // بر اساس طول یا متر مربع
+  pricePerMeter: number; // ??? ? ?? ??? (???)
+  calculationBase: 'length' | 'squareMeters'; // ? ?? ?? ? ?? ??
   isActive: boolean;
 }
 
@@ -143,9 +144,9 @@ export interface AppliedSubService {
   id: string; // Unique ID for this applied service
   subServiceId: string; // Reference to SubService
   subService: SubService; // Full SubService object
-  meter: number; // مقدار استفاده شده (طول یا متر مربع)
-  cost: number; // هزینه محاسبه شده
-  calculationBase: 'length' | 'squareMeters'; // مبنای محاسبه
+  meter: number; // ??? ?? ?? (?? ? ?? ??)
+  cost: number; // ??? ??? ??
+  calculationBase: 'length' | 'squareMeters'; // ??? ???
 }
 
 export interface CuttingBreakdownEntry {
@@ -170,7 +171,7 @@ export interface ServiceEntry {
 // Stair Part interface for individual parts of a stair system
 export interface StairPart {
   // Part identification
-  partType: 'tread' | 'riser' | 'landing'; // کف پله, خیز پله, پاگرد
+  partType: 'tread' | 'riser' | 'landing'; // ? ??, ?? ??, ???
   isSelected: boolean; // Whether this part is included in the stair system
   
   // Product selection
@@ -178,21 +179,21 @@ export interface StairPart {
   product: Product | null;
   
   // Part-specific dimensions
-  // For Tread (کف پله):
-  treadWidth?: number; // طول پله (width of staircase) - in cm or m
-  treadDepth?: number; // عرض پله (depth of step) - in cm
-  // For Riser (خیز پله):
-  riserHeight?: number; // ارتفاع قائمه - in cm
-  // For Landing (پاگرد):
-  landingWidth?: number; // عرض پاگرد - in cm
-  landingDepth?: number; // عمق پاگرد - in cm
-  numberOfLandings?: number; // تعداد پاگرد
+  // For Tread (? ??):
+  treadWidth?: number; // ?? ?? (width of staircase) - in cm or m
+  treadDepth?: number; // ?? ?? (depth of step) - in cm
+  // For Riser (?? ??):
+  riserHeight?: number; // ??? ??? - in cm
+  // For Landing (???):
+  landingWidth?: number; // ?? ??? - in cm
+  landingDepth?: number; // ?? ??? - in cm
+  numberOfLandings?: number; // ??? ???
   
   // Quantity and pricing
-  quantity: number; // تعداد
-  squareMeters: number; // متر مربع
-  pricePerSquareMeter: number; // فی هر متر مربع
-  totalPrice: number; // قیمت کل
+  quantity: number; // ???
+  squareMeters: number; // ?? ??
+  pricePerSquareMeter: number; // ? ? ?? ??
+  totalPrice: number; // ?? ?
   
   // Nosing (only for tread)
   nosingType?: string;
@@ -214,7 +215,7 @@ export interface StairPart {
 // Stair Part interface for individual parts of a stair system (old flow)
 export interface StairPart {
   // Part identification
-  partType: 'tread' | 'riser' | 'landing'; // کف پله, خیز پله, پاگرد
+  partType: 'tread' | 'riser' | 'landing'; // ? ??, ?? ??, ???
   isSelected: boolean; // Whether this part is included in the stair system
   
   // Product selection
@@ -222,21 +223,21 @@ export interface StairPart {
   product: Product | null;
   
   // Part-specific dimensions
-  // For Tread (کف پله):
-  treadWidth?: number; // طول پله (width of staircase) - in cm or m
-  treadDepth?: number; // عرض پله (depth of step) - in cm
-  // For Riser (خیز پله):
-  riserHeight?: number; // ارتفاع قائمه - in cm
-  // For Landing (پاگرد):
-  landingWidth?: number; // عرض پاگرد - in cm
-  landingDepth?: number; // عمق پاگرد - in cm
-  numberOfLandings?: number; // تعداد پاگرد
+  // For Tread (? ??):
+  treadWidth?: number; // ?? ?? (width of staircase) - in cm or m
+  treadDepth?: number; // ?? ?? (depth of step) - in cm
+  // For Riser (?? ??):
+  riserHeight?: number; // ??? ??? - in cm
+  // For Landing (???):
+  landingWidth?: number; // ?? ??? - in cm
+  landingDepth?: number; // ?? ??? - in cm
+  numberOfLandings?: number; // ??? ???
   
   // Quantity and pricing
-  quantity: number; // تعداد
-  squareMeters: number; // متر مربع
-  pricePerSquareMeter: number; // فی هر متر مربع
-  totalPrice: number; // قیمت کل
+  quantity: number; // ???
+  squareMeters: number; // ?? ??
+  pricePerSquareMeter: number; // ? ? ?? ??
+  totalPrice: number; // ?? ?
   
   // Nosing (only for tread)
   nosingType?: string;
@@ -258,43 +259,43 @@ export interface StairPart {
 // Stair System configuration (old flow)
 export interface StairSystemConfig {
   // Common configuration
-  numberOfSteps: number; // تعداد پله
-  quantityType: 'steps' | 'staircases'; // نوع تعداد
+  numberOfSteps: number; // ??? ??
+  quantityType: 'steps' | 'staircases'; // ?? ???
   numberOfStaircases?: number; // if quantityType === 'staircases'
   
   // Default product (used when user first selects a product)
   defaultProduct: Product | null;
   
   // Three parts
-  tread: StairPart;      // کف پله
-  riser: StairPart;      // خیز پله
-  landing: StairPart;    // پاگرد
+  tread: StairPart;      // ? ??
+  riser: StairPart;      // ?? ??
+  landing: StairPart;    // ???
 }
 
 export interface ContractProduct {
   productId: string;
   product: Product;
   // Product type
-  productType: 'longitudinal' | 'stair' | 'slab'; // نوع محصول
+  productType: 'longitudinal' | 'stair' | 'slab'; // ?? ???
   // Stair system linking (only for stair parts)
   stairSystemId?: string; // ID to link multiple items belonging to same stair system
-  stairPartType?: 'tread' | 'riser' | 'landing'; // نوع بخش پله
+  stairPartType?: 'tread' | 'riser' | 'landing'; // ?? ?? ??
   // Stone-specific fields (shared)
-  stoneCode: string; // کد سنگ
-  stoneName: string; // نام یا نوع سنگ
-  diameterOrWidth: number; // قطر یا عرض (constant for تایل and طولی)
-  length: number; // طول
-  width: number; // عرض
-  quantity: number; // تعداد
-  squareMeters: number; // متر مربع
-  pricePerSquareMeter: number; // فی هر متر مربع
-  unitPrice?: number; // قیمت واحد (used in some calculations)
-  totalPrice: number; // قیمت کل
-  description: string; // توضیحات
+  stoneCode: string; // ? ??
+  stoneName: string; // ?? ? ?? ??
+  diameterOrWidth: number; // ?? ? ?? (constant for ?? and ??)
+  length: number; // ??
+  width: number; // ??
+  quantity: number; // ???
+  squareMeters: number; // ?? ??
+  pricePerSquareMeter: number; // ? ? ?? ??
+  unitPrice?: number; // ?? ?? (used in some calculations)
+  totalPrice: number; // ?? ?
+  description: string; // ??
   currency: string;
   // Unit information for proper display
-  lengthUnit: 'cm' | 'm'; // واحد طول
-  widthUnit: 'cm' | 'm'; // واحد عرض
+  lengthUnit: 'cm' | 'm'; // ?? ??
+  widthUnit: 'cm' | 'm'; // ?? ??
   standardLengthValue?: number | null;
   standardLengthUnit?: 'cm' | 'm';
   actualLengthMeters?: number | null;
@@ -309,19 +310,19 @@ export interface ContractProduct {
   layerUseMandatory?: boolean;
   layerMandatoryPercentage?: number | null;
   // Mandatory pricing fields
-  isMandatory: boolean; // حکمی
-  mandatoryPercentage: number; // درصد حکمی (default 20%)
-  originalTotalPrice: number; // قیمت اصلی قبل از حکمی
+  isMandatory: boolean; // ??
+  mandatoryPercentage: number; // ?? ?? (default 20%)
+  originalTotalPrice: number; // ?? ?? ?? ? ??
   // Stone cutting fields
-  isCut: boolean; // آیا سنگ برش خورده است
-  cutType: 'longitudinal' | 'cross' | null; // نوع برش
-  originalWidth: number; // عرض اصلی سنگ قبل از برش
-  originalLength: number; // طول اصلی سنگ قبل از استفاده (in meters) - برای محاسبه باقی‌مانده
-  cuttingCost: number; // هزینه برش
-  cuttingCostPerMeter: number; // هزینه برش به ازای هر متر
-  cutDescription: string; // توضیحات برش
-  remainingStones: RemainingStone[]; // سنگ‌های باقی‌مانده
-  cutDetails: StoneCut[]; // جزئیات برش‌ها
+  isCut: boolean; // ?? ?? ?? ??? ??
+  cutType: 'longitudinal' | 'cross' | null; // ?? ??
+  originalWidth: number; // ?? ?? ?? ?? ? ??
+  originalLength: number; // ?? ?? ?? ?? ? ?? (in meters) - ?? ??? ???
+  cuttingCost: number; // ??? ??
+  cuttingCostPerMeter: number; // ??? ?? ? ?? ? ??
+  cutDescription: string; // ?? ??
+  remainingStones: RemainingStone[]; // ?? ???
+  cutDetails: StoneCut[]; // ??? ???
   // Legacy single standard dimension fields (kept for backward compatibility)
   slabStandardLengthCm?: number | null;
   slabStandardWidthCm?: number | null;
@@ -332,26 +333,26 @@ export interface ContractProduct {
   slabLineCuttingStrategy?: 'length' | 'width';
   slabLineCuttingLongitudinalMeters?: number | null;
   slabLineCuttingCrossMeters?: number | null;
-  // برش قائم (vertical/perpendicular edge cuts) for slab stones
+  // ?? ?? (vertical/perpendicular edge cuts) for slab stones
   slabVerticalCutSides?: {
-    top: boolean;    // بالا
-    bottom: boolean; // پایین
-    left: boolean;  // چپ
-    right: boolean; // راست
+    top: boolean;    // ??
+    bottom: boolean; // ???
+    left: boolean;  // ?
+    right: boolean; // ??
   };
-  slabVerticalCutCost?: number; // هزینه برش قائم
-  slabVerticalCutCostPerMeter?: number; // هزینه برش قائم به ازای هر متر
+  slabVerticalCutCost?: number; // ??? ?? ??
+  slabVerticalCutCostPerMeter?: number; // ??? ?? ?? ? ?? ? ??
   // Remaining stone usage tracking
-  usedRemainingStones: RemainingStone[]; // سنگ‌های باقی‌مانده استفاده شده
-  totalUsedRemainingWidth: number; // مجموع عرض باقی‌مانده استفاده شده
-  totalUsedRemainingLength: number; // مجموع طول باقی‌مانده استفاده شده (in meters)
+  usedRemainingStones: RemainingStone[]; // ?? ??? ?? ??
+  totalUsedRemainingWidth: number; // ??? ?? ??? ?? ??
+  totalUsedRemainingLength: number; // ??? ?? ??? ?? ?? (in meters)
   // Parent-child relationship (explicit reference instead of stoneCode parsing)
   parentProductIndex?: number; // Index of parent product in wizardData.products array (for remaining stone relationships)
   // SubService tracking
-  appliedSubServices: AppliedSubService[]; // ابزارهای اعمال شده
-  totalSubServiceCost: number; // مجموع هزینه ابزارها
-  usedLengthForSubServices: number; // طول استفاده شده برای ابزارهای مبتنی بر طول (in meters)
-  usedSquareMetersForSubServices: number; // متر مربع استفاده شده برای ابزارهای مبتنی بر متر مربع
+  appliedSubServices: AppliedSubService[]; // ?? ??? ??
+  totalSubServiceCost: number; // ??? ??? ??
+  usedLengthForSubServices: number; // ?? ?? ?? ?? ?? ??? ? ?? (in meters)
+  usedSquareMetersForSubServices: number; // ?? ?? ?? ?? ?? ?? ??? ? ?? ??
   cuttingBreakdown?: CuttingBreakdownEntry[];
   // Stair-specific fields (for backward compatibility and display)
   treadWidth?: number;
@@ -386,30 +387,35 @@ export interface DeliveryProductItem {
 
 export interface DeliverySchedule {
   deliveryDate: string;
-  projectManagerName: string; // نام مدیر پروژه
-  receiverName: string; // نام تحویل‌گیرنده
-  deliveryAddress?: string; // آدرس تحویل
-  driver?: string; // راننده
-  vehicle?: string; // وسیله نقلیه
+  projectManagerName: string; // ?? ?? ???
+  receiverName: string; // ?? ??
+  deliveryAddress?: string; // ?? ???
+  driver?: string; // ???
+  vehicle?: string; // ??? ???
   products: DeliveryProductItem[]; // Products with quantities for this delivery
   notes?: string;
 }
 
+// ?? (??) | ?? (??) | ?
+export type PaymentEntryMethod = 'CASH_CARD' | 'CASH_SHIBA' | 'CHECK';
+
 export interface PaymentEntry {
   id: string; // Unique ID for this payment entry
-  method: 'CASH' | 'CHECK'; // Payment method types
-  amount: number; // Amount for this specific payment
-  status: 'PAID' | 'WILL_BE_PAID'; // پرداخت شده | پرداخت خواهد شد
-  paymentDate: string; // Persian date - paid date if PAID, due date if WILL_BE_PAID
-  description?: string; // Optional description
-  nationalCode?: string; // Optional national code for CHECK payments
-  checkNumber?: string; // Required check number for CHECK payments
-  cashType?: string; // Required cash type for CASH payments (e.g., فوری, عادی, پیش‌پرداخت, پس‌پرداخت)
+  method: PaymentEntryMethod; // ?? (??) | ?? (??) | ?
+  amount: number; // Amount in ???
+  status?: 'PAID' | 'WILL_BE_PAID'; // Optional, for display
+  paymentDate: string; // ??: ??? ??? (when customer will pay). ?: ??? ??? (when check will pass)
+  description?: string;
+  nationalCode?: string;
+  checkNumber?: string; // ?: ??? ?
+  checkOwnerName?: string; // ?: ?? ?? ?
+  handoverDate?: string; // ?: ??? ??? ? (when customer gives/brings check) - Persian date
+  cashType?: string; // Legacy / API: ?? | ?? for CASH
 }
 
 export interface PaymentMethod {
   payments: PaymentEntry[]; // Array of payment entries (compound payments)
-  currency: string; // Default: 'تومان'
+  currency: string; // Default: '???'
   totalContractAmount: number; // Sum of all products (for validation)
 }
 
@@ -449,11 +455,78 @@ export interface ContractWizardData {
   // Step 8: Signature (Digital Signature with SMS Verification)
   signature: {
     phoneNumber: string | null;
-    verificationCode: string;
-    codeSent: boolean;
-    codeVerified: boolean;
-    contractId: string | null; // Store contract ID after creation
+    contractId: string | null;
+    contractStatus?: string | null;
+    confirmationSent: boolean;
+    confirmationStatus: 'PENDING' | 'VERIFIED' | 'EXPIRED' | 'CANCELLED' | null;
+    linkExpiresAt: string | null;
+    otpExpiresAt: string | null;
+    attemptsUsed: number;
+    maxAttempts: number;
+    resendCount: number;
+    lastSentAt: string | null;
+    lastOpenedAt: string | null;
   } | null;
+}
+
+export interface ContractStep8ProductDetail {
+  id: string;
+  code: string;
+  name: string;
+  productType: string;
+  stairPartType: string;
+  dimensions: string;
+  quantity: number;
+  squareMeters: number;
+  unitPrice: number;
+  totalPrice: number;
+  description: string;
+}
+
+export interface ContractStep8ServiceDetail {
+  id: string;
+  productName: string;
+  category: string;
+  name: string;
+  amountLabel: string;
+  rateLabel: string;
+  cost: number;
+}
+
+export interface ContractStep8DeliveryDetail {
+  id: string;
+  deliveryDate: string;
+  deliveryAddress: string;
+  projectManagerName: string;
+  receiverName: string;
+  notes: string;
+  products: Array<{
+    productName: string;
+    quantity: number;
+  }>;
+}
+
+export interface ContractStep8PaymentDetail {
+  id: string;
+  methodLabel: string;
+  amount: number;
+  paymentDate: string;
+  handoverDate: string;
+  checkNumber: string;
+  checkOwnerName: string;
+  status: string;
+  description: string;
+}
+
+export interface ContractStep8FinancialSummary {
+  productsTotal: number;
+  servicesTotal: number;
+  cutsTotal: number;
+  finishingTotal: number;
+  grandTotal: number;
+  paymentTotal: number;
+  remainingAmount: number;
+  currency: string;
 }
 
 export type ContractUsageType = 'longitudinal' | 'stair' | 'slab' | 'volumetric';
@@ -523,19 +596,19 @@ export interface StairPartDraftV2 {
   squareMeters?: number | null;
   tools?: ToolSelectionV2[];
   totalPrice?: number | null;
-  // Layer fields (لایه‌ها)
-  numberOfLayersPerStair?: number | null; // تعداد لایه برای هر پله (e.g., 2 for double)
-  layerWidthCm?: number | null; // عرض لایه (cm) - width of the layer strip
+  // Layer fields (??)
+  numberOfLayersPerStair?: number | null; // ??? ?? ?? ? ?? (e.g., 2 for double)
+  layerWidthCm?: number | null; // ?? ?? (cm) - width of the layer strip
   layerTypeId?: string | null;
   layerTypeName?: string | null;
   layerTypePrice?: number | null;
   // Layer edges - which sides of the stair need layers
   layerEdges?: {
-    front?: boolean; // لایه برای لبه جلو
-    left?: boolean; // لایه برای لبه چپ
-    right?: boolean; // لایه برای لبه راست
-    back?: boolean; // لایه برای لبه عقب (only for landing)
-    perimeter?: boolean; // لایه برای محیط کامل (only for landing)
+    front?: boolean; // ?? ?? ?? ??
+    left?: boolean; // ?? ?? ?? ?
+    right?: boolean; // ?? ?? ?? ??
+    back?: boolean; // ?? ?? ?? ?? (only for landing)
+    perimeter?: boolean; // ?? ?? ?? ?? (only for landing)
   };
   layerUseDifferentStone?: boolean;
   layerStoneProductId?: string | null;
@@ -579,4 +652,6 @@ export type LayerEdgeDemand = {
   layersNeeded: number;
   lengthM: number;
 };
+
+
 

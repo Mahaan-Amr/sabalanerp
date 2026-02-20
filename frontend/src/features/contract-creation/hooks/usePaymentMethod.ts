@@ -1,4 +1,4 @@
-// Payment method hook
+﻿// Payment method hook
 // Manages payment entries and installments
 
 import { useState, useCallback, useMemo } from 'react';
@@ -80,11 +80,11 @@ export const usePaymentMethod = (totalContractAmount: number) => {
       });
     } else {
       addPaymentEntry({
-        method: 'CASH',
+        method: 'CASH_CARD',
         amount: remaining,
         status: 'WILL_BE_PAID',
         paymentDate: '',
-        cashType: 'عادی'
+        cashType: 'CARD'
       });
     }
   }, [totalContractAmount, totalPaymentAmount, paymentMethod.payments, updatePaymentEntry, addPaymentEntry]);
@@ -105,4 +105,5 @@ export const usePaymentMethod = (totalContractAmount: number) => {
     autoBalancePayments
   };
 };
+
 

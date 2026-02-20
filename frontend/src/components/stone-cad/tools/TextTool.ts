@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Text Tool
  * Allows users to add text annotations on the canvas
  */
@@ -12,11 +12,11 @@ import { CADShape } from '../types/CADTypes';
 export class TextTool extends BaseTool {
   name = 'text';
   icon = 'FaFont';
-  displayName = 'متن';
+  displayName = '??';
   
   private isPlacing = false;
   private tempText: any = null; // Konva.Text
-  private defaultText = 'متن';
+  private defaultText = '??';
   
   onMouseDown(e: KonvaEventObject<MouseEvent | TouchEvent>, context: ToolContext) {
     const stage = e.target.getStage();
@@ -114,4 +114,5 @@ export class TextTool extends BaseTool {
     return 'text';
   }
 }
+
 

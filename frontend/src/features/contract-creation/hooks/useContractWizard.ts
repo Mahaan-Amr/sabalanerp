@@ -1,4 +1,4 @@
-// Main contract wizard hook
+﻿// Main contract wizard hook
 // Manages wizard state, navigation, and validation
 
 import { useState, useCallback, useMemo, useRef } from 'react';
@@ -25,48 +25,48 @@ export const WIZARD_STEPS = [
     id: 1,
     title: 'تاریخ قرارداد',
     titleEn: 'Contract Date',
-    description: 'انتخاب تاریخ قرارداد'
+    description: 'تاریخ قرارداد را تعیین کنید'
   },
   {
     id: 2,
     title: 'انتخاب مشتری',
     titleEn: 'Customer Selection',
-    description: 'انتخاب مشتری از سیستم CRM'
+    description: 'مشتری را از CRM انتخاب کنید'
   },
   {
     id: 3,
     title: 'مدیریت پروژه',
     titleEn: 'Project Management',
-    description: 'انتخاب یا ایجاد پروژه'
+    description: 'پروژه را انتخاب یا ایجاد کنید'
   },
   {
     id: 4,
     title: 'انتخاب نوع محصول',
     titleEn: 'Product Type Selection',
-    description: 'نوع محصول را انتخاب کنید'
+    description: 'نوع محصول را مشخص کنید'
   },
   {
     id: 5,
     title: 'انتخاب محصولات',
     titleEn: 'Product Selection',
-    description: 'انتخاب محصولات از کاتالوگ'
+    description: 'محصولات را به قرارداد اضافه کنید'
   },
   {
     id: 6,
     title: 'برنامه تحویل',
     titleEn: 'Delivery Schedule',
-    description: 'تعیین تاریخ و آدرس تحویل'
+    description: 'زمان‌بندی تحویل را ثبت کنید'
   },
   {
     id: 7,
     title: 'روش پرداخت',
     titleEn: 'Payment Method',
-    description: 'انتخاب روش پرداخت'
+    description: 'اقلام پرداخت را تعریف کنید'
   },
   {
     id: 8,
-    title: 'امضای دیجیتال',
-    titleEn: 'Digital Signature',
+    title: 'تایید دیجیتال',
+    titleEn: 'Digital Confirmation',
     description: 'تایید نهایی قرارداد'
   }
 ] as const;
@@ -232,4 +232,5 @@ export const useContractWizard = () => {
     totalSteps: WIZARD_STEPS.length
   };
 };
+
 

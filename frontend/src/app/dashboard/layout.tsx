@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
@@ -148,7 +148,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         show: true
       },
       {
-        name: 'قالب‌های قرارداد',
+        name: 'قالب قرارداد',
         href: '/dashboard/contract-templates',
         icon: FaFileAlt,
         show: true
@@ -166,15 +166,15 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         show: true
       },
       {
-        name: 'گزارشات',
+        name: 'گزارش‌ها',
         href: '/dashboard/reports',
         icon: FaChartLine,
         show: true
       }
     ];
 
-    // Admin-only items
-    if (user?.role === 'ADMIN') {
+    // Admin/Manager items
+    if (user?.role === 'ADMIN' || user?.role === 'MANAGER') {
       baseItems.push(
         {
           name: 'مدیریت کاربران',
@@ -183,7 +183,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           show: true
         },
         {
-          name: 'مدیریت بخش‌ها',
+          name: 'سطوح دسترسی',
+          href: '/dashboard/admin/permissions',
+          icon: FaShieldAlt,
+          show: true
+        },
+        {
+          name: 'دپارتمان‌ها',
           href: '/dashboard/departments',
           icon: FaBuilding,
           show: true
@@ -233,7 +239,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 <FaFileContract className="h-6 w-6 text-teal-400" />
               </div>
               {!sidebarCollapsed && (
-                <h1 className="text-xl font-bold text-white">سبلان ERP</h1>
+                <h1 className="text-xl font-bold text-white">Sabalan ERP</h1>
               )}
             </div>
             <button
@@ -256,7 +262,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                     {user.firstName} {user.lastName}
                   </p>
                   <p className="text-gray-400 text-sm truncate">
-                    {user.department?.namePersian || 'بدون بخش'}
+                    {user.department?.namePersian || 'بدون دپارتمان'}
                   </p>
                   <p className="text-gray-500 text-xs truncate">
                     @{user.username}
@@ -289,7 +295,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           {/* Sidebar Footer */}
           <div className={`${sidebarCollapsed ? 'p-4' : 'p-6 space-y-4'} border-t border-gray-700/50`}>
             <div className={`flex ${sidebarCollapsed ? 'flex-col items-center gap-2' : 'items-center justify-between gap-3'}`}>
-              {!sidebarCollapsed && <span className="text-gray-400 text-sm">تم</span>}
+              {!sidebarCollapsed && <span className="text-gray-400 text-sm">?</span>}
               <ThemeToggle />
             </div>
             <button
@@ -322,14 +328,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               <div>
                 <h1 className="text-2xl font-bold text-white">
                   {currentWorkspace ? 
-                    accessibleWorkspaces.find(w => w.id === currentWorkspace)?.namePersian || 'فضای کاری' :
+                    accessibleWorkspaces.find(w => w.id === currentWorkspace)?.namePersian || 'داشبورد اصلی' :
                     'داشبورد اصلی'
                   }
                 </h1>
                 <p className="text-gray-400 text-sm">
                   {currentWorkspace ? 
                     accessibleWorkspaces.find(w => w.id === currentWorkspace)?.description || '' :
-                    'خوش آمدید، ' + user.firstName + ' ' + user.lastName
+                    'خوش آمدید ' + user.firstName + ' ' + user.lastName
                   }
                 </p>
               </div>
@@ -377,3 +383,4 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     </div>
   );
 }
+

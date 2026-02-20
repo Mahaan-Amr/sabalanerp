@@ -1,4 +1,4 @@
-// useProductModal Hook
+﻿// useProductModal Hook
 // Manages product modal state and logic for longitudinal, slab, and stair (old flow) products
 
 import { useState, useCallback } from 'react';

@@ -1,4 +1,4 @@
-// Stone cutting calculation service
+﻿// Stone cutting calculation service
 // Handles all stone cutting calculations for different product types
 
 import type { StoneCut, RemainingStone, StonePartition, WidthSlice, PartitionPositioningResult, PartitionValidationResult } from '../types/contract.types';
@@ -544,7 +544,7 @@ export const validatePartitions = (
   if (validPartitions.length === 0) {
     return {
       isValid: false,
-      error: 'لطفاً حداقل یک پارتیشن با ابعاد معتبر تعریف کنید',
+      error: 'لطفاً حداقل ÛŒÚ© پارتیشن با ابعاد معتبر تعریف کنید',
       partitionErrors,
       validatedPartitions: partitions
     };
@@ -618,8 +618,8 @@ export const validatePartitions = (
       );
       
       if (overlaps) {
-        partitionErrors.set(p1.id, 'این پارتیشن با پارتیشن دیگر همپوشانی دارد');
-        partitionErrors.set(p2.id, 'این پارتیشن با پارتیشن دیگر همپوشانی دارد');
+        partitionErrors.set(p1.id, 'این پارتیشن با پارتیشن دیگر هم‌پوشانی دارد');
+        partitionErrors.set(p2.id, 'این پارتیشن با پارتیشن دیگر هم‌پوشانی دارد');
       }
     }
   }
@@ -744,4 +744,3 @@ export const calculateRemainingStones = (cuts: StoneCut[]): RemainingStone[] => 
   // Implementation depends on how cuts are structured
   return [];
 };
-

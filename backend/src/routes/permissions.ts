@@ -2,17 +2,47 @@ import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize } from '../middleware/auth';
-import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES, FEATURE_LABELS, FEATURE_WORKSPACE_MAP } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
 // ==================== FEATURE PERMISSIONS ====================
 
+// @desc    Get feature definitions (source of truth for UI)
+// @route   GET /api/permissions/features/definitions
+// @access  Private/Admin
+router.get('/features/definitions', protect, authorize('ADMIN', 'MANAGER'), async (req: any, res: Response) => {
+  try {
+    const data = Object.values(FEATURES).map((feature) => ({
+      key: feature,
+      label: FEATURE_LABELS[feature] || feature,
+      workspace: FEATURE_WORKSPACE_MAP[feature]
+    }));
+
+    data.sort((a, b) => {
+      const workspaceCompare = a.workspace.localeCompare(b.workspace);
+      if (workspaceCompare !== 0) return workspaceCompare;
+      return a.label.localeCompare(b.label);
+    });
+
+    res.json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    console.error('Get feature definitions error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
+  }
+});
+
 // @desc    Get all feature permissions
 // @route   GET /api/permissions/features
 // @access  Private/Admin
-router.get('/features', protect, authorize('ADMIN'), async (req: any, res: Response) => {
+router.get('/features', protect, authorize('ADMIN', 'MANAGER'), async (req: any, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
@@ -79,9 +109,28 @@ router.get('/features', protect, authorize('ADMIN'), async (req: any, res: Respo
 // @desc    Get feature permissions for a specific user
 // @route   GET /api/permissions/features/user/:userId
 // @access  Private/Admin
-router.get('/features/user/:userId', protect, authorize('ADMIN'), async (req: any, res: Response) => {
+router.get('/features/user/:userId', protect, authorize('ADMIN', 'MANAGER'), async (req: any, res: Response) => {
   try {
     const { userId } = req.params;
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true }
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    if (req.user.role === 'MANAGER' && targetUser.role === 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot access admin permissions'
+      });
+    }
 
     const permissions = await prisma.featurePermission.findMany({
       where: { userId },
@@ -125,7 +174,7 @@ router.get('/features/user/:userId', protect, authorize('ADMIN'), async (req: an
 // @desc    Create new feature permission
 // @route   POST /api/permissions/features
 // @access  Private/Admin
-router.post('/features', protect, authorize('ADMIN'), [
+router.post('/features', protect, authorize('ADMIN', 'MANAGER'), [
   body('userId').notEmpty().withMessage('User ID is required'),
   body('workspace').notEmpty().withMessage('Workspace is required'),
   body('feature').notEmpty().withMessage('Feature is required'),
@@ -171,6 +220,13 @@ router.post('/features', protect, authorize('ADMIN'), [
       return res.status(404).json({
         success: false,
         error: 'User not found'
+      });
+    }
+
+    if (req.user.role === 'MANAGER' && user.role === 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot grant permissions to admin users'
       });
     }
 
@@ -220,7 +276,7 @@ router.post('/features', protect, authorize('ADMIN'), [
 // @desc    Update feature permission
 // @route   PUT /api/permissions/features/:id
 // @access  Private/Admin
-router.put('/features/:id', protect, authorize('ADMIN'), [
+router.put('/features/:id', protect, authorize('ADMIN', 'MANAGER'), [
   body('permissionLevel').optional().isIn(['view', 'edit', 'admin']).withMessage('Invalid permission level'),
   body('expiresAt').optional().isISO8601().withMessage('Invalid expiration date'),
   body('isActive').optional().isBoolean().withMessage('Invalid active status')
@@ -237,6 +293,17 @@ router.put('/features/:id', protect, authorize('ADMIN'), [
       return res.status(404).json({
         success: false,
         error: 'Feature permission not found'
+      });
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id: permission.userId }
+    });
+
+    if (req.user.role === 'MANAGER' && targetUser?.role === 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot modify admin permissions'
       });
     }
 
@@ -284,7 +351,7 @@ router.put('/features/:id', protect, authorize('ADMIN'), [
 // @desc    Delete feature permission
 // @route   DELETE /api/permissions/features/:id
 // @access  Private/Admin
-router.delete('/features/:id', protect, authorize('ADMIN'), async (req: any, res: Response) => {
+router.delete('/features/:id', protect, authorize('ADMIN', 'MANAGER'), async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -296,6 +363,17 @@ router.delete('/features/:id', protect, authorize('ADMIN'), async (req: any, res
       return res.status(404).json({
         success: false,
         error: 'Feature permission not found'
+      });
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id: permission.userId }
+    });
+
+    if (req.user.role === 'MANAGER' && targetUser?.role === 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot delete admin permissions'
       });
     }
 
@@ -321,7 +399,7 @@ router.delete('/features/:id', protect, authorize('ADMIN'), async (req: any, res
 // @desc    Get all role feature permissions
 // @route   GET /api/permissions/role-features
 // @access  Private/Admin
-router.get('/role-features', protect, authorize('ADMIN'), async (req: any, res: Response) => {
+router.get('/role-features', protect, authorize('ADMIN', 'MANAGER'), async (req: any, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
@@ -369,7 +447,7 @@ router.get('/role-features', protect, authorize('ADMIN'), async (req: any, res: 
 // @desc    Create new role feature permission
 // @route   POST /api/permissions/role-features
 // @access  Private/Admin
-router.post('/role-features', protect, authorize('ADMIN'), [
+router.post('/role-features', protect, authorize('ADMIN', 'MANAGER'), [
   body('role').notEmpty().withMessage('Role is required'),
   body('workspace').notEmpty().withMessage('Workspace is required'),
   body('feature').notEmpty().withMessage('Feature is required'),
@@ -386,6 +464,13 @@ router.post('/role-features', protect, authorize('ADMIN'), [
     }
 
     const { role, workspace, feature, permissionLevel } = req.body;
+
+    if (req.user.role === 'MANAGER' && role === 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot modify admin role permissions'
+      });
+    }
 
     // Check if permission already exists
     const existingPermission = await prisma.roleFeaturePermission.findUnique({
@@ -430,7 +515,7 @@ router.post('/role-features', protect, authorize('ADMIN'), [
 // @desc    Update role feature permission
 // @route   PUT /api/permissions/role-features/:id
 // @access  Private/Admin
-router.put('/role-features/:id', protect, authorize('ADMIN'), [
+router.put('/role-features/:id', protect, authorize('ADMIN', 'MANAGER'), [
   body('permissionLevel').optional().isIn(['view', 'edit', 'admin']).withMessage('Invalid permission level'),
   body('isActive').optional().isBoolean().withMessage('Invalid active status')
 ], async (req: any, res: Response) => {
@@ -446,6 +531,13 @@ router.put('/role-features/:id', protect, authorize('ADMIN'), [
       return res.status(404).json({
         success: false,
         error: 'Role feature permission not found'
+      });
+    }
+
+    if (req.user.role === 'MANAGER' && permission.role === 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot modify admin role permissions'
       });
     }
 
@@ -473,7 +565,7 @@ router.put('/role-features/:id', protect, authorize('ADMIN'), [
 // @desc    Delete role feature permission
 // @route   DELETE /api/permissions/role-features/:id
 // @access  Private/Admin
-router.delete('/role-features/:id', protect, authorize('ADMIN'), async (req: any, res: Response) => {
+router.delete('/role-features/:id', protect, authorize('ADMIN', 'MANAGER'), async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -485,6 +577,13 @@ router.delete('/role-features/:id', protect, authorize('ADMIN'), async (req: any
       return res.status(404).json({
         success: false,
         error: 'Role feature permission not found'
+      });
+    }
+
+    if (req.user.role === 'MANAGER' && permission.role === 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot modify admin role permissions'
       });
     }
 
@@ -510,7 +609,7 @@ router.delete('/role-features/:id', protect, authorize('ADMIN'), async (req: any
 // @desc    Get user's accessible features summary
 // @route   GET /api/permissions/user/:userId/features
 // @access  Private/Admin
-router.get('/user/:userId/features', protect, authorize('ADMIN'), async (req: any, res: Response) => {
+router.get('/user/:userId/features', protect, authorize('ADMIN', 'MANAGER'), async (req: any, res: Response) => {
   try {
     const { userId } = req.params;
 
@@ -530,6 +629,13 @@ router.get('/user/:userId/features', protect, authorize('ADMIN'), async (req: an
       return res.status(404).json({
         success: false,
         error: 'User not found'
+      });
+    }
+
+    if (req.user.role === 'MANAGER' && user.role === 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot access admin permissions'
       });
     }
 

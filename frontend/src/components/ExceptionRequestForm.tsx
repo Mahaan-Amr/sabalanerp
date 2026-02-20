@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { FaCalendarAlt, FaClock, FaFileAlt, FaUser, FaPhone } from 'react-icons/fa';
@@ -11,11 +11,11 @@ interface ExceptionRequestFormProps {
 }
 
 const exceptionTypes = [
-  { value: 'HOURLY_LEAVE', label: 'مرخصی ساعتی' },
-  { value: 'SICK_LEAVE', label: 'مرخصی استعلاجی' },
-  { value: 'VACATION', label: 'مرخصی استحقاقی' },
-  { value: 'EMERGENCY_LEAVE', label: 'مرخصی اضطراری' },
-  { value: 'PERSONAL_LEAVE', label: 'مرخصی شخصی' }
+  { value: 'HOURLY_LEAVE', label: '??? ???' },
+  { value: 'SICK_LEAVE', label: '??? ??' },
+  { value: 'VACATION', label: '??? ??' },
+  { value: 'EMERGENCY_LEAVE', label: '??? ??' },
+  { value: 'PERSONAL_LEAVE', label: '??? ??' }
 ];
 
 export default function ExceptionRequestForm({ onSubmit, onCancel, loading = false }: ExceptionRequestFormProps) {
@@ -43,19 +43,19 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
   const validateForm = () => {
     const newErrors: { [key: string]: string } = {};
 
-    if (!formData.exceptionType) newErrors.exceptionType = 'نوع استثنا الزامی است';
-    if (!formData.startDate) newErrors.startDate = 'تاریخ شروع الزامی است';
-    if (!formData.reason) newErrors.reason = 'دلیل الزامی است';
+    if (!formData.exceptionType) newErrors.exceptionType = '?? ??? ??? ??';
+    if (!formData.startDate) newErrors.startDate = '??? ?? ??? ??';
+    if (!formData.reason) newErrors.reason = '?? ??? ??';
 
     // For hourly leave, require start and end time
     if (formData.exceptionType === 'HOURLY_LEAVE') {
-      if (!formData.startTime) newErrors.startTime = 'ساعت شروع الزامی است';
-      if (!formData.endTime) newErrors.endTime = 'ساعت پایان الزامی است';
+      if (!formData.startTime) newErrors.startTime = '?? ?? ??? ??';
+      if (!formData.endTime) newErrors.endTime = '?? ??? ??? ??';
     }
 
     // For sick leave, require emergency contact
     if (formData.exceptionType === 'SICK_LEAVE' && !formData.emergencyContact) {
-      newErrors.emergencyContact = 'تماس اضطراری برای مرخصی استعلاجی الزامی است';
+      newErrors.emergencyContact = '?? ?? ?? ??? ?? ??? ??';
     }
 
     setErrors(newErrors);
@@ -74,20 +74,20 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
 
   return (
     <div className="glass-liquid-card p-6">
-      <h2 className="text-2xl font-bold text-primary mb-6 text-right">درخواست استثنا</h2>
+      <h2 className="text-2xl font-bold text-primary mb-6 text-right">?? ???</h2>
       
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Exception Type */}
         <div>
           <label className="block text-sm font-medium text-primary mb-2 text-right">
-            نوع استثنا *
+            ?? ??? *
           </label>
           <select
             value={formData.exceptionType}
             onChange={(e) => handleInputChange('exceptionType', e.target.value)}
             className={`glass-liquid-input w-full ${errors.exceptionType ? 'border-red-500' : ''}`}
           >
-            <option value="">انتخاب نوع استثنا</option>
+            <option value="">??? ?? ???</option>
             {exceptionTypes.map(type => (
               <option key={type.value} value={type.value}>
                 {type.label}
@@ -102,12 +102,12 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
         {/* Start Date */}
         <div>
           <label className="block text-sm font-medium text-primary mb-2 text-right">
-            تاریخ شروع *
+            ??? ?? *
           </label>
           <PersianCalendarComponent
             value={formData.startDate}
             onChange={(date) => handleInputChange('startDate', date)}
-            placeholder="انتخاب تاریخ شروع"
+            placeholder="??? ??? ??"
             className={errors.startDate ? 'border-red-500' : ''}
           />
           {errors.startDate && (
@@ -118,12 +118,12 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
         {/* End Date (Optional) */}
         <div>
           <label className="block text-sm font-medium text-primary mb-2 text-right">
-            تاریخ پایان
+            ??? ???
           </label>
           <PersianCalendarComponent
             value={formData.endDate}
             onChange={(date) => handleInputChange('endDate', date)}
-            placeholder="انتخاب تاریخ پایان (اختیاری)"
+            placeholder="??? ??? ??? (??)"
           />
         </div>
 
@@ -132,7 +132,7 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-primary mb-2 text-right">
-                ساعت شروع *
+                ?? ?? *
               </label>
               <input
                 type="time"
@@ -146,7 +146,7 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
             </div>
             <div>
               <label className="block text-sm font-medium text-primary mb-2 text-right">
-                ساعت پایان *
+                ?? ??? *
               </label>
               <input
                 type="time"
@@ -164,7 +164,7 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
         {/* Duration */}
         <div>
           <label className="block text-sm font-medium text-primary mb-2 text-right">
-            مدت (ساعت)
+            ?? (??)
           </label>
           <input
             type="number"
@@ -172,20 +172,20 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
             value={formData.duration}
             onChange={(e) => handleInputChange('duration', e.target.value)}
             className="glass-liquid-input w-full"
-            placeholder="مدت زمان به ساعت"
+            placeholder="?? ?? ? ??"
           />
         </div>
 
         {/* Reason */}
         <div>
           <label className="block text-sm font-medium text-primary mb-2 text-right">
-            دلیل *
+            ?? *
           </label>
           <textarea
             value={formData.reason}
             onChange={(e) => handleInputChange('reason', e.target.value)}
             className={`glass-liquid-input w-full h-24 resize-none ${errors.reason ? 'border-red-500' : ''}`}
-            placeholder="دلیل درخواست استثنا را توضیح دهید"
+            placeholder="?? ?? ??? ? ??? ??"
           />
           {errors.reason && (
             <p className="text-red-500 text-sm mt-1 text-right">{errors.reason}</p>
@@ -195,13 +195,13 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
         {/* Description */}
         <div>
           <label className="block text-sm font-medium text-primary mb-2 text-right">
-            توضیحات اضافی
+            ?? ???
           </label>
           <textarea
             value={formData.description}
             onChange={(e) => handleInputChange('description', e.target.value)}
             className="glass-liquid-input w-full h-20 resize-none"
-            placeholder="توضیحات اضافی (اختیاری)"
+            placeholder="?? ??? (??)"
           />
         </div>
 
@@ -209,14 +209,14 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
         {isSickLeave && (
           <div>
             <label className="block text-sm font-medium text-primary mb-2 text-right">
-              تماس اضطراری *
+              ?? ?? *
             </label>
             <input
               type="text"
               value={formData.emergencyContact}
               onChange={(e) => handleInputChange('emergencyContact', e.target.value)}
               className={`glass-liquid-input w-full ${errors.emergencyContact ? 'border-red-500' : ''}`}
-              placeholder="شماره تماس اضطراری"
+              placeholder="??? ?? ??"
             />
             {errors.emergencyContact && (
               <p className="text-red-500 text-sm mt-1 text-right">{errors.emergencyContact}</p>
@@ -232,17 +232,18 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
             className="glass-liquid-btn px-6 py-3"
             disabled={loading}
           >
-            انصراف
+            ???
           </button>
           <button
             type="submit"
             className="glass-liquid-btn-primary px-6 py-3"
             disabled={loading}
           >
-            {loading ? 'در حال ارسال...' : 'ارسال درخواست'}
+            {loading ? '? ?? ???...' : '??? ??'}
           </button>
         </div>
       </form>
     </div>
   );
 }
+

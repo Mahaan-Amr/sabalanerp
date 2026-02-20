@@ -14,16 +14,26 @@ interface SendVerificationCodeResponse {
   };
 }
 
+interface SmsTemplateParameter {
+  name: string;
+  value: string;
+}
+
 class SmsService {
   private apiKey: string;
   private apiUrl: string;
   private templateId: number;
+  private contractConfirmationTemplateId: number;
   private environment: string;
 
   constructor() {
     this.apiKey = process.env.SMS_IR_API_KEY || '';
     this.apiUrl = process.env.SMS_IR_API_URL || 'https://api.sms.ir/v1';
     this.templateId = parseInt(process.env.SMS_IR_TEMPLATE_ID || '123456', 10);
+    this.contractConfirmationTemplateId = parseInt(
+      process.env.SMS_IR_CONTRACT_CONFIRM_TEMPLATE_ID || String(this.templateId),
+      10
+    );
     this.environment = process.env.SMS_IR_ENVIRONMENT || 'sandbox';
 
     if (!this.apiKey) {
@@ -94,7 +104,7 @@ class SmsService {
   async sendVerificationCode(
     phoneNumber: string,
     code: string
-  ): Promise<{ success: boolean; messageId?: number; error?: string }> {
+  ): Promise<{ success: boolean; messageId?: number; error?: string; rawResponse?: unknown }> {
     try {
       // Validate API key
       if (!this.apiKey) {
@@ -105,43 +115,12 @@ class SmsService {
       const formattedPhone = this.formatPhoneNumber(phoneNumber);
 
       // Prepare request
-      const requestBody = {
-        mobile: formattedPhone,
-        templateId: this.templateId,
-        parameters: [
-          {
-            name: 'Code',
-            value: code
-          }
-        ]
-      };
-
-      // Send request to sms.ir API
-      const response = await axios.post<SendVerificationCodeResponse>(
-        `${this.apiUrl}/send/verify`,
-        requestBody,
+      return this.sendTemplate(formattedPhone, this.templateId, [
         {
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'text/plain',
-            'x-api-key': this.apiKey
-          },
-          timeout: 10000 // 10 second timeout
+          name: 'Code',
+          value: code
         }
-      );
-
-      // Check response
-      if (response.data.status === 1) {
-        return {
-          success: true,
-          messageId: response.data.data?.messageId
-        };
-      } else {
-        return {
-          success: false,
-          error: response.data.message || 'Failed to send SMS'
-        };
-      }
+      ]);
     } catch (error: any) {
       console.error('SMS sending error:', error);
       
@@ -151,7 +130,8 @@ class SmsService {
         const errorMessage = error.response.data?.message || error.response.data?.error || 'SMS API error';
         return {
           success: false,
-          error: errorMessage
+          error: errorMessage,
+          rawResponse: error.response?.data
         };
       } else if (error.request) {
         // Request was made but no response received
@@ -166,6 +146,74 @@ class SmsService {
           error: error.message || 'Failed to send SMS'
         };
       }
+    }
+  }
+
+  async sendContractConfirmationMessage(params: {
+    phoneNumber: string;
+    code: string;
+    customerName: string;
+    contractNumber: string;
+    confirmationLink: string;
+  }): Promise<{ success: boolean; messageId?: number; error?: string; rawResponse?: unknown }> {
+    const formattedPhone = this.formatPhoneNumber(params.phoneNumber);
+    return this.sendTemplate(formattedPhone, this.contractConfirmationTemplateId, [
+      { name: 'Name', value: params.customerName },
+      { name: 'ContractNumber', value: params.contractNumber },
+      { name: 'Link', value: params.confirmationLink },
+      { name: 'Code', value: params.code }
+    ]);
+  }
+
+  private async sendTemplate(
+    formattedPhone: string,
+    templateId: number,
+    parameters: SmsTemplateParameter[]
+  ): Promise<{ success: boolean; messageId?: number; error?: string; rawResponse?: unknown }> {
+    try {
+      const response = await axios.post<SendVerificationCodeResponse>(
+        `${this.apiUrl}/send/verify`,
+        {
+          mobile: formattedPhone,
+          templateId,
+          parameters
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'text/plain',
+            'x-api-key': this.apiKey
+          },
+          timeout: 10000
+        }
+      );
+
+      if (response.data.status === 1) {
+        return {
+          success: true,
+          messageId: response.data.data?.messageId,
+          rawResponse: response.data
+        };
+      }
+
+      return {
+        success: false,
+        error: response.data.message || 'Failed to send SMS',
+        rawResponse: response.data
+      };
+    } catch (error: any) {
+      if (error.response) {
+        return {
+          success: false,
+          error: error.response.data?.message || error.response.data?.error || 'SMS API error',
+          rawResponse: error.response?.data
+        };
+      }
+
+      return {
+        success: false,
+        error: error.message || 'Failed to send SMS'
+      };
     }
   }
 

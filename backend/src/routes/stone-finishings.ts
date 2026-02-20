@@ -1,8 +1,9 @@
-import express, { Request, Response } from 'express';
+﻿import express, { Request, Response } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
+import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -30,7 +31,14 @@ const decimalFromInput = (value: any): Prisma.Decimal => {
 router.get(
   '/',
   protect,
-  requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW),
+  requireAnyFeatureAccess(
+    [
+      FEATURES.INVENTORY_STONE_FINISHINGS_VIEW,
+      FEATURES.SALES_CONTRACTS_VIEW,
+      FEATURES.SALES_CONTRACTS_CREATE
+    ],
+    FEATURE_PERMISSIONS.VIEW
+  ),
   [
     query('search').optional().isString(),
     query('isActive').optional().isIn(['true', 'false']),
@@ -88,7 +96,7 @@ router.get(
       console.error('Error fetching stone finishings:', error);
       return res.status(500).json({
         success: false,
-        error: 'خطا در دریافت پرداخت‌ها'
+        error: '?? ? ??? ???'
       });
     }
   }
@@ -97,7 +105,14 @@ router.get(
 router.get(
   '/:id',
   protect,
-  requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW),
+  requireAnyFeatureAccess(
+    [
+      FEATURES.INVENTORY_STONE_FINISHINGS_VIEW,
+      FEATURES.SALES_CONTRACTS_VIEW,
+      FEATURES.SALES_CONTRACTS_CREATE
+    ],
+    FEATURE_PERMISSIONS.VIEW
+  ),
   [param('id').isString().notEmpty()],
   async (req: Request, res: Response) => {
     const validationError = handleValidationErrors(req, res);
@@ -111,7 +126,7 @@ router.get(
       if (!finishing) {
         return res.status(404).json({
           success: false,
-          error: 'پرداخت مورد نظر یافت نشد'
+          error: '??? ?? ?? ?? ??'
         });
       }
 
@@ -123,7 +138,7 @@ router.get(
       console.error('Error fetching stone finishing:', error);
       return res.status(500).json({
         success: false,
-        error: 'خطا در دریافت پرداخت'
+        error: '?? ? ??? ???'
       });
     }
   }
@@ -133,13 +148,14 @@ router.post(
   '/',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.INVENTORY_STONE_FINISHINGS_CREATE, FEATURE_PERMISSIONS.EDIT),
   [
-    body('namePersian').isString().notEmpty().withMessage('نام فارسی الزامی است'),
+    body('namePersian').isString().notEmpty().withMessage('?? ??? ??? ??'),
     body('name').optional().isString(),
     body('description').optional().isString(),
     body('pricePerSquareMeter')
       .isFloat({ gt: 0 })
-      .withMessage('قیمت باید بزرگتر از صفر باشد')
+      .withMessage('?? ?? ??? ? ?? ??')
   ],
   async (req: Request, res: Response) => {
     const validationError = handleValidationErrors(req, res);
@@ -164,7 +180,7 @@ router.post(
       console.error('Error creating stone finishing:', error);
       return res.status(500).json({
         success: false,
-        error: 'خطا در ایجاد پرداخت'
+        error: '?? ? ??? ???'
       });
     }
   }
@@ -174,14 +190,15 @@ router.put(
   '/:id',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.INVENTORY_STONE_FINISHINGS_EDIT, FEATURE_PERMISSIONS.EDIT),
   [
     param('id').isString().notEmpty(),
-    body('namePersian').isString().notEmpty().withMessage('نام فارسی الزامی است'),
+    body('namePersian').isString().notEmpty().withMessage('?? ??? ??? ??'),
     body('name').optional().isString(),
     body('description').optional().isString(),
     body('pricePerSquareMeter')
       .isFloat({ gt: 0 })
-      .withMessage('قیمت باید بزرگتر از صفر باشد'),
+      .withMessage('?? ?? ??? ? ?? ??'),
     body('isActive').optional().isBoolean()
   ],
   async (req: Request, res: Response) => {
@@ -196,7 +213,7 @@ router.put(
       if (!existing) {
         return res.status(404).json({
           success: false,
-          error: 'پرداخت یافت نشد'
+          error: '??? ?? ??'
         });
       }
 
@@ -222,7 +239,7 @@ router.put(
       console.error('Error updating stone finishing:', error);
       return res.status(500).json({
         success: false,
-        error: 'خطا در بروزرسانی پرداخت'
+        error: '?? ? ??? ???'
       });
     }
   }
@@ -232,6 +249,7 @@ router.delete(
   '/:id',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.INVENTORY_STONE_FINISHINGS_DELETE, FEATURE_PERMISSIONS.EDIT),
   [param('id').isString().notEmpty()],
   async (req: Request, res: Response) => {
     const validationError = handleValidationErrors(req, res);
@@ -245,7 +263,7 @@ router.delete(
       if (!existing) {
         return res.status(404).json({
           success: false,
-          error: 'پرداخت یافت نشد'
+          error: '??? ?? ??'
         });
       }
 
@@ -255,13 +273,13 @@ router.delete(
 
       return res.json({
         success: true,
-        message: 'پرداخت حذف شد'
+        message: '??? ?? ?'
       });
     } catch (error) {
       console.error('Error deleting stone finishing:', error);
       return res.status(500).json({
         success: false,
-        error: 'خطا در حذف پرداخت'
+        error: '?? ? ?? ???'
       });
     }
   }
@@ -271,6 +289,7 @@ router.patch(
   '/:id/toggle',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.INVENTORY_STONE_FINISHINGS_TOGGLE, FEATURE_PERMISSIONS.EDIT),
   [param('id').isString().notEmpty()],
   async (req: Request, res: Response) => {
     const validationError = handleValidationErrors(req, res);
@@ -284,7 +303,7 @@ router.patch(
       if (!existing) {
         return res.status(404).json({
           success: false,
-          error: 'پرداخت یافت نشد'
+          error: '??? ?? ??'
         });
       }
 
@@ -301,7 +320,7 @@ router.patch(
       console.error('Error toggling stone finishing status:', error);
       return res.status(500).json({
         success: false,
-        error: 'خطا در بروزرسانی وضعیت پرداخت'
+        error: '?? ? ??? ??? ???'
       });
     }
   }

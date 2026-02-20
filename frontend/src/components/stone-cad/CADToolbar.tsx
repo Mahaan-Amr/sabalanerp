@@ -1,4 +1,4 @@
-/**
+﻿/**
  * CAD Toolbar Component
  * Tool selection and controls
  */
@@ -25,13 +25,13 @@ interface CADToolbarProps {
 }
 
 const tools = [
-  { id: 'select', icon: FaHandPointer, label: 'انتخاب' },
-  { id: 'rectangle', icon: FaSquare, label: 'مستطیل' },
-  { id: 'circle', icon: FaCircle, label: 'دایره' },
-  { id: 'line', icon: FaMinus, label: 'خط' },
-  { id: 'freehand', icon: FaPencilAlt, label: 'قلم' },
-  { id: 'text', icon: FaFont, label: 'متن' },
-  { id: 'measurement', icon: FaRuler, label: 'اندازه‌گیری' }
+  { id: 'select', icon: FaHandPointer, label: '???' },
+  { id: 'rectangle', icon: FaSquare, label: '???' },
+  { id: 'circle', icon: FaCircle, label: '???' },
+  { id: 'line', icon: FaMinus, label: '?' },
+  { id: 'freehand', icon: FaPencilAlt, label: '??' },
+  { id: 'text', icon: FaFont, label: '??' },
+  { id: 'measurement', icon: FaRuler, label: '??' }
 ];
 
 export function CADToolbar({
@@ -83,7 +83,7 @@ export function CADToolbar({
               ? 'bg-indigo-600 text-white'
               : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
           }`}
-          title="نمایش/مخفی کردن شبکه"
+          title="???/?? ?? ??"
         >
           <FaThLarge className="w-5 h-5" />
         </button>
@@ -96,7 +96,7 @@ export function CADToolbar({
               ? 'bg-indigo-600 text-white'
               : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
           }`}
-          title="چسبیدن به شبکه"
+          title="??? ? ??"
         >
           <FaLink className="w-5 h-5" />
         </button>
@@ -113,7 +113,7 @@ export function CADToolbar({
                 ? 'bg-indigo-600 text-white'
                 : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
             }`}
-            title="نمایش/مخفی کردن پنل لایه‌ها"
+            title="???/?? ?? ?? ??"
           >
             <FaLayerGroup className="w-5 h-5" />
           </button>
@@ -127,7 +127,7 @@ export function CADToolbar({
             <button
               type="button"
               className="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-              title="خروجی گرفتن"
+              title="??? ???"
             >
               <FaDownload className="w-5 h-5" />
             </button>
@@ -169,7 +169,7 @@ export function CADToolbar({
               ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
               : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-600 cursor-not-allowed'
           }`}
-          title="بازگشت"
+          title="???"
         >
           <FaUndo className="w-5 h-5" />
         </button>
@@ -183,7 +183,7 @@ export function CADToolbar({
               ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
               : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-600 cursor-not-allowed'
           }`}
-          title="بازگشت به جلو"
+          title="??? ? ??"
         >
           <FaRedo className="w-5 h-5" />
         </button>
@@ -191,4 +191,5 @@ export function CADToolbar({
     </div>
   );
 }
+
 

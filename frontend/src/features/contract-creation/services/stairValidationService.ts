@@ -1,4 +1,4 @@
-// Stair validation service
+﻿// Stair validation service
 // Handles all stair system V2 validation logic
 
 import type {
@@ -35,93 +35,93 @@ export const validateDraftNumericFields = (
       const hasStandardLength = getDraftStandardLengthMeters(draft) > 0;
       if (value === null || value === undefined || value <= 0) {
         if (!hasStandardLength) {
-          return `لطفاً طول را برای ${partLabel} وارد کنید`;
+          return `??? ?? ? ?? ${partLabel} ?? ??`;
         }
         return null;
       }
       if (value > 1000) { // Reasonable max: 10 meters or 1000 cm
         const unit = draft.lengthUnit || 'm';
         const maxValue = unit === 'm' ? 10 : 1000;
-        return `طول نمی‌تواند بیشتر از ${maxValue} ${unit === 'm' ? 'متر' : 'سانتی‌متر'} باشد`;
+        return `?? ??? ??? ? ${maxValue} ${unit === 'm' ? '??' : '???'} ??`;
       }
       return null;
     }
 
     case 'width':
       if (value === null || value === undefined) {
-        return `لطفاً عرض را برای ${partLabel} وارد کنید`;
+        return `??? ?? ? ?? ${partLabel} ?? ??`;
       }
       if (value <= 0) {
-        return `عرض باید بیشتر از صفر باشد`;
+        return `?? ?? ??? ? ?? ??`;
       }
       if (originalWidthCm > 0 && value > originalWidthCm) {
-        return `عرض وارد شده (${formatDisplayNumber(value)}cm) نمی‌تواند بیشتر از عرض اصلی سنگ (${formatDisplayNumber(originalWidthCm)}cm) باشد`;
+        return `?? ?? ?? (${formatDisplayNumber(value)}cm) ??? ??? ? ?? ?? ?? (${formatDisplayNumber(originalWidthCm)}cm) ??`;
       }
       if (value < 1) {
-        return `عرض باید حداقل 1 سانتی‌متر باشد`;
+        return `?? ?? ??? 1 ??? ??`;
       }
       return null;
 
     case 'quantity':
       if (value === null || value === undefined) {
-        return `لطفاً تعداد را برای ${partLabel} وارد کنید`;
+        return `??? ??? ? ?? ${partLabel} ?? ??`;
       }
       if (value <= 0) {
-        return `تعداد باید بیشتر از صفر باشد`;
+        return `??? ?? ??? ? ?? ??`;
       }
       if (!Number.isInteger(value)) {
-        return `تعداد باید یک عدد صحیح باشد`;
+        return `??? ?? ? ?? ?? ??`;
       }
       if (value > 10000) {
-        return `تعداد نمی‌تواند بیشتر از 10,000 عدد باشد`;
+        return `??? ??? ??? ? 10,000 ?? ??`;
       }
       return null;
 
     case 'pricePerSquareMeter':
       if (value === null || value === undefined) {
-        return `لطفاً قیمت هر متر مربع را برای ${partLabel} وارد کنید`;
+        return `??? ?? ? ?? ?? ? ?? ${partLabel} ?? ??`;
       }
       if (value <= 0) {
-        return `قیمت هر متر مربع باید بیشتر از صفر باشد`;
+        return `?? ? ?? ?? ?? ??? ? ?? ??`;
       }
       if (value > 100000000) { // Reasonable max: 100 million Toman per sqm
-        return `قیمت هر متر مربع نمی‌تواند بیشتر از 100,000,000 تومان باشد`;
+        return `?? ? ?? ?? ??? ??? ? 100,000,000 ??? ??`;
       }
       return null;
 
     case 'layerStonePrice':
       if (value === null || value === undefined) {
-        return 'لطفاً قیمت هر متر مربع لایه را وارد کنید';
+        return '??? ?? ? ?? ?? ?? ? ?? ??';
       }
       if (value <= 0) {
-        return 'قیمت هر متر مربع لایه باید بیشتر از صفر باشد';
+        return '?? ? ?? ?? ?? ?? ??? ? ?? ??';
       }
       if (value > 100000000) {
-        return 'قیمت هر متر مربع لایه نمی‌تواند بیشتر از 100,000,000 تومان باشد';
+        return '?? ? ?? ?? ?? ??? ??? ? 100,000,000 ??? ??';
       }
       return null;
 
     case 'layerMandatoryPercentage':
       if (value === null || value === undefined) {
-        return 'لطفاً درصد حکمی لایه را وارد کنید';
+        return '??? ?? ?? ?? ? ?? ??';
       }
       if (value < 0) {
-        return 'درصد حکمی نمی‌تواند کمتر از 0 باشد';
+        return '?? ?? ??? ?? ? 0 ??';
       }
       if (value > 100) {
-        return 'درصد حکمی نمی‌تواند بیشتر از 100 باشد';
+        return '?? ?? ??? ??? ? 100 ??';
       }
       return null;
 
     case 'mandatoryPercentage':
       if (value === null || value === undefined) {
-        return `لطفاً درصد حکمی ${partLabel} را وارد کنید`;
+        return `??? ?? ?? ${partLabel} ? ?? ??`;
       }
       if (value < 0) {
-        return 'درصد حکمی نمی‌تواند کمتر از 0 باشد';
+        return '?? ?? ??? ?? ? 0 ??';
       }
       if (value > 100) {
-        return 'درصد حکمی نمی‌تواند بیشتر از 100 باشد';
+        return '?? ?? ??? ??? ? 100 ??';
       }
       return null;
 
@@ -130,7 +130,7 @@ export const validateDraftNumericFields = (
       if (originalThicknessCm > 0) {
         const currentThickness = draft.thicknessCm ?? 0;
         if (Math.abs(currentThickness - originalThicknessCm) > 0.01) {
-          return `قطر باید با قطر محصول انتخاب شده (${formatDisplayNumber(originalThicknessCm)}cm) مطابقت داشته باشد`;
+          return `?? ?? ? ?? ??? ??? ?? (${formatDisplayNumber(originalThicknessCm)}cm) ??? ??? ??`;
         }
       }
       return null;
@@ -152,7 +152,7 @@ export const validateDraftRequiredFields = (
   const errors: StairDraftFieldErrors = {};
 
   if (!draft.stoneId || !draft.stoneProduct) {
-    errors.thickness = `لطفاً ابتدا محصول ${partLabel} را انتخاب کنید`;
+    errors.thickness = `??? ??? ??? ${partLabel} ? ??? ??`;
     return errors; // Can't validate other fields without product
   }
 
@@ -182,12 +182,12 @@ export const validateDraftRequiredFields = (
   }
 
   if (draft.numberOfLayersPerStair && draft.numberOfLayersPerStair > 0 && layerTypes.length > 0 && !draft.layerTypeId) {
-    errors.layerType = 'لطفاً نوع لایه را انتخاب کنید';
+    errors.layerType = '??? ?? ?? ? ??? ??';
   }
 
   if (draft.numberOfLayersPerStair && draft.numberOfLayersPerStair > 0 && draft.layerUseDifferentStone) {
     if (!draft.layerStoneProduct || !draft.layerStoneProductId) {
-      errors.layerStone = 'لطفاً سنگ مورد استفاده برای لایه‌ها را انتخاب کنید';
+      errors.layerStone = '??? ?? ?? ?? ?? ?? ? ??? ??';
     }
     const layerPriceError = validateDraftNumericFields(part, draft, 'layerStonePrice', draft.layerPricePerSquareMeter ?? null, layerTypes);
     if (layerPriceError) {
@@ -216,4 +216,5 @@ export const clearDraftFieldError = (
   delete updated[field];
   return updated;
 };
+
 

@@ -1,4 +1,4 @@
-import moment from 'moment-jalaali';
+﻿import moment from 'moment-jalaali';
 
 // Ensure moment-jalaali is properly loaded
 try {
@@ -120,7 +120,7 @@ export class PersianCalendar {
       'دوشنبه': 'دوشنبه',
       'سه‌شنبه': 'سه‌شنبه',
       'چهارشنبه': 'چهارشنبه',
-      'پنج‌شنبه': 'پنج‌شنبه',
+      'پنجشنبه': 'پنجشنبه',
       'جمعه': 'جمعه'
     };
     
@@ -246,7 +246,7 @@ export class PersianCalendar {
   static getDayNames(): string[] {
     return [
       'شنبه', 'یکشنبه', 'دوشنبه', 'سه‌شنبه', 
-      'چهارشنبه', 'پنج‌شنبه', 'جمعه'
+      'چهارشنبه', 'پنجشنبه', 'جمعه'
     ];
   }
 
@@ -264,3 +264,4 @@ export class PersianCalendar {
 
 // Export default instance for convenience
 export default PersianCalendar;
+

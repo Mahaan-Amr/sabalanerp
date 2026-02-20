@@ -12,8 +12,13 @@ export const useSocket = () => {
 
   useEffect(() => {
     if (isAuthenticated && user) {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
+      const socketUrl = apiUrl.startsWith('/')
+        ? window.location.origin
+        : apiUrl.replace(/\/api\/?$/, '');
+
       // Initialize socket connection
-      const newSocket = io(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000', {
+      const newSocket = io(socketUrl, {
         auth: {
           token: localStorage.getItem('token') || document.cookie
             .split('; ')

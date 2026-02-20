@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -57,8 +57,8 @@ const leadStatusColors = {
 
 const leadStatusLabels = {
   NEW: 'جدید',
-  CONTACTED: 'تماس گرفته شده',
-  QUALIFIED: 'صلاحیت‌دار',
+  CONTACTED: 'تماس گرفته شد',
+  QUALIFIED: 'واجد شرایط',
   PROPOSAL: 'پیشنهاد',
   NEGOTIATION: 'مذاکره',
   CONVERTED: 'تبدیل شده',
@@ -128,7 +128,7 @@ export default function CrmWorkspacePage() {
         recentCustomers: [
           {
             id: '1',
-            companyName: 'شرکت ساختمانی آسمان',
+            companyName: 'شرکت آسمان سازه',
             customerType: 'BUSINESS',
             status: 'ACTIVE',
             primaryContact: {
@@ -141,12 +141,12 @@ export default function CrmWorkspacePage() {
           },
           {
             id: '2',
-            companyName: 'مجتمع مسکونی پارس',
+            companyName: 'شرکت پارس سنگ',
             customerType: 'BUSINESS',
             status: 'ACTIVE',
             primaryContact: {
               firstName: 'فاطمه',
-              lastName: 'احمدی',
+              lastName: 'کریمی',
               email: 'fateme@pars.com',
               phone: '09187654321'
             },
@@ -156,7 +156,7 @@ export default function CrmWorkspacePage() {
         recentLeads: [
           {
             id: '1',
-            companyName: 'شرکت تجاری نوین',
+            companyName: 'شرکت نوین سنگ',
             contactName: 'علی رضایی',
             email: 'ali@novin.com',
             phone: '09111111111',
@@ -167,8 +167,8 @@ export default function CrmWorkspacePage() {
           },
           {
             id: '2',
-            companyName: 'مجتمع اداری تهران',
-            contactName: 'مریم کریمی',
+            companyName: 'شرکت تهران سنگ',
+            contactName: 'مریم حسینی',
             email: 'maryam@tehran.com',
             phone: '09222222222',
             status: 'QUALIFIED',
@@ -182,14 +182,14 @@ export default function CrmWorkspacePage() {
       setStats(mockStats);
     } catch (error: any) {
       console.error('Error fetching CRM data:', error);
-      setError('خطا در دریافت اطلاعات CRM');
+      setError('خطا در بارگذاری اطلاعات CRM');
     } finally {
       setLoading(false);
     }
   };
 
   const formatAmount = (amount: number) => {
-    return `${amount.toLocaleString('fa-IR')} ریال`;
+    return `${amount.toLocaleString('fa-IR')} تومان`;
   };
 
   const formatDate = (dateString: string) => {
@@ -208,7 +208,7 @@ export default function CrmWorkspacePage() {
     return (
       <div className="glass-liquid-card p-6 text-center">
         <FaExclamationTriangle className="mx-auto text-4xl text-red-400 mb-4" />
-        <h2 className="text-xl font-semibold text-white mb-2">خطا در دریافت اطلاعات</h2>
+        <h2 className="text-xl font-semibold text-white mb-2">خطا در بارگذاری داده‌ها</h2>
         <p className="text-gray-400 mb-4">{error}</p>
         <button 
           onClick={fetchCrmData}
@@ -224,8 +224,8 @@ export default function CrmWorkspacePage() {
     return (
       <div className="glass-liquid-card p-6 text-center">
         <FaUsers className="mx-auto text-4xl text-gray-400 mb-4" />
-        <h2 className="text-xl font-semibold text-white mb-2">اطلاعاتی یافت نشد</h2>
-        <p className="text-gray-400">هنوز داده‌ای برای نمایش وجود ندارد</p>
+        <h2 className="text-xl font-semibold text-white mb-2">داده‌ای موجود نیست</h2>
+        <p className="text-gray-400">اطلاعات CRM برای نمایش موجود نیست</p>
       </div>
     );
   }
@@ -235,8 +235,8 @@ export default function CrmWorkspacePage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">فضای کاری CRM</h1>
-          <p className="text-gray-300">مدیریت مشتریان، مخاطبین و فرصت‌های فروش</p>
+          <h1 className="text-3xl font-bold text-white mb-2">داشبورد CRM</h1>
+          <p className="text-gray-300">مدیریت مشتریان و ارتباطات</p>
         </div>
         {crmPermissions.canCreateCustomers && (
           <Link 
@@ -282,7 +282,7 @@ export default function CrmWorkspacePage() {
             <div>
               <p className="text-gray-400 text-sm">سرنخ‌ها</p>
               <p className="text-2xl font-bold text-white">{stats.leads.total}</p>
-              <p className="text-gray-500 text-xs">{stats.leads.qualified} صلاحیت‌دار</p>
+              <p className="text-gray-500 text-xs">{stats.leads.qualified} واجد شرایط</p>
             </div>
             <div className="glass-liquid-card p-3">
               <FaBullhorn className="h-6 w-6 text-yellow-400" />
@@ -306,7 +306,7 @@ export default function CrmWorkspacePage() {
 
       {/* Quick Actions */}
       <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-semibold text-white mb-4">عملیات سریع</h2>
+        <h2 className="text-xl font-semibold text-white mb-4">اقدامات سریع</h2>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Link 
             href="/dashboard/crm/customers" 
@@ -337,7 +337,7 @@ export default function CrmWorkspacePage() {
             className="glass-liquid-btn p-4 flex items-center gap-3 hover:bg-white/10 transition-all duration-200"
           >
             <FaChartLine className="h-5 w-5" />
-            <span>گزارشات</span>
+            <span>گزارش‌ها</span>
           </Link>
         </div>
       </div>
@@ -443,7 +443,7 @@ export default function CrmWorkspacePage() {
 
       {/* Lead Conversion Funnel */}
       <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-semibold text-white mb-4">قیف تبدیل سرنخ‌ها</h2>
+        <h2 className="text-xl font-semibold text-white mb-4">قیف تبدیل سرنخ</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="text-center">
             <div className="glass-liquid-card p-4 mb-2">
@@ -456,7 +456,7 @@ export default function CrmWorkspacePage() {
             <div className="glass-liquid-card p-4 mb-2">
               <FaHandshake className="h-8 w-8 text-yellow-400 mx-auto mb-2" />
               <p className="text-2xl font-bold text-white">{stats.leads.qualified}</p>
-              <p className="text-gray-400 text-sm">صلاحیت‌دار</p>
+              <p className="text-gray-400 text-sm">واجد شرایط</p>
             </div>
           </div>
           <div className="text-center">
@@ -480,3 +480,4 @@ export default function CrmWorkspacePage() {
     </div>
   );
 }
+

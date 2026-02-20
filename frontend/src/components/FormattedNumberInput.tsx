@@ -52,9 +52,27 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
 
   const handleBlur = () => {
     setIsFocused(false);
+    const rawValue = displayValue.trim();
+
+    // User intentionally cleared the field
+    if (!rawValue) {
+      setDisplayValue('');
+      onChange(min ?? 0);
+      return;
+    }
+
     // Format the number when not focused and round to 2 decimal places
-    const numValue = parseFormattedNumber(displayValue);
-    const roundedValue = Math.round(numValue * 100) / 100; // Round to 2 decimal places
+    const numValue = parseFormattedNumber(rawValue);
+    let roundedValue = Math.round(numValue * 100) / 100;
+
+    // Re-apply min/max constraints on blur for consistency
+    if (min !== undefined && roundedValue < min) {
+      roundedValue = min;
+    }
+    if (max !== undefined && roundedValue > max) {
+      roundedValue = max;
+    }
+
     setDisplayValue(formatInputNumber(roundedValue));
     onChange(roundedValue);
   };
@@ -105,19 +123,35 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // Allow: backspace, delete, tab, escape, enter, decimal point
-    if ([8, 9, 27, 13, 46, 110, 190].indexOf(e.keyCode) !== -1 ||
-        // Allow: Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X
-        (e.keyCode === 65 && e.ctrlKey === true) ||
-        (e.keyCode === 67 && e.ctrlKey === true) ||
-        (e.keyCode === 86 && e.ctrlKey === true) ||
-        (e.keyCode === 88 && e.ctrlKey === true) ||
-        // Allow: home, end, left, right, down, up
-        (e.keyCode >= 35 && e.keyCode <= 40)) {
+    // Allow navigation/editing keys and common shortcuts
+    const allowedKeys = [
+      'Backspace',
+      'Delete',
+      'Tab',
+      'Escape',
+      'Enter',
+      'Home',
+      'End',
+      'ArrowLeft',
+      'ArrowRight',
+      'ArrowUp',
+      'ArrowDown'
+    ];
+
+    if (
+      allowedKeys.includes(e.key) ||
+      ((e.ctrlKey || e.metaKey) && ['a', 'c', 'v', 'x'].includes(e.key.toLowerCase()))
+    ) {
       return;
     }
-    // Ensure that it is a number and stop the keypress
-    if ((e.shiftKey || (e.keyCode < 48 || e.keyCode > 57)) && (e.keyCode < 96 || e.keyCode > 105)) {
+
+    // Allow ASCII/Persian/Arabic-Indic digits and decimal separators
+    if (/^[0-9۰-۹٠-٩.,٬،٫-]$/.test(e.key)) {
+      return;
+    }
+
+    // Block everything else
+    if (e.shiftKey || e.key.length === 1) {
       e.preventDefault();
     }
   };

@@ -1,4 +1,4 @@
-import Link from 'next/link'
+﻿import Link from 'next/link'
 import { FaChartLine, FaUsers, FaShoppingCart, FaCog, FaFileContract, FaWarehouse, FaIndustry } from 'react-icons/fa'
 import { ThemeToggle } from '@/components/ThemeToggle'
 
@@ -11,13 +11,13 @@ export default function Home() {
           <div className="flex justify-between items-center py-6">
             <div className="flex items-center">
               <FaChartLine className="h-8 w-8 text-silver-600" />
-              <h1 className="mr-2 text-2xl font-bold text-primary">سبلان ERP</h1>
+              <h1 className="mr-2 text-2xl font-bold text-primary">??? ERP</h1>
             </div>
             <div className="flex items-center space-x-4 space-x-reverse">
               <ThemeToggle />
               <nav className="flex space-x-3 space-x-reverse">
-                <Link href="/login" className="glass-liquid-btn inline-block whitespace-nowrap">ورود</Link>
-                <Link href="/register" className="glass-liquid-btn inline-block whitespace-nowrap">ثبت نام</Link>
+                <Link href="/login" className="glass-liquid-btn inline-block whitespace-nowrap">??</Link>
+                <Link href="/register" className="glass-liquid-btn inline-block whitespace-nowrap">?? ??</Link>
               </nav>
             </div>
           </div>
@@ -28,22 +28,22 @@ export default function Home() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="text-center">
           <h2 className="text-4xl font-bold text-primary sm:text-5xl md:text-6xl">
-            به{' '}
-            <span className="text-gold-500">سبلان ERP</span>
-            {' '}خوش آمدید
+            ?{' '}
+            <span className="text-gold-500">??? ERP</span>
+            {' '}?? ???
           </h2>
           <p className="mt-3 max-w-md mx-auto text-base text-secondary sm:text-lg md:mt-5 md:text-xl md:max-w-3xl">
-            سیستم جامع برنامه ریزی منابع سازمانی با طراحی لوکس و پشتیبانی کامل از زبان فارسی
+            ??? ?? ??? ?? ??? ?? ? ??? ?? ? ?? ?? ? ?? ???
           </p>
           <div className="mt-5 max-w-md mx-auto sm:flex sm:justify-center md:mt-8">
             <div className="rounded-md shadow">
               <Link href="/dashboard" className="glass-liquid-btn-primary inline-block w-full text-center px-8 py-3 text-base font-medium md:py-4 md:text-lg md:px-10">
-                شروع کنید
+                ?? ??
               </Link>
             </div>
             <div className="mt-3 rounded-md shadow sm:mt-0 sm:mr-3">
               <Link href="/features" className="glass-liquid-btn inline-block w-full text-center px-8 py-3 text-base font-medium md:py-4 md:text-lg md:px-10">
-                بیشتر بدانید
+                ??? ???
               </Link>
             </div>
           </div>
@@ -54,30 +54,30 @@ export default function Home() {
           <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
             <div className="glass-liquid-card text-center p-6">
               <FaUsers className="mx-auto h-12 w-12 text-silver-600" />
-              <h3 className="mt-4 text-lg font-medium text-primary">مدیریت کاربران</h3>
+              <h3 className="mt-4 text-lg font-medium text-primary">??? ??</h3>
               <p className="mt-2 text-base text-secondary">
-                مدیریت جامع کاربران با نقش ها و مجوزهای مختلف
+                ??? ?? ?? ? ?? ? ? ?? ???
               </p>
             </div>
             <div className="glass-liquid-card text-center p-6">
               <FaFileContract className="mx-auto h-12 w-12 text-gold-500" />
-              <h3 className="mt-4 text-lg font-medium text-primary">مدیریت قراردادها</h3>
+              <h3 className="mt-4 text-lg font-medium text-primary">??? ???</h3>
               <p className="mt-2 text-base text-secondary">
-                ایجاد، مدیریت و چاپ قراردادهای دیجیتال
+                ??? ??? ? ?? ??? ??
               </p>
             </div>
             <div className="glass-liquid-card text-center p-6">
               <FaChartLine className="mx-auto h-12 w-12 text-teal-500" />
-              <h3 className="mt-4 text-lg font-medium text-primary">تحلیل و گزارش</h3>
+              <h3 className="mt-4 text-lg font-medium text-primary">??? ? ???</h3>
               <p className="mt-2 text-base text-secondary">
-                تحلیل و گزارش گیری لحظه ای برای تصمیم گیری بهتر
+                ??? ? ??? ?? ?? ? ?? ??? ?? ??
               </p>
             </div>
             <div className="glass-liquid-card text-center p-6">
               <FaWarehouse className="mx-auto h-12 w-12 text-silver-600" />
-              <h3 className="mt-4 text-lg font-medium text-primary">مدیریت انبار</h3>
+              <h3 className="mt-4 text-lg font-medium text-primary">??? ???</h3>
               <p className="mt-2 text-base text-secondary">
-                ردیابی ورود و خروج کالا بدون نگهداری موجودی
+                ??? ?? ? ?? ?? ?? ?? ???
               </p>
             </div>
           </div>
@@ -85,27 +85,27 @@ export default function Home() {
 
         {/* Additional Features */}
         <div className="mt-16">
-          <h3 className="text-2xl font-bold text-center text-primary mb-8">ویژگی های کلیدی</h3>
+          <h3 className="text-2xl font-bold text-center text-primary mb-8">??? ?? ???</h3>
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             <div className="glass-liquid-card p-6">
               <FaIndustry className="h-8 w-8 text-gold-500 mb-4" />
-              <h4 className="text-lg font-medium text-primary mb-2">مدیریت تولید</h4>
+              <h4 className="text-lg font-medium text-primary mb-2">??? ???</h4>
               <p className="text-secondary">
-                مدیریت کارگاه های برش و CNC با ردیابی کامل فرآیندها
+                ??? ??? ?? ?? ? CNC ? ??? ?? ??
               </p>
             </div>
             <div className="glass-liquid-card p-6">
               <FaCog className="h-8 w-8 text-teal-500 mb-4" />
-              <h4 className="text-lg font-medium text-primary mb-2">پیکربندی انعطاف پذیر</h4>
+              <h4 className="text-lg font-medium text-primary mb-2">?? ??? ??</h4>
               <p className="text-secondary">
-                گزینه های پیکربندی انعطاف پذیر برای تطبیق با نیازهای کسب و کار
+                ??? ?? ?? ??? ?? ?? ??? ? ?? ?? ? ??
               </p>
             </div>
             <div className="glass-liquid-card p-6">
               <FaShoppingCart className="h-8 w-8 text-silver-600 mb-4" />
-              <h4 className="text-lg font-medium text-primary mb-2">مدیریت فروش</h4>
+              <h4 className="text-lg font-medium text-primary mb-2">??? ??</h4>
               <p className="text-secondary">
-                مدیریت فروش چند کاناله با پشتیبانی از بازاریابی میدانی و تلفنی
+                ??? ?? ?? ??? ? ?? ? ??? ??? ? ???
               </p>
             </div>
           </div>
@@ -117,7 +117,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
           <div className="text-center">
             <p className="text-base text-secondary">
-              &copy; ۱۴۰۳ سبلان ERP. تمامی حقوق محفوظ است.
+              &copy; ?? ??? ERP. ??? ?? ??? ??.
             </p>
           </div>
         </div>
@@ -125,3 +125,4 @@ export default function Home() {
     </div>
   )
 }
+

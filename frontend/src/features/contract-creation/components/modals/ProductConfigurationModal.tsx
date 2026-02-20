@@ -3,10 +3,19 @@
 
 import React, { useState } from 'react';
 import { FaTimes, FaChevronUp, FaChevronDown, FaSearch, FaRuler, FaPlus, FaTrash, FaWarehouse, FaCheck, FaTools, FaSquare } from 'react-icons/fa';
-import type { ContractWizardData, Product, ContractProduct, StairSystemConfig, SlabStandardDimensionEntry, RemainingStone } from '../../types/contract.types';
+import type {
+  ContractWizardData,
+  Product,
+  ContractProduct,
+  StairSystemConfig,
+  SlabStandardDimensionEntry,
+  RemainingStone,
+  StoneFinishing
+} from '../../types/contract.types';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { StoneCADDesigner } from '@/components/stone-cad/StoneCADDesigner';
 import { formatDisplayNumber, formatPrice, formatSquareMeters } from '@/lib/numberFormat';
+import { isUsableRemainingStone, normalizeRemainingStoneCollection } from '../../utils/remainingStoneGuards';
 
 // Comprehensive props interface for Product Configuration Modal
 interface ProductConfigurationModalProps {
@@ -82,6 +91,8 @@ interface ProductConfigurationModalProps {
   // Data
   cuttingTypes: any[];
   products: Product[];
+  stoneFinishings?: StoneFinishing[];
+  finishingLoadState?: 'idle' | 'available' | 'empty' | 'forbidden' | 'error';
   // Stair system handlers (old flow)
   updateStairSystemConfig: (updater: (prev: StairSystemConfig | null) => StairSystemConfig | null) => void;
   updateStairPart: (part: 'tread' | 'riser' | 'landing', updates: Partial<any>) => void;
@@ -165,6 +176,8 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
   setStoneSearchTerm,
   cuttingTypes,
   products,
+  stoneFinishings = [],
+  finishingLoadState = 'idle',
   updateStairSystemConfig,
   updateStairPart,
   selectProductForStairPart,
@@ -242,6 +255,9 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       
                       
                     }}
+                    type="button"
+                    aria-label="بستن پنجره تنظیمات محصول"
+                    title="بستن"
                     className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                   >
                     <FaTimes className="w-6 h-6" />
@@ -300,7 +316,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                     wizardData.products,
                     [] // currentProductRemainingStones - empty for new product
                   );
-                  const availableRemainingStones = allRemainingStones.filter(rs => rs.isAvailable === true);
+                  const availableRemainingStones = normalizeRemainingStoneCollection(allRemainingStones).filter(isUsableRemainingStone);
                   
                   console.log('🔍 Remaining Stone Collection:', {
                     currentProductType,
@@ -501,29 +517,38 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       <div className="space-y-4">
                         {/* Section 1: کف پله (Tread) */}
                         <div className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => setTreadExpanded(!treadExpanded)}
-                            className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                          >
+                          <div className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50">
                             <div className="flex items-center gap-3">
                               <input
+                                id="stair-tread-enabled"
                                 type="checkbox"
                                 checked={stairSystemConfig?.tread.isSelected || false}
                                 onChange={(e) => {
                                   updateStairPart('tread', { isSelected: e.target.checked });
                                 }}
-                                onClick={(e) => e.stopPropagation()}
+                                aria-label="فعال کردن کف پله"
+                                title="فعال کردن کف پله"
                                 className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                               />
-                              <span className="font-semibold text-gray-800 dark:text-white">کف پله (Tread)</span>
+                              <label htmlFor="stair-tread-enabled" className="font-semibold text-gray-800 dark:text-white cursor-pointer">
+                                کف پله (Tread)
+                              </label>
                             </div>
+                            <button
+                              type="button"
+                              onClick={() => setTreadExpanded(!treadExpanded)}
+                              aria-expanded={treadExpanded ? 'true' : 'false'}
+                              aria-label={treadExpanded ? 'بستن بخش کف پله' : 'باز کردن بخش کف پله'}
+                              title={treadExpanded ? 'بستن بخش کف پله' : 'باز کردن بخش کف پله'}
+                              className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            >
                             {treadExpanded ? (
                               <FaChevronUp className="text-gray-500 dark:text-gray-400" />
                             ) : (
                               <FaChevronDown className="text-gray-500 dark:text-gray-400" />
                             )}
-                          </button>
+                            </button>
+                          </div>
                           
                           {treadExpanded && stairSystemConfig && (
                             <div className="p-4 space-y-4 border-t border-gray-200 dark:border-gray-600">
@@ -768,14 +793,17 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
 
                                         {/* Nosing Configuration (only for tread) */}
                                         <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-3">
-                                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                          <label htmlFor="tread-nosing-type" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                                             نوع پیشانی:
                                           </label>
                                           <select
+                                            id="tread-nosing-type"
                                             value={stairSystemConfig.tread.nosingType || 'none'}
                                             onChange={(e) => {
                                               updateStairPart('tread', { nosingType: e.target.value });
                                             }}
+                                            aria-label="انتخاب نوع پیشانی کف پله"
+                                            title="انتخاب نوع پیشانی کف پله"
                                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
                                           >
                                             {NOSING_TYPES.filter(n => n.available).map(nosing => (
@@ -812,14 +840,17 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                                         <div className="border-t border-gray-200 dark:border-gray-600 pt-3">
                                           <div className="flex items-center space-x-3 space-x-reverse mb-2">
                                             <input
+                                              id="tread-mandatory-pricing"
                                               type="checkbox"
                                               checked={stairSystemConfig.tread.isMandatory || false}
                                               onChange={(e) => {
                                                 updateStairPart('tread', { isMandatory: e.target.checked });
                                               }}
+                                              aria-label="فعال کردن قیمت حکمی کف پله"
+                                              title="فعال کردن قیمت حکمی کف پله"
                                               className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                                             />
-                                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                            <label htmlFor="tread-mandatory-pricing" className="text-sm font-medium text-gray-700 dark:text-gray-300">
                                               حکمی (افزایش قیمت)
                                             </label>
                                           </div>
@@ -867,29 +898,38 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                         </div>
                         {/* Section 2: خیز پله (Riser) */}
                         <div className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => setRiserExpanded(!riserExpanded)}
-                            className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                          >
+                          <div className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50">
                             <div className="flex items-center gap-3">
                               <input
+                                id="stair-riser-enabled"
                                 type="checkbox"
                                 checked={stairSystemConfig?.riser.isSelected || false}
                                 onChange={(e) => {
                                   updateStairPart('riser', { isSelected: e.target.checked });
                                 }}
-                                onClick={(e) => e.stopPropagation()}
+                                aria-label="فعال کردن خیز پله"
+                                title="فعال کردن خیز پله"
                                 className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                               />
-                              <span className="font-semibold text-gray-800 dark:text-white">خیز پله (Riser)</span>
+                              <label htmlFor="stair-riser-enabled" className="font-semibold text-gray-800 dark:text-white cursor-pointer">
+                                خیز پله (Riser)
+                              </label>
                             </div>
+                            <button
+                              type="button"
+                              onClick={() => setRiserExpanded(!riserExpanded)}
+                              aria-expanded={riserExpanded ? 'true' : 'false'}
+                              aria-label={riserExpanded ? 'بستن بخش خیز پله' : 'باز کردن بخش خیز پله'}
+                              title={riserExpanded ? 'بستن بخش خیز پله' : 'باز کردن بخش خیز پله'}
+                              className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            >
                             {riserExpanded ? (
                               <FaChevronUp className="text-gray-500 dark:text-gray-400" />
                             ) : (
                               <FaChevronDown className="text-gray-500 dark:text-gray-400" />
                             )}
-                          </button>
+                            </button>
+                          </div>
                           
                           {riserExpanded && stairSystemConfig && (
                             <div className="p-4 space-y-4 border-t border-gray-200 dark:border-gray-600">
@@ -1087,14 +1127,17 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                                         <div className="border-t border-gray-200 dark:border-gray-600 pt-3">
                                           <div className="flex items-center space-x-3 space-x-reverse mb-2">
                                             <input
+                                              id="riser-mandatory-pricing"
                                               type="checkbox"
                                               checked={stairSystemConfig.riser.isMandatory || false}
                                               onChange={(e) => {
                                                 updateStairPart('riser', { isMandatory: e.target.checked });
                                               }}
+                                              aria-label="فعال کردن قیمت حکمی خیز پله"
+                                              title="فعال کردن قیمت حکمی خیز پله"
                                               className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                                             />
-                                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                            <label htmlFor="riser-mandatory-pricing" className="text-sm font-medium text-gray-700 dark:text-gray-300">
                                               حکمی (افزایش قیمت)
                                             </label>
                                           </div>
@@ -1142,29 +1185,38 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                         </div>
                         {/* Section 3: پاگرد (Landing) */}
                         <div className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => setLandingExpanded(!landingExpanded)}
-                            className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                          >
+                          <div className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50">
                             <div className="flex items-center gap-3">
                               <input
+                                id="stair-landing-enabled"
                                 type="checkbox"
                                 checked={stairSystemConfig?.landing.isSelected || false}
                                 onChange={(e) => {
                                   updateStairPart('landing', { isSelected: e.target.checked });
                                 }}
-                                onClick={(e) => e.stopPropagation()}
+                                aria-label="فعال کردن پاگرد"
+                                title="فعال کردن پاگرد"
                                 className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                               />
-                              <span className="font-semibold text-gray-800 dark:text-white">پاگرد (Landing)</span>
+                              <label htmlFor="stair-landing-enabled" className="font-semibold text-gray-800 dark:text-white cursor-pointer">
+                                پاگرد (Landing)
+                              </label>
                             </div>
+                            <button
+                              type="button"
+                              onClick={() => setLandingExpanded(!landingExpanded)}
+                              aria-expanded={landingExpanded ? 'true' : 'false'}
+                              aria-label={landingExpanded ? 'بستن بخش پاگرد' : 'باز کردن بخش پاگرد'}
+                              title={landingExpanded ? 'بستن بخش پاگرد' : 'باز کردن بخش پاگرد'}
+                              className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            >
                             {landingExpanded ? (
                               <FaChevronUp className="text-gray-500 dark:text-gray-400" />
                             ) : (
                               <FaChevronDown className="text-gray-500 dark:text-gray-400" />
                             )}
-                          </button>
+                            </button>
+                          </div>
                           
                           {landingExpanded && stairSystemConfig && (
                             <div className="p-4 space-y-4 border-t border-gray-200 dark:border-gray-600">
@@ -1372,14 +1424,17 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                                         <div className="border-t border-gray-200 dark:border-gray-600 pt-3">
                                           <div className="flex items-center space-x-3 space-x-reverse mb-2">
                                             <input
+                                              id="landing-mandatory-pricing"
                                               type="checkbox"
                                               checked={stairSystemConfig.landing.isMandatory || false}
                                               onChange={(e) => {
                                                 updateStairPart('landing', { isMandatory: e.target.checked });
                                               }}
+                                              aria-label="فعال کردن قیمت حکمی پاگرد"
+                                              title="فعال کردن قیمت حکمی پاگرد"
                                               className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                                             />
-                                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                            <label htmlFor="landing-mandatory-pricing" className="text-sm font-medium text-gray-700 dark:text-gray-300">
                                               حکمی (افزایش قیمت)
                                             </label>
                                           </div>
@@ -2525,7 +2580,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                               
                               {/* Visual representation of slab with 4 sides */}
                               <div className="bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-teal-900/20 dark:to-cyan-900/20 rounded-xl p-6 border-2 border-teal-200 dark:border-teal-700 mb-4">
-                                <div className="relative mx-auto" style={{ width: '200px', height: '150px' }}>
+                                <div className="relative mx-auto w-[200px] h-[150px]">
                                   {/* Slab representation */}
                                   <div className="absolute inset-0 bg-white dark:bg-gray-700 rounded-lg border-2 border-teal-300 dark:border-teal-600 shadow-md"></div>
                                   
@@ -2833,6 +2888,168 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       />
                     </div>
                   </>)}
+
+                  {(currentProductType === 'longitudinal' || currentProductType === 'slab') && (() => {
+                    const hasFinishingOptions = stoneFinishings.length > 0;
+                    const selectedFinishing = productConfig.finishingId
+                      ? stoneFinishings.find((option) => option.id === productConfig.finishingId)
+                      : undefined;
+                    const fallbackSquareMeters =
+                      (() => {
+                        const lengthValue = Number(productConfig.length) || 0;
+                        const widthValue = Number(productConfig.width) || 0;
+                        const quantityValue = Number(productConfig.quantity) || getEffectiveQuantity() || 0;
+                        if (lengthValue <= 0 || widthValue <= 0 || quantityValue <= 0) return 0;
+                        const lengthInMeters = lengthUnit === 'm' ? lengthValue : lengthValue / 100;
+                        const widthInMeters = widthUnit === 'm' ? widthValue : widthValue / 100;
+                        return lengthInMeters * widthInMeters * quantityValue;
+                      })();
+                    const pricingSquareMeters =
+                      (Number(productConfig.squareMeters) > 0 ? Number(productConfig.squareMeters) : fallbackSquareMeters) || 0;
+                    const finishingPricePerSquareMeter =
+                      productConfig.finishingPricePerSquareMeter ??
+                      selectedFinishing?.pricePerSquareMeter ??
+                      null;
+                    const finishingPreviewCost =
+                      productConfig.finishingEnabled && finishingPricePerSquareMeter
+                        ? pricingSquareMeters * finishingPricePerSquareMeter
+                        : 0;
+
+                    const controlsDisabled =
+                      finishingLoadState === 'forbidden' ||
+                      finishingLoadState === 'empty' ||
+                      finishingLoadState === 'idle' ||
+                      finishingLoadState === 'error' ||
+                      !hasFinishingOptions;
+
+                    return (
+                      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h5 className="text-sm font-semibold text-gray-800 dark:text-white">پرداخت سنگ</h5>
+                          <span className="text-xs text-teal-600 dark:text-teal-300">هزینه بر اساس متر مربع</span>
+                        </div>
+
+                        <label htmlFor="modal-finishing-enabled" className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+                          <input
+                            id="modal-finishing-enabled"
+                            type="checkbox"
+                            className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                            checked={!!productConfig.finishingEnabled}
+                            disabled={controlsDisabled}
+                            aria-label="فعال‌سازی پرداخت سنگ"
+                            title="فعال‌سازی پرداخت سنگ"
+                            onChange={(e) => {
+                              const enabled = e.target.checked;
+                              if (!enabled) {
+                                setProductConfig((prev: any) => ({
+                                  ...prev,
+                                  finishingEnabled: false,
+                                  finishingId: null,
+                                  finishingName: null,
+                                  finishingLabel: null,
+                                  finishingPricePerSquareMeter: null
+                                }));
+                                return;
+                              }
+
+                              setProductConfig((prev: any) => {
+                                const nextDefault = prev.finishingId
+                                  ? stoneFinishings.find((option) => option.id === prev.finishingId)
+                                  : stoneFinishings[0];
+                                return {
+                                  ...prev,
+                                  finishingEnabled: true,
+                                  finishingId: nextDefault?.id || prev.finishingId || null,
+                                  finishingName: nextDefault
+                                    ? (nextDefault.namePersian || nextDefault.name || '')
+                                    : prev.finishingName || null,
+                                  finishingLabel: nextDefault
+                                    ? (nextDefault.namePersian || nextDefault.name || '')
+                                    : prev.finishingLabel || null,
+                                  finishingPricePerSquareMeter: nextDefault
+                                    ? nextDefault.pricePerSquareMeter
+                                    : prev.finishingPricePerSquareMeter || null
+                                };
+                              });
+                            }}
+                          />
+                          فعال‌سازی پرداخت برای این محصول
+                        </label>
+
+                        <div>
+                          <label htmlFor="modal-stone-finishing-select" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            انتخاب نوع پرداخت
+                          </label>
+                          <select
+                            id="modal-stone-finishing-select"
+                            value={productConfig.finishingId || ''}
+                            disabled={controlsDisabled || !productConfig.finishingEnabled}
+                            aria-label="انتخاب نوع پرداخت سنگ"
+                            title="انتخاب نوع پرداخت سنگ"
+                            onChange={(e) => {
+                              const selectedId = e.target.value;
+                              if (!selectedId) {
+                                setProductConfig((prev: any) => ({
+                                  ...prev,
+                                  finishingId: null,
+                                  finishingName: null,
+                                  finishingLabel: null,
+                                  finishingPricePerSquareMeter: null
+                                }));
+                                return;
+                              }
+
+                              const selected = stoneFinishings.find((option) => option.id === selectedId);
+                              if (!selected) return;
+
+                              setProductConfig((prev: any) => ({
+                                ...prev,
+                                finishingEnabled: true,
+                                finishingId: selected.id,
+                                finishingName: selected.namePersian || selected.name || '',
+                                finishingLabel: selected.namePersian || selected.name || '',
+                                finishingPricePerSquareMeter: selected.pricePerSquareMeter
+                              }));
+                            }}
+                            className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all disabled:opacity-60"
+                          >
+                            <option value="">انتخاب پرداخت...</option>
+                            {stoneFinishings.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.namePersian || option.name} ({formatPrice(option.pricePerSquareMeter)})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {productConfig.finishingEnabled && finishingPricePerSquareMeter && (
+                          <div className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-4 py-3 text-xs leading-5 text-teal-700 dark:text-teal-200 space-y-1">
+                            <div className="flex justify-between">
+                              <span>نرخ هر متر مربع:</span>
+                              <span className="font-semibold">{formatPrice(finishingPricePerSquareMeter)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>مساحت محاسباتی:</span>
+                              <span className="font-semibold">{formatSquareMeters(pricingSquareMeters)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>هزینه تقریبی پرداخت:</span>
+                              <span className="font-semibold">{formatPrice(finishingPreviewCost)}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {(finishingLoadState === 'forbidden' || finishingLoadState === 'empty' || finishingLoadState === 'idle' || finishingLoadState === 'error') && (
+                          <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
+                            {finishingLoadState === 'forbidden' && 'دسترسی مشاهده پرداخت‌ها برای این کاربر فعال نیست.'}
+                            {finishingLoadState === 'empty' && 'هیچ پرداخت فعالی برای انتخاب یافت نشد.'}
+                            {finishingLoadState === 'idle' && 'در حال بارگذاری لیست پرداخت‌ها...'}
+                            {finishingLoadState === 'error' && 'خطا در دریافت لیست پرداخت‌ها. لطفاً مجدد تلاش کنید.'}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Unit Selection Help Text - Only for slab/longitudinal */}
                   {(currentProductType === 'longitudinal' || currentProductType === 'slab') && (

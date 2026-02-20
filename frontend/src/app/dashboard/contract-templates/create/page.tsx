@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -73,16 +73,16 @@ export default function CreateContractTemplatePage() {
   });
 
   const categories = [
-    { value: 'sales', label: 'فروش' },
-    { value: 'service', label: 'خدمات' },
+    { value: 'sales', label: 'ÙØ±Ùˆش' },
+    { value: 'service', label: 'خد�&ات' },
     { value: 'maintenance', label: 'نگهداری' },
-    { value: 'general', label: 'عمومی' }
+    { value: 'general', label: 'Ø¹Ù…Ùˆمی' }
   ];
 
   const variableTypes = [
     { value: 'text', label: 'متن' },
     { value: 'number', label: 'عدد' },
-    { value: 'date', label: 'تاریخ' },
+    { value: 'date', label: 'تار�Rخ' },
     { value: 'array', label: 'آرایه' }
   ];
 
@@ -96,7 +96,7 @@ export default function CreateContractTemplatePage() {
       newErrors.namePersian = 'نام فارسی قالب الزامی است';
     }
     if (!formData.content.trim()) {
-      newErrors.content = 'محتوای قالب الزامی است';
+      newErrors.content = 'Ù…Ø­ØªÙˆای قالب الزامی است';
     }
 
     setErrors(newErrors);
@@ -142,7 +142,7 @@ export default function CreateContractTemplatePage() {
     }
 
     if (formData.variables[newVariable.key]) {
-      setErrors({ variable: 'متغیر با این کلید قبلاً وجود دارد' });
+      setErrors({ variable: 'متغیر با این کلید قبلاً ÙˆØ¬Ùˆد دارد' });
       return;
     }
 
@@ -193,10 +193,10 @@ export default function CreateContractTemplatePage() {
 
   const tabs = [
     { id: 'basic', label: 'اطلاعات پایه', icon: FaFileContract },
-    { id: 'content', label: 'محتوای قالب', icon: FaCode },
+    { id: 'content', label: 'Ù…Ø­ØªÙˆای قالب', icon: FaCode },
     { id: 'variables', label: 'متغیرها', icon: FaTable },
     { id: 'structure', label: 'ساختار', icon: FaTable },
-    { id: 'calculations', label: 'محاسبات', icon: FaCalculator }
+    { id: 'calculations', label: '�&حاسبات', icon: FaCalculator }
   ];
 
   return (
@@ -205,7 +205,7 @@ export default function CreateContractTemplatePage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">ایجاد قالب قرارداد جدید</h1>
-          <p className="text-gray-300 mt-1">قالب جدید برای قراردادهای فروش</p>
+          <p className="text-gray-300 mt-1">قالب جدید برای قراردادهای ÙØ±Ùˆش</p>
         </div>
         <Link 
           href="/dashboard/contract-templates"
@@ -273,7 +273,7 @@ export default function CreateContractTemplatePage() {
                   value={formData.namePersian}
                   onChange={(e) => setFormData({ ...formData, namePersian: e.target.value })}
                   className="glass-liquid-input w-full"
-                  placeholder="قالب قرارداد فروش"
+                  placeholder="قالب قرارداد ÙØ±Ùˆش"
                 />
                 {errors.namePersian && <p className="text-red-400 text-sm mt-1">{errors.namePersian}</p>}
               </div>
@@ -292,12 +292,12 @@ export default function CreateContractTemplatePage() {
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-white font-medium mb-2">توضیحات</label>
+                <label className="block text-white font-medium mb-2">ØªÙˆضیحات</label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   className="glass-liquid-input w-full h-24"
-                  placeholder="توضیحات کوتاه درباره قالب..."
+                  placeholder="ØªÙˆضیحات Ú©Ùˆتاه درباره قالب..."
                 />
               </div>
             </div>
@@ -307,15 +307,15 @@ export default function CreateContractTemplatePage() {
         {/* Content Tab */}
         {activeTab === 'content' && (
           <div className="glass-liquid-card p-6 space-y-6">
-            <h2 className="text-xl font-semibold text-white mb-4">محتوای قالب</h2>
+            <h2 className="text-xl font-semibold text-white mb-4">Ù…Ø­ØªÙˆای قالب</h2>
             
             <div>
-              <label className="block text-white font-medium mb-2">محتوای HTML قالب</label>
+              <label className="block text-white font-medium mb-2">Ù…Ø­ØªÙˆای HTML قالب</label>
               <textarea
                 value={formData.content}
                 onChange={(e) => setFormData({ ...formData, content: e.target.value })}
                 className="glass-liquid-input w-full h-96 font-mono text-sm"
-                placeholder="محتوای HTML قالب با متغیرهای {{variableName}}..."
+                placeholder="Ù…Ø­ØªÙˆای HTML قالب با متغیرهای {{variableName}}..."
               />
               {errors.content && <p className="text-red-400 text-sm mt-1">{errors.content}</p>}
             </div>
@@ -324,9 +324,9 @@ export default function CreateContractTemplatePage() {
               <h3 className="text-white font-medium mb-2">راهنمای متغیرها:</h3>
               <ul className="text-gray-300 text-sm space-y-1">
                 <li>• از {'{{variableName}}'} برای متغیرها استفاده کنید</li>
-                <li>• از {'{{tableRows}}'} برای ردیف‌های جدول استفاده کنید</li>
+                <li>• از {'{{tableRows}}'} برای ردیف‌های Ø¬Ø¯Ùˆل استفاده کنید</li>
                 <li>• از CSS inline برای استایل‌دهی استفاده کنید</li>
-                <li>• جهت RTL و فونت فارسی را در نظر بگیرید</li>
+                <li>• جهت RTL و ÙÙˆنت فارسی را در نظر بگیرید</li>
               </ul>
             </div>
           </div>
@@ -339,7 +339,7 @@ export default function CreateContractTemplatePage() {
             
             {/* Add New Variable */}
             <div className="glass-liquid-card p-4">
-              <h3 className="text-white font-medium mb-4">افزودن متغیر جدید</h3>
+              <h3 className="text-white font-medium mb-4">Ø§ÙØ²Ùˆدن متغیر جدید</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-white text-sm mb-1">کلید متغیر</label>
@@ -352,7 +352,7 @@ export default function CreateContractTemplatePage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-white text-sm mb-1">برچسب</label>
+                  <label className="block text-white text-sm mb-1">بر� سب</label>
                   <input
                     type="text"
                     value={newVariable.label}
@@ -362,7 +362,7 @@ export default function CreateContractTemplatePage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-white text-sm mb-1">نوع</label>
+                  <label className="block text-white text-sm mb-1">Ù†Ùˆع</label>
                   <select
                     value={newVariable.type}
                     onChange={(e) => setNewVariable({ ...newVariable, type: e.target.value as any })}
@@ -380,7 +380,7 @@ export default function CreateContractTemplatePage() {
                     className="glass-liquid-btn-primary px-4 py-2 w-full flex items-center justify-center gap-2"
                   >
                     <FaPlus className="h-4 w-4" />
-                    <span>افزودن</span>
+                    <span>Ø§ÙØ²Ùˆدن</span>
                   </button>
                 </div>
               </div>
@@ -402,7 +402,7 @@ export default function CreateContractTemplatePage() {
                     onChange={(e) => setNewVariable({ ...newVariable, autoGenerated: e.target.checked })}
                     className="rounded"
                   />
-                  تولید خودکار
+                  ØªÙˆلید Ø®Ùˆدکار
                 </label>
                 <label className="flex items-center gap-2 text-white text-sm">
                   <input
@@ -420,9 +420,9 @@ export default function CreateContractTemplatePage() {
 
             {/* Existing Variables */}
             <div>
-              <h3 className="text-white font-medium mb-4">متغیرهای موجود</h3>
+              <h3 className="text-white font-medium mb-4">متغیرهای Ù…ÙˆØ¬Ùˆد</h3>
               {Object.keys(formData.variables).length === 0 ? (
-                <p className="text-gray-400 text-center py-8">هنوز متغیری اضافه نشده است</p>
+                <p className="text-gray-400 text-center py-8">Ù‡Ù†Ùˆز متغیری اضافه نشده است</p>
               ) : (
                 <div className="space-y-2">
                   {Object.entries(formData.variables).map(([key, variable]) => (
@@ -434,7 +434,7 @@ export default function CreateContractTemplatePage() {
                         </div>
                         <span className="text-gray-500 text-sm">{variableTypes.find(t => t.value === variable.type)?.label}</span>
                         {variable.required && <span className="text-red-400 text-xs">الزامی</span>}
-                        {variable.autoGenerated && <span className="text-blue-400 text-xs">خودکار</span>}
+                        {variable.autoGenerated && <span className="text-blue-400 text-xs">Ø®Ùˆدکار</span>}
                         {variable.calculated && <span className="text-green-400 text-xs">محاسبه‌شده</span>}
                       </div>
                       <button
@@ -476,15 +476,15 @@ export default function CreateContractTemplatePage() {
                       className="rounded"
                     />
                     {section === 'header' && 'سربرگ'}
-                    {section === 'table' && 'جدول'}
-                    {section === 'footer' && 'پاورقی'}
+                    {section === 'table' && 'Ø¬Ø¯Ùˆل'}
+                    {section === 'footer' && 'Ù¾Ø§Ùˆرقی'}
                   </label>
                 ))}
               </div>
             </div>
 
             <div>
-              <label className="block text-white font-medium mb-2">حداکثر ردیف جدول</label>
+              <label className="block text-white font-medium mb-2">حداکثر ردیف Ø¬Ø¯Ùˆل</label>
               <input
                 type="number"
                 value={formData.structure.tableConfig?.maxRows || 9}
@@ -503,10 +503,10 @@ export default function CreateContractTemplatePage() {
         {/* Calculations Tab */}
         {activeTab === 'calculations' && (
           <div className="glass-liquid-card p-6 space-y-6">
-            <h2 className="text-xl font-semibold text-white mb-4">فرمول‌های محاسباتی</h2>
+            <h2 className="text-xl font-semibold text-white mb-4">ÙØ±Ù…Ùˆل‌های محاسباتی</h2>
             
             <div>
-              <label className="block text-white font-medium mb-2">فرمول‌های محاسباتی</label>
+              <label className="block text-white font-medium mb-2">ÙØ±Ù…Ùˆل‌های محاسباتی</label>
               <div className="space-y-4">
                 <div>
                   <label className="block text-white text-sm mb-1">محاسبه متر مربع</label>
@@ -535,7 +535,7 @@ export default function CreateContractTemplatePage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-white text-sm mb-1">محاسبه مجموع کل</label>
+                  <label className="block text-white text-sm mb-1">محاسبه Ù…Ø¬Ù…Ùˆع کل</label>
                   <input
                     type="text"
                     value={formData.calculations.formulas?.totalAmount || ''}
@@ -570,7 +570,7 @@ export default function CreateContractTemplatePage() {
             href="/dashboard/contract-templates"
             className="glass-liquid-btn px-6 py-3"
           >
-            انصراف
+            ا� صراف
           </Link>
           <button
             type="submit"

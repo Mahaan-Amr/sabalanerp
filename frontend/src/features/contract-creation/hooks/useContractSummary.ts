@@ -1,4 +1,4 @@
-// useContractSummary Hook
+﻿// useContractSummary Hook
 // Provides contract summary computations including products, services, and totals
 
 import { useMemo } from 'react';
@@ -51,9 +51,9 @@ interface UseContractSummaryReturn {
 
 const getPartDisplayLabel = (part: StairStepperPart): string => {
   const labels: Record<StairStepperPart, string> = {
-    tread: 'پله',
-    riser: 'کف پله',
-    landing: 'سکو'
+    tread: 'کف پله',
+    riser: 'پیشانی',
+    landing: 'پاگرد'
   };
   return labels[part] || part;
 };
@@ -96,7 +96,7 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
             key: `tool-${productIndex}-${appliedIndex}-${applied.id}`,
             type: 'tool',
             productName: productLabel,
-            description: applied.subService?.namePersian || applied.subService?.name || 'ابزار',
+            description: applied.subService?.namePersian || applied.subService?.name || 'نامشخص',
             amountLabel,
             cost: applied.cost || 0,
             meta: {
@@ -114,7 +114,7 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
           key: `finishing-${productIndex}`,
           type: 'finishing',
           productName: productLabel,
-          description: product.finishingName || 'پرداخت سنگ',
+          description: product.finishingName || 'فینیشینگ',
           amountLabel: `${formatSquareMeters(product.finishingSquareMeters || product.squareMeters || 0)}`,
           cost: product.finishingCost || 0,
           meta: product.finishingPricePerSquareMeter
@@ -132,7 +132,7 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
         const descriptionParts: string[] = [];
         if (layerMeta.layer?.numberOfLayersPerStair) {
           const parentPartType = (layerMeta.layer.parentPartType || 'tread') as StairStepperPart;
-          descriptionParts.push(`${layerMeta.layer.numberOfLayersPerStair} لایه برای هر ${getPartDisplayLabel(parentPartType)}`);
+          descriptionParts.push(`${layerMeta.layer.numberOfLayersPerStair} لایه برای ${getPartDisplayLabel(parentPartType)}`);
         }
         if (layerMeta.layer?.layerTypeName) {
           descriptionParts.push(`نوع لایه: ${layerMeta.layer.layerTypeName}`);
@@ -144,7 +144,7 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
           key: `layer-${productIndex}`,
           type: 'layer',
           productName: productLabel,
-          description: descriptionParts.length ? descriptionParts.join(' | ') : 'لایه اضافه',
+          description: descriptionParts.length ? descriptionParts.join(' | ') : 'لایه',
           amountLabel: `${formatDisplayNumber(product.quantity || 0)} عدد | ${formatSquareMeters(product.squareMeters || 0)}`,
           cost: typeof product.totalPrice === 'number' ? product.totalPrice : parseFloat(String(product.totalPrice || '0')) || 0,
           meta: product.layerUseDifferentStone && product.layerStonePricePerSquareMeter
@@ -170,15 +170,15 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
               cost: product.cuttingCost || 0
             }];
 
-        // Count cross cuts to determine if we should use "برش کله بر"
+        // Count cross cuts to determine if we should use "?? ?? ?"
         const crossCuts = breakdown.filter(cut => cut.type === 'cross');
         const hasOnlyOneCrossCut = crossCuts.length === 1 && breakdown.length === 1;
 
         breakdown.forEach((cut, cutIndex) => {
           const metersLabel = `${formatDisplayNumber(cut.meters || 0)} متر`;
-          // Use "برش کله بر" if there's only 1 cross cut, otherwise use "برش عرضی"
+          // Use singular label if there is only one cross cut.
           const cutDescription = cut.type === 'cross'
-            ? (hasOnlyOneCrossCut ? 'برش کله بر' : 'برش عرضی')
+            ? (hasOnlyOneCrossCut ? 'برش عرضی' : 'برش‌های عرضی')
             : 'برش طولی';
           entries.push({
             key: `cut-${productIndex}-${cutIndex}`,
@@ -202,7 +202,7 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
         entries.push({
           key: `cut-partition-${productIndex}-${partitionIndex}`,
           type: 'cut',
-          productName: `${productLabel} (پارتیشن)`,
+          productName: `${productLabel} (باقی‌مانده)`,
           description: partition.cutType === 'cross' ? 'برش عرضی باقی‌مانده' : 'برش طولی باقی‌مانده',
           amountLabel: `${formatDisplayNumber(partition.length * (partition.quantity || 1))} متر`,
           cost: partition.cuttingCost || 0,
@@ -242,9 +242,9 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
               ? 'طولی'
               : product.productType === 'slab'
                 ? 'اسلب'
-                : 'محصول');
+                : 'نامشخص');
 
-      // Append "/حکمی" if mandatory option is activated
+      // Append "/حکمی" if mandatory option is activated.
       if (product.isMandatory && product.mandatoryPercentage && product.mandatoryPercentage > 0) {
         partLabel = `${partLabel}/حکمی`;
       }
@@ -280,3 +280,4 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
     contractGrandTotal
   };
 };
+

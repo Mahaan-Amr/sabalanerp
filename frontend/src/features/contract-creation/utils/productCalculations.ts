@@ -1,4 +1,4 @@
-// Product calculation utilities
+﻿// Product calculation utilities
 // Smart calculations and metrics for different product types
 
 import type { SlabStandardDimensionEntry, SlabLineCutPlan, Product, ContractProduct } from '../types/contract.types';
@@ -389,7 +389,7 @@ export const calculateSlabMetrics = (data: {
  * Calculate stair stone metrics
  */
 export const calculateStairStoneMetrics = (data: {
-  treadWidth: number; // طول پله (cm or m)
+  treadWidth: number; // Ø·Ùˆل پله (cm or m)
   treadWidthUnit: 'cm' | 'm';
   treadDepth: number; // عرض پله (cm)
   numberOfSteps: number; // تعداد پله
@@ -414,7 +414,7 @@ export const calculateStairStoneMetrics = (data: {
   // Convert tread width to cm
   const treadWidthInCm = treadWidthUnit === 'm' ? treadWidth * 100 : treadWidth;
   
-  // Calculate area per step (tread width × tread depth)
+  // Calculate area per step (tread width � tread depth)
   const areaPerStep = (treadWidthInCm * treadDepth) / 10000; // Convert cm² to m²
   
   // Calculate total steps based on quantity type
@@ -433,7 +433,7 @@ export const calculateStairStoneMetrics = (data: {
   // Total area (steps + landings)
   const totalArea = totalStepsArea + landingArea;
   
-  // Calculate total linear length (tread width × number of steps)
+  // Calculate total linear length (tread width � number of steps)
   const totalLinearLength = (treadWidthInCm / 100) * totalSteps; // Convert cm to meters
   
   return {
@@ -462,7 +462,7 @@ export const calculateTreadMetrics = (data: {
   // Convert tread width to cm
   const treadWidthInCm = treadWidthUnit === 'm' ? treadWidth * 100 : treadWidth;
   
-  // Calculate area per step (tread width × tread depth) in m²
+  // Calculate area per step (tread width � tread depth) in m²
   const areaPerStep = (treadWidthInCm * treadDepth) / 10000;
   
   // Calculate total quantity
@@ -498,7 +498,7 @@ export const calculateRiserMetrics = (data: {
   // Convert tread width to cm
   const treadWidthInCm = treadWidthUnit === 'm' ? treadWidth * 100 : treadWidth;
   
-  // Calculate area per riser (tread width × riser height) in m²
+  // Calculate area per riser (tread width � riser height) in m²
   const areaPerRiser = (treadWidthInCm * riserHeight) / 10000;
   
   // Calculate total quantity
@@ -630,4 +630,3 @@ export const getSlabStandardDimensions = (
     standardWidthCm: standardWidthCm || 0
   };
 };
-

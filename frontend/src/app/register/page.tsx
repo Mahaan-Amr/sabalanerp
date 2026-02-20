@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import Link from 'next/link';
@@ -31,14 +31,14 @@ export default function RegisterPage() {
 
   // Mock departments - replace with actual API call
   const departments: Department[] = [
-    { id: '1', name: 'Sales Marketing', namePersian: 'فروش و بازاریابی' },
-    { id: '2', name: 'Workshop', namePersian: 'کارگاه' },
-    { id: '3', name: 'Customer Affairs', namePersian: 'امور مشتریان' },
-    { id: '4', name: 'Finance', namePersian: 'مالی و حساب داری' },
-    { id: '5', name: 'Warehouse', namePersian: 'انبار' },
-    { id: '6', name: 'Security', namePersian: 'انتظامات' },
-    { id: '7', name: 'Procurement', namePersian: 'کارپرداز' },
-    { id: '8', name: 'Management', namePersian: 'مدیریت' }
+    { id: '1', name: 'Sales Marketing', namePersian: '?? ? ???' },
+    { id: '2', name: 'Workshop', namePersian: '???' },
+    { id: '3', name: 'Customer Affairs', namePersian: '?? ??' },
+    { id: '4', name: 'Finance', namePersian: '?? ? ?? ??' },
+    { id: '5', name: 'Warehouse', namePersian: '???' },
+    { id: '6', name: 'Security', namePersian: '??' },
+    { id: '7', name: 'Procurement', namePersian: '??' },
+    { id: '8', name: 'Management', namePersian: '???' }
   ];
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -61,39 +61,39 @@ export default function RegisterPage() {
     const newErrors: Record<string, string> = {};
 
     if (!formData.firstName.trim()) {
-      newErrors.firstName = 'نام الزامی است';
+      newErrors.firstName = '?? ??? ??';
     }
 
     if (!formData.lastName.trim()) {
-      newErrors.lastName = 'نام خانوادگی الزامی است';
+      newErrors.lastName = '?? ?? ??? ??';
     }
 
     if (!formData.email.trim()) {
-      newErrors.email = 'ایمیل الزامی است';
+      newErrors.email = '??? ??? ??';
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'فرمت ایمیل صحیح نیست';
+      newErrors.email = '?? ??? ?? ??';
     }
 
     if (!formData.username.trim()) {
-      newErrors.username = 'نام کاربری الزامی است';
+      newErrors.username = '?? ??? ??? ??';
     } else if (formData.username.length < 3) {
-      newErrors.username = 'نام کاربری باید حداقل 3 کاراکتر باشد';
+      newErrors.username = '?? ??? ?? ??? 3 ?? ??';
     }
 
     if (!formData.password.trim()) {
-      newErrors.password = 'رمز عبور الزامی است';
+      newErrors.password = '?? ?? ??? ??';
     } else if (formData.password.length < 6) {
-      newErrors.password = 'رمز عبور باید حداقل 6 کاراکتر باشد';
+      newErrors.password = '?? ?? ?? ??? 6 ?? ??';
     }
 
     if (!formData.confirmPassword.trim()) {
-      newErrors.confirmPassword = 'تکرار رمز عبور الزامی است';
+      newErrors.confirmPassword = '??? ?? ?? ??? ??';
     } else if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = 'رمز عبور و تکرار آن یکسان نیستند';
+      newErrors.confirmPassword = '?? ?? ? ??? ? ??? ???';
     }
 
     if (!formData.departmentId) {
-      newErrors.departmentId = 'انتخاب بخش الزامی است';
+      newErrors.departmentId = '??? ?? ??? ??';
     }
 
     setErrors(newErrors);
@@ -126,11 +126,11 @@ export default function RegisterPage() {
         // Redirect to dashboard
         router.push('/dashboard');
       } else {
-        setErrors({ general: data.error || 'خطا در ثبت نام' });
+        setErrors({ general: data.error || '?? ? ?? ??' });
       }
     } catch (error) {
       console.error('Register error:', error);
-      setErrors({ general: 'خطا در ارتباط با سرور' });
+      setErrors({ general: '?? ? ??? ? ??' });
     } finally {
       setLoading(false);
     }
@@ -146,8 +146,8 @@ export default function RegisterPage() {
               <FaUser className="h-12 w-12 text-teal-400" />
             </div>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">ثبت نام</h1>
-          <p className="text-gray-300">حساب کاربری جدید ایجاد کنید</p>
+          <h1 className="text-3xl font-bold text-white mb-2">?? ??</h1>
+          <p className="text-gray-300">?? ??? ?? ??? ??</p>
         </div>
 
         {/* Register Form */}
@@ -164,7 +164,7 @@ export default function RegisterPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">
-                  نام
+                  ??
                 </label>
                 <div className="relative">
                   <FaUser className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -174,7 +174,7 @@ export default function RegisterPage() {
                     value={formData.firstName}
                     onChange={handleInputChange}
                     className={`glass-liquid-input w-full pr-10 ${errors.firstName ? 'border-red-500' : ''}`}
-                    placeholder="نام"
+                    placeholder="??"
                   />
                 </div>
                 {errors.firstName && <p className="text-red-400 text-sm mt-1">{errors.firstName}</p>}
@@ -182,7 +182,7 @@ export default function RegisterPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">
-                  نام خانوادگی
+                  ?? ??
                 </label>
                 <div className="relative">
                   <FaUser className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -192,7 +192,7 @@ export default function RegisterPage() {
                     value={formData.lastName}
                     onChange={handleInputChange}
                     className={`glass-liquid-input w-full pr-10 ${errors.lastName ? 'border-red-500' : ''}`}
-                    placeholder="نام خانوادگی"
+                    placeholder="?? ??"
                   />
                 </div>
                 {errors.lastName && <p className="text-red-400 text-sm mt-1">{errors.lastName}</p>}
@@ -202,7 +202,7 @@ export default function RegisterPage() {
             {/* Email Field */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
-                ایمیل
+                ???
               </label>
               <div className="relative">
                 <FaEnvelope className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -212,7 +212,7 @@ export default function RegisterPage() {
                   value={formData.email}
                   onChange={handleInputChange}
                   className={`glass-liquid-input w-full pr-10 ${errors.email ? 'border-red-500' : ''}`}
-                  placeholder="ایمیل خود را وارد کنید"
+                  placeholder="??? ?? ? ?? ??"
                   dir="ltr"
                 />
               </div>
@@ -222,7 +222,7 @@ export default function RegisterPage() {
             {/* Username Field */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
-                نام کاربری
+                ?? ???
               </label>
               <div className="relative">
                 <FaUser className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -232,7 +232,7 @@ export default function RegisterPage() {
                   value={formData.username}
                   onChange={handleInputChange}
                   className={`glass-liquid-input w-full pr-10 ${errors.username ? 'border-red-500' : ''}`}
-                  placeholder="نام کاربری"
+                  placeholder="?? ???"
                   dir="ltr"
                 />
               </div>
@@ -242,7 +242,7 @@ export default function RegisterPage() {
             {/* Department Field */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
-                بخش
+                ??
               </label>
               <div className="relative">
                 <FaBuilding className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -252,7 +252,7 @@ export default function RegisterPage() {
                   onChange={handleInputChange}
                   className={`glass-liquid-input w-full pr-10 ${errors.departmentId ? 'border-red-500' : ''}`}
                 >
-                  <option value="">انتخاب بخش</option>
+                  <option value="">??? ??</option>
                   {departments.map(dept => (
                     <option key={dept.id} value={dept.id}>
                       {dept.namePersian}
@@ -267,7 +267,7 @@ export default function RegisterPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">
-                  رمز عبور
+                  ?? ??
                 </label>
                 <div className="relative">
                   <FaLock className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -277,7 +277,7 @@ export default function RegisterPage() {
                     value={formData.password}
                     onChange={handleInputChange}
                     className={`glass-liquid-input w-full pr-10 pl-10 ${errors.password ? 'border-red-500' : ''}`}
-                    placeholder="رمز عبور"
+                    placeholder="?? ??"
                   />
                   <button
                     type="button"
@@ -292,7 +292,7 @@ export default function RegisterPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">
-                  تکرار رمز عبور
+                  ??? ?? ??
                 </label>
                 <div className="relative">
                   <FaLock className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -302,7 +302,7 @@ export default function RegisterPage() {
                     value={formData.confirmPassword}
                     onChange={handleInputChange}
                     className={`glass-liquid-input w-full pr-10 pl-10 ${errors.confirmPassword ? 'border-red-500' : ''}`}
-                    placeholder="تکرار رمز عبور"
+                    placeholder="??? ?? ??"
                   />
                   <button
                     type="button"
@@ -326,7 +326,7 @@ export default function RegisterPage() {
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
               ) : (
                 <>
-                  <span>ثبت نام</span>
+                  <span>?? ??</span>
                   <FaArrowRight />
                 </>
               )}
@@ -337,9 +337,9 @@ export default function RegisterPage() {
         {/* Login Link */}
         <div className="text-center mt-6">
           <p className="text-gray-300">
-            قبلاً حساب کاربری دارید؟{' '}
+            ??? ?? ??? ???{' '}
             <Link href="/login" className="text-teal-400 hover:text-teal-300 font-medium">
-              وارد شوید
+              ?? ??
             </Link>
           </p>
         </div>
@@ -352,3 +352,4 @@ export default function RegisterPage() {
     </div>
   );
 }
+

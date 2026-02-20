@@ -1,0 +1,14 @@
+.git
+.gitignore
+node_modules
+**/node_modules
+**/.next
+**/dist
+**/build
+**/.env
+**/.env.local
+**/.env.*.local
+**/*.log
+backend/storage/contracts/*.pdf
+backend/uploads/*
+frontend/tsconfig.tsbuildinfo

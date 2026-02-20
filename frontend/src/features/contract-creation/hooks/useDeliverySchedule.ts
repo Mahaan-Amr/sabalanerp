@@ -1,4 +1,4 @@
-// Delivery schedule hook
+﻿// Delivery schedule hook
 // Manages delivery creation and product distribution
 
 import { useState, useCallback, useMemo } from 'react';
@@ -105,7 +105,7 @@ export const useDeliverySchedule = (products: ContractProduct[]) => {
     const errors: Record<string, string> = {};
     
     if (deliveries.length === 0) {
-      errors.general = 'حداقل یک برنامه تحویل باید تعریف شود';
+      errors.general = '??? ? ??? ??? ?? ??? ??';
       return { isValid: false, errors };
     }
 
@@ -118,7 +118,7 @@ export const useDeliverySchedule = (products: ContractProduct[]) => {
 
     // Check if all products are fully distributed
     if (!areAllProductsDistributed) {
-      errors.distribution = 'همه محصولات باید به طور کامل در برنامه تحویل توزیع شوند';
+      errors.distribution = '?? ?? ?? ? ?? ?? ? ??? ??? ??? ??';
     }
 
     return {
@@ -184,4 +184,5 @@ export const useDeliverySchedule = (products: ContractProduct[]) => {
     isProductFullyDistributed
   };
 };
+
 

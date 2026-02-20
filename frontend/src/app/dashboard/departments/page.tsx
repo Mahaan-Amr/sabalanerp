@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -54,7 +54,7 @@ export default function DepartmentsManagementPage() {
       }
     } catch (error: any) {
       console.error('Error fetching departments:', error);
-      setError(error.response?.data?.error || 'خطا در ارتباط با سرور');
+      setError(error.response?.data?.error || '?? ? ??? ? ??');
     } finally {
       setLoading(false);
     }
@@ -70,11 +70,11 @@ export default function DepartmentsManagementPage() {
     
     try {
       await departmentsAPI.deleteDepartment(departmentToDelete.id);
-      alert('بخش با موفقیت حذف شد');
+      alert('?? ? ??? ?? ?');
       fetchDepartments();
     } catch (error: any) {
       console.error('Error deleting department:', error);
-      alert(error.response?.data?.error || 'خطا در حذف بخش');
+      alert(error.response?.data?.error || '?? ? ?? ??');
     } finally {
       setShowDeleteModal(false);
       setDepartmentToDelete(null);
@@ -106,13 +106,13 @@ export default function DepartmentsManagementPage() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
         <div className="glass-liquid-card p-8 text-center">
-          <h2 className="text-xl font-bold text-primary mb-2">خطا در بارگذاری</h2>
+          <h2 className="text-xl font-bold text-primary mb-2">?? ? ??</h2>
           <p className="text-secondary mb-4">{error}</p>
           <button 
             onClick={fetchDepartments}
             className="glass-liquid-btn-primary px-6 py-2"
           >
-            تلاش مجدد
+            ?? ??
           </button>
         </div>
       </div>
@@ -127,8 +127,8 @@ export default function DepartmentsManagementPage() {
           <div className="flex items-center space-x-4 space-x-reverse">
             <FaBuilding className="h-8 w-8 text-teal-500" />
             <div>
-              <h1 className="text-2xl font-bold text-primary">مدیریت بخش‌ها</h1>
-              <p className="text-secondary">مدیریت بخش‌ها و واحدهای سازمانی</p>
+              <h1 className="text-2xl font-bold text-primary">??? ???</h1>
+              <p className="text-secondary">??? ??? ? ?? ??</p>
             </div>
           </div>
           <div className="flex items-center space-x-4 space-x-reverse">
@@ -137,14 +137,14 @@ export default function DepartmentsManagementPage() {
               className="glass-liquid-btn-primary px-6 py-2 flex items-center space-x-2 space-x-reverse"
             >
               <FaPlus />
-              <span>بخش جدید</span>
+              <span>?? ??</span>
             </Link>
             <Link
               href="/dashboard/users"
               className="glass-liquid-btn px-6 py-2 flex items-center space-x-2 space-x-reverse"
             >
               <FaUsers />
-              <span>مدیریت کاربران</span>
+              <span>??? ??</span>
             </Link>
           </div>
         </div>
@@ -155,7 +155,7 @@ export default function DepartmentsManagementPage() {
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-secondary">کل بخش‌ها</p>
+              <p className="text-sm text-secondary">? ???</p>
               <p className="text-2xl font-bold text-primary">{departments.length}</p>
             </div>
             <FaBuilding className="h-8 w-8 text-blue-500" />
@@ -165,7 +165,7 @@ export default function DepartmentsManagementPage() {
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-secondary">بخش‌های فعال</p>
+              <p className="text-sm text-secondary">?? ??</p>
               <p className="text-2xl font-bold text-primary">
                 {departments.filter(d => d.isActive).length}
               </p>
@@ -177,7 +177,7 @@ export default function DepartmentsManagementPage() {
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-secondary">بخش‌های غیرفعال</p>
+              <p className="text-sm text-secondary">?? ??</p>
               <p className="text-2xl font-bold text-primary">
                 {departments.filter(d => !d.isActive).length}
               </p>
@@ -189,7 +189,7 @@ export default function DepartmentsManagementPage() {
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-secondary">کل کارمندان</p>
+              <p className="text-sm text-secondary">? ??</p>
               <p className="text-2xl font-bold text-primary">
                 {departments.reduce((sum, d) => sum + (d._count?.users || 0), 0)}
               </p>
@@ -203,29 +203,29 @@ export default function DepartmentsManagementPage() {
       <div className="glass-liquid-card p-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-sm text-secondary mb-2">جستجو</label>
+            <label className="block text-sm text-secondary mb-2">???</label>
             <div className="relative">
               <FaSearch className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="جستجو در نام یا توضیحات..."
+                placeholder="??? ? ?? ? ??..."
                 className="glass-liquid-input w-full pr-10"
               />
             </div>
           </div>
           
           <div>
-            <label className="block text-sm text-secondary mb-2">وضعیت</label>
+            <label className="block text-sm text-secondary mb-2">???</label>
             <select
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
               className="glass-liquid-input w-full"
             >
-              <option value="">همه وضعیت‌ها</option>
-              <option value="active">فعال</option>
-              <option value="inactive">غیرفعال</option>
+              <option value="">?? ??</option>
+              <option value="active">??</option>
+              <option value="inactive">??</option>
             </select>
           </div>
           
@@ -238,7 +238,7 @@ export default function DepartmentsManagementPage() {
               className="glass-liquid-btn w-full px-4 py-2 flex items-center justify-center space-x-2 space-x-reverse"
             >
               <FaFilter />
-              <span>پاک کردن فیلترها</span>
+              <span>?? ?? ??</span>
             </button>
           </div>
         </div>
@@ -247,9 +247,9 @@ export default function DepartmentsManagementPage() {
       {/* Departments Table */}
       <div className="glass-liquid-card p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-primary">لیست بخش‌ها</h2>
+          <h2 className="text-xl font-bold text-primary">?? ???</h2>
           <div className="flex items-center space-x-2 space-x-reverse">
-            <button className="glass-liquid-btn p-2" title="صادرات">
+            <button className="glass-liquid-btn p-2" title="???">
               <FaDownload />
             </button>
           </div>
@@ -259,13 +259,13 @@ export default function DepartmentsManagementPage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-700">
-                <th className="text-right py-3 px-4 text-secondary">نام بخش</th>
-                <th className="text-right py-3 px-4 text-secondary">نام فارسی</th>
-                <th className="text-right py-3 px-4 text-secondary">توضیحات</th>
-                <th className="text-right py-3 px-4 text-secondary">تعداد کارمندان</th>
-                <th className="text-right py-3 px-4 text-secondary">وضعیت</th>
-                <th className="text-right py-3 px-4 text-secondary">تاریخ ایجاد</th>
-                <th className="text-right py-3 px-4 text-secondary">عملیات</th>
+                <th className="text-right py-3 px-4 text-secondary">?? ??</th>
+                <th className="text-right py-3 px-4 text-secondary">?? ???</th>
+                <th className="text-right py-3 px-4 text-secondary">??</th>
+                <th className="text-right py-3 px-4 text-secondary">??? ??</th>
+                <th className="text-right py-3 px-4 text-secondary">???</th>
+                <th className="text-right py-3 px-4 text-secondary">??? ???</th>
+                <th className="text-right py-3 px-4 text-secondary">???</th>
               </tr>
             </thead>
             <tbody>
@@ -298,7 +298,7 @@ export default function DepartmentsManagementPage() {
                         ? 'text-green-500 bg-green-500/20' 
                         : 'text-red-500 bg-red-500/20'
                     }`}>
-                      {department.isActive ? 'فعال' : 'غیرفعال'}
+                      {department.isActive ? '??' : '??'}
                     </span>
                   </td>
                   <td className="py-3 px-4 text-secondary text-sm">
@@ -309,21 +309,21 @@ export default function DepartmentsManagementPage() {
                       <Link
                         href={`/dashboard/departments/${department.id}`}
                         className="glass-liquid-btn p-2"
-                        title="مشاهده جزئیات"
+                        title="??? ???"
                       >
                         <FaEye />
                       </Link>
                       <Link
                         href={`/dashboard/departments/${department.id}/edit`}
                         className="glass-liquid-btn p-2"
-                        title="ویرایش"
+                        title="???"
                       >
                         <FaEdit />
                       </Link>
                       <button
                         onClick={() => handleDeleteDepartment(department)}
                         className="glass-liquid-btn p-2 text-red-400"
-                        title="حذف"
+                        title="??"
                       >
                         <FaTrash />
                       </button>
@@ -337,7 +337,7 @@ export default function DepartmentsManagementPage() {
         
         {filteredDepartments.length === 0 && (
           <div className="text-center py-8">
-            <p className="text-secondary">هیچ بخشی یافت نشد</p>
+            <p className="text-secondary">?? ?? ?? ??</p>
           </div>
         )}
       </div>
@@ -347,7 +347,7 @@ export default function DepartmentsManagementPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="glass-liquid-card p-6 w-full max-w-md">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-primary">تایید حذف</h2>
+              <h2 className="text-xl font-bold text-primary">??? ??</h2>
               <button
                 onClick={() => setShowDeleteModal(false)}
                 className="glass-liquid-btn p-2"
@@ -356,17 +356,17 @@ export default function DepartmentsManagementPage() {
               </button>
             </div>
             <p className="text-secondary mb-6">
-              آیا مطمئن هستید که می‌خواهید بخش{' '}
+              ?? ??? ??? ? ??? ??{' '}
               <span className="font-medium text-primary">
                 {departmentToDelete.namePersian}
               </span>{' '}
-              را حذف کنید؟ این عمل قابل بازگشت نیست.
+              ? ?? ??? ?? ?? ?? ??? ??.
             </p>
             {departmentToDelete._count?.users && departmentToDelete._count.users > 0 && (
               <div className="bg-yellow-500/20 border border-yellow-500/30 rounded-lg p-4 mb-6">
                 <p className="text-yellow-400 text-sm">
-                  ⚠️ این بخش دارای {departmentToDelete._count.users} کارمند است. 
-                  قبل از حذف، کارمندان را به بخش دیگری منتقل کنید.
+                  ? ?? ?? ??? {departmentToDelete._count.users} ??? ??. 
+                  ?? ? ?? ?? ? ? ?? ??? ??? ??.
                 </p>
               </div>
             )}
@@ -376,13 +376,13 @@ export default function DepartmentsManagementPage() {
                 disabled={!!(departmentToDelete._count?.users && departmentToDelete._count.users > 0)}
                 className="glass-liquid-btn-primary px-6 py-2 flex-1 disabled:opacity-50"
               >
-                حذف
+                ??
               </button>
               <button
                 onClick={() => setShowDeleteModal(false)}
                 className="glass-liquid-btn px-6 py-2 flex-1"
               >
-                لغو
+                ??
               </button>
             </div>
           </div>
@@ -391,3 +391,4 @@ export default function DepartmentsManagementPage() {
     </div>
   );
 }
+

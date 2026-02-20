@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
@@ -130,6 +130,7 @@ export default function CustomerDetailPage() {
     position: '',
     isPrimary: false
   });
+  const addProjectModalOpenedRef = useRef(false);
 
   useEffect(() => {
     if (params.id) {
@@ -197,6 +198,30 @@ export default function CustomerDetailPage() {
     });
     setShowAddProjectModal(true);
   };
+
+  // When returning from contract wizard to add a project, open the add-project modal immediately (once)
+  useEffect(() => {
+    if (!customer || addProjectModalOpenedRef.current) return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const returnTo = urlParams.get('returnTo');
+    const step = urlParams.get('step');
+    const action = urlParams.get('action');
+    if (returnTo === 'contract' && step && action === 'addProject') {
+      addProjectModalOpenedRef.current = true;
+      setActiveTab('projects');
+      setEditingProject(null);
+      setProjectFormData({
+        address: '',
+        city: '',
+        postalCode: '',
+        projectName: '',
+        projectType: '',
+        projectManagerName: '',
+        projectManagerNumber: ''
+      });
+      setShowAddProjectModal(true);
+    }
+  }, [customer?.id]);
 
   const handleEditProject = (project: any) => {
     setEditingProject(project);
@@ -971,17 +996,17 @@ export default function CustomerDetailPage() {
                 <select
                   value={projectFormData.projectType}
                   onChange={(e) => setProjectFormData(prev => ({ ...prev, projectType: e.target.value }))}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  className="w-full px-4 py-3 min-h-[48px] bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
                 >
-                  <option value="">انتخاب نوع پروژه</option>
-                  <option value="مسکونی">مسکونی</option>
-                  <option value="تجاری">تجاری</option>
-                  <option value="پزشکی">پزشکی</option>
-                  <option value="اداری">اداری</option>
-                  <option value="صنعتی">صنعتی</option>
-                  <option value="آموزشی">آموزشی</option>
-                  <option value="تفریحی">تفریحی</option>
-                  <option value="سایر">سایر</option>
+                  <option value="" className="bg-gray-800 text-white">انتخاب نوع پروژه</option>
+                  <option value="مسکونی" className="bg-gray-800 text-white">مسکونی</option>
+                  <option value="تجاری" className="bg-gray-800 text-white">تجاری</option>
+                  <option value="پزشکی" className="bg-gray-800 text-white">پزشکی</option>
+                  <option value="اداری" className="bg-gray-800 text-white">اداری</option>
+                  <option value="صنعتی" className="bg-gray-800 text-white">صنعتی</option>
+                  <option value="آموزشی" className="bg-gray-800 text-white">آموزشی</option>
+                  <option value="تفریحی" className="bg-gray-800 text-white">تفریحی</option>
+                  <option value="سایر" className="bg-gray-800 text-white">سایر</option>
                 </select>
               </div>
 

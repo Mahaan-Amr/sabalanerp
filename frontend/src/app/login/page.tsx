@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import Link from 'next/link';
@@ -37,13 +37,13 @@ export default function LoginPage() {
     const newErrors: Record<string, string> = {};
 
     if (!formData.email.trim()) {
-      newErrors.email = 'ایمیل الزامی است';
+      newErrors.email = '??? ??? ??';
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'فرمت ایمیل صحیح نیست';
+      newErrors.email = '?? ??? ?? ??';
     }
 
     if (!formData.password.trim()) {
-      newErrors.password = 'رمز عبور الزامی است';
+      newErrors.password = '?? ?? ??? ??';
     }
 
     setErrors(newErrors);
@@ -75,7 +75,7 @@ export default function LoginPage() {
           router.push('/dashboard');
         }
       } else {
-        setErrors({ general: data.error || 'خطا در ورود' });
+        setErrors({ general: data.error || '?? ? ??' });
       }
     } catch (error: any) {
       console.error('Login error:', error);
@@ -86,9 +86,9 @@ export default function LoginPage() {
       if (error.response?.data?.error) {
         setErrors({ general: error.response.data.error });
       } else if (error.code === 'ECONNREFUSED' || error.message.includes('Network Error')) {
-        setErrors({ general: 'سرور در دسترس نیست. لطفاً اتصال اینترنت خود را بررسی کنید.' });
+        setErrors({ general: '?? ? ??? ??. ??? ??? ?? ?? ? ??? ??.' });
       } else {
-        setErrors({ general: 'خطا در ارتباط با سرور' });
+        setErrors({ general: '?? ? ??? ? ??' });
       }
     } finally {
       setLoading(false);
@@ -105,8 +105,8 @@ export default function LoginPage() {
               <FaUser className="h-12 w-12 text-teal-400" />
             </div>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">ورود به سیستم</h1>
-          <p className="text-gray-300">به پنل مدیریت سبلان ERP خوش آمدید</p>
+          <h1 className="text-3xl font-bold text-white mb-2">?? ? ???</h1>
+          <p className="text-gray-300">? ?? ??? ??? ERP ?? ???</p>
         </div>
 
         {/* Login Form */}
@@ -122,7 +122,7 @@ export default function LoginPage() {
             {/* Email Field */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
-                ایمیل
+                ???
               </label>
               <div className="relative">
                 <FaUser className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -132,7 +132,7 @@ export default function LoginPage() {
                   value={formData.email}
                   onChange={handleInputChange}
                   className={`glass-liquid-input w-full pr-10 ${errors.email ? 'border-red-500' : ''}`}
-                  placeholder="ایمیل خود را وارد کنید"
+                  placeholder="??? ?? ? ?? ??"
                   dir="ltr"
                 />
               </div>
@@ -142,7 +142,7 @@ export default function LoginPage() {
             {/* Password Field */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
-                رمز عبور
+                ?? ??
               </label>
               <div className="relative">
                 <FaLock className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -152,7 +152,7 @@ export default function LoginPage() {
                   value={formData.password}
                   onChange={handleInputChange}
                   className={`glass-liquid-input w-full pr-10 pl-10 ${errors.password ? 'border-red-500' : ''}`}
-                  placeholder="رمز عبور خود را وارد کنید"
+                  placeholder="?? ?? ?? ? ?? ??"
                 />
                 <button
                   type="button"
@@ -172,10 +172,10 @@ export default function LoginPage() {
                   type="checkbox"
                   className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
                 />
-                <span className="mr-2 text-sm text-gray-300">مرا به خاطر بسپار</span>
+                <span className="mr-2 text-sm text-gray-300">?? ? ?? ???</span>
               </label>
               <Link href="/forgot-password" className="text-sm text-teal-400 hover:text-teal-300">
-                فراموشی رمز عبور؟
+                ?? ?? ???
               </Link>
             </div>
 
@@ -189,7 +189,7 @@ export default function LoginPage() {
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
               ) : (
                 <>
-                  <span>ورود</span>
+                  <span>??</span>
                   <FaArrowRight />
                 </>
               )}
@@ -200,9 +200,9 @@ export default function LoginPage() {
         {/* Register Link */}
         <div className="text-center mt-6">
           <p className="text-gray-300">
-            حساب کاربری ندارید؟{' '}
+            ?? ??? ??{' '}
             <Link href="/register" className="text-teal-400 hover:text-teal-300 font-medium">
-              ثبت نام کنید
+              ?? ?? ??
             </Link>
           </p>
         </div>
@@ -215,3 +215,4 @@ export default function LoginPage() {
     </div>
   );
 }
+

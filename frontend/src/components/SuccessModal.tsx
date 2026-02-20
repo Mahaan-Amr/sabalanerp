@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React from 'react';
 import { FaCheck, FaTimes, FaCheckCircle } from 'react-icons/fa';
@@ -17,9 +17,9 @@ interface SuccessModalProps {
 export default function SuccessModal({
   isOpen,
   onClose,
-  title = 'موفقیت',
+  title = '???',
   message,
-  buttonText = 'باشه',
+  buttonText = '??',
   showIcon = true,
   autoClose = false,
   autoCloseDelay = 3000
@@ -80,7 +80,7 @@ export default function SuccessModal({
         {autoClose && (
           <div className="mt-4 text-center">
             <div className="text-xs text-slate-500 dark:text-slate-400">
-              این پیام در {autoCloseDelay / 1000} ثانیه بسته می‌شود
+              ?? ?? ? {autoCloseDelay / 1000} ??? ?? ???
             </div>
           </div>
         )}
@@ -88,3 +88,4 @@ export default function SuccessModal({
     </div>
   );
 }
+

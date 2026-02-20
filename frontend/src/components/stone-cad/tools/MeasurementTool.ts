@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Measurement Tool
  * Allows users to measure distances on the canvas
  */
@@ -12,7 +12,7 @@ import { Measurement } from '../types/CADTypes';
 export class MeasurementTool extends BaseTool {
   name = 'measurement';
   icon = 'FaRuler';
-  displayName = 'اندازه‌گیری';
+  displayName = '??';
   
   private isMeasuring = false;
   private startPoint: { x: number; y: number } | null = null;
@@ -157,4 +157,5 @@ export class MeasurementTool extends BaseTool {
     return 'crosshair';
   }
 }
+
 

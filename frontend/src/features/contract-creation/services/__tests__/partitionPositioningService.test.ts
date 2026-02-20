@@ -1,4 +1,4 @@
-import { calculatePartitionPositions, validatePartitionFit } from '../partitionPositioningService';
+﻿import { calculatePartitionPositions, validatePartitionFit } from '../partitionPositioningService';
 import type { StonePartition } from '../../types/contract.types';
 
 describe('partitionPositioningService', () => {
@@ -74,8 +74,8 @@ describe('partitionPositioningService', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].position).toBeUndefined();
-      expect(result[0].validationError).toContain('عرض پارتیشن');
-      expect(result[0].validationError).toContain('بیش از');
+      expect(result[0].validationError).toContain('?? ??');
+      expect(result[0].validationError).toContain('?? ?');
     });
 
     it('should detect when partition length exceeds available length', () => {
@@ -87,8 +87,8 @@ describe('partitionPositioningService', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].position).toBeUndefined();
-      expect(result[0].validationError).toContain('طول پارتیشن');
-      expect(result[0].validationError).toContain('بیش از');
+      expect(result[0].validationError).toContain('?? ??');
+      expect(result[0].validationError).toContain('?? ?');
     });
 
     it('should detect when partition cannot fit in remaining space', () => {
@@ -211,7 +211,7 @@ describe('partitionPositioningService', () => {
       const result = validatePartitionFit(partition, 100, 5);
 
       expect(result.isValid).toBe(false);
-      expect(result.error).toBe('ابعاد پارتیشن نامعتبر است');
+      expect(result.error).toBe('??? ?? ?? ??');
     });
 
     it('should reject partition with excessive width', () => {
@@ -225,8 +225,8 @@ describe('partitionPositioningService', () => {
       const result = validatePartitionFit(partition, 100, 5);
 
       expect(result.isValid).toBe(false);
-      expect(result.error).toContain('عرض پارتیشن');
-      expect(result.error).toContain('بیش از عرض موجود');
+      expect(result.error).toContain('?? ??');
+      expect(result.error).toContain('?? ? ?? ???');
     });
 
     it('should reject partition with excessive length', () => {
@@ -240,8 +240,8 @@ describe('partitionPositioningService', () => {
       const result = validatePartitionFit(partition, 100, 5);
 
       expect(result.isValid).toBe(false);
-      expect(result.error).toContain('طول پارتیشن');
-      expect(result.error).toContain('بیش از طول موجود');
+      expect(result.error).toContain('?? ??');
+      expect(result.error).toContain('?? ? ?? ???');
     });
 
     it('should validate partition at exact bounds', () => {
@@ -259,3 +259,4 @@ describe('partitionPositioningService', () => {
     });
   });
 });
+

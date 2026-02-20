@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React from 'react';
 import { 
@@ -17,8 +17,8 @@ export default function SalesReportsPage() {
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">گزارشات فروش</h1>
-          <p className="text-gray-300">مشاهده آمار و گزارشات فروش</p>
+          <h1 className="text-3xl font-bold text-white mb-2">گزارش فروش</h1>
+          <p className="text-gray-300">نمای کلی عملکرد فروش</p>
         </div>
 
         {/* Report Cards */}
@@ -26,8 +26,8 @@ export default function SalesReportsPage() {
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-400 text-sm">کل فروش ماه</p>
-                <p className="text-2xl font-bold text-white">0 ریال</p>
+                <p className="text-gray-400 text-sm">کل فروش</p>
+                <p className="text-2xl font-bold text-white">0 تومان</p>
               </div>
               <div className="glass-liquid-card p-3">
                 <FaDollarSign className="h-6 w-6 text-green-400" />
@@ -38,7 +38,7 @@ export default function SalesReportsPage() {
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-400 text-sm">قراردادهای امضا شده</p>
+                <p className="text-gray-400 text-sm">تعداد قراردادها</p>
                 <p className="text-2xl font-bold text-white">0</p>
               </div>
               <div className="glass-liquid-card p-3">
@@ -50,7 +50,7 @@ export default function SalesReportsPage() {
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-400 text-sm">مشتریان جدید</p>
+                <p className="text-gray-400 text-sm">مشتریان</p>
                 <p className="text-2xl font-bold text-white">0</p>
               </div>
               <div className="glass-liquid-card p-3">
@@ -62,7 +62,7 @@ export default function SalesReportsPage() {
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-400 text-sm">نرخ تکمیل</p>
+                <p className="text-gray-400 text-sm">نرخ تبدیل</p>
                 <p className="text-2xl font-bold text-white">0%</p>
               </div>
               <div className="glass-liquid-card p-3">
@@ -79,7 +79,7 @@ export default function SalesReportsPage() {
             <h2 className="text-xl font-semibold text-white mb-4">عملکرد فروش</h2>
             <div className="text-center py-12">
               <FaChartLine className="mx-auto text-4xl text-gray-400 mb-4" />
-              <p className="text-gray-400">گزارش عملکرد فروش در حال توسعه است</p>
+              <p className="text-gray-400">نمودار عملکرد فروش به‌زودی اضافه می‌شود</p>
             </div>
           </div>
 
@@ -88,7 +88,7 @@ export default function SalesReportsPage() {
             <h2 className="text-xl font-semibold text-white mb-4">وضعیت قراردادها</h2>
             <div className="text-center py-12">
               <FaFileContract className="mx-auto text-4xl text-gray-400 mb-4" />
-              <p className="text-gray-400">گزارش وضعیت قراردادها در حال توسعه است</p>
+              <p className="text-gray-400">نمودار وضعیت قراردادها به‌زودی اضافه می‌شود</p>
             </div>
           </div>
 
@@ -97,17 +97,17 @@ export default function SalesReportsPage() {
             <h2 className="text-xl font-semibold text-white mb-4">تحلیل مشتریان</h2>
             <div className="text-center py-12">
               <FaUsers className="mx-auto text-4xl text-gray-400 mb-4" />
-              <p className="text-gray-400">گزارش تحلیل مشتریان در حال توسعه است</p>
+              <p className="text-gray-400">نمودار تحلیل مشتریان به‌زودی اضافه می‌شود</p>
             </div>
           </div>
 
           {/* Export Options */}
           <div className="glass-liquid-card p-6">
-            <h2 className="text-xl font-semibold text-white mb-4">گزینه‌های خروجی</h2>
+            <h2 className="text-xl font-semibold text-white mb-4">خروجی گزارش</h2>
             <div className="space-y-4">
               <button className="w-full glass-liquid-btn p-4 flex items-center gap-3 hover:bg-white/10 transition-all duration-200">
                 <FaDownload className="h-5 w-5" />
-                <span>دانلود گزارش Excel</span>
+                <span>دانلود فایل Excel</span>
               </button>
               <button className="w-full glass-liquid-btn p-4 flex items-center gap-3 hover:bg-white/10 transition-all duration-200">
                 <FaPrint className="h-5 w-5" />
@@ -120,3 +120,4 @@ export default function SalesReportsPage() {
     </div>
   );
 }
+

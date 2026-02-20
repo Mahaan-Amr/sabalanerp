@@ -6,11 +6,12 @@ import bcrypt from 'bcryptjs';
 
 const router = express.Router();
 const prisma = new PrismaClient();
+const CUID_REGEX = /^c[a-z0-9]{24}$/;
 
 // @desc    Get all users
 // @route   GET /api/users
 // @access  Private/Admin
-router.get('/', protect, authorize('ADMIN'), async (req, res) => {
+router.get('/', protect, authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
@@ -60,16 +61,20 @@ router.get('/', protect, authorize('ADMIN'), async (req, res) => {
 // @desc    Create new user (Admin only)
 // @route   POST /api/users
 // @access  Private/Admin
-router.post('/', protect, authorize('ADMIN'), [
+router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
   body('email').isEmail().normalizeEmail(),
   body('username').isLength({ min: 3 }).trim().escape(),
   body('password').isLength({ min: 6 }),
   body('firstName').trim().escape(),
   body('lastName').trim().escape(),
-  body('role').optional().isIn(['USER', 'MODERATOR', 'ADMIN']),
-  body('departmentId').optional().isUUID(),
+  body('role').optional().isIn(['USER', 'MODERATOR', 'ADMIN', 'SALES', 'MANAGER']),
+  body('departmentId')
+    .optional({ values: 'falsy' })
+    .isString()
+    .custom((value) => CUID_REGEX.test(value))
+    .withMessage('Invalid department ID'),
   body('isActive').optional().isBoolean(),
-], async (req: Request, res: Response) => {
+], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -90,6 +95,27 @@ router.post('/', protect, authorize('ADMIN'), [
       departmentId,
       isActive = true
     } = req.body;
+
+    if (departmentId) {
+      const department = await prisma.department.findUnique({
+        where: { id: departmentId },
+        select: { id: true, isActive: true }
+      });
+
+      if (!department || !department.isActive) {
+        return res.status(400).json({
+          success: false,
+          error: 'Department not found or inactive'
+        });
+      }
+    }
+
+    if (req.user?.role === 'MANAGER' && role === 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot create admin users'
+      });
+    }
 
     // Check if user already exists
     const existingUser = await prisma.user.findFirst({
@@ -185,8 +211,8 @@ router.get('/:id', protect, async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Users can only view their own profile unless they're admin
-    if (req.user!.id !== user.id && req.user!.role !== 'ADMIN') {
+    // Users can only view their own profile unless they're admin or manager
+    if (req.user!.id !== user.id && !['ADMIN', 'MANAGER'].includes(req.user!.role)) {
       return res.status(403).json({
         success: false,
         error: 'Not authorized to view this user'
@@ -209,10 +235,17 @@ router.get('/:id', protect, async (req: AuthRequest, res: Response) => {
 // @desc    Update user
 // @route   PUT /api/users/:id
 // @access  Private
-router.put('/:id', protect, [
+router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
   body('firstName').optional().trim().escape(),
   body('lastName').optional().trim().escape(),
   body('email').optional().isEmail().normalizeEmail(),
+  body('role').optional().isIn(['USER', 'MODERATOR', 'ADMIN', 'SALES', 'MANAGER']),
+  body('departmentId')
+    .optional({ values: 'falsy' })
+    .isString()
+    .custom((value) => CUID_REGEX.test(value))
+    .withMessage('Invalid department ID'),
+  body('isActive').optional().isBoolean(),
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -224,7 +257,21 @@ router.put('/:id', protect, [
       });
     }
 
-    const { firstName, lastName, email } = req.body;
+    const { firstName, lastName, email, role, departmentId, isActive } = req.body;
+
+    if (departmentId) {
+      const department = await prisma.department.findUnique({
+        where: { id: departmentId },
+        select: { id: true, isActive: true }
+      });
+
+      if (!department || !department.isActive) {
+        return res.status(400).json({
+          success: false,
+          error: 'Department not found or inactive'
+        });
+      }
+    }
 
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
@@ -238,11 +285,25 @@ router.put('/:id', protect, [
       });
     }
 
-    // Users can only update their own profile unless they're admin
-    if (req.user!.id !== existingUser.id && req.user!.role !== 'ADMIN') {
+    // Users can only update their own profile unless they're admin or manager
+    if (req.user!.id !== existingUser.id && !['ADMIN', 'MANAGER'].includes(req.user!.role)) {
       return res.status(403).json({
         success: false,
         error: 'Not authorized to update this user'
+      });
+    }
+
+    if (req.user!.role === 'MANAGER' && existingUser.role === 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot update admin users'
+      });
+    }
+
+    if (req.user!.role === 'MANAGER' && role === 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot assign admin role'
       });
     }
 
@@ -266,6 +327,9 @@ router.put('/:id', protect, [
         ...(firstName && { firstName }),
         ...(lastName && { lastName }),
         ...(email && { email }),
+        ...(role && { role }),
+        ...(departmentId !== undefined && { departmentId: departmentId || null }),
+        ...(isActive !== undefined && { isActive }),
       },
       select: {
         id: true,
@@ -297,7 +361,7 @@ router.put('/:id', protect, [
 // @desc    Delete user
 // @route   DELETE /api/users/:id
 // @access  Private/Admin
-router.delete('/:id', protect, authorize('ADMIN'), async (req: Request, res: Response) => {
+router.delete('/:id', protect, authorize('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.params.id }
@@ -307,6 +371,13 @@ router.delete('/:id', protect, authorize('ADMIN'), async (req: Request, res: Res
       return res.status(404).json({
         success: false,
         error: 'User not found'
+      });
+    }
+
+    if ((req as AuthRequest).user?.role === 'MANAGER' && user.role === 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot delete admin users'
       });
     }
 

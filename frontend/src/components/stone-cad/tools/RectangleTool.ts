@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Rectangle Drawing Tool
  * Allows users to draw rectangles on the canvas
  */
@@ -12,7 +12,7 @@ import { CADShape } from '../types/CADTypes';
 export class RectangleTool extends BaseTool {
   name = 'rectangle';
   icon = 'FaSquare';
-  displayName = 'مستطیل';
+  displayName = '???';
   
   private isDrawing = false;
   private startPoint: { x: number; y: number } | null = null;
@@ -167,4 +167,5 @@ export class RectangleTool extends BaseTool {
     return 'crosshair';
   }
 }
+
 

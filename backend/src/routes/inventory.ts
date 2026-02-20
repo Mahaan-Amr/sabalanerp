@@ -3,7 +3,7 @@ import { body, query, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
-import { requireFeatureAccess, FEATURES } from '../middleware/feature';
+import { requireFeatureAccess, FEATURES, FEATURE_PERMISSIONS } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -13,7 +13,7 @@ const prisma = new PrismaClient();
 // @desc    Get all cut types
 // @route   GET /api/inventory/cut-types
 // @access  Private/Inventory Workspace
-router.get('/cut-types', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), [
+router.get('/cut-types', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.INVENTORY_CUT_TYPES_VIEW, FEATURE_PERMISSIONS.VIEW), [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
   query('search').optional().isString().withMessage('Search must be a string'),
@@ -74,7 +74,7 @@ router.get('/cut-types', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, W
 // @desc    Create cut type
 // @route   POST /api/inventory/cut-types
 // @access  Private/Inventory Workspace
-router.post('/cut-types', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.post('/cut-types', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_CUT_TYPES_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('code').notEmpty().withMessage('Code is required'),
   body('namePersian').notEmpty().withMessage('Persian name is required'),
   body('name').optional().isString(),
@@ -116,7 +116,7 @@ router.post('/cut-types', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, 
 // @desc    Update cut type
 // @route   PUT /api/inventory/cut-types/:id
 // @access  Private/Inventory Workspace
-router.put('/cut-types/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.put('/cut-types/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_CUT_TYPES_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('code').optional().isString(),
   body('name').optional().isString(),
   body('namePersian').optional().isString(),
@@ -161,7 +161,7 @@ router.put('/cut-types/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTOR
 // @desc    Delete cut type
 // @route   DELETE /api/inventory/cut-types/:id
 // @access  Private/Inventory Workspace
-router.delete('/cut-types/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), async (req: any, res: Response) => {
+router.delete('/cut-types/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_CUT_TYPES_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -192,7 +192,7 @@ router.delete('/cut-types/:id', protect, requireWorkspaceAccess(WORKSPACES.INVEN
 // @desc    Get all stone materials
 // @route   GET /api/inventory/stone-materials
 // @access  Private/Inventory Workspace
-router.get('/stone-materials', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), [
+router.get('/stone-materials', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.INVENTORY_STONE_MATERIALS_VIEW, FEATURE_PERMISSIONS.VIEW), [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
   query('search').optional().isString().withMessage('Search must be a string'),
@@ -253,7 +253,7 @@ router.get('/stone-materials', protect, requireWorkspaceAccess(WORKSPACES.INVENT
 // @desc    Create stone material
 // @route   POST /api/inventory/stone-materials
 // @access  Private/Inventory Workspace
-router.post('/stone-materials', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.post('/stone-materials', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_STONE_MATERIALS_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('code').notEmpty().withMessage('Code is required'),
   body('namePersian').notEmpty().withMessage('Persian name is required'),
   body('name').optional().isString(),
@@ -295,7 +295,7 @@ router.post('/stone-materials', protect, requireWorkspaceAccess(WORKSPACES.INVEN
 // @desc    Update stone material
 // @route   PUT /api/inventory/stone-materials/:id
 // @access  Private/Inventory Workspace
-router.put('/stone-materials/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.put('/stone-materials/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_STONE_MATERIALS_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('code').optional().isString(),
   body('name').optional().isString(),
   body('namePersian').optional().isString(),
@@ -340,7 +340,7 @@ router.put('/stone-materials/:id', protect, requireWorkspaceAccess(WORKSPACES.IN
 // @desc    Delete stone material
 // @route   DELETE /api/inventory/stone-materials/:id
 // @access  Private/Inventory Workspace
-router.delete('/stone-materials/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), async (req: any, res: Response) => {
+router.delete('/stone-materials/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_STONE_MATERIALS_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -371,7 +371,7 @@ router.delete('/stone-materials/:id', protect, requireWorkspaceAccess(WORKSPACES
 // @desc    Get all cut widths
 // @route   GET /api/inventory/cut-widths
 // @access  Private/Inventory Workspace
-router.get('/cut-widths', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), [
+router.get('/cut-widths', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.INVENTORY_CUT_WIDTHS_VIEW, FEATURE_PERMISSIONS.VIEW), [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
   query('search').optional().isString().withMessage('Search must be a string'),
@@ -432,7 +432,7 @@ router.get('/cut-widths', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, 
 // @desc    Create cut width
 // @route   POST /api/inventory/cut-widths
 // @access  Private/Inventory Workspace
-router.post('/cut-widths', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.post('/cut-widths', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_CUT_WIDTHS_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('code').notEmpty().withMessage('Code is required'),
   body('namePersian').notEmpty().withMessage('Persian name is required'),
   body('value').isNumeric().withMessage('Value must be a number'),
@@ -478,7 +478,7 @@ router.post('/cut-widths', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY,
 // @desc    Update cut width
 // @route   PUT /api/inventory/cut-widths/:id
 // @access  Private/Inventory Workspace
-router.put('/cut-widths/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.put('/cut-widths/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_CUT_WIDTHS_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('code').optional().isString(),
   body('name').optional().isString(),
   body('namePersian').optional().isString(),
@@ -530,7 +530,7 @@ router.put('/cut-widths/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTO
 // @desc    Delete cut width
 // @route   DELETE /api/inventory/cut-widths/:id
 // @access  Private/Inventory Workspace
-router.delete('/cut-widths/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), async (req: any, res: Response) => {
+router.delete('/cut-widths/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_CUT_WIDTHS_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -561,7 +561,7 @@ router.delete('/cut-widths/:id', protect, requireWorkspaceAccess(WORKSPACES.INVE
 // @desc    Get all thicknesses
 // @route   GET /api/inventory/thicknesses
 // @access  Private/Inventory Workspace
-router.get('/thicknesses', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), [
+router.get('/thicknesses', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.INVENTORY_THICKNESSES_VIEW, FEATURE_PERMISSIONS.VIEW), [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
   query('search').optional().isString().withMessage('Search must be a string'),
@@ -622,7 +622,7 @@ router.get('/thicknesses', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY,
 // @desc    Create thickness
 // @route   POST /api/inventory/thicknesses
 // @access  Private/Inventory Workspace
-router.post('/thicknesses', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.post('/thicknesses', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_THICKNESSES_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('code').notEmpty().withMessage('Code is required'),
   body('namePersian').notEmpty().withMessage('Persian name is required'),
   body('value').isNumeric().withMessage('Value must be a number'),
@@ -668,7 +668,7 @@ router.post('/thicknesses', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY
 // @desc    Update thickness
 // @route   PUT /api/inventory/thicknesses/:id
 // @access  Private/Inventory Workspace
-router.put('/thicknesses/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.put('/thicknesses/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_THICKNESSES_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('code').optional().isString(),
   body('name').optional().isString(),
   body('namePersian').optional().isString(),
@@ -720,7 +720,7 @@ router.put('/thicknesses/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENT
 // @desc    Delete thickness
 // @route   DELETE /api/inventory/thicknesses/:id
 // @access  Private/Inventory Workspace
-router.delete('/thicknesses/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), async (req: any, res: Response) => {
+router.delete('/thicknesses/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_THICKNESSES_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -751,7 +751,7 @@ router.delete('/thicknesses/:id', protect, requireWorkspaceAccess(WORKSPACES.INV
 // @desc    Get all mines
 // @route   GET /api/inventory/mines
 // @access  Private/Inventory Workspace
-router.get('/mines', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), [
+router.get('/mines', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.INVENTORY_MINES_VIEW, FEATURE_PERMISSIONS.VIEW), [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
   query('search').optional().isString().withMessage('Search must be a string'),
@@ -812,7 +812,7 @@ router.get('/mines', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKS
 // @desc    Create mine
 // @route   POST /api/inventory/mines
 // @access  Private/Inventory Workspace
-router.post('/mines', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.post('/mines', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_MINES_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('code').notEmpty().withMessage('Code is required'),
   body('namePersian').notEmpty().withMessage('Persian name is required'),
   body('name').optional().isString(),
@@ -854,7 +854,7 @@ router.post('/mines', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORK
 // @desc    Update mine
 // @route   PUT /api/inventory/mines/:id
 // @access  Private/Inventory Workspace
-router.put('/mines/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.put('/mines/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_MINES_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('code').optional().isString(),
   body('name').optional().isString(),
   body('namePersian').optional().isString(),
@@ -899,7 +899,7 @@ router.put('/mines/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, W
 // @desc    Delete mine
 // @route   DELETE /api/inventory/mines/:id
 // @access  Private/Inventory Workspace
-router.delete('/mines/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), async (req: any, res: Response) => {
+router.delete('/mines/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_MINES_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -930,7 +930,7 @@ router.delete('/mines/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY
 // @desc    Get all finish types
 // @route   GET /api/inventory/finish-types
 // @access  Private/Inventory Workspace
-router.get('/finish-types', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), [
+router.get('/finish-types', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.INVENTORY_FINISH_TYPES_VIEW, FEATURE_PERMISSIONS.VIEW), [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
   query('search').optional().isString().withMessage('Search must be a string'),
@@ -991,7 +991,7 @@ router.get('/finish-types', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY
 // @desc    Create finish type
 // @route   POST /api/inventory/finish-types
 // @access  Private/Inventory Workspace
-router.post('/finish-types', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.post('/finish-types', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_FINISH_TYPES_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('code').notEmpty().withMessage('Code is required'),
   body('namePersian').notEmpty().withMessage('Persian name is required'),
   body('name').optional().isString(),
@@ -1033,7 +1033,7 @@ router.post('/finish-types', protect, requireWorkspaceAccess(WORKSPACES.INVENTOR
 // @desc    Update finish type
 // @route   PUT /api/inventory/finish-types/:id
 // @access  Private/Inventory Workspace
-router.put('/finish-types/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.put('/finish-types/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_FINISH_TYPES_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('code').optional().isString(),
   body('name').optional().isString(),
   body('namePersian').optional().isString(),
@@ -1078,7 +1078,7 @@ router.put('/finish-types/:id', protect, requireWorkspaceAccess(WORKSPACES.INVEN
 // @desc    Delete finish type
 // @route   DELETE /api/inventory/finish-types/:id
 // @access  Private/Inventory Workspace
-router.delete('/finish-types/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), async (req: any, res: Response) => {
+router.delete('/finish-types/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_FINISH_TYPES_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -1109,7 +1109,7 @@ router.delete('/finish-types/:id', protect, requireWorkspaceAccess(WORKSPACES.IN
 // @desc    Get all colors
 // @route   GET /api/inventory/colors
 // @access  Private/Inventory Workspace
-router.get('/colors', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), [
+router.get('/colors', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.INVENTORY_COLORS_VIEW, FEATURE_PERMISSIONS.VIEW), [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
   query('search').optional().isString().withMessage('Search must be a string'),
@@ -1170,7 +1170,7 @@ router.get('/colors', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORK
 // @desc    Create color
 // @route   POST /api/inventory/colors
 // @access  Private/Inventory Workspace
-router.post('/colors', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.post('/colors', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_COLORS_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('code').notEmpty().withMessage('Code is required'),
   body('namePersian').notEmpty().withMessage('Persian name is required'),
   body('name').optional().isString(),
@@ -1212,7 +1212,7 @@ router.post('/colors', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WOR
 // @desc    Update color
 // @route   PUT /api/inventory/colors/:id
 // @access  Private/Inventory Workspace
-router.put('/colors/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.put('/colors/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_COLORS_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('code').optional().isString(),
   body('name').optional().isString(),
   body('namePersian').optional().isString(),
@@ -1257,7 +1257,7 @@ router.put('/colors/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, 
 // @desc    Delete color
 // @route   DELETE /api/inventory/colors/:id
 // @access  Private/Inventory Workspace
-router.delete('/colors/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), async (req: any, res: Response) => {
+router.delete('/colors/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.INVENTORY_COLORS_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 

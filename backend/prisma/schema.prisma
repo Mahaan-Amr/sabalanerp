@@ -43,6 +43,9 @@ model User {
   workspacePermissions   WorkspacePermission[]
   grantedFeaturePermissions FeaturePermission[] @relation("FeaturePermissionGranter")
   featurePermissions     FeaturePermission[]
+  ownedCrmCustomers      CrmCustomer[]         @relation("CrmCustomerOwner")
+  createdCrmCustomers    CrmCustomer[]         @relation("CrmCustomerCreatedBy")
+  updatedCrmCustomers    CrmCustomer[]         @relation("CrmCustomerUpdatedBy")
 
   @@map("users")
 }
@@ -118,6 +121,8 @@ model Department {
   @@map("departments")
 }
 
+// Legacy customer model used by old contract endpoints.
+// New sales contract flow should use CrmCustomer.
 model Customer {
   id          String     @id @default(cuid())
   firstName   String
@@ -387,6 +392,8 @@ model SalesContract {
   deliveries           Delivery[]
   payments             Payment[]
   verificationCodes    ContractVerificationCode[]
+  publicConfirmations  ContractPublicConfirmation[]
+  confirmationAuditLogs ContractConfirmationAuditLog[]
   isSigned             Boolean                    @default(false)
   signedByPhoneNumber  String?
   verificationCodeId    String?                    @unique
@@ -403,6 +410,9 @@ model SalesContract {
 
 model CrmCustomer {
   id                       String             @id @default(cuid())
+  ownerUserId              String?
+  createdBy                String?
+  updatedBy                String?
   companyName              String?
   customerType             String             @default("Individual")
   industry                 String?
@@ -433,10 +443,15 @@ model CrmCustomer {
   contacts                 CrmContact[]       @relation("CustomerContacts")
   primaryContact           CrmContact?        @relation("CustomerPrimaryContact", fields: [primaryContactId], references: [id])
   leads                    CrmLead[]
+  ownerUser                User?              @relation("CrmCustomerOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  createdByUser            User?              @relation("CrmCustomerCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  updatedByUser            User?              @relation("CrmCustomerUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
   phoneNumbers             PhoneNumber[]
   projectAddresses         ProjectAddress[]
   salesContracts           SalesContract[]
 
+  @@index([ownerUserId])
+  @@index([createdBy])
   @@map("crm_customers")
 }
 
@@ -819,21 +834,23 @@ model StoneFinishing {
 }
 
 model Payment {
-  id            String               @id @default(cuid())
-  contractId    String
-  paymentMethod PaymentMethod
-  totalAmount   Decimal              @db.Decimal(15, 2)
-  currency      String               @default("ریال")
-  status        PaymentStatus        @default(PENDING)
-  paymentDate   DateTime?            // Date when payment was made (PAID) or due date (WILL_BE_PAID)
-  checkNumber   String?              // Check number for CHECK payment type
-  cashType      String?              // Cash payment type/category (e.g., فوری, عادی, پیش‌پرداخت, پس‌پرداخت)
-  nationalCode  String?
-  notes         String?
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
-  installments  PaymentInstallment[]
-  contract      SalesContract        @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  id              String               @id @default(cuid())
+  contractId      String
+  paymentMethod   PaymentMethod
+  totalAmount     Decimal              @db.Decimal(15, 2)
+  currency        String               @default("ریال")
+  status          PaymentStatus        @default(PENDING)
+  paymentDate     DateTime?            // نقدی: when customer will pay. چک: تاریخ سررسید (when check will pass)
+  checkNumber     String?              // چک: شماره چک
+  checkOwnerName  String?              // چک: نام صاحب چک
+  handoverDate    DateTime?            // چک: تاریخ تحویل چک (when customer gives/brings check)
+  cashType        String?              // نقدی: کارتخوان | شبا
+  nationalCode    String?
+  notes           String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  installments    PaymentInstallment[]
+  contract        SalesContract        @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
   @@map("payments")
 }
@@ -948,6 +965,55 @@ model ContractVerificationCode {
   contract      SalesContract?   @relation(fields: [contractId], references: [id], onDelete: Cascade)
   verifiedContract SalesContract? @relation("VerifiedCode")
 
-  @@unique([contractId, phoneNumber]) // One active code per contract+phone
+  @@index([contractId, phoneNumber])
   @@map("contract_verification_codes")
+}
+
+model ContractPublicConfirmation {
+  id              String      @id @default(cuid())
+  contractId      String
+  tokenHash       String      @unique
+  phoneNumber     String
+  otpCodeHash     String
+  otpExpiresAt    DateTime
+  linkExpiresAt   DateTime
+  status          String      @default("PENDING")
+  maxAttempts     Int         @default(5)
+  attemptsUsed    Int         @default(0)
+  lastSentAt      DateTime?
+  resendCount     Int         @default(0)
+  verifiedAt      DateTime?
+  createdBy       String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  cancelledAt     DateTime?
+  contract        SalesContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId, status])
+  @@index([phoneNumber])
+  @@map("contract_public_confirmations")
+}
+
+model ContractConfirmationAuditLog {
+  id                  String      @id @default(cuid())
+  contractId          String
+  sessionId           String?
+  eventType           String
+  eventAt             DateTime    @default(now())
+  ipAddress           String?
+  userAgent           String?
+  acceptLanguage      String?
+  deviceFingerprint   String?
+  referrer            String?
+  provider            String?
+  providerMessageId   String?
+  providerRawResponse Json?
+  eventPayloadJson    Json?
+  eventHash           String?
+  createdAt           DateTime    @default(now())
+  contract            SalesContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId, eventAt])
+  @@index([sessionId])
+  @@map("contract_confirmation_audit_logs")
 }

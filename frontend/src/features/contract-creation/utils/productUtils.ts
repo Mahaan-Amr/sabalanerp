@@ -1,4 +1,4 @@
-// Product utility functions
+﻿// Product utility functions
 // Helper functions for product-related operations
 
 import type { Product, ContractUsageType, StairSystemConfig } from '../types/contract.types';
@@ -111,4 +111,5 @@ export const getCuttingTypePricePerMeter = (
   );
   return cuttingType?.pricePerMeter || null;
 };
+
 

@@ -2,7 +2,7 @@
 // Manages payment entry modal state and handlers
 
 import { useState, useCallback } from 'react';
-import type { ContractWizardData, PaymentEntry } from '../types/contract.types';
+import type { ContractWizardData, PaymentEntry, PaymentEntryMethod } from '../types/contract.types';
 
 interface UsePaymentHandlersOptions {
   wizardData: ContractWizardData;
@@ -18,10 +18,9 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
   const [showPaymentEntryModal, setShowPaymentEntryModal] = useState(false);
   const [editingPaymentEntryId, setEditingPaymentEntryId] = useState<string | null>(null);
   
-  // Payment entry form state
+  // Payment entry form state (CASH_CARD | CASH_SHIBA | CHECK)
   const [paymentEntryForm, setPaymentEntryForm] = useState<Partial<PaymentEntry>>({
-    method: 'CASH',
-    status: 'WILL_BE_PAID',
+    method: 'CASH_CARD',
     paymentDate: '',
     amount: 0
   });
@@ -29,65 +28,86 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
   // Handler to add a new payment entry
   const handleAddPaymentEntry = useCallback(() => {
     setEditingPaymentEntryId(null);
-    // Calculate remaining amount to auto-suggest
     const existingPaymentsSum = wizardData.payment.payments.reduce((sum, p) => sum + p.amount, 0);
     const remainingAmount = wizardData.payment.totalContractAmount - existingPaymentsSum;
     setPaymentEntryForm({
-      method: 'CASH',
-      status: 'WILL_BE_PAID',
+      method: 'CASH_CARD',
       paymentDate: getCurrentPersianDate(),
       amount: remainingAmount > 0 ? remainingAmount : 0,
-      cashType: undefined,
       checkNumber: undefined,
+      checkOwnerName: undefined,
+      handoverDate: undefined,
       nationalCode: undefined
     });
     setShowPaymentEntryModal(true);
   }, [wizardData.payment, getCurrentPersianDate]);
 
-  // Handler to edit an existing payment entry
+  // Handler to edit an existing payment entry (normalize legacy CASH to CASH_CARD/CASH_SHIBA)
   const handleEditPaymentEntry = useCallback((entryId: string) => {
     const entry = wizardData.payment.payments.find(p => p.id === entryId);
     if (entry) {
       setEditingPaymentEntryId(entryId);
-      setPaymentEntryForm({ ...entry });
+      const rawMethod = (entry as { method?: string }).method;
+      const method: PaymentEntryMethod = rawMethod === 'CASH'
+        ? (entry.cashType === 'SHIBA' ? 'CASH_SHIBA' : 'CASH_CARD')
+        : (entry.method as PaymentEntryMethod);
+      setPaymentEntryForm({ ...entry, method });
       setShowPaymentEntryModal(true);
     }
   }, [wizardData.payment.payments]);
 
   // Handler to save payment entry (add or update)
   const handleSavePaymentEntry = useCallback(() => {
-    // Validate required fields
-    if (!paymentEntryForm.method || !paymentEntryForm.amount || paymentEntryForm.amount <= 0 || !paymentEntryForm.status || !paymentEntryForm.paymentDate) {
-      setErrors({ paymentMethod: 'لطفاً تمام فیلدهای الزامی را پر کنید' });
+    const method = paymentEntryForm.method as PaymentEntryMethod | undefined;
+    if (!method) {
+      setErrors({ paymentMethod: 'نوع پرداخت را انتخاب کنید' });
+      return;
+    }
+    if (!paymentEntryForm.amount || paymentEntryForm.amount <= 0) {
+      setErrors({ paymentMethod: 'مبلغ باید بیشتر از صفر باشد' });
       return;
     }
 
-    // Validate conditional fields
-    if (paymentEntryForm.method === 'CHECK' && !paymentEntryForm.checkNumber) {
-      setErrors({ paymentMethod: 'شماره چک برای پرداخت چکی الزامی است' });
-      return;
+    // نقدی (CASH_CARD / CASH_SHIBA): amount + paymentDate
+    if (method === 'CASH_CARD' || method === 'CASH_SHIBA') {
+      if (!paymentEntryForm.paymentDate || !paymentEntryForm.paymentDate.trim()) {
+        setErrors({ paymentMethod: 'تاریخ پرداخت الزامی است' });
+        return;
+      }
     }
 
-    if (paymentEntryForm.method === 'CHECK' && !paymentEntryForm.nationalCode) {
-      setErrors({ paymentMethod: 'کد ملی برای پرداخت چکی الزامی است' });
-      return;
-    }
-
-    if (paymentEntryForm.method === 'CASH' && !paymentEntryForm.cashType) {
-      setErrors({ paymentMethod: 'نوع پرداخت نقدی الزامی است' });
-      return;
+    // چک: checkNumber, checkOwnerName, amount, handoverDate, paymentDate (سررسید)
+    if (method === 'CHECK') {
+      if (!paymentEntryForm.checkNumber || !paymentEntryForm.checkNumber.trim()) {
+        setErrors({ paymentMethod: 'شماره چک الزامی است' });
+        return;
+      }
+      if (!paymentEntryForm.checkOwnerName || !paymentEntryForm.checkOwnerName.trim()) {
+        setErrors({ paymentMethod: 'نام صاحب چک الزامی است' });
+        return;
+      }
+      if (!paymentEntryForm.handoverDate || !paymentEntryForm.handoverDate.trim()) {
+        setErrors({ paymentMethod: 'تاریخ تحویل چک الزامی است' });
+        return;
+      }
+      if (!paymentEntryForm.paymentDate || !paymentEntryForm.paymentDate.trim()) {
+        setErrors({ paymentMethod: 'تاریخ سررسید چک الزامی است' });
+        return;
+      }
     }
 
     const entry: PaymentEntry = {
       id: editingPaymentEntryId || `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      method: paymentEntryForm.method as 'CASH' | 'CHECK',
+      method: method as PaymentEntryMethod,
       amount: paymentEntryForm.amount,
-      status: paymentEntryForm.status as 'PAID' | 'WILL_BE_PAID',
       paymentDate: paymentEntryForm.paymentDate!,
       description: paymentEntryForm.description,
       nationalCode: paymentEntryForm.nationalCode,
       checkNumber: paymentEntryForm.checkNumber,
-      cashType: paymentEntryForm.cashType
+      checkOwnerName: paymentEntryForm.checkOwnerName,
+      handoverDate: paymentEntryForm.handoverDate,
+      cashType: paymentEntryForm.cashType,
+      status: paymentEntryForm.status
     };
 
     const updatedPayments = editingPaymentEntryId
@@ -105,8 +125,7 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     setShowPaymentEntryModal(false);
     setEditingPaymentEntryId(null);
     setPaymentEntryForm({
-      method: 'CASH',
-      status: 'WILL_BE_PAID',
+      method: 'CASH_CARD',
       paymentDate: '',
       amount: 0
     });
@@ -129,8 +148,7 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     setShowPaymentEntryModal(false);
     setEditingPaymentEntryId(null);
     setPaymentEntryForm({
-      method: 'CASH',
-      status: 'WILL_BE_PAID',
+      method: 'CASH_CARD',
       paymentDate: '',
       amount: 0
     });
@@ -156,4 +174,5 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     handleClosePaymentEntryModal
   };
 };
+
 

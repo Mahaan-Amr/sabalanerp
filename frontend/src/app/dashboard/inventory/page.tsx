@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -68,9 +68,9 @@ const InventoryDashboard: React.FC = () => {
   const masterDataSections = [
     {
       id: 'cut-types',
-      title: 'نوع برش',
-      titlePersian: 'نوع برش',
-      description: 'مدیریت انواع برش سنگ (تایل، اسلب، حجیم، و...)',
+      title: '?? ??',
+      titlePersian: '?? ??',
+      description: '??? ??? ?? ?? (??? ??? ??? ?...)',
       icon: FaCog,
       canView: inventoryPermissions?.cutTypes.canView || false,
       canCreate: inventoryPermissions?.cutTypes.canCreate || false,
@@ -78,9 +78,9 @@ const InventoryDashboard: React.FC = () => {
     },
     {
       id: 'stone-materials',
-      title: 'جنس سنگ',
-      titlePersian: 'جنس سنگ',
-      description: 'مدیریت جنس‌های مختلف سنگ (کریستال، مرمریت، گرانیت، و...)',
+      title: '?? ??',
+      titlePersian: '?? ??',
+      description: '??? ?? ??? ?? (?? ?? ?? ?...)',
       icon: FaBoxes,
       canView: inventoryPermissions?.stoneMaterials.canView || false,
       canCreate: inventoryPermissions?.stoneMaterials.canCreate || false,
@@ -88,9 +88,9 @@ const InventoryDashboard: React.FC = () => {
     },
     {
       id: 'cut-widths',
-      title: 'عرض برش',
-      titlePersian: 'عرض برش',
-      description: 'مدیریت عرض‌های مختلف برش (60 سانتی‌متر، 40 سانتی‌متر، و...)',
+      title: '?? ??',
+      titlePersian: '?? ??',
+      description: '??? ?? ??? ?? (60 ??? 40 ??? ?...)',
       icon: FaCog,
       canView: inventoryPermissions?.cutWidths.canView || false,
       canCreate: inventoryPermissions?.cutWidths.canCreate || false,
@@ -98,9 +98,9 @@ const InventoryDashboard: React.FC = () => {
     },
     {
       id: 'thicknesses',
-      title: 'ضخامت',
-      titlePersian: 'ضخامت',
-      description: 'مدیریت ضخامت‌های مختلف (2 سانتی‌متر، 3 سانتی‌متر، و...)',
+      title: '???',
+      titlePersian: '???',
+      description: '??? ??? ??? (2 ??? 3 ??? ?...)',
       icon: FaCog,
       canView: inventoryPermissions?.thicknesses.canView || false,
       canCreate: inventoryPermissions?.thicknesses.canCreate || false,
@@ -108,9 +108,9 @@ const InventoryDashboard: React.FC = () => {
     },
     {
       id: 'mines',
-      title: 'معدن',
-      titlePersian: 'معدن',
-      description: 'مدیریت معادن مختلف (ازنا، نی ریز، الیگودرز، و...)',
+      title: '??',
+      titlePersian: '??',
+      description: '??? ??? ??? (??? ? ?? ??? ?...)',
       icon: FaWarehouse,
       canView: inventoryPermissions?.mines.canView || false,
       canCreate: inventoryPermissions?.mines.canCreate || false,
@@ -118,9 +118,9 @@ const InventoryDashboard: React.FC = () => {
     },
     {
       id: 'finish-types',
-      title: 'نوع پرداخت',
-      titlePersian: 'نوع پرداخت',
-      description: 'مدیریت انواع پرداخت (صیقل، سندبلاست، و...)',
+      title: '?? ???',
+      titlePersian: '?? ???',
+      description: '??? ??? ??? (??? ??? ?...)',
       icon: FaCog,
       canView: inventoryPermissions?.finishTypes.canView || false,
       canCreate: inventoryPermissions?.finishTypes.canCreate || false,
@@ -128,9 +128,9 @@ const InventoryDashboard: React.FC = () => {
     },
     {
       id: 'colors',
-      title: 'رنگ/خصوصیات',
-      titlePersian: 'رنگ/خصوصیات',
-      description: 'مدیریت رنگ‌ها و خصوصیات (مشکی، سفید، و...)',
+      title: '??/??',
+      titlePersian: '??/??',
+      description: '??? ??? ? ?? (??? ??? ?...)',
       icon: FaCog,
       canView: inventoryPermissions?.colors.canView || false,
       canCreate: inventoryPermissions?.colors.canCreate || false,
@@ -138,9 +138,9 @@ const InventoryDashboard: React.FC = () => {
     },
     {
       id: 'cutting-types',
-      title: 'انواع برش',
-      titlePersian: 'انواع برش',
-      description: 'مدیریت انواع برش (طولی، عرضی، و...)',
+      title: '??? ??',
+      titlePersian: '??? ??',
+      description: '??? ??? ?? (??? ??? ?...)',
       icon: FaCut,
       canView: inventoryPermissions?.cuttingTypes?.canView || false,
       canCreate: inventoryPermissions?.cuttingTypes?.canCreate || false,
@@ -154,10 +154,10 @@ const InventoryDashboard: React.FC = () => {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
-            داشبورد موجودی
+            ?? ???
           </h1>
           <p className="text-slate-600 dark:text-slate-400">
-            مدیریت موجودی و انبار - سبلان استون
+            ??? ??? ? ??? - ??? ???
           </p>
         </div>
 
@@ -172,17 +172,17 @@ const InventoryDashboard: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-                    کد کالا
+                    ? ??
                   </h3>
                   <p className="text-sm text-slate-600 dark:text-slate-400">
-                    مدیریت داده‌های پایه
+                    ??? ?? ??
                   </p>
                 </div>
               </div>
             </div>
             
             <p className="text-slate-600 dark:text-slate-400 mb-4 text-sm">
-              مدیریت انواع برش، جنس سنگ، ابعاد، معادن، نوع پرداخت و رنگ‌ها
+              ??? ??? ?? ?? ?? ??? ??? ?? ??? ? ???
             </p>
             
             {hasAnyMasterDataPermission ? (
@@ -191,11 +191,11 @@ const InventoryDashboard: React.FC = () => {
                 className="w-full bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2 space-x-reverse"
               >
                 <FaCog className="w-4 h-4" />
-                <span>مدیریت داده‌های پایه</span>
+                <span>??? ?? ??</span>
               </button>
             ) : (
               <div className="w-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-4 py-2 rounded-lg text-center">
-                دسترسی محدود
+                ??? ???
               </div>
             )}
           </div>
@@ -209,17 +209,17 @@ const InventoryDashboard: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-                    محصولات
+                    ??
                   </h3>
                   <p className="text-sm text-slate-600 dark:text-slate-400">
-                    کاتالوگ محصولات
+                    ?? ??
                   </p>
                 </div>
               </div>
             </div>
             
             <p className="text-slate-600 dark:text-slate-400 mb-4 text-sm">
-              مشاهده و مدیریت کاتالوگ کامل محصولات
+              ??? ? ??? ?? ?? ??
             </p>
             
             <button
@@ -227,7 +227,7 @@ const InventoryDashboard: React.FC = () => {
               className="w-full bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2 space-x-reverse"
             >
               <FaBoxes className="w-4 h-4" />
-              <span>مشاهده محصولات</span>
+              <span>??? ??</span>
             </button>
           </div>
 
@@ -240,21 +240,21 @@ const InventoryDashboard: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-                    حرکات موجودی
+                    ??? ???
                   </h3>
                   <p className="text-sm text-slate-600 dark:text-slate-400">
-                    ورود و خروج کالا
+                    ?? ? ?? ??
                   </p>
                 </div>
               </div>
             </div>
             
             <p className="text-slate-600 dark:text-slate-400 mb-4 text-sm">
-              ردیابی ورود و خروج کالا از انبار
+              ??? ?? ? ?? ?? ? ???
             </p>
             
             <div className="w-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-4 py-2 rounded-lg text-center">
-              در حال توسعه
+              ? ?? ???
             </div>
           </div>
 
@@ -267,17 +267,17 @@ const InventoryDashboard: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-                    خدمات
+                    ???
                   </h3>
                   <p className="text-sm text-slate-600 dark:text-slate-400">
-                    مدیریت خدمات برش
+                    ??? ??? ??
                   </p>
                 </div>
               </div>
             </div>
             
             <p className="text-slate-600 dark:text-slate-400 mb-4 text-sm">
-              مدیریت انواع خدمات برش و خدمات ارائه شده به مشتریان
+              ??? ??? ??? ?? ? ??? ??? ?? ? ??
             </p>
             
             <button
@@ -285,7 +285,7 @@ const InventoryDashboard: React.FC = () => {
               className="w-full bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2 space-x-reverse"
             >
               <FaTools className="w-4 h-4" />
-              <span>مدیریت خدمات</span>
+              <span>??? ???</span>
             </button>
           </div>
 
@@ -298,21 +298,21 @@ const InventoryDashboard: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-                    گزارشات موجودی
+                    ?? ???
                   </h3>
                   <p className="text-sm text-slate-600 dark:text-slate-400">
-                    آمار و گزارشات
+                    ?? ? ??
                   </p>
                 </div>
               </div>
             </div>
             
             <p className="text-slate-600 dark:text-slate-400 mb-4 text-sm">
-              گزارشات جامع از وضعیت موجودی
+              ?? ?? ? ??? ???
             </p>
             
             <div className="w-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-4 py-2 rounded-lg text-center">
-              در حال توسعه
+              ? ?? ???
             </div>
           </div>
         </div>
@@ -322,13 +322,13 @@ const InventoryDashboard: React.FC = () => {
           <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-xl p-6 border border-slate-200/50 dark:border-slate-700/50 shadow-lg">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200">
-                بخش‌های داده‌های پایه
+                ?? ?? ??
               </h2>
               <button
                 onClick={() => router.push('/dashboard/inventory/master-data')}
                 className="text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 text-sm font-medium"
               >
-                مشاهده همه
+                ??? ??
               </button>
             </div>
             
@@ -360,7 +360,7 @@ const InventoryDashboard: React.FC = () => {
                           ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
                           : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
                       }`}>
-                        {section.canView ? 'دسترسی دارد' : 'بدون دسترسی'}
+                        {section.canView ? '??? ??' : '?? ???'}
                       </span>
                       {section.canCreate && (
                         <FaPlus className="w-3 h-3 text-orange-500" />
@@ -378,3 +378,4 @@ const InventoryDashboard: React.FC = () => {
 };
 
 export default InventoryDashboard;
+

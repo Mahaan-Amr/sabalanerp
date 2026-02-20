@@ -1,4 +1,4 @@
-// Stair System Helper Utilities
+﻿// Stair System Helper Utilities
 // Pure functions for stair system operations
 
 import type {
@@ -64,7 +64,7 @@ export const deriveLayerEdgesFromTools = (
 export const getPartDisplayLabel = (part: StairStepperPart): string => {
   const labels: Record<StairStepperPart, string> = {
     tread: 'کف پله',
-    riser: 'خیز پله',
+    riser: 'پیشانی',
     landing: 'پاگرد'
   };
   return labels[part] || part;
@@ -88,3 +88,4 @@ export const getProductServiceCost = (product: ContractProduct): number => {
   const cuttingCost = getProductCuttingCost(product);
   return toolCost + cuttingCost;
 };
+

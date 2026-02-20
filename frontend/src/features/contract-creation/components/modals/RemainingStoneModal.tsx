@@ -27,7 +27,7 @@ interface RemainingStoneModalProps {
   setShowRemainingStoneCAD: React.Dispatch<React.SetStateAction<boolean>>;
   // Handlers
   handleAddPartition: () => void;
-  handleUpdatePartition: (partitionId: string, field: 'width' | 'length', value: number) => void;
+  handleUpdatePartition: (partitionId: string, field: 'width' | 'length' | 'quantity', value: number) => void;
   handleRemovePartition: (partitionId: string) => void;
   // Validation
   partitionValidationErrors: Map<string, string>;
@@ -85,6 +85,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                         id: `partition_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                         width: 0,
                         length: 0,
+                        quantity: 1,
                         squareMeters: 0
                       }]);
                       
@@ -224,6 +225,9 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-600">
                             متر مربع (محاسبه شده)
                           </th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-600">
+                            تعداد
+                          </th>
                           <th className="px-4 py-3 text-center text-xs font-medium text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-600 w-20">
                             عملیات
                           </th>
@@ -290,6 +294,16 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                                   {formatDisplayNumber(partition.squareMeters)}
                                 </div>
                               </td>
+                              <td className="px-4 py-3">
+                                <FormattedNumberInput
+                                  value={partition.quantity ?? 1}
+                                  onChange={(value) => handleUpdatePartition(partition.id, 'quantity', value)}
+                                  className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm"
+                                  min={1}
+                                  step={1}
+                                  placeholder="1"
+                                />
+                              </td>
                               <td className="px-4 py-3 text-center">
                                 <button
                                   onClick={() => handleRemovePartition(partition.id)}
@@ -306,7 +320,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                         {/* Display partition-specific validation errors below the table */}
                         {partitions.some(p => p.validationError || partitionValidationErrors.has(p.id)) && (
                           <tr>
-                            <td colSpan={4} className="px-4 py-3">
+                            <td colSpan={5} className="px-4 py-3">
                               <div className="space-y-2">
                                 {partitions.map(partition => {
                                   const error = partition.validationError || partitionValidationErrors.get(partition.id);
@@ -342,10 +356,11 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                     const validPartitions = partitions.filter(p => p.width > 0 && p.length > 0);
                     const totalUsedSquareMeters = validPartitions.reduce((sum, p) => sum + p.squareMeters, 0);
                     const remainingSquareMeters = remainingStone.squareMeters - totalUsedSquareMeters;
+                    const totalPieces = validPartitions.reduce((sum, p) => sum + Math.max(1, Math.floor(p.quantity || 1)), 0);
 
                     return validPartitions.length > 0 && (
                       <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                        <div className="grid grid-cols-3 gap-4 text-sm">
+                        <div className="grid grid-cols-4 gap-4 text-sm">
                           <div>
                             <span className="text-blue-600 dark:text-blue-400">مجموع متر مربع استفاده شده:</span>
                             <span className="font-medium text-blue-800 dark:text-blue-200 mr-2">{formatDisplayNumber(totalUsedSquareMeters)}</span>
@@ -359,6 +374,10 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                           <div>
                             <span className="text-blue-600 dark:text-blue-400">تعداد پارتیشن‌ها:</span>
                             <span className="font-medium text-blue-800 dark:text-blue-200 mr-2">{validPartitions.length}</span>
+                          </div>
+                          <div>
+                            <span className="text-blue-600 dark:text-blue-400">تعداد کل قطعات:</span>
+                            <span className="font-medium text-blue-800 dark:text-blue-200 mr-2">{totalPieces}</span>
                           </div>
                         </div>
                       </div>
@@ -428,6 +447,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                         id: `partition_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                         width: 0,
                         length: 0,
+                        quantity: 1,
                         squareMeters: 0
                       }]);
                       

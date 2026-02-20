@@ -1,15 +1,27 @@
-import express from 'express';
+﻿import express from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize } from '../middleware/auth';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
-// @desc    Get all customers
+// Legacy customer model routes.
+// NOTE: New sales contract wizard must use /api/crm/customers (CrmCustomer) only.
+router.use((req, _res, next) => {
+  console.warn('[legacy-customers-route-hit]', {
+    method: req.method,
+    path: req.originalUrl,
+    source: 'backend/src/routes/customers.ts'
+  });
+  next();
+});
+
+// @desc    [Legacy] Get all customers
 // @route   GET /api/customers
 // @access  Private
-router.get('/', protect, async (req: any, res) => {
+router.get('/', protect, requireFeatureAccess(FEATURES.SALES_CUSTOMERS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
@@ -65,10 +77,10 @@ router.get('/', protect, async (req: any, res) => {
   }
 });
 
-// @desc    Get customer by ID
+// @desc    [Legacy] Get customer by ID
 // @route   GET /api/customers/:id
 // @access  Private
-router.get('/:id', protect, async (req: any, res) => {
+router.get('/:id', protect, requireFeatureAccess(FEATURES.SALES_CUSTOMERS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res) => {
   try {
     const customer = await prisma.customer.findUnique({
       where: { id: req.params.id },
@@ -123,10 +135,10 @@ router.get('/:id', protect, async (req: any, res) => {
   }
 });
 
-// @desc    Create new customer
+// @desc    [Legacy] Create new customer
 // @route   POST /api/customers
 // @access  Private
-router.post('/', protect, [
+router.post('/', protect, requireFeatureAccess(FEATURES.SALES_CUSTOMERS_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('firstName').notEmpty().withMessage('First name is required'),
   body('lastName').notEmpty().withMessage('Last name is required'),
   body('email').optional().isEmail().withMessage('Invalid email format'),
@@ -179,10 +191,10 @@ router.post('/', protect, [
   }
 });
 
-// @desc    Update customer
+// @desc    [Legacy] Update customer
 // @route   PUT /api/customers/:id
 // @access  Private
-router.put('/:id', protect, [
+router.put('/:id', protect, requireFeatureAccess(FEATURES.SALES_CUSTOMERS_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('firstName').optional().notEmpty().withMessage('First name cannot be empty'),
   body('lastName').optional().notEmpty().withMessage('Last name cannot be empty'),
   body('email').optional().isEmail().withMessage('Invalid email format'),
@@ -227,10 +239,10 @@ router.put('/:id', protect, [
   }
 });
 
-// @desc    Delete customer (soft delete)
+// @desc    [Legacy] Delete customer (soft delete)
 // @route   DELETE /api/customers/:id
 // @access  Private/Admin
-router.delete('/:id', protect, authorize('ADMIN'), async (req: any, res) => {
+router.delete('/:id', protect, authorize('ADMIN'), requireFeatureAccess(FEATURES.SALES_CUSTOMERS_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: any, res) => {
   try {
     const customer = await prisma.customer.findUnique({
       where: { id: req.params.id },
@@ -277,3 +289,4 @@ router.delete('/:id', protect, authorize('ADMIN'), async (req: any, res) => {
 });
 
 export default router;
+

@@ -1,4 +1,4 @@
-// Step 3: Project Management Component
+﻿// Step 3: Project Management Component
 // Project selection from customer's projects
 
 import React from 'react';
@@ -20,6 +20,7 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
   currentStep
 }) => {
   const router = useRouter();
+  const projects = wizardData.customer?.projectAddresses || [];
 
   return (
     <div className="space-y-6">
@@ -28,7 +29,7 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
           مدیریت پروژه
         </h3>
         <p className="text-gray-600 dark:text-gray-300">
-          پروژه مربوط به مشتری را انتخاب کنید
+          پروژه مشتری را انتخاب یا ایجاد کنید
         </p>
       </div>
       
@@ -38,7 +39,12 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
             پروژه‌های {wizardData.customer.firstName} {wizardData.customer.lastName}
           </label>
           <div className="space-y-3">
-            {wizardData.customer.projectAddresses.map((project) => (
+            {projects.length === 0 && (
+              <div className="text-center py-6 border border-dashed border-gray-500/40 rounded-lg text-gray-400">
+                هیچ پروژه‌ای برای این مشتری ثبت نشده است. برای ادامه یک پروژه جدید ایجاد کنید.
+              </div>
+            )}
+            {projects.map((project) => (
               <div
                 key={project.id}
                 onClick={() => updateWizardData({ 
@@ -54,7 +60,7 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex-1">
                     <h4 className="font-medium text-gray-800 dark:text-white">
-                      {project.projectName || 'پروژه بدون نام'}
+                      {project.projectName || 'بدون نام پروژه'}
                     </h4>
                     <p className="text-sm text-gray-600 dark:text-gray-300">{project.address}</p>
                     <p className="text-sm text-gray-500 dark:text-gray-400">{project.city}</p>
@@ -73,7 +79,7 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
                         {/* Project Manager Name */}
                         {project.projectManagerName && (
                           <div className="flex items-center gap-2">
-                            <span className="text-gray-500 dark:text-gray-400 text-sm">👤</span>
+                            <span className="text-gray-500 dark:text-gray-400 text-sm">?</span>
                             <div>
                               <span className="text-xs text-gray-500 dark:text-gray-400 block">مدیر پروژه</span>
                               <span className="text-sm text-gray-600 dark:text-gray-300 font-medium">
@@ -89,7 +95,7 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
                         {/* Project Manager Number */}
                         {project.projectManagerNumber && (
                           <div className="flex items-center gap-2">
-                            <span className="text-gray-500 dark:text-gray-400 text-sm">📱</span>
+                            <span className="text-gray-500 dark:text-gray-400 text-sm">?</span>
                             <div>
                               <span className="text-xs text-gray-500 dark:text-gray-400 block">شماره مدیر پروژه</span>
                               <span className="text-sm text-gray-600 dark:text-gray-300 font-medium">
@@ -116,7 +122,7 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
                   currentStep: currentStep,
                   wizardData: wizardData
                 }));
-                console.log('💾 Saving wizard state for project creation:', {
+                console.log('? Saving wizard state for project creation:', {
                   currentStep,
                   wizardData
                 });
@@ -126,10 +132,10 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
               className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
             >
               <FaPlus className="h-4 w-4" />
-              <span className="font-medium">افزودن پروژه جدید</span>
+              <span className="font-medium">ایجاد پروژه جدید</span>
             </button>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-center">
-              پروژه مورد نظر را پیدا نکردید؟ پروژه جدید اضافه کنید
+              پروژه مورد نظر را پیدا نکردید؟ پروژه جدید ایجاد کنید
             </p>
           </div>
           {errors.projectId && (
@@ -140,4 +146,5 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
     </div>
   );
 };
+
 

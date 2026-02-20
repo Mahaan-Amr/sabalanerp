@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { formatDisplayNumber } from '@/lib/numberFormat';
@@ -17,13 +17,13 @@ import {
 interface RemainingStone {
   id: string;
   width: number; // عرض باقی‌مانده (in cm)
-  length: number; // طول باقی‌مانده (in meters)
+  length: number; // Ø·Ùˆل باقی‌مانده (in meters)
   squareMeters: number; // متر مربع باقی‌مانده
   isAvailable: boolean;
   sourceCutId: string;
   position?: { // موقعیت در سنگ اصلی (برای نمایش در canvas) - فقط برای پارتیشن‌ها
-    startWidth: number; // شروع عرض (in cm)
-    startLength: number; // شروع طول (in meters)
+    startWidth: number; // Ø´Ø±Ùˆع عرض (in cm)
+    startLength: number; // Ø´Ø±Ùˆع Ø·Ùˆل (in meters)
   };
 }
 
@@ -42,7 +42,7 @@ interface AppliedSubService {
   id: string;
   subServiceId: string;
   subService: SubService;
-  meter: number; // مقدار استفاده شده (طول یا متر مربع)
+  meter: number; // مقدار استفاده شده (Ø·Ùˆل یا متر مربع)
   cost: number;
   calculationBase: 'length' | 'squareMeters';
 }
@@ -58,7 +58,7 @@ interface ClickableArea {
 
 interface StoneCanvasProps {
   // Original stone dimensions
-  originalLength: number | string; // طول اصلی (in meters) - can be string from database
+  originalLength: number | string; // Ø·Ùˆل اصلی (in meters) - can be string from database
   originalWidth: number | string; // عرض اصلی (in cm) - can be string from database
   lengthUnit: 'cm' | 'm';
   widthUnit: 'cm' | 'm';
@@ -155,7 +155,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
   
   // If product is cut, calculate initial used area from product dimensions
   // Otherwise, use provided usedLength/usedWidth (for remaining stone usage)
-  // 🎯 FIX: For products with explicit remainingStones positions (e.g., layers),
+  // ðŸŽ¯ FIX: For products with explicit remainingStones positions (e.g., layers),
   // don't calculate initialCutWidth/initialCutLength from product dimensions
   // The usedWidth/usedLength already represent the used area correctly
   const hasExplicitRemainingPositions = remainingStones && remainingStones.some(rs => rs.position);
@@ -163,7 +163,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
   const initialCutWidth = (isCut && !hasExplicitRemainingPositions && productWidthInCm > 0 && originalWidthInCm > productWidthInCm) ? productWidthInCm : 0;
   
   // Total used area = initial cut + remaining stone usage
-  // 🎯 FIX: For products with explicit positions, usedWidth/usedLength already include everything
+  // ðŸŽ¯ FIX: For products with explicit positions, usedWidth/usedLength already include everything
   // So we should use them directly without adding initialCutWidth/initialCutLength
   const totalUsedLengthInMeters = hasExplicitRemainingPositions 
     ? (usedLength || 0) // For layers, usedLength already represents the used area
@@ -174,7 +174,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
 
   // Calculate remaining dimensions (using total used dimensions)
   const remainingLengthInMeters = Math.max(0, originalLengthInMeters - totalUsedLengthInMeters);
-  // 🎯 FIX: For products with explicit remainingStones positions (e.g., layers),
+  // ðŸŽ¯ FIX: For products with explicit remainingStones positions (e.g., layers),
   // don't calculate remainingWidth from usedWidth to avoid conflicts
   // The remainingStones array already contains the correctly positioned pieces
   // (hasExplicitRemainingPositions is already declared above)
@@ -184,7 +184,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
   
   // Calculate primary remaining piece from initial cut (if cut was made)
   // This is the piece that remains after cutting from the original stone
-  // For longitudinal cuts: remaining piece is (remainingWidth × fullLength) positioned next to the used piece
+  // For longitudinal cuts: remaining piece is (remainingWidth � fullLength) positioned next to the used piece
   const primaryRemainingPiece = isCut && initialCutWidth > 0 && remainingWidthInCm > 0 ? {
     id: 'primary-remaining',
     width: remainingWidthInCm,
@@ -500,8 +500,8 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         // Canvas info
         canvasSize
       };
-      console.log('🎨 StoneCanvas Rendering:', logData);
-      console.log('🔍 Critical Calculations:', {
+      console.log('ðŸŽ¨ StoneCanvas Rendering:', logData);
+      console.log('ðŸ” Critical Calculations:', {
         'isCut?': isCut,
         'productLength?': productLength,
         'productWidth?': productWidth,
@@ -531,7 +531,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       });
       
       // Additional debug for rendering
-      console.log('🎨 Rendering Debug:', {
+      console.log('ðŸŽ¨ Rendering Debug:', {
         'originalRect calculated?': originalLengthInMeters > 0 && originalWidthInCm > 0,
         'canvasSize': canvasSize,
         'Will draw used area condition': totalUsedLengthInMeters > 0 || totalUsedWidthInCm > 0,
@@ -753,10 +753,10 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     }
     
     // Draw main used area (initial cut) if there's something used
-    // 🎯 Store used area end position for precise remaining stone positioning
+    // ðŸŽ¯ Store used area end position for precise remaining stone positioning
     let usedAreaEndY: number | null = null;
     
-    // 🎯 FIX: For layers, we need to ensure used area is drawn correctly
+    // ðŸŽ¯ FIX: For layers, we need to ensure used area is drawn correctly
     // Even if usedLength is 0, we should still draw if usedWidth > 0
     // For layers, usedLength represents the full length across which the layer width is cut
     if (totalUsedLengthInMeters > 0 || totalUsedWidthInCm > 0) {
@@ -764,7 +764,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       const clampedUsedLength = Math.min(totalUsedLengthInMeters, originalLengthInMeters);
       const clampedUsedWidth = Math.min(totalUsedWidthInCm, originalWidthInCm);
       
-      // 🎯 FIX: For layers (hasExplicitRemainingPositions), if usedLength is 0 but usedWidth > 0,
+      // ðŸŽ¯ FIX: For layers (hasExplicitRemainingPositions), if usedLength is 0 but usedWidth > 0,
       // use the full original length to draw the used area correctly
       const lengthToUse = (hasExplicitRemainingPositions && clampedUsedLength === 0 && clampedUsedWidth > 0)
         ? originalLengthInMeters // Use full length for layers
@@ -799,12 +799,12 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           originalRect.y + originalRect.height - clampedY
         );
         
-        // 🎯 Store the end Y position of used area for precise remaining stone positioning
+        // ðŸŽ¯ Store the end Y position of used area for precise remaining stone positioning
         usedAreaEndY = clampedY + clampedHeight;
         
         // Skip if clamped dimensions are invalid
         if (clampedWidth <= 0 || clampedHeight <= 0) {
-          // 🎯 FIX: Even if used area can't be drawn, calculate usedAreaEndY for remaining stone positioning
+          // ðŸŽ¯ FIX: Even if used area can't be drawn, calculate usedAreaEndY for remaining stone positioning
           // This is especially important for layers where usedWidth > 0 but usedLength might cause issues
           if (hasExplicitRemainingPositions && totalUsedWidthInCm > 0) {
             // Calculate used area end position directly from usedWidth ratio
@@ -816,7 +816,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         
         // Debug: Log used rect dimensions
         if (!debugLogged.current) {
-          console.log('📊 Used Area Rect:', {
+          console.log('ðŸ“Š Used Area Rect:', {
             usedRect: { x: usedRect.x, y: usedRect.y, width: usedRect.width, height: usedRect.height },
             clampedRect: { x: clampedX, y: clampedY, width: clampedWidth, height: clampedHeight },
             originalRect: { x: originalRect.x, y: originalRect.y, width: originalRect.width, height: originalRect.height },
@@ -1014,7 +1014,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     // If so, hide the primary remaining piece since it's been "used" to create partitions
     const hasPartitionsFromPrimary = partitionUsedAreas.length > 0;
     
-    // 🎯 FIX: Check if we have remaining stones with explicit positions (e.g., from layers)
+    // ðŸŽ¯ FIX: Check if we have remaining stones with explicit positions (e.g., from layers)
     // If so, don't create primaryRemainingPiece to avoid duplication
     // Remaining stones with positions are explicitly calculated and positioned
     const hasRemainingStonesWithPositions = actualRemainingStones && actualRemainingStones.some(rs => rs.position);
@@ -1028,7 +1028,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     
     // Add actual remaining stones from array (excluding partition pieces which are shown as used)
     if (actualRemainingStones && actualRemainingStones.length > 0) {
-      console.log('🎨 Canvas: Adding remaining stones to canvas:', {
+      console.log('ðŸŽ¨ Canvas: Adding remaining stones to canvas:', {
         totalRemainingStonesCount: remainingStones?.length || 0,
         partitionUsedAreasCount: partitionUsedAreas.length,
         actualRemainingStonesCount: actualRemainingStones.length,
@@ -1046,7 +1046,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       allRemainingPieces.push(...actualRemainingStones);
     }
     
-    console.log('🎨 Canvas: Total remaining pieces to render:', {
+    console.log('ðŸŽ¨ Canvas: Total remaining pieces to render:', {
       primaryRemaining: primaryRemainingPiece ? 1 : 0,
       partitionUsedAreas: partitionUsedAreas.length,
       actualRemainingStones: actualRemainingStones?.length || 0,
@@ -1116,7 +1116,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           // Remaining stone with explicit position (from partitions): use the position field
           remainingStartLength = remainingStone.position.startLength;
           remainingStartWidth = remainingStone.position.startWidth;
-          // 🎯 FIX: For layers with explicit positions, ensure remaining stone starts AFTER used area
+          // ðŸŽ¯ FIX: For layers with explicit positions, ensure remaining stone starts AFTER used area
           // This prevents overlap when position.startWidth might be slightly off due to rounding
           if (hasExplicitRemainingPositions && totalUsedWidthInCm > 0) {
             // Ensure remaining stone starts at least at the end of used area
@@ -1126,7 +1126,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           // For partitions, length is already in meters
           stoneLengthInMeters = remainingStone.length > 100 ? remainingStone.length / 100 : remainingStone.length;
           
-          // 🎯 FIX: For layers, if startLength is 0, use the full used length (which is the original length)
+          // ðŸŽ¯ FIX: For layers, if startLength is 0, use the full used length (which is the original length)
           // This ensures the remaining stone spans the full length after the used width
           if (hasExplicitRemainingPositions && remainingStartLength === 0 && totalUsedLengthInMeters > 0) {
             remainingStartLength = 0; // Start at beginning (correct for layers)
@@ -1134,7 +1134,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
             stoneLengthInMeters = Math.max(stoneLengthInMeters, originalLengthInMeters);
           }
           
-          // 🎯 FIX: For layers, ensure remaining stone is positioned correctly relative to used area
+          // ðŸŽ¯ FIX: For layers, ensure remaining stone is positioned correctly relative to used area
           // Calculate the exact width that should remain after the used area
           let remainingStoneWidth = remainingStone.width;
           
@@ -1175,7 +1175,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         }
         
         // Calculate remaining stone rectangle using coordinate utilities
-        // 🎯 FIX: Use adjusted width and start position if available (for layers with position validation)
+        // ðŸŽ¯ FIX: Use adjusted width and start position if available (for layers with position validation)
         const widthToUse = (remainingStone as any).__adjustedWidth !== undefined 
           ? (remainingStone as any).__adjustedWidth 
           : remainingStone.width;
@@ -1198,7 +1198,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         if (remainingRect.width > 0 && remainingRect.height > 0) {
           // Debug: Log remaining rect dimensions
           if (!debugLogged.current && index === 0) {
-            console.log('📊 Remaining Piece Rect:', {
+            console.log('ðŸ“Š Remaining Piece Rect:', {
               remainingStoneId: remainingStone.id,
               remainingRect: { x: remainingRect.x, y: remainingRect.y, width: remainingRect.width, height: remainingRect.height },
               remainingStartLength,
@@ -1223,7 +1223,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
 
           // Clamp to original stone bounds
           const clampedX = Math.max(remainingRect.x, originalRect.x);
-          // 🎯 FIX: For layers, use the exact pixel position where used area ends to prevent overlap
+          // ðŸŽ¯ FIX: For layers, use the exact pixel position where used area ends to prevent overlap
           let clampedY: number;
           if (hasExplicitRemainingPositions && usedAreaEndY !== null && usedAreaEndY >= originalRect.y) {
             // Start exactly where used area ends (pixel-perfect alignment)
@@ -1234,7 +1234,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
             const expectedHeight = (widthToUse / originalWidthInCm) * originalRect.height;
             let clampedHeight = Math.min(expectedHeight, maxAvailableHeight);
             
-            // 🎯 FIX: If calculated height is invalid, recalculate from usedWidth directly
+            // ðŸŽ¯ FIX: If calculated height is invalid, recalculate from usedWidth directly
             if (clampedHeight <= 0 && totalUsedWidthInCm > 0) {
               // Calculate used area height in pixels
               const usedWidthRatio = totalUsedWidthInCm / originalWidthInCm;
@@ -1538,9 +1538,9 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     // 1. Label for original stone (if large enough and no cut, or show as border label when cut)
     // When there's a cut, don't show the original stone label in the center (it's confusing)
     // Instead, show it as a subtle border label if space allows
-    // Convention: Always display dimensions as length × width
+    // Convention: Always display dimensions as length � width
     if (!isCut && originalRect.width > minSizeForLabel && originalRect.height > minSizeForLabel) {
-      const originalLabel = `${formatDisplayNumber(originalLengthInMeters)}m × ${formatDisplayNumber(originalWidthInCm)}cm`;
+      const originalLabel = `${formatDisplayNumber(originalLengthInMeters)}m � ${formatDisplayNumber(originalWidthInCm)}cm`;
       const labelFontSize = Math.min(11, Math.min(originalRect.width, originalRect.height) / 10);
       
       if (labelFontSize >= 8) { // Only draw if font size is readable
@@ -1562,8 +1562,8 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       }
     } else if (isCut) {
       // When there's a cut, show a subtle label in the top-left corner for the original dimensions
-      // Convention: Always display dimensions as length × width
-      // 🎯 ENHANCEMENT: Add "(از باقی‌مانده)" suffix for layers cut from remaining stones
+      // Convention: Always display dimensions as length � width
+      // ðŸŽ¯ ENHANCEMENT: Add "(از باقی‌مانده)" suffix for layers cut from remaining stones
       const baseLabel = `اصلی: ${formatDisplayNumber(originalLengthInMeters)}m × ${formatDisplayNumber(originalWidthInCm)}cm`;
       const originalLabel = isLayerFromRemaining 
         ? `${baseLabel} (از باقی‌مانده)`
@@ -1628,7 +1628,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       );
       
       if (clampedWidthForLabel > minSizeForLabel && clampedHeightForLabel > minSizeForLabel) {
-        // Convention: Always display dimensions as length × width
+        // Convention: Always display dimensions as length � width
         const usedLabel = `استفاده شده: ${formatDisplayNumber(clampedUsedLength)}m × ${formatDisplayNumber(clampedUsedWidth)}cm`;
         const labelFontSize = Math.min(10, Math.min(clampedWidthForLabel, clampedHeightForLabel) / 12);
         
@@ -1708,7 +1708,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           
           if (clampedWidth > minSizeForLabel && clampedHeight > minSizeForLabel) {
             // Format remaining stone dimensions based on type
-            // Convention: Always display dimensions as length × width
+            // Convention: Always display dimensions as length � width
             const lengthDisplay = remainingStone.id === 'primary-remaining' 
               ? `${formatDisplayNumber(stoneLengthInMeters)}m`
               : `${formatDisplayNumber(remainingStone.length)}cm`;
@@ -2059,7 +2059,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     }
     
     if (remainingCount > 0) {
-      description += `. ${remainingCount} قطعه باقی‌مانده موجود است`;
+      description += `. ${remainingCount} قطعه باقی‌مانده Ù…ÙˆØ¬Ùˆد است`;
     }
     
     if (subServicesCount > 0) {
@@ -2082,7 +2082,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         : `${formatDisplayNumber(piece.length / 100)}m`;
       
       // Announce to screen readers
-      const announcement = `قطعه باقی‌مانده انتخاب شده: طول ${lengthDisplay}، عرض ${formatDisplayNumber(piece.width)}cm، متر مربع ${formatDisplayNumber(piece.squareMeters)}`;
+      const announcement = `قطعه باقی‌مانده انتخاب شده: Ø·Ùˆل ${lengthDisplay}، عرض ${formatDisplayNumber(piece.width)}cm، متر مربع ${formatDisplayNumber(piece.squareMeters)}`;
       
       // Create a temporary aria-live region for announcement
       const liveRegion = document.createElement('div');
@@ -2132,7 +2132,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
               const remainingCount = (remainingStones?.length || 0) + (hasPrimaryRemaining ? 1 : 0);
               return remainingCount > 0 
                 ? `${remainingCount} قطعه باقی‌مانده`
-                : 'هیچ قطعه باقی‌مانده‌ای وجود ندارد';
+                : 'هیچ قطعه باقی‌مانده‌ای ÙˆØ¬Ùˆد ندارد';
             })()}
           </div>
         )}

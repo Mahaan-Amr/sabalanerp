@@ -1,4 +1,4 @@
-// Step 2: Customer Selection Component
+﻿// Step 2: Customer Selection Component
 // Customer search and selection
 
 import React from 'react';
@@ -16,6 +16,7 @@ interface Step2CustomerSelectionProps {
   customers: CrmCustomer[];
   filteredCustomers: CrmCustomer[];
   currentStep: number;
+  isOwnerScopedUser?: boolean;
 }
 
 export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
@@ -26,7 +27,8 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
   setCustomerSearchTerm,
   customers,
   filteredCustomers,
-  currentStep
+  currentStep,
+  isOwnerScopedUser = false
 }) => {
   const router = useRouter();
 
@@ -53,11 +55,17 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
           </div>
           <input
             type="text"
-            placeholder="جستجو برای مشاهده تمام مشتریان (نام، شرکت، کد ملی، شماره تلفن...)"
+            placeholder="جستجو برای مشاهده همه مشتریان (نام، شرکت، کد ملی، شماره تلفن...)"
             value={customerSearchTerm}
             onChange={(e) => setCustomerSearchTerm(e.target.value)}
             className="w-full pr-10 pl-4 py-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
           />
+        </div>
+
+        <div className="mb-4 px-4 py-2 rounded-lg border border-teal-500/30 bg-teal-500/10 text-xs text-teal-200">
+          {isOwnerScopedUser
+            ? 'فقط مشتریان متعلق به شما نمایش داده می‌شود. برای یافتن سریع‌تر از جستجو استفاده کنید.'
+            : 'مشتری را از CRM انتخاب کنید. در صورت نیاز مشتری جدید بسازید.'}
         </div>
 
         {/* Quick Create Customer Button */}
@@ -70,7 +78,7 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
                 currentStep: currentStep,
                 wizardData: wizardData
               }));
-              console.log('💾 Saving wizard state for customer creation:', {
+              console.log('? Saving wizard state for customer creation:', {
                 currentStep,
                 wizardData
               });
@@ -91,23 +99,11 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
           {filteredCustomers.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-gray-500 dark:text-gray-400">
-                {customerSearchTerm ? 'هیچ مشتری‌ای با این جستجو یافت نشد' : 'هیچ مشتری‌ای موجود نیست'}
+                {customerSearchTerm ? 'مشتری‌ای با این عبارت پیدا نشد' : 'هیچ مشتری‌ای موجود نیست'}
               </p>
             </div>
           ) : (
             <div className="space-y-3">
-              {/* Preview header when not searching */}
-              {!customerSearchTerm.trim() && customers.length > 2 && (
-                <div className="px-4 py-3 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-700/50 dark:to-slate-600/50 border border-slate-200 dark:border-slate-600 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                      آخرین مشتریان ایجاد شده
-                    </span>
-                  </div>
-                </div>
-              )}
-              
               {filteredCustomers.map((customer) => (
                 <div
                   key={customer.id}
@@ -115,15 +111,23 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
                     // First update with basic customer data
                     updateWizardData({ 
                       customerId: customer.id, 
-                      customer: customer 
+                      customer: {
+                        ...customer,
+                        projectAddresses: customer.projectAddresses || [],
+                        phoneNumbers: customer.phoneNumbers || []
+                      }
                     });
                     
-                    // Fetch full customer data to ensure phoneNumbers are included
+                    // Fetch full CRM customer data
                     try {
                       const fullCustomerResponse = await crmAPI.getCustomer(customer.id);
                       if (fullCustomerResponse.data.success && fullCustomerResponse.data.data) {
                         updateWizardData({
-                          customer: fullCustomerResponse.data.data
+                          customer: {
+                            ...fullCustomerResponse.data.data,
+                            projectAddresses: fullCustomerResponse.data.data.projectAddresses || [],
+                            phoneNumbers: fullCustomerResponse.data.data.phoneNumbers || []
+                          }
                         });
                       }
                     } catch (error) {
@@ -152,49 +156,28 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
                     )}
                   </div>
                   
-                  {/* Customer Details Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {/* Left Column */}
-                    <div className="space-y-2">
-                      {/* Customer Type & Status */}
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                          {customer.customerType}
+                  {/* Customer Details: type, status, phone */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                      {customer.customerType}
+                    </span>
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                      {customer.status}
+                    </span>
+                    {customer.phoneNumbers && customer.phoneNumbers.length > 0 && (
+                      <>
+                        <span className="text-gray-500 dark:text-gray-400 text-sm">?</span>
+                        <span className="text-sm text-gray-600 dark:text-gray-300">
+                          {customer.phoneNumbers[0].number}
                         </span>
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
-                          {customer.status}
-                        </span>
-                      </div>
-                      
-                      {/* Main Phone Number */}
-                      {customer.phoneNumbers && customer.phoneNumbers.length > 0 && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-gray-500 dark:text-gray-400 text-sm">📞</span>
-                          <span className="text-sm text-gray-600 dark:text-gray-300">
-                            {customer.phoneNumbers[0].number}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* Right Column */}
-                    <div className="space-y-2">
-                      {/* Customer Type & Status */}
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                          {customer.customerType}
-                        </span>
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
-                          {customer.status}
-                        </span>
-                      </div>
-                    </div>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
               
               {/* Preview indicator when not searching */}
-              {!customerSearchTerm.trim() && customers.length > 2 && (
+              {!customerSearchTerm.trim() && customers.length > 10 && (
                 <div className="px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                   <div className="flex items-center justify-center gap-2 text-blue-600 dark:text-blue-400">
                     <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
@@ -204,7 +187,7 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
                     <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
                   </div>
                   <p className="text-xs text-blue-500 dark:text-blue-400 text-center mt-1">
-                    برای مشاهده تمام مشتریان، در کادر جستجو تایپ کنید
+                    برای مشاهده همه مشتریان از جستجو استفاده کنید
                   </p>
                 </div>
               )}
@@ -218,4 +201,5 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
     </div>
   );
 };
+
 

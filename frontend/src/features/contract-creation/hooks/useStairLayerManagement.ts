@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+﻿import { useCallback } from 'react';
 import type {
   ContractProduct,
   StairPartDraftV2,
@@ -250,7 +250,7 @@ export const useStairLayerManagement = ({
     if (!draft.layerUseDifferentStone) {
       return {
         ...draft,
-        layerPricePerSquareMeter: draft.pricePerSquareMeter ?? draft.layerPricePerSquareMeter ?? null,
+        layerPricePerSquareMeter: draft.layerPricePerSquareMeter ?? draft.pricePerSquareMeter ?? null,
         layerUseMandatory: undefined,
         layerMandatoryPercentage: null
       };
@@ -448,7 +448,7 @@ export const useStairLayerManagement = ({
       stairPartType: parentPartType,
       stoneCode: stoneProduct.code,
       stoneName: `${layerStoneName} - لایه (${draft.numberOfLayersPerStair} لایه برای هر پله)`,
-      diameterOrWidth: stoneProduct.thicknessValue ?? draft.thicknessCm ?? 0,
+      diameterOrWidth: draft.thicknessCm ?? stoneProduct.thicknessValue ?? 0,
       length: convertMetersToUnit(getActualLengthMeters(draft), draft.lengthUnit || 'm'),
       lengthUnit: draft.lengthUnit || 'm',
       width: draft.layerWidthCm!,
@@ -684,7 +684,7 @@ export const useStairLayerManagement = ({
       layerStoneName: layerUseDifferentStone ? (layerStoneLabel || existing.layerStoneName || existing.stoneName) : existing.layerStoneName || null,
       layerStonePricePerSquareMeter: layerUseDifferentStone ? layerPricePerSquareMeter : existing.layerStonePricePerSquareMeter || null,
       layerStoneBasePricePerSquareMeter: layerUseDifferentStone
-        ? (layerStoneBasePricePerSquareMeter ?? layerPricePerSquareMeter)
+        ? (layerStoneBasePricePerSquareMeter ?? existing.layerStoneBasePricePerSquareMeter ?? layerPricePerSquareMeter)
         : existing.layerStoneBasePricePerSquareMeter || null,
       layerUseMandatory: layerUseDifferentStone
         ? (layerUseMandatory ?? existing.layerUseMandatory ?? true)

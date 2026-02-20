@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function seedSecurityData() {
-  console.log('🌱 Seeding security data...');
+  console.log('Seeding security data...');
 
   try {
     // Create default shifts
@@ -12,7 +12,7 @@ async function seedSecurityData() {
       update: {},
       create: {
         name: 'Day',
-        namePersian: 'روزانه',
+        namePersian: 'شیفت روز',
         startTime: '07:00',
         endTime: '19:00',
         duration: 12,
@@ -25,7 +25,7 @@ async function seedSecurityData() {
       update: {},
       create: {
         name: 'Night',
-        namePersian: 'شبانه',
+        namePersian: 'شیفت شب',
         startTime: '19:00',
         endTime: '07:00',
         duration: 12,
@@ -33,7 +33,7 @@ async function seedSecurityData() {
       }
     });
 
-    console.log('✅ Default shifts created:', {
+    console.log('Default shifts created:', {
       dayShift: dayShift.namePersian,
       nightShift: nightShift.namePersian
     });
@@ -51,19 +51,20 @@ async function seedSecurityData() {
         create: {
           userId: adminUser.id,
           shiftId: dayShift.id,
-          position: 'سرپرست امنیت',
+          position: 'سرپرست حراست',
           isActive: true
         }
       });
 
-      console.log('✅ Admin assigned as security supervisor');
+      console.log('Admin assigned as security supervisor');
     }
 
-    console.log('🎉 Security data seeded successfully!');
+    console.log('Security data seeded successfully!');
   } catch (error) {
-    console.error('❌ Error seeding security data:', error);
+    console.error('Error seeding security data:', error);
     throw error;
   }
 }
 
 export default seedSecurityData;
+

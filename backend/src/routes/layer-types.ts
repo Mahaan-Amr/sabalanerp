@@ -1,8 +1,9 @@
-import express, { Request, Response } from 'express';
+﻿import express, { Request, Response } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -31,6 +32,7 @@ router.get(
   '/',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW),
+  requireFeatureAccess(FEATURES.INVENTORY_LAYER_TYPES_VIEW, FEATURE_PERMISSIONS.VIEW),
   async (req: Request, res: Response): Promise<Response | void> => {
     try {
       const { isActive } = req.query;
@@ -58,7 +60,7 @@ router.get(
       console.error('Error fetching layer types:', error);
       return res.status(500).json({
         success: false,
-        error: 'خطا در دریافت نوع لایه‌ها'
+        error: '?? ? ??? ?? ??'
       });
     }
   }
@@ -68,7 +70,8 @@ router.get(
   '/:id',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW),
-  [param('id').isString().notEmpty().withMessage('شناسه نامعتبر است')],
+  requireFeatureAccess(FEATURES.INVENTORY_LAYER_TYPES_VIEW, FEATURE_PERMISSIONS.VIEW),
+  [param('id').isString().notEmpty().withMessage('??? ?? ??')],
   async (req: Request, res: Response): Promise<Response | void> => {
     const validationError = handleValidationErrors(req, res);
     if (validationError) return validationError;
@@ -81,7 +84,7 @@ router.get(
       if (!layerType) {
         return res.status(404).json({
           success: false,
-          error: 'نوع لایه یافت نشد'
+          error: '?? ?? ?? ??'
         });
       }
 
@@ -93,7 +96,7 @@ router.get(
       console.error('Error fetching layer type:', error);
       return res.status(500).json({
         success: false,
-        error: 'خطا در دریافت نوع لایه'
+        error: '?? ? ??? ?? ??'
       });
     }
   }
@@ -103,11 +106,12 @@ router.post(
   '/',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.INVENTORY_LAYER_TYPES_CREATE, FEATURE_PERMISSIONS.EDIT),
   [
-    body('name').isString().notEmpty().withMessage('نام نوع لایه الزامی است'),
+    body('name').isString().notEmpty().withMessage('?? ?? ?? ??? ??'),
     body('pricePerLayer')
       .isFloat({ gt: 0 })
-      .withMessage('قیمت باید عددی بزرگتر از صفر باشد'),
+      .withMessage('?? ?? ?? ??? ? ?? ??'),
     body('description').optional().isString()
   ],
   async (req: Request, res: Response): Promise<Response | void> => {
@@ -132,7 +136,7 @@ router.post(
       console.error('Error creating layer type:', error);
       return res.status(500).json({
         success: false,
-        error: 'خطا در ایجاد نوع لایه'
+        error: '?? ? ??? ?? ??'
       });
     }
   }
@@ -142,12 +146,13 @@ router.put(
   '/:id',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.INVENTORY_LAYER_TYPES_EDIT, FEATURE_PERMISSIONS.EDIT),
   [
-    param('id').isString().notEmpty().withMessage('شناسه نامعتبر است'),
-    body('name').isString().notEmpty().withMessage('نام نوع لایه الزامی است'),
+    param('id').isString().notEmpty().withMessage('??? ?? ??'),
+    body('name').isString().notEmpty().withMessage('?? ?? ?? ??? ??'),
     body('pricePerLayer')
       .isFloat({ gt: 0 })
-      .withMessage('قیمت باید عددی بزرگتر از صفر باشد'),
+      .withMessage('?? ?? ?? ??? ? ?? ??'),
     body('description').optional().isString()
   ],
   async (req: Request, res: Response): Promise<Response | void> => {
@@ -162,7 +167,7 @@ router.put(
       if (!existing) {
         return res.status(404).json({
           success: false,
-          error: 'نوع لایه یافت نشد'
+          error: '?? ?? ?? ??'
         });
       }
 
@@ -183,7 +188,7 @@ router.put(
       console.error('Error updating layer type:', error);
       return res.status(500).json({
         success: false,
-        error: 'خطا در بروزرسانی نوع لایه'
+        error: '?? ? ??? ?? ??'
       });
     }
   }
@@ -193,7 +198,8 @@ router.delete(
   '/:id',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
-  [param('id').isString().notEmpty().withMessage('شناسه نامعتبر است')],
+  requireFeatureAccess(FEATURES.INVENTORY_LAYER_TYPES_DELETE, FEATURE_PERMISSIONS.EDIT),
+  [param('id').isString().notEmpty().withMessage('??? ?? ??')],
   async (req: Request, res: Response): Promise<Response | void> => {
     const validationError = handleValidationErrors(req, res);
     if (validationError) return validationError;
@@ -205,13 +211,13 @@ router.delete(
 
       return res.json({
         success: true,
-        message: 'نوع لایه با موفقیت حذف شد'
+        message: '?? ?? ? ??? ?? ?'
       });
     } catch (error) {
       console.error('Error deleting layer type:', error);
       return res.status(500).json({
         success: false,
-        error: 'خطا در حذف نوع لایه'
+        error: '?? ? ?? ?? ??'
       });
     }
   }
@@ -221,7 +227,8 @@ router.patch(
   '/:id/toggle',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
-  [param('id').isString().notEmpty().withMessage('شناسه نامعتبر است')],
+  requireFeatureAccess(FEATURES.INVENTORY_LAYER_TYPES_TOGGLE, FEATURE_PERMISSIONS.EDIT),
+  [param('id').isString().notEmpty().withMessage('??? ?? ??')],
   async (req: Request, res: Response): Promise<Response | void> => {
     const validationError = handleValidationErrors(req, res);
     if (validationError) return validationError;
@@ -234,7 +241,7 @@ router.patch(
       if (!existing) {
         return res.status(404).json({
           success: false,
-          error: 'نوع لایه یافت نشد'
+          error: '?? ?? ?? ??'
         });
       }
 
@@ -251,11 +258,12 @@ router.patch(
       console.error('Error toggling layer type status:', error);
       return res.status(500).json({
         success: false,
-        error: 'خطا در تغییر وضعیت نوع لایه'
+        error: '?? ? ??? ??? ?? ??'
       });
     }
   }
 );
 
 export default router;
+
 

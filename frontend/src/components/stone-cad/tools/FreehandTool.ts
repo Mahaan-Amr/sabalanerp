@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Freehand Drawing Tool (Pencil)
  * Allows users to draw freehand strokes on the canvas
  */
@@ -12,7 +12,7 @@ import { CADShape } from '../types/CADTypes';
 export class FreehandTool extends BaseTool {
   name = 'freehand';
   icon = 'FaPencilAlt';
-  displayName = 'قلم';
+  displayName = '??';
   
   private isDrawing = false;
   private points: number[] = [];
@@ -118,4 +118,5 @@ export class FreehandTool extends BaseTool {
     return 'crosshair';
   }
 }
+
 

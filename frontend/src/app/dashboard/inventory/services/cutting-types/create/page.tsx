@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -30,7 +30,7 @@ const CreateCuttingTypePage: React.FC = () => {
         // Redirect back to services page
         router.push('/dashboard/inventory/services');
       } else {
-        setErrors({ general: 'خطا در ایجاد نوع برش' });
+        setErrors({ general: '?? ? ??? ?? ??' });
       }
     } catch (error: any) {
       console.error('Error creating cutting type:', error);
@@ -42,7 +42,7 @@ const CreateCuttingTypePage: React.FC = () => {
         });
         setErrors(newErrors);
       } else {
-        setErrors({ general: 'خطا در ایجاد نوع برش' });
+        setErrors({ general: '?? ? ??? ?? ??' });
       }
     } finally {
       setLoading(false);
@@ -61,10 +61,10 @@ const CreateCuttingTypePage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
-                ایجاد نوع برش جدید
+                ??? ?? ?? ??
               </h1>
               <p className="text-slate-600 dark:text-slate-400">
-                نوع برش جدید را تعریف کنید
+                ?? ?? ?? ? ??? ??
               </p>
             </div>
             <button
@@ -83,7 +83,7 @@ const CreateCuttingTypePage: React.FC = () => {
               {/* Code */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  کد نوع برش *
+                  ? ?? ?? *
                 </label>
                 <input
                   type="text"
@@ -92,7 +92,7 @@ const CreateCuttingTypePage: React.FC = () => {
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
                     errors.code ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
                   }`}
-                  placeholder="مثال: LONG, CROSS"
+                  placeholder="??: LONG, CROSS"
                 />
                 {errors.code && (
                   <p className="text-red-500 text-sm mt-1">{errors.code}</p>
@@ -102,7 +102,7 @@ const CreateCuttingTypePage: React.FC = () => {
               {/* Persian Name */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  نام فارسی *
+                  ?? ??? *
                 </label>
                 <input
                   type="text"
@@ -111,7 +111,7 @@ const CreateCuttingTypePage: React.FC = () => {
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
                     errors.namePersian ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
                   }`}
-                  placeholder="مثال: برش طولی"
+                  placeholder="??: ?? ??"
                 />
                 {errors.namePersian && (
                   <p className="text-red-500 text-sm mt-1">{errors.namePersian}</p>
@@ -121,35 +121,35 @@ const CreateCuttingTypePage: React.FC = () => {
               {/* English Name */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  نام انگلیسی
+                  ?? ??
                 </label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  placeholder="مثال: Longitudinal Cut"
+                  placeholder="??: Longitudinal Cut"
                 />
               </div>
 
               {/* Description */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  توضیحات
+                  ??
                 </label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   rows={3}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  placeholder="توضیحات نوع برش..."
+                  placeholder="?? ?? ??..."
                 />
               </div>
 
               {/* Price Per Meter */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  قیمت به ازای هر متر (تومان)
+                  ?? ? ?? ? ?? (???)
                 </label>
                 <input
                   type="number"
@@ -158,7 +158,7 @@ const CreateCuttingTypePage: React.FC = () => {
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
                     errors.pricePerMeter ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
                   }`}
-                  placeholder="مثال: 50000"
+                  placeholder="??: 50000"
                   min={0}
                   step={1000}
                 />
@@ -166,7 +166,7 @@ const CreateCuttingTypePage: React.FC = () => {
                   <p className="text-red-500 text-sm mt-1">{errors.pricePerMeter}</p>
                 )}
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  این قیمت برای محاسبه خودکار هزینه برش در قراردادها استفاده می‌شود
+                  ?? ?? ?? ??? ??? ??? ?? ? ??? ?? ???
                 </p>
               </div>
 
@@ -180,7 +180,7 @@ const CreateCuttingTypePage: React.FC = () => {
                     className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                   />
                   <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                    فعال
+                    ??
                   </span>
                 </label>
               </div>
@@ -199,7 +199,7 @@ const CreateCuttingTypePage: React.FC = () => {
                   onClick={handleCancel}
                   className="px-6 py-2 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
                 >
-                  انصراف
+                  ???
                 </button>
                 <button
                   type="submit"
@@ -211,7 +211,7 @@ const CreateCuttingTypePage: React.FC = () => {
                   ) : (
                     <FaSave className="w-4 h-4" />
                   )}
-                  <span>{loading ? 'در حال ایجاد...' : 'ایجاد نوع برش'}</span>
+                  <span>{loading ? '? ?? ???...' : '??? ?? ??'}</span>
                 </button>
               </div>
             </form>
@@ -223,3 +223,4 @@ const CreateCuttingTypePage: React.FC = () => {
 };
 
 export default CreateCuttingTypePage;
+

@@ -5,6 +5,8 @@ import { useMemo } from 'react';
 import type { CrmCustomer, Product, ContractUsageType } from '../types/contract.types';
 import { productSupportsContractType } from '../utils/productUtils';
 
+const CUSTOMER_PREVIEW_COUNT = 10;
+
 interface UseProductFilteringOptions {
   customers: CrmCustomer[];
   products: Product[];
@@ -39,8 +41,8 @@ export const useProductFiltering = (options: UseProductFilteringOptions): UsePro
   // Filter customers based on search term
   const filteredCustomers = useMemo(() => {
     if (!customerSearchTerm.trim()) {
-      // Show only last 2 customers as preview when no search term
-      return customers.slice(0, 2);
+      // Show latest customers as preview when no search term
+      return customers.slice(0, CUSTOMER_PREVIEW_COUNT);
     }
 
     // Show full filtered list when searching

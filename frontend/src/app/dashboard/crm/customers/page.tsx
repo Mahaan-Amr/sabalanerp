@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -157,11 +157,11 @@ export default function CustomersPage() {
           pages: response.data.pagination.pages
         }));
       } else {
-        setError('خطا در دریافت لیست مشتریان');
+        setError('خطا در بارگذاری مشتریان');
       }
     } catch (error: any) {
       console.error('Error fetching customers:', error);
-      setError('خطا در دریافت لیست مشتریان');
+      setError('خطا در بارگذاری مشتریان');
     } finally {
       setLoading(false);
     }
@@ -224,7 +224,7 @@ export default function CustomersPage() {
     switch (status) {
       case 'Active': return 'فعال';
       case 'Inactive': return 'غیرفعال';
-      case 'Prospect': return 'پتانسیل';
+      case 'Prospect': return 'بالقوه';
       case 'Lead': return 'سرنخ';
       default: return status;
     }
@@ -232,8 +232,8 @@ export default function CustomersPage() {
 
   const getCustomerTypeLabel = (type: string) => {
     switch (type) {
-      case 'Individual': return 'شخصی';
-      case 'Company': return 'شرکتی';
+      case 'Individual': return 'حقیقی';
+      case 'Company': return 'حقوقی';
       case 'Government': return 'دولتی';
       default: return type;
     }
@@ -253,7 +253,7 @@ export default function CustomersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-white mb-2">مدیریت مشتریان</h1>
-          <p className="text-gray-300">مدیریت اطلاعات مشتریان و پروژه‌های آن‌ها</p>
+          <p className="text-gray-300">مدیریت کامل اطلاعات مشتریان</p>
         </div>
         {crmPermissions.canCreateCustomers && (
           <Link 
@@ -275,7 +275,7 @@ export default function CustomersPage() {
               <FaSearch className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
-                placeholder="جستجو در نام، شرکت، کد ملی، مدیر پروژه، شماره تلفن..."
+                placeholder="جستجو بر اساس نام، شماره تماس یا شرکت..."
                 value={filters.search}
                 onChange={(e) => handleSearch(e.target.value)}
                 className="w-full pr-10 pl-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
@@ -289,7 +289,7 @@ export default function CustomersPage() {
             className="glass-liquid-btn inline-flex items-center gap-2 px-4 py-3"
           >
             <FaFilter className="text-lg" />
-            فیلترها
+            فیلتر
           </button>
         </div>
 
@@ -308,7 +308,7 @@ export default function CustomersPage() {
                   <option value="">همه وضعیت‌ها</option>
                   <option value="Active">فعال</option>
                   <option value="Inactive">غیرفعال</option>
-                  <option value="Prospect">پتانسیل</option>
+                  <option value="Prospect">بالقوه</option>
                   <option value="Lead">سرنخ</option>
                 </select>
               </div>
@@ -322,37 +322,37 @@ export default function CustomersPage() {
                   className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
                 >
                   <option value="">همه انواع</option>
-                  <option value="Individual">شخصی</option>
-                  <option value="Company">شرکتی</option>
+                  <option value="Individual">حقیقی</option>
+                  <option value="Company">حقوقی</option>
                   <option value="Government">دولتی</option>
                 </select>
               </div>
 
               {/* Blacklist Filter */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">لیست سیاه</label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">بلک‌لیست</label>
                 <select
                   value={filters.isBlacklisted === null ? '' : filters.isBlacklisted.toString()}
                   onChange={(e) => handleFilterChange('isBlacklisted', e.target.value === '' ? null : e.target.value === 'true')}
                   className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
                 >
                   <option value="">همه</option>
-                  <option value="false">عادی</option>
-                  <option value="true">لیست سیاه</option>
+                  <option value="false">خیر</option>
+                  <option value="true">بله</option>
                 </select>
               </div>
 
               {/* Lock Filter */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">قفل شده</label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">قفل</label>
                 <select
                   value={filters.isLocked === null ? '' : filters.isLocked.toString()}
                   onChange={(e) => handleFilterChange('isLocked', e.target.value === '' ? null : e.target.value === 'true')}
                   className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
                 >
                   <option value="">همه</option>
-                  <option value="false">باز</option>
-                  <option value="true">قفل شده</option>
+                  <option value="false">خیر</option>
+                  <option value="true">بله</option>
                 </select>
               </div>
             </div>
@@ -390,7 +390,7 @@ export default function CustomersPage() {
         <div className="glass-liquid-card">
           <div className="p-6 border-b border-white/10">
             <h2 className="text-xl font-semibold text-white">
-              لیست مشتریان ({pagination.total})
+              همه مشتریان ({pagination.total})
             </h2>
           </div>
 
@@ -401,7 +401,7 @@ export default function CustomersPage() {
                 <h3 className="text-lg font-semibold text-white mb-2">مشتری یافت نشد</h3>
                 <p className="text-gray-400 mb-4">
                   {filters.search || filters.status || filters.customerType || filters.isBlacklisted !== null || filters.isLocked !== null
-                    ? 'با فیلترهای انتخاب شده مشتری یافت نشد'
+                    ? 'با این فیلترها نتیجه‌ای پیدا نشد'
                     : 'هنوز مشتری ثبت نشده است'
                   }
                 </p>
@@ -505,13 +505,13 @@ export default function CustomersPage() {
                         {customer.isBlacklisted && (
                           <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-500/20 text-red-400">
                             <FaBan className="h-3 w-3" />
-                            لیست سیاه
+                            بلک‌لیست
                           </span>
                         )}
                         {customer.isLocked && (
                           <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-orange-500/20 text-orange-400">
                             <FaLock className="h-3 w-3" />
-                            قفل شده
+                            قفل‌شده
                           </span>
                         )}
                       </div>
@@ -522,7 +522,7 @@ export default function CustomersPage() {
                       <Link
                         href={`/dashboard/crm/customers/${customer.id}`}
                         className="glass-liquid-btn p-2 hover:bg-white/10"
-                        title="مشاهده جزئیات"
+                        title="مشاهده مشتری"
                       >
                         <FaEye className="h-4 w-4" />
                       </Link>
@@ -546,7 +546,7 @@ export default function CustomersPage() {
                                 ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' 
                                 : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
                             }`}
-                            title={customer.isBlacklisted ? 'حذف از لیست سیاه' : 'افزودن به لیست سیاه'}
+                            title={customer.isBlacklisted ? 'حذف از بلک‌لیست' : 'افزودن به بلک‌لیست'}
                           >
                             {customer.isBlacklisted ? <FaCheckCircle className="h-4 w-4" /> : <FaBan className="h-4 w-4" />}
                           </button>
@@ -605,3 +605,4 @@ export default function CustomersPage() {
     </div>
   );
 }
+

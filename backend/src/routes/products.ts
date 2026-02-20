@@ -1,4 +1,4 @@
-import express, { Response } from 'express';
+﻿import express, { Response } from 'express';
 import { body, query, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
@@ -10,15 +10,18 @@ import path from 'path';
 
 const router = express.Router();
 const prisma = new PrismaClient();
+const DEBUG_LOGS = process.env.NODE_ENV !== 'production';
 
 // Log all requests to products router
 router.use((req: any, res: any, next: any) => {
-  console.log('🔍 Products router request:', {
-    method: req.method,
-    url: req.originalUrl,
-    path: req.path,
-    headers: req.headers.authorization ? 'Has auth header' : 'No auth header'
-  });
+  if (DEBUG_LOGS) {
+    console.log('ðŸ” Products router request:', {
+      method: req.method,
+      url: req.originalUrl,
+      path: req.path,
+      headers: req.headers.authorization ? 'Has auth header' : 'No auth header'
+    });
+  }
   next();
 });
 
@@ -54,7 +57,7 @@ const upload = multer({
 // @desc    Get all products with filtering and search
 // @route   GET /api/products
 // @access  Private/Sales Workspace
-router.get('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), [
+router.get('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_PRODUCTS_VIEW, FEATURE_PERMISSIONS.VIEW), [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 1000 }).withMessage('Limit must be between 1 and 1000'),
   query('search').optional().isString().withMessage('Search must be a string'),
@@ -205,12 +208,12 @@ router.get('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERM
 // @desc    Generate Excel template for product import
 // @route   GET /api/products/template
 // @access  Private/Sales Products Import
-router.get('/template', async (req: any, res: Response) => {
-  console.log('📄 Template route called:', req.originalUrl);
-  console.log('📄 Request headers:', req.headers);
-  console.log('📄 Request method:', req.method);
+router.get('/template', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_PRODUCTS_TEMPLATE, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
+  console.log('ðŸ“„ Template route called:', req.originalUrl);
+  console.log('ðŸ“„ Request headers:', req.headers);
+  console.log('ðŸ“„ Request method:', req.method);
   try {
-    console.log('📄 Starting template generation...');
+    console.log('ðŸ“„ Starting template generation...');
     // Get all active master data for dropdowns
     const [
       cutTypes,
@@ -230,7 +233,7 @@ router.get('/template', async (req: any, res: Response) => {
       prisma.color.findMany({ where: { isActive: true }, orderBy: { namePersian: 'asc' } })
     ]);
     
-    console.log('📄 Master data fetched:', {
+    console.log('ðŸ“„ Master data fetched:', {
       cutTypes: cutTypes.length,
       stoneMaterials: stoneMaterials.length,
       cutWidths: cutWidths.length,
@@ -245,28 +248,28 @@ router.get('/template', async (req: any, res: Response) => {
 
     // Create main data sheet
     const headers = [
-      'کد محصول',
-      'نام محصول (انگلیسی)',
-      'نام محصول (فارسی)',
-      'کد نوع برش',
-      'نام نوع برش',
-      'نام نوع برش (فارسی)',
+      'کد Ù…Ø­ØµÙˆل',
+      'نام Ù…Ø­ØµÙˆل (انگلیسی)',
+      'نام Ù…Ø­ØµÙˆل (فارسی)',
+      'کد Ù†Ùˆع برش',
+      'نام Ù†Ùˆع برش',
+      'نام Ù†Ùˆع برش (فارسی)',
       'کد جنس سنگ',
       'نام جنس سنگ',
       'نام جنس سنگ (فارسی)',
       'کد عرض',
       'مقدار عرض',
       'نام عرض',
-      'کد ضخامت',
+      'کد ضخا�&ت',
       'مقدار ضخامت',
       'نام ضخامت',
       'کد معدن',
       'نام معدن',
       'نام معدن (فارسی)',
-      'کد نوع پرداخت',
-      'نام نوع پرداخت',
-      'نام نوع پرداخت (فارسی)',
-      'کد رنگ',
+      'کد Ù†Ùˆع پرداخت',
+      'نام Ù†Ùˆع پرداخت',
+      'نام Ù†Ùˆع پرداخت (فارسی)',
+      'کد ر� گ',
       'نام رنگ',
       'نام رنگ (فارسی)',
       'کد کیفیت',
@@ -274,10 +277,10 @@ router.get('/template', async (req: any, res: Response) => {
       'نام کیفیت (فارسی)',
       'قیمت پایه',
       'ارز',
-      'موجود',
-      'زمان تحویل',
-      'توضیحات',
-      'فعال'
+      'Ù…ÙˆØ¬Ùˆد',
+      'زمان ØªØ­Ùˆیل',
+      'ØªÙˆضیحات',
+      'فعا�'
     ];
 
     // Add sample data
@@ -285,7 +288,7 @@ router.get('/template', async (req: any, res: Response) => {
       [
         'CT001-SM001-CW001-TH001-MN001-FT001-CL001',
         'Travertine 10cm x 2cm - Abbas Abad - Polished',
-        'تراورتن 10 سانتی‌متر × 2 سانتی‌متر - عباس آباد - صیقلی',
+        'ØªØ±Ø§Ùˆرتن 10 سانتی‌متر × 2 سانتی‌متر - عباس آباد - صیقلی',
         cutTypes[0]?.code || 'CT001',
         cutTypes[0]?.name || 'Longitudinal',
         cutTypes[0]?.namePersian || 'طولی',
@@ -309,12 +312,12 @@ router.get('/template', async (req: any, res: Response) => {
         colors[0]?.namePersian || 'سفید',
         'QUALITY-001',
         'Standard',
-        'استاندارد',
+        'استا� دارد',
         500000,
         'ریال',
         true,
         7,
-        'محصول نمونه',
+        'Ù…Ø­ØµÙˆل Ù†Ù…Ùˆنه',
         true
       ]
     ];
@@ -324,28 +327,28 @@ router.get('/template', async (req: any, res: Response) => {
 
     // Set column widths
     const colWidths = [
-      { wch: 25 }, // کد محصول
-      { wch: 40 }, // نام محصول (انگلیسی)
-      { wch: 40 }, // نام محصول (فارسی)
-      { wch: 15 }, // کد نوع برش
-      { wch: 20 }, // نام نوع برش
-      { wch: 20 }, // نام نوع برش (فارسی)
+      { wch: 25 }, // کد Ù…Ø­ØµÙˆل
+      { wch: 40 }, // نام Ù…Ø­ØµÙˆل (انگلیسی)
+      { wch: 40 }, // نام Ù…Ø­ØµÙˆل (فارسی)
+      { wch: 15 }, // کد Ù†Ùˆع برش
+      { wch: 20 }, // نام Ù†Ùˆع برش
+      { wch: 20 }, // نام Ù†Ùˆع برش (فارسی)
       { wch: 15 }, // کد جنس سنگ
       { wch: 20 }, // نام جنس سنگ
       { wch: 20 }, // نام جنس سنگ (فارسی)
       { wch: 15 }, // کد عرض
       { wch: 12 }, // مقدار عرض
       { wch: 15 }, // نام عرض
-      { wch: 15 }, // کد ضخامت
+      { wch: 15 }, // کد ضخا�&ت
       { wch: 12 }, // مقدار ضخامت
       { wch: 15 }, // نام ضخامت
       { wch: 15 }, // کد معدن
       { wch: 20 }, // نام معدن
       { wch: 20 }, // نام معدن (فارسی)
-      { wch: 15 }, // کد نوع پرداخت
-      { wch: 20 }, // نام نوع پرداخت
-      { wch: 20 }, // نام نوع پرداخت (فارسی)
-      { wch: 15 }, // کد رنگ
+      { wch: 15 }, // کد Ù†Ùˆع پرداخت
+      { wch: 20 }, // نام Ù†Ùˆع پرداخت
+      { wch: 20 }, // نام Ù†Ùˆع پرداخت (فارسی)
+      { wch: 15 }, // کد ر� گ
       { wch: 15 }, // نام رنگ
       { wch: 15 }, // نام رنگ (فارسی)
       { wch: 15 }, // کد کیفیت
@@ -353,35 +356,35 @@ router.get('/template', async (req: any, res: Response) => {
       { wch: 15 }, // نام کیفیت (فارسی)
       { wch: 15 }, // قیمت پایه
       { wch: 10 }, // ارز
-      { wch: 10 }, // موجود
-      { wch: 12 }, // زمان تحویل
-      { wch: 30 }, // توضیحات
-      { wch: 10 }  // فعال
+      { wch: 10 }, // Ù…ÙˆØ¬Ùˆد
+      { wch: 12 }, // زمان ØªØ­Ùˆیل
+      { wch: 30 }, // ØªÙˆضیحات
+      { wch: 10 }  // فعا�
     ];
 
     worksheet['!cols'] = colWidths;
 
     // Add worksheet to workbook
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'محصولات');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Ù…Ø­ØµÙˆلات');
 
     // Create master data reference sheet
     const masterDataSheet = XLSX.utils.aoa_to_sheet([
-      ['نوع برش', 'کد', 'نام فارسی', 'نام انگلیسی'],
+      ['Ù†Ùˆع برش', 'کد', 'نام فارسی', 'نام انگلیسی'],
       ...cutTypes.map(item => [item.namePersian, item.code, item.namePersian, item.name || '']),
       ['', '', '', ''],
       ['جنس سنگ', 'کد', 'نام فارسی', 'نام انگلیسی'],
       ...stoneMaterials.map(item => [item.namePersian, item.code, item.namePersian, item.name || '']),
       ['', '', '', ''],
-      ['عرض', 'کد', 'مقدار', 'واحد'],
+      ['عرض', 'کد', 'مقدار', 'Ùˆاحد'],
       ...cutWidths.map(item => [item.namePersian, item.code, item.value, item.unit]),
       ['', '', '', ''],
-      ['ضخامت', 'کد', 'مقدار', 'واحد'],
+      ['ضخامت', 'کد', 'مقدار', 'Ùˆاحد'],
       ...thicknesses.map(item => [item.namePersian, item.code, item.value, item.unit]),
       ['', '', '', ''],
       ['معدن', 'کد', 'نام فارسی', 'نام انگلیسی'],
       ...mines.map(item => [item.namePersian, item.code, item.namePersian, item.name || '']),
       ['', '', '', ''],
-      ['نوع پرداخت', 'کد', 'نام فارسی', 'نام انگلیسی'],
+      ['Ù†Ùˆع پرداخت', 'کد', 'نام فارسی', 'نام انگلیسی'],
       ...finishTypes.map(item => [item.namePersian, item.code, item.namePersian, item.name || '']),
       ['', '', '', ''],
       ['رنگ', 'کد', 'نام فارسی', 'نام انگلیسی'],
@@ -391,25 +394,25 @@ router.get('/template', async (req: any, res: Response) => {
     XLSX.utils.book_append_sheet(workbook, masterDataSheet, 'مرجع داده‌ها');
 
     // Generate Excel file buffer
-    console.log('📄 Generating Excel buffer...');
+    console.log('ðŸ“„ Generating Excel buffer...');
     const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    console.log('📄 Excel buffer generated, size:', excelBuffer.length);
+    console.log('ðŸ“„ Excel buffer generated, size:', excelBuffer.length);
 
     // Set response headers
-    console.log('📄 Setting response headers...');
+    console.log('ðŸ“„ Setting response headers...');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="product-import-template.xlsx"');
     res.setHeader('Content-Length', excelBuffer.length);
 
-    console.log('📄 Sending Excel file...');
+    console.log('ðŸ“„ Sending Excel file...');
     return res.send(excelBuffer);
-    console.log('📄 Excel file sent successfully');
+    console.log('ðŸ“„ Excel file sent successfully');
 
   } catch (error) {
     console.error('Template generation error:', error);
     return res.status(500).json({
       success: false,
-      error: 'خطا در تولید قالب Excel'
+      error: 'خطا در ØªÙˆلید قالب Excel'
     });
   }
 });
@@ -417,7 +420,7 @@ router.get('/template', async (req: any, res: Response) => {
 // @desc    Get product by ID
 // @route   GET /api/products/:id
 // @access  Private/Sales Workspace
-router.get('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
+router.get('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_PRODUCTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
     const product = await prisma.product.findUnique({
       where: { id: req.params.id }
@@ -446,7 +449,7 @@ router.get('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_P
 // @desc    Get product by code
 // @route   GET /api/products/code/:code
 // @access  Private/Sales Workspace
-router.get('/code/:code', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
+router.get('/code/:code', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_PRODUCTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
     const product = await prisma.product.findUnique({
       where: { code: req.params.code }
@@ -475,7 +478,7 @@ router.get('/code/:code', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
 // @desc    Create new product
 // @route   POST /api/products
 // @access  Private/Sales Workspace
-router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), [
+router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_PRODUCTS_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('code').notEmpty().withMessage('Product code is required'),
   body('name').notEmpty().withMessage('Product name is required'),
   body('namePersian').notEmpty().withMessage('Product Persian name is required'),
@@ -516,7 +519,9 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
   body('availableInVolumetricContracts').optional().isBoolean().withMessage('availableInVolumetricContracts must be a boolean').toBoolean(),
 ], async (req: any, res: Response) => {
   try {
-    console.log('Received product data:', JSON.stringify(req.body, null, 2));
+    if (DEBUG_LOGS) {
+      console.log('Received product data:', JSON.stringify(req.body, null, 2));
+    }
     
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -599,7 +604,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
 // @desc    Update product (Edit permission required)
 // @route   PUT /api/products/:id
 // @access  Private/Sales Workspace Edit
-router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), [
+router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_PRODUCTS_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('basePrice').optional().isNumeric().withMessage('Base price must be a number'),
   body('isAvailable').optional().isBoolean().withMessage('isAvailable must be a boolean'),
   body('isActive').optional().isBoolean().withMessage('isActive must be a boolean'),
@@ -678,7 +683,7 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_P
 // @desc    Get product attributes for filtering
 // @route   GET /api/products/attributes
 // @access  Private/Sales Workspace
-router.get('/attributes', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
+router.get('/attributes', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_PRODUCTS_ATTRIBUTES, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
     // Get unique values for each attribute
     const [
@@ -744,7 +749,7 @@ router.get('/attributes', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
 // @desc    Delete product (Edit permission required)
 // @route   DELETE /api/products/:id
 // @access  Private/Sales Workspace Edit
-router.delete('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
+router.delete('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_PRODUCTS_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const product = await prisma.product.findUnique({
       where: { id: req.params.id },
@@ -800,7 +805,7 @@ router.delete('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPAC
 // @desc    Get product statistics
 // @route   GET /api/products/stats
 // @access  Private/Sales Workspace
-router.get('/stats', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
+router.get('/stats', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_PRODUCTS_STATS, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
     const [
       totalProducts,
@@ -840,7 +845,7 @@ router.get('/stats', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE
 // @desc    Import products from Excel file
 // @route   POST /api/products/import
 // @access  Private/Sales Products Import
-router.post('/import', protect, upload.single('file'), async (req: any, res: Response) => {
+router.post('/import', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_PRODUCTS_IMPORT, FEATURE_PERMISSIONS.EDIT), upload.single('file'), async (req: any, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -982,7 +987,7 @@ router.post('/import', protect, upload.single('file'), async (req: any, res: Res
         if (existingProduct) {
           results.errors.push({
             row: rowNumber,
-            error: 'محصول با این کد قبلاً وجود دارد',
+            error: 'Ù…Ø­ØµÙˆل با این کد قبلاً ÙˆØ¬Ùˆد دارد',
             data: { code }
           });
           results.failed++;
@@ -1018,7 +1023,7 @@ router.post('/import', protect, upload.single('file'), async (req: any, res: Res
             colorNamePersian: colorNamePersian || color.namePersian,
             qualityCode: qualityCode || 'QUALITY-001',
             qualityName: qualityName || 'Standard',
-            qualityNamePersian: qualityNamePersian || 'استاندارد',
+            qualityNamePersian: qualityNamePersian || 'استا� دارد',
             basePrice: basePrice ? parseFloat(basePrice) : null,
             currency: currency || 'ریال',
             isAvailable: isAvailable !== undefined ? Boolean(isAvailable) : true,
@@ -1034,10 +1039,10 @@ router.post('/import', protect, upload.single('file'), async (req: any, res: Res
         });
 
         results.success++;
-        console.log(`✅ Imported product ${code}: ${namePersian}`);
+        console.log(`�S& Imported product ${code}: ${namePersian}`);
 
       } catch (error: any) {
-        console.error(`❌ Error importing row ${rowNumber}:`, error.message);
+        console.error(`�R Error importing row ${rowNumber}:`, error.message);
         results.errors.push({
           row: rowNumber,
           error: error.message,
@@ -1053,7 +1058,7 @@ router.post('/import', protect, upload.single('file'), async (req: any, res: Res
 
     return res.json({
       success: true,
-      message: 'وارد کردن محصولات تکمیل شد',
+      message: 'Ùˆارد کردن Ù…Ø­ØµÙˆلات تکمیل شد',
       data: results
     });
 
@@ -1061,7 +1066,7 @@ router.post('/import', protect, upload.single('file'), async (req: any, res: Res
     console.error('Import error:', error);
     return res.status(500).json({
       success: false,
-      error: 'خطا در وارد کردن فایل Excel'
+      error: 'خطا در Ùˆارد کردن فایل Excel'
     });
   }
 });
@@ -1069,7 +1074,7 @@ router.post('/import', protect, upload.single('file'), async (req: any, res: Res
 // @desc    Export products to Excel
 // @route   GET /api/products/export
 // @access  Private/Sales Products Export
-router.get('/export', protect, async (req: any, res: Response) => {
+router.get('/export', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_PRODUCTS_EXPORT, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
     // Get filter parameters
     const {
@@ -1120,23 +1125,23 @@ router.get('/export', protect, async (req: any, res: Response) => {
 
     // Prepare data
     const headers = [
-      'کد محصول',
-      'نام محصول (انگلیسی)',
-      'نام محصول (فارسی)',
-      'نوع برش',
+      'کد Ù…Ø­ØµÙˆل',
+      'نام Ù…Ø­ØµÙˆل (انگلیسی)',
+      'نام Ù…Ø­ØµÙˆل (فارسی)',
+      'Ù†Ùˆع برش',
       'جنس سنگ',
       'عرض',
-      'ضخامت',
+      'ضخا�&ت',
       'معدن',
-      'نوع پرداخت',
-      'رنگ',
+      'Ù†Ùˆع پرداخت',
+      'ر� گ',
       'کیفیت',
       'قیمت پایه',
       'ارز',
-      'موجود',
-      'زمان تحویل',
-      'توضیحات',
-      'فعال',
+      'Ù…ÙˆØ¬Ùˆد',
+      'زمان ØªØ­Ùˆیل',
+      'ØªÙˆضیحات',
+      'فعا�',
       'تاریخ ایجاد'
     ];
 
@@ -1172,7 +1177,7 @@ router.get('/export', protect, async (req: any, res: Response) => {
       { wch: 30 }, { wch: 10 }, { wch: 15 }
     ];
 
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'محصولات');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Ù…Ø­ØµÙˆلات');
 
     // Generate Excel file buffer
     const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
@@ -1188,7 +1193,7 @@ router.get('/export', protect, async (req: any, res: Response) => {
     console.error('Export error:', error);
     return res.status(500).json({
       success: false,
-      error: 'خطا در صادر کردن محصولات'
+      error: 'خطا در صادر کردن Ù…Ø­ØµÙˆلات'
     });
   }
 });

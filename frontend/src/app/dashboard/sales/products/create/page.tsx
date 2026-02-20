@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -22,46 +22,46 @@ import ErrorModal from '@/components/ErrorModal';
 
 // Stone type definitions
 const STONE_TYPES = [
-  { value: 'LONGITUDINAL', label: 'سنگ های طولی', description: 'عرض و ضخامت مشخص با طول‌های مختلف' },
-  { value: 'DIMENSIONAL', label: 'سنگ حکمی', description: 'عرض، ضخامت و طول مشخص' },
+  { value: 'LONGITUDINAL', label: 'سنگ های Ø·Ùˆلی', description: 'عرض و ضخامت مشخص با Ø·Ùˆل‌های مختلف' },
+  { value: 'DIMENSIONAL', label: 'سنگ حکمی', description: 'عرض، ضخامت و Ø·Ùˆل مشخص' },
   { value: 'TILE', label: 'سنگ تایل', description: 'برش‌های استاندارد مثل 60×60 یا 120×120' },
   { value: 'SLAB', label: 'سنگ اسلب', description: 'سنگ‌های بزرگ‌تر از تایل' },
-  { value: 'VOLUMETRIC', label: 'سنگ های حجمی', description: 'قطر معمولاً بیش از 6 سانتی‌متر' }
+  { value: 'VOLUMETRIC', label: 'سنگ های حجمی', description: 'قطر Ù…Ø¹Ù…Ùˆلاً بیش از 6 سانتی‌متر' }
 ];
 
 // Unit options
 const UNITS = [
   { value: 'mm', label: 'میلی‌متر' },
   { value: 'cm', label: 'سانتی‌متر' },
-  { value: 'm', label: 'متر' }
+  { value: 'm', label: '�&تر' }
 ];
 
 // Wizard step definitions
 const WIZARD_STEPS = [
   {
     id: 1,
-    title: 'نوع برش',
+    title: 'Ù†Ùˆع برش',
     titleEn: 'Cut Type',
     icon: FaCut,
-    description: 'انتخاب نوع سنگ'
+    description: 'انتخاب Ù†Ùˆع سنگ'
   },
   {
     id: 2,
     title: 'جنس سنگ',
     titleEn: 'Stone Material',
     icon: FaGem,
-    description: 'نوع جنس سنگ'
+    description: 'Ù†Ùˆع جنس سنگ'
   },
   {
     id: 3,
     title: 'عرض برش',
     titleEn: 'Cut Width',
     icon: FaRuler,
-    description: 'عرض سنگ'
+    description: 'عرض س� گ'
   },
   {
     id: 4,
-    title: 'ضخامت',
+    title: 'ضخا�&ت',
     titleEn: 'Thickness',
     icon: FaRuler,
     description: 'ضخامت سنگ'
@@ -75,17 +75,17 @@ const WIZARD_STEPS = [
   },
   {
     id: 6,
-    title: 'نوع پرداخت',
+    title: 'Ù†Ùˆع پرداخت',
     titleEn: 'Finish Type',
     icon: FaPaintBrush,
-    description: 'نوع پرداخت'
+    description: 'Ù†Ùˆع پرداخت'
   },
   {
     id: 7,
-    title: 'خصوصیات یا رنگ',
+    title: 'Ø®ØµÙˆصیات یا رنگ',
     titleEn: 'Properties or Color',
     icon: FaPalette,
-    description: 'خصوصیات یا رنگ'
+    description: 'Ø®ØµÙˆصیات یا رنگ'
   }
 ];
 
@@ -96,7 +96,7 @@ const CONTRACT_VISIBILITY_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  { id: 'longitudinal', label: 'طولی', description: 'نمایش در قراردادهای سنگ طولی' },
+  { id: 'longitudinal', label: 'Ø·Ùˆلی', description: 'نمایش در قراردادهای سنگ Ø·Ùˆلی' },
   { id: 'stair', label: 'سنگ پله', description: 'نمایش در قراردادهای پله' },
   { id: 'slab', label: 'اسلب', description: 'نمایش در قراردادهای اسلب' },
   { id: 'volumetric', label: 'حجمی', description: 'نمایش در قراردادهای حجمی' }
@@ -313,7 +313,7 @@ export default function CreateStoneProductWizard() {
     switch (currentStep) {
       case 1:
         if (!wizardData.cutTypeId) {
-          newErrors.cutType = 'انتخاب نوع برش الزامی است';
+          newErrors.cutType = 'انتخاب Ù†Ùˆع برش الزامی است';
         }
         break;
       case 2:
@@ -338,15 +338,15 @@ export default function CreateStoneProductWizard() {
         break;
       case 6:
         if (!wizardData.finishTypeId) {
-          newErrors.finishType = 'انتخاب نوع پرداخت الزامی است';
+          newErrors.finishType = 'انتخاب Ù†Ùˆع پرداخت الزامی است';
         }
         break;
       case 7:
         if (!wizardData.colorId) {
-          newErrors.color = 'انتخاب خصوصیات یا رنگ الزامی است';
+          newErrors.color = 'انتخاب Ø®ØµÙˆصیات یا رنگ الزامی است';
         }
         if (!Object.values(wizardData.contractVisibility || {}).some(Boolean)) {
-          newErrors.contractVisibility = 'حداقل یک قرارداد باید انتخاب شود';
+          newErrors.contractVisibility = 'حداقل ÛŒÚ© قرارداد باید انتخاب Ø´Ùˆد';
         }
         break;
     }
@@ -434,7 +434,7 @@ export default function CreateStoneProductWizard() {
         colorNamePersian: wizardData.color?.namePersian || '',
         qualityCode: 'QUALITY-001', // Default quality
         qualityName: 'Standard',
-        qualityNamePersian: 'استاندارد',
+        qualityNamePersian: 'استا� دارد',
         currency: 'ریال',
         isAvailable: true,
         description: `سنگ ${wizardData.cutType?.namePersian} از جنس ${wizardData.stoneMaterial?.namePersian} با عرض ${wizardData.cutWidth?.value || 0} ${wizardData.cutWidth?.unit || 'cm'} و ضخامت ${wizardData.thickness?.value || 0} ${wizardData.thickness?.unit || 'cm'}`,
@@ -450,7 +450,7 @@ export default function CreateStoneProductWizard() {
       const response = await salesAPI.createProduct(productData);
       
       if (response.data.success) {
-        setModalMessage('محصول با موفقیت ایجاد شد!');
+        setModalMessage('Ù…Ø­ØµÙˆل با Ù…Ùˆفقیت ایجاد شد!');
         setShowSuccessModal(true);
         // Auto redirect after modal closes
         setTimeout(() => {
@@ -468,7 +468,7 @@ export default function CreateStoneProductWizard() {
           }
         }, 2000);
       } else {
-        setModalMessage('خطا در ایجاد محصول');
+        setModalMessage('خطا در ایجاد Ù…Ø­ØµÙˆل');
         setModalDetails(response.data.error);
         setShowErrorModal(true);
       }
@@ -483,11 +483,11 @@ export default function CreateStoneProductWizard() {
         setModalDetails(errorMessages);
         setShowErrorModal(true);
       } else if (error.response?.data?.error) {
-        setModalMessage('خطا در ایجاد محصول');
+        setModalMessage('خطا در ایجاد Ù…Ø­ØµÙˆل');
         setModalDetails(error.response.data.error);
         setShowErrorModal(true);
       } else {
-        setModalMessage('خطا در ایجاد محصول');
+        setModalMessage('خطا در ایجاد Ù…Ø­ØµÙˆل');
         setModalDetails('خطای غیرمنتظره رخ داده است');
         setShowErrorModal(true);
       }
@@ -559,7 +559,7 @@ export default function CreateStoneProductWizard() {
                       </h4>
                       <p className="text-sm text-slate-600 dark:text-slate-300">
                         کد: {item.code}
-                        {item.value && item.unit && ` • ${item.value} ${item.unit}`}
+                        {item.value && item.unit && ` ⬢ ${item.value} ${item.unit}`}
                       </p>
                       {item.description && (
                         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
@@ -604,8 +604,8 @@ export default function CreateStoneProductWizard() {
           <div className="space-y-6">
             <SearchableDropdown
               type="cutTypes"
-              label="نوع برش"
-              placeholder="جستجو در نوع برش..."
+              label="Ù†Ùˆع برش"
+              placeholder="جستجو در Ù†Ùˆع برش..."
               errorKey="cutType"
               selectedItem={wizardData.cutType}
             />
@@ -643,7 +643,7 @@ export default function CreateStoneProductWizard() {
           <div className="space-y-6">
             <SearchableDropdown
               type="thicknesses"
-              label="ضخامت"
+              label="ضخا�&ت"
               placeholder="جستجو در ضخامت..."
               errorKey="thickness"
               selectedItem={wizardData.thickness}
@@ -669,8 +669,8 @@ export default function CreateStoneProductWizard() {
           <div className="space-y-6">
             <SearchableDropdown
               type="finishTypes"
-              label="نوع پرداخت"
-              placeholder="جستجو در نوع پرداخت..."
+              label="Ù†Ùˆع پرداخت"
+              placeholder="جستجو در Ù†Ùˆع پرداخت..."
               errorKey="finishType"
               selectedItem={wizardData.finishType}
             />
@@ -682,8 +682,8 @@ export default function CreateStoneProductWizard() {
           <div className="space-y-6">
             <SearchableDropdown
               type="colors"
-              label="خصوصیات یا رنگ"
-              placeholder="جستجو در خصوصیات یا رنگ..."
+              label="Ø®ØµÙˆصیات یا رنگ"
+              placeholder="جستجو در Ø®ØµÙˆصیات یا رنگ..."
               errorKey="color"
               selectedItem={wizardData.color}
             />
@@ -691,7 +691,7 @@ export default function CreateStoneProductWizard() {
             {/* Final Code Preview */}
             <div className="bg-teal-50 dark:bg-teal-900/20 p-4 rounded-lg border border-teal-200 dark:border-teal-800">
               <label className="block text-sm font-medium text-teal-800 dark:text-teal-200 mb-2">
-                کد نهایی محصول:
+                کد نهایی Ù…Ø­ØµÙˆل:
               </label>
               <div className="font-mono text-lg text-teal-900 dark:text-teal-100 bg-white dark:bg-slate-800 p-3 rounded border">
                 {generateFinalCode()}
@@ -700,10 +700,10 @@ export default function CreateStoneProductWizard() {
 
             <div className="p-4 bg-white/80 dark:bg-slate-800/80 rounded-lg border border-slate-200 dark:border-slate-700">
               <label className="block text-sm font-medium text-slate-800 dark:text-slate-200 mb-3">
-                قراردادهای موجود
+                قراردادهای Ù…ÙˆØ¬Ùˆد
               </label>
               <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-                مشخص کنید این محصول در کدام فرایندهای ایجاد قرارداد نمایش داده شود.
+                مشخص کنید این Ù…Ø­ØµÙˆل در کدام فرایندهای ایجاد قرارداد نمایش داده Ø´Ùˆد.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {CONTRACT_VISIBILITY_OPTIONS.map(option => {
@@ -751,10 +751,10 @@ export default function CreateStoneProductWizard() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200">
-                ایجاد محصول سنگ
+                ایجاد Ù…Ø­ØµÙˆل سنگ
               </h1>
               <p className="text-slate-600 dark:text-slate-400 mt-2">
-                ایجاد محصول جدید با استفاده از جادوگر 7 مرحله‌ای
+                ایجاد Ù…Ø­ØµÙˆل جدید با استفاده از Ø¬Ø§Ø¯Ùˆگر 7 مرحله‌ای
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -894,9 +894,9 @@ export default function CreateStoneProductWizard() {
       <SuccessModal
         isOpen={showSuccessModal}
         onClose={() => setShowSuccessModal(false)}
-        title="محصول ایجاد شد"
+        title="Ù…Ø­ØµÙˆل ایجاد شد"
         message={modalMessage}
-        buttonText="باشه"
+        buttonText="باش�!"
         autoClose={true}
         autoCloseDelay={2000}
       />
@@ -905,10 +905,10 @@ export default function CreateStoneProductWizard() {
       <ErrorModal
         isOpen={showErrorModal}
         onClose={() => setShowErrorModal(false)}
-        title="خطا در ایجاد محصول"
+        title="خطا در ایجاد Ù…Ø­ØµÙˆل"
         message={modalMessage}
         details={modalDetails}
-        buttonText="باشه"
+        buttonText="باش�!"
       />
     </div>
   );

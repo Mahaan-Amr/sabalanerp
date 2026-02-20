@@ -3,6 +3,7 @@ import { body, param, query, validationResult } from 'express-validator';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -31,6 +32,7 @@ router.get(
   '/',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW),
+  requireFeatureAccess(FEATURES.INVENTORY_STAIR_STANDARD_LENGTHS_VIEW, FEATURE_PERMISSIONS.VIEW),
   [
     query('isActive').optional().isBoolean().withMessage('isActive must be a boolean'),
     query('search').optional().isString().withMessage('search must be a string')
@@ -77,6 +79,7 @@ router.get(
   '/:id',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW),
+  requireFeatureAccess(FEATURES.INVENTORY_STAIR_STANDARD_LENGTHS_VIEW, FEATURE_PERMISSIONS.VIEW),
   async (req: Request, res: Response): Promise<Response | void> => {
     try {
       const { id } = req.params;
@@ -106,6 +109,7 @@ router.post(
   '/',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.INVENTORY_STAIR_STANDARD_LENGTHS_CREATE, FEATURE_PERMISSIONS.EDIT),
   [
     body('value').notEmpty().isFloat({ gt: 0 }).withMessage('Value must be greater than 0'),
     body('unit').optional().isIn(['m', 'cm']).withMessage('Unit must be m or cm'),
@@ -167,6 +171,7 @@ router.put(
   '/:id',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.INVENTORY_STAIR_STANDARD_LENGTHS_EDIT, FEATURE_PERMISSIONS.EDIT),
   [
     param('id').notEmpty().withMessage('ID is required'),
     body('value').optional().isFloat({ gt: 0 }).withMessage('Value must be greater than 0'),
@@ -245,6 +250,7 @@ router.delete(
   '/:id',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.INVENTORY_STAIR_STANDARD_LENGTHS_DELETE, FEATURE_PERMISSIONS.EDIT),
   async (req: Request, res: Response): Promise<Response | void> => {
     try {
       const { id } = req.params;
@@ -276,6 +282,7 @@ router.patch(
   '/:id/toggle',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.INVENTORY_STAIR_STANDARD_LENGTHS_TOGGLE, FEATURE_PERMISSIONS.EDIT),
   async (req: Request, res: Response): Promise<Response | void> => {
     try {
       const { id } = req.params;

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -10,6 +10,7 @@ import {
   FaCheck,
   FaSignature,
   FaPrint,
+  FaDownload,
   FaClock,
   FaExclamationTriangle,
   FaSearch,
@@ -20,6 +21,7 @@ import { salesAPI, dashboardAPI } from '@/lib/api';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import PersianCalendar from '@/lib/persian-calendar';
 import { getContractPermissions, User } from '@/lib/permissions';
+import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
 
 interface Contract {
   id: string;
@@ -100,6 +102,7 @@ export default function ContractsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
     loadContracts();
@@ -153,8 +156,43 @@ export default function ContractsPage() {
     return new Intl.NumberFormat('fa-IR').format(amount) + ' ' + currency;
   };
 
+  const openPdfUrl = (url: string, tryPrint: boolean) => {
+    const win = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!win || !tryPrint) return;
+
+    try {
+      const triggerPrint = () => {
+        try {
+          win.focus();
+          win.print();
+        } catch (error) {
+          console.error('Print trigger failed:', error);
+        }
+      };
+      win.addEventListener('load', triggerPrint, { once: true });
+      setTimeout(triggerPrint, 1200);
+    } catch (error) {
+      console.error('Print setup failed:', error);
+    }
+  };
+
+  const handleDownloadPdf = async (contractId: string) => {
+    setPdfActionLoading(contractId);
+    try {
+      const response = await salesAPI.getContractPdf(contractId, { fresh: false });
+      if (response.data?.success && response.data?.data?.url) {
+        openPdfUrl(response.data.data.url, false);
+      }
+    } catch (error) {
+      console.error('Error downloading contract PDF:', error);
+    } finally {
+      setPdfActionLoading(null);
+    }
+  };
+
   const handleStatusAction = async (contractId: string, action: string) => {
-    setActionLoading(contractId);
+    const actionKey = `${contractId}:${action}`;
+    setActionLoading(actionKey);
     try {
       let response;
       switch (action) {
@@ -175,6 +213,12 @@ export default function ContractsPage() {
       }
       
       if (response.data.success) {
+        if (action === 'print') {
+          const pdfResponse = await salesAPI.getContractPdf(contractId, { fresh: false });
+          if (pdfResponse.data?.success && pdfResponse.data?.data?.url) {
+            openPdfUrl(pdfResponse.data.data.url, true);
+          }
+        }
         // Reload contracts to reflect the status change
         await loadContracts();
       } else {
@@ -200,15 +244,15 @@ export default function ContractsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">مدیریت قراردادها</h1>
-          <p className="text-gray-300">مشاهده و مدیریت تمام قراردادهای فروش</p>
+          <h1 className="text-3xl font-bold text-white mb-2">قراردادهای فروش</h1>
+          <p className="text-gray-300">مدیریت و پیگیری قراردادهای فروش</p>
         </div>
         <Link
           href="/dashboard/sales/contracts/create"
           className="glass-liquid-btn-primary inline-flex items-center gap-2 px-6 py-3"
         >
           <FaPlus className="text-lg" />
-          قرارداد جدید
+          ثبت قرارداد
         </Link>
       </div>
 
@@ -221,7 +265,7 @@ export default function ContractsPage() {
               <FaSearch className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
-                placeholder="جستجو در قراردادها، مشتریان، شرکت‌ها..."
+                placeholder="جستجو در قراردادها..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pr-10 pl-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
@@ -255,7 +299,7 @@ export default function ContractsPage() {
           <div className="text-center py-8">
             <FaFileContract className="mx-auto text-4xl text-gray-400 mb-4" />
             <p className="text-gray-400">
-              {searchTerm || statusFilter !== 'ALL' ? 'قراردادی یافت نشد' : 'هنوز قراردادی ایجاد نشده است'}
+              {searchTerm || statusFilter !== 'ALL' ? 'قراردادی یافت نشد' : 'هنوز قراردادی ثبت نشده است'}
             </p>
           </div>
         ) : (
@@ -267,17 +311,25 @@ export default function ContractsPage() {
                     {getStatusIcon(contract.status)}
                   </div>
                   <div>
-                    <h3 className="text-white font-medium">{contract.titlePersian}</h3>
+                    <h3 className="text-white font-medium">
+                      {sanitizeUiTextWithCandidates([contract.titlePersian, contract.title, contract.contractNumber], 'قرارداد فروش')}
+                    </h3>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-teal-400 text-sm font-medium">مشتری:</span>
                       <span className="text-gray-300 text-sm">
-                        {contract.customer.firstName} {contract.customer.lastName}
-                        {contract.customer.companyName && ` (${contract.customer.companyName})`}
+                        {sanitizeUiTextWithCandidates(
+                          [
+                            `${contract.customer.firstName || ''} ${contract.customer.lastName || ''}`.trim(),
+                            contract.customer.companyName
+                          ],
+                          'نامشخص'
+                        )}
+                        {sanitizeUiText(contract.customer.companyName, '') && ` (${sanitizeUiText(contract.customer.companyName, '')})`}
                       </span>
                     </div>
                     <div className="flex items-center gap-4 text-sm text-gray-400 mt-1">
-                      <span>شماره: {contract.contractNumber}</span>
-                      <span>مبلغ: {formatCurrency(contract.totalAmount, contract.currency)}</span>
+                      <span>شماره: {sanitizeUiText(contract.contractNumber, '—')}</span>
+                      <span>مبلغ: {formatCurrency(contract.totalAmount, sanitizeUiText(contract.currency, 'تومان'))}</span>
                       <span>تاریخ: {PersianCalendar.formatForDisplay(contract.createdAt)}</span>
                     </div>
                   </div>
@@ -308,11 +360,11 @@ export default function ContractsPage() {
                     {contract.status === 'DRAFT' && contractPermissions.canApprove && (
                       <button 
                         onClick={() => handleStatusAction(contract.id, 'approve')}
-                        disabled={actionLoading === contract.id}
+                        disabled={actionLoading === `${contract.id}:approve`}
                         className="p-2 text-gray-400 hover:text-green-500 transition-colors disabled:opacity-50"
                         title="تایید قرارداد"
                       >
-                        {actionLoading === contract.id ? (
+                        {actionLoading === `${contract.id}:approve` ? (
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-500"></div>
                         ) : (
                           <FaCheck className="w-4 h-4" />
@@ -322,11 +374,11 @@ export default function ContractsPage() {
                     {contract.status === 'DRAFT' && contractPermissions.canReject && (
                       <button 
                         onClick={() => handleStatusAction(contract.id, 'reject')}
-                        disabled={actionLoading === contract.id}
+                        disabled={actionLoading === `${contract.id}:reject`}
                         className="p-2 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
                         title="رد قرارداد"
                       >
-                        {actionLoading === contract.id ? (
+                        {actionLoading === `${contract.id}:reject` ? (
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500"></div>
                         ) : (
                           <FaTimes className="w-4 h-4" />
@@ -336,11 +388,11 @@ export default function ContractsPage() {
                     {contract.status === 'PENDING_APPROVAL' && contractPermissions.canApprove && (
                       <button 
                         onClick={() => handleStatusAction(contract.id, 'approve')}
-                        disabled={actionLoading === contract.id}
+                        disabled={actionLoading === `${contract.id}:approve`}
                         className="p-2 text-gray-400 hover:text-green-500 transition-colors disabled:opacity-50"
                         title="تایید قرارداد"
                       >
-                        {actionLoading === contract.id ? (
+                        {actionLoading === `${contract.id}:approve` ? (
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-500"></div>
                         ) : (
                           <FaCheck className="w-4 h-4" />
@@ -350,11 +402,11 @@ export default function ContractsPage() {
                     {contract.status === 'PENDING_APPROVAL' && contractPermissions.canReject && (
                       <button 
                         onClick={() => handleStatusAction(contract.id, 'reject')}
-                        disabled={actionLoading === contract.id}
+                        disabled={actionLoading === `${contract.id}:reject`}
                         className="p-2 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
                         title="رد قرارداد"
                       >
-                        {actionLoading === contract.id ? (
+                        {actionLoading === `${contract.id}:reject` ? (
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500"></div>
                         ) : (
                           <FaTimes className="w-4 h-4" />
@@ -364,25 +416,39 @@ export default function ContractsPage() {
                     {contract.status === 'APPROVED' && contractPermissions.canSign && (
                       <button 
                         onClick={() => handleStatusAction(contract.id, 'sign')}
-                        disabled={actionLoading === contract.id}
+                        disabled={actionLoading === `${contract.id}:sign`}
                         className="p-2 text-gray-400 hover:text-green-500 transition-colors disabled:opacity-50"
                         title="امضای قرارداد"
                       >
-                        {actionLoading === contract.id ? (
+                        {actionLoading === `${contract.id}:sign` ? (
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-500"></div>
                         ) : (
                           <FaSignature className="w-4 h-4" />
                         )}
                       </button>
                     )}
-                    {contract.status === 'SIGNED' && contractPermissions.canPrint && (
+                    {(contract.status === 'SIGNED' || contract.status === 'PRINTED') && contractPermissions.canPrint && (
+                      <button
+                        onClick={() => handleDownloadPdf(contract.id)}
+                        disabled={pdfActionLoading === contract.id}
+                        className="p-2 text-gray-400 hover:text-emerald-500 transition-colors disabled:opacity-50"
+                        title="دانلود PDF قرارداد کامل"
+                      >
+                        {pdfActionLoading === contract.id ? (
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-emerald-500"></div>
+                        ) : (
+                          <FaDownload className="w-4 h-4" />
+                        )}
+                      </button>
+                    )}
+                    {(contract.status === 'SIGNED' || contract.status === 'PRINTED') && contractPermissions.canPrint && (
                       <button 
                         onClick={() => handleStatusAction(contract.id, 'print')}
-                        disabled={actionLoading === contract.id}
+                        disabled={actionLoading === `${contract.id}:print`}
                         className="p-2 text-gray-400 hover:text-purple-500 transition-colors disabled:opacity-50"
-                        title="چاپ قرارداد"
+                        title="پرینت قرارداد"
                       >
-                        {actionLoading === contract.id ? (
+                        {actionLoading === `${contract.id}:print` ? (
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-500"></div>
                         ) : (
                           <FaPrint className="w-4 h-4" />
@@ -399,3 +465,4 @@ export default function ContractsPage() {
     </div>
   );
 }
+

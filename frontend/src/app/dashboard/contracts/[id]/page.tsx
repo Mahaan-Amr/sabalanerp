@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -56,13 +56,13 @@ const statusColors = {
 };
 
 const statusLabels = {
-  DRAFT: 'پیش نویس',
-  PENDING_APPROVAL: 'در انتظار تایید',
-  APPROVED: 'تایید شده',
-  SIGNED: 'امضا شده',
-  PRINTED: 'چاپ شده',
-  CANCELLED: 'لغو شده',
-  EXPIRED: 'منقضی شده'
+  DRAFT: '?? ??',
+  PENDING_APPROVAL: '? ??? ???',
+  APPROVED: '??? ??',
+  SIGNED: '?? ??',
+  PRINTED: '?? ??',
+  CANCELLED: '?? ??',
+  EXPIRED: '??? ??'
 };
 
 export default function ContractDetailsPage({ params }: { params: { id: string } }) {
@@ -107,7 +107,7 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
   };
 
   const formatAmount = (amount: number | null, currency: string) => {
-    if (!amount) return 'نامشخص';
+    if (!amount) return '???';
     return `${amount.toLocaleString('fa-IR')} ${currency}`;
   };
 
@@ -116,36 +116,37 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
     const pdfPath = (contract as any)?.signatures?.print?.pdfPath as string | undefined;
     if (!pdfPath) return null;
     // Backend serves under /files/contracts
-    const apiBase = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000');
+    const apiBase = (process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000'));
+    const baseUrl = apiBase === '/api' ? '' : apiBase;
     // When pdfPath is absolute, return as-is; otherwise map to served path
     if (pdfPath.startsWith('http')) return pdfPath;
     const fileName = pdfPath.split(/[/\\]/).pop();
     // Always add timestamp to force fresh download
     const ts = Date.now();
-    return `${apiBase}/files/contracts/${fileName}?t=${ts}`;
+    return `${baseUrl}/files/contracts/${fileName}?t=${ts}`;
   };
 
   const handleAction = async (action: string) => {
     try {
-      const note = typeof window !== 'undefined' ? window.prompt('توضیح (اختیاری):') || undefined : undefined;
+      const note = typeof window !== 'undefined' ? window.prompt('??? (??):') || undefined : undefined;
       if (action === 'approve') {
-        if (!confirm('آیا از تایید این قرارداد مطمئن هستید؟')) return;
+        if (!confirm('?? ? ??? ?? ?? ??? ???')) return;
         await contractsAPI.approve(params.id, note);
       } else if (action === 'reject') {
-        const ok = confirm('آیا از رد/لغو این قرارداد مطمئن هستید؟');
+        const ok = confirm('?? ? ?/?? ?? ?? ??? ???');
         if (!ok) return;
         await contractsAPI.reject(params.id, note);
       } else if (action === 'sign') {
-        if (!confirm('آیا از امضای این قرارداد مطمئن هستید؟')) return;
+        if (!confirm('?? ? ??? ?? ?? ??? ???')) return;
         await contractsAPI.sign(params.id, note);
       } else if (action === 'print') {
-        if (!confirm('آیا از چاپ این قرارداد مطمئن هستید؟')) return;
+        if (!confirm('?? ? ?? ?? ?? ??? ???')) return;
         await contractsAPI.print(params.id, note);
       }
       await fetchContract();
     } catch (error) {
       console.error('Error performing action:', error);
-      alert('خطا در انجام عملیات');
+      alert('?? ? ??? ???');
     }
   };
 
@@ -160,9 +161,9 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
   if (!contract) {
     return (
       <div className="text-center py-12">
-        <h1 className="text-2xl font-bold text-white mb-4">قرارداد یافت نشد</h1>
+        <h1 className="text-2xl font-bold text-white mb-4">?? ?? ??</h1>
         <Link href="/dashboard/contracts" className="glass-liquid-btn-primary">
-          بازگشت به لیست قراردادها
+          ??? ? ?? ???
         </Link>
       </div>
     );
@@ -177,7 +178,7 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
         </Link>
         <div className="flex-1">
           <h1 className="text-3xl font-bold text-white mb-2">{contract.titlePersian}</h1>
-          <p className="text-gray-300">شماره قرارداد: {contract.contractNumber}</p>
+          <p className="text-gray-300">??? ??: {contract.contractNumber}</p>
         </div>
         <div className="flex items-center gap-3">
           <span className={`px-4 py-2 rounded-full text-sm font-medium ${statusColors[contract.status as keyof typeof statusColors]}`}>
@@ -195,7 +196,7 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
             <button
               onClick={() => handleAction('approve')}
               className="glass-liquid-btn p-3 text-blue-400"
-              title="تایید قرارداد"
+              title="??? ??"
             >
               <FaCheck />
             </button>
@@ -205,7 +206,7 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
             <button
               onClick={() => handleAction('reject')}
               className="glass-liquid-btn p-3 text-red-400"
-              title="رد قرارداد"
+              title="? ??"
             >
               <FaCheck style={{ transform: 'rotate(45deg)' }} />
             </button>
@@ -236,7 +237,7 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
               rel="noopener noreferrer"
               className="glass-liquid-btn p-3 text-teal-400"
             >
-              دانلود PDF
+              ??? PDF
             </a>
           )}
         </div>
@@ -249,7 +250,7 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
           <div className="glass-liquid-card p-6">
             <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
               <FaFileContract className="text-teal-400" />
-              محتوای قرارداد
+              ??? ??
             </h2>
             
             {/* Form Data Display */}
@@ -257,46 +258,46 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
               <div className="space-y-6">
                 {/* Basic Information */}
                 <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-white">اطلاعات پایه</h3>
+                  <h3 className="text-lg font-semibold text-white">?? ??</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                     <div>
-                      <span className="text-gray-400">شماره فرم:</span>
-                      <span className="mr-2 text-white">{contract.contractData.formNumber || 'نامشخص'}</span>
+                      <span className="text-gray-400">??? ??:</span>
+                      <span className="mr-2 text-white">{contract.contractData.formNumber || '???'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-400">تاریخ فرم:</span>
-                      <span className="mr-2 text-white">{contract.contractData.formDate || 'نامشخص'}</span>
+                      <span className="text-gray-400">??? ??:</span>
+                      <span className="mr-2 text-white">{contract.contractData.formDate || '???'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-400">تاریخ قرارداد:</span>
-                      <span className="mr-2 text-white">{contract.contractData.contractDate || 'نامشخص'}</span>
+                      <span className="text-gray-400">??? ??:</span>
+                      <span className="mr-2 text-white">{contract.contractData.contractDate || '???'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-400">نحوه تسویه:</span>
-                      <span className="mr-2 text-white">{contract.contractData.paymentMethod || 'نامشخص'}</span>
+                      <span className="text-gray-400">?? ???:</span>
+                      <span className="mr-2 text-white">{contract.contractData.paymentMethod || '???'}</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Buyer Information */}
                 <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-white">اطلاعات خریدار</h3>
+                  <h3 className="text-lg font-semibold text-white">?? ???</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                     <div>
-                      <span className="text-gray-400">نام و نام خانوادگی:</span>
-                      <span className="mr-2 text-white">{contract.contractData.buyerName || 'نامشخص'}</span>
+                      <span className="text-gray-400">?? ? ?? ??:</span>
+                      <span className="mr-2 text-white">{contract.contractData.buyerName || '???'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-400">کد ملی:</span>
-                      <span className="mr-2 text-white">{contract.contractData.buyerNationalId || 'نامشخص'}</span>
+                      <span className="text-gray-400">? ??:</span>
+                      <span className="mr-2 text-white">{contract.contractData.buyerNationalId || '???'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-400">شماره تماس:</span>
-                      <span className="mr-2 text-white">{contract.contractData.buyerPhone || 'نامشخص'}</span>
+                      <span className="text-gray-400">??? ??:</span>
+                      <span className="mr-2 text-white">{contract.contractData.buyerPhone || '???'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-400">آدرس پروژه:</span>
-                      <span className="mr-2 text-white">{contract.contractData.projectAddress || 'نامشخص'}</span>
+                      <span className="text-gray-400">?? ???:</span>
+                      <span className="mr-2 text-white">{contract.contractData.projectAddress || '???'}</span>
                     </div>
                   </div>
                 </div>
@@ -304,22 +305,22 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
                 {/* Product Items */}
                 {contract.contractData.items && contract.contractData.items.length > 0 && (
                   <div className="space-y-4">
-                    <h3 className="text-lg font-semibold text-white">اقلام قرارداد</h3>
+                    <h3 className="text-lg font-semibold text-white">??? ??</h3>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-gray-700">
-                            <th className="text-right text-white p-3">ردیف</th>
-                            <th className="text-right text-white p-3">کد</th>
-                            <th className="text-right text-white p-3">نوع سنگ</th>
-                            <th className="text-right text-white p-3">قطر</th>
-                            <th className="text-right text-white p-3">طول</th>
-                            <th className="text-right text-white p-3">عرض</th>
-                            <th className="text-right text-white p-3">تعداد</th>
-                            <th className="text-right text-white p-3">متر مربع</th>
-                            <th className="text-right text-white p-3">فی</th>
-                            <th className="text-right text-white p-3">قیمت کل</th>
-                            <th className="text-right text-white p-3">توضیحات</th>
+                            <th className="text-right text-white p-3">??</th>
+                            <th className="text-right text-white p-3">?</th>
+                            <th className="text-right text-white p-3">?? ??</th>
+                            <th className="text-right text-white p-3">??</th>
+                            <th className="text-right text-white p-3">??</th>
+                            <th className="text-right text-white p-3">??</th>
+                            <th className="text-right text-white p-3">???</th>
+                            <th className="text-right text-white p-3">?? ??</th>
+                            <th className="text-right text-white p-3">?</th>
+                            <th className="text-right text-white p-3">?? ?</th>
+                            <th className="text-right text-white p-3">??</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -333,8 +334,8 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
                               <td className="p-3 text-white">{item.width || 0}</td>
                               <td className="p-3 text-white">{item.quantity || 0}</td>
                               <td className="p-3 text-white">{item.squareMeter || 0}</td>
-                              <td className="p-3 text-white">{item.unitPrice ? item.unitPrice.toLocaleString('fa-IR') : 0} ریال</td>
-                              <td className="p-3 text-white">{item.totalPrice ? item.totalPrice.toLocaleString('fa-IR') : 0} ریال</td>
+                              <td className="p-3 text-white">{item.unitPrice ? item.unitPrice.toLocaleString('fa-IR') : 0} ??</td>
+                              <td className="p-3 text-white">{item.totalPrice ? item.totalPrice.toLocaleString('fa-IR') : 0} ??</td>
                               <td className="p-3 text-white">{item.description || '-'}</td>
                             </tr>
                           ))}
@@ -346,20 +347,20 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
 
                 {/* Total Amount */}
                 <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-white">خلاصه مالی</h3>
+                  <h3 className="text-lg font-semibold text-white">??? ??</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                     <div>
-                      <span className="text-gray-400">مبلغ کل:</span>
+                      <span className="text-gray-400">?? ?:</span>
                       <span className="mr-2 font-semibold text-teal-400">
                         {contract.contractData.totalAmount ? 
-                          `${contract.contractData.totalAmount.toLocaleString('fa-IR')} ریال` : 
+                          `${contract.contractData.totalAmount.toLocaleString('fa-IR')} ??` : 
                           formatAmount(contract.totalAmount, contract.currency)
                         }
                       </span>
                     </div>
                     <div>
-                      <span className="text-gray-400">مبلغ کل به حروف:</span>
-                      <span className="mr-2 text-white">{contract.contractData.totalAmountWords || 'نامشخص'}</span>
+                      <span className="text-gray-400">?? ? ? ??:</span>
+                      <span className="mr-2 text-white">{contract.contractData.totalAmountWords || '???'}</span>
                     </div>
                   </div>
                 </div>
@@ -378,7 +379,7 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
           {/* Notes */}
           {contract.notes && (
             <div className="glass-liquid-card p-6">
-              <h2 className="text-xl font-semibold text-white mb-4">یادداشت‌ها</h2>
+              <h2 className="text-xl font-semibold text-white mb-4">???</h2>
               <p className="text-gray-300">{contract.notes}</p>
             </div>
           )}
@@ -390,31 +391,31 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
           <div className="glass-liquid-card p-6">
             <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
               <FaUser className="text-teal-400" />
-              اطلاعات مشتری
+              ?? ???
             </h2>
             <div className="space-y-3 text-sm">
               {/* Show buyer info from contractData if available, otherwise fallback to customer relationship */}
               {contract.contractData?.buyerName ? (
                 <>
                   <div>
-                    <span className="text-gray-400">نام خریدار:</span>
+                    <span className="text-gray-400">?? ???:</span>
                     <span className="mr-2 text-white">{contract.contractData.buyerName}</span>
                   </div>
                   {contract.contractData.buyerNationalId && (
                     <div>
-                      <span className="text-gray-400">کد ملی:</span>
+                      <span className="text-gray-400">? ??:</span>
                       <span className="mr-2 text-white">{contract.contractData.buyerNationalId}</span>
                     </div>
                   )}
                   {contract.contractData.buyerPhone && (
                     <div>
-                      <span className="text-gray-400">شماره تماس:</span>
+                      <span className="text-gray-400">??? ??:</span>
                       <span className="mr-2 text-white">{contract.contractData.buyerPhone}</span>
                     </div>
                   )}
                   {contract.contractData.projectAddress && (
                     <div>
-                      <span className="text-gray-400">آدرس پروژه:</span>
+                      <span className="text-gray-400">?? ???:</span>
                       <span className="mr-2 text-white">{contract.contractData.projectAddress}</span>
                     </div>
                   )}
@@ -422,32 +423,32 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
               ) : (
                 <>
                   <div>
-                    <span className="text-gray-400">نام:</span>
+                    <span className="text-gray-400">??:</span>
                     <span className="mr-2 text-white">
                       {contract.customer.firstName} {contract.customer.lastName}
                     </span>
                   </div>
                   {contract.customer.companyName && (
                     <div>
-                      <span className="text-gray-400">شرکت:</span>
+                      <span className="text-gray-400">??:</span>
                       <span className="mr-2 text-white">{contract.customer.companyName}</span>
                     </div>
                   )}
                   {contract.customer.email && (
                     <div>
-                      <span className="text-gray-400">ایمیل:</span>
+                      <span className="text-gray-400">???:</span>
                       <span className="mr-2 text-white">{contract.customer.email}</span>
                     </div>
                   )}
                   {contract.customer.phone && (
                     <div>
-                      <span className="text-gray-400">تلفن:</span>
+                      <span className="text-gray-400">??:</span>
                       <span className="mr-2 text-white">{contract.customer.phone}</span>
                     </div>
                   )}
                   {contract.customer.address && (
                     <div>
-                      <span className="text-gray-400">آدرس:</span>
+                      <span className="text-gray-400">??:</span>
                       <span className="mr-2 text-white">{contract.customer.address}</span>
                     </div>
                   )}
@@ -460,28 +461,28 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
           <div className="glass-liquid-card p-6">
             <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
               <FaBuilding className="text-teal-400" />
-              جزئیات قرارداد
+              ??? ??
             </h2>
             <div className="space-y-3 text-sm">
               <div>
-                <span className="text-gray-400">مبلغ کل:</span>
+                <span className="text-gray-400">?? ?:</span>
                 <span className="mr-2 font-semibold text-teal-400">
                   {formatAmount(contract.totalAmount, contract.currency)}
                 </span>
               </div>
               <div>
-                <span className="text-gray-400">بخش:</span>
+                <span className="text-gray-400">??:</span>
                 <span className="mr-2 text-white">{contract.department.namePersian}</span>
               </div>
               <div>
-                <span className="text-gray-400">ایجاد شده توسط:</span>
+                <span className="text-gray-400">??? ?? ??:</span>
                 <span className="mr-2 text-white">
                   {contract.createdByUser.firstName} {contract.createdByUser.lastName}
                 </span>
               </div>
               {contract.approvedByUser && (
                 <div>
-                  <span className="text-gray-400">تایید شده توسط:</span>
+                  <span className="text-gray-400">??? ?? ??:</span>
                   <span className="mr-2 text-white">
                     {contract.approvedByUser.firstName} {contract.approvedByUser.lastName}
                   </span>
@@ -489,7 +490,7 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
               )}
               {contract.signedByUser && (
                 <div>
-                  <span className="text-gray-400">امضا شده توسط:</span>
+                  <span className="text-gray-400">?? ?? ??:</span>
                   <span className="mr-2 text-white">
                     {contract.signedByUser.firstName} {contract.signedByUser.lastName}
                   </span>
@@ -502,22 +503,22 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
           <div className="glass-liquid-card p-6">
             <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
               <FaCalendar className="text-teal-400" />
-              زمان‌بندی
+              ???
             </h2>
             <div className="space-y-3 text-sm">
               <div>
-                <span className="text-gray-400">تاریخ ایجاد:</span>
+                <span className="text-gray-400">??? ???:</span>
                 <span className="mr-2 text-white">{formatDate(contract.createdAt)}</span>
               </div>
               {contract.signedAt && (
                 <div>
-                  <span className="text-gray-400">تاریخ امضا:</span>
+                  <span className="text-gray-400">??? ??:</span>
                   <span className="mr-2 text-white">{formatDate(contract.signedAt)}</span>
                 </div>
               )}
               {contract.printedAt && (
                 <div>
-                  <span className="text-gray-400">تاریخ چاپ:</span>
+                  <span className="text-gray-400">??? ??:</span>
                   <span className="mr-2 text-white">{formatDate(contract.printedAt)}</span>
                 </div>
               )}
@@ -528,3 +529,4 @@ export default function ContractDetailsPage({ params }: { params: { id: string }
     </div>
   );
 }
+

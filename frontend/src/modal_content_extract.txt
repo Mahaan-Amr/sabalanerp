@@ -25,20 +25,20 @@
                       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
                         <div className="flex items-center gap-2 mb-4">
                           <div className="w-1 h-5 bg-gradient-to-b from-teal-500 to-teal-600 rounded-full"></div>
-                          <h5 className="text-sm font-semibold text-gray-800 dark:text-white">Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ù…Ø­ØµÙˆÙ„</h5>
+                          <h5 className="text-sm font-semibold text-gray-800 dark:text-white">اط�اعات �&حص���</h5>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                               <span className="flex items-center gap-1">
                                 <span className="w-2 h-2 rounded-full bg-teal-500"></span>
-                                Ù†ÙˆØ¹ Ø³Ù†Ú¯
+                                � ��ع س� گ
                               </span>
                             </label>
                             <div className="relative">
                               <input 
                                 className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all" 
-                                placeholder="Ø¬Ø³ØªØ¬Ùˆ Ø¯Ø± Ù†ÙˆØ¹ Ø¨Ø±Ø´ØŒ Ø¬Ù†Ø³ Ø³Ù†Ú¯ØŒ Ù…Ø¹Ø¯Ù†ØŒ Ù†ÙˆØ¹ Ù¾Ø±Ø¯Ø§Ø®ØªØŒ Ø±Ù†Ú¯/Ø®ØµÙˆØµÛŒØ§Øª" 
+                                placeholder="جستج�� در � ��ع برش�R ج� س س� گ�R �&عد� �R � ��ع پرداخت�R ر� گ/خص��ص�Rات" 
                                 value={stoneSearchTerm} 
                                 onChange={(e) => setStoneSearchTerm(e.target.value)} 
                               />
@@ -47,7 +47,7 @@
                                   <div className="text-sm font-medium text-teal-800 dark:text-teal-200">{draft.stoneLabel}</div>
                                   {draft.stoneProduct.basePrice && (
                                     <div className="text-xs text-teal-600 dark:text-teal-400 mt-1">
-                                      Ù‚ÛŒÙ…Øª: {formatPrice(draft.stoneProduct.basePrice)}
+                                      ��R�&ت: {formatPrice(draft.stoneProduct.basePrice)}
                                     </div>
                                   )}
                                 </div>
@@ -57,11 +57,11 @@
                               <div className="mt-2 max-h-48 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
                                 {isSearchingStones && (
                                   <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">
-                                    <span className="animate-pulse">Ø¯Ø± Ø­Ø§Ù„ Ø¬Ø³ØªØ¬Ùˆ...</span>
+                                    <span className="animate-pulse">در حا� جستج��...</span>
                                   </div>
                                 )}
                                 {!isSearchingStones && stoneSearchResults.length === 0 && (
-                                  <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">Ù†ØªÛŒØ¬Ù‡â€ŒØ§ÛŒ ÛŒØ§ÙØª Ù†Ø´Ø¯</div>
+                                  <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">� ت�Rج�!�Rا�R �Rافت � شد</div>
                                 )}
                                 {stoneSearchResults.map((p: Product) => (
                                   <button 
@@ -89,7 +89,7 @@
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                               <span className="flex items-center gap-1">
                                 <span className="w-2 h-2 rounded-full bg-teal-500"></span>
-                                Ù‚Ø·Ø± (Ø³Ø§Ù†ØªÛŒâ€ŒÙ…ØªØ±)
+                                �طر (سا� ت�R�R�&تر)
                               </span>
                             </label>
                             <FormattedNumberInput
@@ -99,10 +99,10 @@
                               step={1}
                               disabled
                               className="w-full rounded-lg bg-gray-100 dark:bg-gray-700/60 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-600 dark:text-gray-300 cursor-not-allowed"
-                              placeholder="Ø§Ø¨ØªØ¯Ø§ Ù…Ø­ØµÙˆÙ„ Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯"
+                              placeholder="ابتدا �&حص��� را ا� تخاب ک� �Rد"
                             />
                             <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                              Ù‚Ø·Ø± Ø¨Ù‡ ØµÙˆØ±Øª Ø®ÙˆØ¯Ú©Ø§Ø± Ø§Ø² Ù…Ø´Ø®ØµØ§Øª Ù…Ø­ØµÙˆÙ„ Ø§Ù†ØªØ®Ø§Ø¨ Ø´Ø¯Ù‡ ØªÙ†Ø¸ÛŒÙ… Ù…ÛŒâ€ŒØ´ÙˆØ¯ Ùˆ Ù‚Ø§Ø¨Ù„ ØªØºÛŒÛŒØ± Ù†ÛŒØ³Øª.
+                              �طر ب�! ص��رت خ��دکار از �&شخصات �&حص��� ا� تخاب شد�! ت� ظ�R�& �&�R�Rش��د �� �اب� تغ�R�Rر � �Rست.
                             </p>
                           {draftErrors.thickness && (
                             <p className="mt-1 text-xs text-red-500">{draftErrors.thickness}</p>
@@ -113,7 +113,7 @@
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                               <span className="flex items-center gap-1">
                                 <span className="w-2 h-2 rounded-full bg-teal-500"></span>
-                                Ø·ÙˆÙ„
+                                ط���
                               </span>
                             </label>
                             <div className="flex gap-2">
@@ -136,7 +136,7 @@
                                 min={0}
                                 step={0.01}
                                 className="flex-1 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                                placeholder="Ù…Ø«Ø§Ù„: 1.2"
+                                placeholder="�&ثا�: 1.2"
                               />
                               <select 
                                 className="rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all font-medium" 
@@ -150,7 +150,7 @@
                             {stairActivePart !== 'riser' && (
                             <div className="mt-3">
                               <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
-                                Ø·ÙˆÙ„ Ø§Ø³ØªØ§Ù†Ø¯Ø§Ø±Ø¯ (Ø¨Ø±Ø§ÛŒ Ù‚ÛŒÙ…Øªâ€ŒÚ¯Ø°Ø§Ø±ÛŒ)
+                                ط��� استا� دارد (برا�R ��R�&ت�Rگذار�R)
                               </label>
                               <div className="flex gap-2">
                                 <FormattedNumberInput
@@ -166,7 +166,7 @@
                                   min={0}
                                   step={0.01}
                                   className="flex-1 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                                  placeholder="Ù…Ø«Ø§Ù„: 1.2"
+                                  placeholder="�&ثا�: 1.2"
                                 />
                                 <select 
                                   className="rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all font-medium" 
@@ -178,7 +178,7 @@
                                 </select>
                               </div>
                               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                Ø§Ú¯Ø± Ø·ÙˆÙ„ ÙˆØ§Ù‚Ø¹ÛŒ ÙˆØ§Ø±Ø¯ Ù†Ø´ÙˆØ¯ØŒ Ø§Ø² Ù‡Ù…ÛŒÙ† Ø·ÙˆÙ„ Ø§Ø³ØªØ§Ù†Ø¯Ø§Ø±Ø¯ Ø¨Ø±Ø§ÛŒ Ù…Ø­Ø§Ø³Ø¨Ù‡ Ù‚ÛŒÙ…Øª Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
+                                اگر ط��� ��ا�ع�R ��ارد � ش��د�R از �!�&�R�  ط��� استا� دارد برا�R �&حاسب�! ��R�&ت استفاد�! �&�R�Rش��د.
                               </p>
                             </div>
                             )}
@@ -191,7 +191,7 @@
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                               <span className="flex items-center gap-1">
                                 <span className="w-2 h-2 rounded-full bg-teal-500"></span>
-                                Ø¹Ø±Ø¶ (Ø³Ø§Ù†ØªÛŒâ€ŒÙ…ØªØ±)
+                                عرض (سا� ت�R�R�&تر)
                               </span>
                             </label>
                             <FormattedNumberInput
@@ -213,7 +213,7 @@
                               min={0}
                               step={0.1}
                               className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                              placeholder="Ù…Ø«Ø§Ù„: 40"
+                              placeholder="�&ثا�: 40"
                             />
                           {draftErrors.width && (
                             <p className="mt-1 text-xs text-red-500">{draftErrors.width}</p>
@@ -224,7 +224,7 @@
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                               <span className="flex items-center gap-1">
                                 <span className="w-2 h-2 rounded-full bg-teal-500"></span>
-                                ØªØ¹Ø¯Ø§Ø¯
+                                تعداد
                               </span>
                             </label>
                             <FormattedNumberInput
@@ -248,7 +248,7 @@
                               min={1}
                               step={1}
                               className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                              placeholder="Ù…Ø«Ø§Ù„: 100"
+                              placeholder="�&ثا�: 100"
                             />
                           {draftErrors.quantity && (
                             <p className="mt-1 text-xs text-red-500">{draftErrors.quantity}</p>
@@ -258,11 +258,11 @@
                             <div className="md:col-span-2">
                               <div className="mt-2 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-4 py-3 text-xs leading-5 text-teal-700 dark:text-teal-200">
                                 <div>
-                                  Ø§Ø² Ù‡Ø± Ø³Ù†Ú¯ {formatDisplayNumber(totals.piecesPerStone)} Ù‚Ø·Ø¹Ù‡ Ø¨Ø§ Ø¹Ø±Ø¶ {formatDisplayNumber(draft.widthCm ?? 0)} Ø³Ø§Ù†ØªÛŒâ€ŒÙ…ØªØ± Ø¨Ù‡ Ø¯Ø³Øª Ù…ÛŒâ€ŒØ¢ÛŒØ¯.
+                                  از �!ر س� گ {formatDisplayNumber(totals.piecesPerStone)} �طع�! با عرض {formatDisplayNumber(draft.widthCm ?? 0)} سا� ت�R�R�&تر ب�! دست �&�R�Rآ�Rد.
                                 </div>
                                 <div>
-                                  ØªØ¹Ø¯Ø§Ø¯ Ø³Ù†Ú¯ Ù¾Ø§ÛŒÙ‡ Ù…ÙˆØ±Ø¯ Ù†ÛŒØ§Ø²: {formatDisplayNumber(totals.baseStoneQuantity)} Ø¹Ø¯Ø¯
-                                  {totals.leftoverWidthCm > 0 ? ` â€¢ Ø¨Ø§Ù‚ÛŒÙ…Ø§Ù†Ø¯Ù‡ Ù‡Ø± Ø³Ù†Ú¯: ${formatDisplayNumber(totals.leftoverWidthCm)}cm` : ''}
+                                  تعداد س� گ پا�R�! �&��رد � �Rاز: {formatDisplayNumber(totals.baseStoneQuantity)} عدد
+                                  {totals.leftoverWidthCm > 0 ? ` ⬢ با��R�&ا� د�! �!ر س� گ: ${formatDisplayNumber(totals.leftoverWidthCm)}cm` : ''}
                                 </div>
                               </div>
                             </div>
@@ -272,7 +272,7 @@
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                               <span className="flex items-center gap-1">
                                 <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                                Ù…ØªØ± Ù…Ø±Ø¨Ø¹ (Ø®ÙˆØ¯Ú©Ø§Ø±)
+                                �&تر �&ربع (خ��دکار)
                               </span>
                             </label>
                             <input 
@@ -286,7 +286,7 @@
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                               <span className="flex items-center gap-1">
                                 <span className="w-2 h-2 rounded-full bg-teal-500"></span>
-                                Ù‚ÛŒÙ…Øª Ù‡Ø± Ù…ØªØ± Ù…Ø±Ø¨Ø¹
+                                ��R�&ت �!ر �&تر �&ربع
                               </span>
                             </label>
                             <FormattedNumberInput
@@ -308,7 +308,7 @@
                               min={0}
                               step={1000}
                               className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                              placeholder="Ù…Ø«Ø§Ù„: 1,500,000"
+                              placeholder="�&ثا�: 1,500,000"
                             />
                           {draftErrors.pricePerSquareMeter && (
                             <p className="mt-1 text-xs text-red-500">{draftErrors.pricePerSquareMeter}</p>
@@ -336,10 +336,10 @@
                                 />
                                 <div>
                                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                    Ø­Ú©Ù…ÛŒ (Ø§ÙØ²Ø§ÛŒØ´ Ù‚ÛŒÙ…Øª)
+                                    حک�&�R (افزا�Rش ��R�&ت)
                                   </label>
                                   <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                    Ø¯Ø± ØµÙˆØ±Øª ÙØ¹Ø§Ù„ Ø¨ÙˆØ¯Ù†ØŒ Ù‚ÛŒÙ…Øª Ø³Ù†Ú¯ Ø§ÛŒÙ† Ø¨Ø®Ø´ Ø¨Ù‡ ØµÙˆØ±Øª Ø¯Ø±ØµØ¯ÛŒ Ø§ÙØ²Ø§ÛŒØ´ Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
+                                    در ص��رت فعا� ب��د� �R ��R�&ت س� گ ا�R�  بخش ب�! ص��رت درصد�R افزا�Rش داد�! �&�R�Rش��د.
                                   </p>
                                 </div>
                               </div>
@@ -367,7 +367,7 @@
                                   />
                                   <span className="text-xs text-gray-600 dark:text-gray-300">%</span>
                                   <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                    Ù‚ÛŒÙ…Øª Ù¾Ø§ÛŒÙ‡ Ø¨Ø§ {formatDisplayNumber(mandatoryPercentageValue)}% Ø§ÙØ²Ø§ÛŒØ´ Ù…Ø­Ø§Ø³Ø¨Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
+                                    ��R�&ت پا�R�! با {formatDisplayNumber(mandatoryPercentageValue)}% افزا�Rش �&حاسب�! �&�R�Rش��د.
                                   </p>
                                 </div>
                               )}
@@ -383,12 +383,12 @@
                               <div className="mt-2 rounded-lg border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-xs leading-5 text-amber-700 dark:text-amber-200">
                                 {totals.billableCuttingCostLongitudinal > 0 && (
                                   <div>
-                                    Ù‡Ø²ÛŒÙ†Ù‡ Ø¨Ø±Ø´ Ø·ÙˆÙ„ÛŒ: {formatPrice(totals.billableCuttingCostLongitudinal)} ({formatDisplayNumber(lengthMInfo)} m Ã— {formatDisplayNumber(totals.baseStoneQuantity)} Ø³Ù†Ú¯ Ã— {formatPrice(totals.shouldChargeCuttingCost ? (totals.cuttingCostPerMeterLongitudinal || totals.cuttingCostPerMeter) : 0)})
+                                    �!ز�R� �! برش ط����R: {formatPrice(totals.billableCuttingCostLongitudinal)} ({formatDisplayNumber(lengthMInfo)} m � {formatDisplayNumber(totals.baseStoneQuantity)} س� گ � {formatPrice(totals.shouldChargeCuttingCost ? (totals.cuttingCostPerMeterLongitudinal || totals.cuttingCostPerMeter) : 0)})
                                   </div>
                                 )}
                                 {totals.billableCuttingCostCross > 0 && (
                                   <div className="mt-1">
-                                    Ù‡Ø²ÛŒÙ†Ù‡ Ø¨Ø±Ø´ Ø¹Ø±Ø¶ÛŒ: {formatPrice(totals.billableCuttingCostCross)} ({formatDisplayNumber((draft.widthCm || 0) / 100)} m Ã— {formatDisplayNumber(totals.baseStoneQuantity)} Ø³Ù†Ú¯ Ã— {formatPrice(totals.shouldChargeCuttingCost ? (totals.cuttingCostPerMeterCross || totals.cuttingCostPerMeter) : 0)})
+                                    �!ز�R� �! برش عرض�R: {formatPrice(totals.billableCuttingCostCross)} ({formatDisplayNumber((draft.widthCm || 0) / 100)} m � {formatDisplayNumber(totals.baseStoneQuantity)} س� گ � {formatPrice(totals.shouldChargeCuttingCost ? (totals.cuttingCostPerMeterCross || totals.cuttingCostPerMeter) : 0)})
                                   </div>
                                 )}
                               </div>
@@ -403,18 +403,18 @@
                         <div className="flex items-center justify-between mb-4">
                           <div className="flex items-center gap-2">
                             <div className="w-1 h-5 bg-gradient-to-b from-purple-500 to-purple-600 rounded-full"></div>
-                            <h5 className="text-sm font-semibold text-gray-800 dark:text-white">Ø§Ø¨Ø²Ø§Ø±Ù‡Ø§ (Ø¨Ø± Ù…ØªØ±)</h5>
+                            <h5 className="text-sm font-semibold text-gray-800 dark:text-white">ابزار�!ا (بر �&تر)</h5>
                           </div>
                           {stairActivePart === 'landing' && (
-                            <span className="text-xs text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded">Ù…Ø¯Ù„ Ù„Ø¨Ù‡ Ù¾Ø§Ú¯Ø±Ø¯: Ù…Ø­ÛŒØ·/Ø¬Ù‡Øªâ€ŒÙ‡Ø§</span>
+                            <span className="text-xs text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded">�&د� �ب�! پاگرد: �&ح�Rط/ج�!ت�R�!ا</span>
                           )}
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Ø§ÙØ²ÙˆØ¯Ù† Ø§Ø¨Ø²Ø§Ø±</label>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">افز��د�  ابزار</label>
                             <input 
                               className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all" 
-                              placeholder="Ø¬Ø³ØªØ¬Ùˆ Ø¯Ø± Ø§Ø¨Ø²Ø§Ø±Ù‡Ø§" 
+                              placeholder="جستج�� در ابزار�!ا" 
                               value={toolsSearchTerm} 
                               onChange={(e) => setToolsSearchTerm(e.target.value)} 
                               onFocus={() => setToolsDropdownOpen(true)} 
@@ -424,11 +424,11 @@
                               <div className="mt-2 max-h-48 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
                                 {isSearchingTools && (
                                   <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">
-                                    <span className="animate-pulse">Ø¯Ø± Ø­Ø§Ù„ Ø¬Ø³ØªØ¬Ùˆ...</span>
+                                    <span className="animate-pulse">در حا� جستج��...</span>
                                   </div>
                                 )}
                                 {!isSearchingTools && toolsResults.length === 0 && (
-                                  <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">Ù†ØªÛŒØ¬Ù‡â€ŒØ§ÛŒ ÛŒØ§ÙØª Ù†Ø´Ø¯</div>
+                                  <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">� ت�Rج�!�Rا�R �Rافت � شد</div>
                                 )}
                                 {toolsResults.map((t: any) => (
                                   <button 
@@ -456,10 +456,10 @@
                           </div>
 
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Ø§Ø¨Ø²Ø§Ø±Ù‡Ø§ÛŒ Ø§Ù†ØªØ®Ø§Ø¨ Ø´Ø¯Ù‡ Ùˆ Ù„Ø¨Ù‡â€ŒÙ‡Ø§</label>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">ابزار�!ا�R ا� تخاب شد�! �� �ب�!�R�!ا</label>
                             {(draft.tools || []).length === 0 ? (
                               <div className="text-center py-8 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
-                                <p className="text-xs text-gray-400 dark:text-gray-500">Ø§Ø¨Ø²Ø§Ø±ÛŒ Ø§Ù†ØªØ®Ø§Ø¨ Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª.</p>
+                                <p className="text-xs text-gray-400 dark:text-gray-500">ابزار�R ا� تخاب � شد�! است.</p>
                               </div>
                             ) : (
                               <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -482,7 +482,7 @@
                                               const tools = (draft.tools || []).filter((_, i) => i !== idx);
                                               setDraft({ ...draft, tools });
                                             }}
-                                            title="Ø­Ø°Ù Ø§Ø¨Ø²Ø§Ø±"
+                                            title="حذف ابزار"
                                           >
                                             <FaTrash className="w-3 h-3" />
                                           </button>
@@ -501,7 +501,7 @@
                                               }} 
                                               className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
                                             /> 
-                                            <span className="text-gray-700 dark:text-gray-300">Ù…Ø­ÛŒØ· Ú©Ø§Ù…Ù„</span>
+                                            <span className="text-gray-700 dark:text-gray-300">�&ح�Rط کا�&�</span>
                                           </label>
                                         )}
                                         <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
@@ -515,7 +515,7 @@
                                             }} 
                                             className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
                                           /> 
-                                          <span className="text-gray-700 dark:text-gray-300">Ø¬Ù„Ùˆ</span>
+                                          <span className="text-gray-700 dark:text-gray-300">ج���</span>
                                         </label>
                                         {stairActivePart === 'landing' && (
                                           <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
@@ -529,7 +529,7 @@
                                               }} 
                                               className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
                                             /> 
-                                            <span className="text-gray-700 dark:text-gray-300">Ø¹Ù‚Ø¨</span>
+                                            <span className="text-gray-700 dark:text-gray-300">ع�ب</span>
                                           </label>
                                         )}
                                         <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
@@ -543,7 +543,7 @@
                                             }} 
                                             className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
                                           /> 
-                                          <span className="text-gray-700 dark:text-gray-300">Ú†Ù¾</span>
+                                          <span className="text-gray-700 dark:text-gray-300">� پ</span>
                                         </label>
                                         <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
                                           <input 
@@ -556,7 +556,7 @@
                                             }} 
                                             className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
                                           /> 
-                                          <span className="text-gray-700 dark:text-gray-300">Ø±Ø§Ø³Øª</span>
+                                          <span className="text-gray-700 dark:text-gray-300">راست</span>
                                         </label>
                                       </div>
                                     </div>
@@ -569,23 +569,23 @@
                       </div>
                       )}
 
-                      {/* Layers Section (Ù„Ø§ÛŒÙ‡â€ŒÙ‡Ø§) - Enhanced */}
+                      {/* Layers Section (�ا�R�!�R�!ا) - Enhanced */}
                       {/* ðŸŽ¯ Hide layers section for riser */}
                       {stairActivePart !== 'riser' && (
                       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
                         <div className="flex items-center justify-between mb-4">
                           <div className="flex items-center gap-2">
                             <div className="w-1 h-5 bg-gradient-to-b from-orange-500 to-orange-600 rounded-full"></div>
-                            <h5 className="text-sm font-semibold text-gray-800 dark:text-white">Ù„Ø§ÛŒÙ‡â€ŒÙ‡Ø§</h5>
+                            <h5 className="text-sm font-semibold text-gray-800 dark:text-white">�ا�R�!�R�!ا</h5>
                           </div>
-                          <span className="text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 px-2 py-1 rounded">Ù„Ø§ÛŒÙ‡â€ŒÙ‡Ø§ÛŒ Ø§Ø¶Ø§ÙÛŒ Ø¨Ø±Ø§ÛŒ Ù‡Ø± Ù¾Ù„Ù‡</span>
+                          <span className="text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 px-2 py-1 rounded">�ا�R�!�R�!ا�R اضاف�R برا�R �!ر پ��!</span>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
                               <span className="flex items-center gap-1">
                                 <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                                ØªØ¹Ø¯Ø§Ø¯ Ù„Ø§ÛŒÙ‡ Ø¨Ø±Ø§ÛŒ Ù‡Ø± Ù¾Ù„Ù‡
+                                تعداد �ا�R�! برا�R �!ر پ��!
                               </span>
                             </label>
                             <FormattedNumberInput
@@ -605,7 +605,7 @@
                                       ...prev,
                                       [stairActivePart]: { 
                                         ...prev[stairActivePart], 
-                                        layerType: 'Ù„Ø·ÙØ§Ù‹ Ù†ÙˆØ¹ Ù„Ø§ÛŒÙ‡ Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯'
+                                        layerType: '�طفا�9 � ��ع �ا�R�! را ا� تخاب ک� �Rد'
                                       }
                                     }));
                                   } else {
@@ -633,7 +633,7 @@
                                     ...prev,
                                     [stairActivePart]: { 
                                       ...prev[stairActivePart], 
-                                      quantity: 'ØªØ¹Ø¯Ø§Ø¯ Ù„Ø§ÛŒÙ‡ Ø¨Ø±Ø§ÛŒ Ù‡Ø± Ù¾Ù„Ù‡ Ù†Ù…ÛŒâ€ŒØªÙˆØ§Ù†Ø¯ Ø¨ÛŒØ´ØªØ± Ø§Ø² 10 Ø¨Ø§Ø´Ø¯'
+                                      quantity: 'تعداد �ا�R�! برا�R �!ر پ��! � �&�R�Rت��ا� د ب�Rشتر از 10 باشد'
                                     }
                                   }));
                                 }
@@ -642,10 +642,10 @@
                               step={1}
                               max={10}
                               className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
-                              placeholder="Ù…Ø«Ø§Ù„: 2 (Ø¨Ø±Ø§ÛŒ Ø¯ÙˆØ¨Ù„)"
+                              placeholder="�&ثا�: 2 (برا�R د��ب�)"
                             />
                             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                              ØªØ¹Ø¯Ø§Ø¯ Ù„Ø§ÛŒÙ‡â€ŒÙ‡Ø§ÛŒÛŒ Ú©Ù‡ Ø¨Ø±Ø§ÛŒ Ù‡Ø± Ù¾Ù„Ù‡ Ù†ÛŒØ§Ø² Ø§Ø³Øª (Ù…Ø«Ø§Ù„: 2 Ø¨Ø±Ø§ÛŒ Ø¯ÙˆØ¨Ù„)
+                              تعداد �ا�R�!�R�!ا�R�R ک�! برا�R �!ر پ��! � �Rاز است (�&ثا�: 2 برا�R د��ب�)
                             </p>
                           </div>
                           
@@ -655,7 +655,7 @@
                                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
                                   <span className="flex items-center gap-1">
                                     <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                                    Ø¹Ø±Ø¶ Ù„Ø§ÛŒÙ‡ (Ø³Ø§Ù†ØªÛŒâ€ŒÙ…ØªØ±)
+                                    عرض �ا�R�! (سا� ت�R�R�&تر)
                                   </span>
                                 </label>
                                 <FormattedNumberInput
@@ -673,7 +673,7 @@
                                           ...prev,
                                           [stairActivePart]: { 
                                             ...prev[stairActivePart], 
-                                            width: `Ø¹Ø±Ø¶ Ù„Ø§ÛŒÙ‡ (${formatDisplayNumber(value)}cm) Ù†Ù…ÛŒâ€ŒØªÙˆØ§Ù†Ø¯ Ø¨ÛŒØ´ØªØ± Ø§Ø² Ø¹Ø±Ø¶ Ø¨Ø§Ù‚ÛŒâ€ŒÙ…Ø§Ù†Ø¯Ù‡ (${formatDisplayNumber(availableWidthCm)}cm) Ø¨Ø§Ø´Ø¯`
+                                            width: `عرض �ا�R�! (${formatDisplayNumber(value)}cm) � �&�R�Rت��ا� د ب�Rشتر از عرض با��R�R�&ا� د�! (${formatDisplayNumber(availableWidthCm)}cm) باشد`
                                           }
                                         }));
                                       } else if (value < 0.5) {
@@ -681,7 +681,7 @@
                                           ...prev,
                                           [stairActivePart]: { 
                                             ...prev[stairActivePart], 
-                                            width: 'Ø¹Ø±Ø¶ Ù„Ø§ÛŒÙ‡ Ø¨Ø§ÛŒØ¯ Ø­Ø¯Ø§Ù‚Ù„ 0.5 Ø³Ø§Ù†ØªÛŒâ€ŒÙ…ØªØ± Ø¨Ø§Ø´Ø¯'
+                                            width: 'عرض �ا�R�! با�Rد حدا�� 0.5 سا� ت�R�R�&تر باشد'
                                           }
                                         }));
                                       } else {
@@ -693,7 +693,7 @@
                                   min={0.5}
                                   step={0.1}
                                   className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
-                                  placeholder="Ù…Ø«Ø§Ù„: 15"
+                                  placeholder="�&ثا�: 15"
                                 />
                               </div>
                               
@@ -703,7 +703,7 @@
                                   <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
                                     <span className="flex items-center gap-1">
                                       <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                                      Ù†ÙˆØ¹ Ù„Ø§ÛŒÙ‡
+                                      � ��ع �ا�R�!
                                     </span>
                                   </label>
                                   <select
@@ -724,7 +724,7 @@
                                             ...prev,
                                             [stairActivePart]: { 
                                               ...prev[stairActivePart], 
-                                              layerType: 'Ù„Ø·ÙØ§Ù‹ Ù†ÙˆØ¹ Ù„Ø§ÛŒÙ‡ Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯'
+                                              layerType: '�طفا�9 � ��ع �ا�R�! را ا� تخاب ک� �Rد'
                                             }
                                           }));
                                         }
@@ -742,10 +742,10 @@
                                       }
                                     }}
                                   >
-                                    <option value="">Ø§Ù†ØªØ®Ø§Ø¨ Ù†ÙˆØ¹ Ù„Ø§ÛŒÙ‡...</option>
+                                    <option value="">ا� تخاب � ��ع �ا�R�!...</option>
                                     {layerTypes.map((option: LayerTypeOption) => (
                                       <option key={option.id} value={option.id}>
-                                        {option.name} - {option.pricePerLayer.toLocaleString('fa-IR')} ØªÙˆÙ…Ø§Ù†
+                                        {option.name} - {option.pricePerLayer.toLocaleString('fa-IR')} ت���&ا� 
                                       </option>
                                     ))}
                                   </select>
@@ -767,10 +767,10 @@
                                   <div className="flex items-center justify-between">
                                     <div>
                                       <h6 className="text-xs font-semibold text-orange-700 dark:text-orange-300">
-                                        Ø§Ø³ØªÙØ§Ø¯Ù‡ Ø§Ø² Ø³Ù†Ú¯ Ù…ØªÙØ§ÙˆØª Ø¨Ø±Ø§ÛŒ Ù„Ø§ÛŒÙ‡â€ŒÙ‡Ø§
+                                        استفاد�! از س� گ �&تفا��ت برا�R �ا�R�!�R�!ا
                                       </h6>
                                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                                        Ù…ÛŒâ€ŒØªÙˆØ§Ù†ÛŒØ¯ Ø³Ù†Ú¯ Ø¯ÛŒÚ¯Ø±ÛŒ Ø±Ø§ Ø¨Ø±Ø§ÛŒ Ù„Ø§ÛŒÙ‡â€ŒÙ‡Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ø±Ø¯Ù‡ Ùˆ Ù‚ÛŒÙ…Øª Ù…Ø³ØªÙ‚Ù„ Ø¢Ù† Ø±Ø§ Ø«Ø¨Øª Ú©Ù†ÛŒØ¯.
+                                        �&�R�Rت��ا� �Rد س� گ د�Rگر�R را برا�R �ا�R�!�R�!ا ا� تخاب کرد�! �� ��R�&ت �&ست�� آ�  را ثبت ک� �Rد.
                                       </p>
                                     </div>
                                     <button
@@ -809,7 +809,7 @@
                                           : 'bg-white dark:bg-gray-900/40 text-orange-600 border border-orange-200 dark:border-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/40'
                                       }`}
                                     >
-                                      {draft.layerUseDifferentStone ? 'Ù„ØºÙˆ Ø§Ø³ØªÙØ§Ø¯Ù‡' : 'ÙØ¹Ø§Ù„â€ŒØ³Ø§Ø²ÛŒ'}
+                                      {draft.layerUseDifferentStone ? '�غ�� استفاد�!' : 'فعا��Rساز�R'}
                                     </button>
                                   </div>
 
@@ -817,13 +817,13 @@
                                     <div className="mt-4 space-y-4">
                                       <div>
                                         <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                          Ø§Ù†ØªØ®Ø§Ø¨ Ø³Ù†Ú¯ Ø¨Ø±Ø§ÛŒ Ù„Ø§ÛŒÙ‡â€ŒÙ‡Ø§
+                                          ا� تخاب س� گ برا�R �ا�R�!�R�!ا
                                         </label>
                                         {!draft.layerStoneProduct ? (
                                           <>
                                             <input
                                               className="w-full rounded-lg bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
-                                              placeholder="Ù†Ø§Ù… Ø³Ù†Ú¯ Ù…ÙˆØ±Ø¯ Ù†Ø¸Ø± Ø±Ø§ Ø¬Ø³ØªØ¬Ùˆ Ú©Ù†ÛŒØ¯"
+                                              placeholder="� ا�& س� گ �&��رد � ظر را جستج�� ک� �Rد"
                                               value={layerStoneSearchTerm}
                                               onChange={(e) => setLayerStoneSearchTerm(e.target.value)}
                                               onFocus={() => setLayerStoneDropdownOpen(true)}
@@ -833,11 +833,11 @@
                                               <div className="mt-2 max-h-48 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
                                                 {isSearchingLayerStones && (
                                                   <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">
-                                                    <span className="animate-pulse">Ø¯Ø± Ø­Ø§Ù„ Ø¬Ø³ØªØ¬Ùˆ...</span>
+                                                    <span className="animate-pulse">در حا� جستج��...</span>
                                                   </div>
                                                 )}
                                                 {!isSearchingLayerStones && layerStoneSearchResults.length === 0 && (
-                                                  <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">Ù†ØªÛŒØ¬Ù‡â€ŒØ§ÛŒ ÛŒØ§ÙØª Ù†Ø´Ø¯</div>
+                                                  <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">� ت�Rج�!�Rا�R �Rافت � شد</div>
                                                 )}
                                                 {layerStoneSearchResults.map((p) => (
                                                   <button
@@ -879,7 +879,7 @@
                                                 {draft.layerStoneLabel || draft.layerStoneProduct.namePersian || draft.layerStoneProduct.name}
                                               </div>
                                               <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                                                Ú©Ø¯: {draft.layerStoneProduct.code || '-'}
+                                                کد: {draft.layerStoneProduct.code || '-'}
                                               </div>
                                             </div>
                                             <div className="flex gap-2">
@@ -897,7 +897,7 @@
                                                   clearDraftFieldError(stairActivePart, 'layerStone');
                                                 }}
                                               >
-                                                ØªØºÛŒÛŒØ±
+                                                تغ�R�Rر
                                               </button>
                                               <button
                                                 type="button"
@@ -916,7 +916,7 @@
                                                   clearDraftFieldError(stairActivePart, 'layerStonePrice');
                                                 }}
                                               >
-                                                Ø­Ø°Ù
+                                                حذف
                                               </button>
                                             </div>
                                           </div>
@@ -930,7 +930,7 @@
 
                                       <div>
                                         <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                          Ù‚ÛŒÙ…Øª Ù‡Ø± Ù…ØªØ± Ù…Ø±Ø¨Ø¹ Ø³Ù†Ú¯ Ù„Ø§ÛŒÙ‡ (ØªÙˆÙ…Ø§Ù†)
+                                          ��R�&ت �!ر �&تر �&ربع س� گ �ا�R�! (ت���&ا� )
                                         </label>
                                         <FormattedNumberInput
                                           value={draft.layerPricePerSquareMeter ?? null}
@@ -950,7 +950,7 @@
                                           min={0}
                                           step={1000}
                                           className="w-full rounded-lg bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
-                                          placeholder="Ù…Ø«Ø§Ù„: 1,800,000"
+                                          placeholder="�&ثا�: 1,800,000"
                                         />
                                         {stairDraftErrors[stairActivePart]?.layerStonePrice && (
                                           <p className="mt-1 text-xs text-red-500">
@@ -982,10 +982,10 @@
                                           />
                                           <div>
                                             <label className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                                              Ø­Ú©Ù…ÛŒ (Ø§ÙØ²Ø§ÛŒØ´ Ù‚ÛŒÙ…Øª)
+                                              حک�&�R (افزا�Rش ��R�&ت)
                                             </label>
                                             <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                              Ø¯Ø± ØµÙˆØ±Øª ÙØ¹Ø§Ù„ Ø¨ÙˆØ¯Ù†ØŒ Ù‚ÛŒÙ…Øª Ø³Ù†Ú¯ Ù„Ø§ÛŒÙ‡ Ø¨Ù‡ ØµÙˆØ±Øª Ø¯Ø±ØµØ¯ÛŒ Ø§ÙØ²Ø§ÛŒØ´ Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
+                                              در ص��رت فعا� ب��د� �R ��R�&ت س� گ �ا�R�! ب�! ص��رت درصد�R افزا�Rش داد�! �&�R�Rش��د.
                                             </p>
                                           </div>
                                         </div>
@@ -1013,7 +1013,7 @@
                                             />
                                             <span className="text-xs text-gray-600 dark:text-gray-300">%</span>
                                             <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                              Ù‚ÛŒÙ…Øª Ù†Ù‡Ø§ÛŒÛŒ Ø¨Ø§ {formatDisplayNumber(draft.layerMandatoryPercentage ?? 20)}% Ø§ÙØ²Ø§ÛŒØ´ Ù…Ø­Ø§Ø³Ø¨Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯.
+                                              ��R�&ت � �!ا�R�R با {formatDisplayNumber(draft.layerMandatoryPercentage ?? 20)}% افزا�Rش �&حاسب�! �&�R�Rش��د.
                                             </p>
                                           </div>
                                         )}
@@ -1033,7 +1033,7 @@
                                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
                                   <span className="flex items-center gap-1">
                                     <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                                    Ø§Ù†ØªØ®Ø§Ø¨ Ù„Ø¨Ù‡â€ŒÙ‡Ø§ÛŒ Ù…ÙˆØ±Ø¯ Ù†ÛŒØ§Ø² Ø¨Ø±Ø§ÛŒ Ù„Ø§ÛŒÙ‡
+                                    ا� تخاب �ب�!�R�!ا�R �&��رد � �Rاز برا�R �ا�R�!
                                   </span>
                                 </label>
                                 <div className="flex flex-wrap gap-2 p-3 bg-orange-50/50 dark:bg-orange-900/10 rounded-lg border border-orange-200 dark:border-orange-800">
@@ -1059,7 +1059,7 @@
                                         }} 
                                         className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                                       /> 
-                                      <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">Ù…Ø­ÛŒØ· Ú©Ø§Ù…Ù„</span>
+                                      <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">�&ح�Rط کا�&�</span>
                                     </label>
                                   )}
                                   <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
@@ -1080,7 +1080,7 @@
                                       className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                                       disabled={!!(draft.layerEdges?.perimeter)}
                                     /> 
-                                    <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">Ø¬Ù„Ùˆ</span>
+                                    <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">ج���</span>
                                   </label>
                                   {stairActivePart === 'landing' && (
                                     <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
@@ -1101,7 +1101,7 @@
                                         className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                                         disabled={!!(draft.layerEdges?.perimeter)}
                                       /> 
-                                      <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">Ø¹Ù‚Ø¨</span>
+                                      <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">ع�ب</span>
                                     </label>
                                   )}
                                   <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
@@ -1122,7 +1122,7 @@
                                       className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                                       disabled={!!(draft.layerEdges?.perimeter)}
                                     /> 
-                                    <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">Ú†Ù¾</span>
+                                    <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">� پ</span>
                                   </label>
                                   <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
                                     <input 
@@ -1142,12 +1142,12 @@
                                       className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                                       disabled={!!(draft.layerEdges?.perimeter)}
                                     /> 
-                                    <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">Ø±Ø§Ø³Øª</span>
+                                    <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">راست</span>
                                   </label>
                                 </div>
                                 {(!draft.layerEdges || (!draft.layerEdges.front && !draft.layerEdges.left && !draft.layerEdges.right && !draft.layerEdges.back && !draft.layerEdges.perimeter)) && (
                                   <p className="mt-2 text-xs text-orange-600 dark:text-orange-400">
-                                    Ù„Ø·ÙØ§Ù‹ Ø­Ø¯Ø§Ù‚Ù„ ÛŒÚ© Ù„Ø¨Ù‡ Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯
+                                    �طفا�9 حدا�� �Rک �ب�! را ا� تخاب ک� �Rد
                                   </p>
                                 )}
                               </div>
@@ -1194,8 +1194,8 @@
                                 const pricePerSqm = draft.pricePerSquareMeter || 0;
                                 const layerTypeUnitPrice = draft.layerTypePrice || 0;
                                 
-                                // ðŸŽ¯ FIX: Calculate layer type cost based on total length per stair Ã— number of stairs Ã— layer type price per meter
-                                // Ù…Ø¬Ù…ÙˆØ¹ Ø·ÙˆÙ„Ù‡ Ù‡Ø§ÛŒ Ù„Ø§ÛŒÙ‡ Ø¨Ø±Ø§ÛŒ ÛŒÚ© Ù¾Ù„Ù‡ (Ú†Ù¾ + Ø±Ø§Ø³Øª + Ø¬Ù„Ùˆ) Ã— ØªØ¹Ø¯Ø§Ø¯ Ù¾Ù„Ù‡ Ù‡Ø§ Ã— Ù‡Ø²ÛŒÙ†Ù‡ Ù‡Ø± Ù†ÙˆØ¹ Ù„Ø§ÛŒÙ‡
+                                // �x}� FIX: Calculate layer type cost based on total length per stair � number of stairs � layer type price per meter
+                                // �&ج�&��ع ط����! �!ا�R �ا�R�! برا�R �Rک پ��! (� پ + راست + ج���) � تعداد پ��! �!ا � �!ز�R� �! �!ر � ��ع �ا�R�!
                                 const totalLayerLengthPerStairM = getTotalLayerLengthPerStairM(stairActivePart, draft);
                                 const totalLayerLengthM = totalLayerLengthPerStairM * draft.quantity;
                                 const layerTypeCostPreview = totalLayerLengthM * layerTypeUnitPrice;
@@ -1209,48 +1209,48 @@
                                 return (
                                   <div className="md:col-span-2">
                                     <div className="mt-2 rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/20 px-4 py-3 text-xs leading-5 text-orange-700 dark:text-orange-200">
-                                      <div className="font-semibold mb-1">Ø®Ù„Ø§ØµÙ‡ Ù„Ø§ÛŒÙ‡â€ŒÙ‡Ø§:</div>
-                                      <div>ØªØ¹Ø¯Ø§Ø¯ Ú©Ù„ Ù„Ø§ÛŒÙ‡â€ŒÙ‡Ø§: {formatDisplayNumber(totalLayers)} Ø¹Ø¯Ø¯ ({formatDisplayNumber(draft.quantity)} Ù¾Ù„Ù‡ Ã— {formatDisplayNumber(draft.numberOfLayersPerStair)} Ù„Ø§ÛŒÙ‡)</div>
+                                      <div className="font-semibold mb-1">خ�اص�! �ا�R�!�R�!ا:</div>
+                                      <div>تعداد ک� �ا�R�!�R�!ا: {formatDisplayNumber(totalLayers)} عدد ({formatDisplayNumber(draft.quantity)} پ��! � {formatDisplayNumber(draft.numberOfLayersPerStair)} �ا�R�!)</div>
                                       <div className="mt-1">
-                                        <span className="font-medium">Ù„Ø¨Ù‡â€ŒÙ‡Ø§ÛŒ Ø§Ù†ØªØ®Ø§Ø¨ Ø´Ø¯Ù‡: </span>
+                                        <span className="font-medium">�ب�!�R�!ا�R ا� تخاب شد�!: </span>
                                         {stairActivePart === 'landing' && draft.layerEdges?.perimeter && (
-                                          <span className="text-orange-600 dark:text-orange-400">Ù…Ø­ÛŒØ· Ú©Ø§Ù…Ù„</span>
+                                          <span className="text-orange-600 dark:text-orange-400">�&ح�Rط کا�&�</span>
                                         )}
                                         {!draft.layerEdges?.perimeter && (
                                           <>
-                                            {draft.layerEdges?.front && <span className="text-orange-600 dark:text-orange-400">Ø¬Ù„Ùˆ </span>}
-                                            {draft.layerEdges?.back && <span className="text-orange-600 dark:text-orange-400">Ø¹Ù‚Ø¨ </span>}
-                                            {draft.layerEdges?.left && <span className="text-orange-600 dark:text-orange-400">Ú†Ù¾ </span>}
-                                            {draft.layerEdges?.right && <span className="text-orange-600 dark:text-orange-400">Ø±Ø§Ø³Øª </span>}
+                                            {draft.layerEdges?.front && <span className="text-orange-600 dark:text-orange-400">ج��� </span>}
+                                            {draft.layerEdges?.back && <span className="text-orange-600 dark:text-orange-400">ع�ب </span>}
+                                            {draft.layerEdges?.left && <span className="text-orange-600 dark:text-orange-400">� پ </span>}
+                                            {draft.layerEdges?.right && <span className="text-orange-600 dark:text-orange-400">راست </span>}
                                           </>
                                         )}
                                       </div>
-                                      <div>Ù…ØªØ± Ù…Ø±Ø¨Ø¹ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ø´Ø¯Ù‡: {formatSquareMeters(totalLayerSqm)}</div>
+                                      <div>�&تر �&ربع استفاد�! شد�!: {formatSquareMeters(totalLayerSqm)}</div>
                                       {stoneAreaUsedSqm > 0 && (
-                                        <div>Ù…ØªØ± Ù…Ø±Ø¨Ø¹ Ø³Ù†Ú¯: {formatSquareMeters(stoneAreaUsedSqm)}</div>
+                                        <div>�&تر �&ربع س� گ: {formatSquareMeters(stoneAreaUsedSqm)}</div>
                                       )}
                                       <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                                        Ù‚ÛŒÙ…Øª Ù‡Ø± Ù…ØªØ± Ù…Ø±Ø¨Ø¹: {formatPrice(pricePerSqm)} (Ù‡Ù…Ø§Ù† Ø³Ù†Ú¯ Ø§ØµÙ„ÛŒ)
+                                        ��R�&ت �!ر �&تر �&ربع: {formatPrice(pricePerSqm)} (�!�&ا�  س� گ اص��R)
                                       </div>
                                       <div className="mt-1 pt-1 border-t border-orange-200 dark:border-orange-700">
                                         <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">
-                                            Ù‚ÛŒÙ…Øª Ø³Ù†Ú¯ Ù„Ø§ÛŒÙ‡: {formatPrice((stoneAreaUsedSqm > 0 ? stoneAreaUsedSqm : totalLayerSqm) * pricePerSqm)}
+                                            ��R�&ت س� گ �ا�R�!: {formatPrice((stoneAreaUsedSqm > 0 ? stoneAreaUsedSqm : totalLayerSqm) * pricePerSqm)}
                                             {stoneAreaUsedSqm > 0 && (
                                             <span className="text-xs text-gray-500 dark:text-gray-500 mr-1">
-                                                (Ø¨Ø± Ø§Ø³Ø§Ø³ Ù…ØªØ± Ù…Ø±Ø¨Ø¹ Ø³Ù†Ú¯: {formatSquareMeters(stoneAreaUsedSqm)})
+                                                (بر اساس �&تر �&ربع س� گ: {formatSquareMeters(stoneAreaUsedSqm)})
                                             </span>
                                           )}
                                         </div>
                                         {layerTypeUnitPrice > 0 && (
                                           <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">
-                                            Ù‡Ø²ÛŒÙ†Ù‡ Ù†ÙˆØ¹ Ù„Ø§ÛŒÙ‡ ({draft.layerTypeName || '-'}): {formatPrice(layerTypeCostPreview)}
+                                            �!ز�R� �! � ��ع �ا�R�! ({draft.layerTypeName || '-'}): {formatPrice(layerTypeCostPreview)}
                                             <span className="text-xs text-gray-500 dark:text-gray-500 ml-1">
-                                              ({formatDisplayNumber(totalLayerLengthPerStairM)} Ù…ØªØ± Ã— {formatDisplayNumber(draft.quantity)} Ù¾Ù„Ù‡ Ã— {formatPrice(layerTypeUnitPrice)}/Ù…ØªØ±)
+                                              ({formatDisplayNumber(totalLayerLengthPerStairM)} �&تر � {formatDisplayNumber(draft.quantity)} پ��! � {formatPrice(layerTypeUnitPrice)}/�&تر)
                                             </span>
                                           </div>
                                         )}
                                         <div className="mt-1 pt-1 border-t border-orange-200 dark:border-orange-700">
-                                          <span className="font-semibold">Ù‚ÛŒÙ…Øª Ú©Ù„ Ù„Ø§ÛŒÙ‡â€ŒÙ‡Ø§: {formatPrice(layerTotalPrice)}</span>
+                                          <span className="font-semibold">��R�&ت ک� �ا�R�!�R�!ا: {formatPrice(layerTotalPrice)}</span>
                                         </div>
                                       </div>
                                     </div>
@@ -1268,10 +1268,10 @@
                           <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2">
                               <div className="w-1 h-5 bg-gradient-to-b from-teal-500 to-teal-600 rounded-full"></div>
-                              <h5 className="text-sm font-semibold text-gray-800 dark:text-white">Ù¾Ø±Ø¯Ø§Ø®Øª Ø³Ù†Ú¯</h5>
+                              <h5 className="text-sm font-semibold text-gray-800 dark:text-white">پرداخت س� گ</h5>
                             </div>
                             <span className="text-xs text-teal-600 dark:text-teal-300 bg-teal-50 dark:bg-teal-900/30 px-2 py-1 rounded">
-                              Ù‡Ø²ÛŒÙ†Ù‡ Ø¨Ù‡ Ø§Ø²Ø§ÛŒ Ù…ØªØ± Ù…Ø±Ø¨Ø¹
+                              �!ز�R� �! ب�! ازا�R �&تر �&ربع
                             </span>
                           </div>
                           <div className="space-y-4">
@@ -1308,14 +1308,14 @@
                                   });
                                 }}
                               />
-                              ÙØ¹Ø§Ù„â€ŒØ³Ø§Ø²ÛŒ Ù¾Ø±Ø¯Ø§Ø®Øª Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø¨Ø®Ø´
+                              فعا��Rساز�R پرداخت برا�R ا�R�  بخش
                             </label>
 
                             {draft.finishingEnabled && (
                               <>
                                 <div>
                                   <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                    Ø§Ù†ØªØ®Ø§Ø¨ Ù†ÙˆØ¹ Ù¾Ø±Ø¯Ø§Ø®Øª
+                                    ا� تخاب � ��ع پرداخت
                                   </label>
                                   <select
                                     value={draft.finishingId || ''}
@@ -1343,7 +1343,7 @@
                                     }}
                                     className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
                                   >
-                                    <option value="">Ø§Ù†ØªØ®Ø§Ø¨ Ù¾Ø±Ø¯Ø§Ø®Øª...</option>
+                                    <option value="">ا� تخاب پرداخت...</option>
                                     {stoneFinishings.map(option => (
                                       <option key={option.id} value={option.id}>
                                         {option.namePersian} - {formatPrice(option.pricePerSquareMeter)}
@@ -1355,15 +1355,15 @@
                                 {selectedFinishing && finishingPricePerSquareMeter && (
                                   <div className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-4 py-3 text-xs leading-5 text-teal-700 dark:text-teal-200 space-y-1.5">
                                     <div className="flex justify-between">
-                                      <span>Ù‚ÛŒÙ…Øª Ù‡Ø± Ù…ØªØ± Ù…Ø±Ø¨Ø¹:</span>
+                                      <span>��R�&ت �!ر �&تر �&ربع:</span>
                                       <span className="font-semibold">{formatPrice(finishingPricePerSquareMeter)}</span>
                                     </div>
                                     <div className="flex justify-between">
-                                      <span>Ù…Ø³Ø§Ø­Øª Ù…Ø­Ø§Ø³Ø¨Ø§ØªÛŒ:</span>
+                                      <span>�&ساحت �&حاسبات�R:</span>
                                       <span className="font-semibold">{formatSquareMeters(totals.pricingSquareMeters)}</span>
                                     </div>
                                     <div className="flex justify-between">
-                                      <span>Ù‡Ø²ÛŒÙ†Ù‡ ØªÙ‚Ø±ÛŒØ¨ÛŒ Ù¾Ø±Ø¯Ø§Ø®Øª:</span>
+                                      <span>�!ز�R� �! ت�ر�Rب�R پرداخت:</span>
                                       <span className="font-semibold">{formatPrice(finishingPreviewCost)}</span>
                                     </div>
                                   </div>
@@ -1378,7 +1378,7 @@
                       <div className="bg-gradient-to-r from-teal-50 to-teal-100 dark:from-teal-900/30 dark:to-teal-800/30 rounded-lg border-2 border-teal-300 dark:border-teal-700 p-4 flex items-center justify-between shadow-sm">
                         <div className="flex items-center gap-2">
                           <div className="w-1 h-6 bg-gradient-to-b from-teal-500 to-teal-600 rounded-full"></div>
-                          <span className="text-sm font-semibold text-teal-900 dark:text-teal-200">Ø¬Ù…Ø¹ Ú©Ù„ Ø§ÛŒÙ† Ø¨Ø®Ø´</span>
+                          <span className="text-sm font-semibold text-teal-900 dark:text-teal-200">ج�&ع ک� ا�R�  بخش</span>
                         </div>
                         <div className="text-xl font-bold text-teal-700 dark:text-teal-300">{formatPrice(totals.partTotal || 0)}</div>
                       </div>
@@ -1390,28 +1390,28 @@
                 <div className="mt-4 border-t border-gray-200 dark:border-gray-700 pt-4">
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-1 h-6 bg-gradient-to-b from-purple-500 to-purple-600 rounded-full"></div>
-                    <h4 className="text-base font-semibold text-gray-800 dark:text-white">Ø®Ù„Ø§ØµÙ‡ Ø§Ù‚Ù„Ø§Ù… Ø§ÙØ²ÙˆØ¯Ù‡ Ø´Ø¯Ù‡</h4>
+                    <h4 className="text-base font-semibold text-gray-800 dark:text-white">خ�اص�! ا��ا�& افز��د�! شد�!</h4>
                     <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full text-xs font-medium">
-                      {stairSessionItems.length} Ø¢ÛŒØªÙ…
+                      {stairSessionItems.length} آ�Rت�&
                     </span>
                   </div>
                   {stairSessionItems.length === 0 ? (
                     <div className="text-center py-6 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
-                      <p className="text-sm text-gray-400 dark:text-gray-500">Ù‡Ù†ÙˆØ² Ø¢ÛŒØªÙ…ÛŒ Ø§ÙØ²ÙˆØ¯Ù‡ Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª.</p>
+                      <p className="text-sm text-gray-400 dark:text-gray-500">�!� ��ز آ�Rت�&�R افز��د�! � شد�! است.</p>
                     </div>
                   ) : (
                     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
                       <table className="min-w-full text-sm">
                         <thead>
                           <tr className="bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-900/30 dark:to-purple-800/30 border-b border-purple-200 dark:border-purple-700">
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">Ø¨Ø®Ø´</th>
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">Ø§Ø¨Ø¹Ø§Ø¯</th>
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">ØªØ¹Ø¯Ø§Ø¯</th>
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">Ù…ØªØ± Ù…Ø±Ø¨Ø¹</th>
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">Ù‚ÛŒÙ…Øª Ù…ØªØ± Ù…Ø±Ø¨Ø¹</th>
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">Ø§Ø¨Ø²Ø§Ø±Ù‡Ø§</th>
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">Ù‡Ø²ÛŒÙ†Ù‡ Ø§Ø¨Ø²Ø§Ø±</th>
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">Ø¬Ù…Ø¹ Ø¬Ø²</th>
+                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">بخش</th>
+                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">ابعاد</th>
+                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">تعداد</th>
+                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">�&تر �&ربع</th>
+                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">��R�&ت �&تر �&ربع</th>
+                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">ابزار�!ا</th>
+                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">�!ز�R� �! ابزار</th>
+                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">ج�&ع جز</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1420,8 +1420,8 @@
                             const isLayer = ((it as any).meta?.isLayer) || false;
                             const layerInfo = ((it as any).meta?.layerInfo) || null;
                             const partTypeLabel = isLayer 
-                              ? `Ù„Ø§ÛŒÙ‡ ${it.stairPartType === 'tread' ? 'Ú©Ù Ù¾Ù„Ù‡' : it.stairPartType === 'riser' ? 'Ø®ÛŒØ²' : 'Ù¾Ø§Ú¯Ø±Ø¯'}`
-                              : (it.stairPartType === 'tread' ? 'Ú©Ù Ù¾Ù„Ù‡' : it.stairPartType === 'riser' ? 'Ø®ÛŒØ²' : 'Ù¾Ø§Ú¯Ø±Ø¯');
+                              ? `�ا�R�! ${it.stairPartType === 'tread' ? 'کف پ��!' : it.stairPartType === 'riser' ? 'خ�Rز' : 'پاگرد'}`
+                              : (it.stairPartType === 'tread' ? 'کف پ��!' : it.stairPartType === 'riser' ? 'خ�Rز' : 'پاگرد');
                             const partTypeColor = isLayer 
                               ? 'orange' 
                               : (it.stairPartType === 'tread' ? 'purple' : it.stairPartType === 'riser' ? 'blue' : 'indigo');
@@ -1445,30 +1445,30 @@
                                   </span>
                                   {isLayer && layerInfo && (
                                     <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">
-                                      {layerInfo.numberOfLayersPerStair} Ù„Ø§ÛŒÙ‡ Ø¨Ø±Ø§ÛŒ Ù‡Ø± Ù¾Ù„Ù‡
+                                      {layerInfo.numberOfLayersPerStair} �ا�R�! برا�R �!ر پ��!
                                     </div>
                                   )}
                                 </td>
                                 <td className="py-3 px-4 text-gray-700 dark:text-gray-300">
                                   <div className="flex flex-col gap-0.5">
-                                    <span className="font-medium">Ø·ÙˆÙ„: {lengthDisplay}</span>
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">Ø¹Ø±Ø¶: {widthDisplay}</span>
+                                    <span className="font-medium">ط���: {lengthDisplay}</span>
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">عرض: {widthDisplay}</span>
                                   </div>
                                 </td>
                                 <td className="py-3 px-4 text-gray-700 dark:text-gray-300">
                                   <div className="flex flex-col gap-1">
-                                    <span className="font-medium">{formatDisplayNumber(it.quantity || 0)} Ø¹Ø¯Ø¯</span>
+                                    <span className="font-medium">{formatDisplayNumber(it.quantity || 0)} عدد</span>
                                     {baseStoneQuantity > 0 && (
                                       <span className="text-xs text-purple-600 dark:text-purple-300">
-                                        Ø³Ù†Ú¯ Ù¾Ø§ÛŒÙ‡: {formatDisplayNumber(baseStoneQuantity)} Ø¹Ø¯Ø¯
-                                        {piecesPerStoneMeta > 0 ? ` â€¢ ${formatDisplayNumber(piecesPerStoneMeta)} Ù‚Ø·Ø¹Ù‡ Ø§Ø² Ù‡Ø± Ø³Ù†Ú¯` : ''}
-                                        {leftoverWidthMeta > 0 ? ` â€¢ Ø¨Ø§Ù‚ÛŒÙ…Ø§Ù†Ø¯Ù‡: ${formatDisplayNumber(leftoverWidthMeta)}cm` : ''}
+                                        س� گ پا�R�!: {formatDisplayNumber(baseStoneQuantity)} عدد
+                                        {piecesPerStoneMeta > 0 ? ` ⬢ ${formatDisplayNumber(piecesPerStoneMeta)} �طع�! از �!ر س� گ` : ''}
+                                        {leftoverWidthMeta > 0 ? ` ⬢ با��R�&ا� د�!: ${formatDisplayNumber(leftoverWidthMeta)}cm` : ''}
                                       </span>
                                     )}
                                     {isLayer && layerInfo && (
                                       <span className="text-xs text-orange-600 dark:text-orange-400 mt-0.5">
                                         {layerInfo.layersFromRemainingStones > 0 || layerInfo.layersFromNewStones > 0
-                                          ? `${layerInfo.layersFromRemainingStones || 0} Ø§Ø² Ø¨Ø§Ù‚ÛŒâ€ŒÙ…Ø§Ù†Ø¯Ù‡ØŒ ${layerInfo.layersFromNewStones || 0} Ø§Ø² Ø³Ù†Ú¯ Ø¬Ø¯ÛŒØ¯`
+                                          ? `${layerInfo.layersFromRemainingStones || 0} از با��R�R�&ا� د�!�R ${layerInfo.layersFromNewStones || 0} از س� گ جد�Rد`
                                           : ''}
                                       </span>
                                     )}
@@ -1488,16 +1488,16 @@
                                       ((it as any).meta?.tools || []).map((t: any, i: number) => (
                                         <div key={i} className="text-xs bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded border border-purple-200 dark:border-purple-800">
                                           <span className="font-medium text-purple-700 dark:text-purple-300">{t.name}</span>
-                                          <span className="text-gray-600 dark:text-gray-400"> â€¢ {formatDisplayNumber(t.computedMeters || 0)} m</span>
-                                          <span className="text-gray-500 dark:text-gray-500"> Ã— {formatPrice(t.pricePerMeter || 0)}</span>
+                                          <span className="text-gray-600 dark:text-gray-400"> ⬢ {formatDisplayNumber(t.computedMeters || 0)} m</span>
+                                          <span className="text-gray-500 dark:text-gray-500"> � {formatPrice(t.pricePerMeter || 0)}</span>
                                         </div>
                                       ))
                                     )}
                                     {it.finishingId && it.finishingCost ? (
                                       <div className="text-xs bg-teal-50 dark:bg-teal-900/20 px-2 py-1 rounded border border-teal-200 dark:border-teal-800">
-                                        <span className="font-medium text-teal-700 dark:text-teal-300">Ù¾Ø±Ø¯Ø§Ø®Øª:</span>
+                                        <span className="font-medium text-teal-700 dark:text-teal-300">پرداخت:</span>
                                         <span className="text-gray-600 dark:text-gray-400 mr-1">
-                                          {it.finishingName || 'Ù¾Ø±Ø¯Ø§Ø®Øª'} â€¢ {formatSquareMeters(it.finishingSquareMeters || it.squareMeters || 0)}
+                                          {it.finishingName || 'پرداخت'} ⬢ {formatSquareMeters(it.finishingSquareMeters || it.squareMeters || 0)}
                                         </span>
                                         <span className="text-teal-600 dark:text-teal-300 font-semibold">
                                           {formatPrice(it.finishingCost)}
@@ -1524,7 +1524,7 @@
                             );
                           })}
                           <tr className="bg-gradient-to-r from-teal-50 to-teal-100 dark:from-teal-900/30 dark:to-teal-800/30 border-t-2 border-teal-300 dark:border-teal-700">
-                            <td className="py-3 px-4 font-bold text-teal-900 dark:text-teal-200" colSpan={7}>Ø¬Ù…Ø¹ Ú©Ù„ Ú¯Ø±ÙˆÙ‡</td>
+                            <td className="py-3 px-4 font-bold text-teal-900 dark:text-teal-200" colSpan={7}>ج�&ع ک� گر���!</td>
                             <td className="py-3 px-4">
                               <span className="font-bold text-lg text-teal-700 dark:text-teal-300">
                                 {formatPrice(stairSessionItems.reduce((s, it) => s + (it.totalPrice || 0), 0))}
@@ -1539,7 +1539,7 @@
                 </div>
               </div>
               <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-2 flex-shrink-0">
-                <button type="button" className="px-3 py-2 rounded-md bg-gray-200 dark:bg-gray-700" onClick={() => setShowProductModal(false)}>Ø§Ù†ØµØ±Ø§Ù</button>
+                <button type="button" className="px-3 py-2 rounded-md bg-gray-200 dark:bg-gray-700" onClick={() => setShowProductModal(false)}>ا� صراف</button>
                 <button type="button" className="px-3 py-2 rounded-md bg-purple-600 text-white" onClick={() => {
                   const [draft] = getActiveDraft();
                   // Validate required fields
@@ -1553,7 +1553,7 @@
                         ...fieldErrors
                       }
                     }));
-                    setErrors({ products: 'Ù„Ø·ÙØ§Ù‹ Ø®Ø·Ø§Ù‡Ø§ÛŒ Ù…Ø´Ø®Øµâ€ŒØ´Ø¯Ù‡ Ø±Ø§ Ø¨Ø±Ø·Ø±Ù Ú©Ù†ÛŒØ¯' });
+                    setErrors({ products: '�طفا�9 خطا�!ا�R �&شخص�Rشد�! را برطرف ک� �Rد' });
                     return;
                   }
                   setStairDraftErrors(prev => ({ ...prev, [stairActivePart]: {} }));
@@ -1589,7 +1589,7 @@
                       ...metaTools,
                       {
                         toolId: `cut-longitudinal-${draft.stoneId || 'new'}`,
-                        name: 'Ø¨Ø±Ø´ Ø·ÙˆÙ„ÛŒ',
+                        name: 'برش ط����R',
                         pricePerMeter: totals.cuttingCostPerMeterLongitudinal || totals.cuttingCostPerMeter,
                         edges: { front: false, left: false, right: false, back: false, perimeter: true },
                         computedMeters: cutMeters,
@@ -1599,9 +1599,9 @@
                   }
                   if (totals.cuttingCostCross > 0 && totals.shouldChargeCuttingCost) {
                     const widthMeters = ((draft.widthCm || 0) / 100) * totals.baseStoneQuantity;
-                    // Use "Ø¨Ø±Ø´ Ú©Ù„Ù‡ Ø¨Ø±" if there's only 1 cross cut (no longitudinal cut)
+                    // Use "برش ک��! بر" if there's only 1 cross cut (no longitudinal cut)
                     const hasOnlyCrossCut = totals.cuttingCostLongitudinal === 0 || !totals.cuttingCostLongitudinal;
-                    const cutName = hasOnlyCrossCut ? 'Ø¨Ø±Ø´ Ú©Ù„Ù‡ Ø¨Ø±' : 'Ø¨Ø±Ø´ Ø¹Ø±Ø¶ÛŒ';
+                    const cutName = hasOnlyCrossCut ? 'برش ک��! بر' : 'برش عرض�R';
                     metaTools = [
                       ...metaTools,
                       {
@@ -1741,7 +1741,7 @@
                     stairPartType: stairActivePart,
                     stoneCode: stoneProduct.code,
                     stoneName: draft.stoneLabel || stoneProduct.namePersian || stoneProduct.name || '',
-                    diameterOrWidth: draft.thicknessCm || stoneProduct.thicknessValue || 0, // Ù‚Ø·Ø± = Ø¶Ø®Ø§Ù…Øª (thickness)
+                    diameterOrWidth: draft.thicknessCm || stoneProduct.thicknessValue || 0, // �طر = ضخا�&ت (thickness)
                     length: storedLengthValue,
                     lengthUnit: draft.lengthUnit || 'cm',
                     width: draft.widthCm!,
@@ -1751,7 +1751,7 @@
                     pricePerSquareMeter: draft.pricePerSquareMeter!,
                     totalPrice: totalPrice,
                     description: '',
-                    currency: 'ØªÙˆÙ…Ø§Ù†',
+                    currency: 'ت���&ا� ',
                     isMandatory: isDraftMandatory && mandatoryPercentageValue > 0,
                     mandatoryPercentage: isDraftMandatory && mandatoryPercentageValue > 0 ? mandatoryPercentageValue : 0,
                     originalTotalPrice: totals.baseMaterialPrice,
@@ -1763,10 +1763,10 @@
                     cuttingCostPerMeter: cuttingCostPerMeter,
                     cutDescription: isCut
                       ? hasWidthCut && hasLengthCut
-                        ? `Ø¨Ø±Ø´ Ø·ÙˆÙ„ÛŒ (${originalWidthCm}cm â†’ ${userWidthCm}cm) Ùˆ Ø¨Ø±Ø´ Ø¹Ø±Ø¶ÛŒ (${formatDisplayNumber(pricingLengthM)}m â†’ ${formatDisplayNumber(actualLengthM)}m)`
+                        ? `برش ط����R (${originalWidthCm}cm �  ${userWidthCm}cm) �� برش عرض�R (${formatDisplayNumber(pricingLengthM)}m �  ${formatDisplayNumber(actualLengthM)}m)`
                         : hasWidthCut
-                          ? `Ø¨Ø±Ø´ Ø·ÙˆÙ„ÛŒ (${originalWidthCm}cm â†’ ${userWidthCm}cm)`
-                          : `Ø¨Ø±Ø´ Ú©Ù„Ù‡ Ø¨Ø± (${formatDisplayNumber(pricingLengthM)}m â†’ ${formatDisplayNumber(actualLengthM)}m)`
+                          ? `برش ط����R (${originalWidthCm}cm �  ${userWidthCm}cm)`
+                          : `برش ک��! بر (${formatDisplayNumber(pricingLengthM)}m �  ${formatDisplayNumber(actualLengthM)}m)`
                       : '',
                     remainingStones: remainingStones,
                     cutDetails: cutDetails,
@@ -1917,8 +1917,8 @@
                       const layerSqmPerStair = totalLayerSqm / (draft.quantity * draft.numberOfLayersPerStair);
                       const layerTypeUnitPrice = draft.layerTypePrice || 0;
                       
-                      // ðŸŽ¯ FIX: Calculate layer type cost based on total length per stair Ã— number of stairs Ã— layer type price per meter
-                      // Ù…Ø¬Ù…ÙˆØ¹ Ø·ÙˆÙ„Ù‡ Ù‡Ø§ÛŒ Ù„Ø§ÛŒÙ‡ Ø¨Ø±Ø§ÛŒ ÛŒÚ© Ù¾Ù„Ù‡ (Ú†Ù¾ + Ø±Ø§Ø³Øª + Ø¬Ù„Ùˆ) Ã— ØªØ¹Ø¯Ø§Ø¯ Ù¾Ù„Ù‡ Ù‡Ø§ Ã— Ù‡Ø²ÛŒÙ†Ù‡ Ù‡Ø± Ù†ÙˆØ¹ Ù„Ø§ÛŒÙ‡
+                      // �x}� FIX: Calculate layer type cost based on total length per stair � number of stairs � layer type price per meter
+                      // �&ج�&��ع ط����! �!ا�R �ا�R�! برا�R �Rک پ��! (� پ + راست + ج���) � تعداد پ��! �!ا � �!ز�R� �! �!ر � ��ع �ا�R�!
                       const totalLayerLengthPerStairM = getTotalLayerLengthPerStairM(stairActivePart, draft);
                       const totalLayerLengthM = totalLayerLengthPerStairM * draft.quantity;
                       const layerTypeCost = totalLayerLengthM * layerTypeUnitPrice;
@@ -1982,7 +1982,7 @@
                       const chargeableLayerCuttingCost = shouldChargeLayerCutting ? layerMetrics.totalLayerCuttingCost : 0;
                       // ðŸŽ¯ FIX: Layer material price should be based on stone area used, NOT layer square meters
                       // ðŸŽ¯ NOTE: effectiveLayerPricePerSqm already includes mandatory pricing if applicable
-                      // Example: stoneAreaUsedSqm (0.976 mÂ²) Ã— pricePerSqm (700,000) = 683,200 ØªÙˆÙ…Ø§Ù†
+                      // Example: stoneAreaUsedSqm (0.976 m²) � pricePerSqm (700,000) = 683,200 ت���&ا� 
                       const layerMaterialPrice = pricingStoneAreaSqm * effectiveLayerPricePerSqm;
                       // ðŸŽ¯ FIX: Ensure layerTotalPrice is always a number (not string) and properly rounded
                       const layerTotalPrice = Number((layerMaterialPrice + layerTypeCost + chargeableLayerCuttingCost).toFixed(2));
@@ -2023,7 +2023,7 @@
                         } else if (existingLayerInWizard) {
                           // Existing layer is in wizardData.products - skip creating new one in session
                           // It will be merged when adding to wizardData (handled in the "Add to Contract" button handler)
-                          console.log('â„¹ï¸ Existing layer product found in wizardData.products, will be merged when adding to contract');
+                          console.log('��️ Existing layer product found in wizardData.products, will be merged when adding to contract');
                           // Don't create a new layer product in session - prevents duplicates
                         }
                       } else {
@@ -2127,7 +2127,7 @@
                   setToolsSearchTerm('');
                   setToolsDropdownOpen(false);
                   setErrors({});
-                }}>Ø§ÙØ²ÙˆØ¯Ù† Ø§ÛŒÙ† Ø¨Ø®Ø´</button>
+                }}>افز��د�  ا�R�  بخش</button>
                 <button type="button" className="px-3 py-2 rounded-md bg-green-600 text-white" onClick={() => {
                   if (!stairSessionItems.length) { setShowProductModal(false); return; }
                   
@@ -2264,7 +2264,7 @@
                               };
                             } else {
                               // Fallback: calculate based on session index (shouldn't happen, but handle gracefully)
-                              console.warn('âš ï¸ Could not find parent final index for layer product, using fallback calculation');
+                              console.warn('�a�️ Could not find parent final index for layer product, using fallback calculation');
                               // Find parent's index in original session
                               const parentSessionIndex = stairSessionItems.findIndex(p => p === parentInSession);
                               if (parentSessionIndex >= 0) {
@@ -2350,5 +2350,5 @@
                   setIsEditMode(false);
                   setEditingProductIndex(null);
                   setShowProductModal(false);
-                }}>Ø§ØªÙ…Ø§Ù… Ùˆ Ø§ÙØ²ÙˆØ¯Ù† Ø¨Ù‡ Ù‚Ø±Ø§Ø±Ø¯Ø§Ø¯</button>
+                }}>ات�&ا�& �� افز��د�  ب�! �رارداد</button>
               </div>

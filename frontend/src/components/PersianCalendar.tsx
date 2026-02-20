@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
@@ -21,7 +21,7 @@ interface PersianCalendarProps {
 export default function PersianCalendarComponent({
   value,
   onChange,
-  placeholder = 'تاریخ را انتخاب کنید',
+  placeholder = '??? ? ??? ??',
   className = '',
   disabled = false,
   showTime = false,
@@ -68,7 +68,7 @@ export default function PersianCalendarComponent({
 
   const getFirstDayOfMonth = (year: number, month: number): number => {
     const firstDay = moment().jYear(year).jMonth(month - 1).jDate(1);
-    // Adjust for Persian calendar where Saturday (شنبه) is day 0
+    // Adjust for Persian calendar where Saturday (??) is day 0
     const day = firstDay.day();
     return day === 6 ? 0 : day + 1; // Convert Sunday=0 to Saturday=0
   };
@@ -354,7 +354,7 @@ export default function PersianCalendarComponent({
           {/* Year Selector Dropdown */}
           {enableYearSelection && showYearSelector && (
             <div className="mb-4 p-3 bg-white/5 rounded-lg border border-white/10">
-              <div className="text-sm text-gray-300 mb-2 text-center">انتخاب سال</div>
+              <div className="text-sm text-gray-300 mb-2 text-center">??? ??</div>
               <div className="grid grid-cols-4 gap-2 max-h-32 overflow-y-auto">
                 {generateYearOptions().map((yearOption) => (
                   <button
@@ -431,14 +431,14 @@ export default function PersianCalendarComponent({
                 }}
                 className="glass-liquid-btn text-sm px-3 py-1"
               >
-                امروز
+                ???
               </button>
               
               <button
                 onClick={() => setIsOpen(false)}
                 className="glass-liquid-btn-primary text-sm px-3 py-1"
               >
-                تایید
+                ???
               </button>
             </div>
           </div>
@@ -448,3 +448,4 @@ export default function PersianCalendarComponent({
     </div>
   );
 }
+

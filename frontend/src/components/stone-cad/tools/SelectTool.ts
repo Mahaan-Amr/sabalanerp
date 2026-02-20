@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Selection Tool
  * Allows users to select and move objects on the canvas
  */
@@ -10,7 +10,7 @@ import Konva from 'konva';
 export class SelectTool extends BaseTool {
   name = 'select';
   icon = 'FaHandPointer';
-  displayName = 'انتخاب';
+  displayName = '???';
   
   private isSelecting = false;
   private selectionBox: any = null; // Konva.Rect
@@ -90,4 +90,5 @@ export class SelectTool extends BaseTool {
     return 'default';
   }
 }
+
 

@@ -1,4 +1,4 @@
-// Payment service
+﻿// Payment service
 // Handles payment business logic
 
 import { PrismaClient } from '@prisma/client';
@@ -12,6 +12,8 @@ export interface CreatePaymentData {
   currency?: string;
   paymentDate?: string;
   checkNumber?: string;
+  checkOwnerName?: string;
+  handoverDate?: string;
   cashType?: string;
   nationalCode?: string;
   notes?: string;
@@ -29,6 +31,8 @@ export interface UpdatePaymentData {
   currency?: string;
   paymentDate?: string;
   checkNumber?: string;
+  checkOwnerName?: string;
+  handoverDate?: string;
   cashType?: string;
   nationalCode?: string;
   notes?: string;
@@ -44,12 +48,14 @@ export interface UpdatePaymentData {
  * Validate payment data based on payment method
  */
 export function validatePaymentData(data: CreatePaymentData | UpdatePaymentData): { isValid: boolean; error?: string } {
-  // Validate check number for check payments
-  if (data.paymentMethod === 'CHECK' && !data.checkNumber) {
-    return {
-      isValid: false,
-      error: 'Check number is required for check payments'
-    };
+  // Validate check fields for check payments
+  if (data.paymentMethod === 'CHECK') {
+    if (!data.checkNumber) {
+      return { isValid: false, error: 'Check number is required for check payments' };
+    }
+    if (!data.checkOwnerName || !String(data.checkOwnerName).trim()) {
+      return { isValid: false, error: 'Check owner name is required for check payments' };
+    }
   }
 
   // Validate cash type for cash payments
@@ -111,6 +117,8 @@ export async function createPayment(
       status: data.status || 'PENDING',
       paymentDate: data.paymentDate ? new Date(data.paymentDate) : null,
       checkNumber: data.checkNumber || null,
+      checkOwnerName: data.checkOwnerName || null,
+      handoverDate: data.handoverDate ? new Date(data.handoverDate) : null,
       cashType: data.cashType || null,
       nationalCode: data.nationalCode || null,
       notes: data.notes || null,
@@ -232,6 +240,8 @@ export async function updatePayment(
       status: data.status !== undefined ? data.status : payment.status,
       paymentDate: data.paymentDate !== undefined ? (data.paymentDate ? new Date(data.paymentDate) : null) : payment.paymentDate,
       checkNumber: data.checkNumber !== undefined ? data.checkNumber : payment.checkNumber,
+      checkOwnerName: data.checkOwnerName !== undefined ? data.checkOwnerName : payment.checkOwnerName,
+      handoverDate: data.handoverDate !== undefined ? (data.handoverDate ? new Date(data.handoverDate) : null) : payment.handoverDate,
       cashType: data.cashType !== undefined ? data.cashType : payment.cashType,
       nationalCode: data.nationalCode !== undefined ? data.nationalCode : payment.nationalCode,
       notes: data.notes !== undefined ? data.notes : payment.notes,
@@ -297,4 +307,5 @@ export async function deletePayment(
 
   return { success: true };
 }
+
 

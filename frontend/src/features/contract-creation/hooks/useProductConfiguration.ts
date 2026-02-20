@@ -1,4 +1,4 @@
-// Product configuration hook
+﻿// Product configuration hook
 // Manages product selection, dimensions, cutting, and pricing
 
 import { useState, useCallback, useMemo } from 'react';
@@ -152,7 +152,7 @@ export const useProductConfiguration = () => {
       totalPrice: metrics.totalPrice,
       originalTotalPrice: metrics.originalTotalPrice,
       description: '',
-      currency: selectedProduct.currency || 'تومان',
+      currency: selectedProduct.currency || '???',
       lengthUnit: dimensions.lengthUnit,
       widthUnit: dimensions.widthUnit,
       isMandatory: mandatoryPricing.isMandatory,
@@ -224,4 +224,5 @@ export const useProductConfiguration = () => {
     resetConfiguration
   };
 };
+
 

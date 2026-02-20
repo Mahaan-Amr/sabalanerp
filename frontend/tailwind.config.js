@@ -87,8 +87,8 @@ module.exports = {
         },
       },
       fontFamily: {
-        'vazir': ['Vazir', 'sans-serif'],
-        'samim': ['Samim', 'sans-serif'],
+        'vazir': ['Yekan Bakh', 'Tahoma', 'Arial', 'sans-serif'],
+        'samim': ['Yekan Bakh', 'Tahoma', 'Arial', 'sans-serif'],
       },
       backdropBlur: {
         'xs': '2px',

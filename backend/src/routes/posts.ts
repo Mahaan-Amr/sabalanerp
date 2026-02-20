@@ -2,6 +2,7 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -135,7 +136,7 @@ router.get('/:id', async (req, res) => {
 // @desc    Create post
 // @route   POST /api/posts
 // @access  Private
-router.post('/', protect, [
+router.post('/', protect, requireFeatureAccess(FEATURES.CORE_POSTS_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('title').trim().isLength({ min: 1 }).escape(),
   body('content').trim().isLength({ min: 1 }),
   body('published').optional().isBoolean(),
@@ -187,7 +188,7 @@ router.post('/', protect, [
 // @desc    Update post
 // @route   PUT /api/posts/:id
 // @access  Private
-router.put('/:id', protect, [
+router.put('/:id', protect, requireFeatureAccess(FEATURES.CORE_POSTS_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('title').optional().trim().isLength({ min: 1 }).escape(),
   body('content').optional().trim().isLength({ min: 1 }),
   body('published').optional().isBoolean(),
@@ -259,7 +260,7 @@ router.put('/:id', protect, [
 // @desc    Delete post
 // @route   DELETE /api/posts/:id
 // @access  Private
-router.delete('/:id', protect, async (req: any, res) => {
+router.delete('/:id', protect, requireFeatureAccess(FEATURES.CORE_POSTS_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: any, res) => {
   try {
     const post = await prisma.post.findUnique({
       where: { id: req.params.id }

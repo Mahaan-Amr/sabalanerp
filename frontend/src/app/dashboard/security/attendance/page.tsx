@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import { 
@@ -77,7 +77,7 @@ export default function AttendancePage() {
       }
     } catch (error: any) {
       console.error('Error fetching attendance data:', error);
-      setError(error.response?.data?.error || 'خطا در ارتباط با سرور');
+      setError(error.response?.data?.error || '?? ? ??? ? ??');
     } finally {
       setLoading(false);
     }
@@ -96,14 +96,14 @@ export default function AttendancePage() {
 
   const getStatusLabel = (status: string) => {
     switch (status) {
-      case 'PRESENT': return 'حاضر';
-      case 'ABSENT': return 'غایب';
-      case 'LATE': return 'تاخیر';
-      case 'MISSION': return 'ماموریت';
-      case 'HOURLY_LEAVE': return 'مرخصی ساعتی';
-      case 'SICK_LEAVE': return 'مرخصی استعلاجی';
-      case 'VACATION': return 'مرخصی استحقاقی';
-      default: return 'نامشخص';
+      case 'PRESENT': return '??';
+      case 'ABSENT': return '??';
+      case 'LATE': return '???';
+      case 'MISSION': return '??';
+      case 'HOURLY_LEAVE': return '??? ???';
+      case 'SICK_LEAVE': return '??? ??';
+      case 'VACATION': return '??? ??';
+      default: return '???';
     }
   };
 
@@ -127,13 +127,13 @@ export default function AttendancePage() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
         <div className="glass-liquid-card p-8 text-center">
-          <h2 className="text-xl font-bold text-primary mb-2">خطا در بارگذاری</h2>
+          <h2 className="text-xl font-bold text-primary mb-2">?? ? ??</h2>
           <p className="text-secondary mb-4">{error}</p>
           <button 
             onClick={fetchAttendanceData}
             className="glass-liquid-btn-primary px-6 py-2"
           >
-            تلاش مجدد
+            ?? ??
           </button>
         </div>
       </div>
@@ -148,20 +148,20 @@ export default function AttendancePage() {
           <div className="flex items-center space-x-4 space-x-reverse">
             <FaCalendarAlt className="h-8 w-8 text-teal-500" />
             <div>
-              <h1 className="text-2xl font-bold text-primary">حضور و غیاب</h1>
-              <p className="text-secondary">مدیریت حضور و غیاب کارمندان</p>
+              <h1 className="text-2xl font-bold text-primary">?? ? ??</h1>
+              <p className="text-secondary">??? ?? ? ?? ??</p>
             </div>
           </div>
           <div className="flex items-center space-x-4 space-x-reverse">
             <PersianCalendarComponent
               value={selectedDate}
               onChange={setSelectedDate}
-              placeholder="انتخاب تاریخ"
+              placeholder="??? ???"
               className="w-64"
             />
             <button className="glass-liquid-btn-primary px-4 py-2 flex items-center space-x-2 space-x-reverse">
               <FaDownload />
-              <span>گزارش</span>
+              <span>???</span>
             </button>
           </div>
         </div>
@@ -173,7 +173,7 @@ export default function AttendancePage() {
           <div className="glass-liquid-card p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-secondary">کل کارمندان</p>
+                <p className="text-sm text-secondary">? ??</p>
                 <p className="text-xl font-bold text-primary">{stats.totalEmployees}</p>
               </div>
               <FaUserCheck className="h-6 w-6 text-blue-500" />
@@ -182,7 +182,7 @@ export default function AttendancePage() {
           <div className="glass-liquid-card p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-secondary">حاضر</p>
+                <p className="text-sm text-secondary">??</p>
                 <p className="text-xl font-bold text-green-500">{stats.present}</p>
               </div>
               <FaUserCheck className="h-6 w-6 text-green-500" />
@@ -191,7 +191,7 @@ export default function AttendancePage() {
           <div className="glass-liquid-card p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-secondary">غایب</p>
+                <p className="text-sm text-secondary">??</p>
                 <p className="text-xl font-bold text-red-500">{stats.absent}</p>
               </div>
               <FaUserTimes className="h-6 w-6 text-red-500" />
@@ -200,7 +200,7 @@ export default function AttendancePage() {
           <div className="glass-liquid-card p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-secondary">تاخیر</p>
+                <p className="text-sm text-secondary">???</p>
                 <p className="text-xl font-bold text-yellow-500">{stats.late}</p>
               </div>
               <FaClock className="h-6 w-6 text-yellow-500" />
@@ -209,7 +209,7 @@ export default function AttendancePage() {
           <div className="glass-liquid-card p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-secondary">ماموریت</p>
+                <p className="text-sm text-secondary">??</p>
                 <p className="text-xl font-bold text-blue-500">{stats.mission}</p>
               </div>
               <FaClock className="h-6 w-6 text-blue-500" />
@@ -218,7 +218,7 @@ export default function AttendancePage() {
           <div className="glass-liquid-card p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-secondary">مرخصی</p>
+                <p className="text-sm text-secondary">???</p>
                 <p className="text-xl font-bold text-purple-500">{stats.leave}</p>
               </div>
               <FaClock className="h-6 w-6 text-purple-500" />
@@ -235,7 +235,7 @@ export default function AttendancePage() {
               <FaSearch className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
-                placeholder="جستجو در نام کارمندان..."
+                placeholder="??? ? ?? ??..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="glass-liquid-input w-full pr-10"
@@ -249,12 +249,12 @@ export default function AttendancePage() {
               onChange={(e) => setStatusFilter(e.target.value)}
               className="glass-liquid-input"
             >
-              <option value="ALL">همه وضعیت‌ها</option>
-              <option value="PRESENT">حاضر</option>
-              <option value="ABSENT">غایب</option>
-              <option value="LATE">تاخیر</option>
-              <option value="MISSION">ماموریت</option>
-              <option value="HOURLY_LEAVE">مرخصی ساعتی</option>
+              <option value="ALL">?? ??</option>
+              <option value="PRESENT">??</option>
+              <option value="ABSENT">??</option>
+              <option value="LATE">???</option>
+              <option value="MISSION">??</option>
+              <option value="HOURLY_LEAVE">??? ???</option>
             </select>
           </div>
         </div>
@@ -266,13 +266,13 @@ export default function AttendancePage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-700">
-                <th className="text-right py-3 px-4 text-secondary">نام کارمند</th>
-                <th className="text-right py-3 px-4 text-secondary">بخش</th>
-                <th className="text-right py-3 px-4 text-secondary">ساعت ورود</th>
-                <th className="text-right py-3 px-4 text-secondary">ساعت خروج</th>
-                <th className="text-right py-3 px-4 text-secondary">وضعیت</th>
-                <th className="text-right py-3 px-4 text-secondary">توضیحات</th>
-                <th className="text-right py-3 px-4 text-secondary">امضا</th>
+                <th className="text-right py-3 px-4 text-secondary">?? ???</th>
+                <th className="text-right py-3 px-4 text-secondary">??</th>
+                <th className="text-right py-3 px-4 text-secondary">?? ??</th>
+                <th className="text-right py-3 px-4 text-secondary">?? ??</th>
+                <th className="text-right py-3 px-4 text-secondary">???</th>
+                <th className="text-right py-3 px-4 text-secondary">??</th>
+                <th className="text-right py-3 px-4 text-secondary">??</th>
               </tr>
             </thead>
             <tbody>
@@ -320,10 +320,11 @@ export default function AttendancePage() {
         
         {filteredRecords.length === 0 && (
           <div className="text-center py-8">
-            <p className="text-secondary">هیچ رکورد حضور و غیابی یافت نشد</p>
+            <p className="text-secondary">?? ??? ?? ? ??? ?? ??</p>
           </div>
         )}
       </div>
     </div>
   );
 }
+

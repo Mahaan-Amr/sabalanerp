@@ -1,4 +1,4 @@
-// Step 1: Contract Date Component
+﻿// Step 1: Contract Date Component
 // Contract date selection and contract number display
 
 import React from 'react';
@@ -25,7 +25,7 @@ export const Step1ContractDate: React.FC<Step1ContractDateProps> = ({
     <div className="space-y-6">
       <div className="text-center">
         <h3 className="text-xl font-semibold text-gray-800 dark:text-white mb-2">
-          انتخاب تاریخ قرارداد
+          تاریخ قرارداد
         </h3>
         <p className="text-gray-600 dark:text-gray-300">
           تاریخ قرارداد را انتخاب کنید
@@ -36,7 +36,7 @@ export const Step1ContractDate: React.FC<Step1ContractDateProps> = ({
       {currentUser && (
         <div className="max-w-md mx-auto">
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            کاربر ایجاد کننده
+            کاربر ایجادکننده
           </label>
           <div className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-medium">
             {currentUser.firstName} {currentUser.lastName}
@@ -72,4 +72,5 @@ export const Step1ContractDate: React.FC<Step1ContractDateProps> = ({
     </div>
   );
 };
+
 

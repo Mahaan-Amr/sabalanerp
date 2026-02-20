@@ -9,9 +9,14 @@
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
-    "db:seed": "tsx src/prisma/seed.ts"
+    "db:seed": "tsx src/prisma/seed.ts",
+    "migrate:legacy-customers:dry": "tsx scripts/migrate-legacy-customers-to-crm.ts",
+    "migrate:legacy-customers:apply": "tsx scripts/migrate-legacy-customers-to-crm.ts --apply",
+    "backfill:crm-customer-owners:dry": "tsx scripts/backfill-crm-customer-owners.ts",
+    "backfill:crm-customer-owners:apply": "tsx scripts/backfill-crm-customer-owners.ts --apply"
   },
   "dependencies": {
     "@prisma/client": "^5.16.1",

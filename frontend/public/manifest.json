@@ -1,8 +1,8 @@
-{
-  "name": "سبلان ERP - سیستم امنیت",
-  "short_name": "سبلان امنیت",
-  "description": "سیستم جامع مدیریت امنیت و حضور و غیاب سبلان",
-  "start_url": "/dashboard/security",
+﻿{
+  "name": "سبلان ERP - سیستم برنامه‌ریزی منابع سازمانی",
+  "short_name": "Sablan ERP",
+  "description": "سامانه یکپارچه مدیریت فرایندهای سازمانی سبلان",
+  "start_url": "/dashboard/sales/contracts/create",
   "display": "standalone",
   "background_color": "#1f2937",
   "theme_color": "#14b8a6",
@@ -10,97 +10,5 @@
   "scope": "/",
   "lang": "fa",
   "dir": "rtl",
-  "icons": [
-    {
-      "src": "/icons/icon-72x72.png",
-      "sizes": "72x72",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "/icons/icon-96x96.png",
-      "sizes": "96x96",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "/icons/icon-128x128.png",
-      "sizes": "128x128",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "/icons/icon-144x144.png",
-      "sizes": "144x144",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "/icons/icon-152x152.png",
-      "sizes": "152x152",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "/icons/icon-192x192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "/icons/icon-384x384.png",
-      "sizes": "384x384",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "/icons/icon-512x512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable any"
-    }
-  ],
-  "categories": ["business", "productivity", "utilities"],
-  "screenshots": [
-    {
-      "src": "/screenshots/mobile-dashboard.png",
-      "sizes": "390x844",
-      "type": "image/png",
-      "form_factor": "narrow"
-    },
-    {
-      "src": "/screenshots/desktop-dashboard.png",
-      "sizes": "1280x720",
-      "type": "image/png",
-      "form_factor": "wide"
-    }
-  ],
-  "shortcuts": [
-    {
-      "name": "حضور و غیاب",
-      "short_name": "حضور",
-      "description": "ثبت حضور و غیاب کارمندان",
-      "url": "/dashboard/security",
-      "icons": [
-        {
-          "src": "/icons/shortcut-attendance.png",
-          "sizes": "96x96"
-        }
-      ]
-    },
-    {
-      "name": "درخواست‌های استثنا",
-      "short_name": "استثنا",
-      "description": "مدیریت درخواست‌های استثنا",
-      "url": "/dashboard/security?tab=exceptions",
-      "icons": [
-        {
-          "src": "/icons/shortcut-exceptions.png",
-          "sizes": "96x96"
-        }
-      ]
-    }
-  ],
-  "related_applications": [],
-  "prefer_related_applications": false
+  "icons": []
 }

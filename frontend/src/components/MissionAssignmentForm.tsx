@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import { FaMapMarkerAlt, FaUser, FaCalendarAlt, FaClock, FaFileAlt } from 'react-icons/fa';
@@ -11,8 +11,8 @@ interface MissionAssignmentFormProps {
 }
 
 const missionTypes = [
-  { value: 'ماموریت داخلی', label: 'ماموریت داخلی' },
-  { value: 'ماموریت خارجی', label: 'ماموریت خارجی' }
+  { value: '?? ???', label: '?? ???' },
+  { value: '?? ???', label: '?? ???' }
 ];
 
 export default function MissionAssignmentForm({ onSubmit, onCancel, loading = false }: MissionAssignmentFormProps) {
@@ -57,12 +57,12 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
   const validateForm = () => {
     const newErrors: { [key: string]: string } = {};
 
-    if (!formData.employeeId) newErrors.employeeId = 'انتخاب کارمند الزامی است';
-    if (!formData.missionType) newErrors.missionType = 'نوع ماموریت الزامی است';
-    if (!formData.missionLocation) newErrors.missionLocation = 'محل ماموریت الزامی است';
-    if (!formData.missionPurpose) newErrors.missionPurpose = 'هدف ماموریت الزامی است';
-    if (!formData.startDate) newErrors.startDate = 'تاریخ شروع الزامی است';
-    if (!formData.startTime) newErrors.startTime = 'ساعت شروع الزامی است';
+    if (!formData.employeeId) newErrors.employeeId = '??? ??? ??? ??';
+    if (!formData.missionType) newErrors.missionType = '?? ?? ??? ??';
+    if (!formData.missionLocation) newErrors.missionLocation = '?? ?? ??? ??';
+    if (!formData.missionPurpose) newErrors.missionPurpose = '?? ?? ??? ??';
+    if (!formData.startDate) newErrors.startDate = '??? ?? ??? ??';
+    if (!formData.startTime) newErrors.startTime = '?? ?? ??? ??';
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -77,23 +77,23 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
 
   return (
     <div className="glass-liquid-card p-6">
-      <h2 className="text-2xl font-bold text-primary mb-6 text-right">تعیین ماموریت</h2>
+      <h2 className="text-2xl font-bold text-primary mb-6 text-right">??? ??</h2>
       
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Employee Selection */}
         <div>
           <label className="block text-sm font-medium text-primary mb-2 text-right">
-            کارمند *
+            ??? *
           </label>
           <select
             value={formData.employeeId}
             onChange={(e) => handleInputChange('employeeId', e.target.value)}
             className={`glass-liquid-input w-full ${errors.employeeId ? 'border-red-500' : ''}`}
           >
-            <option value="">انتخاب کارمند</option>
+            <option value="">??? ???</option>
             {employees.map(employee => (
               <option key={employee.id} value={employee.id}>
-                {employee.firstName} {employee.lastName} ({employee.department?.namePersian || 'نامشخص'})
+                {employee.firstName} {employee.lastName} ({employee.department?.namePersian || '???'})
               </option>
             ))}
           </select>
@@ -105,14 +105,14 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
         {/* Mission Type */}
         <div>
           <label className="block text-sm font-medium text-primary mb-2 text-right">
-            نوع ماموریت *
+            ?? ?? *
           </label>
           <select
             value={formData.missionType}
             onChange={(e) => handleInputChange('missionType', e.target.value)}
             className={`glass-liquid-input w-full ${errors.missionType ? 'border-red-500' : ''}`}
           >
-            <option value="">انتخاب نوع ماموریت</option>
+            <option value="">??? ?? ??</option>
             {missionTypes.map(type => (
               <option key={type.value} value={type.value}>
                 {type.label}
@@ -127,14 +127,14 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
         {/* Mission Location */}
         <div>
           <label className="block text-sm font-medium text-primary mb-2 text-right">
-            محل ماموریت *
+            ?? ?? *
           </label>
           <input
             type="text"
             value={formData.missionLocation}
             onChange={(e) => handleInputChange('missionLocation', e.target.value)}
             className={`glass-liquid-input w-full ${errors.missionLocation ? 'border-red-500' : ''}`}
-            placeholder="محل انجام ماموریت"
+            placeholder="?? ??? ??"
           />
           {errors.missionLocation && (
             <p className="text-red-500 text-sm mt-1 text-right">{errors.missionLocation}</p>
@@ -144,13 +144,13 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
         {/* Mission Purpose */}
         <div>
           <label className="block text-sm font-medium text-primary mb-2 text-right">
-            هدف ماموریت *
+            ?? ?? *
           </label>
           <textarea
             value={formData.missionPurpose}
             onChange={(e) => handleInputChange('missionPurpose', e.target.value)}
             className={`glass-liquid-input w-full h-24 resize-none ${errors.missionPurpose ? 'border-red-500' : ''}`}
-            placeholder="هدف و دلیل ماموریت را توضیح دهید"
+            placeholder="?? ? ?? ?? ? ??? ??"
           />
           {errors.missionPurpose && (
             <p className="text-red-500 text-sm mt-1 text-right">{errors.missionPurpose}</p>
@@ -161,12 +161,12 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-primary mb-2 text-right">
-              تاریخ شروع *
+              ??? ?? *
             </label>
             <PersianCalendarComponent
               value={formData.startDate}
               onChange={(date) => handleInputChange('startDate', date)}
-              placeholder="انتخاب تاریخ شروع"
+              placeholder="??? ??? ??"
               className={errors.startDate ? 'border-red-500' : ''}
             />
             {errors.startDate && (
@@ -175,12 +175,12 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
           </div>
           <div>
             <label className="block text-sm font-medium text-primary mb-2 text-right">
-              تاریخ پایان
+              ??? ???
             </label>
             <PersianCalendarComponent
               value={formData.endDate}
               onChange={(date) => handleInputChange('endDate', date)}
-              placeholder="انتخاب تاریخ پایان (اختیاری)"
+              placeholder="??? ??? ??? (??)"
             />
           </div>
         </div>
@@ -189,7 +189,7 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-primary mb-2 text-right">
-              ساعت شروع *
+              ?? ?? *
             </label>
             <input
               type="time"
@@ -203,7 +203,7 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
           </div>
           <div>
             <label className="block text-sm font-medium text-primary mb-2 text-right">
-              ساعت پایان
+              ?? ???
             </label>
             <input
               type="time"
@@ -217,13 +217,13 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
         {/* Notes */}
         <div>
           <label className="block text-sm font-medium text-primary mb-2 text-right">
-            یادداشت‌ها
+            ???
           </label>
           <textarea
             value={formData.notes}
             onChange={(e) => handleInputChange('notes', e.target.value)}
             className="glass-liquid-input w-full h-20 resize-none"
-            placeholder="یادداشت‌های اضافی (اختیاری)"
+            placeholder="?? ??? (??)"
           />
         </div>
 
@@ -235,17 +235,18 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
             className="glass-liquid-btn px-6 py-3"
             disabled={loading}
           >
-            انصراف
+            ???
           </button>
           <button
             type="submit"
             className="glass-liquid-btn-primary px-6 py-3"
             disabled={loading}
           >
-            {loading ? 'در حال ارسال...' : 'تعیین ماموریت'}
+            {loading ? '? ?? ???...' : '??? ??'}
           </button>
         </div>
       </form>
     </div>
   );
 }
+

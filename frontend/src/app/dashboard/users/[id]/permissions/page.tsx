@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -12,7 +12,7 @@ import {
   FaUser,
   FaBuilding
 } from 'react-icons/fa';
-import { usersAPI, workspacePermissionsAPI } from '@/lib/api';
+import { usersAPI, workspacePermissionsAPI, authAPI } from '@/lib/api';
 
 interface User {
   id: string;
@@ -60,18 +60,18 @@ const WORKSPACE_PERMISSIONS = {
 };
 
 const WORKSPACE_LABELS = {
-  sales: 'فروش',
+  sales: '??',
   crm: 'CRM',
-  hr: 'منابع انسانی',
-  accounting: 'حسابداری',
-  inventory: 'انبار',
-  security: 'امنیت'
+  hr: '??? ???',
+  accounting: '??',
+  inventory: '???',
+  security: '???'
 };
 
 const PERMISSION_LABELS = {
-  view: 'مشاهده',
-  edit: 'ویرایش',
-  admin: 'مدیریت'
+  view: '???',
+  edit: '???',
+  admin: '???'
 };
 
 const PERMISSION_COLORS = {
@@ -88,12 +88,28 @@ export default function UserPermissionsPage({ params }: { params: { id: string }
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   
   const [workspacePermissions, setWorkspacePermissions] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchUserData();
   }, [params.id]);
+
+  useEffect(() => {
+    fetchCurrentUser();
+  }, []);
+
+  const fetchCurrentUser = async () => {
+    try {
+      const response = await authAPI.getMe();
+      if (response.data.success) {
+        setCurrentUserRole(response.data.data.role);
+      }
+    } catch (error) {
+      console.error('Error fetching current user:', error);
+    }
+  };
 
   const fetchUserData = async () => {
     try {
@@ -126,7 +142,7 @@ export default function UserPermissionsPage({ params }: { params: { id: string }
       }
     } catch (error: any) {
       console.error('Error fetching user data:', error);
-      setError(error.response?.data?.error || 'خطا در بارگذاری اطلاعات');
+      setError(error.response?.data?.error || '?? ? ?? ??');
     } finally {
       setLoading(false);
     }
@@ -146,6 +162,11 @@ export default function UserPermissionsPage({ params }: { params: { id: string }
   const handleSave = async () => {
     if (!user) return;
     
+    if (currentUserRole === 'MANAGER' && user.role === 'ADMIN') {
+      setError('?? ?? ??? ??? ?? ??? ? ??? ??');
+      return;
+    }
+
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -190,11 +211,11 @@ export default function UserPermissionsPage({ params }: { params: { id: string }
         }
       }
       
-      setSuccess('دسترسی‌ها با موفقیت به‌روزرسانی شدند');
+      setSuccess('??? ? ??? ?? ??');
       fetchUserData(); // Refresh data
     } catch (error: any) {
       console.error('Error saving permissions:', error);
-      setError(error.response?.data?.error || 'خطا در ذخیره دسترسی‌ها');
+      setError(error.response?.data?.error || '?? ? ??? ???');
     } finally {
       setSaving(false);
     }
@@ -212,13 +233,13 @@ export default function UserPermissionsPage({ params }: { params: { id: string }
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
         <div className="glass-liquid-card p-8 text-center">
-          <h2 className="text-xl font-bold text-primary mb-2">خطا در بارگذاری</h2>
+          <h2 className="text-xl font-bold text-primary mb-2">?? ? ??</h2>
           <p className="text-secondary mb-4">{error}</p>
           <button 
             onClick={fetchUserData}
             className="glass-liquid-btn-primary px-6 py-2"
           >
-            تلاش مجدد
+            ?? ??
           </button>
         </div>
       </div>
@@ -237,8 +258,8 @@ export default function UserPermissionsPage({ params }: { params: { id: string }
           <div className="flex items-center space-x-4 space-x-reverse">
             <FaShieldAlt className="h-8 w-8 text-teal-500" />
             <div>
-              <h1 className="text-2xl font-bold text-primary">مدیریت دسترسی‌ها</h1>
-              <p className="text-secondary">تنظیم دسترسی‌های فضای کاری برای کاربر</p>
+              <h1 className="text-2xl font-bold text-primary">??? ???</h1>
+              <p className="text-secondary">??? ??? ?? ?? ?? ???</p>
             </div>
           </div>
           <Link
@@ -246,19 +267,19 @@ export default function UserPermissionsPage({ params }: { params: { id: string }
             className="glass-liquid-btn px-6 py-2 flex items-center space-x-2 space-x-reverse"
           >
             <FaArrowRight />
-            <span>بازگشت به لیست</span>
+            <span>??? ? ??</span>
           </Link>
         </div>
       </div>
 
       {/* User Info */}
       <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-bold text-primary mb-4">اطلاعات کاربر</h2>
+        <h2 className="text-xl font-bold text-primary mb-4">?? ???</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="flex items-center space-x-3 space-x-reverse">
             <FaUser className="h-6 w-6 text-blue-500" />
             <div>
-              <p className="text-sm text-secondary">نام</p>
+              <p className="text-sm text-secondary">??</p>
               <p className="text-primary font-medium">
                 {user.firstName} {user.lastName}
               </p>
@@ -268,7 +289,7 @@ export default function UserPermissionsPage({ params }: { params: { id: string }
           <div className="flex items-center space-x-3 space-x-reverse">
             <FaShieldAlt className="h-6 w-6 text-yellow-500" />
             <div>
-              <p className="text-sm text-secondary">نقش</p>
+              <p className="text-sm text-secondary">??</p>
               <p className="text-primary font-medium">{user.role}</p>
             </div>
           </div>
@@ -276,9 +297,9 @@ export default function UserPermissionsPage({ params }: { params: { id: string }
           <div className="flex items-center space-x-3 space-x-reverse">
             <FaBuilding className="h-6 w-6 text-purple-500" />
             <div>
-              <p className="text-sm text-secondary">بخش</p>
+              <p className="text-sm text-secondary">??</p>
               <p className="text-primary font-medium">
-                {user.department ? user.department.namePersian : 'بدون بخش'}
+                {user.department ? user.department.namePersian : '?? ??'}
               </p>
             </div>
           </div>
@@ -288,7 +309,7 @@ export default function UserPermissionsPage({ params }: { params: { id: string }
       {/* Current Permissions */}
       {permissions.length > 0 && (
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">دسترسی‌های فعلی</h2>
+          <h2 className="text-xl font-bold text-primary mb-4">??? ??</h2>
           <div className="flex flex-wrap gap-2">
             {permissions.filter(p => p.isActive).map(permission => (
               <span
@@ -304,9 +325,9 @@ export default function UserPermissionsPage({ params }: { params: { id: string }
 
       {/* Permission Management */}
       <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-bold text-primary mb-4">تنظیم دسترسی‌ها</h2>
+        <h2 className="text-xl font-bold text-primary mb-4">??? ???</h2>
         <p className="text-secondary mb-6">
-          دسترسی‌های کاربر به فضاهای کاری مختلف را تعیین کنید
+          ??? ??? ? ??? ?? ??? ? ??? ??
         </p>
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -342,7 +363,7 @@ export default function UserPermissionsPage({ params }: { params: { id: string }
                     onChange={() => handlePermissionChange(workspace, 'none')}
                     className="text-gray-500 focus:ring-gray-500"
                   />
-                  <span className="text-gray-500 text-sm">بدون دسترسی</span>
+                  <span className="text-gray-500 text-sm">?? ???</span>
                 </label>
               </div>
             </div>
@@ -376,22 +397,24 @@ export default function UserPermissionsPage({ params }: { params: { id: string }
             href="/dashboard/users"
             className="glass-liquid-btn px-6 py-2"
           >
-            لغو
+            ??
           </Link>
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || (currentUserRole === 'MANAGER' && user.role === 'ADMIN')}
             className="glass-liquid-btn-primary px-6 py-2 flex items-center space-x-2 space-x-reverse disabled:opacity-50"
+            title={currentUserRole === 'MANAGER' && user.role === 'ADMIN' ? '??? ?? ?? ?? ??? ??' : ''}
           >
             {saving ? (
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
             ) : (
               <FaSave />
             )}
-            <span>{saving ? 'در حال ذخیره...' : 'ذخیره تغییرات'}</span>
+            <span>{saving ? '? ?? ???...' : '??? ??'}</span>
           </button>
         </div>
       </div>
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -33,15 +33,15 @@ export default function CreateDepartmentPage() {
 
   const validateForm = () => {
     if (!formData.name.trim()) {
-      setError('نام بخش الزامی است');
+      setError('?? ?? ??? ??');
       return false;
     }
     if (!formData.namePersian.trim()) {
-      setError('نام فارسی بخش الزامی است');
+      setError('?? ??? ?? ??? ??');
       return false;
     }
     if (!formData.description.trim()) {
-      setError('توضیحات الزامی است');
+      setError('?? ??? ??');
       return false;
     }
     return true;
@@ -61,12 +61,12 @@ export default function CreateDepartmentPage() {
       const response = await departmentsAPI.createDepartment(formData);
       
       if (response.data.success) {
-        alert('بخش با موفقیت ایجاد شد');
+        alert('?? ? ??? ??? ?');
         router.push('/dashboard/departments');
       }
     } catch (error: any) {
       console.error('Error creating department:', error);
-      setError(error.response?.data?.error || 'خطا در ایجاد بخش');
+      setError(error.response?.data?.error || '?? ? ??? ??');
     } finally {
       setLoading(false);
     }
@@ -80,8 +80,8 @@ export default function CreateDepartmentPage() {
           <div className="flex items-center space-x-4 space-x-reverse">
             <FaBuilding className="h-8 w-8 text-teal-500" />
             <div>
-              <h1 className="text-2xl font-bold text-primary">ایجاد بخش جدید</h1>
-              <p className="text-secondary">ایجاد بخش جدید در سازمان</p>
+              <h1 className="text-2xl font-bold text-primary">??? ?? ??</h1>
+              <p className="text-secondary">??? ?? ?? ? ???</p>
             </div>
           </div>
           <Link
@@ -89,7 +89,7 @@ export default function CreateDepartmentPage() {
             className="glass-liquid-btn px-6 py-2 flex items-center space-x-2 space-x-reverse"
           >
             <FaArrowRight />
-            <span>بازگشت به لیست</span>
+            <span>??? ? ??</span>
           </Link>
         </div>
       </div>
@@ -106,10 +106,10 @@ export default function CreateDepartmentPage() {
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Department Information */}
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">اطلاعات بخش</h2>
+          <h2 className="text-xl font-bold text-primary mb-4">?? ??</h2>
           <div className="space-y-6">
             <div>
-              <label className="block text-sm text-secondary mb-2">نام بخش (انگلیسی) *</label>
+              <label className="block text-sm text-secondary mb-2">?? ?? (??) *</label>
               <input
                 type="text"
                 name="name"
@@ -122,26 +122,26 @@ export default function CreateDepartmentPage() {
             </div>
             
             <div>
-              <label className="block text-sm text-secondary mb-2">نام بخش (فارسی) *</label>
+              <label className="block text-sm text-secondary mb-2">?? ?? (???) *</label>
               <input
                 type="text"
                 name="namePersian"
                 value={formData.namePersian}
                 onChange={handleInputChange}
                 className="glass-liquid-input w-full"
-                placeholder="نام بخش"
+                placeholder="?? ??"
                 required
               />
             </div>
             
             <div>
-              <label className="block text-sm text-secondary mb-2">توضیحات *</label>
+              <label className="block text-sm text-secondary mb-2">?? *</label>
               <textarea
                 name="description"
                 value={formData.description}
                 onChange={handleInputChange}
                 className="glass-liquid-input w-full h-24 resize-none"
-                placeholder="توضیحات مربوط به بخش..."
+                placeholder="?? ??? ? ??..."
                 required
               />
             </div>
@@ -155,7 +155,7 @@ export default function CreateDepartmentPage() {
                   onChange={handleInputChange}
                   className="rounded border-gray-600 bg-gray-700 text-teal-500 focus:ring-teal-500"
                 />
-                <span className="text-secondary">بخش فعال</span>
+                <span className="text-secondary">?? ??</span>
               </label>
             </div>
           </div>
@@ -168,7 +168,7 @@ export default function CreateDepartmentPage() {
               href="/dashboard/departments"
               className="glass-liquid-btn px-6 py-2"
             >
-              لغو
+              ??
             </Link>
             <button
               type="submit"
@@ -180,7 +180,7 @@ export default function CreateDepartmentPage() {
               ) : (
                 <FaCheck />
               )}
-              <span>{loading ? 'در حال ایجاد...' : 'ایجاد بخش'}</span>
+              <span>{loading ? '? ?? ???...' : '??? ??'}</span>
             </button>
           </div>
         </div>
@@ -188,3 +188,4 @@ export default function CreateDepartmentPage() {
     </div>
   );
 }
+

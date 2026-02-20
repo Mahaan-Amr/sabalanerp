@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -92,11 +92,11 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
     }
   };
 
-  const toggleExpanded = (itemName: string) => {
+  const toggleExpanded = (itemKey: string) => {
     setExpandedItems(prev => 
-      prev.includes(itemName) 
-        ? prev.filter(name => name !== itemName)
-        : [...prev, itemName]
+      prev.includes(itemKey)
+        ? prev.filter(name => name !== itemKey)
+        : [...prev, itemKey]
     );
   };
 
@@ -120,7 +120,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
         },
         {
           name: 'Contract Templates',
-          namePersian: 'قالب‌های قرارداد',
+          namePersian: 'قالب قرارداد',
           href: '/dashboard/contract-templates',
           icon: FaFileAlt,
           show: true
@@ -141,15 +141,15 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
         },
         {
           name: 'Reports',
-          namePersian: 'گزارشات',
+          namePersian: 'گزارش‌ها',
           href: '/dashboard/reports',
           icon: FaChartLine,
           show: true
         }
       ];
 
-      // Add admin navigation items if user is admin
-      if (currentUser?.role === 'ADMIN') {
+      // Add admin/manager navigation items
+      if (currentUser?.role === 'ADMIN' || currentUser?.role === 'MANAGER') {
         baseItems.push(
           {
             name: 'User Management',
@@ -160,14 +160,14 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           },
           {
             name: 'Permissions',
-            namePersian: 'مدیریت دسترسی‌ها',
+            namePersian: 'سطوح دسترسی',
             href: '/dashboard/admin/permissions',
             icon: FaShieldAlt,
             show: true
           },
           {
             name: 'Departments',
-            namePersian: 'مدیریت بخش‌ها',
+            namePersian: 'دپارتمان‌ها',
             href: '/dashboard/departments',
             icon: FaBuilding,
             show: true
@@ -181,7 +181,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           },
           {
             name: 'Security',
-            namePersian: 'امنیت سیستم',
+            namePersian: 'امنیت سامانه',
             href: '/dashboard/admin/security',
             icon: FaUserShield,
             show: true
@@ -226,7 +226,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
               },
               {
                 name: 'Draft Contracts',
-                namePersian: 'پیش نویس‌ها',
+                namePersian: 'پیش‌نویس‌ها',
                 href: '/dashboard/sales/contracts?status=DRAFT',
                 icon: FaFileAlt,
                 show: true
@@ -240,7 +240,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
               },
               {
                 name: 'Signed Contracts',
-                namePersian: 'امضا شده',
+                namePersian: 'امضا شده‌ها',
                 href: '/dashboard/sales/contracts?status=SIGNED',
                 icon: FaSignature,
                 show: true
@@ -288,7 +288,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           },
           {
             name: 'Reports',
-            namePersian: 'گزارشات فروش',
+            namePersian: 'گزارش‌های فروش',
             href: '/dashboard/sales/reports',
             icon: FaChartLine,
             show: true
@@ -350,7 +350,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           },
           {
             name: 'Reports',
-            namePersian: 'گزارشات CRM',
+            namePersian: 'گزارش‌های CRM',
             href: '/dashboard/crm/reports',
             icon: FaChartLine,
             show: true
@@ -368,7 +368,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           },
           {
             name: 'Employees',
-            namePersian: 'پرسنل',
+            namePersian: 'کارکنان',
             href: '/dashboard/hr/employees',
             icon: FaUsers,
             show: true
@@ -389,7 +389,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           },
           {
             name: 'Reports',
-            namePersian: 'گزارشات HR',
+            namePersian: 'گزارش‌های HR',
             href: '/dashboard/hr/reports',
             icon: FaChartLine,
             show: true
@@ -421,7 +421,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           },
           {
             name: 'Reports',
-            namePersian: 'گزارشات مالی',
+            namePersian: 'گزارش‌های مالی',
             href: '/dashboard/accounting/reports',
             icon: FaChartLine,
             show: true
@@ -432,14 +432,14 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
         return [
           {
             name: 'Inventory Dashboard',
-            namePersian: 'داشبورد موجودی',
+            namePersian: 'داشبورد انبار',
             href: '/dashboard/inventory',
             icon: FaChartLine,
             show: true
           },
           {
             name: 'Master Data',
-            namePersian: 'کد کالا',
+            namePersian: 'داده‌های پایه',
             href: '/dashboard/inventory/master-data',
             icon: FaCog,
             show: true
@@ -453,14 +453,14 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           },
           {
             name: 'Stock Movements',
-            namePersian: 'حرکات موجودی',
+            namePersian: 'گردش موجودی',
             href: '/dashboard/inventory/movements',
             icon: FaClipboardList,
             show: true
           },
           {
             name: 'Reports',
-            namePersian: 'گزارشات موجودی',
+            namePersian: 'گزارش‌های انبار',
             href: '/dashboard/inventory/reports',
             icon: FaChartLine,
             show: true
@@ -471,7 +471,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
         return [
           {
             name: 'Security Dashboard',
-            namePersian: 'داشبورد امنیت',
+            namePersian: 'داشبورد حراست',
             href: '/dashboard/security',
             icon: FaChartLine,
             show: true
@@ -492,21 +492,21 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           },
           {
             name: 'Personnel',
-            namePersian: 'پرسنل امنیت',
+            namePersian: 'پرسنل',
             href: '/dashboard/security/personnel',
             icon: FaShieldAlt,
             show: true
           },
           {
             name: 'Exceptions',
-            namePersian: 'استثنائات',
+            namePersian: 'استثناها',
             href: '/dashboard/security/exceptions',
             icon: FaExclamationTriangle,
             show: true
           },
           {
             name: 'Reports',
-            namePersian: 'گزارشات امنیت',
+            namePersian: 'گزارش‌های حراست',
             href: '/dashboard/security/reports',
             icon: FaChartLine,
             show: true
@@ -529,13 +529,14 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
     const Icon = item.icon;
     const isActive = isActivePath(item.href);
     const hasChildren = item.children && item.children.length > 0;
-    const isExpanded = expandedItems.includes(item.name);
+    const itemKey = item.href;
+    const isExpanded = expandedItems.includes(itemKey);
     const showChildren = hasChildren && isExpanded;
 
     if (!item.show) return null;
 
     return (
-      <div key={item.name}>
+      <div key={itemKey}>
         <div
           className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
             level > 0 ? 'mr-4' : ''
@@ -547,7 +548,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
         >
           {hasChildren ? (
             <button
-              onClick={() => toggleExpanded(item.name)}
+              onClick={() => toggleExpanded(itemKey)}
               className="flex items-center gap-3 flex-1"
             >
               <Icon className="h-5 w-5" />
@@ -587,7 +588,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           className="glass-liquid-btn w-full flex items-center justify-center gap-2"
         >
           {collapsed ? <FaChevronRight className="h-4 w-4" /> : <FaChevronLeft className="h-4 w-4" />}
-          {!collapsed && <span>بستن منو</span>}
+          {!collapsed && <span>جمع‌کردن منو</span>}
         </button>
       </div>
 
@@ -619,3 +620,4 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
     </div>
   );
 };
+

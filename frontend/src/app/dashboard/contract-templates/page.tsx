@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -61,18 +61,18 @@ export default function ContractTemplatesPage() {
       if (response.data.success) {
         setTemplates(response.data.data);
       } else {
-        setError('خطا در دریافت قالب‌های قرارداد');
+        setError('?? ? ??? ?? ??');
       }
     } catch (error: any) {
       console.error('Error fetching templates:', error);
-      setError(error.response?.data?.error || 'خطا در ارتباط با سرور');
+      setError(error.response?.data?.error || '?? ? ??? ? ??');
     } finally {
       setLoading(false);
     }
   };
 
   const handleDelete = async (templateId: string) => {
-    if (!confirm('آیا مطمئن هستید که می‌خواهید این قالب را حذف کنید؟')) {
+    if (!confirm('?? ??? ??? ? ??? ?? ?? ? ?? ???')) {
       return;
     }
 
@@ -81,7 +81,7 @@ export default function ContractTemplatesPage() {
       setTemplates(templates.filter(t => t.id !== templateId));
     } catch (error: any) {
       console.error('Error deleting template:', error);
-      alert('خطا در حذف قالب: ' + (error.response?.data?.error || 'خطای سرور'));
+      alert('?? ? ?? ??: ' + (error.response?.data?.error || '?? ??'));
     }
   };
 
@@ -95,10 +95,10 @@ export default function ContractTemplatesPage() {
 
   const getCategoryLabel = (category: string | null) => {
     switch (category) {
-      case 'sales': return 'فروش';
-      case 'service': return 'خدمات';
-      case 'maintenance': return 'نگهداری';
-      default: return 'عمومی';
+      case 'sales': return '??';
+      case 'service': return '???';
+      case 'maintenance': return '??';
+      default: return '???';
     }
   };
 
@@ -123,13 +123,13 @@ export default function ContractTemplatesPage() {
     return (
       <div className="glass-liquid-card p-6 text-center">
         <FaFileContract className="mx-auto text-4xl text-red-400 mb-4" />
-        <h2 className="text-xl font-semibold text-white mb-2">خطا در دریافت اطلاعات</h2>
+        <h2 className="text-xl font-semibold text-white mb-2">?? ? ??? ??</h2>
         <p className="text-gray-400 mb-4">{error}</p>
         <button 
           onClick={fetchTemplates}
           className="glass-liquid-btn-primary px-6 py-2"
         >
-          تلاش مجدد
+          ?? ??
         </button>
       </div>
     );
@@ -140,15 +140,15 @@ export default function ContractTemplatesPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">مدیریت قالب‌های قرارداد</h1>
-          <p className="text-gray-300 mt-1">ایجاد و مدیریت قالب‌های قرارداد</p>
+          <h1 className="text-2xl font-bold text-white">??? ?? ??</h1>
+          <p className="text-gray-300 mt-1">??? ? ??? ?? ??</p>
         </div>
         <Link 
           href="/dashboard/contract-templates/create"
           className="glass-liquid-btn-primary px-6 py-3 flex items-center gap-2"
         >
           <FaPlus className="h-5 w-5" />
-          <span>ایجاد قالب جدید</span>
+          <span>??? ?? ??</span>
         </Link>
       </div>
 
@@ -161,7 +161,7 @@ export default function ContractTemplatesPage() {
               <FaSearch className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
               <input
                 type="text"
-                placeholder="جستجو در قالب‌ها..."
+                placeholder="??? ? ??..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="glass-liquid-input w-full pr-10"
@@ -176,10 +176,10 @@ export default function ContractTemplatesPage() {
               onChange={(e) => setCategoryFilter(e.target.value)}
               className="glass-liquid-input w-full"
             >
-              <option value="">همه دسته‌بندی‌ها</option>
-              <option value="sales">فروش</option>
-              <option value="service">خدمات</option>
-              <option value="maintenance">نگهداری</option>
+              <option value="">?? ??</option>
+              <option value="sales">??</option>
+              <option value="service">???</option>
+              <option value="maintenance">??</option>
             </select>
           </div>
 
@@ -190,9 +190,9 @@ export default function ContractTemplatesPage() {
               onChange={(e) => setStatusFilter(e.target.value)}
               className="glass-liquid-input w-full"
             >
-              <option value="all">همه وضعیت‌ها</option>
-              <option value="active">فعال</option>
-              <option value="inactive">غیرفعال</option>
+              <option value="all">?? ??</option>
+              <option value="active">??</option>
+              <option value="inactive">??</option>
             </select>
           </div>
         </div>
@@ -203,12 +203,12 @@ export default function ContractTemplatesPage() {
         <div className="glass-liquid-card p-12 text-center">
           <FaFileContract className="mx-auto text-6xl text-gray-400 mb-6" />
           <h2 className="text-2xl font-semibold text-white mb-4">
-            {searchTerm ? 'قالبی یافت نشد' : 'هنوز قالبی ایجاد نشده است'}
+            {searchTerm ? '??? ?? ??' : '?? ??? ??? ?? ??'}
           </h2>
           <p className="text-gray-400 mb-6">
             {searchTerm 
-              ? 'لطفاً عبارت جستجوی خود را تغییر دهید'
-              : 'برای شروع، اولین قالب قرارداد خود را ایجاد کنید'
+              ? '??? ??? ??? ?? ? ??? ??'
+              : '?? ??? ??? ?? ?? ?? ? ??? ??'
             }
           </p>
           {!searchTerm && (
@@ -217,7 +217,7 @@ export default function ContractTemplatesPage() {
               className="glass-liquid-btn-primary px-8 py-3 inline-flex items-center gap-2"
             >
               <FaPlus className="h-5 w-5" />
-              <span>ایجاد اولین قالب</span>
+              <span>??? ??? ??</span>
             </Link>
           )}
         </div>
@@ -249,7 +249,7 @@ export default function ContractTemplatesPage() {
                       ? 'bg-green-500/20 text-green-400' 
                       : 'bg-red-500/20 text-red-400'
                   }`}>
-                    {template.isActive ? 'فعال' : 'غیرفعال'}
+                    {template.isActive ? '??' : '??'}
                   </span>
                 </div>
               </div>
@@ -258,10 +258,10 @@ export default function ContractTemplatesPage() {
               <div className="flex items-center justify-between mb-4 text-sm text-gray-400">
                 <div className="flex items-center gap-1">
                   <FaFileContract className="h-4 w-4" />
-                  <span>{template._count.contracts} قرارداد</span>
+                  <span>{template._count.contracts} ??</span>
                 </div>
                 <div>
-                  توسط {template.createdByUser.firstName} {template.createdByUser.lastName}
+                  ?? {template.createdByUser.firstName} {template.createdByUser.lastName}
                 </div>
               </div>
 
@@ -272,7 +272,7 @@ export default function ContractTemplatesPage() {
                   className="flex-1 glass-liquid-btn p-2 text-center flex items-center justify-center gap-2 hover:bg-white/10 transition-all duration-200"
                 >
                   <FaEye className="h-4 w-4" />
-                  <span>مشاهده</span>
+                  <span>???</span>
                 </Link>
                 
                 <Link 
@@ -280,7 +280,7 @@ export default function ContractTemplatesPage() {
                   className="flex-1 glass-liquid-btn p-2 text-center flex items-center justify-center gap-2 hover:bg-white/10 transition-all duration-200"
                 >
                   <FaEdit className="h-4 w-4" />
-                  <span>ویرایش</span>
+                  <span>???</span>
                 </Link>
 
                 <Link 
@@ -288,13 +288,13 @@ export default function ContractTemplatesPage() {
                   className="flex-1 glass-liquid-btn-primary p-2 text-center flex items-center justify-center gap-2 hover:bg-teal-600/20 transition-all duration-200"
                 >
                   <FaCopy className="h-4 w-4" />
-                  <span>استفاده</span>
+                  <span>??</span>
                 </Link>
 
                 <button
                   onClick={() => handleDelete(template.id)}
                   className="glass-liquid-btn p-2 text-red-400 hover:bg-red-500/20 transition-all duration-200"
-                  title="حذف قالب"
+                  title="?? ??"
                 >
                   <FaTrash className="h-4 w-4" />
                 </button>
@@ -306,14 +306,14 @@ export default function ContractTemplatesPage() {
 
       {/* Quick Actions */}
       <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-semibold text-white mb-4">عملیات سریع</h2>
+        <h2 className="text-xl font-semibold text-white mb-4">??? ??</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Link 
             href="/dashboard/contract-templates/create" 
             className="glass-liquid-btn-primary p-4 flex items-center gap-3 hover:bg-teal-600/20 transition-all duration-200"
           >
             <FaPlus className="h-5 w-5" />
-            <span>ایجاد قالب جدید</span>
+            <span>??? ?? ??</span>
           </Link>
           
           <Link 
@@ -321,7 +321,7 @@ export default function ContractTemplatesPage() {
             className="glass-liquid-btn p-4 flex items-center gap-3 hover:bg-white/10 transition-all duration-200"
           >
             <FaFileContract className="h-5 w-5" />
-            <span>ایجاد قرارداد جدید</span>
+            <span>??? ?? ??</span>
           </Link>
           
           <Link 
@@ -329,10 +329,11 @@ export default function ContractTemplatesPage() {
             className="glass-liquid-btn p-4 flex items-center gap-3 hover:bg-white/10 transition-all duration-200"
           >
             <FaArrowRight className="h-5 w-5" />
-            <span>مشاهده قراردادها</span>
+            <span>??? ???</span>
           </Link>
         </div>
       </div>
     </div>
   );
 }
+

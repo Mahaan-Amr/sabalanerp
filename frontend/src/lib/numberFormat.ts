@@ -23,7 +23,7 @@ export const formatNumber = (
   }
 
   const num = typeof value === 'string' ? parseFloat(value) : value;
-  
+
   if (isNaN(num)) {
     return '0';
   }
@@ -54,14 +54,13 @@ export const formatNumber = (
  * @returns Formatted number string
  */
 export const formatDisplayNumber = (value: number | string | null | undefined): string => {
-  // Round to 2 decimal places before formatting
   if (value === null || value === undefined || value === '') {
     return '0';
   }
   const num = typeof value === 'string' ? parseFloat(value) : value;
   if (isNaN(num)) return '0';
   const roundedValue = Math.round(num * 100) / 100;
-  
+
   return formatNumber(roundedValue, {
     locale: 'fa-IR',
     minimumFractionDigits: 0,
@@ -143,11 +142,18 @@ export const formatPriceWithRial = (
  */
 export const parseFormattedNumber = (formattedValue: string): number => {
   if (!formattedValue) return 0;
-  
-  // Remove all non-numeric characters except decimal point
-  const cleaned = formattedValue.replace(/[^\d.-]/g, '');
+
+  const normalizedDigits = formattedValue
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 1728))
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632));
+
+  const normalized = normalizedDigits
+    .replace(/٫/g, '.')
+    .replace(/[٬،,\s]/g, '');
+
+  const cleaned = normalized.replace(/[^\d.-]/g, '');
   const num = parseFloat(cleaned);
-  
+
   return isNaN(num) ? 0 : num;
 };
 
@@ -162,15 +168,12 @@ export const formatInputNumber = (value: number | string | null | undefined): st
   }
 
   const num = typeof value === 'string' ? parseFloat(value) : value;
-  
+
   if (isNaN(num)) {
     return '';
   }
 
-  // Round to 2 decimal places before formatting
   const roundedValue = Math.round(num * 100) / 100;
-  
-  // For input fields, we want to show the number without currency symbols
   return formatDisplayNumber(roundedValue);
 };
 
@@ -188,7 +191,7 @@ export const formatDimensions = (
 ): string => {
   const formattedWidth = formatDisplayNumber(width);
   const formattedThickness = formatDisplayNumber(thickness);
-  
+
   return `عرض ${formattedWidth} × ضخامت ${formattedThickness} ${unit}`;
 };
 

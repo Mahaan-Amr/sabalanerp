@@ -2,6 +2,7 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize } from '../middleware/auth';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -9,7 +10,7 @@ const prisma = new PrismaClient();
 // @desc    Get all departments
 // @route   GET /api/departments
 // @access  Private
-router.get('/', protect, async (req: any, res) => {
+router.get('/', protect, requireFeatureAccess(FEATURES.CORE_DEPARTMENTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res) => {
   try {
     const departments = await prisma.department.findMany({
       where: { isActive: true },
@@ -42,7 +43,7 @@ router.get('/', protect, async (req: any, res) => {
 // @desc    Get department by ID
 // @route   GET /api/departments/:id
 // @access  Private
-router.get('/:id', protect, async (req: any, res) => {
+router.get('/:id', protect, requireFeatureAccess(FEATURES.CORE_DEPARTMENTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res) => {
   try {
     const department = await prisma.department.findUnique({
       where: { id: req.params.id },
@@ -114,7 +115,7 @@ router.get('/:id', protect, async (req: any, res) => {
 // @desc    Create new department
 // @route   POST /api/departments
 // @access  Private/Admin
-router.post('/', protect, authorize('ADMIN'), [
+router.post('/', protect, authorize('ADMIN'), requireFeatureAccess(FEATURES.CORE_DEPARTMENTS_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('name').notEmpty().withMessage('Name is required'),
   body('namePersian').notEmpty().withMessage('Persian name is required'),
 ], async (req: any, res) => {
@@ -154,7 +155,7 @@ router.post('/', protect, authorize('ADMIN'), [
 // @desc    Update department
 // @route   PUT /api/departments/:id
 // @access  Private/Admin
-router.put('/:id', protect, authorize('ADMIN'), [
+router.put('/:id', protect, authorize('ADMIN'), requireFeatureAccess(FEATURES.CORE_DEPARTMENTS_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('name').optional().notEmpty().withMessage('Name cannot be empty'),
   body('namePersian').optional().notEmpty().withMessage('Persian name cannot be empty'),
 ], async (req: any, res) => {
@@ -200,7 +201,7 @@ router.put('/:id', protect, authorize('ADMIN'), [
 // @desc    Delete department (soft delete)
 // @route   DELETE /api/departments/:id
 // @access  Private/Admin
-router.delete('/:id', protect, authorize('ADMIN'), async (req: any, res) => {
+router.delete('/:id', protect, authorize('ADMIN'), requireFeatureAccess(FEATURES.CORE_DEPARTMENTS_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: any, res) => {
   try {
     const department = await prisma.department.findUnique({
       where: { id: req.params.id },

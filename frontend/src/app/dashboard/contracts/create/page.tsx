@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -81,12 +81,12 @@ export default function CreateContractPage() {
     { key: 'formDate', label: 'تاریخ فرم', type: 'text' },
     { key: 'customerId', label: 'مشتری', type: 'select' },
     { key: 'departmentId', label: 'بخش', type: 'select' },
-    { key: 'buyerName', label: 'نام و نام خانوادگی خریدار', type: 'text' },
+    { key: 'buyerName', label: 'نام و نام Ø®Ø§Ù†Ùˆادگی خریدار', type: 'text' },
     { key: 'buyerNationalId', label: 'کد ملی', type: 'text' },
     { key: 'buyerPhone', label: 'شماره تماس', type: 'text' },
-    { key: 'projectAddress', label: 'آدرس پروژه', type: 'text' },
-    { key: 'paymentMethod', label: 'نحوه تسویه حساب', type: 'text' },
-    { key: 'items', label: 'افزودن اقلام', type: 'items' },
+    { key: 'projectAddress', label: 'آدرس Ù¾Ø±ÙˆÚ˜ه', type: 'text' },
+    { key: 'paymentMethod', label: 'Ù†Ø­Ùˆه ØªØ³Ùˆیه حساب', type: 'text' },
+    { key: 'items', label: 'Ø§ÙØ²Ùˆدن اقلام', type: 'items' },
     { key: 'summary', label: 'خلاصه و ایجاد', type: 'summary' },
   ];
 
@@ -94,15 +94,15 @@ export default function CreateContractPage() {
   const [itemStep, setItemStep] = useState<number>(0);
   const itemFields: Array<{ key: keyof ProductItem; label: string; type: 'text' | 'number' }> = [
     { key: 'code', label: 'کد', type: 'text' },
-    { key: 'stoneType', label: 'نوع سنگ', type: 'text' },
-    { key: 'thickness', label: 'قطر', type: 'text' },
-    { key: 'length', label: 'طول', type: 'number' },
+    { key: 'stoneType', label: 'Ù†Ùˆع سنگ', type: 'text' },
+    { key: 'thickness', label: '�طر', type: 'text' },
+    { key: 'length', label: 'Ø·Ùˆل', type: 'number' },
     { key: 'width', label: 'عرض', type: 'number' },
     { key: 'quantity', label: 'تعداد', type: 'number' },
     { key: 'squareMeter', label: 'متر مربع', type: 'number' },
-    { key: 'unitPrice', label: 'فی', type: 'number' },
+    { key: 'unitPrice', label: 'ف�R', type: 'number' },
     { key: 'totalPrice', label: 'قیمت کل', type: 'number' },
-    { key: 'description', label: 'توضیحات', type: 'text' },
+    { key: 'description', label: 'ØªÙˆضیحات', type: 'text' },
   ];
   const [draftItem, setDraftItem] = useState<ProductItem>({
     id: '', code: '', stoneType: '', thickness: '', length: 0, width: 0, quantity: 0,
@@ -112,8 +112,8 @@ export default function CreateContractPage() {
   // Contract data structure matching the Soblan Stone form
   const [contractData, setContractData] = useState({
     // Basic contract info
-    title: 'قرارداد فروش سبلان استون',
-    titlePersian: 'قرارداد فروش سبلان استون',
+    title: 'قرارداد ÙØ±Ùˆش سبلان Ø§Ø³ØªÙˆن',
+    titlePersian: 'قرارداد ÙØ±Ùˆش سبلان Ø§Ø³ØªÙˆن',
     customerId: '',
     departmentId: '',
     templateId: templateId || '',
@@ -148,7 +148,7 @@ export default function CreateContractPage() {
       setTemplate({
         id: '',
         name: 'Standard Contract',
-        namePersian: 'قرارداد فروش استاندارد',
+        namePersian: 'قرارداد ÙØ±Ùˆش استاندارد',
         description: null,
         variables: null,
         structure: null,
@@ -290,7 +290,7 @@ export default function CreateContractPage() {
 
   const convertToPersianWords = (num: number): string => {
     // Simplified Persian number conversion
-    const persianNumbers = ['صفر', 'یک', 'دو', 'سه', 'چهار', 'پنج', 'شش', 'هفت', 'هشت', 'نه'];
+    const persianNumbers = ['صفر', 'ÛŒÚ©', 'دو', 'سه', 'چهار', 'پنج', 'شش', 'هفت', 'هشت', 'نه'];
     
     if (num === 0) return 'صفر';
     if (num < 10) return persianNumbers[num];
@@ -318,10 +318,10 @@ export default function CreateContractPage() {
       newErrors.buyerPhone = 'شماره تماس الزامی است';
     }
     if (!contractData.projectAddress.trim()) {
-      newErrors.projectAddress = 'آدرس پروژه الزامی است';
+      newErrors.projectAddress = 'آدرس Ù¾Ø±ÙˆÚ˜ه الزامی است';
     }
     if (contractData.items.length === 0) {
-      newErrors.items = 'حداقل یک قلم محصول الزامی است';
+      newErrors.items = 'حداقل ÛŒÚ© قلم Ù…Ø­ØµÙˆل الزامی است';
     }
 
     setErrors(newErrors);
@@ -335,7 +335,7 @@ export default function CreateContractPage() {
     }
 
     if (!hasTemplate) {
-      setErrors({ general: 'لطفا ابتدا یک قالب قرارداد انتخاب کنید.' });
+      setErrors({ general: 'لطفا ابتدا ÛŒÚ© قالب قرارداد انتخاب کنید.' });
       return;
     }
 
@@ -385,8 +385,8 @@ export default function CreateContractPage() {
     if (current.key === 'buyerName' && !contractData.buyerName.trim()) errs.buyerName = 'نام خریدار الزامی است';
     if (current.key === 'buyerNationalId' && !contractData.buyerNationalId.trim()) errs.buyerNationalId = 'کد ملی الزامی است';
     if (current.key === 'buyerPhone' && !contractData.buyerPhone.trim()) errs.buyerPhone = 'شماره تماس الزامی است';
-    if (current.key === 'projectAddress' && !contractData.projectAddress.trim()) errs.projectAddress = 'آدرس پروژه الزامی است';
-    if (current.key === 'items' && contractData.items.length === 0) errs.items = 'حداقل یک قلم باید ثبت شود';
+    if (current.key === 'projectAddress' && !contractData.projectAddress.trim()) errs.projectAddress = 'آدرس Ù¾Ø±ÙˆÚ˜ه الزامی است';
+    if (current.key === 'items' && contractData.items.length === 0) errs.items = 'حداقل ÛŒÚ© قلم باید ثبت Ø´Ùˆد';
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
     setStep((s) => Math.min(s + 1, fieldSteps.length - 1));
@@ -439,19 +439,19 @@ export default function CreateContractPage() {
                 <input type="text" className="glass-liquid-input w-full" value={draftItem.code} onChange={(e)=>setDraftItem({ ...draftItem, code: e.target.value })} placeholder="کد" />
             </div>
               <div>
-                <label className="block text-white font-medium mb-2">نوع سنگ</label>
-                <input type="text" className="glass-liquid-input w-full" value={draftItem.stoneType} onChange={(e)=>setDraftItem({ ...draftItem, stoneType: e.target.value })} placeholder="نوع سنگ" />
+                <label className="block text-white font-medium mb-2">Ù†Ùˆع سنگ</label>
+                <input type="text" className="glass-liquid-input w-full" value={draftItem.stoneType} onChange={(e)=>setDraftItem({ ...draftItem, stoneType: e.target.value })} placeholder="Ù†Ùˆع سنگ" />
           </div>
               <div>
-                <label className="block text-white font-medium mb-2">قطر</label>
-                <input type="text" className="glass-liquid-input w-full" value={draftItem.thickness} onChange={(e)=>setDraftItem({ ...draftItem, thickness: e.target.value })} placeholder="قطر" />
+                <label className="block text-white font-medium mb-2">�طر</label>
+                <input type="text" className="glass-liquid-input w-full" value={draftItem.thickness} onChange={(e)=>setDraftItem({ ...draftItem, thickness: e.target.value })} placeholder="�طر" />
         </div>
               <div>
-                <label className="block text-white font-medium mb-2">طول</label>
+                <label className="block text-white font-medium mb-2">Ø·Ùˆل</label>
                 <input type="number" className="glass-liquid-input w-full" value={draftItem.length} onChange={(e)=>{
                   const val = parseFloat(e.target.value) || 0; const nxt = { ...draftItem, length: val, squareMeter: val * (draftItem.width || 0) };
                   nxt.totalPrice = (nxt.squareMeter || 0) * (nxt.unitPrice || 0); setDraftItem(nxt);
-                }} placeholder="طول" />
+                }} placeholder="Ø·Ùˆل" />
               </div>
               <div>
                 <label className="block text-white font-medium mb-2">عرض</label>
@@ -472,11 +472,11 @@ export default function CreateContractPage() {
                 }} placeholder="متر مربع" />
               </div>
               <div>
-                <label className="block text-white font-medium mb-2">فی</label>
+                <label className="block text-white font-medium mb-2">ف�R</label>
                 <input type="number" className="glass-liquid-input w-full" value={draftItem.unitPrice} onChange={(e)=>{
                   const val = parseFloat(e.target.value) || 0; const nxt = { ...draftItem, unitPrice: val } as ProductItem;
                   nxt.totalPrice = (nxt.squareMeter || 0) * (val || 0); setDraftItem(nxt);
-                }} placeholder="قیمت واحد" />
+                }} placeholder="قیمت Ùˆاحد" />
               </div>
               <div>
                 <label className="block text-white font-medium mb-2">قیمت کل</label>
@@ -486,8 +486,8 @@ export default function CreateContractPage() {
                 </div>
               </div>
               <div className="md:col-span-2 lg:col-span-3">
-                <label className="block text-white font-medium mb-2">توضیحات</label>
-                <input type="text" className="glass-liquid-input w-full" value={draftItem.description} onChange={(e)=>setDraftItem({ ...draftItem, description: e.target.value })} placeholder="توضیحات" />
+                <label className="block text-white font-medium mb-2">ØªÙˆضیحات</label>
+                <input type="text" className="glass-liquid-input w-full" value={draftItem.description} onChange={(e)=>setDraftItem({ ...draftItem, description: e.target.value })} placeholder="ØªÙˆضیحات" />
               </div>
             </div>
             <div className="flex items-center justify-between">
@@ -497,7 +497,7 @@ export default function CreateContractPage() {
                   const newItem = { ...draftItem, id: `item-${Date.now()}` } as ProductItem;
                   setContractData(prev => ({ ...prev, items: [...prev.items, newItem] }));
                   setDraftItem({ id:'', code:'', stoneType:'', thickness:'', length:0, width:0, quantity:0, squareMeter:0, unitPrice:0, totalPrice:0, description:'' });
-                }}>ذخیره قلم و افزودن بعدی</button>
+                }}>ذخیره قلم و Ø§ÙØ²Ùˆدن بعدی</button>
                 <button type="button" className="glass-liquid-btn px-6 py-3" onClick={()=>{
                   if (draftItem.code || draftItem.squareMeter || draftItem.unitPrice || draftItem.totalPrice) {
                     const newItem = { ...draftItem, id: `item-${Date.now()}` } as ProductItem;
@@ -521,8 +521,8 @@ export default function CreateContractPage() {
               <div>نام خریدار: <span className="text-white">{contractData.buyerName || '—'}</span></div>
               <div>کد ملی: <span className="text-white">{contractData.buyerNationalId || '—'}</span></div>
               <div>تلفن: <span className="text-white">{contractData.buyerPhone || '—'}</span></div>
-              <div>آدرس: <span className="text-white">{contractData.projectAddress || '—'}</span></div>
-              <div>نحوه تسویه: <span className="text-white">{contractData.paymentMethod || '—'}</span></div>
+              <div>آدرس: <span className="text-white">{contractData.projectAddress || '�'}</span></div>
+              <div>Ù†Ø­Ùˆه ØªØ³Ùˆیه: <span className="text-white">{contractData.paymentMethod || '—'}</span></div>
               <div className="md:col-span-2">تعداد اقلام: <span className="text-white">{contractData.items.length}</span></div>
               <div className="md:col-span-2">مبلغ کل: <span className="text-teal-400 font-semibold">{contractData.totalAmount.toLocaleString('fa-IR')} ریال</span></div>
             </div>
@@ -548,7 +548,7 @@ export default function CreateContractPage() {
 
       {/* Progress */}
       <div className="glass-liquid-card p-4">
-        <div className="text-gray-300 text-sm mb-2">گام {step + 1} از {fieldSteps.length}: {current.label}</div>
+        <div className="text-gray-300 text-sm mb-2">گا�& {step + 1} از {fieldSteps.length}: {current.label}</div>
         <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
           <div className="h-full bg-teal-500" style={{ width: `${((step + 1) / fieldSteps.length) * 100}%` }} />
             </div>
@@ -561,7 +561,7 @@ export default function CreateContractPage() {
         {current.type !== 'items' && current.type !== 'summary' && (
           <div className="flex items-center justify-between mt-6">
             <button type="button" className="glass-liquid-btn px-6 py-3" onClick={goPrev} disabled={step===0}>قبلی</button>
-            <button type="button" className="glass-liquid-btn-primary px-6 py-3 min-w-[110px]" onClick={goNext}>بعدی</button>
+            <button type="button" className="glass-liquid-btn-primary px-6 py-3 min-w-[110px]" onClick={goNext}>بعد�R</button>
           </div>
         )}
       </div>

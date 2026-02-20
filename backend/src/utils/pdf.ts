@@ -26,7 +26,11 @@ export async function generatePdfFromHtml(options: GeneratePdfOptions): Promise<
 
   const outputPath = path.join(outputDir, `${options.fileName.replace(/[^\w\-\.]/g, '_')}.pdf`);
 
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await puppeteer.launch({
+    headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  });
   try {
     const page = await browser.newPage();
 

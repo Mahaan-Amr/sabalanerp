@@ -1,7 +1,8 @@
-import express, { Request, Response } from 'express';
+﻿import express, { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -9,7 +10,7 @@ const prisma = new PrismaClient();
 // @desc    Get all contract templates
 // @route   GET /api/contract-templates
 // @access  Private
-router.get('/', protect, async (req: any, res) => {
+router.get('/', protect, requireFeatureAccess(FEATURES.SALES_CONTRACT_TEMPLATES_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
@@ -71,7 +72,7 @@ router.get('/', protect, async (req: any, res) => {
 // @desc    Get contract template by ID
 // @route   GET /api/contract-templates/:id
 // @access  Private
-router.get('/:id', protect, async (req: AuthRequest, res: Response) => {
+router.get('/:id', protect, requireFeatureAccess(FEATURES.SALES_CONTRACT_TEMPLATES_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
     const template = await prisma.contractTemplate.findUnique({
       where: { id: req.params.id },
@@ -123,7 +124,7 @@ router.get('/:id', protect, async (req: AuthRequest, res: Response) => {
 // @desc    Create new contract template
 // @route   POST /api/contract-templates
 // @access  Private
-router.post('/', protect, [
+router.post('/', protect, requireFeatureAccess(FEATURES.SALES_CONTRACT_TEMPLATES_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('name').notEmpty().withMessage('Template name is required'),
   body('namePersian').notEmpty().withMessage('Persian template name is required'),
   body('content').notEmpty().withMessage('Template content is required'),
@@ -189,7 +190,7 @@ router.post('/', protect, [
 // @desc    Update contract template
 // @route   PUT /api/contract-templates/:id
 // @access  Private
-router.put('/:id', protect, [
+router.put('/:id', protect, requireFeatureAccess(FEATURES.SALES_CONTRACT_TEMPLATES_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('name').notEmpty().withMessage('Template name is required'),
   body('namePersian').notEmpty().withMessage('Persian template name is required'),
   body('content').notEmpty().withMessage('Template content is required'),
@@ -269,7 +270,7 @@ router.put('/:id', protect, [
 // @desc    Delete contract template
 // @route   DELETE /api/contract-templates/:id
 // @access  Private/Admin
-router.delete('/:id', protect, authorize('ADMIN'), async (req: AuthRequest, res: Response) => {
+router.delete('/:id', protect, authorize('ADMIN'), requireFeatureAccess(FEATURES.SALES_CONTRACT_TEMPLATES_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: AuthRequest, res: Response) => {
   try {
     const template = await prisma.contractTemplate.findUnique({
       where: { id: req.params.id },
@@ -316,7 +317,7 @@ router.delete('/:id', protect, authorize('ADMIN'), async (req: AuthRequest, res:
 // @desc    Generate contract from template
 // @route   POST /api/contract-templates/:id/generate
 // @access  Private
-router.post('/:id/generate', protect, [
+router.post('/:id/generate', protect, requireFeatureAccess(FEATURES.SALES_CONTRACT_TEMPLATES_GENERATE, FEATURE_PERMISSIONS.EDIT), [
   body('contractData').notEmpty().withMessage('Contract data is required'),
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -345,12 +346,12 @@ router.post('/:id/generate', protect, [
         const newCustomer = await prisma.customer.create({
           data: {
             firstName: 'مشتری',
-            lastName: 'عمومی',
-            companyName: 'مشتری عمومی',
+            lastName: 'پیش‌فرض',
+            companyName: 'شرکت پیش‌فرض',
             email: 'default@customer.com',
             phone: '0000000000',
-            address: 'آدرس پیش‌فرض',
-            city: 'شیراز',
+            address: 'آدرس ثبت نشده',
+            city: 'تهران',
             country: 'ایران'
           }
         });
@@ -368,8 +369,8 @@ router.post('/:id/generate', protect, [
         const newDepartment = await prisma.department.create({
           data: {
             name: 'Default Department',
-            namePersian: 'بخش پیش‌فرض',
-            description: 'بخش پیش‌فرض برای قراردادها'
+            namePersian: 'دپارتمان پیش‌فرض',
+            description: 'دپارتمان پیش‌فرض سیستم'
           }
         });
         finalDepartmentId = newDepartment.id;
@@ -409,7 +410,7 @@ router.post('/:id/generate', protect, [
       if (!value) return null;
       const pureNumericMatch = value.match(/^\d+$/);
       if (pureNumericMatch) return parseInt(pureNumericMatch[0], 10);
-      const legacyMatch = value.match(/(\d+)/); // e.g., CNT-000123 → 123
+      const legacyMatch = value.match(/(\d+)/); // e.g., CNT-000123 ? 123
       return legacyMatch ? parseInt(legacyMatch[1], 10) : null;
     };
 
@@ -424,7 +425,7 @@ router.post('/:id/generate', protect, [
     const generatedContent = await generateContractContent(template, contractDataWithNumber);
 
     // Calculate total amount if provided
-    let totalAmount = null;
+    let totalAmount: number | null = null;
     if (contractData.totalAmount) {
       totalAmount = parseFloat(contractData.totalAmount);
     }
@@ -486,8 +487,8 @@ async function generateContractContent(template: any, contractData: any): Promis
     '{{totalAmount}}': contractData.totalAmount || '0',
     '{{totalAmountWords}}': convertToPersianWords(contractData.totalAmount || 0),
     '{{paymentMethod}}': contractData.paymentMethod || '',
-    '{{sellerName}}': 'سبلان استون',
-    '{{sellerPhone}}': '۰۷۱۹۱۰۱۰۹۰۰',
+    '{{sellerName}}': 'مجموعه سنگ طبیعی سبلان',
+    '{{sellerPhone}}': '-',
   };
 
   // Replace all variables in content
@@ -532,7 +533,8 @@ function convertToPersianWords(num: number): string {
   if (num < 10) return persianNumbers[num];
   
   // For larger numbers, you'd implement a full converter
-  return num.toLocaleString('fa-IR') + ' ریال';
+  return num.toLocaleString('fa-IR') + ' تومان';
 }
 
 export default router;
+

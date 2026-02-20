@@ -3,6 +3,7 @@ import { body, query, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
+import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -10,7 +11,11 @@ const prisma = new PrismaClient();
 // @desc    Get all cutting types with filtering and search
 // @route   GET /api/cutting-types
 // @access  Private/Inventory Workspace
-router.get('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), [
+router.get('/', protect, requireAnyFeatureAccess([
+  FEATURES.INVENTORY_CUTTING_TYPES_VIEW,
+  FEATURES.SALES_CONTRACTS_VIEW,
+  FEATURES.SALES_CONTRACTS_CREATE
+], FEATURE_PERMISSIONS.VIEW), [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 1000 }).withMessage('Limit must be between 1 and 1000'),
   query('search').optional().isString().withMessage('Search must be a string'),
@@ -86,7 +91,11 @@ router.get('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_
 // @desc    Get cutting type by ID
 // @route   GET /api/cutting-types/:id
 // @access  Private/Inventory Workspace
-router.get('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), async (req: Request, res: Response) => {
+router.get('/:id', protect, requireAnyFeatureAccess([
+  FEATURES.INVENTORY_CUTTING_TYPES_VIEW,
+  FEATURES.SALES_CONTRACTS_VIEW,
+  FEATURES.SALES_CONTRACTS_CREATE
+], FEATURE_PERMISSIONS.VIEW), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -117,7 +126,7 @@ router.get('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPA
 // @desc    Create new cutting type
 // @route   POST /api/cutting-types
 // @access  Private/Inventory Workspace
-router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), [
+router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.INVENTORY_CUTTING_TYPES_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('code').notEmpty().withMessage('Code is required'),
   body('namePersian').notEmpty().withMessage('Persian name is required'),
   body('name').optional().isString(),
@@ -176,7 +185,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
 // @desc    Update cutting type
 // @route   PUT /api/cutting-types/:id
 // @access  Private/Inventory Workspace
-router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), [
+router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.INVENTORY_CUTTING_TYPES_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('code').optional().isString(),
   body('name').optional().isString(),
   body('namePersian').optional().isString(),
@@ -250,7 +259,7 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPA
 // @desc    Delete cutting type
 // @route   DELETE /api/cutting-types/:id
 // @access  Private/Inventory Workspace
-router.delete('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), async (req: Request, res: Response) => {
+router.delete('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.INVENTORY_CUTTING_TYPES_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -286,7 +295,7 @@ router.delete('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORK
 // @desc    Toggle cutting type status
 // @route   PATCH /api/cutting-types/:id/toggle
 // @access  Private/Inventory Workspace
-router.patch('/:id/toggle', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), async (req: Request, res: Response) => {
+router.patch('/:id/toggle', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.INVENTORY_CUTTING_TYPES_TOGGLE, FEATURE_PERMISSIONS.EDIT), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 

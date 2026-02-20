@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
@@ -56,7 +56,7 @@ export const WORKSPACE_CONFIG: Record<WORKSPACES, WorkspaceInfo> = {
     id: WORKSPACES.SALES,
     name: 'Sales',
     namePersian: 'فروش',
-    description: 'مدیریت قراردادها و فرآیندهای فروش',
+    description: 'مدیریت فروش و قراردادها',
     icon: 'FaFileContract',
     color: 'teal',
     path: '/dashboard/sales',
@@ -66,7 +66,7 @@ export const WORKSPACE_CONFIG: Record<WORKSPACES, WorkspaceInfo> = {
     id: WORKSPACES.CRM,
     name: 'CRM',
     namePersian: 'مدیریت ارتباط با مشتری',
-    description: 'مدیریت مشتریان، مخاطبین و فرصت‌های فروش',
+    description: 'مدیریت مشتریان و ارتباطات',
     icon: 'FaUsers',
     color: 'blue',
     path: '/dashboard/crm',
@@ -76,7 +76,7 @@ export const WORKSPACE_CONFIG: Record<WORKSPACES, WorkspaceInfo> = {
     id: WORKSPACES.HR,
     name: 'Human Resources',
     namePersian: 'منابع انسانی',
-    description: 'مدیریت پرسنل، حقوق و دستمزد',
+    description: 'مدیریت کارکنان و حقوق',
     icon: 'FaUserTie',
     color: 'purple',
     path: '/dashboard/hr',
@@ -86,7 +86,7 @@ export const WORKSPACE_CONFIG: Record<WORKSPACES, WorkspaceInfo> = {
     id: WORKSPACES.ACCOUNTING,
     name: 'Accounting',
     namePersian: 'حسابداری',
-    description: 'مدیریت مالی و حسابداری',
+    description: 'مدیریت مالی و حساب‌ها',
     icon: 'FaCalculator',
     color: 'green',
     path: '/dashboard/accounting',
@@ -95,8 +95,8 @@ export const WORKSPACE_CONFIG: Record<WORKSPACES, WorkspaceInfo> = {
   [WORKSPACES.INVENTORY]: {
     id: WORKSPACES.INVENTORY,
     name: 'Inventory',
-    namePersian: 'موجودی',
-    description: 'مدیریت موجودی و انبار',
+    namePersian: 'انبار',
+    description: 'مدیریت موجودی و کالاها',
     icon: 'FaWarehouse',
     color: 'orange',
     path: '/dashboard/inventory',
@@ -105,8 +105,8 @@ export const WORKSPACE_CONFIG: Record<WORKSPACES, WorkspaceInfo> = {
   [WORKSPACES.SECURITY]: {
     id: WORKSPACES.SECURITY,
     name: 'Security',
-    namePersian: 'امنیت',
-    description: 'مدیریت امنیت و حضور و غیاب',
+    namePersian: 'حراست',
+    description: 'مدیریت تردد و امنیت',
     icon: 'FaShieldAlt',
     color: 'red',
     path: '/dashboard/security',
@@ -299,3 +299,4 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
     </WorkspaceContext.Provider>
   );
 };
+

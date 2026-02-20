@@ -1,8 +1,9 @@
-import express, { Response } from 'express';
+﻿import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -10,7 +11,7 @@ const prisma = new PrismaClient();
 // @desc    Get all shifts
 // @route   GET /api/security/shifts
 // @access  Private/Security Workspace
-router.get('/shifts', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
+router.get('/shifts', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_SHIFTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
     const shifts = await prisma.shift.findMany({
       where: { isActive: true },
@@ -43,7 +44,7 @@ router.get('/shifts', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKS
 // @desc    Create new shift
 // @route   POST /api/security/shifts
 // @access  Private/Security Workspace Admin
-router.post('/shifts', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), [
+router.post('/shifts', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_SHIFTS_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('name').notEmpty().withMessage('Name is required'),
   body('namePersian').notEmpty().withMessage('Persian name is required'),
   body('startTime').notEmpty().withMessage('Start time is required'),
@@ -90,7 +91,7 @@ router.post('/shifts', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORK
 // @desc    Start security shift
 // @route   POST /api/security/shifts/start
 // @access  Private/Security Workspace
-router.post('/shifts/start', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), async (req: AuthRequest, res: Response) => {
+router.post('/shifts/start', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_SHIFTS_START, FEATURE_PERMISSIONS.EDIT), async (req: AuthRequest, res: Response) => {
   try {
     const { shiftId } = req.body;
 
@@ -154,7 +155,7 @@ router.post('/shifts/start', protect, requireWorkspaceAccess(WORKSPACES.SECURITY
 // @desc    End security shift
 // @route   POST /api/security/shifts/end
 // @access  Private/Security Workspace
-router.post('/shifts/end', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), async (req: AuthRequest, res: Response) => {
+router.post('/shifts/end', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_SHIFTS_END, FEATURE_PERMISSIONS.EDIT), async (req: AuthRequest, res: Response) => {
   try {
     // Check if user is security personnel
     const securityPersonnel = await prisma.securityPersonnel.findUnique({
@@ -190,7 +191,7 @@ router.post('/shifts/end', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, 
 // @desc    Employee check-in
 // @route   POST /api/security/attendance/checkin
 // @access  Private/Security Workspace
-router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), [
+router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_ATTENDANCE_CHECKIN, FEATURE_PERMISSIONS.EDIT), [
   body('employeeId').notEmpty().withMessage('Employee ID is required'),
   body('entryTime').optional().isString().withMessage('Entry time must be a string'),
 ], async (req: AuthRequest, res: Response) => {
@@ -312,7 +313,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
 // @desc    Employee check-out
 // @route   POST /api/security/attendance/checkout
 // @access  Private/Security Personnel
-router.post('/attendance/checkout', protect, [
+router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_ATTENDANCE_CHECKOUT, FEATURE_PERMISSIONS.EDIT), [
   body('employeeId').notEmpty().withMessage('Employee ID is required'),
   body('exitTime').optional().isString().withMessage('Exit time must be a string'),
 ], async (req: AuthRequest, res: Response) => {
@@ -413,7 +414,7 @@ router.post('/attendance/checkout', protect, [
 // @desc    Record attendance exception
 // @route   POST /api/security/attendance/exception
 // @access  Private/Security Personnel
-router.post('/attendance/exception', protect, [
+router.post('/attendance/exception', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_ATTENDANCE_EXCEPTION, FEATURE_PERMISSIONS.EDIT), [
   body('employeeId').notEmpty().withMessage('Employee ID is required'),
   body('exceptionType').notEmpty().withMessage('Exception type is required'),
   body('exceptionTime').optional().isString().withMessage('Exception time must be a string'),
@@ -447,9 +448,9 @@ router.post('/attendance/exception', protect, [
 
     // Determine status based on exception type
     let status = 'PRESENT';
-    if (exceptionType === 'ماموریت') status = 'MISSION';
-    else if (exceptionType === 'مرخصی ساعتی') status = 'HOURLY_LEAVE';
-    else if (exceptionType === 'غیبت') status = 'ABSENT';
+    if (exceptionType === '??') status = 'MISSION';
+    else if (exceptionType === '??? ???') status = 'HOURLY_LEAVE';
+    else if (exceptionType === '??') status = 'ABSENT';
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -498,7 +499,7 @@ router.post('/attendance/exception', protect, [
 // @desc    Get daily attendance report
 // @route   GET /api/security/attendance/daily
 // @access  Private/Security Personnel
-router.get('/attendance/daily', protect, async (req: AuthRequest, res: Response) => {
+router.get('/attendance/daily', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_ATTENDANCE_DAILY_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
     const { date } = req.query;
     let targetDate: Date;
@@ -610,7 +611,7 @@ router.get('/attendance/daily', protect, async (req: AuthRequest, res: Response)
 // @desc    Get security dashboard stats
 // @route   GET /api/security/dashboard/stats
 // @access  Private/Security Personnel
-router.get('/dashboard/stats', protect, async (req: AuthRequest, res: Response) => {
+router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
     // Check if user is security personnel
     const securityPersonnel = await prisma.securityPersonnel.findUnique({
@@ -705,7 +706,7 @@ router.get('/dashboard/stats', protect, async (req: AuthRequest, res: Response) 
 // @desc    Get security personnel
 // @route   GET /api/security/personnel
 // @access  Private/Admin
-router.get('/personnel', protect, authorize('ADMIN'), async (req: AuthRequest, res: Response) => {
+router.get('/personnel', protect, authorize('ADMIN'), requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_PERSONNEL_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
     const personnel = await prisma.securityPersonnel.findMany({
       where: { isActive: true },
@@ -749,7 +750,7 @@ router.get('/personnel', protect, authorize('ADMIN'), async (req: AuthRequest, r
 // @desc    Assign security personnel
 // @route   POST /api/security/personnel
 // @access  Private/Admin
-router.post('/personnel', protect, authorize('ADMIN'), [
+router.post('/personnel', protect, authorize('ADMIN'), requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_PERSONNEL_ASSIGN, FEATURE_PERMISSIONS.EDIT), [
   body('userId').notEmpty().withMessage('User ID is required'),
   body('shiftId').notEmpty().withMessage('Shift ID is required'),
   body('position').notEmpty().withMessage('Position is required'),
@@ -823,7 +824,7 @@ router.post('/personnel', protect, authorize('ADMIN'), [
 // @desc    Create exception request (leave, sick leave, etc.)
 // @route   POST /api/security/exceptions/request
 // @access  Private/All Users
-router.post('/exceptions/request', protect, [
+router.post('/exceptions/request', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_REQUEST, FEATURE_PERMISSIONS.EDIT), [
   body('exceptionType').isIn(['HOURLY_LEAVE', 'SICK_LEAVE', 'VACATION', 'EMERGENCY_LEAVE', 'PERSONAL_LEAVE']).withMessage('Invalid exception type'),
   body('startDate').isISO8601().withMessage('Start date must be valid'),
   body('endDate').optional().isISO8601().withMessage('End date must be valid'),
@@ -905,7 +906,7 @@ router.post('/exceptions/request', protect, [
 // @desc    Get exception requests (for managers/approvers)
 // @route   GET /api/security/exceptions/requests
 // @access  Private/Managers
-router.get('/exceptions/requests', protect, authorize('ADMIN'), async (req: AuthRequest, res: Response) => {
+router.get('/exceptions/requests', protect, authorize('ADMIN'), requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
     const { status, type, page = 1, limit = 10 } = req.query;
     
@@ -973,7 +974,7 @@ router.get('/exceptions/requests', protect, authorize('ADMIN'), async (req: Auth
 // @desc    Approve exception request
 // @route   PUT /api/security/exceptions/:id/approve
 // @access  Private/Managers
-router.put('/exceptions/:id/approve', protect, authorize('ADMIN'), [
+router.put('/exceptions/:id/approve', protect, authorize('ADMIN'), requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_APPROVE, FEATURE_PERMISSIONS.EDIT), [
   body('notes').optional().isString().withMessage('Notes must be a string')
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -1034,7 +1035,7 @@ router.put('/exceptions/:id/approve', protect, authorize('ADMIN'), [
 // @desc    Reject exception request
 // @route   PUT /api/security/exceptions/:id/reject
 // @access  Private/Managers
-router.put('/exceptions/:id/reject', protect, authorize('ADMIN'), [
+router.put('/exceptions/:id/reject', protect, authorize('ADMIN'), requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_REJECT, FEATURE_PERMISSIONS.EDIT), [
   body('rejectionReason').notEmpty().withMessage('Rejection reason is required')
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -1093,9 +1094,9 @@ router.put('/exceptions/:id/reject', protect, authorize('ADMIN'), [
 // @desc    Create mission assignment
 // @route   POST /api/security/missions/assign
 // @access  Private/Security Personnel
-router.post('/missions/assign', protect, [
+router.post('/missions/assign', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_MISSIONS_ASSIGN, FEATURE_PERMISSIONS.EDIT), [
   body('employeeId').notEmpty().withMessage('Employee ID is required'),
-  body('missionType').isIn(['ماموریت داخلی', 'ماموریت خارجی']).withMessage('Invalid mission type'),
+  body('missionType').isIn(['?? ???', '?? ???']).withMessage('Invalid mission type'),
   body('missionLocation').notEmpty().withMessage('Mission location is required'),
   body('missionPurpose').notEmpty().withMessage('Mission purpose is required'),
   body('startDate').isISO8601().withMessage('Start date must be valid'),
@@ -1193,7 +1194,7 @@ router.post('/missions/assign', protect, [
 // @desc    Get mission assignments
 // @route   GET /api/security/missions
 // @access  Private/Security Personnel
-router.get('/missions', protect, async (req: AuthRequest, res: Response) => {
+router.get('/missions', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_MISSIONS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
     const { status, page = 1, limit = 10 } = req.query;
     
@@ -1258,7 +1259,7 @@ router.get('/missions', protect, async (req: AuthRequest, res: Response) => {
 // @desc    Approve mission assignment
 // @route   PUT /api/security/missions/:id/approve
 // @access  Private/Managers
-router.put('/missions/:id/approve', protect, authorize('ADMIN'), async (req: AuthRequest, res: Response) => {
+router.put('/missions/:id/approve', protect, authorize('ADMIN'), requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_MISSIONS_APPROVE, FEATURE_PERMISSIONS.EDIT), async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -1306,7 +1307,7 @@ router.put('/missions/:id/approve', protect, authorize('ADMIN'), async (req: Aut
 // @desc    Save digital signature for attendance record
 // @route   PUT /api/security/attendance/:id/signature
 // @access  Private/Security Personnel
-router.put('/attendance/:id/signature', protect, [
+router.put('/attendance/:id/signature', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_SIGNATURE_UPDATE, FEATURE_PERMISSIONS.EDIT), [
   body('signatureData').notEmpty().withMessage('Signature data is required'),
   body('signatureType').optional().isIn(['CHECKIN', 'CHECKOUT', 'EXCEPTION']).withMessage('Invalid signature type')
 ], async (req: AuthRequest, res: Response) => {
@@ -1390,7 +1391,7 @@ router.put('/attendance/:id/signature', protect, [
 // @desc    Get attendance record with signature
 // @route   GET /api/security/attendance/:id/signature
 // @access  Private/Security Personnel
-router.get('/attendance/:id/signature', protect, async (req: AuthRequest, res: Response) => {
+router.get('/attendance/:id/signature', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_SIGNATURE_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
     // Check if user is security personnel
     const securityPersonnel = await prisma.securityPersonnel.findUnique({
@@ -1456,7 +1457,7 @@ router.get('/attendance/:id/signature', protect, async (req: AuthRequest, res: R
 // @desc    Validate signature authenticity
 // @route   POST /api/security/signature/validate
 // @access  Private/Security Personnel
-router.post('/signature/validate', protect, [
+router.post('/signature/validate', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_SIGNATURE_VALIDATE, FEATURE_PERMISSIONS.VIEW), [
   body('signatureData').notEmpty().withMessage('Signature data is required'),
   body('employeeId').notEmpty().withMessage('Employee ID is required')
 ], async (req: AuthRequest, res: Response) => {
@@ -1510,3 +1511,4 @@ router.post('/signature/validate', protect, [
 });
 
 export default router;
+

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -41,13 +41,13 @@ const statusColors = {
 };
 
 const statusLabels = {
-  DRAFT: 'پیش نویس',
-  PENDING_APPROVAL: 'در انتظار تایید',
-  APPROVED: 'تایید شده',
-  SIGNED: 'امضا شده',
-  PRINTED: 'چاپ شده',
-  CANCELLED: 'لغو شده',
-  EXPIRED: 'منقضی شده'
+  DRAFT: '?? ??',
+  PENDING_APPROVAL: '? ??? ???',
+  APPROVED: '??? ??',
+  SIGNED: '?? ??',
+  PRINTED: '?? ??',
+  CANCELLED: '?? ??',
+  EXPIRED: '??? ??'
 };
 
 export default function ContractsPage() {
@@ -104,7 +104,7 @@ export default function ContractsPage() {
   };
 
   const formatAmount = (amount: number | null, currency: string) => {
-    if (!amount) return 'نامشخص';
+    if (!amount) return '???';
     return `${amount.toLocaleString('fa-IR')} ${currency}`;
   };
 
@@ -113,15 +113,15 @@ export default function ContractsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">مدیریت قراردادها</h1>
-          <p className="text-gray-300">مدیریت و پیگیری قراردادهای فروش</p>
+          <h1 className="text-3xl font-bold text-white mb-2">??? ???</h1>
+          <p className="text-gray-300">??? ? ??? ??? ??</p>
         </div>
         <Link 
           href="/dashboard/contracts/create" 
           className="glass-liquid-btn-primary inline-flex items-center gap-2 px-6 py-3"
         >
           <FaPlus className="text-lg" />
-          قرارداد جدید
+          ?? ??
         </Link>
       </div>
 
@@ -132,7 +132,7 @@ export default function ContractsPage() {
             <FaSearch className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="جستجو در قراردادها، شماره فرم، نام خریدار، کد ملی، شماره تماس..."
+              placeholder="??? ? ??? ??? ?? ?? ?? ? ?? ??? ??..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="glass-liquid-input w-full pr-10"
@@ -144,13 +144,13 @@ export default function ContractsPage() {
               onChange={(e) => setStatusFilter(e.target.value)}
               className="glass-liquid-input w-full"
             >
-              <option value="">همه وضعیت‌ها</option>
-              <option value="DRAFT">پیش نویس</option>
-              <option value="PENDING_APPROVAL">در انتظار تایید</option>
-              <option value="APPROVED">تایید شده</option>
-              <option value="SIGNED">امضا شده</option>
-              <option value="PRINTED">چاپ شده</option>
-              <option value="CANCELLED">لغو شده</option>
+              <option value="">?? ??</option>
+              <option value="DRAFT">?? ??</option>
+              <option value="PENDING_APPROVAL">? ??? ???</option>
+              <option value="APPROVED">??? ??</option>
+              <option value="SIGNED">?? ??</option>
+              <option value="PRINTED">?? ??</option>
+              <option value="CANCELLED">?? ??</option>
             </select>
           </div>
         </div>
@@ -167,10 +167,10 @@ export default function ContractsPage() {
             {filteredContracts.length === 0 ? (
               <div className="text-center py-12">
                 <FaFileContract className="mx-auto text-6xl text-gray-400 mb-4" />
-                <h3 className="text-xl font-semibold text-gray-300 mb-2">قراردادی یافت نشد</h3>
-                <p className="text-gray-400 mb-6">هنوز قراردادی ایجاد نشده است</p>
+                <h3 className="text-xl font-semibold text-gray-300 mb-2">?? ?? ??</h3>
+                <p className="text-gray-400 mb-6">?? ?? ??? ?? ??</p>
                 <Link href="/dashboard/contracts/create" className="glass-liquid-btn-primary">
-                  ایجاد اولین قرارداد
+                  ??? ??? ??
                 </Link>
               </div>
             ) : (
@@ -189,62 +189,62 @@ export default function ContractsPage() {
                       
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-300">
                         <div>
-                          <span className="text-gray-400">شماره قرارداد:</span>
+                          <span className="text-gray-400">??? ??:</span>
                           <span className="mr-2 font-mono">{contract.contractNumber}</span>
                         </div>
                         <div>
-                          <span className="text-gray-400">شماره فرم:</span>
-                          <span className="mr-2 font-mono">{contract.contractData?.formNumber || 'نامشخص'}</span>
+                          <span className="text-gray-400">??? ??:</span>
+                          <span className="mr-2 font-mono">{contract.contractData?.formNumber || '???'}</span>
                         </div>
                         <div>
-                          <span className="text-gray-400">تاریخ فرم:</span>
-                          <span className="mr-2">{contract.contractData?.formDate || 'نامشخص'}</span>
+                          <span className="text-gray-400">??? ??:</span>
+                          <span className="mr-2">{contract.contractData?.formDate || '???'}</span>
                         </div>
                         <div>
-                          <span className="text-gray-400">نام خریدار:</span>
-                          <span className="mr-2">{contract.contractData?.buyerName || 'نامشخص'}</span>
+                          <span className="text-gray-400">?? ???:</span>
+                          <span className="mr-2">{contract.contractData?.buyerName || '???'}</span>
                         </div>
                         <div>
-                          <span className="text-gray-400">کد ملی:</span>
-                          <span className="mr-2">{contract.contractData?.buyerNationalId || 'نامشخص'}</span>
+                          <span className="text-gray-400">? ??:</span>
+                          <span className="mr-2">{contract.contractData?.buyerNationalId || '???'}</span>
                         </div>
                         <div>
-                          <span className="text-gray-400">شماره تماس:</span>
-                          <span className="mr-2">{contract.contractData?.buyerPhone || 'نامشخص'}</span>
+                          <span className="text-gray-400">??? ??:</span>
+                          <span className="mr-2">{contract.contractData?.buyerPhone || '???'}</span>
                         </div>
                         <div>
-                          <span className="text-gray-400">آدرس پروژه:</span>
-                          <span className="mr-2">{contract.contractData?.projectAddress || 'نامشخص'}</span>
+                          <span className="text-gray-400">?? ???:</span>
+                          <span className="mr-2">{contract.contractData?.projectAddress || '???'}</span>
                         </div>
                         <div>
-                          <span className="text-gray-400">نحوه تسویه:</span>
-                          <span className="mr-2">{contract.contractData?.paymentMethod || 'نامشخص'}</span>
+                          <span className="text-gray-400">?? ???:</span>
+                          <span className="mr-2">{contract.contractData?.paymentMethod || '???'}</span>
                         </div>
                         <div>
-                          <span className="text-gray-400">مبلغ کل:</span>
+                          <span className="text-gray-400">?? ?:</span>
                           <span className="mr-2 font-semibold text-teal-400">
                             {contract.contractData?.totalAmount ? 
-                              `${contract.contractData.totalAmount.toLocaleString('fa-IR')} ریال` : 
+                              `${contract.contractData.totalAmount.toLocaleString('fa-IR')} ??` : 
                               formatAmount(contract.totalAmount, contract.currency)
                             }
                           </span>
                         </div>
                         <div>
-                          <span className="text-gray-400">تعداد اقلام:</span>
-                          <span className="mr-2">{contract.contractData?.items?.length || 0} قلم</span>
+                          <span className="text-gray-400">??? ???:</span>
+                          <span className="mr-2">{contract.contractData?.items?.length || 0} ??</span>
                         </div>
                         <div>
-                          <span className="text-gray-400">بخش:</span>
+                          <span className="text-gray-400">??:</span>
                           <span className="mr-2">{contract.department.namePersian}</span>
                         </div>
                         <div>
-                          <span className="text-gray-400">ایجاد شده توسط:</span>
+                          <span className="text-gray-400">??? ?? ??:</span>
                           <span className="mr-2">
                             {contract.createdByUser.firstName} {contract.createdByUser.lastName}
                           </span>
                         </div>
                         <div>
-                          <span className="text-gray-400">تاریخ ایجاد:</span>
+                          <span className="text-gray-400">??? ???:</span>
                           <span className="mr-2">{formatDate(contract.createdAt)}</span>
                         </div>
                       </div>
@@ -254,7 +254,7 @@ export default function ContractsPage() {
                       <Link 
                         href={`/dashboard/contracts/${contract.id}`}
                         className="glass-liquid-btn p-3"
-                        title="مشاهده"
+                        title="???"
                       >
                         <FaEye />
                       </Link>
@@ -262,7 +262,7 @@ export default function ContractsPage() {
                         <Link 
                           href={`/dashboard/contracts/${contract.id}/edit`}
                           className="glass-liquid-btn p-3"
-                          title="ویرایش"
+                          title="???"
                         >
                           <FaEdit />
                         </Link>
@@ -270,7 +270,7 @@ export default function ContractsPage() {
                       {contract.status === 'APPROVED' && (
                         <button 
                           className="glass-liquid-btn p-3 text-green-400"
-                          title="امضا"
+                          title="??"
                         >
                           <FaSignature />
                         </button>
@@ -278,7 +278,7 @@ export default function ContractsPage() {
                       {contract.status === 'SIGNED' && (
                         <button 
                           className="glass-liquid-btn p-3 text-purple-400"
-                          title="چاپ"
+                          title="??"
                         >
                           <FaPrint />
                         </button>
@@ -294,3 +294,4 @@ export default function ContractsPage() {
     </div>
   );
 }
+

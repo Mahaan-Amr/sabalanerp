@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -163,7 +163,7 @@ export default function CreateCustomerPage() {
   const steps = [
     { key: 'customerType', label: 'نوع مشتری', fields: ['customerType'] },
     { key: 'basic', label: 'اطلاعات پایه', fields: ['firstName', 'lastName', 'phoneNumber1', 'phoneNumber2', 'nationalCode'] },
-    { key: 'project', label: 'تعریف پروژه', fields: ['projectName', 'projectAddress', 'projectCity', 'projectType'] }
+    { key: 'project', label: 'اطلاعات پروژه', fields: ['projectName', 'projectAddress', 'projectCity', 'projectType'] }
   ];
 
   const validateStep = (stepIndex: number): boolean => {
@@ -377,7 +377,7 @@ export default function CreateCustomerPage() {
           <div className="space-y-6">
             <div className="text-center">
               <h3 className="text-xl font-semibold text-white mb-4">نوع مشتری را انتخاب کنید</h3>
-              <p className="text-gray-300 mb-8">لطفاً نوع مشتری خود را انتخاب کنید تا مراحل بعدی بر اساس آن تنظیم شود</p>
+              <p className="text-gray-300 mb-8">در این مرحله نوع مشتری را مشخص کنید تا فرم مناسب نمایش داده شود.</p>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -392,8 +392,8 @@ export default function CreateCustomerPage() {
               >
                 <div className="text-center">
                   <FaUser className="mx-auto text-3xl mb-4" />
-                  <h4 className="text-lg font-semibold mb-2">شخصی</h4>
-                  <p className="text-sm text-gray-300">مشتریان شخصی و افراد حقیقی</p>
+                  <h4 className="text-lg font-semibold mb-2">حقیقی</h4>
+                  <p className="text-sm text-gray-300">مشتری شخصی و فردی</p>
                 </div>
               </button>
 
@@ -408,8 +408,8 @@ export default function CreateCustomerPage() {
               >
                 <div className="text-center">
                   <FaBuilding className="mx-auto text-3xl mb-4" />
-                  <h4 className="text-lg font-semibold mb-2">شرکتی</h4>
-                  <p className="text-sm text-gray-300">شرکت‌ها و سازمان‌های خصوصی</p>
+                  <h4 className="text-lg font-semibold mb-2">حقوقی</h4>
+                  <p className="text-sm text-gray-300">مشتری شرکتی یا سازمانی</p>
                 </div>
               </button>
 
@@ -425,7 +425,7 @@ export default function CreateCustomerPage() {
                 <div className="text-center">
                   <FaBuilding className="mx-auto text-3xl mb-4" />
                   <h4 className="text-lg font-semibold mb-2">دولتی</h4>
-                  <p className="text-sm text-gray-300">سازمان‌ها و نهادهای دولتی</p>
+                  <p className="text-sm text-gray-300">مشتری دولتی یا عمومی</p>
                 </div>
               </button>
             </div>
@@ -516,13 +516,13 @@ export default function CreateCustomerPage() {
                 <div className="mt-4 p-6 bg-white/5 border border-white/20 rounded-lg">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">نام شرکت یا برند</label>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">نام شرکت / سازمان</label>
                       <input
                         type="text"
                         value={formData.companyName}
                         onChange={(e) => handleInputChange('companyName', e.target.value)}
                         className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                        placeholder="نام شرکت یا برند"
+                        placeholder="نام شرکت / سازمان"
                       />
                     </div>
 
@@ -668,15 +668,15 @@ export default function CreateCustomerPage() {
                   label="نوع پروژه"
                   value={formData.projectType}
                   onChange={(value) => handleInputChange('projectType', value)}
-                  placeholder="انتخاب نوع پروژه"
+                  placeholder="نوع پروژه را انتخاب کنید"
                   options={[
                     { value: 'مسکونی', label: 'مسکونی' },
                     { value: 'تجاری', label: 'تجاری' },
-                    { value: 'پزشکی', label: 'پزشکی' },
                     { value: 'اداری', label: 'اداری' },
                     { value: 'صنعتی', label: 'صنعتی' },
-                    { value: 'آموزشی', label: 'آموزشی' },
-                    { value: 'تفریحی', label: 'تفریحی' },
+                    { value: 'عمرانی', label: 'عمرانی' },
+                    { value: 'بازسازی', label: 'بازسازی' },
+                    { value: 'ویلا', label: 'ویلا' },
                     { value: 'سایر', label: 'سایر' }
                   ]}
                   searchable={true}
@@ -692,7 +692,7 @@ export default function CreateCustomerPage() {
                 onClick={() => setShowAdditionalInfo(!showAdditionalInfo)}
                 className="w-full flex items-center justify-between p-4 bg-white/5 border border-white/20 rounded-lg text-white hover:bg-white/10 transition-colors"
               >
-                <span className="text-lg font-medium">اطلاعات تکمیلی</span>
+                <span className="text-lg font-medium">مدیر پروژه</span>
                 <span className={`transform transition-transform ${showAdditionalInfo ? 'rotate-180' : ''}`}>
                   <FaArrowRight className="h-4 w-4" />
                 </span>
@@ -740,8 +740,8 @@ export default function CreateCustomerPage() {
       <div className="flex items-center justify-center py-12">
         <div className="glass-liquid-card p-6 text-center">
           <FaExclamationTriangle className="mx-auto text-4xl text-red-400 mb-4" />
-          <h2 className="text-xl font-semibold text-white mb-2">دسترسی محدود</h2>
-          <p className="text-gray-400">شما مجوز ایجاد مشتری جدید را ندارید</p>
+          <h2 className="text-xl font-semibold text-white mb-2">عدم دسترسی</h2>
+          <p className="text-gray-400">شما دسترسی لازم برای ایجاد مشتری را ندارید</p>
         </div>
       </div>
     );
@@ -753,7 +753,7 @@ export default function CreateCustomerPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-white mb-2">ایجاد مشتری جدید</h1>
-          <p className="text-gray-300">اطلاعات مشتری جدید را وارد کنید</p>
+          <p className="text-gray-300">مراحل ایجاد مشتری را تکمیل کنید</p>
         </div>
         <div className="flex items-center gap-3">
           {/* Cancel button - return to contract wizard */}
@@ -780,7 +780,7 @@ export default function CreateCustomerPage() {
                   className="glass-liquid-btn px-6 py-3 bg-red-500/20 hover:bg-red-500/30 border-red-500/50 text-red-300 hover:text-red-200"
                 >
                   <FaTimes className="inline-block ml-2" />
-                  لغو و بازگشت به قرارداد
+                  بازگشت به مشتریان
                 </button>
               );
             }
@@ -791,7 +791,7 @@ export default function CreateCustomerPage() {
             href="/dashboard/crm/customers" 
             className="glass-liquid-btn px-6 py-3"
           >
-            بازگشت به لیست
+            مرحله بعد
           </Link>
         </div>
       </div>
@@ -842,12 +842,12 @@ export default function CreateCustomerPage() {
               {loading ? (
                 <>
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  در حال ایجاد...
+                  در حال ثبت...
                 </>
               ) : (
                 <>
                   <FaSave className="text-lg" />
-                  ایجاد مشتری
+                  ثبت مشتری
                 </>
               )}
             </button>
@@ -865,3 +865,4 @@ export default function CreateCustomerPage() {
     </div>
   );
 }
+

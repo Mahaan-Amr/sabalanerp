@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import { 
@@ -121,7 +121,7 @@ export default function ReportsPage() {
       setAttendanceTrend(mockTrend);
     } catch (error: any) {
       console.error('Error fetching reports data:', error);
-      setError(error.response?.data?.error || 'خطا در ارتباط با سرور');
+      setError(error.response?.data?.error || '?? ? ??? ? ??');
     } finally {
       setLoading(false);
     }
@@ -129,7 +129,7 @@ export default function ReportsPage() {
 
   const handleExportReport = (format: 'pdf' | 'excel') => {
     // This would trigger the actual export functionality
-    alert(`گزارش ${format.toUpperCase()} در حال تولید است...`);
+    alert(`??? ${format.toUpperCase()} ? ?? ??? ??...`);
   };
 
   if (loading) {
@@ -144,13 +144,13 @@ export default function ReportsPage() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
         <div className="glass-liquid-card p-8 text-center">
-          <h2 className="text-xl font-bold text-primary mb-2">خطا در بارگذاری</h2>
+          <h2 className="text-xl font-bold text-primary mb-2">?? ? ??</h2>
           <p className="text-secondary mb-4">{error}</p>
           <button 
             onClick={fetchReportsData}
             className="glass-liquid-btn-primary px-6 py-2"
           >
-            تلاش مجدد
+            ?? ??
           </button>
         </div>
       </div>
@@ -165,8 +165,8 @@ export default function ReportsPage() {
           <div className="flex items-center space-x-4 space-x-reverse">
             <FaChartLine className="h-8 w-8 text-teal-500" />
             <div>
-              <h1 className="text-2xl font-bold text-primary">گزارشات امنیت</h1>
-              <p className="text-secondary">گزارشات جامع سیستم امنیت و حضور و غیاب</p>
+              <h1 className="text-2xl font-bold text-primary">?? ???</h1>
+              <p className="text-secondary">?? ?? ??? ??? ? ?? ? ??</p>
             </div>
           </div>
           <div className="flex items-center space-x-4 space-x-reverse">
@@ -192,31 +192,31 @@ export default function ReportsPage() {
       <div className="glass-liquid-card p-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
-            <label className="block text-sm text-secondary mb-2">تاریخ شروع</label>
+            <label className="block text-sm text-secondary mb-2">??? ??</label>
             <PersianCalendarComponent
               value={dateRange.startDate}
               onChange={(date) => setDateRange({ ...dateRange, startDate: date })}
-              placeholder="انتخاب تاریخ شروع"
+              placeholder="??? ??? ??"
             />
           </div>
           <div>
-            <label className="block text-sm text-secondary mb-2">تاریخ پایان</label>
+            <label className="block text-sm text-secondary mb-2">??? ???</label>
             <PersianCalendarComponent
               value={dateRange.endDate}
               onChange={(date) => setDateRange({ ...dateRange, endDate: date })}
-              placeholder="انتخاب تاریخ پایان"
+              placeholder="??? ??? ???"
             />
           </div>
           <div>
-            <label className="block text-sm text-secondary mb-2">نوع گزارش</label>
+            <label className="block text-sm text-secondary mb-2">?? ???</label>
             <select
               value={reportType}
               onChange={(e) => setReportType(e.target.value as 'daily' | 'weekly' | 'monthly')}
               className="glass-liquid-input w-full"
             >
-              <option value="daily">روزانه</option>
-              <option value="weekly">هفتگی</option>
-              <option value="monthly">ماهانه</option>
+              <option value="daily">???</option>
+              <option value="weekly">???</option>
+              <option value="monthly">???</option>
             </select>
           </div>
           <div className="flex items-end">
@@ -225,7 +225,7 @@ export default function ReportsPage() {
               className="glass-liquid-btn-primary w-full px-4 py-2 flex items-center justify-center space-x-2 space-x-reverse"
             >
               <FaChartLine />
-              <span>تولید گزارش</span>
+              <span>??? ???</span>
             </button>
           </div>
         </div>
@@ -237,24 +237,24 @@ export default function ReportsPage() {
           {/* Attendance Summary */}
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-primary">حضور و غیاب</h3>
+              <h3 className="text-lg font-bold text-primary">?? ? ??</h3>
               <FaUsers className="h-6 w-6 text-blue-500" />
             </div>
             <div className="space-y-2">
               <div className="flex justify-between">
-                <span className="text-secondary">کل کارمندان:</span>
+                <span className="text-secondary">? ??:</span>
                 <span className="text-primary">{reportData.attendance.totalEmployees}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">حاضر:</span>
+                <span className="text-secondary">??:</span>
                 <span className="text-green-500">{reportData.attendance.present}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">غایب:</span>
+                <span className="text-secondary">??:</span>
                 <span className="text-red-500">{reportData.attendance.absent}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">نرخ حضور:</span>
+                <span className="text-secondary">?? ??:</span>
                 <span className="text-teal-500">{reportData.attendance.attendanceRate}%</span>
               </div>
             </div>
@@ -263,24 +263,24 @@ export default function ReportsPage() {
           {/* Exceptions Summary */}
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-primary">استثنائات</h3>
+              <h3 className="text-lg font-bold text-primary">???</h3>
               <FaExclamationTriangle className="h-6 w-6 text-yellow-500" />
             </div>
             <div className="space-y-2">
               <div className="flex justify-between">
-                <span className="text-secondary">کل درخواست‌ها:</span>
+                <span className="text-secondary">? ???:</span>
                 <span className="text-primary">{reportData.exceptions.totalRequests}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">تایید شده:</span>
+                <span className="text-secondary">??? ??:</span>
                 <span className="text-green-500">{reportData.exceptions.approved}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">رد شده:</span>
+                <span className="text-secondary">? ??:</span>
                 <span className="text-red-500">{reportData.exceptions.rejected}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">نرخ تایید:</span>
+                <span className="text-secondary">?? ???:</span>
                 <span className="text-teal-500">{reportData.exceptions.approvalRate}%</span>
               </div>
             </div>
@@ -289,24 +289,24 @@ export default function ReportsPage() {
           {/* Missions Summary */}
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-primary">ماموریت‌ها</h3>
+              <h3 className="text-lg font-bold text-primary">???</h3>
               <FaClock className="h-6 w-6 text-purple-500" />
             </div>
             <div className="space-y-2">
               <div className="flex justify-between">
-                <span className="text-secondary">کل ماموریت‌ها:</span>
+                <span className="text-secondary">? ???:</span>
                 <span className="text-primary">{reportData.missions.totalMissions}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">تکمیل شده:</span>
+                <span className="text-secondary">??? ??:</span>
                 <span className="text-green-500">{reportData.missions.completed}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">در انتظار:</span>
+                <span className="text-secondary">? ???:</span>
                 <span className="text-yellow-500">{reportData.missions.pending}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">نرخ تکمیل:</span>
+                <span className="text-secondary">?? ???:</span>
                 <span className="text-teal-500">{reportData.missions.completionRate}%</span>
               </div>
             </div>
@@ -315,24 +315,24 @@ export default function ReportsPage() {
           {/* Shifts Summary */}
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-primary">شیفت‌ها</h3>
+              <h3 className="text-lg font-bold text-primary">??</h3>
               <FaClock className="h-6 w-6 text-orange-500" />
             </div>
             <div className="space-y-2">
               <div className="flex justify-between">
-                <span className="text-secondary">کل شیفت‌ها:</span>
+                <span className="text-secondary">? ??:</span>
                 <span className="text-primary">{reportData.shifts.totalShifts}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">فعال:</span>
+                <span className="text-secondary">??:</span>
                 <span className="text-green-500">{reportData.shifts.activeShifts}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">کل پرسنل:</span>
+                <span className="text-secondary">? ???:</span>
                 <span className="text-primary">{reportData.shifts.totalPersonnel}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">پرسنل فعال:</span>
+                <span className="text-secondary">??? ??:</span>
                 <span className="text-teal-500">{reportData.shifts.activePersonnel}</span>
               </div>
             </div>
@@ -342,17 +342,17 @@ export default function ReportsPage() {
 
       {/* Attendance Trend Chart */}
       <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-bold text-primary mb-4">روند حضور و غیاب</h2>
+        <h2 className="text-xl font-bold text-primary mb-4">?? ?? ? ??</h2>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-700">
-                <th className="text-right py-3 px-4 text-secondary">تاریخ</th>
-                <th className="text-right py-3 px-4 text-secondary">حاضر</th>
-                <th className="text-right py-3 px-4 text-secondary">غایب</th>
-                <th className="text-right py-3 px-4 text-secondary">تاخیر</th>
-                <th className="text-right py-3 px-4 text-secondary">کل</th>
-                <th className="text-right py-3 px-4 text-secondary">نرخ حضور</th>
+                <th className="text-right py-3 px-4 text-secondary">???</th>
+                <th className="text-right py-3 px-4 text-secondary">??</th>
+                <th className="text-right py-3 px-4 text-secondary">??</th>
+                <th className="text-right py-3 px-4 text-secondary">???</th>
+                <th className="text-right py-3 px-4 text-secondary">?</th>
+                <th className="text-right py-3 px-4 text-secondary">?? ??</th>
               </tr>
             </thead>
             <tbody>
@@ -379,7 +379,7 @@ export default function ReportsPage() {
         {/* Daily Attendance Report */}
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-bold text-primary">گزارش روزانه حضور</h3>
+            <h3 className="text-lg font-bold text-primary">??? ??? ??</h3>
             <button
               onClick={() => handleExportReport('pdf')}
               className="glass-liquid-btn p-2"
@@ -388,14 +388,14 @@ export default function ReportsPage() {
             </button>
           </div>
           <p className="text-secondary text-sm">
-            گزارش تفصیلی حضور و غیاب کارمندان در بازه زمانی انتخابی
+            ??? ??? ?? ? ?? ?? ? ?? ??? ??
           </p>
         </div>
 
         {/* Exception Report */}
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-bold text-primary">گزارش استثنائات</h3>
+            <h3 className="text-lg font-bold text-primary">??? ???</h3>
             <button
               onClick={() => handleExportReport('excel')}
               className="glass-liquid-btn p-2"
@@ -404,10 +404,11 @@ export default function ReportsPage() {
             </button>
           </div>
           <p className="text-secondary text-sm">
-            گزارش درخواست‌های استثنا و وضعیت تایید آنها
+            ??? ?? ??? ? ??? ??? ??
           </p>
         </div>
       </div>
     </div>
   );
 }
+

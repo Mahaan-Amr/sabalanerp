@@ -1,4 +1,4 @@
-// Contract service
+﻿// Contract service
 // Handles contract business logic
 
 import { PrismaClient } from '@prisma/client';
@@ -284,4 +284,5 @@ export async function rejectContract(
 
   return updatedContract;
 }
+
 

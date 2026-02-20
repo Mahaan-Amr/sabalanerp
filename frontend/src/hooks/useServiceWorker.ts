@@ -89,7 +89,9 @@ export function useServiceWorker() {
   const syncOfflineActions = async () => {
     if (state.registration && 'sync' in window.ServiceWorkerRegistration.prototype) {
       try {
-        await state.registration.sync.register('background-sync');
+        await (state.registration as ServiceWorkerRegistration & {
+          sync: { register: (tag: string) => Promise<void> };
+        }).sync.register('background-sync');
         console.log('Background sync registered');
       } catch (error) {
         console.error('Background sync registration failed:', error);

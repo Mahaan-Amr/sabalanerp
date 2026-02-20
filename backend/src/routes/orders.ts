@@ -1,7 +1,8 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma, OrderStatus } from '@prisma/client';
 import { protect, authorize } from '../middleware/auth';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -9,15 +10,18 @@ const prisma = new PrismaClient();
 // @desc    Get all orders
 // @route   GET /api/orders
 // @access  Private
-router.get('/', protect, async (req: any, res) => {
+router.get('/', protect, requireFeatureAccess(FEATURES.CORE_ORDERS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const skip = (page - 1) * limit;
-    const status = req.query.status as string;
+    const statusRaw = req.query.status as string | undefined;
+    const status = statusRaw && Object.values(OrderStatus).includes(statusRaw as OrderStatus)
+      ? (statusRaw as OrderStatus)
+      : undefined;
 
     // Regular users can only see their own orders, admins can see all
-    const whereClause = req.user.role === 'ADMIN' 
+    const whereClause: Prisma.OrderWhereInput = req.user.role === 'ADMIN' 
       ? (status ? { status } : {})
       : { customerId: req.user.id, ...(status ? { status } : {}) };
 
@@ -65,7 +69,7 @@ router.get('/', protect, async (req: any, res) => {
 // @desc    Get order by ID
 // @route   GET /api/orders/:id
 // @access  Private
-router.get('/:id', protect, async (req: any, res) => {
+router.get('/:id', protect, requireFeatureAccess(FEATURES.CORE_ORDERS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res) => {
   try {
     const order = await prisma.order.findUnique({
       where: { id: req.params.id },
@@ -113,7 +117,7 @@ router.get('/:id', protect, async (req: any, res) => {
 // @desc    Create order
 // @route   POST /api/orders
 // @access  Private
-router.post('/', protect, [
+router.post('/', protect, requireFeatureAccess(FEATURES.CORE_ORDERS_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('total').isDecimal().isFloat({ min: 0 }),
 ], async (req: any, res) => {
   try {
@@ -167,7 +171,7 @@ router.post('/', protect, [
 // @desc    Update order status
 // @route   PUT /api/orders/:id/status
 // @access  Private/Admin
-router.put('/:id/status', protect, authorize('ADMIN'), [
+router.put('/:id/status', protect, authorize('ADMIN'), requireFeatureAccess(FEATURES.CORE_ORDERS_UPDATE_STATUS, FEATURE_PERMISSIONS.EDIT), [
   body('status').isIn(['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED']),
 ], async (req, res) => {
   try {
@@ -225,7 +229,7 @@ router.put('/:id/status', protect, authorize('ADMIN'), [
 // @desc    Delete order
 // @route   DELETE /api/orders/:id
 // @access  Private/Admin
-router.delete('/:id', protect, authorize('ADMIN'), async (req, res) => {
+router.delete('/:id', protect, authorize('ADMIN'), requireFeatureAccess(FEATURES.CORE_ORDERS_DELETE, FEATURE_PERMISSIONS.EDIT), async (req, res) => {
   try {
     const order = await prisma.order.findUnique({
       where: { id: req.params.id }

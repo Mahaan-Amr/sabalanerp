@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -31,7 +31,7 @@ const CreateSubServicePage: React.FC = () => {
         // Redirect back to services page
         router.push('/dashboard/inventory/services');
       } else {
-        setErrors({ general: 'خطا در ایجاد ابزار' });
+        setErrors({ general: '?? ? ??? ???' });
       }
     } catch (error: any) {
       console.error('Error creating sub-service:', error);
@@ -43,7 +43,7 @@ const CreateSubServicePage: React.FC = () => {
         });
         setErrors(newErrors);
       } else {
-        setErrors({ general: 'خطا در ایجاد ابزار' });
+        setErrors({ general: '?? ? ??? ???' });
       }
     } finally {
       setLoading(false);
@@ -62,10 +62,10 @@ const CreateSubServicePage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
-                ایجاد ابزار جدید
+                ??? ??? ??
               </h1>
               <p className="text-slate-600 dark:text-slate-400">
-                ابزار جدید را تعریف کنید
+                ??? ?? ? ??? ??
               </p>
             </div>
             <button
@@ -84,7 +84,7 @@ const CreateSubServicePage: React.FC = () => {
               {/* Code */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  کد ابزار *
+                  ? ??? *
                 </label>
                 <input
                   type="text"
@@ -93,7 +93,7 @@ const CreateSubServicePage: React.FC = () => {
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
                     errors.code ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
                   }`}
-                  placeholder="مثال: SUB001"
+                  placeholder="??: SUB001"
                 />
                 {errors.code && (
                   <p className="text-red-500 text-sm mt-1">{errors.code}</p>
@@ -103,7 +103,7 @@ const CreateSubServicePage: React.FC = () => {
               {/* Persian Name */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  نام فارسی (نوع یا نام ابزار) *
+                  ?? ??? (?? ? ?? ???) *
                 </label>
                 <input
                   type="text"
@@ -112,7 +112,7 @@ const CreateSubServicePage: React.FC = () => {
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
                     errors.namePersian ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
                   }`}
-                  placeholder="مثال: ابزار صیقل کاری"
+                  placeholder="??: ??? ?? ??"
                 />
                 {errors.namePersian && (
                   <p className="text-red-500 text-sm mt-1">{errors.namePersian}</p>
@@ -122,35 +122,35 @@ const CreateSubServicePage: React.FC = () => {
               {/* English Name */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  نام انگلیسی
+                  ?? ??
                 </label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  placeholder="مثال: Polishing Sub"
+                  placeholder="??: Polishing Sub"
                 />
               </div>
 
               {/* Description */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  توضیحات
+                  ??
                 </label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   rows={3}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  placeholder="توضیحات ابزار..."
+                  placeholder="?? ???..."
                 />
               </div>
 
               {/* Price Per Meter */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  هزینه هر متر ابزار (تومان) *
+                  ??? ? ?? ??? (???) *
                 </label>
                 <input
                   type="number"
@@ -159,7 +159,7 @@ const CreateSubServicePage: React.FC = () => {
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
                     errors.pricePerMeter ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
                   }`}
-                  placeholder="مثال: 50000"
+                  placeholder="??: 50000"
                   min={0}
                   step={1000}
                   required
@@ -168,25 +168,25 @@ const CreateSubServicePage: React.FC = () => {
                   <p className="text-red-500 text-sm mt-1">{errors.pricePerMeter}</p>
                 )}
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  این قیمت برای محاسبه هزینه ابزار در قراردادها استفاده می‌شود
+                  ?? ?? ?? ??? ??? ??? ? ??? ?? ???
                 </p>
               </div>
 
               {/* Calculation Base */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  مبنای محاسبه *
+                  ??? ??? *
                 </label>
                 <select
                   value={formData.calculationBase}
                   onChange={(e) => setFormData(prev => ({ ...prev, calculationBase: e.target.value as 'length' | 'squareMeters' }))}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                 >
-                  <option value="length">طول</option>
-                  <option value="squareMeters">متر مربع</option>
+                  <option value="length">??</option>
+                  <option value="squareMeters">?? ??</option>
                 </select>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  هزینه بر اساس طول یا متر مربع محصول محاسبه می‌شود
+                  ??? ? ?? ?? ? ?? ?? ??? ??? ???
                 </p>
               </div>
 
@@ -200,7 +200,7 @@ const CreateSubServicePage: React.FC = () => {
                     className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                   />
                   <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                    فعال
+                    ??
                   </span>
                 </label>
               </div>
@@ -219,7 +219,7 @@ const CreateSubServicePage: React.FC = () => {
                   onClick={handleCancel}
                   className="px-6 py-2 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
                 >
-                  انصراف
+                  ???
                 </button>
                 <button
                   type="submit"
@@ -231,7 +231,7 @@ const CreateSubServicePage: React.FC = () => {
                   ) : (
                     <FaSave className="w-4 h-4" />
                   )}
-                  <span>{loading ? 'در حال ایجاد...' : 'ایجاد ابزار'}</span>
+                  <span>{loading ? '? ?? ???...' : '??? ???'}</span>
                 </button>
               </div>
             </form>
@@ -243,4 +243,5 @@ const CreateSubServicePage: React.FC = () => {
 };
 
 export default CreateSubServicePage;
+
 

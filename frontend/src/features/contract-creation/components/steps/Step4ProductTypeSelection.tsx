@@ -1,9 +1,9 @@
-// Step 4: Product Type Selection Component
+﻿// Step 4: Product Type Selection Component
 // Product type selection (longitudinal, stair, slab)
 
 import React from 'react';
 import { FaCheck } from 'react-icons/fa';
-import { FaRuler, FaSquare, FaThLarge, FaCubes } from 'react-icons/fa';
+import { FaRuler, FaSquare, FaThLarge } from 'react-icons/fa';
 import type { ContractWizardData } from '../../types/contract.types';
 
 const PRODUCT_TYPES = [
@@ -12,7 +12,7 @@ const PRODUCT_TYPES = [
     name: 'سنگ طولی',
     nameEn: 'Longitudinal Stone',
     icon: FaRuler,
-    description: 'سنگ‌های طولی با برش طولی',
+    description: 'سنگ طولی با برش مستقیم',
     available: true
   },
   {
@@ -20,7 +20,7 @@ const PRODUCT_TYPES = [
     name: 'سنگ پله',
     nameEn: 'Stair Stone',
     icon: FaSquare,
-    description: 'سنگ‌های مخصوص پله',
+    description: 'سنگ مخصوص پله',
     available: true
   },
   {
@@ -28,16 +28,8 @@ const PRODUCT_TYPES = [
     name: 'سنگ اسلب',
     nameEn: 'Slab Stone',
     icon: FaThLarge,
-    description: 'سنگ‌های اسلب با برش دو بعدی (طول و عرض)',
+    description: 'سنگ اسلب با برش دو بعدی (طول و عرض)',
     available: true
-  },
-  {
-    id: 'volumetric',
-    name: 'سنگ حجمی',
-    nameEn: 'Volumetric Stone',
-    icon: FaCubes,
-    description: 'به‌زودی: مدیریت سفارش سنگ‌های حجمی',
-    available: false
   }
 ] as const;
 
@@ -139,7 +131,7 @@ export const Step4ProductTypeSelection: React.FC<Step4ProductTypeSelectionProps>
         {wizardData.products.length > 0 && (
           <div className="mt-8 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
             <h4 className="text-sm font-semibold text-blue-800 dark:text-blue-200 mb-3">
-              محصولات اضافه شده:
+              محصولات اضافه‌شده:
             </h4>
             <div className="flex flex-wrap gap-2">
               {Array.from(new Set(wizardData.products.map(p => p.productType))).map(productType => {
@@ -150,13 +142,13 @@ export const Step4ProductTypeSelection: React.FC<Step4ProductTypeSelectionProps>
                     key={productType}
                     className="inline-flex items-center gap-2 px-3 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 rounded-full text-sm"
                   >
-                    {typeInfo?.name}: {count} محصول
+                    {typeInfo?.name}: {count} عدد
                   </span>
                 );
               })}
             </div>
             <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
-              می‌توانید برای اضافه کردن محصولات بیشتر، نوع محصول دیگری انتخاب کنید
+              برای افزودن محصول جدید، نوع محصول را انتخاب کنید
             </p>
           </div>
         )}
@@ -164,4 +156,5 @@ export const Step4ProductTypeSelection: React.FC<Step4ProductTypeSelectionProps>
     </div>
   );
 };
+
 

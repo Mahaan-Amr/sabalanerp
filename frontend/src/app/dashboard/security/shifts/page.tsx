@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import { 
@@ -82,7 +82,7 @@ export default function ShiftsPage() {
       }
     } catch (error: any) {
       console.error('Error fetching shifts data:', error);
-      setError(error.response?.data?.error || 'خطا در ارتباط با سرور');
+      setError(error.response?.data?.error || '?? ? ??? ? ??');
     } finally {
       setLoading(false);
     }
@@ -99,7 +99,7 @@ export default function ShiftsPage() {
       }
     } catch (error: any) {
       console.error('Error creating shift:', error);
-      alert(error.response?.data?.error || 'خطا در ایجاد شیفت');
+      alert(error.response?.data?.error || '?? ? ??? ??');
     }
   };
 
@@ -107,12 +107,12 @@ export default function ShiftsPage() {
     try {
       const response = await securityAPI.startShift(shiftId);
       if (response.data.success) {
-        alert('شیفت با موفقیت شروع شد');
+        alert('?? ? ??? ?? ?');
         fetchShiftsData();
       }
     } catch (error: any) {
       console.error('Error starting shift:', error);
-      alert(error.response?.data?.error || 'خطا در شروع شیفت');
+      alert(error.response?.data?.error || '?? ? ?? ??');
     }
   };
 
@@ -120,12 +120,12 @@ export default function ShiftsPage() {
     try {
       const response = await securityAPI.endShift();
       if (response.data.success) {
-        alert('شیفت با موفقیت پایان یافت');
+        alert('?? ? ??? ??? ??');
         fetchShiftsData();
       }
     } catch (error: any) {
       console.error('Error ending shift:', error);
-      alert(error.response?.data?.error || 'خطا در پایان شیفت');
+      alert(error.response?.data?.error || '?? ? ??? ??');
     }
   };
 
@@ -148,13 +148,13 @@ export default function ShiftsPage() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
         <div className="glass-liquid-card p-8 text-center">
-          <h2 className="text-xl font-bold text-primary mb-2">خطا در بارگذاری</h2>
+          <h2 className="text-xl font-bold text-primary mb-2">?? ? ??</h2>
           <p className="text-secondary mb-4">{error}</p>
           <button 
             onClick={fetchShiftsData}
             className="glass-liquid-btn-primary px-6 py-2"
           >
-            تلاش مجدد
+            ?? ??
           </button>
         </div>
       </div>
@@ -169,8 +169,8 @@ export default function ShiftsPage() {
           <div className="flex items-center space-x-4 space-x-reverse">
             <FaClock className="h-8 w-8 text-teal-500" />
             <div>
-              <h1 className="text-2xl font-bold text-primary">مدیریت شیفت‌ها</h1>
-              <p className="text-secondary">مدیریت شیفت‌های امنیت و پرسنل</p>
+              <h1 className="text-2xl font-bold text-primary">??? ??</h1>
+              <p className="text-secondary">??? ?? ??? ? ???</p>
             </div>
           </div>
           <button
@@ -178,7 +178,7 @@ export default function ShiftsPage() {
             className="glass-liquid-btn-primary px-4 py-2 flex items-center space-x-2 space-x-reverse"
           >
             <FaPlus />
-            <span>شیفت جدید</span>
+            <span>?? ??</span>
           </button>
         </div>
       </div>
@@ -197,30 +197,30 @@ export default function ShiftsPage() {
                   ? 'bg-green-500/20 text-green-500' 
                   : 'bg-gray-500/20 text-gray-500'
               }`}>
-                {shift.isActive ? 'فعال' : 'غیرفعال'}
+                {shift.isActive ? '??' : '??'}
               </div>
             </div>
 
             <div className="space-y-3 mb-4">
               <div className="flex items-center justify-between">
-                <span className="text-secondary">ساعت شروع:</span>
+                <span className="text-secondary">?? ??:</span>
                 <span className="text-primary">{formatTime(shift.startTime)}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-secondary">ساعت پایان:</span>
+                <span className="text-secondary">?? ???:</span>
                 <span className="text-primary">{formatTime(shift.endTime)}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-secondary">مدت زمان:</span>
-                <span className="text-primary">{shift.duration} ساعت</span>
+                <span className="text-secondary">?? ??:</span>
+                <span className="text-primary">{shift.duration} ??</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-secondary">پرسنل:</span>
-                <span className="text-primary">{shift._count.securityPersonnel} نفر</span>
+                <span className="text-secondary">???:</span>
+                <span className="text-primary">{shift._count.securityPersonnel} ??</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-secondary">رکوردها:</span>
-                <span className="text-primary">{shift._count.attendanceRecords} رکورد</span>
+                <span className="text-secondary">??:</span>
+                <span className="text-primary">{shift._count.attendanceRecords} ???</span>
               </div>
             </div>
 
@@ -231,7 +231,7 @@ export default function ShiftsPage() {
                   className="flex-1 glass-liquid-btn flex items-center justify-center space-x-2 space-x-reverse"
                 >
                   <FaStop />
-                  <span>پایان شیفت</span>
+                  <span>??? ??</span>
                 </button>
               ) : (
                 <button
@@ -239,7 +239,7 @@ export default function ShiftsPage() {
                   className="flex-1 glass-liquid-btn-primary flex items-center justify-center space-x-2 space-x-reverse"
                 >
                   <FaPlay />
-                  <span>شروع شیفت</span>
+                  <span>?? ??</span>
                 </button>
               )}
               <button
@@ -255,16 +255,16 @@ export default function ShiftsPage() {
 
       {/* Personnel Assignment */}
       <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-bold text-primary mb-4">تخصیص پرسنل به شیفت‌ها</h2>
+        <h2 className="text-xl font-bold text-primary mb-4">??? ??? ? ??</h2>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-700">
-                <th className="text-right py-3 px-4 text-secondary">نام پرسنل</th>
-                <th className="text-right py-3 px-4 text-secondary">شیفت فعلی</th>
-                <th className="text-right py-3 px-4 text-secondary">وضعیت</th>
-                <th className="text-right py-3 px-4 text-secondary">تاریخ تخصیص</th>
-                <th className="text-right py-3 px-4 text-secondary">عملیات</th>
+                <th className="text-right py-3 px-4 text-secondary">?? ???</th>
+                <th className="text-right py-3 px-4 text-secondary">?? ??</th>
+                <th className="text-right py-3 px-4 text-secondary">???</th>
+                <th className="text-right py-3 px-4 text-secondary">??? ???</th>
+                <th className="text-right py-3 px-4 text-secondary">???</th>
               </tr>
             </thead>
             <tbody>
@@ -289,7 +289,7 @@ export default function ShiftsPage() {
                         ? 'bg-green-500/20 text-green-500' 
                         : 'bg-gray-500/20 text-gray-500'
                     }`}>
-                      {person.isActive ? 'فعال' : 'غیرفعال'}
+                      {person.isActive ? '??' : '??'}
                     </span>
                   </td>
                   <td className="py-3 px-4 text-secondary">
@@ -316,10 +316,10 @@ export default function ShiftsPage() {
       {showCreateForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="glass-liquid-card p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold text-primary mb-4">ایجاد شیفت جدید</h2>
+            <h2 className="text-xl font-bold text-primary mb-4">??? ?? ??</h2>
             <form onSubmit={handleCreateShift} className="space-y-4">
               <div>
-                <label className="block text-sm text-secondary mb-2">نام انگلیسی</label>
+                <label className="block text-sm text-secondary mb-2">?? ??</label>
                 <input
                   type="text"
                   value={formData.name}
@@ -329,7 +329,7 @@ export default function ShiftsPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm text-secondary mb-2">نام فارسی</label>
+                <label className="block text-sm text-secondary mb-2">?? ???</label>
                 <input
                   type="text"
                   value={formData.namePersian}
@@ -339,7 +339,7 @@ export default function ShiftsPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm text-secondary mb-2">ساعت شروع</label>
+                <label className="block text-sm text-secondary mb-2">?? ??</label>
                 <input
                   type="time"
                   value={formData.startTime}
@@ -349,7 +349,7 @@ export default function ShiftsPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm text-secondary mb-2">ساعت پایان</label>
+                <label className="block text-sm text-secondary mb-2">?? ???</label>
                 <input
                   type="time"
                   value={formData.endTime}
@@ -359,7 +359,7 @@ export default function ShiftsPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm text-secondary mb-2">مدت زمان (ساعت)</label>
+                <label className="block text-sm text-secondary mb-2">?? ?? (??)</label>
                 <input
                   type="number"
                   value={formData.duration}
@@ -375,14 +375,14 @@ export default function ShiftsPage() {
                   type="submit"
                   className="flex-1 glass-liquid-btn-primary px-4 py-2"
                 >
-                  ایجاد شیفت
+                  ??? ??
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowCreateForm(false)}
                   className="flex-1 glass-liquid-btn px-4 py-2"
                 >
-                  انصراف
+                  ???
                 </button>
               </div>
             </form>
@@ -392,3 +392,4 @@ export default function ShiftsPage() {
     </div>
   );
 }
+

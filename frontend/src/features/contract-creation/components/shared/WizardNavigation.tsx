@@ -1,4 +1,4 @@
-// Wizard Navigation Component
+﻿// Wizard Navigation Component
 // Previous/Next buttons and step counter
 
 import React from 'react';
@@ -71,10 +71,11 @@ export const WizardNavigation: React.FC<WizardNavigationProps> = ({
           ) : (
             <FaFileContract className="w-5 h-5" />
           )}
-          <span className="font-medium">ایجاد قرارداد</span>
+          <span className="font-medium">ثبت قرارداد</span>
         </button>
       )}
     </div>
   );
 };
+
 

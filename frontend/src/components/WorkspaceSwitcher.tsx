@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState } from 'react';
 import { 
@@ -47,7 +47,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
   const getCurrentWorkspaceInfo = () => {
     if (!currentWorkspace) {
       return {
-        name: 'داشبورد اصلی',
+        name: 'Main Dashboard',
         namePersian: 'داشبورد اصلی',
         icon: FaHome,
         color: 'gray'
@@ -200,7 +200,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
           {showLabel && (
             <div className="text-right">
               <p className="text-white font-medium">{currentInfo.namePersian}</p>
-              <p className="text-gray-400 text-sm">انتخاب فضای کاری</p>
+              <p className="text-gray-400 text-sm">فضای کاری فعال</p>
             </div>
           )}
         </div>
@@ -263,3 +263,4 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
     </div>
   );
 };
+

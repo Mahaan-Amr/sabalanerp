@@ -247,7 +247,9 @@ export const getContractPermissions = (user: User | null) => {
 export const getCrmPermissions = (user: User | null) => {
   return {
     canViewCustomers: hasFeatureAccess(user, 'crm_customers_view', 'view'),
-    canCreateCustomers: hasFeatureAccess(user, 'crm_customers_create', 'edit'),
+    canCreateCustomers:
+      hasFeatureAccess(user, 'crm_customers_create', 'edit') ||
+      hasFeatureAccess(user, 'sales_customers_create', 'edit'),
     canEditCustomers: hasFeatureAccess(user, 'crm_customers_edit', 'edit'),
     canDeleteCustomers: hasFeatureAccess(user, 'crm_customers_delete', 'edit'),
   };

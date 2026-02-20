@@ -3,6 +3,7 @@ import { body, query, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -10,7 +11,7 @@ const prisma = new PrismaClient();
 // @desc    Get all sub-services with filtering and search
 // @route   GET /api/sub-services
 // @access  Private/Inventory Workspace
-router.get('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), [
+router.get('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.INVENTORY_SUB_SERVICES_VIEW, FEATURE_PERMISSIONS.VIEW), [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 1000 }).withMessage('Limit must be between 1 and 1000'),
   query('search').optional().isString().withMessage('Search must be a string'),
@@ -86,7 +87,7 @@ router.get('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_
 // @desc    Get sub-service by ID
 // @route   GET /api/sub-services/:id
 // @access  Private/Inventory Workspace
-router.get('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), async (req: Request, res: Response) => {
+router.get('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.INVENTORY_SUB_SERVICES_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -117,7 +118,7 @@ router.get('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPA
 // @desc    Create new sub-service
 // @route   POST /api/sub-services
 // @access  Private/Inventory Workspace
-router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), [
+router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.INVENTORY_SUB_SERVICES_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('code').notEmpty().withMessage('Code is required'),
   body('namePersian').notEmpty().withMessage('Persian name is required'),
   body('name').optional().isString(),
@@ -178,7 +179,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
 // @desc    Update sub-service
 // @route   PUT /api/sub-services/:id
 // @access  Private/Inventory Workspace
-router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), [
+router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.INVENTORY_SUB_SERVICES_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('code').optional().isString(),
   body('name').optional().isString(),
   body('namePersian').optional().isString(),
@@ -253,7 +254,7 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPA
 // @desc    Delete sub-service
 // @route   DELETE /api/sub-services/:id
 // @access  Private/Inventory Workspace
-router.delete('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), async (req: Request, res: Response) => {
+router.delete('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.INVENTORY_SUB_SERVICES_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -289,7 +290,7 @@ router.delete('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORK
 // @desc    Toggle sub-service status
 // @route   PATCH /api/sub-services/:id/toggle
 // @access  Private/Inventory Workspace
-router.patch('/:id/toggle', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), async (req: Request, res: Response) => {
+router.patch('/:id/toggle', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.INVENTORY_SUB_SERVICES_TOGGLE, FEATURE_PERMISSIONS.EDIT), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 

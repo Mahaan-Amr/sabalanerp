@@ -1,4 +1,4 @@
-// Stair-specific utility functions
+﻿// Stair-specific utility functions
 // Helper functions for stair calculations and operations
 
 import type { StairStepperPart, StairPartDraftV2 } from '../types/contract.types';
@@ -9,7 +9,7 @@ import { toMeters, convertMetersToUnit, hasLengthMeasurement } from './dimension
  */
 export const getPartDisplayLabel = (part: StairStepperPart): string => {
   if (part === 'tread') return 'کف پله';
-  if (part === 'riser') return 'خیز پله';
+  if (part === 'riser') return 'پیشانی پله';
   return 'پاگرد';
 };
 
@@ -110,4 +110,5 @@ export { hasLengthMeasurement };
  * Convert meters to unit for display
  */
 export { convertMetersToUnit };
+
 

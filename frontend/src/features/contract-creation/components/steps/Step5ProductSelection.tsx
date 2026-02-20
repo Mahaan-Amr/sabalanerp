@@ -1,12 +1,16 @@
-// Step 5: Product Selection Component
+﻿// Step 5: Product Selection Component
 // Product search, selection, and configuration
 
 import React from 'react';
 import { FaSearch, FaPlus, FaCheck, FaEdit, FaTrash } from 'react-icons/fa';
 import { useRouter } from 'next/navigation';
-import { formatPrice, formatSquareMeters, formatQuantity } from '@/lib/numberFormat';
+import { formatPrice, formatSquareMeters, formatQuantity, formatDisplayNumber } from '@/lib/numberFormat';
 import { generateFullProductName } from '../../utils/productUtils';
-import type { ContractWizardData, Product, ContractProduct } from '../../types/contract.types';
+import {
+  isUsableRemainingStone,
+  normalizeRemainingStoneCollection
+} from '../../utils/remainingStoneGuards';
+import type { ContractWizardData, Product, ContractProduct, RemainingStone } from '../../types/contract.types';
 
 const PRODUCT_TYPES = [
   {
@@ -39,6 +43,8 @@ interface Step5ProductSelectionProps {
   setSelectedProductForConfiguration: (product: Product | null) => void;
   setSelectedProductIndexForEdit: (index: number | null) => void;
   handleRemoveProduct: (index: number) => void;
+  onEditProduct: (index: number) => void;
+  onUseRemainingStone?: (remainingStone: RemainingStone, sourceProduct: ContractProduct) => void;
   currentStep: number;
   productsSummary: {
     totalPrice: number;
@@ -60,6 +66,8 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   setSelectedProductForConfiguration,
   setSelectedProductIndexForEdit,
   handleRemoveProduct,
+  onEditProduct,
+  onUseRemainingStone,
   currentStep,
   productsSummary
 }) => {
@@ -113,7 +121,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
               }));
               router.push(`/dashboard/sales/products/create?returnTo=contract&step=${currentStep}`);
             }}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl"
           >
             <FaPlus className="h-4 w-4" />
             <span className="font-medium">ایجاد محصول جدید</span>
@@ -130,8 +138,8 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
             </p>
           </div>
         ) : (
-          <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl border border-white/20 dark:border-slate-700/50 overflow-hidden isolate" style={{ contain: 'layout style paint' }}>
-            <div className="overflow-x-auto overflow-y-auto max-h-[600px]">
+          <div className="relative z-10 bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl border border-white/20 dark:border-slate-700/50 isolate">
+            <div className="overflow-x-auto overflow-y-auto max-h-[600px] overscroll-contain">
               <table className="w-full border-collapse">
                 <thead className="bg-slate-50 dark:bg-slate-700/50">
                   <tr>
@@ -255,18 +263,57 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
               </div>
             </div>
             
-            {/* Selected Products List */}
-            <div className="space-y-3">
-              {wizardData.products.map((product, index) => (
+            {/* Selected Products List - with full product info and remaining stones */}
+            <div className="space-y-4">
+              {wizardData.products.map((product, index) => {
+                const catalogProduct = product.product;
+                const productTypeLabel = PRODUCT_TYPES.find(t => t.id === product.productType)?.name ?? product.productType;
+                const availableRemainingStones = normalizeRemainingStoneCollection(product.remainingStones || []).filter(isUsableRemainingStone);
+                const hasGeometryCutWithoutRate =
+                  product.productType === 'longitudinal' &&
+                  !!product.isCut &&
+                  (!product.cuttingCostPerMeter || product.cuttingCostPerMeter <= 0);
+                return (
                 <div
                   key={index}
-                  className="p-4 bg-white dark:bg-gray-900/30 rounded-lg border border-gray-200 dark:border-gray-700"
+                  className="p-4 bg-white dark:bg-gray-900/30 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4"
                 >
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <h5 className="font-medium text-gray-800 dark:text-white mb-2">
-                        {product.stoneName || `محصول ${index + 1}`}
-                      </h5>
+                  {/* Product info block */}
+                  <div className="flex justify-between items-start gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 mb-2">
+                        <h5 className="font-medium text-gray-800 dark:text-white">
+                          {product.stoneName || catalogProduct?.namePersian || `محصول ${index + 1}`}
+                        </h5>
+                        <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${
+                          product.productType === 'longitudinal' ? 'bg-teal-500/20 text-teal-700 dark:text-teal-300' :
+                          product.productType === 'slab' ? 'bg-indigo-500/20 text-indigo-700 dark:text-indigo-300' :
+                          'bg-purple-500/20 text-purple-700 dark:text-purple-300'
+                        }`}>
+                          {productTypeLabel}
+                        </span>
+                        {product.meta?.remainingSource && (
+                          <span className="px-2 py-0.5 text-xs rounded-full font-medium bg-orange-500/20 text-orange-700 dark:text-orange-300">
+                            از سنگ باقی‌مانده
+                          </span>
+                        )}
+                        {product.stoneCode && (
+                          <span className="text-xs text-gray-500 dark:text-gray-400">کد: {product.stoneCode}</span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                        {catalogProduct?.stoneTypeNamePersian && <span>{catalogProduct.stoneTypeNamePersian}</span>}
+                        {catalogProduct?.stoneTypeNamePersian && (product.diameterOrWidth != null || product.width != null) && ' ⬢ '}
+                        {(product.diameterOrWidth != null || product.width != null) && (
+                          <span>عرض {formatDisplayNumber(product.diameterOrWidth ?? product.width ?? 0)} × ضخامت {catalogProduct?.thicknessValue ?? ''} cm</span>
+                        )}
+                        {catalogProduct?.mineNamePersian && (
+                          <span className="mr-2"> • معدن: {catalogProduct.mineNamePersian}</span>
+                        )}
+                        {catalogProduct?.finishNamePersian && (
+                          <span> ⬢ پرداخت: {catalogProduct.finishNamePersian}</span>
+                        )}
+                      </p>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
                         <div>
                           <span className="text-gray-500 dark:text-gray-400">تعداد: </span>
@@ -281,7 +328,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                         <div>
                           <span className="text-gray-500 dark:text-gray-400">قیمت واحد: </span>
                           <span className="font-medium text-gray-700 dark:text-gray-300">
-                            {formatPrice(product.unitPrice || 0, 'تومان')}
+                            {formatPrice(product.unitPrice ?? product.pricePerSquareMeter ?? 0, 'تومان')}
                           </span>
                         </div>
                         <div>
@@ -292,13 +339,9 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                         </div>
                       </div>
                     </div>
-                    <div className="flex gap-2 ml-4">
+                    <div className="flex gap-2 flex-shrink-0">
                       <button
-                        onClick={() => {
-                          setSelectedProductIndexForEdit(index);
-                          setSelectedProductForConfiguration(product as any);
-                          setShowProductModal(true);
-                        }}
+                        onClick={() => onEditProduct(index)}
                         className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                         title="ویرایش"
                       >
@@ -313,8 +356,52 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                       </button>
                     </div>
                   </div>
+
+                  {/* Remaining stones section - for longitudinal products */}
+                  {product.productType === 'longitudinal' && (
+                    <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
+                      <h6 className="font-medium text-orange-800 dark:text-orange-200 mb-2 text-sm">
+                        سنگ‌های باقیمانده
+                      </h6>
+                      {availableRemainingStones.length === 0 ? (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          {hasGeometryCutWithoutRate
+                            ? 'برش هندسی انجام شده اما نرخ برش در دسترس نیست؛ هزینه برش صفر ثبت شده است.'
+                            : 'هیچ سنگ باقیمانده‌ای ندارد. پس از برش سنگ در ویرایش، سنگ‌های باقیمانده اینجا نمایش داده می‌شوند.'}
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {availableRemainingStones.map((rs) => (
+                            <div
+                              key={rs.id}
+                              className="flex flex-wrap items-center justify-between gap-2 py-2 px-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800"
+                            >
+                              <div className="text-sm text-gray-700 dark:text-gray-300">
+                                عرض: {formatDisplayNumber(rs.width)} cm × طول: {formatDisplayNumber(rs.length)} m
+                                {' ⬢ '}
+                                متر مربع: {formatSquareMeters(rs.squareMeters)}
+                                {rs.quantity != null && rs.quantity > 1 && (
+                                  <span className="mr-2"> ⬢ تعداد: {formatDisplayNumber(rs.quantity)} عدد</span>
+                                )}
+                              </div>
+                              {onUseRemainingStone && (
+                                <button
+                                  type="button"
+                                  onClick={() => onUseRemainingStone(rs, product)}
+                                  className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-medium whitespace-nowrap"
+                                >
+                                  استفاده از این سنگ
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ))}
+              );
+              })}
             </div>
           </div>
         )}
@@ -322,4 +409,3 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
     </div>
   );
 };
-

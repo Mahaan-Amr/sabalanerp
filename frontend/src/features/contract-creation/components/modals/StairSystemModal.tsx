@@ -1,4 +1,4 @@
-// Stair System Modal Component
+﻿// Stair System Modal Component
 // Stair system configuration
 
 import React from 'react';
@@ -45,7 +45,7 @@ export const StairSystemModal: React.FC<StairSystemModalProps> = ({
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-y-auto m-4">
         <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex justify-between items-center">
           <h2 className="text-xl font-semibold text-gray-800 dark:text-white">
-            پیکربندی سیستم پله
+            ?? ??? ??
           </h2>
           <button
             onClick={onClose}
@@ -57,7 +57,7 @@ export const StairSystemModal: React.FC<StairSystemModalProps> = ({
         
         <div className="p-6">
           <p className="text-gray-600 dark:text-gray-300 mb-4">
-            این یک نسخه ساده از مودال پیکربندی سیستم پله است. پیاده‌سازی کامل شامل تمام منطق محاسباتی پله خواهد بود.
+            ?? ? ?? ?? ? ??? ?? ??? ?? ??. ??? ?? ?? ?? ?? ?? ?? ??? ??.
           </p>
           
           {/* Placeholder for stair system configuration */}
@@ -71,7 +71,7 @@ export const StairSystemModal: React.FC<StairSystemModalProps> = ({
                     : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
                 }`}
               >
-                پاگرد
+                ???
               </button>
               <button
                 onClick={() => setStairActivePart?.('riser')}
@@ -81,7 +81,7 @@ export const StairSystemModal: React.FC<StairSystemModalProps> = ({
                     : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
                 }`}
               >
-                پله
+                ??
               </button>
               <button
                 onClick={() => setStairActivePart?.('landing')}
@@ -91,7 +91,7 @@ export const StairSystemModal: React.FC<StairSystemModalProps> = ({
                     : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
                 }`}
               >
-                فرود
+                ??
               </button>
             </div>
           </div>
@@ -102,17 +102,18 @@ export const StairSystemModal: React.FC<StairSystemModalProps> = ({
             onClick={onClose}
             className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
           >
-            انصراف
+            ???
           </button>
           <button
             onClick={onSave}
             className="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600"
           >
-            ذخیره
+            ???
           </button>
         </div>
       </div>
     </div>
   );
 };
+
 

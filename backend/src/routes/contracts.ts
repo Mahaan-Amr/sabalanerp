@@ -1,7 +1,8 @@
-import express, { Response } from 'express';
+﻿import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize } from '../middleware/auth';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
 import { renderContractHtml } from '../utils/printTemplate';
 
@@ -11,7 +12,7 @@ const prisma = new PrismaClient();
 // @desc    Get all contracts
 // @route   GET /api/contracts
 // @access  Private
-router.get('/', protect, async (req: any, res) => {
+router.get('/', protect, requireFeatureAccess(FEATURES.SALES_LEGACY_CONTRACTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
@@ -115,7 +116,7 @@ router.get('/', protect, async (req: any, res) => {
 // @desc    Get contract by ID
 // @route   GET /api/contracts/:id
 // @access  Private
-router.get('/:id', protect, async (req: any, res) => {
+router.get('/:id', protect, requireFeatureAccess(FEATURES.SALES_LEGACY_CONTRACTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res) => {
   try {
     const contract = await prisma.contract.findUnique({
       where: { id: req.params.id },
@@ -181,7 +182,7 @@ router.get('/:id', protect, async (req: any, res) => {
 // @desc    Create new contract
 // @route   POST /api/contracts
 // @access  Private
-router.post('/', protect, [
+router.post('/', protect, requireFeatureAccess(FEATURES.SALES_LEGACY_CONTRACTS_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('title').notEmpty().withMessage('Title is required'),
   body('titlePersian').notEmpty().withMessage('Persian title is required'),
   body('customerId').notEmpty().withMessage('Customer ID is required'),
@@ -234,7 +235,7 @@ router.post('/', protect, [
         templateId: templateId || null,
         createdBy: req.user.id,
         totalAmount: totalAmount ? parseFloat(totalAmount) : null,
-        currency: currency || 'ریال',
+        currency: currency || '??',
         notes: notes || null,
       },
       include: {
@@ -268,7 +269,7 @@ router.post('/', protect, [
 // @desc    Update contract
 // @route   PUT /api/contracts/:id
 // @access  Private
-router.put('/:id', protect, [
+router.put('/:id', protect, requireFeatureAccess(FEATURES.SALES_LEGACY_CONTRACTS_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('title').optional().notEmpty().withMessage('Title cannot be empty'),
   body('titlePersian').optional().notEmpty().withMessage('Persian title cannot be empty'),
   body('content').optional().notEmpty().withMessage('Content cannot be empty'),
@@ -348,7 +349,7 @@ router.put('/:id', protect, [
 // @desc    Approve contract
 // @route   PUT /api/contracts/:id/approve
 // @access  Private/Admin
-router.put('/:id/approve', protect, authorize('ADMIN'), async (req: any, res: Response) => {
+router.put('/:id/approve', protect, authorize('ADMIN'), requireFeatureAccess(FEATURES.SALES_LEGACY_CONTRACTS_APPROVE, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const contract = await prisma.contract.findUnique({
       where: { id: req.params.id }
@@ -424,7 +425,7 @@ router.put('/:id/approve', protect, authorize('ADMIN'), async (req: any, res: Re
 // @desc    Reject contract
 // @route   PUT /api/contracts/:id/reject
 // @access  Private/Admin
-router.put('/:id/reject', protect, authorize('ADMIN'), async (req: any, res: Response) => {
+router.put('/:id/reject', protect, authorize('ADMIN'), requireFeatureAccess(FEATURES.SALES_LEGACY_CONTRACTS_REJECT, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const contract = await prisma.contract.findUnique({
       where: { id: req.params.id }
@@ -498,7 +499,7 @@ router.put('/:id/reject', protect, authorize('ADMIN'), async (req: any, res: Res
 // @desc    Sign contract
 // @route   PUT /api/contracts/:id/sign
 // @access  Private
-router.put('/:id/sign', protect, async (req: any, res: Response) => {
+router.put('/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_LEGACY_CONTRACTS_SIGN, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const contract = await prisma.contract.findUnique({
       where: { id: req.params.id }
@@ -590,7 +591,7 @@ router.put('/:id/sign', protect, async (req: any, res: Response) => {
 // @desc    Mark contract as printed
 // @route   PUT /api/contracts/:id/print
 // @access  Private
-router.put('/:id/print', protect, async (req: any, res: Response) => {
+router.put('/:id/print', protect, requireFeatureAccess(FEATURES.SALES_LEGACY_CONTRACTS_PRINT, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const contract = await prisma.contract.findUnique({
       where: { id: req.params.id }
@@ -706,7 +707,7 @@ router.put('/:id/print', protect, async (req: any, res: Response) => {
 // @desc    Delete contract
 // @route   DELETE /api/contracts/:id
 // @access  Private/Admin
-router.delete('/:id', protect, authorize('ADMIN'), async (req: any, res: Response) => {
+router.delete('/:id', protect, authorize('ADMIN'), requireFeatureAccess(FEATURES.SALES_LEGACY_CONTRACTS_DELETE, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
   try {
     const contract = await prisma.contract.findUnique({
       where: { id: req.params.id }
@@ -745,3 +746,4 @@ router.delete('/:id', protect, authorize('ADMIN'), async (req: any, res: Respons
 });
 
 export default router;
+

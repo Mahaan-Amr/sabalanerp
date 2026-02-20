@@ -185,6 +185,21 @@ This will start:
 2. Set production environment variables
 3. Start the application: `npm run start`
 
+### Docker Production (VPS)
+
+Use the production stack in `docker-compose.prod.yml` with nginx reverse proxy and Let's Encrypt:
+
+1. Copy `deploy/.env.prod.template` to `deploy/.env.prod` and fill all values.
+2. Deploy:
+   ```bash
+   sh deploy/scripts/deploy.sh deploy/.env.prod
+   ```
+3. Issue TLS certificate:
+   ```bash
+   sh deploy/scripts/issue-cert.sh <domain> <email>
+   ```
+4. Full runbook: `deploy/README.md`
+
 ## Contributing
 
 1. Fork the repository

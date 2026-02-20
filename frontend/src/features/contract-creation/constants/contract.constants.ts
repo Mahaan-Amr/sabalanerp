@@ -1,4 +1,4 @@
-// Contract Creation Constants
+﻿// Contract Creation Constants
 // All constants used in contract creation feature
 
 import {
@@ -20,33 +20,33 @@ import {
 export const NOSING_TYPES = [
   {
     id: 'bullnose',
-    name: 'پیشانی گرد (Bullnose)',
+    name: 'لب گرد (Bullnose)',
     nameEn: 'Bullnose',
-    description: 'پیشانی گرد و نرم',
+    description: 'لب‌پرداخت گرد پله',
     cuttingCostPerMeter: 15000, // Mock price - will come from services
     available: true
   },
   {
     id: 'square',
-    name: 'مربعی (Square)',
+    name: 'لب صاف (Square)',
     nameEn: 'Square',
-    description: 'پیشانی مربعی و تیز',
+    description: 'لب‌پرداخت صاف پله',
     cuttingCostPerMeter: 12000, // Mock price
     available: true
   },
   {
     id: 'rounded',
-    name: 'گرد (Rounded)',
+    name: 'نیم‌گرد (Rounded)',
     nameEn: 'Rounded',
-    description: 'پیشانی گرد با شعاع کوچک',
+    description: 'لب‌پرداخت نیم‌گرد پله',
     cuttingCostPerMeter: 14000, // Mock price
     available: true
   },
   {
     id: 'none',
-    name: 'بدون پیشانی',
+    name: 'بدون لب‌پرداخت',
     nameEn: 'No Nosing',
-    description: 'بدون پیشانی',
+    description: 'بدون لب‌پرداخت',
     cuttingCostPerMeter: 0,
     available: true
   }
@@ -59,7 +59,7 @@ export const PRODUCT_TYPES = [
     name: 'سنگ طولی',
     nameEn: 'Longitudinal Stone',
     icon: FaRuler,
-    description: 'سنگ‌های طولی با برش طولی',
+    description: 'سنگ طولی با برش مستقیم',
     available: true
   },
   {
@@ -67,7 +67,7 @@ export const PRODUCT_TYPES = [
     name: 'سنگ پله',
     nameEn: 'Stair Stone',
     icon: FaSquare,
-    description: 'سنگ‌های مخصوص پله',
+    description: 'سنگ مخصوص پله',
     available: true
   },
   {
@@ -75,7 +75,7 @@ export const PRODUCT_TYPES = [
     name: 'سنگ اسلب',
     nameEn: 'Slab Stone',
     icon: FaThLarge,
-    description: 'سنگ‌های اسلب با برش دو بعدی (طول و عرض)',
+    description: 'سنگ اسلب با برش دو بعدی (طول و عرض)',
     available: true
   },
   {
@@ -83,7 +83,7 @@ export const PRODUCT_TYPES = [
     name: 'سنگ حجمی',
     nameEn: 'Volumetric Stone',
     icon: FaCubes,
-    description: 'به‌زودی: مدیریت سفارش سنگ‌های حجمی',
+    description: 'به‌زودی: در نسخه‌های بعدی',
     available: false
   }
 ] as const;
@@ -103,56 +103,57 @@ export const WIZARD_STEPS = [
     title: 'تاریخ قرارداد',
     titleEn: 'Contract Date',
     icon: FaCalendarAlt,
-    description: 'انتخاب تاریخ قرارداد'
+    description: 'تاریخ قرارداد را تعیین کنید'
   },
   {
     id: 2,
     title: 'انتخاب مشتری',
     titleEn: 'Customer Selection',
     icon: FaUser,
-    description: 'انتخاب مشتری از سیستم CRM'
+    description: 'مشتری را از CRM انتخاب کنید'
   },
   {
     id: 3,
     title: 'مدیریت پروژه',
     titleEn: 'Project Management',
     icon: FaBuilding,
-    description: 'انتخاب یا ایجاد پروژه'
+    description: 'پروژه را انتخاب یا ایجاد کنید'
   },
   {
     id: 4,
     title: 'انتخاب نوع محصول',
     titleEn: 'Product Type Selection',
     icon: FaLayerGroup,
-    description: 'نوع محصول را انتخاب کنید'
+    description: 'نوع محصول را مشخص کنید'
   },
   {
     id: 5,
     title: 'انتخاب محصولات',
     titleEn: 'Product Selection',
     icon: FaWarehouse,
-    description: 'انتخاب محصولات از کاتالوگ'
+    description: 'محصولات را به قرارداد اضافه کنید'
   },
   {
     id: 6,
     title: 'برنامه تحویل',
     titleEn: 'Delivery Schedule',
     icon: FaTruck,
-    description: 'تعیین تاریخ و آدرس تحویل'
+    description: 'زمان‌بندی تحویل را ثبت کنید'
   },
   {
     id: 7,
     title: 'روش پرداخت',
     titleEn: 'Payment Method',
     icon: FaCreditCard,
-    description: 'انتخاب روش پرداخت'
+    description: 'اقلام پرداخت را تعریف کنید'
   },
   {
     id: 8,
-    title: 'امضای دیجیتال',
-    titleEn: 'Digital Signature',
+    title: 'تایید دیجیتال',
+    titleEn: 'Digital Confirmation',
     icon: FaSignature,
     description: 'تایید نهایی قرارداد'
   }
 ];
+
 

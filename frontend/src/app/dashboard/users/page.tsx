@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -15,9 +15,10 @@ import {
   FaDownload,
   FaUserCheck,
   FaUserTimes,
-  FaCog
+  FaCog,
+  FaTimes
 } from 'react-icons/fa';
-import { usersAPI, workspacePermissionsAPI, departmentsAPI } from '@/lib/api';
+import { usersAPI, workspacePermissionsAPI, departmentsAPI, authAPI } from '@/lib/api';
 
 interface User {
   id: string;
@@ -78,6 +79,7 @@ export default function UsersManagementPage() {
   const [permissions, setPermissions] = useState<WorkspacePermission[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [selectedRole, setSelectedRole] = useState('');
@@ -90,6 +92,21 @@ export default function UsersManagementPage() {
   useEffect(() => {
     fetchData();
   }, [currentPage, searchTerm, selectedDepartment, selectedRole, selectedStatus]);
+
+  useEffect(() => {
+    fetchCurrentUser();
+  }, []);
+
+  const fetchCurrentUser = async () => {
+    try {
+      const response = await authAPI.getMe();
+      if (response.data.success) {
+        setCurrentUserRole(response.data.data.role);
+      }
+    } catch (error) {
+      console.error('Error fetching current user:', error);
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -152,6 +169,8 @@ export default function UsersManagementPage() {
       case 'ADMIN': return 'مدیر';
       case 'USER': return 'کاربر';
       case 'MODERATOR': return 'ناظر';
+      case 'SALES': return 'فروش';
+      case 'MANAGER': return 'مدیر فروش';
       default: return role;
     }
   };
@@ -161,6 +180,8 @@ export default function UsersManagementPage() {
       case 'ADMIN': return 'text-red-500 bg-red-500/20';
       case 'USER': return 'text-blue-500 bg-blue-500/20';
       case 'MODERATOR': return 'text-yellow-500 bg-yellow-500/20';
+      case 'SALES': return 'text-green-500 bg-green-500/20';
+      case 'MANAGER': return 'text-purple-500 bg-purple-500/20';
       default: return 'text-gray-500 bg-gray-500/20';
     }
   };
@@ -325,6 +346,8 @@ export default function UsersManagementPage() {
           <div>
             <label className="block text-sm text-secondary mb-2">بخش</label>
             <select
+              title="فیلتر بر اساس بخش"
+              aria-label="فیلتر بر اساس بخش"
               value={selectedDepartment}
               onChange={(e) => setSelectedDepartment(e.target.value)}
               className="glass-liquid-input w-full"
@@ -341,12 +364,16 @@ export default function UsersManagementPage() {
           <div>
             <label className="block text-sm text-secondary mb-2">نقش</label>
             <select
+              title="فیلتر بر اساس نقش"
+              aria-label="فیلتر بر اساس نقش"
               value={selectedRole}
               onChange={(e) => setSelectedRole(e.target.value)}
               className="glass-liquid-input w-full"
             >
               <option value="">همه نقش‌ها</option>
               <option value="ADMIN">مدیر</option>
+              <option value="MANAGER">مدیر فروش</option>
+              <option value="SALES">فروش</option>
               <option value="USER">کاربر</option>
               <option value="MODERATOR">ناظر</option>
             </select>
@@ -355,6 +382,8 @@ export default function UsersManagementPage() {
           <div>
             <label className="block text-sm text-secondary mb-2">وضعیت</label>
             <select
+              title="فیلتر بر اساس وضعیت"
+              aria-label="فیلتر بر اساس وضعیت"
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
               className="glass-liquid-input w-full"
@@ -409,6 +438,9 @@ export default function UsersManagementPage() {
             <tbody>
               {filteredUsers.map((user) => {
                 const userPermissions = getUserWorkspacePermissions(user.id);
+                const isManager = currentUserRole === 'MANAGER';
+                const isAdminTarget = user.role === 'ADMIN';
+                const disableAdminActions = isManager && isAdminTarget;
                 return (
                   <tr key={user.id} className="border-b border-gray-800 hover:bg-white/5">
                     <td className="py-3 px-4">
@@ -469,27 +501,53 @@ export default function UsersManagementPage() {
                         >
                           <FaEye />
                         </Link>
-                        <Link
-                          href={`/dashboard/users/${user.id}/edit`}
-                          className="glass-liquid-btn p-2"
-                          title="ویرایش"
-                        >
-                          <FaEdit />
-                        </Link>
-                        <Link
-                          href={`/dashboard/users/${user.id}/permissions`}
-                          className="glass-liquid-btn p-2"
-                          title="مدیریت دسترسی‌ها"
-                        >
-                          <FaCog />
-                        </Link>
-                        <button
-                          onClick={() => handleDeleteUser(user)}
-                          className="glass-liquid-btn p-2 text-red-400"
-                          title="حذف"
-                        >
-                          <FaTrash />
-                        </button>
+                        {disableAdminActions ? (
+                          <>
+                            <span
+                              className="glass-liquid-btn p-2 opacity-50 cursor-not-allowed"
+                              title="دسترسی برای مدیر فروش محدود است"
+                            >
+                              <FaEdit />
+                            </span>
+                            <span
+                              className="glass-liquid-btn p-2 opacity-50 cursor-not-allowed"
+                              title="دسترسی برای مدیر فروش محدود است"
+                            >
+                              <FaCog />
+                            </span>
+                            <button
+                              disabled
+                              className="glass-liquid-btn p-2 text-red-400 opacity-50 cursor-not-allowed"
+                              title="دسترسی برای مدیر فروش محدود است"
+                            >
+                              <FaTrash />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <Link
+                              href={`/dashboard/users/${user.id}/edit`}
+                              className="glass-liquid-btn p-2"
+                              title="ویرایش"
+                            >
+                              <FaEdit />
+                            </Link>
+                            <Link
+                              href={`/dashboard/users/${user.id}/permissions`}
+                              className="glass-liquid-btn p-2"
+                              title="مدیریت دسترسی‌ها"
+                            >
+                              <FaCog />
+                            </Link>
+                            <button
+                              onClick={() => handleDeleteUser(user)}
+                              className="glass-liquid-btn p-2 text-red-400"
+                              title="حذف"
+                            >
+                              <FaTrash />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -538,6 +596,8 @@ export default function UsersManagementPage() {
               <button
                 onClick={() => setShowDeleteModal(false)}
                 className="glass-liquid-btn p-2"
+                title="بستن پنجره حذف"
+                aria-label="بستن پنجره حذف"
               >
                 <FaTimes />
               </button>

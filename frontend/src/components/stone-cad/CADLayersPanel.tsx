@@ -1,4 +1,4 @@
-/**
+﻿/**
  * CAD Layers Panel Component
  * Manages layers in the CAD design
  */
@@ -33,16 +33,16 @@ export function CADLayersPanel({
     <div className="cad-layers-panel bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-          لایه‌ها ({layers.length})
+          ?? ({layers.length})
         </h3>
         <button
           type="button"
           onClick={onLayerAdd}
           className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors flex items-center gap-1"
-          title="افزودن لایه جدید"
+          title="??? ?? ??"
         >
           <FaPlus className="w-3 h-3" />
-          افزودن
+          ???
         </button>
       </div>
       
@@ -61,7 +61,7 @@ export function CADLayersPanel({
               type="button"
               onClick={() => onLayerUpdate(layer.id, { visible: !layer.visible })}
               className="p-1 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
-              title={layer.visible ? 'مخفی کردن' : 'نمایش'}
+              title={layer.visible ? '?? ??' : '???'}
             >
               {layer.visible ? (
                 <FaEye className="w-4 h-4" />
@@ -79,7 +79,7 @@ export function CADLayersPanel({
                   ? 'text-yellow-600 dark:text-yellow-400'
                   : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
               }`}
-              title={layer.locked ? 'قفل شده' : 'قفل کردن'}
+              title={layer.locked ? '?? ??' : '?? ??'}
             >
               {layer.locked ? (
                 <FaLock className="w-4 h-4" />
@@ -99,7 +99,7 @@ export function CADLayersPanel({
                   ? 'border-gray-300 dark:border-gray-600 opacity-50 cursor-not-allowed'
                   : 'border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-indigo-500 focus:border-transparent'
               }`}
-              placeholder="نام لایه"
+              placeholder="?? ??"
             />
             
             {/* Activate Button */}
@@ -111,9 +111,9 @@ export function CADLayersPanel({
                   ? 'bg-indigo-600 text-white'
                   : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
               }`}
-              title="فعال کردن"
+              title="?? ??"
             >
-              فعال
+              ??
             </button>
             
             {/* Delete Button */}
@@ -125,7 +125,7 @@ export function CADLayersPanel({
                 className={`p-1 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors ${
                   layer.locked ? 'opacity-50 cursor-not-allowed' : ''
                 }`}
-                title="حذف لایه"
+                title="?? ??"
               >
                 <FaTrash className="w-4 h-4" />
               </button>
@@ -136,11 +136,12 @@ export function CADLayersPanel({
       
       {layers.length === 0 && (
         <div className="text-center py-4 text-sm text-gray-500 dark:text-gray-400">
-          هیچ لایه‌ای وجود ندارد
+          ?? ?? ?? ???
         </div>
       )}
     </div>
   );
 }
+
 
 

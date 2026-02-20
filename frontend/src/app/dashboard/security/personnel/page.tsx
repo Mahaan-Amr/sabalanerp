@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import { 
@@ -96,7 +96,7 @@ export default function PersonnelPage() {
       }
     } catch (error: any) {
       console.error('Error fetching personnel data:', error);
-      setError(error.response?.data?.error || 'خطا در ارتباط با سرور');
+      setError(error.response?.data?.error || '?? ? ??? ? ??');
     } finally {
       setLoading(false);
     }
@@ -110,11 +110,11 @@ export default function PersonnelPage() {
         setShowAssignForm(false);
         setAssignFormData({ userId: '', shiftId: '' });
         fetchPersonnelData();
-        alert('پرسنل با موفقیت تخصیص یافت');
+        alert('??? ? ??? ??? ??');
       }
     } catch (error: any) {
       console.error('Error assigning personnel:', error);
-      alert(error.response?.data?.error || 'خطا در تخصیص پرسنل');
+      alert(error.response?.data?.error || '?? ? ??? ???');
     }
   };
 
@@ -122,10 +122,10 @@ export default function PersonnelPage() {
     try {
       // This would need a new API endpoint
       // const response = await securityAPI.togglePersonnelStatus(personnelId, !isActive);
-      alert('این قابلیت در حال توسعه است');
+      alert('?? ??? ? ?? ??? ??');
     } catch (error: any) {
       console.error('Error toggling personnel status:', error);
-      alert(error.response?.data?.error || 'خطا در تغییر وضعیت پرسنل');
+      alert(error.response?.data?.error || '?? ? ??? ??? ???');
     }
   };
 
@@ -148,13 +148,13 @@ export default function PersonnelPage() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
         <div className="glass-liquid-card p-8 text-center">
-          <h2 className="text-xl font-bold text-primary mb-2">خطا در بارگذاری</h2>
+          <h2 className="text-xl font-bold text-primary mb-2">?? ? ??</h2>
           <p className="text-secondary mb-4">{error}</p>
           <button 
             onClick={fetchPersonnelData}
             className="glass-liquid-btn-primary px-6 py-2"
           >
-            تلاش مجدد
+            ?? ??
           </button>
         </div>
       </div>
@@ -169,8 +169,8 @@ export default function PersonnelPage() {
           <div className="flex items-center space-x-4 space-x-reverse">
             <FaShieldAlt className="h-8 w-8 text-teal-500" />
             <div>
-              <h1 className="text-2xl font-bold text-primary">پرسنل امنیت</h1>
-              <p className="text-secondary">مدیریت پرسنل امنیت و تخصیص شیفت‌ها</p>
+              <h1 className="text-2xl font-bold text-primary">??? ???</h1>
+              <p className="text-secondary">??? ??? ??? ? ??? ??</p>
             </div>
           </div>
           <button
@@ -178,7 +178,7 @@ export default function PersonnelPage() {
             className="glass-liquid-btn-primary px-4 py-2 flex items-center space-x-2 space-x-reverse"
           >
             <FaPlus />
-            <span>تخصیص پرسنل</span>
+            <span>??? ???</span>
           </button>
         </div>
       </div>
@@ -188,7 +188,7 @@ export default function PersonnelPage() {
         <div className="glass-liquid-card p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-secondary">کل پرسنل</p>
+              <p className="text-sm text-secondary">? ???</p>
               <p className="text-xl font-bold text-primary">{personnel.length}</p>
             </div>
             <FaUser className="h-6 w-6 text-blue-500" />
@@ -197,7 +197,7 @@ export default function PersonnelPage() {
         <div className="glass-liquid-card p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-secondary">فعال</p>
+              <p className="text-sm text-secondary">??</p>
               <p className="text-xl font-bold text-green-500">
                 {personnel.filter(p => p.isActive).length}
               </p>
@@ -208,7 +208,7 @@ export default function PersonnelPage() {
         <div className="glass-liquid-card p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-secondary">غیرفعال</p>
+              <p className="text-sm text-secondary">??</p>
               <p className="text-xl font-bold text-red-500">
                 {personnel.filter(p => !p.isActive).length}
               </p>
@@ -219,7 +219,7 @@ export default function PersonnelPage() {
         <div className="glass-liquid-card p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-secondary">شیفت‌های فعال</p>
+              <p className="text-sm text-secondary">?? ??</p>
               <p className="text-xl font-bold text-teal-500">
                 {shifts.filter(s => s.isActive).length}
               </p>
@@ -231,18 +231,18 @@ export default function PersonnelPage() {
 
       {/* Personnel Table */}
       <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-bold text-primary mb-4">لیست پرسنل امنیت</h2>
+        <h2 className="text-xl font-bold text-primary mb-4">?? ??? ???</h2>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-700">
-                <th className="text-right py-3 px-4 text-secondary">نام پرسنل</th>
-                <th className="text-right py-3 px-4 text-secondary">بخش</th>
-                <th className="text-right py-3 px-4 text-secondary">شیفت</th>
-                <th className="text-right py-3 px-4 text-secondary">ساعات کاری</th>
-                <th className="text-right py-3 px-4 text-secondary">وضعیت</th>
-                <th className="text-right py-3 px-4 text-secondary">تاریخ تخصیص</th>
-                <th className="text-right py-3 px-4 text-secondary">عملیات</th>
+                <th className="text-right py-3 px-4 text-secondary">?? ???</th>
+                <th className="text-right py-3 px-4 text-secondary">??</th>
+                <th className="text-right py-3 px-4 text-secondary">??</th>
+                <th className="text-right py-3 px-4 text-secondary">??? ??</th>
+                <th className="text-right py-3 px-4 text-secondary">???</th>
+                <th className="text-right py-3 px-4 text-secondary">??? ???</th>
+                <th className="text-right py-3 px-4 text-secondary">???</th>
               </tr>
             </thead>
             <tbody>
@@ -288,7 +288,7 @@ export default function PersonnelPage() {
                           : 'bg-gray-500/20 text-gray-500 hover:bg-gray-500/30'
                       }`}
                     >
-                      {person.isActive ? 'فعال' : 'غیرفعال'}
+                      {person.isActive ? '??' : '??'}
                     </button>
                   </td>
                   <td className="py-3 px-4 text-secondary">
@@ -312,7 +312,7 @@ export default function PersonnelPage() {
         
         {personnel.length === 0 && (
           <div className="text-center py-8">
-            <p className="text-secondary">هیچ پرسنل امنیتی تخصیص نیافته است</p>
+            <p className="text-secondary">?? ??? ??? ??? ??? ??</p>
           </div>
         )}
       </div>
@@ -321,31 +321,31 @@ export default function PersonnelPage() {
       {showAssignForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="glass-liquid-card p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold text-primary mb-4">تخصیص پرسنل به شیفت</h2>
+            <h2 className="text-xl font-bold text-primary mb-4">??? ??? ? ??</h2>
             <form onSubmit={handleAssignPersonnel} className="space-y-4">
               <div>
-                <label className="block text-sm text-secondary mb-2">انتخاب کاربر</label>
+                <label className="block text-sm text-secondary mb-2">??? ???</label>
                 <select
                   value={assignFormData.userId}
                   onChange={(e) => setAssignFormData({ ...assignFormData, userId: e.target.value })}
                   className="glass-liquid-input w-full"
                   required
                 >
-                  <option value="">کاربر را انتخاب کنید</option>
+                  <option value="">??? ? ??? ??</option>
                   {/* This would need to fetch available users */}
-                  <option value="user1">کاربر نمونه ۱</option>
-                  <option value="user2">کاربر نمونه ۲</option>
+                  <option value="user1">??? ??? ?</option>
+                  <option value="user2">??? ??? ?</option>
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-secondary mb-2">انتخاب شیفت</label>
+                <label className="block text-sm text-secondary mb-2">??? ??</label>
                 <select
                   value={assignFormData.shiftId}
                   onChange={(e) => setAssignFormData({ ...assignFormData, shiftId: e.target.value })}
                   className="glass-liquid-input w-full"
                   required
                 >
-                  <option value="">شیفت را انتخاب کنید</option>
+                  <option value="">?? ? ??? ??</option>
                   {shifts.map((shift) => (
                     <option key={shift.id} value={shift.id}>
                       {shift.namePersian} ({formatTime(shift.startTime)} - {formatTime(shift.endTime)})
@@ -358,14 +358,14 @@ export default function PersonnelPage() {
                   type="submit"
                   className="flex-1 glass-liquid-btn-primary px-4 py-2"
                 >
-                  تخصیص پرسنل
+                  ??? ???
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowAssignForm(false)}
                   className="flex-1 glass-liquid-btn px-4 py-2"
                 >
-                  انصراف
+                  ???
                 </button>
               </div>
             </form>
@@ -375,3 +375,4 @@ export default function PersonnelPage() {
     </div>
   );
 }
+

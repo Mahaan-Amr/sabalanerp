@@ -1,4 +1,4 @@
-// useStairSystemV2 Hook
+﻿// useStairSystemV2 Hook
 // Manages all stair system v2 state and logic
 
 import { useState, useCallback, useEffect, useRef } from 'react';
@@ -14,7 +14,7 @@ import { validateDraftNumericFields, validateDraftRequiredFields, clearDraftFiel
 import { generateFullProductName } from '../utils/productUtils';
 import { computeLayerSqmV2, getTotalLayerLengthPerStairM } from '../services/stairCalculationService';
 import { getActualLengthMeters, convertMetersToUnit } from '../utils/stairUtils';
-import { servicesAPI } from '@/lib/api';
+import { servicesAPI, dashboardAPI } from '@/lib/api';
 
 interface UseStairSystemV2Options {
   onError?: (error: string) => void;
@@ -143,7 +143,7 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
   // Helper: Get part display label
   const getPartDisplayLabel = useCallback((part: StairStepperPart): string => {
     if (part === 'tread') return 'کف پله';
-    if (part === 'riser') return 'خیز پله';
+    if (part === 'riser') return 'پیشانی';
     return 'پاگرد';
   }, []);
 
@@ -234,6 +234,22 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
       setIsLoadingLayerTypes(true);
       setLayerTypesError(null);
       try {
+        const profileResponse = await dashboardAPI.getProfile();
+        const features: string[] = (profileResponse?.data?.data?.permissions?.features || []).map(
+          (item: any) => item.feature
+        );
+        const canLoadLayerTypes = [
+          'inventory_layer_types_view',
+          'inventory_layer_types_edit',
+          'inventory_layer_types_create'
+        ].some((feature) => features.includes(feature));
+
+        if (!canLoadLayerTypes) {
+          setLayerTypes([]);
+          setLayerTypesError(null);
+          return;
+        }
+
         const response = await servicesAPI.getLayerTypes({ isActive: true });
         if (response?.data?.success) {
           const options: LayerTypeOption[] = (response.data.data || [])
@@ -248,11 +264,17 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
           setLayerTypes(options);
           setLayerTypesError(null);
         }
-      } catch (error) {
+      } catch (error: any) {
+        if (error?.response?.status === 403) {
+          // Missing permission: keep layer types empty and avoid noisy global errors.
+          setLayerTypes([]);
+          setLayerTypesError(null);
+          return;
+        }
         console.error('Error loading layer types:', error);
-        setLayerTypesError('خطا در بارگذاری نوع لایه');
+        setLayerTypesError('Error loading layer types');
         if (onErrorRef.current) {
-          onErrorRef.current('خطا در بارگذاری نوع لایه');
+          onErrorRef.current('Error loading layer types');
         }
       } finally {
         setIsLoadingLayerTypes(false);
@@ -487,4 +509,5 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
     reset
   };
 };
+
 

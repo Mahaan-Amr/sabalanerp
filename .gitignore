@@ -16,6 +16,8 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
+backend/.env
+deploy/.env.prod
 
 # IDE
 .vscode/
@@ -91,6 +93,15 @@ prisma/migrations/
 
 # Uploads
 uploads/
+backend/uploads/
+!backend/uploads/
+backend/storage/contracts/*.pdf
+backend/storage/contracts/**/*.pdf
+backend/storage/contracts/*
+!backend/storage/contracts/.gitkeep
+!backend/uploads/.gitkeep
 
 # Docker
-.dockerignore
+!.dockerignore
+!backend/.dockerignore
+!frontend/.dockerignore

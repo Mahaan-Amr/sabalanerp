@@ -1,19 +1,60 @@
-import express, { Response } from 'express';
+﻿import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
-import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
+import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
+const DEBUG_LOGS = process.env.NODE_ENV !== 'production';
+
+const isOwnerScopedUser = (req: any) => req?.user?.role && req.user.role !== 'ADMIN';
+
+const buildCustomerScope = (req: any) => {
+  if (isOwnerScopedUser(req)) {
+    return { ownerUserId: req.user.id };
+  }
+  return {};
+};
+
+const ensureOwnershipOrDeny = (
+  req: any,
+  res: Response,
+  customer: { id: string; ownerUserId: string | null } | null,
+  context: string
+) => {
+  if (!customer) {
+    res.status(404).json({
+      success: false,
+      error: 'Customer not found'
+    });
+    return false;
+  }
+
+  if (isOwnerScopedUser(req) && customer.ownerUserId !== req.user.id) {
+    console.warn('[crm-customer-owner-deny]', {
+      userId: req.user?.id,
+      role: req.user?.role,
+      customerId: customer.id,
+      context
+    });
+    res.status(403).json({
+      success: false,
+      error: 'Access denied: customer does not belong to current sales user'
+    });
+    return false;
+  }
+
+  return true;
+};
 
 // ==================== CRM CUSTOMERS ====================
 
 // @desc    Get all CRM customers
 // @route   GET /api/crm/customers
-// @access  Private/CRM Feature Access
-router.get('/customers', protect, requireFeatureAccess(FEATURES.CRM_CUSTOMERS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
+// @access  Private/CRM or Sales Customer View Access
+router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
@@ -23,7 +64,7 @@ router.get('/customers', protect, requireFeatureAccess(FEATURES.CRM_CUSTOMERS_VI
     const customerType = req.query.customerType as string;
 
     // Build where clause
-    let whereClause: any = {};
+    let whereClause: any = buildCustomerScope(req);
     
     if (search) {
       whereClause.OR = [
@@ -127,8 +168,8 @@ router.get('/customers', protect, requireFeatureAccess(FEATURES.CRM_CUSTOMERS_VI
 
 // @desc    Get CRM customer by ID
 // @route   GET /api/crm/customers/:id
-// @access  Private/CRM Workspace
-router.get('/customers/:id', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {
+// @access  Private/CRM or Sales Customer View Access
+router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {
   try {
     const customer = await prisma.crmCustomer.findUnique({
       where: { id: req.params.id },
@@ -169,14 +210,7 @@ router.get('/customers/:id', protect, requireWorkspaceAccess(WORKSPACES.CRM, WOR
         }
       }
     });
-
-    if (!customer) {
-      res.status(404).json({
-        success: false,
-        error: 'Customer not found'
-      });
-      return;
-    }
+    if (!ensureOwnershipOrDeny(req, res, customer, 'get_customer')) return;
 
     res.json({
       success: true,
@@ -194,7 +228,7 @@ router.get('/customers/:id', protect, requireWorkspaceAccess(WORKSPACES.CRM, WOR
 // @desc    Create new CRM customer
 // @route   POST /api/crm/customers
 // @access  Private/CRM Workspace
-router.post('/customers', protect, requireFeatureAccess(FEATURES.CRM_CUSTOMERS_CREATE, FEATURE_PERMISSIONS.EDIT), [
+router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_CREATE, FEATURES.SALES_CUSTOMERS_CREATE], FEATURE_PERMISSIONS.EDIT), [
   body('firstName').notEmpty().withMessage('First name is required'),
   body('lastName').notEmpty().withMessage('Last name is required'),
   body('customerType').notEmpty().withMessage('Customer type is required'),
@@ -206,11 +240,15 @@ router.post('/customers', protect, requireFeatureAccess(FEATURES.CRM_CUSTOMERS_C
   }),
 ], async (req: any, res: Response): Promise<void> => {
   try {
-    console.log('Received customer data:', JSON.stringify(req.body, null, 2));
+    if (DEBUG_LOGS) {
+      console.log('Received customer data:', JSON.stringify(req.body, null, 2));
+    }
     
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      console.log('Validation errors:', errors.array());
+      if (DEBUG_LOGS) {
+        console.log('Validation errors:', errors.array());
+      }
       res.status(400).json({
         success: false,
         error: 'Validation failed',
@@ -261,27 +299,29 @@ router.post('/customers', protect, requireFeatureAccess(FEATURES.CRM_CUSTOMERS_C
     } = req.body;
 
     // Create customer with all related data
-    console.log('Creating customer with data:', {
-      firstName,
-      lastName,
-      companyName,
-      customerType,
-      industry,
-      status,
-      nationalCode,
-      homeAddress,
-      homeNumber,
-      workAddress,
-      workNumber,
-      projectManagerName,
-      projectManagerNumber,
-      brandName,
-      brandNameDescription,
-      isBlacklisted,
-      isLocked,
-      projectAddresses: projectAddresses?.length || 0,
-      phoneNumbers: phoneNumbers?.length || 0
-    });
+    if (DEBUG_LOGS) {
+      console.log('Creating customer with data:', {
+        firstName,
+        lastName,
+        companyName,
+        customerType,
+        industry,
+        status,
+        nationalCode,
+        homeAddress,
+        homeNumber,
+        workAddress,
+        workNumber,
+        projectManagerName,
+        projectManagerNumber,
+        brandName,
+        brandNameDescription,
+        isBlacklisted,
+        isLocked,
+        projectAddresses: projectAddresses?.length || 0,
+        phoneNumbers: phoneNumbers?.length || 0
+      });
+    }
     
     let customer;
     try {
@@ -313,11 +353,14 @@ router.post('/customers', protect, requireFeatureAccess(FEATURES.CRM_CUSTOMERS_C
         // Security & Access Control
         isBlacklisted: isBlacklisted || false,
         isLocked: isLocked || false,
+        ownerUserId: req.user.id,
+        createdBy: req.user.id,
+        updatedBy: req.user.id,
         
         // Legacy Fields (for backward compatibility)
         address: address || null,
         city: city || null,
-        country: country || 'ایران',
+        country: country || '???',
         communicationPreferences: communicationPreferences || null,
         customFields: customFields || null,
         
@@ -404,7 +447,7 @@ router.post('/customers', protect, requireFeatureAccess(FEATURES.CRM_CUSTOMERS_C
 // @desc    Update CRM customer
 // @route   PUT /api/crm/customers/:id
 // @access  Private/CRM Workspace
-router.put('/customers/:id', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), [
+router.put('/customers/:id', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_CUSTOMERS_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('companyName').optional().notEmpty().withMessage('Company name cannot be empty'),
   body('customerType').optional().notEmpty().withMessage('Customer type cannot be empty'),
 ], async (req: any, res: Response): Promise<void> => {
@@ -420,20 +463,19 @@ router.put('/customers/:id', protect, requireWorkspaceAccess(WORKSPACES.CRM, WOR
     }
 
     const customer = await prisma.crmCustomer.findUnique({
-      where: { id: req.params.id }
+      where: { id: req.params.id },
+      select: { id: true, ownerUserId: true }
     });
+    if (!ensureOwnershipOrDeny(req, res, customer, 'update_customer')) return;
 
-    if (!customer) {
-      res.status(404).json({
-        success: false,
-        error: 'Customer not found'
-      });
-      return;
-    }
+    const { ownerUserId, createdBy, updatedBy, ...safeBody } = req.body || {};
 
     const updatedCustomer = await prisma.crmCustomer.update({
       where: { id: req.params.id },
-      data: req.body,
+      data: {
+        ...safeBody,
+        updatedBy: req.user.id
+      },
       include: {
         primaryContact: true,
         contacts: true
@@ -458,7 +500,7 @@ router.put('/customers/:id', protect, requireWorkspaceAccess(WORKSPACES.CRM, WOR
 // @desc    Add project address to customer
 // @route   POST /api/crm/customers/:customerId/project-addresses
 // @access  Private/CRM Workspace
-router.post('/customers/:customerId/project-addresses', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), [
+router.post('/customers/:customerId/project-addresses', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_PROJECT_ADDRESSES_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('address').notEmpty().withMessage('Address is required'),
   body('city').notEmpty().withMessage('City is required'),
 ], async (req: any, res: Response): Promise<void> => {
@@ -478,16 +520,10 @@ router.post('/customers/:customerId/project-addresses', protect, requireWorkspac
 
     // Check if customer exists
     const customer = await prisma.crmCustomer.findUnique({
-      where: { id: customerId }
+      where: { id: customerId },
+      select: { id: true, ownerUserId: true }
     });
-
-    if (!customer) {
-      res.status(404).json({
-        success: false,
-        error: 'Customer not found'
-      });
-      return;
-    }
+    if (!ensureOwnershipOrDeny(req, res, customer, 'create_project_address')) return;
 
     const projectAddress = await prisma.projectAddress.create({
       data: {
@@ -519,7 +555,7 @@ router.post('/customers/:customerId/project-addresses', protect, requireWorkspac
 // @desc    Update project address
 // @route   PUT /api/crm/customers/:customerId/project-addresses/:projectId
 // @access  Private/CRM Workspace
-router.put('/customers/:customerId/project-addresses/:projectId', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), [
+router.put('/customers/:customerId/project-addresses/:projectId', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_PROJECT_ADDRESSES_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('address').notEmpty().withMessage('Address is required'),
   body('city').notEmpty().withMessage('City is required'),
 ], async (req: any, res: Response): Promise<void> => {
@@ -539,16 +575,10 @@ router.put('/customers/:customerId/project-addresses/:projectId', protect, requi
 
     // Check if customer exists
     const customer = await prisma.crmCustomer.findUnique({
-      where: { id: customerId }
+      where: { id: customerId },
+      select: { id: true, ownerUserId: true }
     });
-
-    if (!customer) {
-      res.status(404).json({
-        success: false,
-        error: 'Customer not found'
-      });
-      return;
-    }
+    if (!ensureOwnershipOrDeny(req, res, customer, 'update_project_address')) return;
 
     // Check if project exists
     const existingProject = await prisma.projectAddress.findUnique({
@@ -594,7 +624,7 @@ router.put('/customers/:customerId/project-addresses/:projectId', protect, requi
 // @desc    Add phone number to customer
 // @route   POST /api/crm/customers/:customerId/phone-numbers
 // @access  Private/CRM Workspace
-router.post('/customers/:customerId/phone-numbers', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), [
+router.post('/customers/:customerId/phone-numbers', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_PHONE_NUMBERS_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('number').notEmpty().withMessage('Phone number is required'),
   body('type').notEmpty().withMessage('Phone type is required'),
 ], async (req: any, res: Response): Promise<void> => {
@@ -614,16 +644,10 @@ router.post('/customers/:customerId/phone-numbers', protect, requireWorkspaceAcc
 
     // Check if customer exists
     const customer = await prisma.crmCustomer.findUnique({
-      where: { id: customerId }
+      where: { id: customerId },
+      select: { id: true, ownerUserId: true }
     });
-
-    if (!customer) {
-      res.status(404).json({
-        success: false,
-        error: 'Customer not found'
-      });
-      return;
-    }
+    if (!ensureOwnershipOrDeny(req, res, customer, 'create_phone_number')) return;
 
     // If setting as primary, unset other primary numbers
     if (isPrimary) {
@@ -661,24 +685,18 @@ router.post('/customers/:customerId/phone-numbers', protect, requireWorkspaceAcc
 // @desc    Toggle customer blacklist status
 // @route   PUT /api/crm/customers/:id/blacklist
 // @access  Private/CRM Workspace (Manager/Admin only)
-router.put('/customers/:id/blacklist', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.ADMIN), async (req: any, res: Response): Promise<void> => {
+router.put('/customers/:id/blacklist', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.CRM_CUSTOMERS_BLACKLIST, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response): Promise<void> => {
   try {
     const customer = await prisma.crmCustomer.findUnique({
-      where: { id: req.params.id }
+      where: { id: req.params.id },
+      select: { id: true, ownerUserId: true, isBlacklisted: true }
     });
-
-    if (!customer) {
-      res.status(404).json({
-        success: false,
-        error: 'Customer not found'
-      });
-      return;
-    }
+    if (!ensureOwnershipOrDeny(req, res, customer, 'toggle_blacklist')) return;
 
     const updatedCustomer = await prisma.crmCustomer.update({
       where: { id: req.params.id },
       data: {
-        isBlacklisted: !customer.isBlacklisted
+        isBlacklisted: !customer!.isBlacklisted
       },
       include: {
         primaryContact: true,
@@ -705,24 +723,18 @@ router.put('/customers/:id/blacklist', protect, requireWorkspaceAccess(WORKSPACE
 // @desc    Toggle customer lock status
 // @route   PUT /api/crm/customers/:id/lock
 // @access  Private/CRM Workspace (Manager/Admin only)
-router.put('/customers/:id/lock', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.ADMIN), async (req: any, res: Response): Promise<void> => {
+router.put('/customers/:id/lock', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.CRM_CUSTOMERS_LOCK, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response): Promise<void> => {
   try {
     const customer = await prisma.crmCustomer.findUnique({
-      where: { id: req.params.id }
+      where: { id: req.params.id },
+      select: { id: true, ownerUserId: true, isLocked: true }
     });
-
-    if (!customer) {
-      res.status(404).json({
-        success: false,
-        error: 'Customer not found'
-      });
-      return;
-    }
+    if (!ensureOwnershipOrDeny(req, res, customer, 'toggle_lock')) return;
 
     const updatedCustomer = await prisma.crmCustomer.update({
       where: { id: req.params.id },
       data: {
-        isLocked: !customer.isLocked
+        isLocked: !customer!.isLocked
       },
       include: {
         primaryContact: true,
@@ -751,7 +763,7 @@ router.put('/customers/:id/lock', protect, requireWorkspaceAccess(WORKSPACES.CRM
 // @desc    Add contact to customer
 // @route   POST /api/crm/customers/:customerId/contacts
 // @access  Private/CRM Workspace
-router.post('/customers/:customerId/contacts', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), [
+router.post('/customers/:customerId/contacts', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_CONTACTS_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('firstName').notEmpty().withMessage('First name is required'),
   body('lastName').notEmpty().withMessage('Last name is required'),
 ], async (req: any, res: Response): Promise<void> => {
@@ -771,16 +783,10 @@ router.post('/customers/:customerId/contacts', protect, requireWorkspaceAccess(W
 
     // Check if customer exists
     const customer = await prisma.crmCustomer.findUnique({
-      where: { id: customerId }
+      where: { id: customerId },
+      select: { id: true, ownerUserId: true }
     });
-
-    if (!customer) {
-      res.status(404).json({
-        success: false,
-        error: 'Customer not found'
-      });
-      return;
-    }
+    if (!ensureOwnershipOrDeny(req, res, customer, 'create_contact')) return;
 
     const contact = await prisma.crmContact.create({
       data: {
@@ -821,7 +827,7 @@ router.post('/customers/:customerId/contacts', protect, requireWorkspaceAccess(W
 // @desc    Get all CRM leads
 // @route   GET /api/crm/leads
 // @access  Private/CRM Workspace
-router.get('/leads', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
+router.get('/leads', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.CRM_LEADS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
@@ -877,7 +883,7 @@ router.get('/leads', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_P
 // @desc    Create new CRM lead
 // @route   POST /api/crm/leads
 // @access  Private/CRM Workspace
-router.post('/leads', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), [
+router.post('/leads', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_LEADS_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('companyName').notEmpty().withMessage('Company name is required'),
   body('contactName').notEmpty().withMessage('Contact name is required'),
   body('source').notEmpty().withMessage('Source is required'),
@@ -952,7 +958,7 @@ router.post('/leads', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_
 // @desc    Get CRM dashboard statistics
 // @route   GET /api/crm/dashboard
 // @access  Private/CRM Workspace
-router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
+router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.CRM_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
     const [
       totalCustomers,
@@ -1005,3 +1011,4 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
 });
 
 export default router;
+

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useRef } from 'react';
 import { FaUpload, FaFileExcel, FaTimes, FaCheck } from 'react-icons/fa';
@@ -30,13 +30,13 @@ const ExcelFileUpload: React.FC<ExcelFileUploadProps> = ({
     // Check file type
     const allowedTypes = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'];
     if (!allowedTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls)$/i)) {
-      setError('فقط فایل‌های Excel (.xlsx, .xls) مجاز هستند');
+      setError('?? ?? Excel (.xlsx, .xls) ?? ???');
       return false;
     }
 
     // Check file size
     if (file.size > maxSize * 1024 * 1024) {
-      setError(`حجم فایل نباید بیشتر از ${maxSize} مگابایت باشد`);
+      setError(`?? ?? ??? ??? ? ${maxSize} ?? ??`);
       return false;
     }
 
@@ -126,10 +126,10 @@ const ExcelFileUpload: React.FC<ExcelFileUploadProps> = ({
             
             <div>
               <p className="text-lg font-medium text-slate-700 dark:text-slate-300">
-                فایل Excel را اینجا بکشید یا کلیک کنید
+                ?? Excel ? ??? ??? ? ?? ??
               </p>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                فرمت‌های مجاز: .xlsx, .xls (حداکثر {maxSize} مگابایت)
+                ?? ??: .xlsx, .xls (??? {maxSize} ??)
               </p>
             </div>
             
@@ -139,7 +139,7 @@ const ExcelFileUpload: React.FC<ExcelFileUploadProps> = ({
               disabled={loading}
             >
               <FaUpload className="w-4 h-4 ml-2" />
-              انتخاب فایل
+              ??? ??
             </button>
           </div>
         </div>
@@ -182,3 +182,4 @@ const ExcelFileUpload: React.FC<ExcelFileUploadProps> = ({
 };
 
 export default ExcelFileUpload;
+

@@ -1,4 +1,4 @@
-// Validation service
+﻿// Validation service
 // Handles validation for products, deliveries, payments, and wizard steps
 
 import type { ContractProduct, DeliverySchedule, PaymentMethod, ContractWizardData } from '../types/contract.types';
@@ -10,23 +10,23 @@ export const validateProduct = (product: Partial<ContractProduct>): { isValid: b
   const errors: string[] = [];
   
   if (!product.productId) {
-    errors.push('محصول باید انتخاب شود');
+    errors.push('??? ?? ??? ??');
   }
   
   if (!product.quantity || product.quantity <= 0) {
-    errors.push('تعداد باید بزرگتر از صفر باشد');
+    errors.push('??? ?? ??? ? ?? ??');
   }
   
   if (!product.pricePerSquareMeter || product.pricePerSquareMeter <= 0) {
-    errors.push('قیمت هر متر مربع باید وارد شود');
+    errors.push('?? ? ?? ?? ?? ?? ??');
   }
   
   if (product.productType === 'longitudinal' || product.productType === 'slab') {
     if (!product.length || product.length <= 0) {
-      errors.push('طول باید وارد شود');
+      errors.push('?? ?? ?? ??');
     }
     if (!product.width || product.width <= 0) {
-      errors.push('عرض باید وارد شود');
+      errors.push('?? ?? ?? ??');
     }
   }
   
@@ -46,15 +46,15 @@ export const validateDelivery = (
   const errors: string[] = [];
   
   if (!delivery.deliveryDate) {
-    errors.push('تاریخ تحویل باید انتخاب شود');
+    errors.push('??? ??? ?? ??? ??');
   }
   
   if (!delivery.receiverName || delivery.receiverName.trim() === '') {
-    errors.push('نام تحویل‌گیرنده باید وارد شود');
+    errors.push('?? ?? ?? ?? ??');
   }
   
   if (!delivery.products || delivery.products.length === 0) {
-    errors.push('حداقل یک محصول باید برای تحویل انتخاب شود');
+    errors.push('??? ? ??? ?? ?? ??? ??? ??');
   }
   
   // Validate product quantities don't exceed available quantities
@@ -67,7 +67,7 @@ export const validateDelivery = (
           .reduce((sum, p) => sum + p.quantity, 0);
         
         if (totalDelivered > product.quantity) {
-          errors.push(`تعداد تحویل برای محصول ${product.stoneName} بیش از تعداد موجود است`);
+          errors.push(`??? ??? ?? ??? ${product.stoneName} ?? ? ??? ??? ??`);
         }
       }
     }
@@ -89,32 +89,43 @@ export const validatePayment = (
   const errors: string[] = [];
   
   if (!payment.payments || payment.payments.length === 0) {
-    errors.push('حداقل یک روش پرداخت باید تعریف شود');
+    errors.push('??? ? ?? ??? ?? ??? ??');
   }
   
   if (payment.payments && payment.payments.length > 0) {
     const totalPaymentAmount = payment.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
     
     if (Math.abs(totalPaymentAmount - totalContractAmount) > 0.01) {
-      errors.push(`مجموع مبالغ پرداخت (${totalPaymentAmount}) باید برابر با مبلغ کل قرارداد (${totalContractAmount}) باشد`);
+      errors.push(`??? ??? ??? (${totalPaymentAmount}) ?? ??? ? ?? ? ?? (${totalContractAmount}) ??`);
     }
     
-    // Validate individual payment entries
+    // Validate individual payment entries (CASH_CARD | CASH_SHIBA | CHECK)
     for (const paymentEntry of payment.payments) {
+      const method = (paymentEntry as { method?: string }).method;
       if (!paymentEntry.amount || paymentEntry.amount <= 0) {
-        errors.push('مبلغ پرداخت باید بزرگتر از صفر باشد');
+        errors.push('?? ??? ?? ??? ? ?? ??');
       }
-      
-      if (!paymentEntry.paymentDate) {
-        errors.push('تاریخ پرداخت باید انتخاب شود');
+      if (method === 'CASH_CARD' || method === 'CASH_SHIBA') {
+        if (!paymentEntry.paymentDate || !String(paymentEntry.paymentDate).trim()) {
+          errors.push('??? ??? ?? ?? ??? ??');
+        }
       }
-      
-      if (paymentEntry.method === 'CHECK' && !paymentEntry.checkNumber) {
-        errors.push('شماره چک برای پرداخت چکی الزامی است');
+      if (method === 'CHECK') {
+        if (!paymentEntry.checkNumber || !String(paymentEntry.checkNumber).trim()) {
+          errors.push('??? ? ?? ??? ?? ??? ??');
+        }
+        if (!paymentEntry.checkOwnerName || !String(paymentEntry.checkOwnerName).trim()) {
+          errors.push('?? ?? ? ??? ??');
+        }
+        if (!paymentEntry.handoverDate || !String(paymentEntry.handoverDate).trim()) {
+          errors.push('??? ??? ? ??? ??');
+        }
+        if (!paymentEntry.paymentDate || !String(paymentEntry.paymentDate).trim()) {
+          errors.push('??? ??? ? ??? ??');
+        }
       }
-      
-      if (paymentEntry.method === 'CASH' && !paymentEntry.cashType) {
-        errors.push('نوع پرداخت نقدی باید انتخاب شود');
+      if (method === 'CASH' && !(paymentEntry as { cashType?: string }).cashType) {
+        errors.push('?? ??? ?? ?? ??? ??');
       }
     }
   }
@@ -137,22 +148,22 @@ export const validateWizardStep = (
   switch (step) {
     case 1: // Contract Date
       if (!wizardData.contractDate) {
-        errors.contractDate = 'تاریخ قرارداد باید انتخاب شود';
+        errors.contractDate = '??? ?? ?? ??? ??';
       }
       if (!wizardData.contractNumber) {
-        errors.contractNumber = 'شماره قرارداد باید تولید شود';
+        errors.contractNumber = '??? ?? ?? ??? ??';
       }
       break;
       
     case 2: // Customer Selection
       if (!wizardData.customerId || !wizardData.customer) {
-        errors.customer = 'مشتری باید انتخاب شود';
+        errors.customer = '??? ?? ??? ??';
       }
       break;
       
     case 3: // Project Management
       if (!wizardData.projectId || !wizardData.project) {
-        errors.project = 'پروژه باید انتخاب یا ایجاد شود';
+        errors.project = '??? ?? ??? ? ??? ??';
       }
       break;
       
@@ -162,7 +173,7 @@ export const validateWizardStep = (
       
     case 5: // Product Selection
       if (!wizardData.products || wizardData.products.length === 0) {
-        errors.products = 'حداقل یک محصول باید به قرارداد اضافه شود';
+        errors.products = '??? ? ??? ?? ? ?? ??? ??';
       } else {
         // Validate each product
         wizardData.products.forEach((product, index) => {
@@ -176,7 +187,7 @@ export const validateWizardStep = (
       
     case 6: // Delivery Schedule
       if (!wizardData.deliveries || wizardData.deliveries.length === 0) {
-        errors.deliveries = 'حداقل یک برنامه تحویل باید تعریف شود';
+        errors.deliveries = '??? ? ??? ??? ?? ??? ??';
       } else {
         // Validate all products are distributed
         const totalProductQuantities = wizardData.products.reduce((acc, p) => {
@@ -198,7 +209,7 @@ export const validateWizardStep = (
         for (const [productId, totalQuantity] of Object.entries(totalProductQuantities)) {
           const delivered = deliveredQuantities[productId] || 0;
           if (delivered < totalQuantity) {
-            errors.deliveries = `همه محصولات باید به طور کامل در برنامه تحویل توزیع شوند`;
+            errors.deliveries = `?? ?? ?? ? ?? ?? ? ??? ??? ??? ??`;
             break;
           }
         }
@@ -223,10 +234,10 @@ export const validateWizardStep = (
       
     case 8: // Digital Signature
       if (!wizardData.signature?.phoneNumber) {
-        errors.signature = 'شماره تلفن برای امضای دیجیتال باید وارد شود';
+        errors.signature = 'شماره تماس مشتری موجود نیست';
       }
-      if (!wizardData.signature?.codeVerified) {
-        errors.signature = 'کد تایید باید تایید شود';
+      if (wizardData.signature?.confirmationStatus !== 'VERIFIED') {
+        errors.signature = 'قرارداد هنوز توسط مشتری تایید نشده است';
       }
       break;
   }
@@ -236,4 +247,5 @@ export const validateWizardStep = (
     errors
   };
 };
+
 

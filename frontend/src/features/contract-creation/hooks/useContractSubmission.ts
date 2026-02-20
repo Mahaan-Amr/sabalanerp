@@ -1,4 +1,4 @@
-// useContractSubmission Hook
+﻿// useContractSubmission Hook
 // Manages contract creation and submission
 
 import { useState, useCallback } from 'react';
@@ -46,8 +46,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       
       // Create contract
       const contractData = {
-        title: 'قرارداد فروش سبلان استون',
-        titlePersian: 'قرارداد فروش سبلان استون',
+        title: 'قرارداد فروش سنگ',
+        titlePersian: 'قرارداد فروش سنگ',
         customerId: wizardData.customerId,
         departmentId: userDepartment || departments?.[0]?.id || 'default-department-id',
         content: generateContractHTML({
@@ -82,14 +82,29 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         // Store contract ID in signature state for Step 8
         updateWizardData({
           signature: {
-            ...wizardData.signature || {
+            ...(wizardData.signature || {
               phoneNumber: null,
-              verificationCode: '',
-              codeSent: false,
-              codeVerified: false,
-              contractId: null
-            },
-            contractId: contractId
+              contractId: null,
+              contractStatus: null,
+              confirmationSent: false,
+              confirmationStatus: null,
+              linkExpiresAt: null,
+              otpExpiresAt: null,
+              attemptsUsed: 0,
+              maxAttempts: 5,
+              resendCount: 0,
+              lastSentAt: null,
+              lastOpenedAt: null
+            }),
+            contractId: contractId,
+            contractStatus: response.data.data.status || null,
+            phoneNumber:
+              wizardData.customer?.homeNumber ||
+              wizardData.customer?.workNumber ||
+              wizardData.customer?.projectManagerNumber ||
+              wizardData.customer?.phoneNumbers?.find((p) => p.isPrimary)?.number ||
+              wizardData.customer?.phoneNumbers?.[0]?.number ||
+              null
           }
         });
         
@@ -132,7 +147,11 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         
         // Create payments (compound payments - one per entry)
         for (const paymentEntry of wizardData.payment.payments) {
-          // Convert Persian date to JavaScript Date
+          const method = paymentEntry.method as string;
+          // Map frontend method to API: CASH_CARD/CASH_SHIBA -> CASH + cashType; CHECK -> CHECK
+          const paymentMethod = method === 'CHECK' ? 'CHECK' : 'CASH';
+          const cashType = method === 'CASH_SHIBA' ? 'SHIBA' : method === 'CASH_CARD' ? 'CARD' : undefined;
+
           let paymentDate: Date | undefined;
           if (paymentEntry.paymentDate) {
             try {
@@ -141,18 +160,27 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
               console.error('Error converting Persian date:', error);
             }
           }
+          let handoverDate: Date | undefined;
+          if (paymentEntry.handoverDate) {
+            try {
+              handoverDate = PersianCalendar.toGregorian(paymentEntry.handoverDate, 'jYYYY/jMM/jDD');
+            } catch (error) {
+              console.error('Error converting handover date:', error);
+            }
+          }
 
-          // Map status: PAID -> COMPLETED, WILL_BE_PAID -> PENDING
           const paymentStatus = paymentEntry.status === 'PAID' ? 'COMPLETED' : 'PENDING';
 
           await salesAPI.createPayment(contractId, {
-            paymentMethod: paymentEntry.method,
+            paymentMethod,
             totalAmount: paymentEntry.amount,
             currency: wizardData.payment.currency,
             status: paymentStatus,
             paymentDate: paymentDate?.toISOString(),
             checkNumber: paymentEntry.checkNumber,
-            cashType: paymentEntry.cashType,
+            checkOwnerName: paymentEntry.checkOwnerName,
+            handoverDate: handoverDate?.toISOString(),
+            cashType: cashType ?? paymentEntry.cashType,
             nationalCode: paymentEntry.nationalCode,
             notes: paymentEntry.description
           });
@@ -161,7 +189,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         // Move to Step 8 (Digital Signature) instead of redirecting
         setCurrentStep(8);
       } else {
-        setErrors({ general: response.data.error || 'خطا در ایجاد قرارداد' });
+        setErrors({ general: response.data.error || 'خطا در ثبت قرارداد' });
       }
     } catch (error: any) {
       console.error('Error creating contract:', error);
@@ -172,7 +200,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         const validationErrors = error.response.data.details.map((err: any) => err.msg).join(', ');
         setErrors({ general: `خطاهای اعتبارسنجی: ${validationErrors}` });
       } else {
-        setErrors({ general: error.response?.data?.error || 'خطا در ارتباط با سرور' });
+        setErrors({ general: error.response?.data?.error || 'خطا در ایجاد قرارداد' });
       }
     } finally {
       setIsSubmitting(false);
@@ -195,4 +223,5 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     isSubmitting
   };
 };
+
 

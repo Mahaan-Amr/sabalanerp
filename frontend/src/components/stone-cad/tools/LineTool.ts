@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Line Drawing Tool
  * Allows users to draw straight lines on the canvas
  */
@@ -12,7 +12,7 @@ import { CADShape } from '../types/CADTypes';
 export class LineTool extends BaseTool {
   name = 'line';
   icon = 'FaMinus';
-  displayName = 'خط';
+  displayName = '?';
   
   private isDrawing = false;
   private startPoint: { x: number; y: number } | null = null;
@@ -134,4 +134,5 @@ export class LineTool extends BaseTool {
     return 'crosshair';
   }
 }
+
 

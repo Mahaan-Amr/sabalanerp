@@ -16,6 +16,7 @@ sh deploy/scripts/deploy.sh deploy/.env.prod
 ```
 
 This script:
+- Fetches latest code from `origin/main` and fast-forwards the working tree
 - Builds images
 - Starts Postgres
 - Runs `prisma migrate deploy`

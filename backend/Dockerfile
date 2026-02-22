@@ -3,6 +3,7 @@ FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 
 COPY package*.json ./
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 RUN npm ci
 
 COPY prisma ./prisma

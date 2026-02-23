@@ -7,6 +7,7 @@ import { requireFeatureAccess, FEATURES, FEATURE_PERMISSIONS } from '../middlewa
 import multer from 'multer';
 import XLSX from 'xlsx';
 import path from 'path';
+import fs from 'fs';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -51,6 +52,36 @@ const upload = multer({
     fileSize: 10 * 1024 * 1024 // 10MB limit
   }
 });
+
+const MAX_IMPORT_ROWS = 5000;
+const XLSX_ZIP_MAGIC = '504b0304';
+const XLS_OLE_MAGIC = 'd0cf11e0a1b11ae1';
+
+const hasValidExcelMagicBytes = (filePath: string): boolean => {
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    const buffer = Buffer.alloc(8);
+    fs.readSync(fd, buffer, 0, 8, 0);
+    fs.closeSync(fd);
+    const headerHex = buffer.toString('hex').toLowerCase();
+    return headerHex.startsWith(XLSX_ZIP_MAGIC) || headerHex.startsWith(XLS_OLE_MAGIC);
+  } catch {
+    return false;
+  }
+};
+
+const quarantineUpload = (filePath: string): void => {
+  try {
+    const quarantineDir = path.join('uploads', 'quarantine');
+    if (!fs.existsSync(quarantineDir)) {
+      fs.mkdirSync(quarantineDir, { recursive: true });
+    }
+    const destination = path.join(quarantineDir, `${Date.now()}-${path.basename(filePath)}`);
+    fs.renameSync(filePath, destination);
+  } catch (error) {
+    console.error('Failed to quarantine upload:', error);
+  }
+};
 
 // ==================== PRODUCT CATALOG ====================
 
@@ -248,28 +279,28 @@ router.get('/template', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSP
 
     // Create main data sheet
     const headers = [
-      'کد Ù…Ø­ØµÙˆل',
-      'نام Ù…Ø­ØµÙˆل (انگلیسی)',
-      'نام Ù…Ø­ØµÙˆل (فارسی)',
-      'کد Ù†Ùˆع برش',
-      'نام Ù†Ùˆع برش',
-      'نام Ù†Ùˆع برش (فارسی)',
+      'کد محصول',
+      'نام محصول (انگلیسی)',
+      'نام محصول (فارسی)',
+      'کد نوع برش',
+      'نام نوع برش',
+      'نام نوع برش (فارسی)',
       'کد جنس سنگ',
       'نام جنس سنگ',
       'نام جنس سنگ (فارسی)',
       'کد عرض',
       'مقدار عرض',
       'نام عرض',
-      'کد ضخا�&ت',
+      'کد ضخامت',
       'مقدار ضخامت',
       'نام ضخامت',
       'کد معدن',
       'نام معدن',
       'نام معدن (فارسی)',
-      'کد Ù†Ùˆع پرداخت',
-      'نام Ù†Ùˆع پرداخت',
-      'نام Ù†Ùˆع پرداخت (فارسی)',
-      'کد ر� گ',
+      'کد نوع پرداخت',
+      'نام نوع پرداخت',
+      'نام نوع پرداخت (فارسی)',
+      'کد رنگ',
       'نام رنگ',
       'نام رنگ (فارسی)',
       'کد کیفیت',
@@ -277,10 +308,10 @@ router.get('/template', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSP
       'نام کیفیت (فارسی)',
       'قیمت پایه',
       'ارز',
-      'Ù…ÙˆØ¬Ùˆد',
-      'زمان ØªØ­Ùˆیل',
-      'ØªÙˆضیحات',
-      'فعا�'
+      'موجود',
+      'زمان تحویل',
+      'توضیحات',
+      'فعال'
     ];
 
     // Add sample data
@@ -288,7 +319,7 @@ router.get('/template', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSP
       [
         'CT001-SM001-CW001-TH001-MN001-FT001-CL001',
         'Travertine 10cm x 2cm - Abbas Abad - Polished',
-        'ØªØ±Ø§Ùˆرتن 10 سانتی‌متر × 2 سانتی‌متر - عباس آباد - صیقلی',
+        'تراورتن 10 سانتی‌متر × 2 سانتی‌متر - عباس آباد - صیقلی',
         cutTypes[0]?.code || 'CT001',
         cutTypes[0]?.name || 'Longitudinal',
         cutTypes[0]?.namePersian || 'طولی',
@@ -312,12 +343,12 @@ router.get('/template', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSP
         colors[0]?.namePersian || 'سفید',
         'QUALITY-001',
         'Standard',
-        'استا� دارد',
+        'استاندارد',
         500000,
         'ریال',
         true,
         7,
-        'Ù…Ø­ØµÙˆل Ù†Ù…Ùˆنه',
+        'محصول نمونه',
         true
       ]
     ];
@@ -327,28 +358,28 @@ router.get('/template', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSP
 
     // Set column widths
     const colWidths = [
-      { wch: 25 }, // کد Ù…Ø­ØµÙˆل
-      { wch: 40 }, // نام Ù…Ø­ØµÙˆل (انگلیسی)
-      { wch: 40 }, // نام Ù…Ø­ØµÙˆل (فارسی)
-      { wch: 15 }, // کد Ù†Ùˆع برش
-      { wch: 20 }, // نام Ù†Ùˆع برش
-      { wch: 20 }, // نام Ù†Ùˆع برش (فارسی)
+      { wch: 25 }, // کد محصول
+      { wch: 40 }, // نام محصول (انگلیسی)
+      { wch: 40 }, // نام محصول (فارسی)
+      { wch: 15 }, // کد نوع برش
+      { wch: 20 }, // نام نوع برش
+      { wch: 20 }, // نام نوع برش (فارسی)
       { wch: 15 }, // کد جنس سنگ
       { wch: 20 }, // نام جنس سنگ
       { wch: 20 }, // نام جنس سنگ (فارسی)
       { wch: 15 }, // کد عرض
       { wch: 12 }, // مقدار عرض
       { wch: 15 }, // نام عرض
-      { wch: 15 }, // کد ضخا�&ت
+      { wch: 15 }, // کد ضخامت
       { wch: 12 }, // مقدار ضخامت
       { wch: 15 }, // نام ضخامت
       { wch: 15 }, // کد معدن
       { wch: 20 }, // نام معدن
       { wch: 20 }, // نام معدن (فارسی)
-      { wch: 15 }, // کد Ù†Ùˆع پرداخت
-      { wch: 20 }, // نام Ù†Ùˆع پرداخت
-      { wch: 20 }, // نام Ù†Ùˆع پرداخت (فارسی)
-      { wch: 15 }, // کد ر� گ
+      { wch: 15 }, // کد نوع پرداخت
+      { wch: 20 }, // نام نوع پرداخت
+      { wch: 20 }, // نام نوع پرداخت (فارسی)
+      { wch: 15 }, // کد رنگ
       { wch: 15 }, // نام رنگ
       { wch: 15 }, // نام رنگ (فارسی)
       { wch: 15 }, // کد کیفیت
@@ -356,35 +387,35 @@ router.get('/template', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSP
       { wch: 15 }, // نام کیفیت (فارسی)
       { wch: 15 }, // قیمت پایه
       { wch: 10 }, // ارز
-      { wch: 10 }, // Ù…ÙˆØ¬Ùˆد
-      { wch: 12 }, // زمان ØªØ­Ùˆیل
-      { wch: 30 }, // ØªÙˆضیحات
-      { wch: 10 }  // فعا�
+      { wch: 10 }, // موجود
+      { wch: 12 }, // زمان تحویل
+      { wch: 30 }, // توضیحات
+      { wch: 10 }  // فعال
     ];
 
     worksheet['!cols'] = colWidths;
 
     // Add worksheet to workbook
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Ù…Ø­ØµÙˆلات');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'محصولات');
 
     // Create master data reference sheet
     const masterDataSheet = XLSX.utils.aoa_to_sheet([
-      ['Ù†Ùˆع برش', 'کد', 'نام فارسی', 'نام انگلیسی'],
+      ['نوع برش', 'کد', 'نام فارسی', 'نام انگلیسی'],
       ...cutTypes.map(item => [item.namePersian, item.code, item.namePersian, item.name || '']),
       ['', '', '', ''],
       ['جنس سنگ', 'کد', 'نام فارسی', 'نام انگلیسی'],
       ...stoneMaterials.map(item => [item.namePersian, item.code, item.namePersian, item.name || '']),
       ['', '', '', ''],
-      ['عرض', 'کد', 'مقدار', 'Ùˆاحد'],
+      ['عرض', 'کد', 'مقدار', 'واحد'],
       ...cutWidths.map(item => [item.namePersian, item.code, item.value, item.unit]),
       ['', '', '', ''],
-      ['ضخامت', 'کد', 'مقدار', 'Ùˆاحد'],
+      ['ضخامت', 'کد', 'مقدار', 'واحد'],
       ...thicknesses.map(item => [item.namePersian, item.code, item.value, item.unit]),
       ['', '', '', ''],
       ['معدن', 'کد', 'نام فارسی', 'نام انگلیسی'],
       ...mines.map(item => [item.namePersian, item.code, item.namePersian, item.name || '']),
       ['', '', '', ''],
-      ['Ù†Ùˆع پرداخت', 'کد', 'نام فارسی', 'نام انگلیسی'],
+      ['نوع پرداخت', 'کد', 'نام فارسی', 'نام انگلیسی'],
       ...finishTypes.map(item => [item.namePersian, item.code, item.namePersian, item.name || '']),
       ['', '', '', ''],
       ['رنگ', 'کد', 'نام فارسی', 'نام انگلیسی'],
@@ -412,7 +443,7 @@ router.get('/template', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSP
     console.error('Template generation error:', error);
     return res.status(500).json({
       success: false,
-      error: 'خطا در ØªÙˆلید قالب Excel'
+      error: 'خطا در تولید قالب Excel'
     });
   }
 });
@@ -854,6 +885,14 @@ router.post('/import', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPA
       });
     }
 
+    if (!hasValidExcelMagicBytes(req.file.path)) {
+      quarantineUpload(req.file.path);
+      return res.status(400).json({
+        success: false,
+        error: 'امضای فایل معتبر نیست. لطفا فایل Excel استاندارد بارگذاری کنید'
+      });
+    }
+
     console.log('Processing Excel file:', req.file.filename);
 
     // Read Excel file
@@ -871,6 +910,14 @@ router.post('/import', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPA
 
     // Skip header row
     const productRows = data.slice(1);
+
+    if (productRows.length > MAX_IMPORT_ROWS) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({
+        success: false,
+        error: `تعداد ردیف‌های فایل بیش از حد مجاز است (حداکثر ${MAX_IMPORT_ROWS} ردیف)`
+      });
+    }
     
     const results = {
       total: productRows.length,
@@ -987,7 +1034,7 @@ router.post('/import', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPA
         if (existingProduct) {
           results.errors.push({
             row: rowNumber,
-            error: 'Ù…Ø­ØµÙˆل با این کد قبلاً ÙˆØ¬Ùˆد دارد',
+            error: 'محصول با این کد قبلاً وجود دارد',
             data: { code }
           });
           results.failed++;
@@ -1023,7 +1070,7 @@ router.post('/import', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPA
             colorNamePersian: colorNamePersian || color.namePersian,
             qualityCode: qualityCode || 'QUALITY-001',
             qualityName: qualityName || 'Standard',
-            qualityNamePersian: qualityNamePersian || 'استا� دارد',
+            qualityNamePersian: qualityNamePersian || 'استاندارد',
             basePrice: basePrice ? parseFloat(basePrice) : null,
             currency: currency || 'ریال',
             isAvailable: isAvailable !== undefined ? Boolean(isAvailable) : true,
@@ -1039,10 +1086,10 @@ router.post('/import', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPA
         });
 
         results.success++;
-        console.log(`�S& Imported product ${code}: ${namePersian}`);
+        console.log(`Imported product ${code}: ${namePersian}`);
 
       } catch (error: any) {
-        console.error(`�R Error importing row ${rowNumber}:`, error.message);
+        console.error(`Error importing row ${rowNumber}:`, error.message);
         results.errors.push({
           row: rowNumber,
           error: error.message,
@@ -1053,12 +1100,11 @@ router.post('/import', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPA
     }
 
     // Clean up uploaded file
-    const fs = require('fs');
     fs.unlinkSync(req.file.path);
 
     return res.json({
       success: true,
-      message: 'Ùˆارد کردن Ù…Ø­ØµÙˆلات تکمیل شد',
+      message: 'وارد کردن محصولات تکمیل شد',
       data: results
     });
 
@@ -1066,7 +1112,7 @@ router.post('/import', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPA
     console.error('Import error:', error);
     return res.status(500).json({
       success: false,
-      error: 'خطا در Ùˆارد کردن فایل Excel'
+      error: 'خطا در وارد کردن فایل Excel'
     });
   }
 });
@@ -1125,23 +1171,23 @@ router.get('/export', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPAC
 
     // Prepare data
     const headers = [
-      'کد Ù…Ø­ØµÙˆل',
-      'نام Ù…Ø­ØµÙˆل (انگلیسی)',
-      'نام Ù…Ø­ØµÙˆل (فارسی)',
-      'Ù†Ùˆع برش',
+      'کد محصول',
+      'نام محصول (انگلیسی)',
+      'نام محصول (فارسی)',
+      'نوع برش',
       'جنس سنگ',
       'عرض',
-      'ضخا�&ت',
+      'ضخامت',
       'معدن',
-      'Ù†Ùˆع پرداخت',
-      'ر� گ',
+      'نوع پرداخت',
+      'رنگ',
       'کیفیت',
       'قیمت پایه',
       'ارز',
-      'Ù…ÙˆØ¬Ùˆد',
-      'زمان ØªØ­Ùˆیل',
-      'ØªÙˆضیحات',
-      'فعا�',
+      'موجود',
+      'زمان تحویل',
+      'توضیحات',
+      'فعال',
       'تاریخ ایجاد'
     ];
 
@@ -1177,7 +1223,7 @@ router.get('/export', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPAC
       { wch: 30 }, { wch: 10 }, { wch: 15 }
     ];
 
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Ù…Ø­ØµÙˆلات');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'محصولات');
 
     // Generate Excel file buffer
     const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
@@ -1193,7 +1239,7 @@ router.get('/export', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPAC
     console.error('Export error:', error);
     return res.status(500).json({
       success: false,
-      error: 'خطا در صادر کردن Ù…Ø­ØµÙˆلات'
+      error: 'خطا در صادر کردن محصولات'
     });
   }
 });

@@ -62,7 +62,7 @@ function extractCustomerName(customer: any): string {
   if (fullName) {
     return fullName;
   }
-  return customer?.companyName || '?????';
+  return customer?.companyName || 'مشتری';
 }
 
 async function createAuditLog(params: {
@@ -127,16 +127,16 @@ export class ContractConfirmationService {
     });
 
     if (!contract) {
-      return { success: false, error: '??????? ???? ???' };
+      return { success: false, error: 'قرارداد یافت نشد' };
     }
 
     if (contract.status === 'CANCELLED') {
-      return { success: false, error: '??????? ??? ??? ???' };
+      return { success: false, error: 'قرارداد لغو شده است' };
     }
 
     const phoneNumber = extractCustomerPhone(contract.customer);
     if (!phoneNumber) {
-      return { success: false, error: '????? ???? ????? ?? CRM ????? ????' };
+      return { success: false, error: 'شماره تماس مشتری در CRM ثبت نشده است' };
     }
 
     const existingActiveSession = await prisma.contractPublicConfirmation.findFirst({
@@ -161,7 +161,7 @@ export class ContractConfirmationService {
         if (secondsSinceLastSend < RESEND_COOLDOWN_SECONDS) {
           return {
             success: false,
-            error: `????? ???? ?? ${RESEND_COOLDOWN_SECONDS - secondsSinceLastSend} ????? ???? ???? ????`
+            error: `لطفا پس از ${RESEND_COOLDOWN_SECONDS - secondsSinceLastSend} ثانیه دوباره تلاش کنید`
           };
         }
       }
@@ -209,7 +209,7 @@ export class ContractConfirmationService {
     }
 
     if (!session) {
-      return { success: false, error: '????? ???? ????? ??????? ?????? ???' };
+      return { success: false, error: 'ایجاد نشست تایید قرارداد ممکن نبود' };
     }
 
     if (!rawToken) {
@@ -260,7 +260,7 @@ export class ContractConfirmationService {
     if (!smsResult.success) {
       return {
         success: false,
-        error: smsResult.error || '????? ????? ?????? ???'
+        error: smsResult.error || 'ارسال پیامک تایید انجام نشد'
       };
     }
 
@@ -308,7 +308,7 @@ export class ContractConfirmationService {
     });
 
     if (!contract) {
-      return { success: false, error: '??????? ???? ???' };
+      return { success: false, error: 'قرارداد یافت نشد' };
     }
 
     const session = contract.publicConfirmations[0] || null;
@@ -373,11 +373,11 @@ export class ContractConfirmationService {
     });
 
     if (!session) {
-      return { success: false, error: '???? ????? ????? ????' };
+      return { success: false, error: 'لینک تایید معتبر نیست' };
     }
 
     if (session.status === 'CANCELLED') {
-      return { success: false, error: '???? ????? ??? ??? ???' };
+      return { success: false, error: 'این لینک دیگر قابل استفاده نیست' };
     }
 
     if (session.linkExpiresAt < new Date()) {
@@ -385,7 +385,7 @@ export class ContractConfirmationService {
         where: { id: session.id },
         data: { status: 'EXPIRED' }
       });
-      return { success: false, error: '???? ???? ????? ?? ????? ????? ???' };
+      return { success: false, error: 'مهلت لینک تایید به پایان رسیده است' };
     }
 
     await createAuditLog({
@@ -443,11 +443,11 @@ export class ContractConfirmationService {
     });
 
     if (!session) {
-      return { success: false, error: '???? ????? ????? ????' };
+      return { success: false, error: 'لینک تایید معتبر نیست' };
     }
 
     if (session.status !== 'PENDING') {
-      return { success: false, error: '??? ???? ???? ???? ??????? ????' };
+      return { success: false, error: 'این نشست تایید دیگر قابل استفاده نیست' };
     }
 
     if (session.linkExpiresAt < new Date()) {
@@ -455,7 +455,7 @@ export class ContractConfirmationService {
         where: { id: session.id },
         data: { status: 'EXPIRED' }
       });
-      return { success: false, error: '???? ???? ????? ?? ????? ????? ???' };
+      return { success: false, error: 'مهلت لینک تایید به پایان رسیده است' };
     }
 
     await createAuditLog({
@@ -469,11 +469,11 @@ export class ContractConfirmationService {
     });
 
     if (session.otpExpiresAt < new Date()) {
-      return { success: false, error: '?? ????? ????? ??? ???' };
+      return { success: false, error: 'مهلت کد تایید به پایان رسیده است' };
     }
 
     if (session.attemptsUsed >= session.maxAttempts) {
-      return { success: false, error: '????? ???? ???? ?? ????? ????? ???' };
+      return { success: false, error: 'تعداد تلاش‌های مجاز به پایان رسیده است' };
     }
 
     const nextAttempts = session.attemptsUsed + 1;
@@ -498,7 +498,7 @@ export class ContractConfirmationService {
         meta: params.meta
       });
 
-      return { success: false, error: '?? ????? ???? ????' };
+      return { success: false, error: 'کد تایید اشتباه است' };
     }
 
     const verifiedAt = new Date();
@@ -570,15 +570,15 @@ export class ContractConfirmationService {
     });
 
     if (!session) {
-      return { success: false, error: 'Ù„ÛŒÙ†Ú© ØªØ§ÛŒÛŒØ¯ Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª' };
+      return { success: false, error: 'لینک تایید معتبر نیست' };
     }
 
     if (session.status !== 'PENDING') {
-      return { success: false, error: 'Ø§ÛŒÙ† Ù„ÛŒÙ†Ú© Ø¯ÛŒÚ¯Ø± Ù‚Ø§Ø¨Ù„ Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†ÛŒØ³Øª' };
+      return { success: false, error: 'این لینک دیگر قابل استفاده نیست' };
     }
 
     if (session.linkExpiresAt < new Date()) {
-      return { success: false, error: 'Ù…Ù‡Ù„Øª Ù„ÛŒÙ†Ú© ØªØ§ÛŒÛŒØ¯ Ø¨Ù‡ Ù¾Ø§ÛŒØ§Ù† Ø±Ø³ÛŒØ¯Ù‡ Ø§Ø³Øª' };
+      return { success: false, error: 'مهلت لینک تایید به پایان رسیده است' };
     }
 
     return this.sendForConfirmation({
@@ -601,13 +601,13 @@ export class ContractConfirmationService {
     });
 
     if (!contract) {
-      return { success: false, error: '??????? ???? ???' };
+      return { success: false, error: 'قرارداد یافت نشد' };
     }
 
     if (contract.status === 'APPROVED' && !params.canCancelApproved) {
       return {
         success: false,
-        error: '???? ??? ??????? ????? ??? ???? ???? ?? ??????'
+        error: 'این قرارداد تایید شده است و بدون دسترسی ویژه قابل لغو نیست'
       };
     }
 

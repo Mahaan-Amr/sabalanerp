@@ -27,7 +27,9 @@
     "db:migrate": "cd backend && npx prisma migrate dev",
     "db:generate": "cd backend && npx prisma generate",
     "db:studio": "cd backend && npx prisma studio",
-    "setup": "npm run install:all && npm run docker:up && sleep 10 && npm run db:create && npm run db:migrate && npm run db:generate"
+    "setup": "npm run install:all && npm run docker:up && sleep 10 && npm run db:create && npm run db:migrate && npm run db:generate",
+    "text:scan": "node scripts/text-corruption-inventory.mjs",
+    "text:check": "npm run text:scan && node scripts/check-text-corruption.mjs"
   },
   "keywords": [
     "erp",

@@ -3,6 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
+import { sanitizeContractHtml } from '../utils/htmlSanitizer';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -155,7 +156,7 @@ router.post('/', protect, requireFeatureAccess(FEATURES.SALES_CONTRACT_TEMPLATES
         name,
         namePersian,
         description: description || null,
-        content,
+        content: sanitizeContractHtml(content),
         variables: variables || null,
         structure: structure || null,
         calculations: calculations || null,
@@ -235,7 +236,7 @@ router.put('/:id', protect, requireFeatureAccess(FEATURES.SALES_CONTRACT_TEMPLAT
         name,
         namePersian,
         description: description || null,
-        content,
+        content: sanitizeContractHtml(content),
         variables: variables || null,
         structure: structure || null,
         calculations: calculations || null,
@@ -502,7 +503,7 @@ async function generateContractContent(template: any, contractData: any): Promis
     content = content.replace('{{tableRows}}', tableRows);
   }
 
-  return content;
+  return sanitizeContractHtml(content);
 }
 
 // Helper function to generate table rows

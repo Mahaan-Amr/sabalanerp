@@ -35,6 +35,8 @@ echo "Requesting Let's Encrypt certificate..."
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml run --rm certbot certonly \
   --webroot \
   --webroot-path /var/www/certbot \
+  --cert-name "${DOMAIN}" \
+  --force-renewal \
   --email "${EMAIL}" \
   --agree-tos \
   --no-eff-email \

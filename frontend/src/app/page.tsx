@@ -119,6 +119,20 @@ export default function Home() {
             <p className="text-base text-secondary">
               &copy; سبلان ERP. تمامی حقوق محفوظ است.
             </p>
+            <div className="mt-6 flex justify-center">
+              <a
+                referrerPolicy="origin"
+                target="_blank"
+                href="https://trustseal.enamad.ir/?id=710761&Code=Smq9kxRtFbt6sCjdJFD2B7AUKdMzIIN9"
+              >
+                <img
+                  referrerPolicy="origin"
+                  src="https://trustseal.enamad.ir/logo.aspx?id=710761&Code=Smq9kxRtFbt6sCjdJFD2B7AUKdMzIIN9"
+                  alt="نماد اعتماد الکترونیکی"
+                  className="cursor-pointer"
+                />
+              </a>
+            </div>
           </div>
         </div>
       </footer>

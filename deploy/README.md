@@ -8,7 +8,8 @@
 ## 1) Prepare environment
 1. Copy `deploy/.env.prod.template` to `deploy/.env.prod`.
 2. Fill every `CHANGE_ME` value with real production secrets.
-3. Set `DOMAIN` and `FRONTEND_URL` to your real domain.
+3. Set `DOMAIN`, `FRONTEND_URL`, and `INQUIRY_DOMAIN` to your real domains.
+4. Make sure DNS A records for both `DOMAIN` and `INQUIRY_DOMAIN` point to the VPS.
 
 ## 2) Build and deploy
 ```bash
@@ -17,10 +18,11 @@ sh deploy/scripts/deploy.sh deploy/.env.prod
 
 This script:
 - Fetches latest code from `origin/main` and fast-forwards the working tree
+- Initializes and updates Git submodules
 - Builds images
 - Starts Postgres
 - Runs `prisma migrate deploy`
-- Starts full stack (`nginx`, `frontend`, `backend`, `postgres`)
+- Starts full stack (`nginx`, `frontend`, `backend`, `inquiry`, `postgres`)
 
 ## 3) Issue TLS certificate (Let's Encrypt)
 ```bash
@@ -31,6 +33,8 @@ Example:
 ```bash
 sh deploy/scripts/issue-cert.sh erp.example.com admin@example.com
 ```
+
+If `INQUIRY_DOMAIN` is set in the env file, the certificate script includes it in the same Let's Encrypt certificate.
 
 ## 4) Renewal
 Manual renewal:
@@ -45,6 +49,7 @@ Recommended cron entry (host):
 
 ## 5) Verification
 - `https://<domain>/` loads frontend
+- `https://<inquiry-domain>/` loads the public price inquiry app
 - `https://<domain>/api/health` returns healthy status
 - `https://<domain>/api/ready` returns ready state
 - Socket connection works through `wss://<domain>/socket.io/`

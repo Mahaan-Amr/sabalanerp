@@ -20,6 +20,12 @@ if [ ! -f "${ENV_FILE}" ]; then
   exit 1
 fi
 
+CERT_DOMAINS="-d ${DOMAIN}"
+INQUIRY_DOMAIN="$(sed -n 's/^INQUIRY_DOMAIN=//p' "${ENV_FILE}" | tail -n 1 | sed 's/^"//; s/"$//')"
+if [ "${INQUIRY_DOMAIN:-}" ]; then
+  CERT_DOMAINS="${CERT_DOMAINS} -d ${INQUIRY_DOMAIN}"
+fi
+
 echo "Creating temporary certificate for bootstrap..."
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml run --rm --entrypoint sh certbot -c "
   mkdir -p /etc/letsencrypt/live/${DOMAIN} && \
@@ -40,7 +46,7 @@ docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml run --rm cert
   --email "${EMAIL}" \
   --agree-tos \
   --no-eff-email \
-  -d "${DOMAIN}"
+  ${CERT_DOMAINS}
 
 echo "Reloading nginx with issued certificate..."
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml exec nginx nginx -s reload

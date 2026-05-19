@@ -33,6 +33,9 @@ Thumbs.db
 logs
 *.log
 
+# Codex scratch space
+.codex-tmp/
+
 # Runtime data
 pids
 *.pid

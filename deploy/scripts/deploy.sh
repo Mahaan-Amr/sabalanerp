@@ -29,6 +29,7 @@ echo "Fetching latest code from ${DEPLOY_REMOTE}/${DEPLOY_BRANCH}..."
 git fetch --prune "${DEPLOY_REMOTE}"
 git checkout "${DEPLOY_BRANCH}"
 git pull --ff-only "${DEPLOY_REMOTE}" "${DEPLOY_BRANCH}"
+git submodule update --init --recursive
 
 echo "Building images..."
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml build

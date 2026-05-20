@@ -5,6 +5,7 @@ WORKDIR /app
 RUN apk add --no-cache openssl
 
 COPY apps/sabalan-inquiry/package*.json ./
+COPY apps/sabalan-inquiry/prisma ./prisma
 RUN --mount=type=cache,target=/root/.npm \
   npm config set fetch-retries 5 \
   && npm config set fetch-retry-factor 2 \

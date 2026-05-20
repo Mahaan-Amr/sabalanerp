@@ -3,14 +3,15 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --include=dev && test -x ./node_modules/.bin/next
 
 COPY . .
 
 ARG NEXT_PUBLIC_API_URL=/api
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN npm run build
+RUN ./node_modules/.bin/next build
 RUN npm prune --omit=dev
 
 FROM node:20-alpine AS runner
@@ -18,6 +19,7 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 
 COPY --from=builder /app/package*.json ./

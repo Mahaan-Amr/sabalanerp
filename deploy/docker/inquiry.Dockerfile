@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 FROM node:22-alpine AS runner
 
 WORKDIR /app
@@ -5,11 +7,12 @@ WORKDIR /app
 RUN apk add --no-cache openssl
 
 COPY apps/sabalan-inquiry/package*.json ./
-RUN npm config set fetch-retries 5 \
+RUN --mount=type=cache,target=/root/.npm \
+  npm config set fetch-retries 5 \
   && npm config set fetch-retry-factor 2 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000 \
-  && npm ci
+  && npm ci --prefer-offline --no-audit --fund=false
 
 COPY apps/sabalan-inquiry ./
 

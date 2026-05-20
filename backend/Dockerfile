@@ -1,10 +1,17 @@
+# syntax=docker/dockerfile:1.7
+
 FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
 COPY package*.json ./
 ENV PUPPETEER_SKIP_DOWNLOAD=true
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+  npm config set fetch-retries 5 \
+  && npm config set fetch-retry-factor 2 \
+  && npm config set fetch-retry-mintimeout 20000 \
+  && npm config set fetch-retry-maxtimeout 120000 \
+  && npm ci --prefer-offline --no-audit --fund=false
 
 COPY prisma ./prisma
 COPY tsconfig.json ./

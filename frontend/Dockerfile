@@ -1,9 +1,17 @@
+# syntax=docker/dockerfile:1.7
+
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --include=dev && test -x ./node_modules/.bin/next
+RUN --mount=type=cache,target=/root/.npm \
+  npm config set fetch-retries 5 \
+  && npm config set fetch-retry-factor 2 \
+  && npm config set fetch-retry-mintimeout 20000 \
+  && npm config set fetch-retry-maxtimeout 120000 \
+  && npm ci --include=dev --prefer-offline --no-audit --fund=false \
+  && test -x ./node_modules/.bin/next
 
 COPY . .
 

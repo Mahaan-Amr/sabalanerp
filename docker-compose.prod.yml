@@ -36,6 +36,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      network: host
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -72,6 +73,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      network: host
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
     restart: unless-stopped
@@ -94,6 +96,7 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/inquiry.Dockerfile
+      network: host
     restart: unless-stopped
     environment:
       NODE_ENV: production

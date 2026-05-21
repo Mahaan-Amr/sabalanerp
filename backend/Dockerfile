@@ -15,7 +15,7 @@ COPY prisma ./prisma
 COPY tsconfig.json ./
 COPY src ./src
 
-RUN HTTP_PROXY=http://172.17.0.1:2081 HTTPS_PROXY=http://172.17.0.1:2081 http_proxy=http://172.17.0.1:2081 https_proxy=http://172.17.0.1:2081 npx prisma generate
+RUN HTTP_PROXY=http://127.0.0.1:2081 HTTPS_PROXY=http://127.0.0.1:2081 http_proxy=http://127.0.0.1:2081 https_proxy=http://127.0.0.1:2081 npx prisma generate
 RUN npm run build
 RUN npm prune --omit=dev
 
@@ -24,18 +24,18 @@ FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 
 RUN printf 'Types: deb\nURIs: https://deb.debian.org/debian\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: https://security.debian.org/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' > /etc/apt/sources.list.d/debian.sources \
-  && HTTP_PROXY=http://172.17.0.1:2081 HTTPS_PROXY=http://172.17.0.1:2081 http_proxy=http://172.17.0.1:2081 https_proxy=http://172.17.0.1:2081 \
+  && HTTP_PROXY=http://127.0.0.1:2081 HTTPS_PROXY=http://127.0.0.1:2081 http_proxy=http://127.0.0.1:2081 https_proxy=http://127.0.0.1:2081 \
   apt-get -o Acquire::ForceIPv4=true update \
-  && HTTP_PROXY=http://172.17.0.1:2081 HTTPS_PROXY=http://172.17.0.1:2081 http_proxy=http://172.17.0.1:2081 https_proxy=http://172.17.0.1:2081 \
+  && HTTP_PROXY=http://127.0.0.1:2081 HTTPS_PROXY=http://127.0.0.1:2081 http_proxy=http://127.0.0.1:2081 https_proxy=http://127.0.0.1:2081 \
   apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
   openssl \
   ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 RUN printf 'Types: deb\nURIs: https://deb.debian.org/debian\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: https://security.debian.org/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' > /etc/apt/sources.list.d/debian.sources \
-  && HTTP_PROXY=http://172.17.0.1:2081 HTTPS_PROXY=http://172.17.0.1:2081 http_proxy=http://172.17.0.1:2081 https_proxy=http://172.17.0.1:2081 \
+  && HTTP_PROXY=http://127.0.0.1:2081 HTTPS_PROXY=http://127.0.0.1:2081 http_proxy=http://127.0.0.1:2081 https_proxy=http://127.0.0.1:2081 \
   apt-get -o Acquire::ForceIPv4=true update \
-  && HTTP_PROXY=http://172.17.0.1:2081 HTTPS_PROXY=http://172.17.0.1:2081 http_proxy=http://172.17.0.1:2081 https_proxy=http://172.17.0.1:2081 \
+  && HTTP_PROXY=http://127.0.0.1:2081 HTTPS_PROXY=http://127.0.0.1:2081 http_proxy=http://127.0.0.1:2081 https_proxy=http://127.0.0.1:2081 \
   apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
   chromium \
   ca-certificates \

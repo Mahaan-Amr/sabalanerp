@@ -15,7 +15,7 @@ COPY prisma ./prisma
 COPY tsconfig.json ./
 COPY src ./src
 
-RUN npx prisma generate
+RUN HTTP_PROXY=http://127.0.0.1:2081 HTTPS_PROXY=http://127.0.0.1:2081 http_proxy=http://127.0.0.1:2081 https_proxy=http://127.0.0.1:2081 npx prisma generate
 RUN npm run build
 RUN npm prune --omit=dev
 
@@ -23,10 +23,23 @@ FROM node:20-bookworm-slim AS runner
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN printf 'Types: deb\nURIs: http://mirror.iranserver.com/debian\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: http://mirror.iranserver.com/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' > /etc/apt/sources.list.d/debian.sources \
+  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
+  apt-get -o Acquire::ForceIPv4=true update \
+  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
+  apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
+  openssl \
+  ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN printf 'Types: deb\nURIs: http://mirror.iranserver.com/debian\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: http://mirror.iranserver.com/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' > /etc/apt/sources.list.d/debian.sources \
+  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
+  apt-get -o Acquire::ForceIPv4=true update \
+  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
+  apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
   chromium \
   ca-certificates \
-  fonts-dejavu \
+  fonts-dejavu-core \
   fonts-liberation \
   && rm -rf /var/lib/apt/lists/*
 

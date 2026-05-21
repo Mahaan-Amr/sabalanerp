@@ -35,4 +35,4 @@ RUN mkdir -p /data
 
 EXPOSE 3001
 
-CMD ["sh", "-c", "npx prisma db push && npm run db:seed && npm run start -- -p 3001"]
+CMD ["sh", "-c", "npm run db:push && npm run db:seed && npm run start -- -p 3001"]

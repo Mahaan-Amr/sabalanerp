@@ -1,5 +1,3 @@
-FROM sabalanerp-backend AS backend-engines
-
 FROM node:20-bookworm-slim AS runner
 
 WORKDIR /app
@@ -20,25 +18,18 @@ RUN --mount=type=cache,target=/root/.npm \
   && npm config set fetch-retry-factor 2 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000 \
-  && npm ci --ignore-scripts --prefer-offline --no-audit --fund=false
-
-COPY --from=backend-engines /app/node_modules/@prisma/engines/schema-engine-debian-openssl-1.1.x /tmp/prisma-engines/schema-engine-debian-openssl-3.0.x
-COPY --from=backend-engines /app/node_modules/@prisma/engines/libquery_engine-debian-openssl-1.1.x.so.node /tmp/prisma-engines/libquery_engine-debian-openssl-3.0.x.so.node
-
-RUN mkdir -p node_modules/@prisma/engines \
-  && cp /tmp/prisma-engines/schema-engine-debian-openssl-3.0.x node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x \
-  && cp /tmp/prisma-engines/libquery_engine-debian-openssl-3.0.x.so.node node_modules/@prisma/engines/libquery_engine-debian-openssl-3.0.x.so.node
+  && HTTP_PROXY=http://127.0.0.1:2081 HTTPS_PROXY=http://127.0.0.1:2081 http_proxy=http://127.0.0.1:2081 https_proxy=http://127.0.0.1:2081 \
+  npm ci --prefer-offline --no-audit --fund=false
 
 COPY apps/sabalan-inquiry ./
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3001
-ENV PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1
 
-RUN npx prisma generate
-RUN DATABASE_URL=file:/tmp/inquiry-build.db npx prisma db push
-RUN DATABASE_URL=file:/tmp/inquiry-build.db SESSION_SECRET=build-only-session-secret-minimum-32-chars npm run build
+RUN HTTP_PROXY=http://127.0.0.1:2081 HTTPS_PROXY=http://127.0.0.1:2081 http_proxy=http://127.0.0.1:2081 https_proxy=http://127.0.0.1:2081 npx prisma generate
+RUN HTTP_PROXY=http://127.0.0.1:2081 HTTPS_PROXY=http://127.0.0.1:2081 http_proxy=http://127.0.0.1:2081 https_proxy=http://127.0.0.1:2081 DATABASE_URL=file:/tmp/inquiry-build.db npx prisma db push
+RUN HTTP_PROXY=http://127.0.0.1:2081 HTTPS_PROXY=http://127.0.0.1:2081 http_proxy=http://127.0.0.1:2081 https_proxy=http://127.0.0.1:2081 DATABASE_URL=file:/tmp/inquiry-build.db SESSION_SECRET=build-only-session-secret-minimum-32-chars npm run build
 
 RUN mkdir -p /data
 

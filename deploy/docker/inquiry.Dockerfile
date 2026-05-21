@@ -4,10 +4,10 @@ FROM node:20-bookworm-slim AS runner
 
 WORKDIR /app
 
-RUN printf 'Types: deb\nURIs: http://mirror.iranserver.com/debian\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: http://mirror.iranserver.com/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' > /etc/apt/sources.list.d/debian.sources \
-  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
+RUN printf 'Types: deb\nURIs: https://deb.debian.org/debian\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: https://security.debian.org/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' > /etc/apt/sources.list.d/debian.sources \
+  && HTTP_PROXY=http://172.17.0.1:2081 HTTPS_PROXY=http://172.17.0.1:2081 http_proxy=http://172.17.0.1:2081 https_proxy=http://172.17.0.1:2081 \
   apt-get -o Acquire::ForceIPv4=true update \
-  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
+  && HTTP_PROXY=http://172.17.0.1:2081 HTTPS_PROXY=http://172.17.0.1:2081 http_proxy=http://172.17.0.1:2081 https_proxy=http://172.17.0.1:2081 \
   apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
   openssl \
   ca-certificates \

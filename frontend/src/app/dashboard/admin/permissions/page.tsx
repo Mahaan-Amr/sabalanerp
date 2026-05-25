@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { FaUsers, FaCog, FaPlus, FaEdit, FaTrash, FaEye, FaCheck, FaTimes, FaLock } from 'react-icons/fa';
 import { usersAPI, permissionsAPI, authAPI, workspacePermissionsAPI } from '@/lib/api';
 import EnhancedDropdown, { DropdownOption } from '@/components/EnhancedDropdown';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 interface FeaturePermission {
   id: string;
@@ -49,38 +49,38 @@ interface FeatureDefinition {
 
 const PERSIAN_ACTION_MAP: Record<string, string> = {
   view: 'مشاهده',
-  create: 'ا�Rجاد',
-  edit: 'Ùˆیرایش',
+  create: 'ایجاد',
+  edit: 'ویرایش',
   delete: 'حذف',
   approve: 'تایید',
   reject: 'رد',
-  sign: 'ا�&ضا',
-  print: '� اپ',
-  import: 'ÙˆØ±Ùˆد',
-  export: 'Ø®Ø±Ùˆجی',
-  update: 'Ø¨Ù‡â€ŒØ±Ùˆزرسانی',
-  toggle: 'تغییر Ùˆضعیت',
-  start: 'Ø´Ø±Ùˆع',
+  sign: 'امضا',
+  print: 'چاپ',
+  import: 'ورود',
+  export: 'خروجی',
+  update: 'به‌روزرسانی',
+  toggle: 'تغییر وضعیت',
+  start: 'شروع',
   end: 'پایان',
-  assign: 'تخص�Rص',
+  assign: 'تخصیص',
   verify: 'تایید',
   validate: 'اعتبارسنجی',
-  send: 'ارسا�',
-  stats: 'آ�&ار'
+  send: 'ارسال',
+  stats: 'آمار'
 };
 
 const PERSIAN_TOKEN_MAP: Record<string, string> = {
   core: 'هسته',
-  dashboard: 'Ø¯Ø§Ø´Ø¨Ùˆرد',
-  profile: 'Ù¾Ø±Ùˆفایل',
+  dashboard: 'داشبورد',
+  profile: 'پروفایل',
   departments: 'بخش‌ها',
   posts: 'پست‌ها',
   orders: 'سفارش‌ها',
   order: 'سفارش',
-  status: 'Ùˆضعیت',
+  status: 'وضعیت',
   customers: 'مشتریان',
   customer: 'مشتری',
-  project: 'Ù¾Ø±ÙˆÚ˜ه',
+  project: 'پروژه',
   addresses: 'آدرس‌ها',
   address: 'آدرس',
   phone: 'تلفن',
@@ -89,58 +89,58 @@ const PERSIAN_TOKEN_MAP: Record<string, string> = {
   leads: 'سرنخ‌ها',
   communications: 'ارتباطات',
   contracts: 'قراردادها',
-  contract: '�رارداد',
+  contract: 'قرارداد',
   items: 'اقلام',
-  deliveries: 'ØªØ­Ùˆیل‌ها',
+  deliveries: 'تحویل‌ها',
   payments: 'پرداخت‌ها',
   verification: 'تایید',
   number: 'شماره',
   templates: 'قالب‌ها',
-  generate: 'ØªÙˆلید',
-  products: 'Ù…Ø­ØµÙˆلات',
-  product: 'Ù…Ø­ØµÙˆل',
-  attributes: 'ÙˆÛŒÚ˜گی‌ها',
+  generate: 'تولید',
+  products: 'محصولات',
+  product: 'محصول',
+  attributes: 'ویژگی‌ها',
   legacy: 'قدیمی',
-  sales: 'ÙØ±Ùˆش',
+  sales: 'فروش',
   crm: 'CRM',
-  inventory: 'ا� بار',
+  inventory: 'انبار',
   hr: 'منابع انسانی',
   security: 'امنیت',
-  accounting: 'حسابدار�R',
+  accounting: 'حسابداری',
   cut: 'برش',
   cutting: 'برش',
-  types: 'Ø§Ù†Ùˆاع',
-  type: 'Ù†Ùˆع',
-  stone: 'س� گ',
-  materials: 'Ù…Ùˆاد',
+  types: 'انواع',
+  type: 'نوع',
+  stone: 'سنگ',
+  materials: 'مواد',
   widths: 'عرض‌ها',
   thicknesses: 'ضخامت‌ها',
   mines: 'معادن',
   finish: 'پرداخت',
   finishings: 'پرداخت‌ها',
   colors: 'رنگ‌ها',
-  services: 'خد�&ات',
-  service: 'خد�&ت',
-  sub: 'ز�Rر',
+  services: 'خدمات',
+  service: 'خدمت',
+  sub: 'زیر',
   stair: 'پله',
-  standard: 'استا� دارد',
-  lengths: 'Ø·Ùˆل‌ها',
+  standard: 'استاندارد',
+  lengths: 'طول‌ها',
   layer: 'لایه',
   layers: 'لایه‌ها',
   shifts: 'شیفت‌ها',
-  attendance: 'Ø­Ø¶Ùˆر و غیاب',
-  checkin: 'ÙˆØ±Ùˆد',
-  checkout: 'Ø®Ø±Ùˆج',
-  exception: 'استث� اء',
+  attendance: 'حضور و غیاب',
+  checkin: 'ورود',
+  checkout: 'خروج',
+  exception: 'استثناء',
   exceptions: 'استثناءها',
-  daily: 'Ø±Ùˆزانه',
+  daily: 'روزانه',
   personnel: 'پرسنل',
-  missions: 'Ù…Ø§Ù…Ùˆریت‌ها',
-  signature: 'ا�&ضا',
+  missions: 'ماموریت‌ها',
+  signature: 'امضا',
   time: 'زمان',
   templates_view: 'مشاهده قالب‌ها',
   templates_create: 'ایجاد قالب‌ها',
-  templates_edit: 'Ùˆیرایش قالب‌ها',
+  templates_edit: 'ویرایش قالب‌ها',
   templates_delete: 'حذف قالب‌ها'
 };
 
@@ -169,16 +169,16 @@ const normalizeFeatureLabelToPersian = (featureKey: string, rawLabel?: string) =
 
 const WORKSPACES = {
   'crm': 'CRM',
-  'sales': 'ÙØ±Ùˆش',
-  'inventory': 'ا� بار',
+  'sales': 'فروش',
+  'inventory': 'انبار',
   'hr': 'منابع انسانی',
   'security': 'امنیت',
-  'accounting': 'حسابدار�R'
+  'accounting': 'حسابداری'
 };
 
 const PERMISSION_LEVELS = {
   'view': 'مشاهده',
-  'edit': 'Ùˆیرایش',
+  'edit': 'ویرایش',
   'admin': 'مدیریت'
 };
 
@@ -218,6 +218,8 @@ const normalizePermissionLevelForFeature = (featureKey: string, permissionLevel:
 
 export default function PermissionsManagementPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedUserId = searchParams.get('userId');
   const [users, setUsers] = useState<User[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -263,9 +265,19 @@ export default function PermissionsManagementPage() {
   const [selectedFeatures, setSelectedFeatures] = useState<{[key: string]: string}>({});
   const [bulkPermissionLevel, setBulkPermissionLevel] = useState('view');
 
+  const isAdminUser = (user?: User | null) => user?.role === 'ADMIN';
+
   useEffect(() => {
     checkUserAccess();
   }, []);
+
+  useEffect(() => {
+    if (!requestedUserId || users.length === 0 || selectedUser) return;
+    const targetUser = users.find((user) => user.id === requestedUserId);
+    if (targetUser) {
+      handleUserSelect(targetUser);
+    }
+  }, [requestedUserId, users, selectedUser]);
 
   const checkUserAccess = async () => {
     try {
@@ -282,8 +294,8 @@ export default function PermissionsManagementPage() {
         }
         
         // If admin/manager, fetch users, role permissions, and feature definitions
-        fetchUsers();
-        fetchRolePermissions();
+        fetchUsers(profileResponse.data.data.role);
+        fetchRolePermissions(profileResponse.data.data.role);
         fetchFeatureDefinitions();
       } else {
         router.push('/login');
@@ -294,15 +306,19 @@ export default function PermissionsManagementPage() {
     }
   };
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (activeRole?: string) => {
     try {
       setLoading(true);
       
       // Fetch users
       const usersResponse = await usersAPI.getUsers(1, 100); // Get up to 100 users
       if (usersResponse.data.success) {
-        setUsers(usersResponse.data.data);
-        setFilteredUsers(usersResponse.data.data);
+        const userList: User[] = usersResponse.data.data || [];
+        const safeUsers = activeRole === 'MANAGER'
+          ? userList.filter((user) => !isAdminUser(user))
+          : userList;
+        setUsers(safeUsers);
+        setFilteredUsers(safeUsers);
       }
       
     } catch (error) {
@@ -312,7 +328,7 @@ export default function PermissionsManagementPage() {
     }
   };
 
-  const fetchRolePermissions = async () => {
+  const fetchRolePermissions = async (activeRole?: string) => {
     try {
       const [roleWorkspaceResponse, roleFeatureResponse] = await Promise.all([
         workspacePermissionsAPI.getRolePermissions(),
@@ -320,11 +336,21 @@ export default function PermissionsManagementPage() {
       ]);
 
       if (roleWorkspaceResponse.data.success) {
-        setRoleWorkspacePermissions(roleWorkspaceResponse.data.data);
+        const roleWorkspaceData = roleWorkspaceResponse.data.data || [];
+        setRoleWorkspacePermissions(
+          activeRole === 'MANAGER'
+            ? roleWorkspaceData.filter((permission: any) => permission.role !== 'ADMIN')
+            : roleWorkspaceData
+        );
       }
 
       if (roleFeatureResponse.data.success) {
-        setRoleFeaturePermissions(roleFeatureResponse.data.data);
+        const roleFeatureData = roleFeatureResponse.data.data || [];
+        setRoleFeaturePermissions(
+          activeRole === 'MANAGER'
+            ? roleFeatureData.filter((permission: RoleFeaturePermission) => permission.role !== 'ADMIN')
+            : roleFeatureData
+        );
       }
     } catch (error) {
       console.error('Error fetching role permissions:', error);
@@ -381,6 +407,10 @@ export default function PermissionsManagementPage() {
   };
 
   const handleUserSelect = (user: User) => {
+    if (currentUser?.role === 'MANAGER' && isAdminUser(user)) {
+      alert('مدیر فروش اجازه مدیریت دسترسی مدیر سیستم را ندارد');
+      return;
+    }
     setSelectedUser(user);
     setFormData({ ...formData, userId: user.id });
     fetchUserPermissions(user.id);
@@ -389,12 +419,12 @@ export default function PermissionsManagementPage() {
   const handleCreatePermission = async () => {
     try {
       if (!selectedUser || !formData.workspace || !formData.feature) {
-        alert('لطفاً تمام فیلدهای Ø¶Ø±Ùˆری را پر کنید');
+        alert('لطفاً تمام فیلدهای ضروری را پر کنید');
         return;
       }
 
       if (currentUser?.role === 'MANAGER' && selectedUser.role === 'ADMIN') {
-        alert('مدیر ÙØ±Ùˆش Ù†Ù…ÛŒâ€ŒØªÙˆاند دسترسی مدیر سیستم را تغییر دهد');
+        alert('مدیر فروش نمی‌تواند دسترسی مدیر سیستم را تغییر دهد');
         return;
       }
 
@@ -410,19 +440,26 @@ export default function PermissionsManagementPage() {
         permissionData.expiresAt = formData.expiresAt;
       }
 
-      const response = await permissionsAPI.createFeaturePermission(permissionData);
+      const response = editingPermission
+        ? await permissionsAPI.updateFeaturePermission(editingPermission.id, {
+            workspace: formData.workspace,
+            feature: formData.feature,
+            permissionLevel: permissionData.permissionLevel,
+            ...(permissionData.expiresAt ? { expiresAt: permissionData.expiresAt } : { expiresAt: null })
+          })
+        : await permissionsAPI.createFeaturePermission(permissionData);
       
       if (response.data.success) {
         setShowAddPermissionModal(false);
         setFormData({ userId: '', workspace: '', feature: '', permissionLevel: 'view', expiresAt: '' });
         setEditingPermission(null);
-        setShowAddPermissionModal(false);
+        clearAllSelections();
         // Refresh the user's permissions
         if (selectedUser) {
           fetchUserPermissions(selectedUser.id);
         }
       } else {
-        alert('خطا در ایجاد Ù…Ø¬Ùˆز: ' + response.data.error);
+        alert('خطا در ایجاد مجوز: ' + response.data.error);
       }
     } catch (error: any) {
       console.error('Error creating permission:', error);
@@ -439,13 +476,13 @@ export default function PermissionsManagementPage() {
       }
 
       if (currentUser?.role === 'MANAGER' && selectedUser.role === 'ADMIN') {
-        alert('مدیر ÙØ±Ùˆش Ù†Ù…ÛŒâ€ŒØªÙˆاند دسترسی مدیر سیستم را تغییر دهد');
+        alert('مدیر فروش نمی‌تواند دسترسی مدیر سیستم را تغییر دهد');
         return;
       }
 
       const selectedFeaturesList = Object.entries(selectedFeatures);
       if (selectedFeaturesList.length === 0) {
-        alert('لطفاً حداقل ÛŒÚ© ویژگی را انتخاب کنید');
+        alert('لطفاً حداقل یک ویژگی را انتخاب کنید');
         return;
       }
 
@@ -491,7 +528,7 @@ export default function PermissionsManagementPage() {
           fetchUserPermissions(selectedUser.id);
         }
       } else {
-        alert('خطا در ایجاد Ù…Ø¬Ùˆزها\n' + errors.join('\n'));
+        alert('خطا در ایجاد مجوزها\n' + errors.join('\n'));
       }
     } catch (error: any) {
       console.error('Error creating bulk permissions:', error);
@@ -500,7 +537,12 @@ export default function PermissionsManagementPage() {
   };
 
   const handleEditPermission = (permission: FeaturePermission) => {
+    if (currentUser?.role === 'MANAGER' && selectedUser?.role === 'ADMIN') {
+      alert('مدیر فروش اجازه ویرایش دسترسی مدیر سیستم را ندارد');
+      return;
+    }
     setEditingPermission(permission);
+    clearAllSelections();
     setFormData({
       userId: permission.userId,
       workspace: permission.workspace,
@@ -512,11 +554,11 @@ export default function PermissionsManagementPage() {
   };
 
   const handleDeletePermission = async (id: string) => {
-    if (!confirm('آیا از حذف این Ù…Ø¬Ùˆز اطمینان دارید؟')) return;
+    if (!confirm('آیا از حذف این مجوز اطمینان دارید؟')) return;
     
     try {
       if (currentUser?.role === 'MANAGER' && selectedUser?.role === 'ADMIN') {
-        alert('مدیر ÙØ±Ùˆش Ù†Ù…ÛŒâ€ŒØªÙˆاند دسترسی مدیر سیستم را تغییر دهد');
+        alert('مدیر فروش نمی‌تواند دسترسی مدیر سیستم را تغییر دهد');
         return;
       }
 
@@ -528,7 +570,7 @@ export default function PermissionsManagementPage() {
           fetchUserPermissions(selectedUser.id);
         }
       } else {
-        alert('خطا در حذف Ù…Ø¬Ùˆز: ' + response.data.error);
+        alert('خطا در حذف مجوز: ' + response.data.error);
       }
     } catch (error: any) {
       console.error('Error deleting permission:', error);
@@ -540,12 +582,12 @@ export default function PermissionsManagementPage() {
   const handleCreateWorkspacePermission = async () => {
     try {
       if (!selectedUser || !formData.workspace || !formData.permissionLevel) {
-        alert('لطفاً تمام فیلدهای Ø¶Ø±Ùˆری را پر کنید');
+        alert('لطفاً تمام فیلدهای ضروری را پر کنید');
         return;
       }
 
       if (currentUser?.role === 'MANAGER' && selectedUser.role === 'ADMIN') {
-        alert('مدیر ÙØ±Ùˆش Ù†Ù…ÛŒâ€ŒØªÙˆاند دسترسی مدیر سیستم را تغییر دهد');
+        alert('مدیر فروش نمی‌تواند دسترسی مدیر سیستم را تغییر دهد');
         return;
       }
 
@@ -569,9 +611,9 @@ export default function PermissionsManagementPage() {
         if (selectedUser) {
           fetchUserPermissions(selectedUser.id);
         }
-        alert('Ù…Ø¬Ùˆز فضای کاری با Ù…Ùˆفقیت ایجاد شد');
+        alert('مجوز فضای کاری با موفقیت ایجاد شد');
       } else {
-        alert('خطا در ایجاد Ù…Ø¬Ùˆز فضای کاری: ' + response.data.error);
+        alert('خطا در ایجاد مجوز فضای کاری: ' + response.data.error);
       }
     } catch (error: any) {
       console.error('Error creating workspace permission:', error);
@@ -581,11 +623,11 @@ export default function PermissionsManagementPage() {
 
   // Handle workspace permission deletion
   const handleDeleteWorkspacePermission = async (id: string) => {
-    if (!confirm('آیا از حذف این Ù…Ø¬Ùˆز فضای کاری اطمینان دارید؟')) return;
+    if (!confirm('آیا از حذف این مجوز فضای کاری اطمینان دارید؟')) return;
     
     try {
       if (currentUser?.role === 'MANAGER' && selectedUser?.role === 'ADMIN') {
-        alert('مدیر ÙØ±Ùˆش Ù†Ù…ÛŒâ€ŒØªÙˆاند دسترسی مدیر سیستم را تغییر دهد');
+        alert('مدیر فروش نمی‌تواند دسترسی مدیر سیستم را تغییر دهد');
         return;
       }
 
@@ -596,9 +638,9 @@ export default function PermissionsManagementPage() {
         if (selectedUser) {
           fetchUserPermissions(selectedUser.id);
         }
-        alert('Ù…Ø¬Ùˆز فضای کاری با Ù…Ùˆفقیت حذف شد');
+        alert('مجوز فضای کاری با موفقیت حذف شد');
       } else {
-        alert('خطا در حذف Ù…Ø¬Ùˆز فضای کاری: ' + response.data.error);
+        alert('خطا در حذف مجوز فضای کاری: ' + response.data.error);
       }
     } catch (error: any) {
       console.error('Error deleting workspace permission:', error);
@@ -614,7 +656,7 @@ export default function PermissionsManagementPage() {
       }
 
       if (currentUser?.role === 'MANAGER' && roleWorkspaceForm.role === 'ADMIN') {
-        alert('مدیر ÙØ±Ùˆش Ù†Ù…ÛŒâ€ŒØªÙˆاند دسترسی نقش مدیر را تغییر دهد');
+        alert('مدیر فروش نمی‌تواند دسترسی نقش مدیر را تغییر دهد');
         return;
       }
 
@@ -650,11 +692,11 @@ export default function PermissionsManagementPage() {
 
   const handleDeleteRoleWorkspacePermission = async (permission: any) => {
     if (currentUser?.role === 'MANAGER' && permission.role === 'ADMIN') {
-      alert('مدیر ÙØ±Ùˆش Ù†Ù…ÛŒâ€ŒØªÙˆاند Ù…Ø¬Ùˆز نقش مدیر را حذف کند');
+      alert('مدیر فروش نمی‌تواند مجوز نقش مدیر را حذف کند');
       return;
     }
 
-    if (!confirm('آیا از حذف این Ù…Ø¬Ùˆز نقش مطمئن هستید؟')) return;
+    if (!confirm('آیا از حذف این مجوز نقش مطمئن هستید؟')) return;
 
     try {
       await workspacePermissionsAPI.deleteRolePermission(permission.id);
@@ -673,7 +715,7 @@ export default function PermissionsManagementPage() {
       }
 
       if (currentUser?.role === 'MANAGER' && roleFeatureForm.role === 'ADMIN') {
-        alert('مدیر ÙØ±Ùˆش Ù†Ù…ÛŒâ€ŒØªÙˆاند دسترسی نقش مدیر را تغییر دهد');
+        alert('مدیر فروش نمی‌تواند دسترسی نقش مدیر را تغییر دهد');
         return;
       }
 
@@ -711,11 +753,11 @@ export default function PermissionsManagementPage() {
 
   const handleDeleteRoleFeaturePermission = async (permission: RoleFeaturePermission) => {
     if (currentUser?.role === 'MANAGER' && permission.role === 'ADMIN') {
-      alert('مدیر ÙØ±Ùˆش Ù†Ù…ÛŒâ€ŒØªÙˆاند Ù…Ø¬Ùˆز نقش مدیر را حذف کند');
+      alert('مدیر فروش نمی‌تواند مجوز نقش مدیر را حذف کند');
       return;
     }
 
-    if (!confirm('آیا از حذف این Ù…Ø¬Ùˆز نقش مطمئن هستید؟')) return;
+    if (!confirm('آیا از حذف این مجوز نقش مطمئن هستید؟')) return;
 
     try {
       await permissionsAPI.deleteRoleFeaturePermission(permission.id);
@@ -805,7 +847,7 @@ export default function PermissionsManagementPage() {
         <div className="max-w-7xl mx-auto">
           <div className="glass-liquid-card p-8 text-center">
             <FaLock className="h-16 w-16 text-red-400 mx-auto mb-4" />
-            <h1 className="text-2xl font-bold text-white mb-4">دسترسی Ù…Ø­Ø¯Ùˆد</h1>
+            <h1 className="text-2xl font-bold text-white mb-4">دسترسی محدود</h1>
             <p className="text-gray-300 mb-6">
               شما دسترسی لازم برای مشاهده این صفحه را ندارید. این صفحه فقط برای مدیران سیستم قابل دسترسی است.
             </p>
@@ -813,7 +855,7 @@ export default function PermissionsManagementPage() {
               onClick={() => router.push('/dashboard')}
               className="glass-liquid-card px-6 py-3 hover:bg-teal-500/20 transition-all duration-300"
             >
-              بازگشت به Ø¯Ø§Ø´Ø¨Ùˆرد
+              بازگشت به داشبورد
             </button>
           </div>
         </div>
@@ -828,8 +870,8 @@ export default function PermissionsManagementPage() {
         <div className="glass-liquid-card p-6 mb-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-white mb-2">مدیریت Ù…Ø¬Ùˆزهای کاربران</h1>
-              <p className="text-gray-300">جستجو و انتخاب کاربر برای مدیریت Ù…Ø¬Ùˆزهای دسترسی</p>
+              <h1 className="text-3xl font-bold text-white mb-2">مدیریت مجوزهای کاربران</h1>
+              <p className="text-gray-300">جستجو و انتخاب کاربر برای مدیریت مجوزهای دسترسی</p>
             </div>
           </div>
         </div>
@@ -896,7 +938,7 @@ export default function PermissionsManagementPage() {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h2 className="text-xl font-semibold text-white mb-2">
-                  Ù…Ø¬Ùˆزهای {selectedUser.firstName} {selectedUser.lastName}
+                  مجوزهای {selectedUser.firstName} {selectedUser.lastName}
                 </h2>
                 <p className="text-gray-400">{selectedUser.email} ⬢ {selectedUser.role}</p>
               </div>
@@ -914,14 +956,14 @@ export default function PermissionsManagementPage() {
                 className="glass-liquid-card px-4 py-2 hover:bg-teal-500/20 transition-all duration-300 flex items-center"
               >
                 <FaPlus className="ml-2" />
-                Ø§ÙØ²Ùˆدن Ù…Ø¬Ùˆز جدید
+                افزودن مجوز جدید
               </button>
             </div>
 
             {/* Workspace Permissions */}
             <div className="mb-8">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-medium text-white">Ù…Ø¬Ùˆزهای فضای کاری</h3>
+                <h3 className="text-lg font-medium text-white">مجوزهای فضای کاری</h3>
                 <button
                   onClick={() => {
                     setFormData({
@@ -936,7 +978,7 @@ export default function PermissionsManagementPage() {
                   className="glass-liquid-card px-4 py-2 hover:bg-teal-500/20 transition-all duration-300 flex items-center text-sm"
                 >
                   <FaPlus className="ml-2" />
-                  Ø§ÙØ²Ùˆدن Ù…Ø¬Ùˆز فضای کاری
+                  افزودن مجوز فضای کاری
                 </button>
               </div>
               {userWorkspacePermissions.length > 0 && (
@@ -958,7 +1000,7 @@ export default function PermissionsManagementPage() {
                           <button
                             onClick={() => handleDeleteWorkspacePermission(permission.id)}
                             className="p-1 text-red-400 hover:bg-red-500/20 rounded transition-all duration-300"
-                            title="حذف Ù…Ø¬Ùˆز فضای کاری"
+                            title="حذف مجوز فضای کاری"
                           >
                             <FaTrash className="w-3 h-3" />
                           </button>
@@ -974,19 +1016,19 @@ export default function PermissionsManagementPage() {
               {userWorkspacePermissions.length === 0 && (
                 <div className="text-center py-8">
                   <FaCog className="h-12 w-12 text-gray-600 mx-auto mb-3" />
-                  <p className="text-gray-400">هیچ Ù…Ø¬Ùˆز فضای کاری تعریف نشده است</p>
+                  <p className="text-gray-400">هیچ مجوز فضای کاری تعریف نشده است</p>
                 </div>
               )}
             </div>
 
             {/* Feature Permissions */}
             <div>
-              <h3 className="text-lg font-medium text-white mb-4">Ù…Ø¬Ùˆزهای جزئی</h3>
+              <h3 className="text-lg font-medium text-white mb-4">مجوزهای جزئی</h3>
               
               {userPermissions.length === 0 ? (
                 <div className="text-center py-12">
                   <FaCog className="h-16 w-16 text-gray-600 mx-auto mb-4" />
-                  <p className="text-gray-400 text-lg">هیچ Ù…Ø¬Ùˆز جزئی تعریف نشده است</p>
+                  <p className="text-gray-400 text-lg">هیچ مجوز جزئی تعریف نشده است</p>
                   <button
                     onClick={() => {
                       setFormData({
@@ -1001,7 +1043,7 @@ export default function PermissionsManagementPage() {
                     className="mt-4 glass-liquid-card px-6 py-3 hover:bg-teal-500/20 transition-all duration-300"
                   >
                     <FaPlus className="inline-block ml-2" />
-                    Ø§ÙØ²Ùˆدن Ù…Ø¬Ùˆز جدید
+                    افزودن مجوز جدید
                   </button>
                 </div>
               ) : (
@@ -1011,8 +1053,8 @@ export default function PermissionsManagementPage() {
                       <tr className="border-b border-gray-700">
                         <th className="text-right py-3 px-4 text-gray-300">فضای کاری</th>
                         <th className="text-right py-3 px-4 text-gray-300">ویژگی</th>
-                        <th className="text-right py-3 px-4 text-gray-300">سطح دسترس�R</th>
-                        <th className="text-right py-3 px-4 text-gray-300">Ùˆضعیت</th>
+                        <th className="text-right py-3 px-4 text-gray-300">سطح دسترسی</th>
+                        <th className="text-right py-3 px-4 text-gray-300">وضعیت</th>
                         <th className="text-right py-3 px-4 text-gray-300">عملیات</th>
                       </tr>
                     </thead>
@@ -1038,7 +1080,7 @@ export default function PermissionsManagementPage() {
                             {permission.isActive ? (
                               <span className="flex items-center text-green-400">
                                 <FaCheck className="ml-1" />
-                                فعا�
+                                فعال
                               </span>
                             ) : (
                               <span className="flex items-center text-red-400">
@@ -1079,7 +1121,7 @@ export default function PermissionsManagementPage() {
             <FaUsers className="h-20 w-20 text-gray-600 mx-auto mb-6" />
             <h2 className="text-2xl font-semibold text-white mb-4">کاربری انتخاب نشده</h2>
             <p className="text-gray-400 text-lg mb-6">
-              برای مشاهده و مدیریت Ù…Ø¬Ùˆزها، ابتدا ÛŒÚ© کاربر را از لیست بالا انتخاب کنید
+              برای مشاهده و مدیریت مجوزها ابتدا یک کاربر را از لیست بالا انتخاب کنید
             </p>
           </div>
         )}
@@ -1087,16 +1129,16 @@ export default function PermissionsManagementPage() {
         {/* Role Permissions */}
         <div className="glass-liquid-card p-6 mt-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-white">مدیریت Ù…Ø¬Ùˆزهای نقش</h2>
+            <h2 className="text-xl font-bold text-white">مدیریت مجوزهای نقش</h2>
             {currentUser?.role === 'MANAGER' && (
-              <span className="text-xs text-gray-400">مدیر ÙØ±Ùˆش به نقش مدیر دسترسی ندارد</span>
+              <span className="text-xs text-gray-400">مدیر فروش به نقش مدیر دسترسی ندارد</span>
             )}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Role Workspace Permissions */}
             <div className="glass-liquid-card p-4">
-              <h3 className="text-lg font-semibold text-white mb-3">Ù…Ø¬Ùˆزهای فضای کاری بر اساس نقش</h3>
+              <h3 className="text-lg font-semibold text-white mb-3">مجوزهای فضای کاری بر اساس نقش</h3>
               <div className="space-y-3">
                 <div>
                   <label className="block text-gray-300 mb-1 text-sm">نقش</label>
@@ -1106,11 +1148,12 @@ export default function PermissionsManagementPage() {
                     className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white text-sm"
                   >
                     <option value="">انتخاب نقش</option>
-                    {ROLE_OPTIONS.map(role => (
+                    {ROLE_OPTIONS
+                      .filter((role) => !(currentUser?.role === 'MANAGER' && role === 'ADMIN'))
+                      .map(role => (
                       <option
                         key={role}
                         value={role}
-                        disabled={currentUser?.role === 'MANAGER' && role === 'ADMIN'}
                       >
                         {role}
                       </option>
@@ -1133,14 +1176,14 @@ export default function PermissionsManagementPage() {
                 </div>
 
                 <div>
-                  <label className="block text-gray-300 mb-1 text-sm">سطح دسترس�R</label>
+                  <label className="block text-gray-300 mb-1 text-sm">سطح دسترسی</label>
                   <select
                     value={roleWorkspaceForm.permissionLevel}
                     onChange={(e) => setRoleWorkspaceForm({ ...roleWorkspaceForm, permissionLevel: e.target.value })}
                     className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white text-sm"
                   >
                     <option value="view">مشاهده</option>
-                    <option value="edit">Ùˆیرایش</option>
+                    <option value="edit">ویرایش</option>
                     <option value="admin">مدیریت</option>
                   </select>
                 </div>
@@ -1156,14 +1199,14 @@ export default function PermissionsManagementPage() {
                     onClick={() => setRoleWorkspaceForm({ id: '', role: '', workspace: '', permissionLevel: 'view', isActive: true })}
                     className="flex-1 glass-liquid-card p-2 hover:bg-gray-700/50 transition-all duration-300 text-center text-sm"
                   >
-                    پاک کرد� 
+                    پاک کردن
                   </button>
                 </div>
               </div>
 
               <div className="mt-4 space-y-2 max-h-48 overflow-y-auto">
                 {roleWorkspacePermissions.length === 0 && (
-                  <p className="text-xs text-gray-400">هیچ Ù…Ø¬Ùˆزی ثبت نشده است.</p>
+                  <p className="text-xs text-gray-400">هیچ مجوزی ثبت نشده است.</p>
                 )}
                 {roleWorkspacePermissions.map((permission: any) => (
                   <div key={permission.id} className="flex items-center justify-between bg-gray-800/50 p-2 rounded">
@@ -1176,7 +1219,7 @@ export default function PermissionsManagementPage() {
                         disabled={currentUser?.role === 'MANAGER' && permission.role === 'ADMIN'}
                         className="text-xs text-teal-300 disabled:opacity-50"
                       >
-                        Ùˆیرایش
+                        ویرایش
                       </button>
                       <button
                         onClick={() => handleDeleteRoleWorkspacePermission(permission)}
@@ -1193,7 +1236,7 @@ export default function PermissionsManagementPage() {
 
             {/* Role Feature Permissions */}
             <div className="glass-liquid-card p-4">
-              <h3 className="text-lg font-semibold text-white mb-3">Ù…Ø¬Ùˆزهای ویژگی بر اساس نقش</h3>
+              <h3 className="text-lg font-semibold text-white mb-3">مجوزهای ویژگی بر اساس نقش</h3>
               <div className="space-y-3">
                 <div>
                   <label className="block text-gray-300 mb-1 text-sm">نقش</label>
@@ -1203,11 +1246,12 @@ export default function PermissionsManagementPage() {
                     className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white text-sm"
                   >
                     <option value="">انتخاب نقش</option>
-                    {ROLE_OPTIONS.map(role => (
+                    {ROLE_OPTIONS
+                      .filter((role) => !(currentUser?.role === 'MANAGER' && role === 'ADMIN'))
+                      .map(role => (
                       <option
                         key={role}
                         value={role}
-                        disabled={currentUser?.role === 'MANAGER' && role === 'ADMIN'}
                       >
                         {role}
                       </option>
@@ -1244,14 +1288,14 @@ export default function PermissionsManagementPage() {
                 </div>
 
                 <div>
-                  <label className="block text-gray-300 mb-1 text-sm">سطح دسترس�R</label>
+                  <label className="block text-gray-300 mb-1 text-sm">سطح دسترسی</label>
                   <select
                     value={roleFeatureForm.permissionLevel}
                     onChange={(e) => setRoleFeatureForm({ ...roleFeatureForm, permissionLevel: e.target.value })}
                     className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white text-sm"
                   >
                     <option value="view">مشاهده</option>
-                    <option value="edit">Ùˆیرایش</option>
+                    <option value="edit">ویرایش</option>
                     <option value="admin">مدیریت</option>
                   </select>
                 </div>
@@ -1267,14 +1311,14 @@ export default function PermissionsManagementPage() {
                     onClick={() => setRoleFeatureForm({ id: '', role: '', workspace: '', feature: '', permissionLevel: 'view', isActive: true })}
                     className="flex-1 glass-liquid-card p-2 hover:bg-gray-700/50 transition-all duration-300 text-center text-sm"
                   >
-                    پاک کرد� 
+                    پاک کردن
                   </button>
                 </div>
               </div>
 
               <div className="mt-4 space-y-2 max-h-48 overflow-y-auto">
                 {roleFeaturePermissions.length === 0 && (
-                  <p className="text-xs text-gray-400">هیچ Ù…Ø¬Ùˆزی ثبت نشده است.</p>
+                  <p className="text-xs text-gray-400">هیچ مجوزی ثبت نشده است.</p>
                 )}
                 {roleFeaturePermissions.map((permission) => (
                   <div key={permission.id} className="flex items-center justify-between bg-gray-800/50 p-2 rounded">
@@ -1287,7 +1331,7 @@ export default function PermissionsManagementPage() {
                         disabled={currentUser?.role === 'MANAGER' && permission.role === 'ADMIN'}
                         className="text-xs text-teal-300 disabled:opacity-50"
                       >
-                        Ùˆیرایش
+                        ویرایش
                       </button>
                       <button
                         onClick={() => handleDeleteRoleFeaturePermission(permission)}
@@ -1334,11 +1378,12 @@ export default function PermissionsManagementPage() {
                     }))}
                     searchable={true}
                     clearable={true}
+                    disabled={!!editingPermission}
                   />
                 </div>
 
                 {/* Feature Selection Table */}
-                {formData.workspace && (
+                {formData.workspace && !editingPermission && (
                   <div>
                     <div className="flex justify-between items-center mb-3">
                       <div className="flex items-center gap-2">
@@ -1349,10 +1394,10 @@ export default function PermissionsManagementPage() {
                         </div>
                         <div>
                           <h3 className="text-base font-semibold text-gray-200">
-                            انتخاب ÙˆÛŒÚ˜گی‌ها برای {getWorkspaceDisplayName(formData.workspace)}
+                            انتخاب ویژگی‌ها برای {getWorkspaceDisplayName(formData.workspace)}
                           </h3>
                           <p className="text-xs text-gray-400">
-                            {getFilteredFeatures().length} ویژگی Ù…ÙˆØ¬Ùˆد است
+                            {getFilteredFeatures().length} ویژگی موجود است
                           </p>
                         </div>
                       </div>
@@ -1369,14 +1414,14 @@ export default function PermissionsManagementPage() {
                           className="flex items-center gap-1 px-2 py-1 bg-green-500/20 text-green-300 border border-green-500/30 rounded text-xs hover:bg-green-500/30 transition-all duration-200"
                         >
                           <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
-                          همه (Ùˆیرایش)
+                          همه (ویرایش)
                         </button>
                         <button
                           onClick={clearAllSelections}
                           className="flex items-center gap-1 px-2 py-1 bg-red-500/20 text-red-300 border border-red-500/30 rounded text-xs hover:bg-red-500/30 transition-all duration-200"
                         >
                           <div className="w-1.5 h-1.5 bg-red-400 rounded-full"></div>
-                          پاک کرد� 
+                          پاک کردن
                         </button>
                       </div>
                     </div>
@@ -1393,19 +1438,19 @@ export default function PermissionsManagementPage() {
                             </th>
                             <th className="p-2 text-center text-gray-200 font-semibold border-b border-gray-600 text-sm">
                               <div className="flex items-center justify-center gap-1">
-                                <span>Ùˆضعیت فعلی</span>
+                                <span>وضعیت فعلی</span>
                                 <div className="w-1.5 h-1.5 bg-blue-400 rounded-full"></div>
                               </div>
                             </th>
                             <th className="p-2 text-center text-gray-200 font-semibold border-b border-gray-600 text-sm">
                               <div className="flex items-center justify-center gap-1">
-                                <span>ا� تخاب</span>
+                                <span>انتخاب</span>
                                 <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
                               </div>
                             </th>
                             <th className="p-2 text-center text-gray-200 font-semibold border-b border-gray-600 text-sm">
                               <div className="flex items-center justify-center gap-1">
-                                <span>سطح دسترس�R</span>
+                                <span>سطح دسترسی</span>
                                 <div className="w-1.5 h-1.5 bg-purple-400 rounded-full"></div>
                               </div>
                             </th>
@@ -1453,7 +1498,7 @@ export default function PermissionsManagementPage() {
                                   ) : (
                                     <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-600/20 text-gray-400 border border-gray-600/30">
                                       <div className="w-1.5 h-1.5 rounded-full mr-1 bg-gray-500"></div>
-                                      Ø¨Ø¯Ùˆن دسترسی
+                                      بدون دسترسی
                                     </span>
                                   )}
                                 </td>
@@ -1508,7 +1553,7 @@ export default function PermissionsManagementPage() {
                                       `}
                                     >
                                       <option value="view">مشاهده</option>
-                                      <option value="edit">Ùˆیرایش</option>
+                                      <option value="edit">ویرایش</option>
                                       <option value="admin">مدیر</option>
                                     </select>
                                   )}
@@ -1534,7 +1579,7 @@ export default function PermissionsManagementPage() {
                                 {Object.keys(selectedFeatures).length} ویژگی انتخاب شده
                               </span>
                               <p className="text-xs text-gray-400">
-                                آماده برای ایجاد Ù…Ø¬Ùˆز
+                                آماده برای ایجاد مجوز
                               </p>
                             </div>
                           </div>
@@ -1545,7 +1590,7 @@ export default function PermissionsManagementPage() {
                               className="px-3 py-1 bg-gray-800/50 border border-gray-600 rounded text-white text-xs focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500/20 transition-all duration-200"
                             >
                               <option value="view">مشاهده</option>
-                              <option value="edit">Ùˆیرایش</option>
+                              <option value="edit">ویرایش</option>
                               <option value="admin">مدیر</option>
                             </select>
                             <button
@@ -1570,6 +1615,13 @@ export default function PermissionsManagementPage() {
                   </div>
                 )}
 
+                {editingPermission && (
+                  <div className="bg-gray-800/60 border border-gray-600 rounded-lg p-3 text-sm text-gray-300">
+                    <p>ویژگی انتخاب‌شده: {getFeatureDisplayName(formData.feature)}</p>
+                    <p className="text-xs text-gray-400 mt-1">در حالت ویرایش، نوع ویژگی و فضای کاری ثابت هستند.</p>
+                  </div>
+                )}
+
 
                 <div>
                   <label className="block text-gray-300 mb-1 text-sm">تاریخ انقضا (اختیاری)</label>
@@ -1588,13 +1640,13 @@ export default function PermissionsManagementPage() {
                     onClick={handleBulkCreatePermissions}
                     className="flex-1 glass-liquid-card p-2 hover:bg-teal-500/20 transition-all duration-300 text-center text-sm"
                   >
-                    ایجاد {Object.keys(selectedFeatures).length} Ù…Ø¬Ùˆز
+                    ایجاد {Object.keys(selectedFeatures).length} مجوز
                   </button>
                 ) : (
                   <button
                     onClick={handleCreatePermission}
                     className="flex-1 glass-liquid-card p-2 hover:bg-teal-500/20 transition-all duration-300 text-center text-sm"
-                    disabled={!formData.feature}
+                    disabled={!formData.feature || (currentUser?.role === 'MANAGER' && selectedUser?.role === 'ADMIN')}
                   >
                     {editingPermission ? 'ویرایش' : 'ایجاد'}
                   </button>
@@ -1608,7 +1660,7 @@ export default function PermissionsManagementPage() {
                   }}
                   className="flex-1 glass-liquid-card p-2 hover:bg-gray-700/50 transition-all duration-300 text-center text-sm"
                 >
-                  ا� صراف
+                  انصراف
                 </button>
               </div>
             </div>
@@ -1620,7 +1672,7 @@ export default function PermissionsManagementPage() {
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="glass-liquid-card p-6 w-full max-w-md mx-auto">
               <h3 className="text-lg font-semibold text-white mb-4">
-                ایجاد Ù…Ø¬Ùˆز فضای کاری
+                ایجاد مجوز فضای کاری
               </h3>
               
               <div className="space-y-4">
@@ -1648,13 +1700,13 @@ export default function PermissionsManagementPage() {
 
                 <div>
                   <EnhancedDropdown
-                    label="سطح دسترس�R"
+                    label="سطح دسترسی"
                     value={formData.permissionLevel}
                     onChange={(value) => setFormData({ ...formData, permissionLevel: value })}
                     placeholder="انتخاب سطح دسترسی"
                     options={[
                       { value: 'view', label: 'مشاهده' },
-                      { value: 'edit', label: 'Ùˆیرایش' },
+                      { value: 'edit', label: 'ویرایش' },
                       { value: 'admin', label: 'مدیریت' }
                     ]}
                     searchable={false}
@@ -1678,7 +1730,7 @@ export default function PermissionsManagementPage() {
                   onClick={handleCreateWorkspacePermission}
                   className="flex-1 glass-liquid-card p-3 hover:bg-teal-500/20 transition-all duration-300 text-center"
                 >
-                  ایجاد Ù…Ø¬Ùˆز فضای کاری
+                  ایجاد مجوز فضای کاری
                 </button>
                 <button
                   onClick={() => {
@@ -1687,7 +1739,7 @@ export default function PermissionsManagementPage() {
                   }}
                   className="flex-1 glass-liquid-card p-3 hover:bg-gray-700/50 transition-all duration-300 text-center"
                 >
-                  ا� صراف
+                  انصراف
                 </button>
               </div>
             </div>

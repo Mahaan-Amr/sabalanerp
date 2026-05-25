@@ -19,7 +19,6 @@ import {
   FaSearch,
   FaTimes,
   FaEdit,
-  FaLayerGroup,
   FaRuler,
   FaSquare,
   FaCubes,
@@ -40,7 +39,6 @@ import { StoneCADDesigner } from '@/components/stone-cad/StoneCADDesigner';
 import { Step1ContractDate } from '@/features/contract-creation/components/steps/Step1ContractDate';
 import { Step2CustomerSelection } from '@/features/contract-creation/components/steps/Step2CustomerSelection';
 import { Step3ProjectManagement } from '@/features/contract-creation/components/steps/Step3ProjectManagement';
-import { Step4ProductTypeSelection } from '@/features/contract-creation/components/steps/Step4ProductTypeSelection';
 import { Step5ProductSelection } from '@/features/contract-creation/components/steps/Step5ProductSelection';
 import { Step6DeliverySchedule } from '@/features/contract-creation/components/steps/Step6DeliverySchedule';
 import { Step7PaymentMethod } from '@/features/contract-creation/components/steps/Step7PaymentMethod';
@@ -159,6 +157,13 @@ import type {
 
 export default function CreateContractWizard() {
   const router = useRouter();
+
+  const normalizeWizardStep = (step: number): number => {
+    if (Number.isNaN(step)) return 1;
+    if (step <= 3) return step;
+    if (step === 4) return 4;
+    return Math.max(1, Math.min(step - 1, WIZARD_STEPS.length));
+  };
   
   // Use contract wizard hook for step management
   const {
@@ -1402,7 +1407,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     treadProductSearchTerm,
     riserProductSearchTerm,
     landingProductSearchTerm,
-    selectedProductTypeForAddition: wizardData.selectedProductTypeForAddition
+    selectedProductTypeForAddition: null
   });
   const {
     filteredCustomers,
@@ -1448,7 +1453,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             });
 
             // Use the saved step instead of URL step parameter
-            setCurrentStep(savedStep);
+            setCurrentStep(normalizeWizardStep(savedStep));
             setWizardData(savedWizardData);
             setStateRestored(true);
             restorationAttempted.current = true;
@@ -1477,7 +1482,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           } catch (error) {
             console.error('❌ Error restoring wizard state:', error);
             // If restoration fails, use URL step as fallback
-            setCurrentStep(parseInt(step));
+            setCurrentStep(normalizeWizardStep(parseInt(step, 10)));
             setStateRestored(true);
             restorationAttempted.current = true;
 
@@ -1489,7 +1494,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         } else {
           // If no saved state, use URL step as fallback
           console.log('⚠️ No saved state found, using URL step:', step);
-          setCurrentStep(parseInt(step));
+          setCurrentStep(normalizeWizardStep(parseInt(step, 10)));
           setStateRestored(true);
           restorationAttempted.current = true;
 
@@ -1647,58 +1652,50 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     });
     syncDraftWithProduct(partType, product);
   };
-  
-  // Handle product selection and open configuration modal
-  const handleProductSelection = (product: Product) => {
-    console.log('🎯 Product Selected:', {
-      id: product.id,
-      name: product.namePersian,
-      widthValue: product.widthValue,
-      code: product.code,
-      basePrice: product.basePrice,
-      productType: wizardData.selectedProductTypeForAddition
-    });
-    
-    setSelectedProduct(product);
-    
-    const selectedProductType = wizardData.selectedProductTypeForAddition;
-    
-    // Initialize product configuration based on product type
+
+  const initializeProductConfigForType = (product: Product, selectedProductType: ContractUsageType | null) => {
+    if (!selectedProductType) {
+      setStairSystemConfig(null);
+      setProductConfig({
+        productId: product.id,
+        product,
+        stoneCode: product.code,
+        stoneName: product.namePersian,
+        diameterOrWidth: product.widthValue,
+        pricePerSquareMeter: product.basePrice || 0
+      });
+      setLengthUnit('m');
+      setWidthUnit('cm');
+      return;
+    }
+
     if (selectedProductType === 'stair') {
-      // Check if using new V2 flow
       if (useStairFlowV2) {
-        // NEW V2 FLOW: Pre-fill the selected product in the active draft
         const [currentDraft, setCurrentDraft] = getActiveDraft();
         const productLabel = product.namePersian || product.name || '';
-        
-        // Pre-fill the active draft with selected product
+
         setCurrentDraft({
           ...currentDraft,
           stoneId: product.id,
           stoneLabel: productLabel,
           stoneProduct: product,
           pricePerSquareMeter: product.basePrice || 0,
-          thicknessCm: product.thicknessValue || null // قطر = ضخامت (thickness), not عرض (width)
+          thicknessCm: product.thicknessValue || null
         });
-        
-        // Pre-fill search term to show the selected product
+
         stairSystemV2.setStoneSearchTerm(productLabel);
-        
-        // Set product config for modal type detection
         setProductConfig({
           productId: product.id,
-          product: product,
+          product,
           productType: 'stair'
         });
       } else {
-        // OLD FLOW: Initialize for stair system (دستگاه پله)
         const stairConfig = initializeStairSystemConfig(product);
         setStairSystemConfig(stairConfig);
-        
-        // Also set old config for backward compatibility (will be removed later)
+
         const defaultConfig: Partial<ContractProduct> = {
           productId: product.id,
-          product: product,
+          product,
           productType: 'stair',
           stoneCode: product.code,
           stoneName: product.namePersian,
@@ -1736,17 +1733,17 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         setProductConfig(defaultConfig);
         setTreadWidthUnit('m');
         setQuantityType('steps');
-        // Reset collapsible sections
         setTreadExpanded(true);
         setRiserExpanded(true);
         setLandingExpanded(false);
-        // Reset product search terms
         setTreadProductSearchTerm('');
         setRiserProductSearchTerm('');
         setLandingProductSearchTerm('');
       }
-    } else if (selectedProductType === 'slab') {
-      // Initialize for slab stone
+      return;
+    }
+
+    if (selectedProductType === 'slab') {
       const defaultStandardWidthCm = product.widthValue || 0;
       const defaultStandardLengthCm = (product as any)?.lengthValue || 300;
       const defaultOriginalLength = lengthUnit === 'm'
@@ -1754,20 +1751,19 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         : defaultStandardLengthCm;
       const defaultConfig: Partial<ContractProduct> = {
         productId: product.id,
-        product: product,
+        product,
         productType: 'slab',
         stoneCode: product.code,
         stoneName: product.namePersian,
-        diameterOrWidth: product.widthValue, // Use product's width as constant
+        diameterOrWidth: product.widthValue,
         length: 0,
-        width: 0, // No default value - user must input
+        width: 0,
         quantity: 1,
         squareMeters: 0,
         pricePerSquareMeter: product.basePrice || 0,
         totalPrice: 0,
         description: '',
         currency: 'تومان',
-        // Initialize stone cutting fields for 2D cutting
         isCut: false,
         originalWidth: defaultStandardWidthCm,
         originalLength: defaultOriginalLength,
@@ -1775,17 +1771,14 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         cuttingCostPerMeter: 0,
         remainingStones: [],
         cutDetails: [],
-        // Legacy single standard dimension fields (kept for backward compatibility)
         slabStandardLengthCm: defaultStandardLengthCm,
         slabStandardWidthCm: defaultStandardWidthCm,
-        // New multiple standard dimensions support
         slabStandardDimensions: [],
         slabCuttingMode: 'lineBased',
         slabCuttingPricePerSquareMeter: 0,
         slabLineCuttingStrategy: 'length',
         slabLineCuttingLongitudinalMeters: null,
         slabLineCuttingCrossMeters: null,
-        // Initialize برش قائم (vertical edge cuts) - all 4 sides active by default
         slabVerticalCutSides: {
           top: true,
           bottom: true,
@@ -1794,72 +1787,87 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         },
         slabVerticalCutCost: 0,
         slabVerticalCutCostPerMeter: 0,
-        // Initialize remaining stone tracking
         usedRemainingStones: [],
         totalUsedRemainingWidth: 0,
         totalUsedRemainingLength: 0,
-        // Initialize SubService tracking
         appliedSubServices: [],
         totalSubServiceCost: 0,
         usedLengthForSubServices: 0,
         usedSquareMetersForSubServices: 0
       };
-      
+
       setProductConfig(defaultConfig);
       setLengthUnit('m');
       setWidthUnit('cm');
-    } else {
-      // Initialize for longitudinal stone (existing logic)
-      const defaultConfig: Partial<ContractProduct> = {
-        productId: product.id,
-        product: product,
-        productType: 'longitudinal',
-        stoneCode: product.code,
-        stoneName: product.namePersian,
-        diameterOrWidth: product.widthValue, // Use product's width as constant
-        length: 0,
-        width: 0, // No default value - user must input
-        quantity: 1,
-        squareMeters: 0,
-        pricePerSquareMeter: product.basePrice || 0,
-        totalPrice: 0,
-        description: '',
-        currency: 'تومان', // Change from Rial to Toman
-        // Initialize stone cutting fields
-        isCut: false,
-        originalWidth: product.widthValue,
-        originalLength: 0, // Will be set when user enters length
-        cuttingCost: 0,
-        cuttingCostPerMeter: 0,
-        remainingStones: [],
-        cutDetails: [],
-        // Initialize remaining stone tracking
-        usedRemainingStones: [],
-        totalUsedRemainingWidth: 0,
-        totalUsedRemainingLength: 0,
-        // Initialize SubService tracking
-        appliedSubServices: [],
-        totalSubServiceCost: 0,
-        usedLengthForSubServices: 0,
-        usedSquareMetersForSubServices: 0
-      };
-      
-      setProductConfig(defaultConfig);
-      setLengthUnit('m');
-      setWidthUnit('cm');
+      return;
     }
-    
+
+    const defaultConfig: Partial<ContractProduct> = {
+      productId: product.id,
+      product,
+      productType: 'longitudinal',
+      stoneCode: product.code,
+      stoneName: product.namePersian,
+      diameterOrWidth: product.widthValue,
+      length: 0,
+      width: 0,
+      quantity: 1,
+      squareMeters: 0,
+      pricePerSquareMeter: product.basePrice || 0,
+      totalPrice: 0,
+      description: '',
+      currency: 'تومان',
+      isCut: false,
+      originalWidth: product.widthValue,
+      originalLength: 0,
+      cuttingCost: 0,
+      cuttingCostPerMeter: 0,
+      remainingStones: [],
+      cutDetails: [],
+      usedRemainingStones: [],
+      totalUsedRemainingWidth: 0,
+      totalUsedRemainingLength: 0,
+      appliedSubServices: [],
+      totalSubServiceCost: 0,
+      usedLengthForSubServices: 0,
+      usedSquareMetersForSubServices: 0
+    };
+
+    setProductConfig(defaultConfig);
+    setLengthUnit('m');
+    setWidthUnit('cm');
+  };
+
+  // Handle product selection and open configuration modal
+  const handleProductSelection = (product: Product) => {
+    const rememberedType = wizardData.selectedProductTypeForAddition;
+    const selectedProductType = rememberedType && productSupportsContractType(product, rememberedType)
+      ? rememberedType
+      : null;
+
+    setSelectedProduct(product);
+    initializeProductConfigForType(product, selectedProductType);
     setIsEditMode(false);
     setEditingProductIndex(null);
-    setHasQuantityBeenInteracted(false); // Reset quantity interaction tracking
-    setTouchedFields(new Set()); // Reset touched fields for new product
-    setErrors({}); // Clear errors when opening modal
+    setHasQuantityBeenInteracted(false);
+    setTouchedFields(new Set());
+    setErrors({});
     setShowProductModal(true);
-    
-    console.log('🎯 Modal State Initialized:', {
-      productType: selectedProductType,
-      pricePerSquareMeter: productConfig.pricePerSquareMeter
-    });
+  };
+
+  const handleModalProductTypeChange = (type: ContractUsageType, selectedModalProduct: Product | null) => {
+    if (isEditMode || !selectedModalProduct) return;
+    initializeProductConfigForType(selectedModalProduct, type);
+  };
+
+  const handleV2ModalProductTypeChange = (type: ContractUsageType) => {
+    if (isEditMode || !selectedProduct) return;
+    if (type === 'stair') return;
+    stairSystemV2.setStairSessionItems([]);
+    stairSystemV2.setStairSessionId(null);
+    setStairSystemConfig(null);
+    initializeProductConfigForType(selectedProduct, type);
+    setErrors({});
   };
 
   // Handle unit conversion for length
@@ -2667,7 +2675,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
   };
 
   useEffect(() => {
-    if (currentStep === 8 && wizardData.signature?.contractId) {
+    if (currentStep === 7 && wizardData.signature?.contractId) {
       refreshConfirmationStatus();
     }
   }, [currentStep, wizardData.signature?.contractId]);
@@ -2678,7 +2686,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     console.log('🔍 Main Product Validation Debug:', {
       selectedProduct: selectedProduct,
       productConfig: productConfig,
-      productType: wizardData.selectedProductTypeForAddition,
+      productType: productConfig.productType || wizardData.selectedProductTypeForAddition,
       hasLength: !!productConfig.length,
       hasWidth: !!productConfig.width,
       hasSquareMeters: !!productConfig.squareMeters,
@@ -2691,8 +2699,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       return;
     }
     
-    // Get product type from wizard data (required)
-    const productType = wizardData.selectedProductTypeForAddition;
+    // Resolve product type from modal selection (fallback to remembered type)
+    const productType = productConfig.productType || wizardData.selectedProductTypeForAddition;
     if (!productType) {
       console.error('❌ Product type not selected');
       setErrors({ products: 'لطفاً ابتدا نوع محصول را انتخاب کنید' });
@@ -3059,7 +3067,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         });
         
         updateWizardData({
-          products: [...updatedProducts, ...productsToAdd]
+          products: [...updatedProducts, ...productsToAdd],
+          selectedProductTypeForAddition: productType
         });
         
         console.log('✅ Successfully updated stair system in contract!', {
@@ -3070,7 +3079,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       } else {
         // Adding new stair system
         updateWizardData({
-          products: [...wizardData.products, ...productsToAdd]
+          products: [...wizardData.products, ...productsToAdd],
+          selectedProductTypeForAddition: productType
         });
         
         console.log('✅ Successfully added stair system to contract!', {
@@ -3098,7 +3108,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     }
     
     // SLAB STONE VALIDATION AND CALCULATION
-    if (productConfig.productType === 'slab') {
+    if (productType === 'slab') {
       // Validate required fields - at least one of length/width or squareMeters must be provided
       const hasDimensions = (productConfig.length && productConfig.width) || productConfig.squareMeters;
       const hasRequiredFields = productConfig.quantity && productConfig.pricePerSquareMeter;
@@ -3443,9 +3453,9 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       if (isEditMode && editingProductIndex !== null) {
         const updatedProducts = [...wizardData.products];
         updatedProducts[editingProductIndex] = finalProduct;
-        updateWizardData({ products: updatedProducts });
+        updateWizardData({ products: updatedProducts, selectedProductTypeForAddition: productType });
       } else {
-        updateWizardData({ products: [...wizardData.products, finalProduct] });
+        updateWizardData({ products: [...wizardData.products, finalProduct], selectedProductTypeForAddition: productType });
       }
       
       console.log('✅ Successfully added slab product to contract!', { finalProduct });
@@ -3699,12 +3709,14 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       const updatedProducts = [...wizardData.products];
       updatedProducts[editingProductIndex] = finalProduct;
       updateWizardData({
-        products: updatedProducts
+        products: updatedProducts,
+        selectedProductTypeForAddition: productType
       });
     } else {
       // Add new product
       updateWizardData({
-        products: [...wizardData.products, finalProduct]
+        products: [...wizardData.products, finalProduct],
+        selectedProductTypeForAddition: productType
       });
     }
     
@@ -3751,17 +3763,12 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           newErrors.projectId = 'انتخاب پروژه الزامی است';
         }
         break;
-      case 4: // NEW: Product Type Selection
-        if (!wizardData.selectedProductTypeForAddition) {
-          newErrors.productType = 'انتخاب نوع محصول الزامی است';
-        }
-        break;
-      case 5: // Updated: Product Selection (was 4)
+      case 4: // Product Selection
         if (wizardData.products.length === 0) {
           newErrors.products = 'انتخاب حداقل یک محصول الزامی است';
         }
         break;
-      case 6: // Updated: Delivery Schedule (was 5)
+      case 5: // Delivery Schedule
         if (wizardData.deliveries.length === 0) {
           newErrors.deliveries = 'تعیین حداقل یک تحویل الزامی است';
         } else {
@@ -3818,7 +3825,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           }
         }
         break;
-      case 7: // Payment Method
+      case 6: // Payment Method
         if (wizardData.payment.payments.length === 0) {
           newErrors.paymentMethod = 'حداقل یک پرداخت باید اضافه شود';
         } else {
@@ -3871,14 +3878,14 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
   // Reset delivery step selection when leaving the step
   useEffect(() => {
-    if (currentStep !== 6) {
+    if (currentStep !== 5) {
       deliverySchedule.setSelectedProductIndices(new Set());
     }
   }, [currentStep]);
 
   // Sync payment total when entering Step 7 so مبلغ کل قرارداد shows correct sum of products
   useEffect(() => {
-    if (currentStep === 7) {
+    if (currentStep === 6) {
       updatePaymentTotal();
     }
   }, [currentStep, updatePaymentTotal]);
@@ -3894,6 +3901,12 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     setCurrentStep(prev => Math.max(prev - 1, 1));
     setErrors({});
   };
+
+  const shouldShowLegacyStairModal =
+    showProductModal &&
+    !useStairFlowV2 &&
+    ((productConfig.productType || wizardData.selectedProductTypeForAddition) === 'stair') &&
+    (selectedProduct || (productConfig.productType === 'stair' && stairSystemConfig));
 
   const renderStepContent = () => {
     switch (currentStep) {
@@ -3931,29 +3944,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             currentStep={currentStep}
           />
         );
-        
-      case 4: // NEW: Product Type Selection
-        return (
-          <Step4ProductTypeSelection
-            wizardData={wizardData}
-            updateWizardData={updateWizardData}
-            errors={errors}
-          />
-        );
-      case 5: // Updated: Product Selection (was case 4)
-        // Conditional rendering based on product type
-        const selectedProductType = wizardData.selectedProductTypeForAddition;
-        
-        if (!selectedProductType) {
-          return (
-            <div className="space-y-6">
-              <div className="text-center">
-                <p className="text-red-500">لطفاً ابتدا نوع محصول را انتخاب کنید</p>
-              </div>
-            </div>
-          );
-        }
-        
+
+      case 4:
         return (
           <Step5ProductSelection
             wizardData={wizardData}
@@ -4026,8 +4018,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             productsSummary={productsSummary}
           />
         );
-        
-      case 6: // Delivery Schedule
+
+      case 5: // Delivery Schedule
         return (
           <Step6DeliverySchedule
             wizardData={wizardData}
@@ -4035,8 +4027,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             errors={errors}
           />
         );
-        
-      case 7: // Payment Method
+
+      case 6: // Payment Method
         return (
           <Step7PaymentMethod
             wizardData={wizardData}
@@ -4047,8 +4039,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             onEditPaymentEntry={paymentHandlers.handleEditPaymentEntry}
           />
         );
-        
-      case 8: { // Digital Signature
+
+      case 7: { // Digital Signature
         const mapProductTypeLabel = (type?: string) => {
           if (type === 'longitudinal') return 'طولی';
           if (type === 'stair') return 'پله';
@@ -4296,6 +4288,37 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                 >
                   <FaTimes className="w-5 h-5" />
                 </button>
+              </div>
+
+              {/* Type Switcher (stair V2 modal) */}
+              <div className="px-6 py-3 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-900/40 dark:to-slate-800/40 flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">نوع محصول:</span>
+                  <div className="flex flex-wrap gap-2">
+                    {(['longitudinal', 'stair', 'slab'] as const).map((type) => {
+                      const typeLabel = PRODUCT_TYPES.find((item) => item.id === type)?.name ?? type;
+                      const isSelected = productConfig.productType === type;
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          disabled={isEditMode}
+                          onClick={() => handleV2ModalProductTypeChange(type)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                            isSelected
+                              ? 'bg-gradient-to-r from-teal-500 to-teal-600 border-teal-400 text-white shadow-sm'
+                              : 'bg-slate-900/60 border-slate-500/70 text-slate-200 hover:border-teal-400 hover:text-teal-200'
+                          } ${isEditMode ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        >
+                          {typeLabel}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {isEditMode && (
+                    <span className="text-xs text-slate-500 dark:text-slate-400">در حالت ویرایش قابل تغییر نیست</span>
+                  )}
+                </div>
               </div>
               
               {/* Step Indicators */}
@@ -6578,12 +6601,12 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                       });
                       
                       // Add updated products
-                      updateWizardData({ products: [...updatedProducts, ...productsToAdd] });
+                      updateWizardData({ products: [...updatedProducts, ...productsToAdd], selectedProductTypeForAddition: 'stair' });
                     } else {
                       // Fallback: just replace the single product
                       const updatedProducts = [...wizardData.products];
                       updatedProducts[editingProductIndex] = stairSystemV2.stairSessionItems[0];
-                      updateWizardData({ products: updatedProducts });
+                      updateWizardData({ products: updatedProducts, selectedProductTypeForAddition: 'stair' });
                     }
                   } else {
                     // Add mode: append session items to wizardData
@@ -6736,7 +6759,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                       }
                     });
                     
-                    updateWizardData({ products: [...updatedProducts, ...productsToAdd] });
+                    updateWizardData({ products: [...updatedProducts, ...productsToAdd], selectedProductTypeForAddition: 'stair' });
                   }
                   
                   stairSystemV2.setStairSessionItems([]);
@@ -6749,7 +6772,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             </div>
           </div>
         )}
-        {showProductModal && (wizardData.selectedProductTypeForAddition === 'stair' && !useStairFlowV2) && (selectedProduct || (productConfig.productType === 'stair' && stairSystemConfig)) && (
+        {shouldShowLegacyStairModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4">
             <div className="bg-white dark:bg-gray-800 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto z-[10000]">
               <div className="p-6">
@@ -9756,7 +9779,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
         {/* New Modal Components */}
         <ProductConfigurationModal
-          isOpen={productModal.showProductModal && (wizardData.selectedProductTypeForAddition === 'longitudinal' || wizardData.selectedProductTypeForAddition === 'slab' || (wizardData.selectedProductTypeForAddition === 'stair' && !useStairFlowV2))}
+          isOpen={productModal.showProductModal && !(productModal.productConfig.productType === 'stair' && useStairFlowV2) && (!!productModal.selectedProduct || productModal.productConfig.productType === 'stair')}
           onClose={() => {
             productModal.setShowProductModal(false);
             productModal.setSelectedProduct(null);
@@ -9795,6 +9818,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           hasQuantityBeenInteracted={productModal.hasQuantityBeenInteracted}
           setHasQuantityBeenInteracted={productModal.setHasQuantityBeenInteracted}
           onSave={handleAddProductToContract}
+          onProductTypeChange={handleModalProductTypeChange}
           wizardData={wizardData}
           updateWizardData={updateWizardData}
           handleSmartCalculation={productCalculations.handleSmartCalculation}
@@ -9903,4 +9927,3 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     </div>
   );
 }
-

@@ -544,7 +544,7 @@ export const validatePartitions = (
   if (validPartitions.length === 0) {
     return {
       isValid: false,
-      error: 'لطفاً حداقل ÛŒÚ© پارتیشن با ابعاد معتبر تعریف کنید',
+      error: 'لطفاً حداقل یک پارتیشن با ابعاد معتبر تعریف کنید',
       partitionErrors,
       validatedPartitions: partitions
     };

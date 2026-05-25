@@ -11,13 +11,18 @@ const CUID_REGEX = /^c[a-z0-9]{24}$/;
 // @desc    Get all users
 // @route   GET /api/users
 // @access  Private/Admin
-router.get('/', protect, authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/', protect, authorize('ADMIN', 'MANAGER'), async (req: AuthRequest, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const skip = (page - 1) * limit;
 
+    const whereClause = req.user?.role === 'MANAGER'
+      ? { role: { not: 'ADMIN' as const } }
+      : undefined;
+
     const users = await prisma.user.findMany({
+      where: whereClause,
       skip,
       take: limit,
       select: {
@@ -37,7 +42,7 @@ router.get('/', protect, authorize('ADMIN', 'MANAGER'), async (req, res) => {
       }
     });
 
-    const total = await prisma.user.count();
+    const total = await prisma.user.count({ where: whereClause });
 
     res.json({
       success: true,
@@ -216,6 +221,13 @@ router.get('/:id', protect, async (req: AuthRequest, res: Response) => {
       return res.status(403).json({
         success: false,
         error: 'Not authorized to view this user'
+      });
+    }
+
+    if (req.user!.role === 'MANAGER' && user.role === 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot view admin users'
       });
     }
 

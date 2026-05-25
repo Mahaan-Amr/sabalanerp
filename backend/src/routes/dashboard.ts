@@ -194,6 +194,7 @@ router.get('/stats', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_STATS
 router.get('/profile', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_PROFILE_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res) => {
   try {
     const userId = req.user.id;
+    const now = new Date();
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -222,7 +223,8 @@ router.get('/profile', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_PRO
     const userFeaturePermissions = await prisma.featurePermission.findMany({
       where: {
         userId: userId,
-        isActive: true
+        isActive: true,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
       },
       select: {
         feature: true,
@@ -251,7 +253,8 @@ router.get('/profile', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_PRO
     const userWorkspacePermissions = await prisma.workspacePermission.findMany({
       where: {
         userId: userId,
-        isActive: true
+        isActive: true,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
       },
       select: {
         workspace: true,

@@ -2,7 +2,7 @@
 // Project selection from customer's projects
 
 import React from 'react';
-import { FaPlus, FaCheck } from 'react-icons/fa';
+import { FaPlus, FaCheck, FaUserTie, FaPhone } from 'react-icons/fa';
 import { useRouter } from 'next/navigation';
 import type { ContractWizardData } from '../../types/contract.types';
 
@@ -79,7 +79,7 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
                         {/* Project Manager Name */}
                         {project.projectManagerName && (
                           <div className="flex items-center gap-2">
-                            <span className="text-gray-500 dark:text-gray-400 text-sm">?</span>
+                            <FaUserTie className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
                             <div>
                               <span className="text-xs text-gray-500 dark:text-gray-400 block">مدیر پروژه</span>
                               <span className="text-sm text-gray-600 dark:text-gray-300 font-medium">
@@ -95,7 +95,7 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
                         {/* Project Manager Number */}
                         {project.projectManagerNumber && (
                           <div className="flex items-center gap-2">
-                            <span className="text-gray-500 dark:text-gray-400 text-sm">?</span>
+                            <FaPhone className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
                             <div>
                               <span className="text-xs text-gray-500 dark:text-gray-400 block">شماره مدیر پروژه</span>
                               <span className="text-sm text-gray-600 dark:text-gray-300 font-medium">
@@ -122,7 +122,7 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
                   currentStep: currentStep,
                   wizardData: wizardData
                 }));
-                console.log('? Saving wizard state for project creation:', {
+                console.log('Saving wizard state for project creation:', {
                   currentStep,
                   wizardData
                 });

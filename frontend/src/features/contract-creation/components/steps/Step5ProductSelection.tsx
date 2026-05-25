@@ -72,23 +72,11 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   productsSummary
 }) => {
   const router = useRouter();
-  const selectedProductType = wizardData.selectedProductTypeForAddition;
-
-  if (!selectedProductType) {
-    return (
-      <div className="space-y-6">
-        <div className="text-center">
-          <p className="text-red-500">لطفاً ابتدا نوع محصول را انتخاب کنید</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       <div className="text-center">
         <h3 className="text-xl font-semibold text-gray-800 dark:text-white mb-2">
-          انتخاب محصولات ({PRODUCT_TYPES.find(t => t.id === selectedProductType)?.name})
+          انتخاب محصولات
         </h3>
         <p className="text-gray-600 dark:text-gray-300">
           محصولات را از کاتالوگ انتخاب کنید

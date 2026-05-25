@@ -7,6 +7,26 @@ import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES, FEATURE_LABELS, FE
 const router = express.Router();
 const prisma = new PrismaClient();
 
+const isManager = (req: any) => req.user?.role === 'MANAGER';
+
+const getFeatureWorkspace = (feature: string): string | null => {
+  if (!Object.values(FEATURES).includes(feature as any)) {
+    return null;
+  }
+  return FEATURE_WORKSPACE_MAP[feature as keyof typeof FEATURE_WORKSPACE_MAP] || null;
+};
+
+const validateFeatureWorkspacePair = (feature: string, workspace: string): string | null => {
+  const mappedWorkspace = getFeatureWorkspace(feature);
+  if (!mappedWorkspace) {
+    return 'Invalid feature';
+  }
+  if (mappedWorkspace !== workspace) {
+    return `Workspace "${workspace}" is not valid for feature "${feature}"`;
+  }
+  return null;
+};
+
 // ==================== FEATURE PERMISSIONS ====================
 
 // @desc    Get feature definitions (source of truth for UI)
@@ -53,9 +73,26 @@ router.get('/features', protect, authorize('ADMIN', 'MANAGER'), async (req: any,
 
     let whereClause: any = {};
 
+    if (isManager(req) && userId) {
+      const targetUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true }
+      });
+      if (targetUser?.role === 'ADMIN') {
+        return res.status(403).json({
+          success: false,
+          error: 'Managers cannot access admin permissions'
+        });
+      }
+    }
+
     if (userId) whereClause.userId = userId;
     if (workspace) whereClause.workspace = workspace;
     if (feature) whereClause.feature = feature;
+
+    if (isManager(req)) {
+      whereClause.user = { role: { not: 'ADMIN' } };
+    }
 
     const permissions = await prisma.featurePermission.findMany({
       where: whereClause,
@@ -193,6 +230,14 @@ router.post('/features', protect, authorize('ADMIN', 'MANAGER'), [
 
     const { userId, workspace, feature, permissionLevel, expiresAt } = req.body;
 
+    const featureWorkspaceError = validateFeatureWorkspacePair(feature, workspace);
+    if (featureWorkspaceError) {
+      return res.status(400).json({
+        success: false,
+        error: featureWorkspaceError
+      });
+    }
+
     // Check if permission already exists
     const existingPermission = await prisma.featurePermission.findUnique({
       where: {
@@ -260,6 +305,14 @@ router.post('/features', protect, authorize('ADMIN', 'MANAGER'), [
       }
     });
 
+    console.info('[permissions] feature permission created', {
+      actorId: req.user.id,
+      targetUserId: userId,
+      workspace,
+      feature,
+      permissionLevel
+    });
+
     res.status(201).json({
       success: true,
       data: permission
@@ -277,13 +330,24 @@ router.post('/features', protect, authorize('ADMIN', 'MANAGER'), [
 // @route   PUT /api/permissions/features/:id
 // @access  Private/Admin
 router.put('/features/:id', protect, authorize('ADMIN', 'MANAGER'), [
+  body('workspace').optional().notEmpty().withMessage('Workspace cannot be empty'),
+  body('feature').optional().notEmpty().withMessage('Feature cannot be empty'),
   body('permissionLevel').optional().isIn(['view', 'edit', 'admin']).withMessage('Invalid permission level'),
   body('expiresAt').optional().isISO8601().withMessage('Invalid expiration date'),
   body('isActive').optional().isBoolean().withMessage('Invalid active status')
 ], async (req: any, res: Response) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: errors.array()
+      });
+    }
+
     const { id } = req.params;
-    const { permissionLevel, expiresAt, isActive } = req.body;
+    const { permissionLevel, expiresAt, isActive, workspace, feature } = req.body;
 
     const permission = await prisma.featurePermission.findUnique({
       where: { id }
@@ -307,12 +371,26 @@ router.put('/features/:id', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
+    const nextFeature = feature ?? permission.feature;
+    const nextWorkspace = workspace ?? permission.workspace;
+    const featureWorkspaceError = validateFeatureWorkspacePair(nextFeature, nextWorkspace);
+    if (featureWorkspaceError) {
+      return res.status(400).json({
+        success: false,
+        error: featureWorkspaceError
+      });
+    }
+
     const updatedPermission = await prisma.featurePermission.update({
       where: { id },
       data: {
+        ...(feature && { feature }),
+        ...(workspace && { workspace }),
         ...(permissionLevel && { permissionLevel }),
         ...(expiresAt !== undefined && { expiresAt: expiresAt ? new Date(expiresAt) : null }),
-        ...(isActive !== undefined && { isActive })
+        ...(isActive !== undefined && { isActive }),
+        grantedBy: req.user.id,
+        grantedAt: new Date()
       },
       include: {
         user: {
@@ -333,6 +411,15 @@ router.put('/features/:id', protect, authorize('ADMIN', 'MANAGER'), [
           }
         }
       }
+    });
+
+    console.info('[permissions] feature permission updated', {
+      actorId: req.user.id,
+      permissionId: id,
+      targetUserId: permission.userId,
+      workspace: nextWorkspace,
+      feature: nextFeature,
+      permissionLevel: permissionLevel ?? permission.permissionLevel
     });
 
     res.json({
@@ -381,6 +468,14 @@ router.delete('/features/:id', protect, authorize('ADMIN', 'MANAGER'), async (re
       where: { id }
     });
 
+    console.info('[permissions] feature permission deleted', {
+      actorId: req.user.id,
+      permissionId: id,
+      targetUserId: permission.userId,
+      workspace: permission.workspace,
+      feature: permission.feature
+    });
+
     res.json({
       success: true,
       message: 'Feature permission deleted successfully'
@@ -413,6 +508,19 @@ router.get('/role-features', protect, authorize('ADMIN', 'MANAGER'), async (req:
     if (role) whereClause.role = role;
     if (workspace) whereClause.workspace = workspace;
     if (feature) whereClause.feature = feature;
+
+    if (isManager(req)) {
+      if (role === 'ADMIN') {
+        return res.status(403).json({
+          success: false,
+          error: 'Managers cannot access admin role permissions'
+        });
+      }
+      whereClause.role = { not: 'ADMIN' };
+      if (role && role !== 'ADMIN') {
+        whereClause.role = role;
+      }
+    }
 
     const permissions = await prisma.roleFeaturePermission.findMany({
       where: whereClause,
@@ -472,6 +580,14 @@ router.post('/role-features', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
+    const featureWorkspaceError = validateFeatureWorkspacePair(feature, workspace);
+    if (featureWorkspaceError) {
+      return res.status(400).json({
+        success: false,
+        error: featureWorkspaceError
+      });
+    }
+
     // Check if permission already exists
     const existingPermission = await prisma.roleFeaturePermission.findUnique({
       where: {
@@ -499,6 +615,14 @@ router.post('/role-features', protect, authorize('ADMIN', 'MANAGER'), [
       }
     });
 
+    console.info('[permissions] role feature permission created', {
+      actorId: req.user.id,
+      role,
+      workspace,
+      feature,
+      permissionLevel
+    });
+
     res.status(201).json({
       success: true,
       data: permission
@@ -516,12 +640,23 @@ router.post('/role-features', protect, authorize('ADMIN', 'MANAGER'), [
 // @route   PUT /api/permissions/role-features/:id
 // @access  Private/Admin
 router.put('/role-features/:id', protect, authorize('ADMIN', 'MANAGER'), [
+  body('workspace').optional().notEmpty().withMessage('Workspace cannot be empty'),
+  body('feature').optional().notEmpty().withMessage('Feature cannot be empty'),
   body('permissionLevel').optional().isIn(['view', 'edit', 'admin']).withMessage('Invalid permission level'),
   body('isActive').optional().isBoolean().withMessage('Invalid active status')
 ], async (req: any, res: Response) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: errors.array()
+      });
+    }
+
     const { id } = req.params;
-    const { permissionLevel, isActive } = req.body;
+    const { permissionLevel, isActive, workspace, feature } = req.body;
 
     const permission = await prisma.roleFeaturePermission.findUnique({
       where: { id }
@@ -541,12 +676,33 @@ router.put('/role-features/:id', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
+    const nextFeature = feature ?? permission.feature;
+    const nextWorkspace = workspace ?? permission.workspace;
+    const featureWorkspaceError = validateFeatureWorkspacePair(nextFeature, nextWorkspace);
+    if (featureWorkspaceError) {
+      return res.status(400).json({
+        success: false,
+        error: featureWorkspaceError
+      });
+    }
+
     const updatedPermission = await prisma.roleFeaturePermission.update({
       where: { id },
       data: {
+        ...(feature && { feature }),
+        ...(workspace && { workspace }),
         ...(permissionLevel && { permissionLevel }),
         ...(isActive !== undefined && { isActive })
       }
+    });
+
+    console.info('[permissions] role feature permission updated', {
+      actorId: req.user.id,
+      permissionId: id,
+      role: permission.role,
+      workspace: nextWorkspace,
+      feature: nextFeature,
+      permissionLevel: permissionLevel ?? permission.permissionLevel
     });
 
     res.json({
@@ -589,6 +745,14 @@ router.delete('/role-features/:id', protect, authorize('ADMIN', 'MANAGER'), asyn
 
     await prisma.roleFeaturePermission.delete({
       where: { id }
+    });
+
+    console.info('[permissions] role feature permission deleted', {
+      actorId: req.user.id,
+      permissionId: id,
+      role: permission.role,
+      workspace: permission.workspace,
+      feature: permission.feature
     });
 
     res.json({

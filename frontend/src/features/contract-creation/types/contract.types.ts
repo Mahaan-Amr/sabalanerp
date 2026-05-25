@@ -440,8 +440,8 @@ export interface ContractWizardData {
   projectId: string;
   project: ProjectAddress | null;
   
-  // Step 4: Product Type Selection (NEW)
-  selectedProductTypeForAddition: 'longitudinal' | 'stair' | 'slab' | null; // Temporary selection for adding products
+  // Last-used product type preference for modal default (not a required wizard step)
+  selectedProductTypeForAddition: 'longitudinal' | 'stair' | 'slab' | null;
   
   // Step 5: Products (was Step 4)
   products: ContractProduct[];

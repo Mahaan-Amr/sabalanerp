@@ -4,6 +4,14 @@ import { AuthRequest } from './auth';
 
 const prisma = new PrismaClient();
 
+const isPermissionActiveAndNotExpired = (
+  permission: { isActive: boolean; expiresAt?: Date | null } | null | undefined
+): boolean => {
+  if (!permission || !permission.isActive) return false;
+  if (!permission.expiresAt) return true;
+  return permission.expiresAt.getTime() > Date.now();
+};
+
 export interface WorkspaceRequest extends AuthRequest {
   workspace?: string;
   workspacePermission?: string;
@@ -73,10 +81,10 @@ export const requireWorkspaceAccess = (workspace: Workspace, requiredPermission:
       // Determine effective permission level
       let effectivePermission: WorkspacePermission | null = null;
 
-      if (userPermission && userPermission.isActive) {
-        effectivePermission = userPermission.permissionLevel as WorkspacePermission;
-      } else if (rolePermission && rolePermission.isActive) {
-        effectivePermission = rolePermission.permissionLevel as WorkspacePermission;
+      if (isPermissionActiveAndNotExpired(userPermission)) {
+        effectivePermission = userPermission!.permissionLevel as WorkspacePermission;
+      } else if (isPermissionActiveAndNotExpired(rolePermission)) {
+        effectivePermission = rolePermission!.permissionLevel as WorkspacePermission;
       }
 
       if (!effectivePermission) {
@@ -163,8 +171,12 @@ export const getUserWorkspaces = async (userId: string, userRole: string): Promi
     const allWorkspaces = new Set([...userPermissions.map(p => p.workspace), ...rolePermissions.map(p => p.workspace)]);
 
     for (const workspace of allWorkspaces) {
-      const userPermission = userPermissions.find(p => p.workspace === workspace);
-      const rolePermission = rolePermissions.find(p => p.workspace === workspace);
+      const userPermission = userPermissions.find(
+        (p) => p.workspace === workspace && isPermissionActiveAndNotExpired(p)
+      );
+      const rolePermission = rolePermissions.find(
+        (p) => p.workspace === workspace && isPermissionActiveAndNotExpired(p)
+      );
 
       let permission: WorkspacePermission;
       if (userPermission) {

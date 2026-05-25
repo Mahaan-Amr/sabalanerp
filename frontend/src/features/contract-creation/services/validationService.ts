@@ -167,11 +167,7 @@ export const validateWizardStep = (
       }
       break;
       
-    case 4: // Product Type Selection
-      // This step is just for selection, no validation needed
-      break;
-      
-    case 5: // Product Selection
+    case 4: // Product Selection
       if (!wizardData.products || wizardData.products.length === 0) {
         errors.products = '??? ? ??? ?? ? ?? ??? ??';
       } else {
@@ -185,7 +181,7 @@ export const validateWizardStep = (
       }
       break;
       
-    case 6: // Delivery Schedule
+    case 5: // Delivery Schedule
       if (!wizardData.deliveries || wizardData.deliveries.length === 0) {
         errors.deliveries = '??? ? ??? ??? ?? ??? ??';
       } else {
@@ -224,7 +220,7 @@ export const validateWizardStep = (
       }
       break;
       
-    case 7: // Payment Method
+    case 6: // Payment Method
       const contractTotal = wizardData.products.reduce((sum, p) => sum + (p.totalPrice || 0), 0);
       const paymentValidation = validatePayment(wizardData.payment, contractTotal);
       if (!paymentValidation.isValid) {
@@ -232,7 +228,7 @@ export const validateWizardStep = (
       }
       break;
       
-    case 8: // Digital Signature
+    case 7: // Digital Signature
       if (!wizardData.signature?.phoneNumber) {
         errors.signature = 'شماره تماس مشتری موجود نیست';
       }

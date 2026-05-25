@@ -2,7 +2,7 @@
 // Customer search and selection
 
 import React from 'react';
-import { FaSearch, FaPlus, FaCheck } from 'react-icons/fa';
+import { FaSearch, FaPlus, FaCheck, FaPhone } from 'react-icons/fa';
 import { useRouter } from 'next/navigation';
 import { crmAPI } from '@/lib/api';
 import type { ContractWizardData, CrmCustomer } from '../../types/contract.types';
@@ -78,7 +78,7 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
                 currentStep: currentStep,
                 wizardData: wizardData
               }));
-              console.log('? Saving wizard state for customer creation:', {
+              console.log('Saving wizard state for customer creation:', {
                 currentStep,
                 wizardData
               });
@@ -166,7 +166,7 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
                     </span>
                     {customer.phoneNumbers && customer.phoneNumbers.length > 0 && (
                       <>
-                        <span className="text-gray-500 dark:text-gray-400 text-sm">?</span>
+                        <FaPhone className="w-3 h-3 text-gray-500 dark:text-gray-400" />
                         <span className="text-sm text-gray-600 dark:text-gray-300">
                           {customer.phoneNumbers[0].number}
                         </span>

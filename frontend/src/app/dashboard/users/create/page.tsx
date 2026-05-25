@@ -13,7 +13,7 @@ import {
   FaEye,
   FaEyeSlash
 } from 'react-icons/fa';
-import { authAPI, usersAPI, departmentsAPI, workspacePermissionsAPI } from '@/lib/api';
+import { authAPI, usersAPI, departmentsAPI } from '@/lib/api';
 
 interface Department {
   id: string;
@@ -210,20 +210,14 @@ export default function CreateUserPage() {
           });
         }
 
-        // Grant workspace permissions
-        for (const permission of workspacePermissions) {
-          try {
-            await workspacePermissionsAPI.createUserPermission({
-              userId,
-              workspace: permission.workspace,
-              permissionLevel: permission.permissionLevel
-            });
-          } catch (permissionError) {
-            console.error('Error granting workspace permission:', permissionError);
-          }
+        if (workspacePermissions.length > 0) {
+          console.info('Workspace permissions are configured post-create in admin permissions page', {
+            userId,
+            requestedWorkspacePermissions: workspacePermissions
+          });
         }
 
-        alert('??? ? ??? ??? ?');
+        alert('کاربر با موفقیت ایجاد شد. دسترسی‌ها را از صفحه مدیریت دسترسی‌ها تنظیم کنید.');
         router.push('/dashboard/users');
       }
     } catch (error: any) {
@@ -430,7 +424,7 @@ export default function CreateUserPage() {
         <div className="glass-liquid-card p-6">
           <h2 className="text-xl font-bold text-primary mb-4">??? ?? ??</h2>
           <p className="text-secondary mb-6">
-            ??? ??? ? ??? ?? ??? ? ??? ??
+            تنظیم دسترسی‌ها پس از ایجاد کاربر در صفحه مدیریت دسترسی‌ها انجام می‌شود.
           </p>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

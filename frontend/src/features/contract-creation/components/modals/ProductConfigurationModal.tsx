@@ -1,12 +1,13 @@
 ﻿// Product Configuration Modal Component
 // Main product configuration modal for longitudinal, slab, and stair (old flow) products
 
-import React, { useState } from 'react';
+import React from 'react';
 import { FaTimes, FaChevronUp, FaChevronDown, FaSearch, FaRuler, FaPlus, FaTrash, FaWarehouse, FaCheck, FaTools, FaSquare } from 'react-icons/fa';
 import type {
   ContractWizardData,
   Product,
   ContractProduct,
+  ContractUsageType,
   StairSystemConfig,
   SlabStandardDimensionEntry,
   RemainingStone,
@@ -16,12 +17,15 @@ import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { StoneCADDesigner } from '@/components/stone-cad/StoneCADDesigner';
 import { formatDisplayNumber, formatPrice, formatSquareMeters } from '@/lib/numberFormat';
 import { isUsableRemainingStone, normalizeRemainingStoneCollection } from '../../utils/remainingStoneGuards';
+import { PRODUCT_TYPES } from '../../constants/contract.constants';
+import { productSupportsContractType } from '../../utils/productUtils';
 
 // Comprehensive props interface for Product Configuration Modal
 interface ProductConfigurationModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: () => void; // Changed from (product: ContractProduct) => void to () => void since handleAddProductToContract doesn't take params
+  onProductTypeChange?: (type: ContractUsageType, selectedProduct: Product | null) => void;
   // Product state
   selectedProduct: Product | null;
   productConfig: any; // Will be typed properly later
@@ -122,6 +126,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
   isOpen,
   onClose,
   onSave,
+  onProductTypeChange,
   selectedProduct,
   productConfig,
   setProductConfig,
@@ -197,8 +202,15 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
   handleCreateFromRemainingStone,
   collectAvailableRemainingStones
 }) => {
-  // Get product type from productConfig or fallback to wizardData
-  const currentProductType = productConfig.productType || wizardData.selectedProductTypeForAddition;
+  // Get product type from productConfig or supported remembered fallback
+  const rememberedType = wizardData.selectedProductTypeForAddition;
+  const currentProductType = productConfig.productType || (
+    selectedProduct && rememberedType && productSupportsContractType(selectedProduct, rememberedType)
+      ? rememberedType
+      : null
+  );
+  const availableProductTypes = ['longitudinal', 'stair', 'slab'] as const;
+  const requiresTypeSelection = !isEditMode && !currentProductType;
   
   // Debug logging
   console.log('🔍 ProductConfigurationModal Render Check:', {
@@ -270,6 +282,61 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                     <p className="text-red-600 dark:text-red-400 text-sm">{errors.products}</p>
                   </div>
                 )}
+
+                {/* Product type selection is now inside modal (add mode only) */}
+                <div className="mb-6 p-4 rounded-lg border border-slate-600/60 bg-slate-800/35 backdrop-blur-sm">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-semibold text-slate-100">نوع محصول</h4>
+                    {isEditMode && (
+                      <span className="text-xs px-2 py-1 rounded-full bg-slate-700 text-slate-200 border border-slate-500/60">
+                        نوع محصول در ویرایش قابل تغییر نیست
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {availableProductTypes.map((type) => {
+                      const typeLabel = PRODUCT_TYPES.find((item) => item.id === type)?.name ?? type;
+                      const isSelected = currentProductType === type;
+                      const isSupportedByProduct = selectedProduct ? productSupportsContractType(selectedProduct, type) : true;
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          disabled={isEditMode}
+                          onClick={() => {
+                            if (isEditMode) return;
+                            setProductConfig((prev: any) => ({ ...prev, productType: type }));
+                            onProductTypeChange?.(type, selectedProduct);
+                          }}
+                          className={`px-3 py-2 rounded-lg text-sm font-medium border transition-all duration-150 ${
+                            isSelected
+                              ? 'bg-gradient-to-r from-teal-500 to-teal-600 border-teal-400 text-white shadow-md'
+                              : 'bg-slate-900/60 border-slate-500/70 text-slate-200 hover:border-teal-400 hover:text-teal-200'
+                          } ${isEditMode ? 'opacity-70 cursor-not-allowed' : 'hover:-translate-y-[1px]'}`}
+                          title={
+                            !isSupportedByProduct
+                              ? 'این محصول به‌طور رسمی برای این نوع قرارداد تنظیم نشده است'
+                              : undefined
+                          }
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            {typeLabel}
+                            {!isSupportedByProduct && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-200 border border-amber-400/30">
+                                ناسازگار
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {requiresTypeSelection && (
+                    <p className="mt-3 text-xs text-amber-300">
+                      ابتدا نوع محصول را انتخاب کنید تا فیلدهای تنظیمات نمایش داده شوند.
+                    </p>
+                  )}
+                </div>
 
                 {/* Product Info - Show for longitudinal and slab products */}
                 {selectedProduct && (currentProductType === 'longitudinal' || currentProductType === 'slab') && (
@@ -3041,7 +3108,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
 
                         {(finishingLoadState === 'forbidden' || finishingLoadState === 'empty' || finishingLoadState === 'idle' || finishingLoadState === 'error') && (
                           <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
-                            {finishingLoadState === 'forbidden' && 'دسترسی مشاهده پرداخت‌ها برای این کاربر فعال نیست.'}
+                            {finishingLoadState === 'forbidden' && 'برای فعال‌سازی، دسترسی قراردادهای فروش یا پرداخت سنگ را از ادمین دریافت کنید.'}
                             {finishingLoadState === 'empty' && 'هیچ پرداخت فعالی برای انتخاب یافت نشد.'}
                             {finishingLoadState === 'idle' && 'در حال بارگذاری لیست پرداخت‌ها...'}
                             {finishingLoadState === 'error' && 'خطا در دریافت لیست پرداخت‌ها. لطفاً مجدد تلاش کنید.'}
@@ -3488,7 +3555,8 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       console.log('🔘 Main Product Button clicked!');
                       onSave();
                     }}
-                    className="px-6 py-2 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white rounded-lg transition-all duration-200 font-medium"
+                    disabled={!currentProductType}
+                    className="px-6 py-2 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-all duration-200 font-medium"
                   >
                     {isEditMode ? 'ذخیره تغییرات' : 'افزودن به قرارداد'}
                   </button>

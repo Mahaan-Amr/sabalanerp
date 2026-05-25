@@ -130,7 +130,8 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         'inventory_stone_finishings_edit',
         'inventory_stone_finishings_create',
         'sales_contracts_view',
-        'sales_contracts_create'
+        'sales_contracts_create',
+        'sales_contracts_edit'
       ]) || hasWorkspaceAccess(workspaces, ['inventory', 'sales'], 'view')
     }),
     [hasAnyFeature, hasWorkspaceAccess]

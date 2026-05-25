@@ -41,30 +41,24 @@ export const WIZARD_STEPS = [
   },
   {
     id: 4,
-    title: 'انتخاب نوع محصول',
-    titleEn: 'Product Type Selection',
-    description: 'نوع محصول را مشخص کنید'
-  },
-  {
-    id: 5,
     title: 'انتخاب محصولات',
     titleEn: 'Product Selection',
     description: 'محصولات را به قرارداد اضافه کنید'
   },
   {
-    id: 6,
+    id: 5,
     title: 'برنامه تحویل',
     titleEn: 'Delivery Schedule',
     description: 'زمان‌بندی تحویل را ثبت کنید'
   },
   {
-    id: 7,
+    id: 6,
     title: 'روش پرداخت',
     titleEn: 'Payment Method',
     description: 'اقلام پرداخت را تعریف کنید'
   },
   {
-    id: 8,
+    id: 7,
     title: 'تایید دیجیتال',
     titleEn: 'Digital Confirmation',
     description: 'تایید نهایی قرارداد'

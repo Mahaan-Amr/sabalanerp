@@ -4,6 +4,14 @@ import { AuthRequest } from './auth';
 
 const prisma = new PrismaClient();
 
+const isPermissionActiveAndNotExpired = (
+  permission: { isActive: boolean; expiresAt?: Date | null } | null | undefined
+): boolean => {
+  if (!permission || !permission.isActive) return false;
+  if (!permission.expiresAt) return true;
+  return permission.expiresAt.getTime() > Date.now();
+};
+
 export interface FeatureRequest extends AuthRequest {
   featurePermission?: string;
 }
@@ -625,14 +633,14 @@ export const requireFeatureAccess = (feature: Feature, requiredPermission: Featu
       let effectivePermission: FeaturePermission | null = null;
 
       // Priority: Feature-specific > Workspace-level
-      if (userFeaturePermission && userFeaturePermission.isActive) {
-        effectivePermission = userFeaturePermission.permissionLevel as FeaturePermission;
-      } else if (roleFeaturePermission && roleFeaturePermission.isActive) {
-        effectivePermission = roleFeaturePermission.permissionLevel as FeaturePermission;
-      } else if (userWorkspacePermission && userWorkspacePermission.isActive) {
-        effectivePermission = userWorkspacePermission.permissionLevel as FeaturePermission;
-      } else if (roleWorkspacePermission && roleWorkspacePermission.isActive) {
-        effectivePermission = roleWorkspacePermission.permissionLevel as FeaturePermission;
+      if (isPermissionActiveAndNotExpired(userFeaturePermission)) {
+        effectivePermission = userFeaturePermission!.permissionLevel as FeaturePermission;
+      } else if (isPermissionActiveAndNotExpired(roleFeaturePermission)) {
+        effectivePermission = roleFeaturePermission!.permissionLevel as FeaturePermission;
+      } else if (isPermissionActiveAndNotExpired(userWorkspacePermission)) {
+        effectivePermission = userWorkspacePermission!.permissionLevel as FeaturePermission;
+      } else if (isPermissionActiveAndNotExpired(roleWorkspacePermission)) {
+        effectivePermission = roleWorkspacePermission!.permissionLevel as FeaturePermission;
       }
 
       if (!effectivePermission) {
@@ -725,14 +733,14 @@ export const requireAnyFeatureAccess = (
 
         let effectivePermission: FeaturePermission | null = null;
 
-        if (userFeaturePermission && userFeaturePermission.isActive) {
-          effectivePermission = userFeaturePermission.permissionLevel as FeaturePermission;
-        } else if (roleFeaturePermission && roleFeaturePermission.isActive) {
-          effectivePermission = roleFeaturePermission.permissionLevel as FeaturePermission;
-        } else if (userWorkspacePermission && userWorkspacePermission.isActive) {
-          effectivePermission = userWorkspacePermission.permissionLevel as FeaturePermission;
-        } else if (roleWorkspacePermission && roleWorkspacePermission.isActive) {
-          effectivePermission = roleWorkspacePermission.permissionLevel as FeaturePermission;
+        if (isPermissionActiveAndNotExpired(userFeaturePermission)) {
+          effectivePermission = userFeaturePermission!.permissionLevel as FeaturePermission;
+        } else if (isPermissionActiveAndNotExpired(roleFeaturePermission)) {
+          effectivePermission = roleFeaturePermission!.permissionLevel as FeaturePermission;
+        } else if (isPermissionActiveAndNotExpired(userWorkspacePermission)) {
+          effectivePermission = userWorkspacePermission!.permissionLevel as FeaturePermission;
+        } else if (isPermissionActiveAndNotExpired(roleWorkspacePermission)) {
+          effectivePermission = roleWorkspacePermission!.permissionLevel as FeaturePermission;
         }
 
         if (effectivePermission && hasRequiredPermissionLevel(effectivePermission, requiredPermission)) {
@@ -816,10 +824,18 @@ export const getUserFeatures = async (userId: string, userRole: string): Promise
     for (const feature of allFeatures) {
       const workspace = FEATURE_WORKSPACE_MAP[feature as Feature];
       
-      const userFeaturePermission = userFeaturePermissions.find(p => p.feature === feature);
-      const roleFeaturePermission = roleFeaturePermissions.find(p => p.feature === feature);
-      const userWorkspacePermission = userWorkspacePermissions.find(p => p.workspace === workspace);
-      const roleWorkspacePermission = roleWorkspacePermissions.find(p => p.workspace === workspace);
+      const userFeaturePermission = userFeaturePermissions.find(
+        (p) => p.feature === feature && isPermissionActiveAndNotExpired(p)
+      );
+      const roleFeaturePermission = roleFeaturePermissions.find(
+        (p) => p.feature === feature && isPermissionActiveAndNotExpired(p)
+      );
+      const userWorkspacePermission = userWorkspacePermissions.find(
+        (p) => p.workspace === workspace && isPermissionActiveAndNotExpired(p)
+      );
+      const roleWorkspacePermission = roleWorkspacePermissions.find(
+        (p) => p.workspace === workspace && isPermissionActiveAndNotExpired(p)
+      );
 
       let permission: FeaturePermission;
       if (userFeaturePermission) {

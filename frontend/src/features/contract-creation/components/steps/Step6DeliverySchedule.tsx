@@ -1,7 +1,7 @@
 ﻿// Step 6: Delivery Schedule Component
 // Delivery schedule management
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import { FaPlus, FaTrash, FaChevronUp, FaChevronDown } from 'react-icons/fa';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
@@ -18,12 +18,50 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
   updateWizardData,
   errors
 }) => {
+  const defaultProjectManagerName = useMemo(
+    () => wizardData.project?.projectManagerName || wizardData.customer?.projectManagerName || '',
+    [wizardData.project?.projectManagerName, wizardData.customer?.projectManagerName]
+  );
+
+  const defaultDeliveryAddress = useMemo(
+    () => wizardData.project?.address || wizardData.customer?.projectAddresses?.[0]?.address || '',
+    [wizardData.project?.address, wizardData.customer?.projectAddresses]
+  );
+
+  useEffect(() => {
+    if (!wizardData.deliveries.length) return;
+
+    let hasChanges = false;
+    const syncedDeliveries = wizardData.deliveries.map((delivery) => {
+      const updates: Partial<DeliverySchedule> = {};
+
+      if (!delivery.projectManagerName?.trim() && defaultProjectManagerName) {
+        updates.projectManagerName = defaultProjectManagerName;
+      }
+
+      if (!delivery.deliveryAddress?.trim() && defaultDeliveryAddress) {
+        updates.deliveryAddress = defaultDeliveryAddress;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        hasChanges = true;
+        return { ...delivery, ...updates };
+      }
+
+      return delivery;
+    });
+
+    if (hasChanges) {
+      updateWizardData({ deliveries: syncedDeliveries });
+    }
+  }, [wizardData.deliveries, defaultProjectManagerName, defaultDeliveryAddress, updateWizardData]);
+
   const handleAddDelivery = () => {
     const newDelivery: DeliverySchedule = {
       deliveryDate: '',
-      projectManagerName: wizardData.project?.projectManagerName ?? '',
+      projectManagerName: defaultProjectManagerName,
       receiverName: '',
-      deliveryAddress: wizardData.project?.address || '',
+      deliveryAddress: defaultDeliveryAddress,
       driver: '',
       vehicle: '',
       notes: '',
@@ -302,5 +340,4 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
     </div>
   );
 };
-
 

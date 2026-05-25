@@ -17,13 +17,13 @@ import {
 interface RemainingStone {
   id: string;
   width: number; // عرض باقی‌مانده (in cm)
-  length: number; // Ø·Ùˆل باقی‌مانده (in meters)
+  length: number; // طول باقی‌مانده (in meters)
   squareMeters: number; // متر مربع باقی‌مانده
   isAvailable: boolean;
   sourceCutId: string;
   position?: { // موقعیت در سنگ اصلی (برای نمایش در canvas) - فقط برای پارتیشن‌ها
-    startWidth: number; // Ø´Ø±Ùˆع عرض (in cm)
-    startLength: number; // Ø´Ø±Ùˆع Ø·Ùˆل (in meters)
+    startWidth: number; // شروع عرض (in cm)
+    startLength: number; // شروع طول (in meters)
   };
 }
 
@@ -42,7 +42,7 @@ interface AppliedSubService {
   id: string;
   subServiceId: string;
   subService: SubService;
-  meter: number; // مقدار استفاده شده (Ø·Ùˆل یا متر مربع)
+  meter: number; // مقدار استفاده شده (طول یا متر مربع)
   cost: number;
   calculationBase: 'length' | 'squareMeters';
 }
@@ -58,7 +58,7 @@ interface ClickableArea {
 
 interface StoneCanvasProps {
   // Original stone dimensions
-  originalLength: number | string; // Ø·Ùˆل اصلی (in meters) - can be string from database
+  originalLength: number | string; // طول اصلی (in meters) - can be string from database
   originalWidth: number | string; // عرض اصلی (in cm) - can be string from database
   lengthUnit: 'cm' | 'm';
   widthUnit: 'cm' | 'm';
@@ -184,7 +184,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
   
   // Calculate primary remaining piece from initial cut (if cut was made)
   // This is the piece that remains after cutting from the original stone
-  // For longitudinal cuts: remaining piece is (remainingWidth � fullLength) positioned next to the used piece
+  // For longitudinal cuts: remaining piece is (remainingWidth × fullLength) positioned next to the used piece
   const primaryRemainingPiece = isCut && initialCutWidth > 0 && remainingWidthInCm > 0 ? {
     id: 'primary-remaining',
     width: remainingWidthInCm,
@@ -1538,9 +1538,9 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     // 1. Label for original stone (if large enough and no cut, or show as border label when cut)
     // When there's a cut, don't show the original stone label in the center (it's confusing)
     // Instead, show it as a subtle border label if space allows
-    // Convention: Always display dimensions as length � width
+    // Convention: Always display dimensions as length × width
     if (!isCut && originalRect.width > minSizeForLabel && originalRect.height > minSizeForLabel) {
-      const originalLabel = `${formatDisplayNumber(originalLengthInMeters)}m � ${formatDisplayNumber(originalWidthInCm)}cm`;
+      const originalLabel = `${formatDisplayNumber(originalLengthInMeters)}m × ${formatDisplayNumber(originalWidthInCm)}cm`;
       const labelFontSize = Math.min(11, Math.min(originalRect.width, originalRect.height) / 10);
       
       if (labelFontSize >= 8) { // Only draw if font size is readable
@@ -1562,7 +1562,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       }
     } else if (isCut) {
       // When there's a cut, show a subtle label in the top-left corner for the original dimensions
-      // Convention: Always display dimensions as length � width
+      // Convention: Always display dimensions as length × width
       // ðŸŽ¯ ENHANCEMENT: Add "(از باقی‌مانده)" suffix for layers cut from remaining stones
       const baseLabel = `اصلی: ${formatDisplayNumber(originalLengthInMeters)}m × ${formatDisplayNumber(originalWidthInCm)}cm`;
       const originalLabel = isLayerFromRemaining 
@@ -1628,7 +1628,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       );
       
       if (clampedWidthForLabel > minSizeForLabel && clampedHeightForLabel > minSizeForLabel) {
-        // Convention: Always display dimensions as length � width
+        // Convention: Always display dimensions as length × width
         const usedLabel = `استفاده شده: ${formatDisplayNumber(clampedUsedLength)}m × ${formatDisplayNumber(clampedUsedWidth)}cm`;
         const labelFontSize = Math.min(10, Math.min(clampedWidthForLabel, clampedHeightForLabel) / 12);
         
@@ -1708,7 +1708,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           
           if (clampedWidth > minSizeForLabel && clampedHeight > minSizeForLabel) {
             // Format remaining stone dimensions based on type
-            // Convention: Always display dimensions as length � width
+            // Convention: Always display dimensions as length × width
             const lengthDisplay = remainingStone.id === 'primary-remaining' 
               ? `${formatDisplayNumber(stoneLengthInMeters)}m`
               : `${formatDisplayNumber(remainingStone.length)}cm`;
@@ -2059,7 +2059,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     }
     
     if (remainingCount > 0) {
-      description += `. ${remainingCount} قطعه باقی‌مانده Ù…ÙˆØ¬Ùˆد است`;
+      description += `. ${remainingCount} قطعه باقی‌مانده موجود است`;
     }
     
     if (subServicesCount > 0) {
@@ -2082,7 +2082,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         : `${formatDisplayNumber(piece.length / 100)}m`;
       
       // Announce to screen readers
-      const announcement = `قطعه باقی‌مانده انتخاب شده: Ø·Ùˆل ${lengthDisplay}، عرض ${formatDisplayNumber(piece.width)}cm، متر مربع ${formatDisplayNumber(piece.squareMeters)}`;
+      const announcement = `قطعه باقی‌مانده انتخاب شده: طول ${lengthDisplay}، عرض ${formatDisplayNumber(piece.width)}cm، متر مربع ${formatDisplayNumber(piece.squareMeters)}`;
       
       // Create a temporary aria-live region for announcement
       const liveRegion = document.createElement('div');
@@ -2132,7 +2132,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
               const remainingCount = (remainingStones?.length || 0) + (hasPrimaryRemaining ? 1 : 0);
               return remainingCount > 0 
                 ? `${remainingCount} قطعه باقی‌مانده`
-                : 'هیچ قطعه باقی‌مانده‌ای ÙˆØ¬Ùˆد ندارد';
+                : 'هیچ قطعه باقی‌مانده‌ای وجود ندارد';
             })()}
           </div>
         )}
@@ -2269,4 +2269,3 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
 };
 
 export default StoneCanvas;
-

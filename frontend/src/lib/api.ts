@@ -136,8 +136,10 @@ export const dashboardAPI = {
 // Workspace Permissions API
 export const workspacePermissionsAPI = {
   getUserWorkspaces: () => api.get('/workspace-permissions/user-workspaces'),
-  getUserPermissions: () => api.get('/workspace-permissions'),
-  getRolePermissions: () => api.get('/workspace-permissions/role-permissions'),
+  getUserPermissions: (params?: { page?: number; limit?: number; userId?: string; workspace?: string }) =>
+    api.get('/workspace-permissions', { params }),
+  getRolePermissions: (params?: { role?: string; workspace?: string }) =>
+    api.get('/workspace-permissions/role-permissions', { params }),
   createUserPermission: (data: any) => api.post('/workspace-permissions', data),
   updateUserPermission: (id: string, data: any) => api.put(`/workspace-permissions/${id}`, data),
   deleteUserPermission: (id: string) => api.delete(`/workspace-permissions/${id}`),

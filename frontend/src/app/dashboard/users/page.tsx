@@ -116,7 +116,7 @@ export default function UsersManagementPage() {
       const [usersResponse, departmentsResponse, permissionsResponse] = await Promise.all([
         usersAPI.getUsers(currentPage, 10),
         departmentsAPI.getDepartments(),
-        workspacePermissionsAPI.getUserPermissions()
+        workspacePermissionsAPI.getUserPermissions({ page: 1, limit: 1000 })
       ]);
       
       if (usersResponse.data.success) {
@@ -533,7 +533,7 @@ export default function UsersManagementPage() {
                               <FaEdit />
                             </Link>
                             <Link
-                              href={`/dashboard/users/${user.id}/permissions`}
+                              href={`/dashboard/admin/permissions?userId=${user.id}`}
                               className="glass-liquid-btn p-2"
                               title="مدیریت دسترسی‌ها"
                             >

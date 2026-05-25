@@ -186,8 +186,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           });
         }
         
-        // Move to Step 8 (Digital Signature) instead of redirecting
-        setCurrentStep(8);
+        // Move to final step (Digital Signature) instead of redirecting
+        setCurrentStep(7);
       } else {
         setErrors({ general: response.data.error || 'خطا در ثبت قرارداد' });
       }

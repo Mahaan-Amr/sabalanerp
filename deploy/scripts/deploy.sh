@@ -38,9 +38,10 @@ echo "Starting database first..."
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml up -d postgres
 
 echo "Applying Prisma migrations..."
-docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml run --rm backend npx prisma migrate deploy
+docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml run --rm backend npm run db:migrate:deploy
 
 echo "Starting full stack..."
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml up -d
+docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml up -d --force-recreate --no-deps nginx
 
 echo "Deployment completed."

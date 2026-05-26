@@ -4,6 +4,12 @@ WORKDIR /app
 
 ARG DEBIAN_MIRROR=http://mirror.iranserver.com/debian
 ARG DEBIAN_SECURITY_MIRROR=http://mirror.iranserver.com/debian-security
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG http_proxy
+ARG https_proxy
+ARG ALL_PROXY
+ARG all_proxy
 
 RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: %s\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' "$DEBIAN_MIRROR" "$DEBIAN_SECURITY_MIRROR" > /etc/apt/sources.list.d/debian.sources \
   && apt-get -o Acquire::ForceIPv4=true update \

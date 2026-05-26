@@ -464,6 +464,15 @@ const publicApi = axios.create({
 });
 
 export const publicContractsAPI = {
+  lookupConfirmationContract: (contractNumber: string, phoneNumber: string) =>
+    publicApi.post('/contracts/confirm/lookup', { contractNumber, phoneNumber }),
+
+  verifyManualConfirmationCode: (contractNumber: string, phoneNumber: string, code: string) =>
+    publicApi.post('/contracts/confirm/verify', { contractNumber, phoneNumber, code }),
+
+  resendManualConfirmationCode: (contractNumber: string, phoneNumber: string) =>
+    publicApi.post('/contracts/confirm/resend', { contractNumber, phoneNumber }),
+
   getConfirmationContract: (token: string) =>
     publicApi.get(`/contracts/confirm/${token}`),
 

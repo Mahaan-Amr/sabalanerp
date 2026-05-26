@@ -16,6 +16,8 @@ export default function Home() {
             <div className="flex items-center space-x-4 space-x-reverse">
               <ThemeToggle />
               <nav className="flex space-x-3 space-x-reverse">
+                <Link href="/about" className="glass-liquid-btn inline-block whitespace-nowrap">درباره ما</Link>
+                <Link href="/contact" className="glass-liquid-btn inline-block whitespace-nowrap">تماس با ما</Link>
                 <Link href="/login" className="glass-liquid-btn inline-block whitespace-nowrap">ورود</Link>
                 <Link href="/register" className="glass-liquid-btn inline-block whitespace-nowrap">ثبت‌نام</Link>
               </nav>
@@ -119,6 +121,11 @@ export default function Home() {
             <p className="text-base text-secondary">
               &copy; سبلان ERP. تمامی حقوق محفوظ است.
             </p>
+            <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm">
+              <Link href="/about" className="text-secondary hover:text-primary">درباره ما</Link>
+              <Link href="/contact" className="text-secondary hover:text-primary">تماس با ما</Link>
+              <Link href="/contracts/confirm" className="text-secondary hover:text-primary">تایید قرارداد</Link>
+            </div>
             <div className="mt-6 flex justify-center">
               <a
                 referrerPolicy="origin"

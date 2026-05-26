@@ -360,7 +360,7 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
         // Legacy Fields (for backward compatibility)
         address: address || null,
         city: city || null,
-        country: country || '???',
+        country: country || 'ایران',
         communicationPreferences: communicationPreferences || null,
         customFields: customFields || null,
         

@@ -154,13 +154,11 @@ class SmsService {
     code: string;
     customerName: string;
     contractNumber: string;
-    confirmationLink: string;
   }): Promise<{ success: boolean; messageId?: number; error?: string; rawResponse?: unknown }> {
     const formattedPhone = this.formatPhoneNumber(params.phoneNumber);
     return this.sendTemplate(formattedPhone, this.contractConfirmationTemplateId, [
       { name: 'Name', value: params.customerName },
       { name: 'ContractNumber', value: params.contractNumber },
-      { name: 'Link', value: params.confirmationLink },
       { name: 'Code', value: params.code }
     ]);
   }

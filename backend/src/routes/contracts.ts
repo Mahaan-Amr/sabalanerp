@@ -235,7 +235,7 @@ router.post('/', protect, requireFeatureAccess(FEATURES.SALES_LEGACY_CONTRACTS_C
         templateId: templateId || null,
         createdBy: req.user.id,
         totalAmount: totalAmount ? parseFloat(totalAmount) : null,
-        currency: currency || '??',
+        currency: currency || 'تومان',
         notes: notes || null,
       },
       include: {

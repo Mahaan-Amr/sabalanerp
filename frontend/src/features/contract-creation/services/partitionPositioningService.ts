@@ -125,14 +125,14 @@ export const calculatePartitionPositions = (
       // Set appropriate error message
       if (bestSlice) {
         if (partition.width > bestSlice.width) {
-          partitionErrors.set(partition.id, `?? ?? (${formatDisplayNumber(partition.width)}cm) ?? ? ?? ??? (${formatDisplayNumber(bestSlice.width)}cm) ??`);
+          partitionErrors.set(partition.id, `عرض پارتیشن (${formatDisplayNumber(partition.width)}cm) از عرض فضای باقی‌مانده (${formatDisplayNumber(bestSlice.width)}cm) بیشتر است`);
         } else if (partition.length > bestSlice.remainingLength) {
-          partitionErrors.set(partition.id, `?? ?? (${formatDisplayNumber(partition.length)}m) ?? ? ?? ??? (${formatDisplayNumber(bestSlice.remainingLength)}m) ??`);
+          partitionErrors.set(partition.id, `طول پارتیشن (${formatDisplayNumber(partition.length)}m) از طول فضای باقی‌مانده (${formatDisplayNumber(bestSlice.remainingLength)}m) بیشتر است`);
         } else {
-          partitionErrors.set(partition.id, `?? ?? ??? ? ??? ??? ?? ??`);
+          partitionErrors.set(partition.id, `این پارتیشن در فضای باقی‌مانده جا نمی‌شود`);
         }
       } else {
-        partitionErrors.set(partition.id, `?? ?? ??? ? ??? ??? ?? ??`);
+        partitionErrors.set(partition.id, `این پارتیشن در فضای باقی‌مانده جا نمی‌شود`);
       }
 
       positionedPartitions.push({
@@ -171,20 +171,20 @@ export const validatePartitionFit = (
   availableLength: number
 ): { isValid: boolean; error?: string } => {
   if (!partition.width || !partition.length) {
-    return { isValid: false, error: '??? ?? ?? ??' };
+    return { isValid: false, error: 'ابعاد پارتیشن الزامی است' };
   }
 
   if (partition.width > availableWidth) {
     return {
       isValid: false,
-      error: `?? ?? (${formatDisplayNumber(partition.width)}cm) ?? ? ?? ??? (${formatDisplayNumber(availableWidth)}cm) ??`
+      error: `عرض پارتیشن (${formatDisplayNumber(partition.width)}cm) از عرض موجود (${formatDisplayNumber(availableWidth)}cm) بیشتر است`
     };
   }
 
   if (partition.length > availableLength) {
     return {
       isValid: false,
-      error: `?? ?? (${formatDisplayNumber(partition.length)}m) ?? ? ?? ??? (${formatDisplayNumber(availableLength)}m) ??`
+      error: `طول پارتیشن (${formatDisplayNumber(partition.length)}m) از طول موجود (${formatDisplayNumber(availableLength)}m) بیشتر است`
     };
   }
 

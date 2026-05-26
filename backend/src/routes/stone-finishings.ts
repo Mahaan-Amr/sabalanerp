@@ -13,7 +13,7 @@ const handleValidationErrors = (req: Request, res: Response) => {
   if (!errors.isEmpty()) {
     return res.status(400).json({
       success: false,
-      error: 'Validation failed',
+      error: 'اعتبارسنجی اطلاعات ناموفق بود',
       details: errors.array()
     });
   }
@@ -97,7 +97,7 @@ router.get(
       console.error('Error fetching stone finishings:', error);
       return res.status(500).json({
         success: false,
-        error: '?? ? ??? ???'
+        error: 'خطا در دریافت پرداخت‌های سنگ'
       });
     }
   }
@@ -128,7 +128,7 @@ router.get(
       if (!finishing) {
         return res.status(404).json({
           success: false,
-          error: '??? ?? ?? ?? ??'
+          error: 'پرداخت سنگ یافت نشد'
         });
       }
 
@@ -140,7 +140,7 @@ router.get(
       console.error('Error fetching stone finishing:', error);
       return res.status(500).json({
         success: false,
-        error: '?? ? ??? ???'
+        error: 'خطا در دریافت پرداخت سنگ'
       });
     }
   }
@@ -152,12 +152,12 @@ router.post(
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
   requireFeatureAccess(FEATURES.INVENTORY_STONE_FINISHINGS_CREATE, FEATURE_PERMISSIONS.EDIT),
   [
-    body('namePersian').isString().notEmpty().withMessage('?? ??? ??? ??'),
+    body('namePersian').isString().notEmpty().withMessage('نام فارسی الزامی است'),
     body('name').optional().isString(),
     body('description').optional().isString(),
     body('pricePerSquareMeter')
       .isFloat({ gt: 0 })
-      .withMessage('?? ?? ??? ? ?? ??')
+      .withMessage('قیمت هر متر مربع باید بیشتر از صفر باشد')
   ],
   async (req: Request, res: Response) => {
     const validationError = handleValidationErrors(req, res);
@@ -182,7 +182,7 @@ router.post(
       console.error('Error creating stone finishing:', error);
       return res.status(500).json({
         success: false,
-        error: '?? ? ??? ???'
+        error: 'خطا در ایجاد پرداخت سنگ'
       });
     }
   }
@@ -195,12 +195,12 @@ router.put(
   requireFeatureAccess(FEATURES.INVENTORY_STONE_FINISHINGS_EDIT, FEATURE_PERMISSIONS.EDIT),
   [
     param('id').isString().notEmpty(),
-    body('namePersian').isString().notEmpty().withMessage('?? ??? ??? ??'),
+    body('namePersian').isString().notEmpty().withMessage('نام فارسی الزامی است'),
     body('name').optional().isString(),
     body('description').optional().isString(),
     body('pricePerSquareMeter')
       .isFloat({ gt: 0 })
-      .withMessage('?? ?? ??? ? ?? ??'),
+      .withMessage('قیمت هر متر مربع باید بیشتر از صفر باشد'),
     body('isActive').optional().isBoolean()
   ],
   async (req: Request, res: Response) => {
@@ -215,7 +215,7 @@ router.put(
       if (!existing) {
         return res.status(404).json({
           success: false,
-          error: '??? ?? ??'
+          error: 'پرداخت سنگ یافت نشد'
         });
       }
 
@@ -241,7 +241,7 @@ router.put(
       console.error('Error updating stone finishing:', error);
       return res.status(500).json({
         success: false,
-        error: '?? ? ??? ???'
+        error: 'خطا در بروزرسانی پرداخت سنگ'
       });
     }
   }
@@ -265,7 +265,7 @@ router.delete(
       if (!existing) {
         return res.status(404).json({
           success: false,
-          error: '??? ?? ??'
+          error: 'پرداخت سنگ یافت نشد'
         });
       }
 
@@ -275,13 +275,13 @@ router.delete(
 
       return res.json({
         success: true,
-        message: '??? ?? ?'
+        message: 'پرداخت سنگ حذف شد'
       });
     } catch (error) {
       console.error('Error deleting stone finishing:', error);
       return res.status(500).json({
         success: false,
-        error: '?? ? ?? ???'
+        error: 'خطا در حذف پرداخت سنگ'
       });
     }
   }
@@ -305,7 +305,7 @@ router.patch(
       if (!existing) {
         return res.status(404).json({
           success: false,
-          error: '??? ?? ??'
+          error: 'پرداخت سنگ یافت نشد'
         });
       }
 
@@ -322,7 +322,7 @@ router.patch(
       console.error('Error toggling stone finishing status:', error);
       return res.status(500).json({
         success: false,
-        error: '?? ? ??? ??? ???'
+        error: 'خطا در تغییر وضعیت پرداخت سنگ'
       });
     }
   }

@@ -41,6 +41,14 @@ const generatePublicToken = () => crypto.randomBytes(32).toString('hex');
 const nowPlusDays = (days: number) => new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 const nowPlusMinutes = (minutes: number) => new Date(Date.now() + minutes * 60 * 1000);
 
+function normalizePhoneNumber(value: string): string {
+  const digits = value.replace(/\D/g, '');
+  if (digits.startsWith('0098')) return `0${digits.slice(4)}`;
+  if (digits.startsWith('98') && digits.length === 12) return `0${digits.slice(2)}`;
+  if (digits.startsWith('9') && digits.length === 10) return `0${digits}`;
+  return digits;
+}
+
 function extractCustomerPhone(customer: any): string | null {
   const candidates = [
     customer?.homeNumber,
@@ -63,6 +71,37 @@ function extractCustomerName(customer: any): string {
     return fullName;
   }
   return customer?.companyName || 'مشتری';
+}
+
+function serializePublicContract(session: any) {
+  const contract = session.contract;
+
+  return {
+    sessionId: session.id,
+    status: session.status,
+    contractStatus: contract.status,
+    otpExpiresAt: session.otpExpiresAt,
+    linkExpiresAt: session.linkExpiresAt,
+    contract: {
+      id: contract.id,
+      contractNumber: contract.contractNumber,
+      title: contract.title,
+      titlePersian: contract.titlePersian,
+      contractData: contract.contractData,
+      totalAmount: contract.totalAmount,
+      currency: contract.currency,
+      createdAt: contract.createdAt,
+      customer: {
+        firstName: contract.customer.firstName,
+        lastName: contract.customer.lastName,
+        companyName: contract.customer.companyName,
+        phoneNumber: extractCustomerPhone(contract.customer)
+      },
+      items: contract.items,
+      deliveries: contract.deliveries,
+      payments: contract.payments
+    }
+  };
 }
 
 async function createAuditLog(params: {
@@ -107,6 +146,76 @@ async function createAuditLog(params: {
 }
 
 export class ContractConfirmationService {
+  private async findSessionByContractAndPhone(
+    contractNumber: string,
+    phoneNumber: string,
+    allowedStatuses = ['PENDING']
+  ) {
+    const normalizedInputPhone = normalizePhoneNumber(phoneNumber);
+    if (!contractNumber.trim() || !normalizedInputPhone) {
+      return { success: false, error: 'شماره قرارداد و شماره تماس الزامی است' };
+    }
+
+    const contract = await prisma.salesContract.findUnique({
+      where: { contractNumber: contractNumber.trim() },
+      include: {
+        publicConfirmations: {
+          where: {
+            status: { in: allowedStatuses }
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10
+        },
+        customer: {
+          include: {
+            phoneNumbers: true,
+            primaryContact: true
+          }
+        },
+        items: {
+          include: {
+            product: true
+          }
+        },
+        deliveries: true,
+        payments: {
+          include: {
+            installments: true
+          }
+        },
+        department: true
+      }
+    });
+
+    if (!contract) {
+      return { success: false, error: 'قرارداد قابل تایید یافت نشد' };
+    }
+
+    const session = contract.publicConfirmations.find(
+      (item) => normalizePhoneNumber(item.phoneNumber) === normalizedInputPhone
+    );
+
+    if (!session) {
+      return { success: false, error: 'نشست تایید فعالی برای این شماره پیدا نشد' };
+    }
+
+    if (session.linkExpiresAt < new Date()) {
+      await prisma.contractPublicConfirmation.update({
+        where: { id: session.id },
+        data: { status: 'EXPIRED' }
+      });
+      return { success: false, error: 'مهلت تایید قرارداد به پایان رسیده است' };
+    }
+
+    return {
+      success: true,
+      session: {
+        ...session,
+        contract
+      }
+    };
+  }
+
   async sendForConfirmation(params: {
     contractId: string;
     requestedBy: string;
@@ -227,8 +336,7 @@ export class ContractConfirmationService {
       phoneNumber,
       code: otpCode,
       customerName: extractCustomerName(contract.customer),
-      contractNumber: contract.contractNumber,
-      confirmationLink: publicLink
+      contractNumber: contract.contractNumber
     });
 
     await createAuditLog({
@@ -398,36 +506,42 @@ export class ContractConfirmationService {
       meta
     });
 
-    const contract = session.contract;
+    return {
+      success: true,
+      data: serializePublicContract(session)
+    };
+  }
+
+  async getPublicContractByManualLookup(params: {
+    contractNumber: string;
+    phoneNumber: string;
+    meta?: RequestEvidenceMeta;
+  }) {
+    const lookup = await this.findSessionByContractAndPhone(params.contractNumber, params.phoneNumber, [
+      'PENDING',
+      'VERIFIED'
+    ]);
+
+    if (!lookup.success || !lookup.session) {
+      return { success: false, error: lookup.error || 'قرارداد قابل تایید یافت نشد' };
+    }
+
+    const session = lookup.session;
+
+    await createAuditLog({
+      contractId: session.contractId,
+      sessionId: session.id,
+      eventType: 'MANUAL_LOOKUP_OPENED',
+      eventPayloadJson: {
+        contractNumber: session.contract.contractNumber,
+        linkExpiresAt: session.linkExpiresAt.toISOString()
+      },
+      meta: params.meta
+    });
 
     return {
       success: true,
-      data: {
-        sessionId: session.id,
-        status: session.status,
-        contractStatus: contract.status,
-        otpExpiresAt: session.otpExpiresAt,
-        linkExpiresAt: session.linkExpiresAt,
-        contract: {
-          id: contract.id,
-          contractNumber: contract.contractNumber,
-          title: contract.title,
-          titlePersian: contract.titlePersian,
-          contractData: contract.contractData,
-          totalAmount: contract.totalAmount,
-          currency: contract.currency,
-          createdAt: contract.createdAt,
-          customer: {
-            firstName: contract.customer.firstName,
-            lastName: contract.customer.lastName,
-            companyName: contract.customer.companyName,
-            phoneNumber: extractCustomerPhone(contract.customer)
-          },
-          items: contract.items,
-          deliveries: contract.deliveries,
-          payments: contract.payments
-        }
-      }
+      data: serializePublicContract(session)
     };
   }
 
@@ -558,6 +672,147 @@ export class ContractConfirmationService {
     };
   }
 
+  async verifyPublicOtpByManualLookup(params: {
+    contractNumber: string;
+    phoneNumber: string;
+    code: string;
+    meta?: RequestEvidenceMeta;
+  }) {
+    const lookup = await this.findSessionByContractAndPhone(
+      params.contractNumber,
+      params.phoneNumber
+    );
+
+    if (!lookup.success || !lookup.session) {
+      return { success: false, error: lookup.error || 'قرارداد قابل تایید یافت نشد' };
+    }
+
+    return this.verifySessionOtp({
+      session: lookup.session,
+      code: params.code,
+      meta: params.meta
+    });
+  }
+
+  private async verifySessionOtp(params: {
+    session: any;
+    code: string;
+    meta?: RequestEvidenceMeta;
+  }) {
+    const { session } = params;
+
+    if (session.status !== 'PENDING') {
+      return { success: false, error: 'این نشست تایید دیگر قابل استفاده نیست' };
+    }
+
+    if (session.linkExpiresAt < new Date()) {
+      await prisma.contractPublicConfirmation.update({
+        where: { id: session.id },
+        data: { status: 'EXPIRED' }
+      });
+      return { success: false, error: 'مهلت تایید قرارداد به پایان رسیده است' };
+    }
+
+    await createAuditLog({
+      contractId: session.contractId,
+      sessionId: session.id,
+      eventType: 'OTP_SUBMITTED',
+      eventPayloadJson: {
+        codeLength: params.code.length
+      },
+      meta: params.meta
+    });
+
+    if (session.otpExpiresAt < new Date()) {
+      return { success: false, error: 'مهلت کد تایید به پایان رسیده است' };
+    }
+
+    if (session.attemptsUsed >= session.maxAttempts) {
+      return { success: false, error: 'تعداد تلاش‌های مجاز به پایان رسیده است' };
+    }
+
+    const nextAttempts = session.attemptsUsed + 1;
+    const codeHash = hashValue(params.code.trim());
+
+    if (codeHash !== session.otpCodeHash) {
+      await prisma.contractPublicConfirmation.update({
+        where: { id: session.id },
+        data: {
+          attemptsUsed: nextAttempts,
+          status: nextAttempts >= session.maxAttempts ? 'EXPIRED' : 'PENDING'
+        }
+      });
+
+      await createAuditLog({
+        contractId: session.contractId,
+        sessionId: session.id,
+        eventType: 'OTP_FAILED',
+        eventPayloadJson: {
+          attemptsUsed: nextAttempts
+        },
+        meta: params.meta
+      });
+
+      return { success: false, error: 'کد تایید اشتباه است' };
+    }
+
+    const verifiedAt = new Date();
+
+    await prisma.$transaction(async (tx) => {
+      await tx.contractPublicConfirmation.update({
+        where: { id: session.id },
+        data: {
+          attemptsUsed: nextAttempts,
+          status: 'VERIFIED',
+          verifiedAt
+        }
+      });
+
+      await tx.salesContract.update({
+        where: { id: session.contractId },
+        data: {
+          status: 'APPROVED',
+          approvedBy: null,
+          signatures: {
+            ...((session.contract.signatures as Record<string, unknown>) || {}),
+            digitalConfirmation: {
+              status: 'VERIFIED',
+              verifiedAt: verifiedAt.toISOString(),
+              sessionId: session.id,
+              phoneNumber: session.phoneNumber
+            }
+          }
+        }
+      });
+
+      await tx.contractConfirmationAuditLog.create({
+        data: {
+          contractId: session.contractId,
+          sessionId: session.id,
+          eventType: 'OTP_VERIFIED',
+          ipAddress: params.meta?.ipAddress || null,
+          userAgent: params.meta?.userAgent || null,
+          acceptLanguage: params.meta?.acceptLanguage || null,
+          deviceFingerprint: params.meta?.deviceFingerprint || null,
+          referrer: params.meta?.referrer || null,
+          eventPayloadJson: {
+            attemptsUsed: nextAttempts
+          },
+          eventHash: hashValue(`${session.contractId}:OTP_VERIFIED:${verifiedAt.toISOString()}`)
+        }
+      });
+    });
+
+    return {
+      success: true,
+      data: {
+        contractId: session.contractId,
+        status: 'APPROVED',
+        verifiedAt: verifiedAt.toISOString()
+      }
+    };
+  }
+
   async resendFromPublicToken(params: { token: string; meta?: RequestEvidenceMeta }) {
     const tokenHash = hashValue(params.token);
     const session = await prisma.contractPublicConfirmation.findUnique({
@@ -586,6 +841,28 @@ export class ContractConfirmationService {
       requestedBy: 'public-resend',
       resend: true,
       explicitToken: params.token,
+      meta: params.meta
+    });
+  }
+
+  async resendFromManualLookup(params: {
+    contractNumber: string;
+    phoneNumber: string;
+    meta?: RequestEvidenceMeta;
+  }) {
+    const lookup = await this.findSessionByContractAndPhone(
+      params.contractNumber,
+      params.phoneNumber
+    );
+
+    if (!lookup.success || !lookup.session) {
+      return { success: false, error: lookup.error || 'قرارداد قابل تایید یافت نشد' };
+    }
+
+    return this.sendForConfirmation({
+      contractId: lookup.session.contractId,
+      requestedBy: 'public-manual-resend',
+      resend: true,
       meta: params.meta
     });
   }

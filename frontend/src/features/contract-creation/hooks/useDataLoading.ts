@@ -148,7 +148,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       return [];
     } catch (err: any) {
       if (isForbiddenError(err)) {
-        const message = '??? ??? ?? CRM ?? ?? ?? ?? ???.';
+        const message = 'برای دریافت مشتریان از CRM دسترسی لازم را ندارید.';
         setError(message);
         if (onErrorRef.current) onErrorRef.current(message);
         setCustomers([]);
@@ -304,7 +304,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       if (nextCapabilities.canLoadCustomers) {
         tasks.push(loadCustomers());
       } else {
-        const message = '?? ??? ?? CRM ?? ??? ??? ?? ?? ???.';
+        const message = 'برای دریافت مشتریان از CRM دسترسی لازم را ندارید.';
         setCustomers([]);
         setError(message);
         if (onErrorRef.current) onErrorRef.current(message);

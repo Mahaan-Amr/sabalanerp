@@ -181,8 +181,8 @@ export default function DigitalSignature({
   return (
     <div className={`glass-liquid-card p-6 ${className}`}>
       <div className="text-center mb-4">
-        <h3 className="text-xl font-bold text-primary mb-2">??? ??</h3>
-        <p className="text-secondary text-sm">??? ??? ?? ? ? ?? ?? ?? ??</p>
+        <h3 className="text-xl font-bold text-primary mb-2">امضای دیجیتال</h3>
+        <p className="text-secondary text-sm">لطفا امضای خود را در کادر زیر وارد کنید</p>
       </div>
 
       {/* Signature Canvas */}
@@ -212,7 +212,7 @@ export default function DigitalSignature({
         {/* Signature Placeholder */}
         {!hasSignature && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <span className="text-gray-500 text-sm">??? ?? ? ??? ?? ??</span>
+            <span className="text-gray-500 text-sm">برای امضا اینجا بکشید</span>
           </div>
         )}
       </div>
@@ -223,7 +223,7 @@ export default function DigitalSignature({
           onClick={undoSignature}
           disabled={currentStep < 0}
           className="glass-liquid-btn p-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="???"
+          title="بازگشت"
         >
           <FaUndo className="h-4 w-4" />
         </button>
@@ -231,7 +231,7 @@ export default function DigitalSignature({
         <button
           onClick={clearSignature}
           className="glass-liquid-btn p-2"
-          title="?? ??"
+          title="پاک کردن"
         >
           <FaEraser className="h-4 w-4" />
         </button>
@@ -244,7 +244,7 @@ export default function DigitalSignature({
           className="glass-liquid-btn px-6 py-2"
         >
           <FaTimes className="ml-2 h-4 w-4" />
-          ???
+          لغو
         </button>
         
         <button
@@ -253,14 +253,14 @@ export default function DigitalSignature({
           className="glass-liquid-btn-primary px-6 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <FaCheck className="ml-2 h-4 w-4" />
-          ??? ??
+          ذخیره امضا
         </button>
       </div>
 
       {/* Instructions */}
       <div className="mt-4 text-center">
         <p className="text-xs text-gray-500">
-          ?? ??? ??? ? ??? ? ?? ?? ??
+          با ماوس یا لمس صفحه می‌توانید امضا را ثبت کنید.
         </p>
       </div>
     </div>

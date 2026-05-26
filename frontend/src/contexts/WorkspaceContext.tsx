@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { workspacePermissionsAPI } from '@/lib/api';
 
@@ -140,6 +140,14 @@ interface WorkspaceProviderProps {
   children: ReactNode;
 }
 
+const initializePermissions = () => {
+  const initialPermissions = {} as Record<WORKSPACES, WORKSPACE_PERMISSIONS[]>;
+  Object.values(WORKSPACES).forEach(workspace => {
+    initialPermissions[workspace] = [];
+  });
+  return initialPermissions;
+};
+
 export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }) => {
   const [currentWorkspace, setCurrentWorkspaceState] = useState<WORKSPACES | null>(null);
   const [userPermissions, setUserPermissions] = useState<Record<WORKSPACES, WORKSPACE_PERMISSIONS[]>>({} as Record<WORKSPACES, WORKSPACE_PERMISSIONS[]>);
@@ -148,29 +156,19 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
   const router = useRouter();
   const pathname = usePathname();
 
-  // Initialize permissions for all workspaces
-  const initializePermissions = () => {
-    const initialPermissions = {} as Record<WORKSPACES, WORKSPACE_PERMISSIONS[]>;
-    Object.values(WORKSPACES).forEach(workspace => {
-      initialPermissions[workspace] = [];
-    });
-    return initialPermissions;
-  };
-
   // Load user permissions from API
-  const loadUserPermissions = async () => {
+  const loadUserPermissions = useCallback(async () => {
     try {
       setLoading(true);
       
-      // Get user data from localStorage
-      const userData = localStorage.getItem('user');
-      if (!userData) {
+      // Permissions are token-backed. On first login the provider may already be
+      // mounted, so do not depend on the initial user snapshot being present.
+      const token = localStorage.getItem('token');
+      if (!token) {
         setUserPermissions(initializePermissions());
         setAccessibleWorkspaces([]);
         return;
       }
-
-      const user = JSON.parse(userData);
       
       // Fetch real workspace permissions from API
       const response = await workspacePermissionsAPI.getUserWorkspaces();
@@ -214,10 +212,10 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // Determine current workspace from pathname
-  const determineCurrentWorkspace = () => {
+  const determineCurrentWorkspace = useCallback(() => {
     if (pathname.startsWith('/dashboard/sales')) {
       return WORKSPACES.SALES;
     } else if (pathname.startsWith('/dashboard/crm')) {
@@ -232,7 +230,7 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
       return WORKSPACES.SECURITY;
     }
     return null;
-  };
+  }, [pathname]);
 
   // Set current workspace
   const setCurrentWorkspace = (workspace: WORKSPACES | null) => {
@@ -275,12 +273,16 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
   // Initialize on mount and pathname change
   useEffect(() => {
     loadUserPermissions();
-  }, []);
+  }, [loadUserPermissions]);
 
   useEffect(() => {
     const workspace = determineCurrentWorkspace();
     setCurrentWorkspaceState(workspace);
-  }, [pathname]);
+
+    if (pathname.startsWith('/dashboard') && localStorage.getItem('token')) {
+      loadUserPermissions();
+    }
+  }, [pathname, determineCurrentWorkspace, loadUserPermissions]);
 
   const value: WorkspaceContextType = {
     currentWorkspace,

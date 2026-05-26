@@ -44,18 +44,18 @@ const WORKSPACE_PERMISSIONS = {
 };
 
 const WORKSPACE_LABELS = {
-  sales: '??',
+  sales: 'فروش',
   crm: 'CRM',
-  hr: '??? ???',
-  accounting: '??',
-  inventory: '???',
-  security: '???'
+  hr: 'منابع انسانی',
+  accounting: 'حسابداری',
+  inventory: 'انبار',
+  security: 'حراست'
 };
 
 const PERMISSION_LABELS = {
-  view: '???',
-  edit: '???',
-  admin: '???'
+  view: 'مشاهده',
+  edit: 'ویرایش',
+  admin: 'مدیر'
 };
 
 export default function CreateUserPage() {
@@ -145,31 +145,31 @@ export default function CreateUserPage() {
 
   const validateForm = () => {
     if (!formData.firstName.trim()) {
-      setError('?? ??? ??');
+      setError('نام الزامی است');
       return false;
     }
     if (!formData.lastName.trim()) {
-      setError('?? ?? ??? ??');
+      setError('نام خانوادگی الزامی است');
       return false;
     }
     if (!formData.email.trim()) {
-      setError('??? ??? ??');
+      setError('ایمیل الزامی است');
       return false;
     }
     if (!formData.username.trim()) {
-      setError('?? ??? ??? ??');
+      setError('نام کاربری الزامی است');
       return false;
     }
     if (!formData.password.trim()) {
-      setError('?? ?? ??? ??');
+      setError('رمز عبور الزامی است');
       return false;
     }
     if (formData.password.length < 6) {
-      setError('?? ?? ?? ??? 6 ?? ??');
+      setError('رمز عبور باید حداقل ۶ کاراکتر باشد');
       return false;
     }
     if (formData.password !== formData.confirmPassword) {
-      setError('?? ?? ? ??? ?? ?? ??? ???');
+      setError('رمز عبور و تکرار آن یکسان نیستند');
       return false;
     }
     return true;
@@ -226,7 +226,7 @@ export default function CreateUserPage() {
       const detailMessage = Array.isArray(details) && details.length > 0
         ? details[0].msg
         : null;
-      setError(detailMessage || error.response?.data?.error || '?? ? ??? ???');
+      setError(detailMessage || error.response?.data?.error || 'خطا در ایجاد کاربر');
     } finally {
       setLoading(false);
     }
@@ -240,8 +240,8 @@ export default function CreateUserPage() {
           <div className="flex items-center space-x-4 space-x-reverse">
             <FaUserPlus className="h-8 w-8 text-teal-500" />
             <div>
-              <h1 className="text-2xl font-bold text-primary">??? ??? ??</h1>
-              <p className="text-secondary">??? ??? ?? ? ??? ?? ? ???</p>
+              <h1 className="text-2xl font-bold text-primary">ایجاد کاربر جدید</h1>
+              <p className="text-secondary">اطلاعات کاربر و نقش سازمانی را تکمیل کنید</p>
             </div>
           </div>
           <Link
@@ -249,7 +249,7 @@ export default function CreateUserPage() {
             className="glass-liquid-btn px-6 py-2 flex items-center space-x-2 space-x-reverse"
           >
             <FaArrowRight />
-            <span>??? ? ??</span>
+            <span>بازگشت به لیست</span>
           </Link>
         </div>
       </div>
@@ -266,36 +266,36 @@ export default function CreateUserPage() {
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Basic Information */}
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">?? ??</h2>
+          <h2 className="text-xl font-bold text-primary mb-4">اطلاعات پایه</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm text-secondary mb-2">?? *</label>
+              <label className="block text-sm text-secondary mb-2">نام *</label>
               <input
                 type="text"
                 name="firstName"
                 value={formData.firstName}
                 onChange={handleInputChange}
                 className="glass-liquid-input w-full"
-                placeholder="??"
+                placeholder="نام"
                 required
               />
             </div>
             
             <div>
-              <label className="block text-sm text-secondary mb-2">?? ?? *</label>
+              <label className="block text-sm text-secondary mb-2">نام خانوادگی *</label>
               <input
                 type="text"
                 name="lastName"
                 value={formData.lastName}
                 onChange={handleInputChange}
                 className="glass-liquid-input w-full"
-                placeholder="?? ??"
+                placeholder="نام خانوادگی"
                 required
               />
             </div>
             
             <div>
-              <label className="block text-sm text-secondary mb-2">??? *</label>
+              <label className="block text-sm text-secondary mb-2">ایمیل *</label>
               <input
                 type="email"
                 name="email"
@@ -308,20 +308,20 @@ export default function CreateUserPage() {
             </div>
             
             <div>
-              <label className="block text-sm text-secondary mb-2">?? ??? *</label>
+              <label className="block text-sm text-secondary mb-2">نام کاربری *</label>
               <input
                 type="text"
                 name="username"
                 value={formData.username}
                 onChange={handleInputChange}
                 className="glass-liquid-input w-full"
-                placeholder="?? ???"
+                placeholder="نام کاربری"
                 required
               />
             </div>
             
             <div>
-              <label className="block text-sm text-secondary mb-2">?? ?? *</label>
+              <label className="block text-sm text-secondary mb-2">رمز عبور *</label>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
@@ -329,7 +329,7 @@ export default function CreateUserPage() {
                   value={formData.password}
                   onChange={handleInputChange}
                   className="glass-liquid-input w-full pr-10"
-                  placeholder="?? ??"
+                  placeholder="رمز عبور"
                   required
                 />
                 <button
@@ -343,7 +343,7 @@ export default function CreateUserPage() {
             </div>
             
             <div>
-              <label className="block text-sm text-secondary mb-2">??? ?? ?? *</label>
+              <label className="block text-sm text-secondary mb-2">تکرار رمز عبور *</label>
               <div className="relative">
                 <input
                   type={showConfirmPassword ? 'text' : 'password'}
@@ -351,7 +351,7 @@ export default function CreateUserPage() {
                   value={formData.confirmPassword}
                   onChange={handleInputChange}
                   className="glass-liquid-input w-full pr-10"
-                  placeholder="??? ?? ??"
+                  placeholder="تکرار رمز عبور"
                   required
                 />
                 <button
@@ -368,35 +368,35 @@ export default function CreateUserPage() {
 
         {/* Role and Department */}
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">?? ? ??</h2>
+          <h2 className="text-xl font-bold text-primary mb-4">نقش و دپارتمان</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm text-secondary mb-2">??</label>
+              <label className="block text-sm text-secondary mb-2">نقش</label>
               <select
                 name="role"
                 value={formData.role}
                 onChange={handleInputChange}
                 className="glass-liquid-input w-full"
               >
-                <option value="USER">???</option>
-                <option value="MODERATOR">??</option>
-                <option value="SALES">??</option>
-                <option value="MANAGER">?? ??</option>
+                <option value="USER">کاربر</option>
+                <option value="MODERATOR">ناظر</option>
+                <option value="SALES">فروش</option>
+                <option value="MANAGER">مدیر</option>
                 {currentUserRole !== 'MANAGER' && (
-                  <option value="ADMIN">??</option>
+                  <option value="ADMIN">مدیر سیستم</option>
                 )}
               </select>
             </div>
             
             <div>
-              <label className="block text-sm text-secondary mb-2">??</label>
+              <label className="block text-sm text-secondary mb-2">دپارتمان</label>
               <select
                 name="departmentId"
                 value={formData.departmentId}
                 onChange={handleInputChange}
                 className="glass-liquid-input w-full"
               >
-                <option value="">?? ??</option>
+                <option value="">انتخاب دپارتمان</option>
                 {departments.map(dept => (
                   <option key={dept.id} value={dept.id}>
                     {dept.namePersian}
@@ -415,14 +415,14 @@ export default function CreateUserPage() {
                 onChange={handleInputChange}
                 className="rounded border-gray-600 bg-gray-700 text-teal-500 focus:ring-teal-500"
               />
-              <span className="text-secondary">??? ??</span>
+              <span className="text-secondary">کاربر فعال</span>
             </label>
           </div>
         </div>
 
         {/* Workspace Permissions */}
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">??? ?? ??</h2>
+          <h2 className="text-xl font-bold text-primary mb-4">دسترسی‌های فضای کاری</h2>
           <p className="text-secondary mb-6">
             تنظیم دسترسی‌ها پس از ایجاد کاربر در صفحه مدیریت دسترسی‌ها انجام می‌شود.
           </p>
@@ -460,7 +460,7 @@ export default function CreateUserPage() {
                       onChange={() => handleWorkspacePermissionChange(workspace, 'none')}
                       className="text-gray-500 focus:ring-gray-500"
                     />
-                    <span className="text-gray-500 text-sm">?? ???</span>
+                    <span className="text-gray-500 text-sm">بدون دسترسی</span>
                   </label>
                 </div>
               </div>
@@ -475,7 +475,7 @@ export default function CreateUserPage() {
               href="/dashboard/users"
               className="glass-liquid-btn px-6 py-2"
             >
-              ??
+              انصراف
             </Link>
             <button
               type="submit"
@@ -487,7 +487,7 @@ export default function CreateUserPage() {
               ) : (
                 <FaCheck />
               )}
-              <span>{loading ? '? ?? ???...' : '??? ???'}</span>
+              <span>{loading ? 'در حال ایجاد...' : 'ایجاد کاربر'}</span>
             </button>
           </div>
         </div>

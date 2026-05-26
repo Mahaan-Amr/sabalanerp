@@ -2,6 +2,16 @@ FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
+ARG DEBIAN_MIRROR=http://mirror.iranserver.com/debian
+ARG DEBIAN_SECURITY_MIRROR=http://mirror.iranserver.com/debian-security
+
+RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: %s\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' "$DEBIAN_MIRROR" "$DEBIAN_SECURITY_MIRROR" > /etc/apt/sources.list.d/debian.sources \
+  && apt-get -o Acquire::ForceIPv4=true update \
+  && apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
+  openssl \
+  ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY package*.json ./
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 RUN --mount=type=cache,target=/root/.npm \
@@ -15,7 +25,7 @@ COPY prisma ./prisma
 COPY tsconfig.json ./
 COPY src ./src
 
-RUN HTTP_PROXY=http://127.0.0.1:2081 HTTPS_PROXY=http://127.0.0.1:2081 http_proxy=http://127.0.0.1:2081 https_proxy=http://127.0.0.1:2081 npx prisma generate
+RUN npx prisma generate
 RUN npm run build
 RUN npm prune --omit=dev
 

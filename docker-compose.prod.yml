@@ -83,6 +83,12 @@ services:
       network: host
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        ALL_PROXY: ${ALL_PROXY:-}
+        all_proxy: ${all_proxy:-}
     restart: unless-stopped
     environment:
       NODE_ENV: production

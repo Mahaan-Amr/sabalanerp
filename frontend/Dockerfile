@@ -2,12 +2,21 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG http_proxy
+ARG https_proxy
+ARG ALL_PROXY
+ARG all_proxy
+
 COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
   npm config set fetch-retries 5 \
   && npm config set fetch-retry-factor 2 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000 \
+  && if [ -n "$HTTP_PROXY" ]; then npm config set proxy "$HTTP_PROXY"; fi \
+  && if [ -n "$HTTPS_PROXY" ]; then npm config set https-proxy "$HTTPS_PROXY"; fi \
   && npm ci --include=dev --prefer-offline --no-audit --fund=false \
   && test -x ./node_modules/.bin/next
 

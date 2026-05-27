@@ -19,6 +19,14 @@ interface SmsTemplateParameter {
   value: string;
 }
 
+function maskPhoneNumber(phoneNumber: string): string {
+  if (phoneNumber.length <= 4) {
+    return '****';
+  }
+
+  return `${phoneNumber.slice(0, 4)}***${phoneNumber.slice(-2)}`;
+}
+
 class SmsService {
   private apiKey: string;
   private apiUrl: string;
@@ -169,6 +177,12 @@ class SmsService {
     parameters: SmsTemplateParameter[]
   ): Promise<{ success: boolean; messageId?: number; error?: string; rawResponse?: unknown }> {
     try {
+      console.info('[sms.ir] sending template SMS', {
+        templateId,
+        mobile: maskPhoneNumber(formattedPhone),
+        parameterNames: parameters.map((parameter) => parameter.name)
+      });
+
       const response = await axios.post<SendVerificationCodeResponse>(
         `${this.apiUrl}/send/verify`,
         {
@@ -187,12 +201,25 @@ class SmsService {
       );
 
       if (response.data.status === 1) {
+        console.info('[sms.ir] template SMS accepted', {
+          templateId,
+          mobile: maskPhoneNumber(formattedPhone),
+          messageId: response.data.data?.messageId
+        });
+
         return {
           success: true,
           messageId: response.data.data?.messageId,
           rawResponse: response.data
         };
       }
+
+      console.warn('[sms.ir] template SMS rejected', {
+        templateId,
+        mobile: maskPhoneNumber(formattedPhone),
+        status: response.data.status,
+        message: response.data.message
+      });
 
       return {
         success: false,
@@ -201,12 +228,25 @@ class SmsService {
       };
     } catch (error: any) {
       if (error.response) {
+        console.error('[sms.ir] template SMS request failed', {
+          templateId,
+          mobile: maskPhoneNumber(formattedPhone),
+          status: error.response.status,
+          message: error.response.data?.message || error.response.data?.error
+        });
+
         return {
           success: false,
           error: error.response.data?.message || error.response.data?.error || 'SMS API error',
           rawResponse: error.response?.data
         };
       }
+
+      console.error('[sms.ir] template SMS request failed', {
+        templateId,
+        mobile: maskPhoneNumber(formattedPhone),
+        message: error.message
+      });
 
       return {
         success: false,

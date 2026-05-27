@@ -45,6 +45,45 @@ interface Step8DigitalSignatureProps {
   financialSummary: ContractStep8FinancialSummary;
 }
 
+const normalizeIranMobileNumber = (value?: string | null) => {
+  if (!value) return null;
+
+  const digits = value.replace(/\D/g, '');
+  let normalized = digits;
+
+  if (digits.startsWith('0098')) {
+    normalized = `0${digits.slice(4)}`;
+  } else if (digits.startsWith('98') && digits.length === 12) {
+    normalized = `0${digits.slice(2)}`;
+  } else if (digits.startsWith('9') && digits.length === 10) {
+    normalized = `0${digits}`;
+  }
+
+  return /^09\d{9}$/.test(normalized) ? normalized : null;
+};
+
+const getCustomerSmsPhoneNumber = (wizardData: ContractWizardData) => {
+  const phoneNumbers = wizardData.customer?.phoneNumbers || [];
+  const candidates = [
+    wizardData.signature?.phoneNumber,
+    phoneNumbers.find((phone) => phone.isPrimary && phone.type === 'mobile')?.number,
+    ...phoneNumbers.filter((phone) => phone.type === 'mobile').map((phone) => phone.number),
+    phoneNumbers.find((phone) => phone.isPrimary)?.number,
+    wizardData.customer?.projectManagerNumber,
+    ...phoneNumbers.filter((phone) => phone.isActive !== false).map((phone) => phone.number),
+    ...phoneNumbers.map((phone) => phone.number),
+    wizardData.customer?.homeNumber,
+    wizardData.customer?.workNumber
+  ];
+
+  for (const candidate of candidates) {
+    const mobile = normalizeIranMobileNumber(candidate);
+    if (mobile) return mobile;
+  }
+
+  return null;
+};
+
 const renderStatusBadge = (
   status: ContractWizardData['signature'] extends infer T
     ? T extends { confirmationStatus: infer S }
@@ -108,6 +147,7 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
   financialSummary
 }) => {
   const signature = wizardData.signature;
+  const smsPhoneNumber = getCustomerSmsPhoneNumber(wizardData);
 
   return (
     <div className="space-y-6">
@@ -163,9 +203,9 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600 dark:text-gray-400">شماره تماس:</span>
+                    <span className="text-gray-600 dark:text-gray-400">شماره موبایل تایید:</span>
                     <span className="font-medium text-gray-800 dark:text-white">
-                      {signature?.phoneNumber || wizardData.customer?.homeNumber || wizardData.customer?.workNumber || 'ثبت نشده'}
+                      {smsPhoneNumber || 'موبایل معتبر ثبت نشده'}
                     </span>
                   </div>
                 </div>

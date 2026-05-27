@@ -19,6 +19,44 @@ interface UseContractSubmissionOptions {
   departments?: Array<{ id: string }>;
 }
 
+const normalizeIranMobileNumber = (value?: string | null) => {
+  if (!value) return null;
+
+  const digits = value.replace(/\D/g, '');
+  let normalized = digits;
+
+  if (digits.startsWith('0098')) {
+    normalized = `0${digits.slice(4)}`;
+  } else if (digits.startsWith('98') && digits.length === 12) {
+    normalized = `0${digits.slice(2)}`;
+  } else if (digits.startsWith('9') && digits.length === 10) {
+    normalized = `0${digits}`;
+  }
+
+  return /^09\d{9}$/.test(normalized) ? normalized : null;
+};
+
+const getCustomerSmsPhoneNumber = (customer: ContractWizardData['customer']) => {
+  const phoneNumbers = customer?.phoneNumbers || [];
+  const candidates = [
+    phoneNumbers.find((phone) => phone.isPrimary && phone.type === 'mobile')?.number,
+    ...phoneNumbers.filter((phone) => phone.type === 'mobile').map((phone) => phone.number),
+    phoneNumbers.find((phone) => phone.isPrimary)?.number,
+    customer?.projectManagerNumber,
+    ...phoneNumbers.filter((phone) => phone.isActive !== false).map((phone) => phone.number),
+    ...phoneNumbers.map((phone) => phone.number),
+    customer?.homeNumber,
+    customer?.workNumber
+  ];
+
+  for (const candidate of candidates) {
+    const mobile = normalizeIranMobileNumber(candidate);
+    if (mobile) return mobile;
+  }
+
+  return null;
+};
+
 export const useContractSubmission = (options: UseContractSubmissionOptions) => {
   const {
     wizardData,
@@ -98,13 +136,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             }),
             contractId: contractId,
             contractStatus: response.data.data.status || null,
-            phoneNumber:
-              wizardData.customer?.homeNumber ||
-              wizardData.customer?.workNumber ||
-              wizardData.customer?.projectManagerNumber ||
-              wizardData.customer?.phoneNumbers?.find((p) => p.isPrimary)?.number ||
-              wizardData.customer?.phoneNumbers?.[0]?.number ||
-              null
+            phoneNumber: getCustomerSmsPhoneNumber(wizardData.customer)
           }
         });
         

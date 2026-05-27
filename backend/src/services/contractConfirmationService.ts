@@ -49,20 +49,46 @@ function normalizePhoneNumber(value: string): string {
   return digits;
 }
 
-function extractCustomerPhone(customer: any): string | null {
-  const candidates = [
-    customer?.homeNumber,
-    customer?.workNumber,
-    customer?.projectManagerNumber,
-    customer?.phoneNumbers?.find((p: any) => p?.isPrimary)?.number,
-    customer?.phoneNumbers?.[0]?.number,
-    customer?.primaryContact?.mobile,
-    customer?.primaryContact?.phone
-  ]
-    .map((v: unknown) => (typeof v === 'string' ? v.trim() : ''))
-    .filter(Boolean);
+function normalizeIranMobileNumber(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
 
-  return candidates[0] || null;
+  const normalized = normalizePhoneNumber(value.trim());
+  return /^09\d{9}$/.test(normalized) ? normalized : null;
+}
+
+function firstValidMobile(values: unknown[]): string | null {
+  for (const value of values) {
+    const mobile = normalizeIranMobileNumber(value);
+    if (mobile) {
+      return mobile;
+    }
+  }
+
+  return null;
+}
+
+function extractCustomerPhone(customer: any): string | null {
+  const phoneNumbers = Array.isArray(customer?.phoneNumbers) ? customer.phoneNumbers : [];
+  const primaryMobile = phoneNumbers.find((p: any) => p?.isPrimary && p?.type === 'mobile')?.number;
+  const mobileNumbers = phoneNumbers.filter((p: any) => p?.type === 'mobile').map((p: any) => p?.number);
+  const primaryPhone = phoneNumbers.find((p: any) => p?.isPrimary)?.number;
+  const activePhones = phoneNumbers.filter((p: any) => p?.isActive !== false).map((p: any) => p?.number);
+  const allPhones = phoneNumbers.map((p: any) => p?.number);
+
+  return firstValidMobile([
+    primaryMobile,
+    ...mobileNumbers,
+    primaryPhone,
+    customer?.primaryContact?.mobile,
+    customer?.primaryContact?.phone,
+    customer?.projectManagerNumber,
+    ...activePhones,
+    ...allPhones,
+    customer?.homeNumber,
+    customer?.workNumber
+  ]);
 }
 
 function extractCustomerName(customer: any): string {
@@ -245,7 +271,7 @@ export class ContractConfirmationService {
 
     const phoneNumber = extractCustomerPhone(contract.customer);
     if (!phoneNumber) {
-      return { success: false, error: 'شماره تماس مشتری در CRM ثبت نشده است' };
+      return { success: false, error: 'شماره موبایل معتبر برای مشتری در CRM ثبت نشده است' };
     }
 
     const existingActiveSession = await prisma.contractPublicConfirmation.findFirst({

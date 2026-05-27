@@ -33,6 +33,7 @@ class SmsService {
   private templateId: number;
   private contractConfirmationTemplateId: number;
   private environment: string;
+  private requestTimeoutMs: number;
 
   constructor() {
     this.apiKey = process.env.SMS_IR_API_KEY || '';
@@ -43,6 +44,7 @@ class SmsService {
       10
     );
     this.environment = process.env.SMS_IR_ENVIRONMENT || 'sandbox';
+    this.requestTimeoutMs = parseInt(process.env.SMS_IR_TIMEOUT_MS || '30000', 10);
 
     if (!this.apiKey) {
       console.warn('SMS_IR_API_KEY is not set in environment variables');
@@ -196,7 +198,7 @@ class SmsService {
             Accept: 'text/plain',
             'x-api-key': this.apiKey
           },
-          timeout: 10000
+          timeout: this.requestTimeoutMs
         }
       );
 
@@ -245,6 +247,8 @@ class SmsService {
       console.error('[sms.ir] template SMS request failed', {
         templateId,
         mobile: maskPhoneNumber(formattedPhone),
+        code: error.code,
+        timeoutMs: this.requestTimeoutMs,
         message: error.message
       });
 

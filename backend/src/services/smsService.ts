@@ -29,9 +29,9 @@ class SmsService {
   constructor() {
     this.apiKey = process.env.SMS_IR_API_KEY || '';
     this.apiUrl = process.env.SMS_IR_API_URL || 'https://api.sms.ir/v1';
-    this.templateId = parseInt(process.env.SMS_IR_TEMPLATE_ID || '123456', 10);
+    this.templateId = parseInt(process.env.SMS_IR_TEMPLATE_ID || '135816', 10);
     this.contractConfirmationTemplateId = parseInt(
-      process.env.SMS_IR_CONTRACT_CONFIRM_TEMPLATE_ID || String(this.templateId),
+      process.env.SMS_IR_CONTRACT_CONFIRM_TEMPLATE_ID || '385075',
       10
     );
     this.environment = process.env.SMS_IR_ENVIRONMENT || 'sandbox';

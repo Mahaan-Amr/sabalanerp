@@ -8,6 +8,12 @@ const router = express.Router();
 const prisma = new PrismaClient();
 
 const isManager = (req: any) => req.user?.role === 'MANAGER';
+const isAdminPermissionLevel = (permissionLevel?: string) =>
+  permissionLevel === FEATURE_PERMISSIONS.ADMIN;
+const FEATURE_EXCEPTION_PERMISSION_LEVELS = [
+  FEATURE_PERMISSIONS.VIEW,
+  FEATURE_PERMISSIONS.EDIT
+];
 
 const getFeatureWorkspace = (feature: string): string | null => {
   if (!Object.values(FEATURES).includes(feature as any)) {
@@ -215,7 +221,7 @@ router.post('/features', protect, authorize('ADMIN', 'MANAGER'), [
   body('userId').notEmpty().withMessage('User ID is required'),
   body('workspace').notEmpty().withMessage('Workspace is required'),
   body('feature').notEmpty().withMessage('Feature is required'),
-  body('permissionLevel').isIn(['view', 'edit', 'admin']).withMessage('Invalid permission level'),
+  body('permissionLevel').isIn(FEATURE_EXCEPTION_PERMISSION_LEVELS).withMessage('Feature exceptions only support view or edit'),
   body('expiresAt').optional().isISO8601().withMessage('Invalid expiration date')
 ], async (req: any, res: Response) => {
   try {
@@ -275,6 +281,13 @@ router.post('/features', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
+    if (isAdminPermissionLevel(permissionLevel)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Feature exceptions only support view or edit'
+      });
+    }
+
     const permission = await prisma.featurePermission.create({
       data: {
         userId,
@@ -326,13 +339,125 @@ router.post('/features', protect, authorize('ADMIN', 'MANAGER'), [
   }
 });
 
+// @desc    Bulk upsert feature permissions for a user
+// @route   POST /api/permissions/features/bulk
+// @access  Private/Admin
+router.post('/features/bulk', protect, authorize('ADMIN', 'MANAGER'), [
+  body('userId').notEmpty().withMessage('User ID is required'),
+  body('permissions').isArray({ min: 1 }).withMessage('Permissions are required'),
+  body('permissions.*.workspace').notEmpty().withMessage('Workspace is required'),
+  body('permissions.*.feature').notEmpty().withMessage('Feature is required'),
+  body('permissions.*.permissionLevel').isIn(FEATURE_EXCEPTION_PERMISSION_LEVELS).withMessage('Feature exceptions only support view or edit'),
+  body('permissions.*.expiresAt').optional({ values: 'falsy' }).isISO8601().withMessage('Invalid expiration date')
+], async (req: any, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: errors.array()
+      });
+    }
+
+    const { userId, permissions } = req.body;
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    if (req.user.role === 'MANAGER' && targetUser.role === 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot grant permissions to admin users'
+      });
+    }
+
+    const normalizedPermissions = Array.from(
+      new Map(
+        permissions.map((permission: any) => [`${permission.workspace}:${permission.feature}`, permission])
+      ).values()
+    ) as any[];
+
+    if (normalizedPermissions.some((permission) => isAdminPermissionLevel(permission.permissionLevel))) {
+      return res.status(403).json({
+        success: false,
+        error: 'Feature exceptions only support view or edit'
+      });
+    }
+
+    for (const permission of normalizedPermissions) {
+      const featureWorkspaceError = validateFeatureWorkspacePair(permission.feature, permission.workspace);
+      if (featureWorkspaceError) {
+        return res.status(400).json({
+          success: false,
+          error: featureWorkspaceError
+        });
+      }
+    }
+
+    const upsertedPermissions = await prisma.$transaction(
+      normalizedPermissions.map((permission) => prisma.featurePermission.upsert({
+        where: {
+          userId_workspace_feature: {
+            userId,
+            workspace: permission.workspace,
+            feature: permission.feature
+          }
+        },
+        create: {
+          userId,
+          workspace: permission.workspace,
+          feature: permission.feature,
+          permissionLevel: permission.permissionLevel,
+          grantedBy: req.user.id,
+          expiresAt: permission.expiresAt ? new Date(permission.expiresAt) : null
+        },
+        update: {
+          permissionLevel: permission.permissionLevel,
+          grantedBy: req.user.id,
+          grantedAt: new Date(),
+          expiresAt: permission.expiresAt ? new Date(permission.expiresAt) : null,
+          isActive: true
+        }
+      }))
+    );
+
+    console.info('[permissions] feature permissions bulk upserted', {
+      actorId: req.user.id,
+      targetUserId: userId,
+      count: upsertedPermissions.length
+    });
+
+    res.status(201).json({
+      success: true,
+      data: upsertedPermissions,
+      summary: {
+        count: upsertedPermissions.length
+      }
+    });
+  } catch (error) {
+    console.error('Bulk upsert feature permissions error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
+  }
+});
+
 // @desc    Update feature permission
 // @route   PUT /api/permissions/features/:id
 // @access  Private/Admin
 router.put('/features/:id', protect, authorize('ADMIN', 'MANAGER'), [
   body('workspace').optional().notEmpty().withMessage('Workspace cannot be empty'),
   body('feature').optional().notEmpty().withMessage('Feature cannot be empty'),
-  body('permissionLevel').optional().isIn(['view', 'edit', 'admin']).withMessage('Invalid permission level'),
+  body('permissionLevel').optional().isIn(FEATURE_EXCEPTION_PERMISSION_LEVELS).withMessage('Feature exceptions only support view or edit'),
   body('expiresAt').optional().isISO8601().withMessage('Invalid expiration date'),
   body('isActive').optional().isBoolean().withMessage('Invalid active status')
 ], async (req: any, res: Response) => {
@@ -368,6 +493,20 @@ router.put('/features/:id', protect, authorize('ADMIN', 'MANAGER'), [
       return res.status(403).json({
         success: false,
         error: 'Managers cannot modify admin permissions'
+      });
+    }
+
+    if (isManager(req) && isAdminPermissionLevel(permission.permissionLevel)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot modify admin-level permissions'
+      });
+    }
+
+    if (isAdminPermissionLevel(permissionLevel)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Feature exceptions only support view or edit'
       });
     }
 
@@ -464,6 +603,13 @@ router.delete('/features/:id', protect, authorize('ADMIN', 'MANAGER'), async (re
       });
     }
 
+    if (isManager(req) && isAdminPermissionLevel(permission.permissionLevel)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot delete admin-level permissions'
+      });
+    }
+
     await prisma.featurePermission.delete({
       where: { id }
     });
@@ -555,7 +701,7 @@ router.get('/role-features', protect, authorize('ADMIN', 'MANAGER'), async (req:
 // @desc    Create new role feature permission
 // @route   POST /api/permissions/role-features
 // @access  Private/Admin
-router.post('/role-features', protect, authorize('ADMIN', 'MANAGER'), [
+router.post('/role-features', protect, authorize('ADMIN'), [
   body('role').notEmpty().withMessage('Role is required'),
   body('workspace').notEmpty().withMessage('Workspace is required'),
   body('feature').notEmpty().withMessage('Feature is required'),
@@ -639,7 +785,7 @@ router.post('/role-features', protect, authorize('ADMIN', 'MANAGER'), [
 // @desc    Update role feature permission
 // @route   PUT /api/permissions/role-features/:id
 // @access  Private/Admin
-router.put('/role-features/:id', protect, authorize('ADMIN', 'MANAGER'), [
+router.put('/role-features/:id', protect, authorize('ADMIN'), [
   body('workspace').optional().notEmpty().withMessage('Workspace cannot be empty'),
   body('feature').optional().notEmpty().withMessage('Feature cannot be empty'),
   body('permissionLevel').optional().isIn(['view', 'edit', 'admin']).withMessage('Invalid permission level'),
@@ -721,7 +867,7 @@ router.put('/role-features/:id', protect, authorize('ADMIN', 'MANAGER'), [
 // @desc    Delete role feature permission
 // @route   DELETE /api/permissions/role-features/:id
 // @access  Private/Admin
-router.delete('/role-features/:id', protect, authorize('ADMIN', 'MANAGER'), async (req: any, res: Response) => {
+router.delete('/role-features/:id', protect, authorize('ADMIN'), async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 

@@ -632,13 +632,13 @@ export const requireFeatureAccess = (feature: Feature, requiredPermission: Featu
       // Determine effective permission level
       let effectivePermission: FeaturePermission | null = null;
 
-      // Priority: Feature-specific > Workspace-level
+      // Priority: user-specific overrides > role defaults.
       if (isPermissionActiveAndNotExpired(userFeaturePermission)) {
         effectivePermission = userFeaturePermission!.permissionLevel as FeaturePermission;
-      } else if (isPermissionActiveAndNotExpired(roleFeaturePermission)) {
-        effectivePermission = roleFeaturePermission!.permissionLevel as FeaturePermission;
       } else if (isPermissionActiveAndNotExpired(userWorkspacePermission)) {
         effectivePermission = userWorkspacePermission!.permissionLevel as FeaturePermission;
+      } else if (isPermissionActiveAndNotExpired(roleFeaturePermission)) {
+        effectivePermission = roleFeaturePermission!.permissionLevel as FeaturePermission;
       } else if (isPermissionActiveAndNotExpired(roleWorkspacePermission)) {
         effectivePermission = roleWorkspacePermission!.permissionLevel as FeaturePermission;
       }
@@ -735,10 +735,10 @@ export const requireAnyFeatureAccess = (
 
         if (isPermissionActiveAndNotExpired(userFeaturePermission)) {
           effectivePermission = userFeaturePermission!.permissionLevel as FeaturePermission;
-        } else if (isPermissionActiveAndNotExpired(roleFeaturePermission)) {
-          effectivePermission = roleFeaturePermission!.permissionLevel as FeaturePermission;
         } else if (isPermissionActiveAndNotExpired(userWorkspacePermission)) {
           effectivePermission = userWorkspacePermission!.permissionLevel as FeaturePermission;
+        } else if (isPermissionActiveAndNotExpired(roleFeaturePermission)) {
+          effectivePermission = roleFeaturePermission!.permissionLevel as FeaturePermission;
         } else if (isPermissionActiveAndNotExpired(roleWorkspacePermission)) {
           effectivePermission = roleWorkspacePermission!.permissionLevel as FeaturePermission;
         }
@@ -840,10 +840,10 @@ export const getUserFeatures = async (userId: string, userRole: string): Promise
       let permission: FeaturePermission;
       if (userFeaturePermission) {
         permission = userFeaturePermission.permissionLevel as FeaturePermission;
-      } else if (roleFeaturePermission) {
-        permission = roleFeaturePermission.permissionLevel as FeaturePermission;
       } else if (userWorkspacePermission) {
         permission = userWorkspacePermission.permissionLevel as FeaturePermission;
+      } else if (roleFeaturePermission) {
+        permission = roleFeaturePermission.permissionLevel as FeaturePermission;
       } else if (roleWorkspacePermission) {
         permission = roleWorkspacePermission.permissionLevel as FeaturePermission;
       } else {
@@ -863,4 +863,3 @@ export const getUserFeatures = async (userId: string, userRole: string): Promise
     return [];
   }
 };
-

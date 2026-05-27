@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { 
   FaUsers, 
   FaPlus, 
@@ -65,6 +66,21 @@ interface WorkspacePermission {
   };
 }
 
+interface RoleWorkspacePermission {
+  id: string;
+  role: string;
+  workspace: string;
+  permissionLevel: string;
+  isActive: boolean;
+}
+
+interface EffectiveWorkspacePermission {
+  key: string;
+  workspace: string;
+  permissionLevel: string;
+  source: 'direct' | 'role' | 'admin';
+}
+
 interface Department {
   id: string;
   name: string;
@@ -74,9 +90,12 @@ interface Department {
 }
 
 export default function UsersManagementPage() {
+  const searchParams = useSearchParams();
+  const createdUserId = searchParams.get('createdUserId');
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [permissions, setPermissions] = useState<WorkspacePermission[]>([]);
+  const [rolePermissions, setRolePermissions] = useState<RoleWorkspacePermission[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
@@ -113,10 +132,11 @@ export default function UsersManagementPage() {
       setLoading(true);
       setError(null);
       
-      const [usersResponse, departmentsResponse, permissionsResponse] = await Promise.all([
+      const [usersResponse, departmentsResponse, permissionsResponse, rolePermissionsResponse] = await Promise.all([
         usersAPI.getUsers(currentPage, 10),
         departmentsAPI.getDepartments(),
-        workspacePermissionsAPI.getUserPermissions({ page: 1, limit: 1000 })
+        workspacePermissionsAPI.getUserPermissions({ page: 1, limit: 1000 }),
+        workspacePermissionsAPI.getRolePermissions()
       ]);
       
       if (usersResponse.data.success) {
@@ -130,6 +150,10 @@ export default function UsersManagementPage() {
       
       if (permissionsResponse.data.success) {
         setPermissions(permissionsResponse.data.data);
+      }
+
+      if (rolePermissionsResponse.data.success) {
+        setRolePermissions(rolePermissionsResponse.data.data);
       }
     } catch (error: any) {
       console.error('Error fetching users data:', error);
@@ -162,6 +186,40 @@ export default function UsersManagementPage() {
 
   const getUserWorkspacePermissions = (userId: string) => {
     return permissions.filter(p => p.userId === userId && p.isActive);
+  };
+
+  const getEffectiveWorkspacePermissions = (user: User): EffectiveWorkspacePermission[] => {
+    if (user.role === 'ADMIN') {
+      return ['sales', 'crm', 'hr', 'accounting', 'inventory', 'security'].map((workspace) => ({
+        key: `admin-${workspace}`,
+        workspace,
+        permissionLevel: 'admin',
+        source: 'admin'
+      }));
+    }
+
+    const directPermissions = getUserWorkspacePermissions(user.id);
+    const roleDefaults = rolePermissions.filter(
+      permission => permission.role === user.role && permission.isActive
+    );
+    const directWorkspaces = new Set(directPermissions.map(permission => permission.workspace));
+
+    return [
+      ...directPermissions.map((permission) => ({
+        key: permission.id,
+        workspace: permission.workspace,
+        permissionLevel: permission.permissionLevel,
+        source: 'direct' as const
+      })),
+      ...roleDefaults
+        .filter(permission => !directWorkspaces.has(permission.workspace))
+        .map((permission) => ({
+          key: permission.id,
+          workspace: permission.workspace,
+          permissionLevel: permission.permissionLevel,
+          source: 'role' as const
+        }))
+    ];
   };
 
   const getRoleLabel = (role: string) => {
@@ -207,6 +265,24 @@ export default function UsersManagementPage() {
     }
   };
 
+  const getPermissionSourceLabel = (source: EffectiveWorkspacePermission['source']) => {
+    switch (source) {
+      case 'direct': return 'مستقیم';
+      case 'role': return 'از نقش';
+      case 'admin': return 'مدیر سیستم';
+      default: return source;
+    }
+  };
+
+  const getPermissionSourceColor = (source: EffectiveWorkspacePermission['source']) => {
+    switch (source) {
+      case 'direct': return 'bg-teal-500/20 text-teal-300 border-teal-500/30';
+      case 'role': return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
+      case 'admin': return 'bg-red-500/20 text-red-300 border-red-500/30';
+      default: return 'bg-gray-500/20 text-gray-300 border-gray-500/30';
+    }
+  };
+
   const filteredUsers = users.filter(user => {
     const matchesSearch = 
       user.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -222,6 +298,9 @@ export default function UsersManagementPage() {
     
     return matchesSearch && matchesDepartment && matchesRole && matchesStatus;
   });
+  const createdUser = createdUserId
+    ? users.find(user => user.id === createdUserId)
+    : null;
 
   if (loading) {
     return (
@@ -411,6 +490,35 @@ export default function UsersManagementPage() {
         </div>
       </div>
 
+      {createdUserId && (
+        <div className="glass-liquid-card p-4 border border-teal-500/30 bg-teal-500/10">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              <p className="text-primary font-medium">
+                کاربر {createdUser ? `${createdUser.firstName} ${createdUser.lastName}` : 'جدید'} ایجاد شد
+              </p>
+              <p className="text-secondary text-sm mt-1">
+                برای موارد خاص، می‌توانید مجوزهای جزئی و استثناها را مدیریت کنید.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link
+                href={`/dashboard/admin/permissions?userId=${createdUserId}&section=exceptions`}
+                className="glass-liquid-btn-primary px-4 py-2 text-sm"
+              >
+                مدیریت استثناها
+              </Link>
+              <Link
+                href="/dashboard/users"
+                className="glass-liquid-btn px-4 py-2 text-sm"
+              >
+                بستن
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Users Table */}
       <div className="glass-liquid-card p-6">
         <div className="flex items-center justify-between mb-4">
@@ -437,7 +545,7 @@ export default function UsersManagementPage() {
             </thead>
             <tbody>
               {filteredUsers.map((user) => {
-                const userPermissions = getUserWorkspacePermissions(user.id);
+                const userPermissions = getEffectiveWorkspacePermissions(user);
                 const isManager = currentUserRole === 'MANAGER';
                 const isAdminTarget = user.role === 'ADMIN';
                 const disableAdminActions = isManager && isAdminTarget;
@@ -469,10 +577,11 @@ export default function UsersManagementPage() {
                         {userPermissions.length > 0 ? (
                           userPermissions.map(permission => (
                             <span
-                              key={permission.id}
-                              className="px-2 py-1 rounded text-xs bg-teal-500/20 text-teal-400"
+                              key={permission.key}
+                              className={`px-2 py-1 rounded text-xs border ${getPermissionSourceColor(permission.source)}`}
+                              title={`منبع دسترسی: ${getPermissionSourceLabel(permission.source)}`}
                             >
-                              {getWorkspaceLabel(permission.workspace)} ({getPermissionLabel(permission.permissionLevel)})
+                              {getWorkspaceLabel(permission.workspace)} ({getPermissionLabel(permission.permissionLevel)} - {getPermissionSourceLabel(permission.source)})
                             </span>
                           ))
                         ) : (

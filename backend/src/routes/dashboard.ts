@@ -1,7 +1,8 @@
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
-import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES, getUserFeatures } from '../middleware/feature';
+import { getUserWorkspaces } from '../middleware/workspace';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -194,7 +195,6 @@ router.get('/stats', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_STATS
 router.get('/profile', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_PROFILE_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res) => {
   try {
     const userId = req.user.id;
-    const now = new Date();
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -219,63 +219,10 @@ router.get('/profile', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_PRO
       });
     }
 
-    // Get user's feature permissions (user-specific)
-    const userFeaturePermissions = await prisma.featurePermission.findMany({
-      where: {
-        userId: userId,
-        isActive: true,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
-      },
-      select: {
-        feature: true,
-        permissionLevel: true,
-        workspace: true
-      }
-    });
-
-    // Get user's role-based feature permissions
-    const roleFeaturePermissions = await prisma.roleFeaturePermission.findMany({
-      where: {
-        role: user.role,
-        isActive: true
-      },
-      select: {
-        feature: true,
-        permissionLevel: true,
-        workspace: true
-      }
-    });
-
-    // Combine user-specific and role-based feature permissions
-    const featurePermissions = [...userFeaturePermissions, ...roleFeaturePermissions];
-
-    // Get user's workspace permissions (user-specific)
-    const userWorkspacePermissions = await prisma.workspacePermission.findMany({
-      where: {
-        userId: userId,
-        isActive: true,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
-      },
-      select: {
-        workspace: true,
-        permissionLevel: true
-      }
-    });
-
-    // Get user's role-based workspace permissions
-    const roleWorkspacePermissions = await prisma.roleWorkspacePermission.findMany({
-      where: {
-        role: user.role,
-        isActive: true
-      },
-      select: {
-        workspace: true,
-        permissionLevel: true
-      }
-    });
-
-    // Combine user-specific and role-based workspace permissions
-    const workspacePermissions = [...userWorkspacePermissions, ...roleWorkspacePermissions];
+    const [featurePermissions, workspacePermissions] = await Promise.all([
+      getUserFeatures(userId, user.role),
+      getUserWorkspaces(userId, user.role)
+    ]);
 
     // Remove sensitive information
     const { password, ...userWithoutPassword } = user;
@@ -285,8 +232,15 @@ router.get('/profile', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_PRO
       data: {
         ...userWithoutPassword,
         permissions: {
-          features: featurePermissions,
-          workspaces: workspacePermissions
+          features: featurePermissions.map((permission) => ({
+            feature: permission.feature,
+            permissionLevel: permission.permission,
+            workspace: permission.workspace
+          })),
+          workspaces: workspacePermissions.map((permission) => ({
+            workspace: permission.workspace,
+            permissionLevel: permission.permission
+          }))
         }
       }
     });

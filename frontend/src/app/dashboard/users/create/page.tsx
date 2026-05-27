@@ -58,6 +58,75 @@ const PERMISSION_LABELS = {
   admin: 'مدیر'
 };
 
+const PERMISSION_PRESETS: Array<{
+  id: string;
+  label: string;
+  description: string;
+  recommendedRole: string;
+  permissions: WorkspacePermission[];
+}> = [
+  {
+    id: 'crm_staff',
+    label: 'کارشناس CRM',
+    description: 'دسترسی کاری به CRM و مشاهده فروش',
+    recommendedRole: 'USER',
+    permissions: [
+      { workspace: WORKSPACES.CRM, permissionLevel: WORKSPACE_PERMISSIONS.EDIT },
+      { workspace: WORKSPACES.SALES, permissionLevel: WORKSPACE_PERMISSIONS.VIEW }
+    ]
+  },
+  {
+    id: 'sales_staff',
+    label: 'کارشناس فروش',
+    description: 'دسترسی کاری به فروش و مشاهده CRM',
+    recommendedRole: 'SALES',
+    permissions: [
+      { workspace: WORKSPACES.SALES, permissionLevel: WORKSPACE_PERMISSIONS.EDIT },
+      { workspace: WORKSPACES.CRM, permissionLevel: WORKSPACE_PERMISSIONS.VIEW }
+    ]
+  },
+  {
+    id: 'sales_manager',
+    label: 'مدیر فروش',
+    description: 'مدیریت فروش و CRM',
+    recommendedRole: 'MANAGER',
+    permissions: [
+      { workspace: WORKSPACES.SALES, permissionLevel: WORKSPACE_PERMISSIONS.ADMIN },
+      { workspace: WORKSPACES.CRM, permissionLevel: WORKSPACE_PERMISSIONS.ADMIN }
+    ]
+  },
+  {
+    id: 'inventory_editor',
+    label: 'کارشناس انبار',
+    description: 'ویرایش انبار و مشاهده فروش',
+    recommendedRole: 'USER',
+    permissions: [
+      { workspace: WORKSPACES.INVENTORY, permissionLevel: WORKSPACE_PERMISSIONS.EDIT },
+      { workspace: WORKSPACES.SALES, permissionLevel: WORKSPACE_PERMISSIONS.VIEW }
+    ]
+  },
+  {
+    id: 'operations_viewer',
+    label: 'مشاهده عملیات',
+    description: 'مشاهده فروش، CRM و انبار',
+    recommendedRole: 'USER',
+    permissions: [
+      { workspace: WORKSPACES.SALES, permissionLevel: WORKSPACE_PERMISSIONS.VIEW },
+      { workspace: WORKSPACES.CRM, permissionLevel: WORKSPACE_PERMISSIONS.VIEW },
+      { workspace: WORKSPACES.INVENTORY, permissionLevel: WORKSPACE_PERMISSIONS.VIEW }
+    ]
+  },
+  {
+    id: 'security_staff',
+    label: 'حراست',
+    description: 'دسترسی کاری به حراست',
+    recommendedRole: 'USER',
+    permissions: [
+      { workspace: WORKSPACES.SECURITY, permissionLevel: WORKSPACE_PERMISSIONS.EDIT }
+    ]
+  }
+];
+
 export default function CreateUserPage() {
   const router = useRouter();
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -80,6 +149,15 @@ export default function CreateUserPage() {
   });
 
   const [workspacePermissions, setWorkspacePermissions] = useState<WorkspacePermission[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
+  const selectedPreset = PERMISSION_PRESETS.find(item => item.id === selectedPresetId) || null;
+  const canGrantAdminPermissions = currentUserRole !== 'MANAGER';
+  const availablePermissionPresets = PERMISSION_PRESETS.filter((preset) =>
+    canGrantAdminPermissions || !preset.permissions.some((permission) => permission.permissionLevel === WORKSPACE_PERMISSIONS.ADMIN)
+  );
+  const availableWorkspacePermissionEntries = Object.entries(WORKSPACE_PERMISSIONS).filter(([, permission]) =>
+    canGrantAdminPermissions || permission !== WORKSPACE_PERMISSIONS.ADMIN
+  );
 
   useEffect(() => {
     fetchDepartments();
@@ -117,6 +195,11 @@ export default function CreateUserPage() {
   };
 
   const handleWorkspacePermissionChange = (workspace: string, permissionLevel: string) => {
+    if (!canGrantAdminPermissions && permissionLevel === WORKSPACE_PERMISSIONS.ADMIN) {
+      setError('مدیر نمی‌تواند سطح دسترسی مدیریت را اعطا کند');
+      return;
+    }
+    setSelectedPresetId(null);
     setWorkspacePermissions(prev => {
       const existing = prev.find(p => p.workspace === workspace);
       if (existing) {
@@ -138,9 +221,32 @@ export default function CreateUserPage() {
     });
   };
 
+  const applyPermissionPreset = (presetId: string) => {
+    const preset = PERMISSION_PRESETS.find(item => item.id === presetId);
+    if (!preset) return;
+    if (!canGrantAdminPermissions && preset.permissions.some((permission) => permission.permissionLevel === WORKSPACE_PERMISSIONS.ADMIN)) {
+      setError('این الگو شامل سطح دسترسی مدیریت است و فقط مدیر سیستم می‌تواند آن را اعمال کند');
+      return;
+    }
+
+    setSelectedPresetId(preset.id);
+    setWorkspacePermissions(preset.permissions);
+  };
+
+  const clearWorkspacePermissions = () => {
+    setSelectedPresetId(null);
+    setWorkspacePermissions([]);
+  };
+
   const getCurrentPermission = (workspace: string) => {
     const permission = workspacePermissions.find(p => p.workspace === workspace);
     return permission ? permission.permissionLevel : 'none';
+  };
+
+  const getWorkspacePermissionLabel = (permission: WorkspacePermission) => {
+    const workspaceLabel = WORKSPACE_LABELS[permission.workspace as keyof typeof WORKSPACE_LABELS] || permission.workspace;
+    const permissionLabel = PERMISSION_LABELS[permission.permissionLevel as keyof typeof PERMISSION_LABELS] || permission.permissionLevel;
+    return `${workspaceLabel}: ${permissionLabel}`;
   };
 
   const validateForm = () => {
@@ -172,6 +278,10 @@ export default function CreateUserPage() {
       setError('رمز عبور و تکرار آن یکسان نیستند');
       return false;
     }
+    if (!canGrantAdminPermissions && workspacePermissions.some((permission) => permission.permissionLevel === WORKSPACE_PERMISSIONS.ADMIN)) {
+      setError('مدیر نمی‌تواند سطح دسترسی مدیریت را اعطا کند');
+      return false;
+    }
     return true;
   };
 
@@ -195,30 +305,15 @@ export default function CreateUserPage() {
         password: formData.password,
         role: formData.role,
         departmentId: formData.departmentId,
-        isActive: formData.isActive
+        isActive: formData.isActive,
+        workspacePermissions
       });
 
       if (userResponse.data.success) {
-        const userId = userResponse.data.data.id;
-
-        // Update user with additional data
-        if (formData.role !== 'USER' || formData.departmentId) {
-          // Note: We would need to add an update user endpoint for role and department
-          console.log('User created, additional updates needed:', {
-            role: formData.role,
-            departmentId: formData.departmentId
-          });
-        }
-
-        if (workspacePermissions.length > 0) {
-          console.info('Workspace permissions are configured post-create in admin permissions page', {
-            userId,
-            requestedWorkspacePermissions: workspacePermissions
-          });
-        }
-
-        alert('کاربر با موفقیت ایجاد شد. دسترسی‌ها را از صفحه مدیریت دسترسی‌ها تنظیم کنید.');
-        router.push('/dashboard/users');
+        const createdUserId = userResponse.data.data.id;
+        const permissionCount = userResponse.data.data.permissionSummary?.workspacePermissions || workspacePermissions.length;
+        alert(`کاربر با موفقیت ایجاد شد${permissionCount > 0 ? ` و ${permissionCount} دسترسی فضای کاری ثبت شد` : ''}.`);
+        router.push(`/dashboard/users?createdUserId=${createdUserId}`);
       }
     } catch (error: any) {
       console.error('Error creating user:', error);
@@ -381,9 +476,11 @@ export default function CreateUserPage() {
                 <option value="USER">کاربر</option>
                 <option value="MODERATOR">ناظر</option>
                 <option value="SALES">فروش</option>
-                <option value="MANAGER">مدیر</option>
                 {currentUserRole !== 'MANAGER' && (
-                  <option value="ADMIN">مدیر سیستم</option>
+                  <>
+                    <option value="MANAGER">مدیر</option>
+                    <option value="ADMIN">مدیر سیستم</option>
+                  </>
                 )}
               </select>
             </div>
@@ -424,8 +521,47 @@ export default function CreateUserPage() {
         <div className="glass-liquid-card p-6">
           <h2 className="text-xl font-bold text-primary mb-4">دسترسی‌های فضای کاری</h2>
           <p className="text-secondary mb-6">
-            تنظیم دسترسی‌ها پس از ایجاد کاربر در صفحه مدیریت دسترسی‌ها انجام می‌شود.
+            دسترسی‌های انتخاب‌شده همزمان با ایجاد کاربر ذخیره می‌شوند.
           </p>
+
+          <div className="mb-6">
+            <div className="flex items-center justify-between gap-4 mb-3">
+              <h3 className="text-lg font-semibold text-primary flex items-center gap-2">
+                <FaShieldAlt className="text-teal-500" />
+                الگوی دسترسی
+              </h3>
+              {workspacePermissions.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearWorkspacePermissions}
+                  className="glass-liquid-btn px-4 py-2 text-sm"
+                >
+                  پاک کردن دسترسی‌ها
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {availablePermissionPresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => applyPermissionPreset(preset.id)}
+                  className={`text-right p-4 rounded-lg border transition-all duration-200 ${
+                    selectedPresetId === preset.id
+                      ? 'bg-teal-500/20 border-teal-400/60 text-teal-100'
+                      : 'bg-gray-800/40 border-gray-700 text-secondary hover:border-teal-500/40 hover:bg-teal-500/10'
+                  }`}
+                >
+                  <span className="block text-primary font-medium mb-1">{preset.label}</span>
+                  <span className="block text-sm text-secondary">{preset.description}</span>
+                  <span className="block text-xs text-teal-300 mt-3">
+                    نقش پیشنهادی: {preset.recommendedRole}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {Object.entries(WORKSPACES).map(([key, workspace]) => (
@@ -435,7 +571,7 @@ export default function CreateUserPage() {
                 </h3>
                 
                 <div className="space-y-2">
-                  {Object.entries(WORKSPACE_PERMISSIONS).map(([permKey, permission]) => (
+                  {availableWorkspacePermissionEntries.map(([permKey, permission]) => (
                     <label key={permission} className="flex items-center space-x-2 space-x-reverse">
                       <input
                         type="radio"
@@ -465,6 +601,48 @@ export default function CreateUserPage() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Review */}
+        <div className="glass-liquid-card p-6">
+          <h2 className="text-xl font-bold text-primary mb-4">بازبینی نهایی</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div className="p-4 rounded-lg bg-gray-800/40 border border-gray-700">
+              <p className="text-secondary mb-2">کاربر</p>
+              <p className="text-primary font-medium">
+                {formData.firstName || 'نام'} {formData.lastName || 'نام خانوادگی'}
+              </p>
+              <p className="text-secondary mt-1">{formData.email || 'ایمیل وارد نشده'}</p>
+              <p className="text-secondary mt-2">نقش انتخاب‌شده: {formData.role}</p>
+              {selectedPreset && selectedPreset.recommendedRole !== formData.role && (
+                <p className="text-amber-300 mt-2">
+                  نقش پیشنهادی این الگو: {selectedPreset.recommendedRole}
+                </p>
+              )}
+            </div>
+            <div className="p-4 rounded-lg bg-gray-800/40 border border-gray-700">
+              <p className="text-secondary mb-2">دسترسی‌ها</p>
+              {workspacePermissions.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {workspacePermissions.map((permission) => (
+                    <span
+                      key={permission.workspace}
+                      className="px-3 py-1 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-200"
+                    >
+                      {getWorkspacePermissionLabel(permission)}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+                  <p className="text-amber-200 font-medium">هیچ دسترسی فضای کاری انتخاب نشده است</p>
+                  <p className="text-amber-100/80 mt-1">
+                    کاربر ایجاد می‌شود، اما تا زمان افزودن دسترسی مستقیم یا نقش مناسب، دسترسی عملی محدودی خواهد داشت.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

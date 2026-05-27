@@ -8,6 +8,8 @@ const router = express.Router();
 const prisma = new PrismaClient();
 
 const isManager = (req: any) => req.user?.role === 'MANAGER';
+const isAdminPermissionLevel = (permissionLevel?: string) =>
+  permissionLevel === WORKSPACE_PERMISSIONS.ADMIN;
 
 // ==================== WORKSPACE PERMISSIONS ====================
 
@@ -151,6 +153,13 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
       return res.status(403).json({
         success: false,
         error: 'Managers cannot grant permissions to admin users'
+      });
+    }
+
+    if (isManager(req) && isAdminPermissionLevel(permissionLevel)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot grant admin-level permissions'
       });
     }
 
@@ -302,6 +311,20 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
+    if (isManager(req) && isAdminPermissionLevel(permission.permissionLevel)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot modify admin-level permissions'
+      });
+    }
+
+    if (isManager(req) && isAdminPermissionLevel(permissionLevel)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot grant admin-level permissions'
+      });
+    }
+
     const updatedPermission = await prisma.workspacePermission.update({
       where: { id },
       data: {
@@ -381,6 +404,13 @@ router.delete('/:id', protect, authorize('ADMIN', 'MANAGER'), async (req: any, r
       });
     }
 
+    if (isManager(req) && isAdminPermissionLevel(permission.permissionLevel)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot revoke admin-level permissions'
+      });
+    }
+
     await prisma.workspacePermission.delete({
       where: { id: req.params.id }
     });
@@ -456,7 +486,7 @@ router.get('/role-permissions', protect, authorize('ADMIN', 'MANAGER'), async (r
 // @desc    Set role workspace permission
 // @route   POST /api/workspace-permissions/role-permissions
 // @access  Private/Admin
-router.post('/role-permissions', protect, authorize('ADMIN', 'MANAGER'), [
+router.post('/role-permissions', protect, authorize('ADMIN'), [
   body('role').notEmpty().withMessage('Role is required'),
   body('workspace').isIn(Object.values(WORKSPACES)).withMessage('Invalid workspace'),
   body('permissionLevel').isIn(Object.values(WORKSPACE_PERMISSIONS)).withMessage('Invalid permission level'),
@@ -540,7 +570,7 @@ router.post('/role-permissions', protect, authorize('ADMIN', 'MANAGER'), [
 // @desc    Update role workspace permission
 // @route   PUT /api/workspace-permissions/role-permissions/:id
 // @access  Private/Admin/Manager
-router.put('/role-permissions/:id', protect, authorize('ADMIN', 'MANAGER'), [
+router.put('/role-permissions/:id', protect, authorize('ADMIN'), [
   body('permissionLevel').optional().isIn(Object.values(WORKSPACE_PERMISSIONS)).withMessage('Invalid permission level'),
   body('isActive').optional().isBoolean().withMessage('Invalid active status')
 ], async (req: any, res: Response) => {
@@ -598,7 +628,7 @@ router.put('/role-permissions/:id', protect, authorize('ADMIN', 'MANAGER'), [
 // @desc    Remove role workspace permission
 // @route   DELETE /api/workspace-permissions/role-permissions/:id
 // @access  Private/Admin
-router.delete('/role-permissions/:id', protect, authorize('ADMIN', 'MANAGER'), async (req: any, res: Response) => {
+router.delete('/role-permissions/:id', protect, authorize('ADMIN'), async (req: any, res: Response) => {
   try {
     const permission = await prisma.roleWorkspacePermission.findUnique({
       where: { id: req.params.id }

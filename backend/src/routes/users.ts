@@ -3,10 +3,26 @@ import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import bcrypt from 'bcryptjs';
+import { WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
+import { FEATURE_PERMISSIONS, FEATURE_WORKSPACE_MAP, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 const CUID_REGEX = /^c[a-z0-9]{24}$/;
+const FEATURE_EXCEPTION_PERMISSION_LEVELS = [
+  FEATURE_PERMISSIONS.VIEW,
+  FEATURE_PERMISSIONS.EDIT
+];
+
+const getFeatureWorkspace = (feature: string): string | null => {
+  if (!Object.values(FEATURES).includes(feature as any)) {
+    return null;
+  }
+  return FEATURE_WORKSPACE_MAP[feature as keyof typeof FEATURE_WORKSPACE_MAP] || null;
+};
+
+const hasAdminPermissionLevel = (permissions: Array<{ permissionLevel?: string }>) =>
+  permissions.some((permission) => permission.permissionLevel === WORKSPACE_PERMISSIONS.ADMIN);
 
 // @desc    Get all users
 // @route   GET /api/users
@@ -79,6 +95,36 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
     .custom((value) => CUID_REGEX.test(value))
     .withMessage('Invalid department ID'),
   body('isActive').optional().isBoolean(),
+  body('workspacePermissions').optional().isArray(),
+  body('workspacePermissions.*.workspace')
+    .optional()
+    .isIn(Object.values(WORKSPACES))
+    .withMessage('Invalid workspace'),
+  body('workspacePermissions.*.permissionLevel')
+    .optional()
+    .isIn(Object.values(WORKSPACE_PERMISSIONS))
+    .withMessage('Invalid workspace permission level'),
+  body('workspacePermissions.*.expiresAt')
+    .optional({ values: 'falsy' })
+    .isISO8601()
+    .withMessage('Invalid workspace permission expiration date'),
+  body('featurePermissions').optional().isArray(),
+  body('featurePermissions.*.workspace')
+    .optional()
+    .isIn(Object.values(WORKSPACES))
+    .withMessage('Invalid feature workspace'),
+  body('featurePermissions.*.feature')
+    .optional()
+    .isIn(Object.values(FEATURES))
+    .withMessage('Invalid feature'),
+  body('featurePermissions.*.permissionLevel')
+    .optional()
+    .isIn(FEATURE_EXCEPTION_PERMISSION_LEVELS)
+    .withMessage('Feature exceptions only support view or edit'),
+  body('featurePermissions.*.expiresAt')
+    .optional({ values: 'falsy' })
+    .isISO8601()
+    .withMessage('Invalid feature permission expiration date'),
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -98,8 +144,41 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
       lastName, 
       role = 'USER',
       departmentId,
-      isActive = true
+      isActive = true,
+      workspacePermissions = [],
+      featurePermissions = []
     } = req.body;
+
+    const normalizedWorkspacePermissions = Array.from(
+      new Map(
+        (Array.isArray(workspacePermissions) ? workspacePermissions : [])
+          .filter((permission) => permission?.workspace && permission?.permissionLevel)
+          .map((permission) => [permission.workspace, permission])
+      ).values()
+    );
+    const normalizedFeaturePermissions = Array.from(
+      new Map(
+        (Array.isArray(featurePermissions) ? featurePermissions : [])
+          .filter((permission) => permission?.workspace && permission?.feature && permission?.permissionLevel)
+          .map((permission) => [`${permission.workspace}:${permission.feature}`, permission])
+      ).values()
+    );
+
+    for (const permission of normalizedFeaturePermissions) {
+      const expectedWorkspace = getFeatureWorkspace(permission.feature);
+      if (!expectedWorkspace || expectedWorkspace !== permission.workspace) {
+        return res.status(400).json({
+          success: false,
+          error: `Workspace "${permission.workspace}" is not valid for feature "${permission.feature}"`
+        });
+      }
+      if (permission.permissionLevel === FEATURE_PERMISSIONS.ADMIN) {
+        return res.status(400).json({
+          success: false,
+          error: 'Feature exceptions only support view or edit'
+        });
+      }
+    }
 
     if (departmentId) {
       const department = await prisma.department.findUnique({
@@ -115,10 +194,21 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
       }
     }
 
-    if (req.user?.role === 'MANAGER' && role === 'ADMIN') {
+    if (req.user?.role === 'MANAGER' && ['ADMIN', 'MANAGER'].includes(role)) {
       return res.status(403).json({
         success: false,
-        error: 'Managers cannot create admin users'
+        error: 'Managers cannot create admin or manager users'
+      });
+    }
+
+    if (
+      req.user?.role === 'MANAGER' &&
+      (hasAdminPermissionLevel(normalizedWorkspacePermissions as Array<{ permissionLevel?: string }>) ||
+        hasAdminPermissionLevel(normalizedFeaturePermissions as Array<{ permissionLevel?: string }>))
+    ) {
+      return res.status(403).json({
+        success: false,
+        error: 'Managers cannot grant admin-level permissions'
       });
     }
 
@@ -139,40 +229,73 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
-    // Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Create user
-    const user = await prisma.user.create({
-      data: {
-        email,
-        username,
-        password: hashedPassword,
-        firstName,
-        lastName,
-        role,
-        departmentId: departmentId || null,
-        isActive,
-      },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
-        department: {
-          select: {
-            id: true,
-            name: true,
-            namePersian: true,
+    const user = await prisma.$transaction(async (tx) => {
+      const createdUser = await tx.user.create({
+        data: {
+          email,
+          username,
+          password: hashedPassword,
+          firstName,
+          lastName,
+          role,
+          departmentId: departmentId || null,
+          isActive,
+        },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+          department: {
+            select: {
+              id: true,
+              name: true,
+              namePersian: true,
+            }
           }
         }
+      });
+
+      if (normalizedWorkspacePermissions.length > 0) {
+        await tx.workspacePermission.createMany({
+          data: normalizedWorkspacePermissions.map((permission) => ({
+            userId: createdUser.id,
+            workspace: permission.workspace,
+            permissionLevel: permission.permissionLevel,
+            grantedBy: req.user?.id,
+            expiresAt: permission.expiresAt ? new Date(permission.expiresAt) : null
+          }))
+        });
       }
+
+      if (normalizedFeaturePermissions.length > 0) {
+        await tx.featurePermission.createMany({
+          data: normalizedFeaturePermissions.map((permission) => ({
+            userId: createdUser.id,
+            workspace: permission.workspace,
+            feature: permission.feature,
+            permissionLevel: permission.permissionLevel,
+            grantedBy: req.user?.id,
+            expiresAt: permission.expiresAt ? new Date(permission.expiresAt) : null
+          }))
+        });
+      }
+
+      return {
+        ...createdUser,
+        permissionSummary: {
+          workspacePermissions: normalizedWorkspacePermissions.length,
+          featurePermissions: normalizedFeaturePermissions.length
+        }
+      };
     });
 
     res.status(201).json({
@@ -312,10 +435,10 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
-    if (req.user!.role === 'MANAGER' && role === 'ADMIN') {
+    if (req.user!.role === 'MANAGER' && role && ['ADMIN', 'MANAGER'].includes(role)) {
       return res.status(403).json({
         success: false,
-        error: 'Managers cannot assign admin role'
+        error: 'Managers cannot assign admin or manager role'
       });
     }
 

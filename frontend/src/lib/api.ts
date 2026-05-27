@@ -71,6 +71,17 @@ export const usersAPI = {
     role?: string;
     departmentId?: string;
     isActive?: boolean;
+    workspacePermissions?: Array<{
+      workspace: string;
+      permissionLevel: string;
+      expiresAt?: string;
+    }>;
+    featurePermissions?: Array<{
+      workspace: string;
+      feature: string;
+      permissionLevel: string;
+      expiresAt?: string;
+    }>;
   }) => api.post('/users', userData),
   
   updateUser: (id: string, userData: any) =>
@@ -607,6 +618,7 @@ export const permissionsAPI = {
   getFeaturePermissions: (params?: any) => api.get('/permissions/features', { params }),
   getFeatureDefinitions: () => api.get('/permissions/features/definitions'),
   createFeaturePermission: (data: any) => api.post('/permissions/features', data),
+  bulkUpsertFeaturePermissions: (data: any) => api.post('/permissions/features/bulk', data),
   updateFeaturePermission: (id: string, data: any) => api.put(`/permissions/features/${id}`, data),
   deleteFeaturePermission: (id: string) => api.delete(`/permissions/features/${id}`),
   getUserFeaturePermissions: (userId: string) => api.get(`/permissions/features/user/${userId}`),

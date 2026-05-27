@@ -76,31 +76,62 @@ class SmsService {
 
     return (
       hostname: string,
-      options: unknown,
-      callback?: (error: NodeJS.ErrnoException | null, address: string, family: number) => void
+      options: dns.LookupOneOptions | dns.LookupAllOptions | ((error: NodeJS.ErrnoException | null, address: string, family: number) => void),
+      callback?: (
+        error: NodeJS.ErrnoException | null,
+        address: string | dns.LookupAddress[],
+        family?: number
+      ) => void
     ) => {
       const cb =
         typeof options === 'function'
-          ? (options as (error: NodeJS.ErrnoException | null, address: string, family: number) => void)
+          ? options
           : callback;
+      const lookupOptions = typeof options === 'function' ? {} : options;
 
       if (!cb) {
         return;
       }
 
+      const done = (error: NodeJS.ErrnoException | null, address?: string, family?: number) => {
+        if (error) {
+          cb(error, '', 4);
+          return;
+        }
+
+        if (!address || !family) {
+          const lookupError = new Error(`No DNS address resolved for ${hostname}`) as NodeJS.ErrnoException;
+          lookupError.code = 'ENOTFOUND';
+          cb(lookupError, '', 4);
+          return;
+        }
+
+        if ('all' in lookupOptions && lookupOptions.all) {
+          (
+            cb as unknown as (
+              error: NodeJS.ErrnoException | null,
+              addresses: dns.LookupAddress[]
+            ) => void
+          )(null, [{ address, family }]);
+          return;
+        }
+
+        cb(null, address, family);
+      };
+
       resolver.resolve4(hostname, (ipv4Error, ipv4Addresses) => {
         if (!ipv4Error && ipv4Addresses.length > 0) {
-          cb(null, ipv4Addresses[0], 4);
+          done(null, ipv4Addresses[0], 4);
           return;
         }
 
         resolver.resolve6(hostname, (ipv6Error, ipv6Addresses) => {
           if (!ipv6Error && ipv6Addresses.length > 0) {
-            cb(null, ipv6Addresses[0], 6);
+            done(null, ipv6Addresses[0], 6);
             return;
           }
 
-          cb((ipv4Error || ipv6Error) as NodeJS.ErrnoException, '', 4);
+          done((ipv4Error || ipv6Error) as NodeJS.ErrnoException);
         });
       });
     };

@@ -1,66 +1,108 @@
 import Link from 'next/link';
-import { FaChartLine, FaEnvelope, FaGlobe, FaHeadset, FaMapMarkerAlt } from 'react-icons/fa';
+import { FaEnvelope, FaGlobe, FaHeadset, FaInfoCircle, FaLock, FaMapMarkerAlt } from 'react-icons/fa';
+import { PublicFooter } from '@/components/public/PublicFooter';
+import { PublicHeader } from '@/components/public/PublicHeader';
+import { Reveal } from '@/components/public/PublicMotion';
 
 const contactItems = [
   {
     icon: FaEnvelope,
-    label: 'ایمیل',
-    value: 'admin@sabalanerp.com'
+    label: 'ایمیل پشتیبانی',
+    value: 'support@sabalanerp.com',
   },
   {
     icon: FaGlobe,
-    label: 'وب‌سایت',
-    value: 'sabalanerp.com'
+    label: 'وب سایت',
+    value: 'sabalanerp.com',
   },
   {
     icon: FaMapMarkerAlt,
-    label: 'نشانی',
-    value: 'ایران'
+    label: 'محدوده فعالیت',
+    value: 'ایران',
   },
   {
     icon: FaHeadset,
-    label: 'پشتیبانی',
-    value: 'پشتیبانی از طریق ایمیل رسمی سامانه انجام می‌شود.'
-  }
+    label: 'پشتیبانی سامانه',
+    value: 'پشتیبانی حساب کاربری و دسترسی از مسیر رسمی سازمان انجام می شود.',
+  },
 ];
 
 export default function ContactPage() {
   return (
-    <div className="min-h-screen px-4 py-8 text-primary">
-      <header className="glass-liquid-card step-content-card mx-auto max-w-6xl p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <Link href="/" className="flex items-center gap-3">
-            <FaChartLine className="h-8 w-8 text-silver-600" />
-            <span className="text-2xl font-bold">سبلان ERP</span>
-          </Link>
-          <nav className="flex flex-wrap gap-3">
-            <Link href="/about" className="glass-liquid-btn">درباره ما</Link>
-            <Link href="/login" className="glass-liquid-btn-primary px-6 py-3">ورود</Link>
-          </nav>
-        </div>
-      </header>
+    <div className="public-site">
+      <PublicHeader />
 
-      <main className="mx-auto max-w-6xl py-10">
-        <section className="mb-8">
-          <h1 className="mb-4 text-4xl font-bold">تماس با ما</h1>
-          <p className="max-w-3xl text-lg leading-9 text-secondary">
-            برای پیگیری حساب کاربری، تایید قرارداد یا هماهنگی‌های پشتیبانی سبلان ERP از راه‌های ارتباطی زیر استفاده کنید.
-          </p>
+      <main>
+        <section className="public-section public-grid-band">
+          <div className="public-container max-w-4xl">
+            <Reveal>
+              <p className="public-eyebrow">تماس و پشتیبانی</p>
+              <h1 className="public-heading">راه ارتباطی رسمی سبلان ERP</h1>
+              <p className="public-lead mt-6">
+                برای پیگیری دسترسی کاربران، هماهنگی های پشتیبانی یا سوال درباره سامانه، از اطلاعات رسمی زیر استفاده کنید.
+              </p>
+            </Reveal>
+          </div>
         </section>
 
-        <section className="grid gap-6 md:grid-cols-2">
-          {contactItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <article key={item.label} className="glass-liquid-card step-content-card p-6">
-                <Icon className="mb-4 h-8 w-8 text-teal-500" />
-                <h2 className="mb-2 text-lg font-semibold">{item.label}</h2>
-                <p className="text-secondary">{item.value}</p>
-              </article>
-            );
-          })}
+        <section className="public-section">
+          <div className="public-container grid gap-5 md:grid-cols-2">
+            {contactItems.map((item, index) => {
+              const Icon = item.icon;
+              return (
+                <Reveal key={item.label} delay={index * 0.04}>
+                  <article className="public-card h-full p-6">
+                    <Icon className="mb-5 h-8 w-8 text-teal-700" />
+                    <h2 className="text-lg font-black text-stone-950">{item.label}</h2>
+                    <p className="mt-3 leading-8 text-stone-600">{item.value}</p>
+                  </article>
+                </Reveal>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="public-section bg-stone-100">
+          <div className="public-container grid gap-5 lg:grid-cols-2">
+            <Reveal>
+              <div className="public-card h-full p-6">
+                <FaLock className="mb-5 h-8 w-8 text-stone-950" />
+                <h2 className="text-2xl font-black text-stone-950">دسترسی عمومی وجود ندارد</h2>
+                <p className="mt-4 leading-9 text-stone-600">
+                  حساب کاربری از داخل سازمان و بر اساس نقش و سطح دسترسی تعریف می شود. اگر باید به سامانه دسترسی داشته باشید، با مدیر سامانه در سنگ سبلان هماهنگ کنید.
+                </p>
+              </div>
+            </Reveal>
+            <Reveal delay={0.08}>
+              <div className="public-card h-full p-6">
+                <FaInfoCircle className="mb-5 h-8 w-8 text-teal-700" />
+                <h2 className="text-2xl font-black text-stone-950">تایید قرارداد از طریق پیامک</h2>
+                <p className="mt-4 leading-9 text-stone-600">
+                  مشتریانی که نیاز به مشاهده یا تایید قرارداد دارند، لینک اختصاصی را از مسیر پیامک دریافت می کنند. برای امنیت بیشتر، این مسیر به عنوان دکمه عمومی در سایت نمایش داده نمی شود.
+                </p>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+
+        <section className="public-section">
+          <div className="public-container">
+            <Reveal>
+              <div className="public-card grid gap-6 p-8 lg:grid-cols-[1fr_auto] lg:items-center">
+                <div>
+                  <h2 className="text-2xl font-black text-stone-950 md:text-4xl">کاربر مجاز سامانه هستید؟</h2>
+                  <p className="public-lead mt-4">برای ورود به داشبورد عملیاتی از مسیر امن سامانه استفاده کنید.</p>
+                </div>
+                <Link href="/login" className="public-button public-button-primary">
+                  ورود به سامانه
+                </Link>
+              </div>
+            </Reveal>
+          </div>
         </section>
       </main>
+
+      <PublicFooter />
     </div>
   );
 }

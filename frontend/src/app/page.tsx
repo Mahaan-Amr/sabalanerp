@@ -1,149 +1,204 @@
-﻿import Link from 'next/link'
-import { FaChartLine, FaUsers, FaShoppingCart, FaCog, FaFileContract, FaWarehouse, FaIndustry } from 'react-icons/fa'
-import { ThemeToggle } from '@/components/ThemeToggle'
+import Link from 'next/link';
+import { FaChartLine, FaFileContract, FaFingerprint, FaGem, FaLock, FaRoute, FaTruck, FaUsers } from 'react-icons/fa';
+import { PublicFooter } from '@/components/public/PublicFooter';
+import { PublicHeader } from '@/components/public/PublicHeader';
+import { PublicHeroVisual } from '@/components/public/PublicHeroVisual';
+import { MotionDiv, Reveal } from '@/components/public/PublicMotion';
+
+const features = [
+  {
+    icon: FaFileContract,
+    title: 'قراردادهای فروش',
+    text: 'ثبت، بررسی، تایید و پیگیری قراردادها در یک جریان مشخص، با شماره گذاری، وضعیت ها و خروجی قابل چاپ.',
+  },
+  {
+    icon: FaUsers,
+    title: 'CRM و مشتریان پروژه ای',
+    text: 'پرونده مشتری، شماره ها، آدرس پروژه، مدیر پروژه و سابقه ارتباط در کنار جریان فروش نگهداری می شود.',
+  },
+  {
+    icon: FaGem,
+    title: 'کاتالوگ تخصصی سنگ',
+    text: 'مشخصات سنگ، نوع برش، ضخامت، عرض، معدن، رنگ، پرداخت و قیمت در کاتالوگ عملیاتی قابل استفاده است.',
+  },
+  {
+    icon: FaTruck,
+    title: 'تحویل و پرداخت',
+    text: 'برنامه ریزی چند مرحله ای تحویل، کنترل مقدار هر محصول و ثبت روش های پرداخت نقدی، رسیدی یا چکی.',
+  },
+  {
+    icon: FaLock,
+    title: 'دسترسی نقش محور',
+    text: 'هر بخش فقط به داده ها و عملیات مجاز خود دسترسی دارد و ساختار سامانه برای کنترل سازمانی طراحی شده است.',
+  },
+  {
+    icon: FaFingerprint,
+    title: 'تایید و ردگیری',
+    text: 'رویدادهای مهم عملیاتی قابل پیگیری هستند و تایید قرارداد برای مشتری از طریق لینک اختصاصی پیامک انجام می شود.',
+  },
+];
+
+const stats = [
+  { value: '۲۰۰۸', label: 'شروع فعالیت سنگ سبلان' },
+  { value: '۶+', label: 'فضای کاری طراحی شده' },
+  { value: '۳۸۶+', label: 'رکورد محصول وارد شده' },
+  { value: 'RTL', label: 'طراحی فارسی و راست به چپ' },
+];
+
+const roadmap = [
+  'گزارش های مدیریتی یکپارچه',
+  'عملیات کامل تر انبار و گردش کالا',
+  'زیرساخت منابع انسانی',
+  'پایه های حسابداری و تطبیق پرداخت',
+];
 
 export default function Home() {
   return (
-    <div className="min-h-screen">
-      {/* Header */}
-      <header className="glass-liquid-card mx-4 mt-4">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
-            <div className="flex items-center">
-              <FaChartLine className="h-8 w-8 text-silver-600" />
-              <h1 className="mr-2 text-2xl font-bold text-primary">سبلان ERP</h1>
-            </div>
-            <div className="flex items-center space-x-4 space-x-reverse">
-              <ThemeToggle />
-              <nav className="flex space-x-3 space-x-reverse">
-                <Link href="/about" className="glass-liquid-btn inline-block whitespace-nowrap">درباره ما</Link>
-                <Link href="/contact" className="glass-liquid-btn inline-block whitespace-nowrap">تماس با ما</Link>
-                <Link href="/login" className="glass-liquid-btn inline-block whitespace-nowrap">ورود</Link>
-                <Link href="/register" className="glass-liquid-btn inline-block whitespace-nowrap">ثبت‌نام</Link>
-              </nav>
-            </div>
-          </div>
-        </div>
-      </header>
+    <div className="public-site">
+      <PublicHeader />
 
-      {/* Hero Section */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="text-center">
-          <h2 className="text-4xl font-bold text-primary sm:text-5xl md:text-6xl">
-            به{' '}
-            <span className="text-gold-500">سبلان ERP</span>
-            {' '}خوش آمدید
-          </h2>
-          <p className="mt-3 max-w-md mx-auto text-base text-secondary sm:text-lg md:mt-5 md:text-xl md:max-w-3xl">
-            سامانه یکپارچه برنامه‌ریزی منابع سازمانی برای مدیریت دقیق فرآیندها، افزایش بهره‌وری و تصمیم‌گیری هوشمند.
-          </p>
-          <div className="mt-5 max-w-md mx-auto sm:flex sm:justify-center md:mt-8">
-            <div className="rounded-md shadow">
-              <Link href="/dashboard" className="glass-liquid-btn-primary inline-block w-full text-center px-8 py-3 text-base font-medium md:py-4 md:text-lg md:px-10">
-                ورود به سامانه
-              </Link>
+      <main>
+        <section className="public-grid-band overflow-hidden">
+          <div className="public-container grid min-h-[calc(100vh-84px)] items-center gap-12 py-14 lg:grid-cols-[0.95fr_1.05fr]">
+            <div>
+              <MotionDiv>
+                <p className="public-eyebrow">پلتفرم رسمی عملیات دیجیتال سنگ سبلان</p>
+                <h1 className="public-heading">
+                  فروش، قرارداد و عملیات سنگ در یک جریان دقیق و قابل پیگیری
+                </h1>
+                <p className="public-lead mt-6 max-w-2xl">
+                  سبلان ERP برای نظم دادن به فرآیندهای واقعی سنگ سبلان ساخته شده است: از شناخت مشتری و انتخاب محصول تا قرارداد، تحویل، پرداخت و کنترل دسترسی.
+                </p>
+                <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                  <Link href="/login" className="public-button public-button-primary">
+                    ورود به سامانه
+                  </Link>
+                  <Link href="/about" className="public-button public-button-secondary">
+                    آشنایی با سامانه
+                  </Link>
+                </div>
+              </MotionDiv>
             </div>
-            <div className="mt-3 rounded-md shadow sm:mt-0 sm:mr-3">
-              <Link href="/dashboard" className="glass-liquid-btn inline-block w-full text-center px-8 py-3 text-base font-medium md:py-4 md:text-lg md:px-10">
-                مشاهده داشبورد
-              </Link>
-            </div>
-          </div>
-        </div>
 
-        {/* Features Grid */}
-        <div className="mt-20">
-          <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="glass-liquid-card text-center p-6">
-              <FaUsers className="mx-auto h-12 w-12 text-silver-600" />
-              <h3 className="mt-4 text-lg font-medium text-primary">مدیریت کاربران</h3>
-              <p className="mt-2 text-base text-secondary">
-                تعریف نقش‌ها، سطوح دسترسی و کنترل کامل کاربران در ساختار سازمانی.
-              </p>
-            </div>
-            <div className="glass-liquid-card text-center p-6">
-              <FaFileContract className="mx-auto h-12 w-12 text-gold-500" />
-              <h3 className="mt-4 text-lg font-medium text-primary">مدیریت قراردادها</h3>
-              <p className="mt-2 text-base text-secondary">
-                ایجاد، پیگیری و آرشیو قراردادها با فرآیند تایید و کنترل مرحله‌ای.
-              </p>
-            </div>
-            <div className="glass-liquid-card text-center p-6">
-              <FaChartLine className="mx-auto h-12 w-12 text-teal-500" />
-              <h3 className="mt-4 text-lg font-medium text-primary">گزارش و تحلیل</h3>
-              <p className="mt-2 text-base text-secondary">
-                مشاهده شاخص‌های عملکردی و گزارش‌های مدیریتی برای تصمیم‌گیری بهتر.
-              </p>
-            </div>
-            <div className="glass-liquid-card text-center p-6">
-              <FaWarehouse className="mx-auto h-12 w-12 text-silver-600" />
-              <h3 className="mt-4 text-lg font-medium text-primary">مدیریت موجودی</h3>
-              <p className="mt-2 text-base text-secondary">
-                کنترل موجودی انبار و هماهنگی تامین کالا در چرخه عملیاتی سازمان.
-              </p>
-            </div>
+            <PublicHeroVisual />
           </div>
-        </div>
+        </section>
 
-        {/* Additional Features */}
-        <div className="mt-16">
-          <h3 className="text-2xl font-bold text-center text-primary mb-8">امکانات تکمیلی</h3>
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="glass-liquid-card p-6">
-              <FaIndustry className="h-8 w-8 text-gold-500 mb-4" />
-              <h4 className="text-lg font-medium text-primary mb-2">اتوماسیون تولید</h4>
-              <p className="text-secondary">
-                برنامه‌ریزی و رهگیری فرآیندهای تولید و اتصال به خطوط CNC در صورت نیاز.
+        <section className="public-section">
+          <div className="public-container">
+            <Reveal className="grid gap-6 md:grid-cols-4">
+              {stats.map((item) => (
+                <div key={item.label} className="public-card p-6">
+                  <p className="text-3xl font-black text-stone-950">{item.value}</p>
+                  <p className="mt-2 text-sm leading-7 text-stone-500">{item.label}</p>
+                </div>
+              ))}
+            </Reveal>
+          </div>
+        </section>
+
+        <section id="features" className="public-section bg-stone-950 text-white">
+          <div className="public-container">
+            <Reveal className="max-w-3xl">
+              <p className="mb-3 text-sm font-black text-teal-300">امکانات اصلی</p>
+              <h2 className="text-3xl font-black leading-snug text-white md:text-5xl">
+                ابزارهایی که مستقیما از نیاز عملیاتی صنعت سنگ آمده اند
+              </h2>
+              <p className="mt-5 text-lg leading-9 text-stone-300">
+                سامانه برای نمایش تبلیغاتی ساخته نشده؛ برای کاهش خطا، سرعت دادن به تصمیم گیری و ثبت دقیق مسیر فروش و تحویل طراحی شده است.
               </p>
-            </div>
-            <div className="glass-liquid-card p-6">
-              <FaCog className="h-8 w-8 text-teal-500 mb-4" />
-              <h4 className="text-lg font-medium text-primary mb-2">پیکربندی پیشرفته</h4>
-              <p className="text-secondary">
-                تنظیمات اختصاصی برای انطباق سامانه با ساختار، سیاست‌ها و نیازهای کسب‌وکار.
-              </p>
-            </div>
-            <div className="glass-liquid-card p-6">
-              <FaShoppingCart className="h-8 w-8 text-silver-600 mb-4" />
-              <h4 className="text-lg font-medium text-primary mb-2">زنجیره تامین</h4>
-              <p className="text-secondary">
-                مدیریت سفارش‌ها و هماهنگی تامین‌کنندگان برای پایداری جریان عملیات.
-              </p>
+            </Reveal>
+
+            <div className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {features.map((feature, index) => {
+                const Icon = feature.icon;
+                return (
+                  <Reveal key={feature.title} delay={index * 0.04}>
+                    <article className="h-full rounded-lg border border-white/10 bg-white/[0.04] p-6">
+                      <Icon className="mb-5 h-7 w-7 text-teal-300" />
+                      <h3 className="text-xl font-extrabold text-white">{feature.title}</h3>
+                      <p className="mt-3 leading-8 text-stone-300">{feature.text}</p>
+                    </article>
+                  </Reveal>
+                );
+              })}
             </div>
           </div>
-        </div>
+        </section>
+
+        <section className="public-section">
+          <div className="public-container grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+            <Reveal>
+              <p className="public-eyebrow">چرا این سامانه ساخته شد؟</p>
+              <h2 className="public-section-title">برای تبدیل کارهای پراکنده به یک مسیر روشن</h2>
+              <p className="public-lead mt-5">
+                در فروش سنگ، جزئیات محصول، ابعاد، برش، پرداخت، پروژه، تحویل و پرداخت به هم وابسته اند. سبلان ERP این وابستگی ها را در یک ساختار واحد نگه می دارد تا تیم ها با داده مشترک و وضعیت شفاف کار کنند.
+              </p>
+            </Reveal>
+
+            <Reveal delay={0.1}>
+              <div className="public-card p-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {['مشتری', 'پروژه', 'محصول', 'قرارداد', 'تحویل', 'پرداخت'].map((item, index) => (
+                    <div key={item} className="rounded-lg border border-stone-200 bg-stone-50 p-4">
+                      <span className="text-xs font-black text-teal-700">۰{index + 1}</span>
+                      <p className="mt-2 text-lg font-extrabold text-stone-950">{item}</p>
+                      <div className="mt-4 h-1.5 rounded-full bg-stone-200">
+                        <div className="h-full rounded-full bg-teal-700" style={{ width: `${48 + index * 8}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+
+        <section id="roadmap" className="public-section bg-stone-100">
+          <div className="public-container grid gap-10 lg:grid-cols-[0.8fr_1.2fr]">
+            <Reveal>
+              <p className="public-eyebrow">مسیر توسعه سامانه</p>
+              <h2 className="public-section-title">هسته عملیاتی امروز، پایه گسترش فردا</h2>
+            </Reveal>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {roadmap.map((item, index) => (
+                <Reveal key={item} delay={index * 0.05}>
+                  <div className="public-card flex h-full items-start gap-4 p-5">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-stone-950 text-sm font-black text-white">
+                      {index + 1}
+                    </span>
+                    <div>
+                      <p className="font-extrabold text-stone-950">{item}</p>
+                      <p className="mt-2 text-sm leading-7 text-stone-500">در حال توسعه و تکمیل بر اساس نیازهای عملیاتی.</p>
+                    </div>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="public-section">
+          <div className="public-container">
+            <Reveal>
+              <div className="public-card grid gap-8 p-8 lg:grid-cols-[1fr_auto] lg:items-center">
+                <div>
+                  <FaRoute className="mb-4 h-8 w-8 text-teal-700" />
+                  <h2 className="text-2xl font-black text-stone-950 md:text-4xl">دسترسی به سامانه برای کاربران مجاز</h2>
+                  <p className="public-lead mt-4 max-w-3xl">
+                    ورود به بخش های عملیاتی فقط برای کاربران تعریف شده در سازمان امکان پذیر است. برای دسترسی یا پشتیبانی، با مدیر سامانه در سنگ سبلان هماهنگ کنید.
+                  </p>
+                </div>
+                <Link href="/login" className="public-button public-button-primary">
+                  ورود کاربران
+                </Link>
+              </div>
+            </Reveal>
+          </div>
+        </section>
       </main>
 
-      {/* Footer */}
-      <footer className="glass-liquid-card mx-4 mb-4 mt-16">
-        <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <p className="text-base text-secondary">
-              &copy; سبلان ERP. تمامی حقوق محفوظ است.
-            </p>
-            <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm">
-              <Link href="/about" className="text-secondary hover:text-primary">درباره ما</Link>
-              <Link href="/contact" className="text-secondary hover:text-primary">تماس با ما</Link>
-              <Link href="/contracts/confirm" className="text-secondary hover:text-primary">تایید قرارداد</Link>
-            </div>
-            <div className="mt-6 flex justify-center">
-              <a
-                referrerPolicy="origin"
-                target="_blank"
-                href="https://trustseal.enamad.ir/?id=710761&Code=Smq9kxRtFbt6sCjdJFD2B7AUKdMzIIN9"
-              >
-                <img
-                  referrerPolicy="origin"
-                  src="https://trustseal.enamad.ir/logo.aspx?id=710761&Code=Smq9kxRtFbt6sCjdJFD2B7AUKdMzIIN9"
-                  alt="نماد اعتماد الکترونیکی"
-                  className="cursor-pointer"
-                />
-              </a>
-            </div>
-          </div>
-        </div>
-      </footer>
+      <PublicFooter />
     </div>
-  )
+  );
 }
-

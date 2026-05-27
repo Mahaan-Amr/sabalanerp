@@ -4,6 +4,9 @@
  */
 
 import axios from 'axios';
+import dns from 'dns';
+import http from 'http';
+import https from 'https';
 
 interface SendVerificationCodeResponse {
   status: number;
@@ -34,6 +37,9 @@ class SmsService {
   private contractConfirmationTemplateId: number;
   private environment: string;
   private requestTimeoutMs: number;
+  private dnsServers: string[];
+  private httpAgent?: http.Agent;
+  private httpsAgent?: https.Agent;
 
   constructor() {
     this.apiKey = process.env.SMS_IR_API_KEY || '';
@@ -45,10 +51,59 @@ class SmsService {
     );
     this.environment = process.env.SMS_IR_ENVIRONMENT || 'sandbox';
     this.requestTimeoutMs = parseInt(process.env.SMS_IR_TIMEOUT_MS || '30000', 10);
+    this.dnsServers = (process.env.SMS_IR_DNS_SERVERS || '')
+      .split(',')
+      .map((server) => server.trim())
+      .filter(Boolean);
+
+    if (this.dnsServers.length > 0) {
+      const lookup = this.createCustomDnsLookup();
+      this.httpAgent = new http.Agent({ lookup });
+      this.httpsAgent = new https.Agent({ lookup });
+      console.info('[sms.ir] using custom DNS resolvers', {
+        dnsServers: this.dnsServers
+      });
+    }
 
     if (!this.apiKey) {
       console.warn('SMS_IR_API_KEY is not set in environment variables');
     }
+  }
+
+  private createCustomDnsLookup() {
+    const resolver = new dns.Resolver();
+    resolver.setServers(this.dnsServers);
+
+    return (
+      hostname: string,
+      options: unknown,
+      callback?: (error: NodeJS.ErrnoException | null, address: string, family: number) => void
+    ) => {
+      const cb =
+        typeof options === 'function'
+          ? (options as (error: NodeJS.ErrnoException | null, address: string, family: number) => void)
+          : callback;
+
+      if (!cb) {
+        return;
+      }
+
+      resolver.resolve4(hostname, (ipv4Error, ipv4Addresses) => {
+        if (!ipv4Error && ipv4Addresses.length > 0) {
+          cb(null, ipv4Addresses[0], 4);
+          return;
+        }
+
+        resolver.resolve6(hostname, (ipv6Error, ipv6Addresses) => {
+          if (!ipv6Error && ipv6Addresses.length > 0) {
+            cb(null, ipv6Addresses[0], 6);
+            return;
+          }
+
+          cb((ipv4Error || ipv6Error) as NodeJS.ErrnoException, '', 4);
+        });
+      });
+    };
   }
 
   /**
@@ -198,7 +253,9 @@ class SmsService {
             Accept: 'text/plain',
             'x-api-key': this.apiKey
           },
-          timeout: this.requestTimeoutMs
+          timeout: this.requestTimeoutMs,
+          httpAgent: this.httpAgent,
+          httpsAgent: this.httpsAgent
         }
       );
 
@@ -249,6 +306,7 @@ class SmsService {
         mobile: maskPhoneNumber(formattedPhone),
         code: error.code,
         timeoutMs: this.requestTimeoutMs,
+        dnsServers: this.dnsServers.length > 0 ? this.dnsServers : undefined,
         message: error.message
       });
 

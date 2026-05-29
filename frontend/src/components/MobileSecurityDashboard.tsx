@@ -81,11 +81,11 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
       if (response.data.success) {
         setAttendanceRecords(response.data.data.records || []);
       } else {
-        setError('?? ? ??? ?? ?? ? ??');
+        setError('خطا در دریافت اطلاعات شیفت');
       }
     } catch (err: any) {
       console.error('Error fetching attendance records:', err);
-      setError(err.response?.data?.error || '?? ? ??? ? ??');
+      setError(err.response?.data?.error || 'خطا در دریافت اطلاعات');
     } finally {
       setLoading(false);
     }
@@ -101,7 +101,7 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
       fetchAttendanceRecords(); // Refresh data
     } catch (error: any) {
       console.error('Error saving signature:', error);
-      alert(`?? ? ??? ??: ${error.response?.data?.error || error.message}`);
+      alert(`خطا در ثبت عملیات: ${error.response?.data?.error || error.message}`);
     }
   };
 
@@ -117,13 +117,13 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
 
   const getStatusLabel = (status: string) => {
     const statusLabels: { [key: string]: string } = {
-      PRESENT: '??',
-      ABSENT: '??',
-      LATE: '???',
-      MISSION: '??',
-      HOURLY_LEAVE: '??? ???',
-      SICK_LEAVE: '??? ??',
-      VACATION: '??? ??'
+      PRESENT: 'حاضر',
+      ABSENT: 'غایب',
+      LATE: 'تاخیر',
+      MISSION: 'ماموریت',
+      HOURLY_LEAVE: 'مرخصی ساعتی',
+      SICK_LEAVE: 'مرخصی استعلاجی',
+      VACATION: 'مرخصی روزانه'
     };
     return statusLabels[status] || status;
   };
@@ -148,7 +148,7 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
       <div className="text-center text-red-500 text-lg p-4">
         <p>{error}</p>
         <button onClick={fetchAttendanceRecords} className="glass-liquid-btn mt-4">
-          ?? ??
+          تلاش مجدد
         </button>
       </div>
     );
@@ -161,15 +161,15 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
         <div className="flex justify-between items-center">
           <div className="flex items-center space-x-2 space-x-reverse">
             <FaMobile className="h-6 w-6 text-teal-400" />
-            <h1 className="text-lg font-bold text-primary">??? ???</h1>
+            <h1 className="text-lg font-bold text-primary">گزارش روزانه</h1>
           </div>
           
           <div className="flex items-center space-x-3 space-x-reverse">
             {/* Connection Status */}
             {isOnline ? (
-              <FaWifi className="h-4 w-4 text-green-500" title="???" />
+              <FaWifi className="h-4 w-4 text-green-500" title="آنلاین" />
             ) : (
-              <FaExclamationTriangle className="h-4 w-4 text-red-500" title="???" />
+              <FaExclamationTriangle className="h-4 w-4 text-red-500" title="خطا" />
             )}
             
             {/* Battery Level */}
@@ -199,13 +199,13 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
               setSelectedRecord(record);
               setShowSignatureModal(true);
             } else {
-              alert('?? ?? ??? ?? ?? ? ?? ??');
+              alert('رکوردی برای ثبت خروج انتخاب نشده است');
             }
           }}
           className="glass-liquid-btn-primary p-4 text-center"
         >
           <FaUserCheck className="h-6 w-6 mx-auto mb-2" />
-          <span className="text-sm">?? ??</span>
+          <span className="text-sm">ثبت ورود</span>
         </button>
         
         <button
@@ -216,24 +216,24 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
               setSelectedRecord(record);
               setShowSignatureModal(true);
             } else {
-              alert('?? ?? ?? ?? ??? ??');
+              alert('رکوردی برای ثبت امضا انتخاب نشده است');
             }
           }}
           className="glass-liquid-btn p-4 text-center"
         >
           <FaUserTimes className="h-6 w-6 mx-auto mb-2" />
-          <span className="text-sm">?? ??</span>
+          <span className="text-sm">ثبت خروج</span>
         </button>
       </div>
 
       {/* Attendance Records */}
       <div className="mx-2 mt-4">
-        <h2 className="text-lg font-bold text-primary mb-3">?? ? ?? ???</h2>
+        <h2 className="text-lg font-bold text-primary mb-3">ورود و خروج امروز</h2>
         
         <div className="space-y-2">
           {attendanceRecords.length === 0 ? (
             <div className="glass-liquid-card p-6 text-center">
-              <p className="text-secondary">?? ??? ?? ? ??? ?? ??? ?? ???</p>
+              <p className="text-secondary">برای این تاریخ هیچ رکوردی ثبت نشده است</p>
             </div>
           ) : (
             attendanceRecords.map((record) => (
@@ -265,7 +265,7 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
                           setShowSignatureModal(true);
                         }}
                         className="text-teal-400 hover:text-teal-300 p-2"
-                        title="?? ??"
+                        title="ثبت امضا"
                       >
                         <FaSignature className="h-4 w-4" />
                       </button>
@@ -274,8 +274,8 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
                 </div>
                 
                 <div className="mt-2 text-xs text-gray-400">
-                  {record.entryTime && `??: ${record.entryTime}`}
-                  {record.exitTime && ` | ??: ${record.exitTime}`}
+                  {record.entryTime && `خروج: ${record.entryTime}`}
+                  {record.exitTime && ` | خروج: ${record.exitTime}`}
                 </div>
               </div>
             ))
@@ -306,7 +306,7 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
           <div className="flex items-center space-x-2 space-x-reverse">
             <FaExclamationTriangle className="h-4 w-4 text-yellow-500" />
             <span className="text-sm text-yellow-500">
-              ?? ??? - ?? ? ?? ??? ?? ??? ??? ?
+              نسخه موبایل - ورود و خروج سریع حراست
             </span>
           </div>
         </div>

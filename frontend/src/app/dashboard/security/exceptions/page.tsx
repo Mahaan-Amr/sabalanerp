@@ -99,7 +99,7 @@ export default function ExceptionsPage() {
       }
     } catch (error: any) {
       console.error('Error fetching exceptions data:', error);
-      setError(error.response?.data?.error || '?? ? ??? ? ??');
+      setError(error.response?.data?.error || 'خطا در دریافت اطلاعات');
     } finally {
       setLoading(false);
     }
@@ -109,12 +109,12 @@ export default function ExceptionsPage() {
     try {
       const response = await securityAPI.approveExceptionRequest(id, notes);
       if (response.data.success) {
-        alert('?? ??? ? ??? ??? ?');
+        alert('درخواست با موفقیت تایید شد');
         fetchExceptionsData();
       }
     } catch (error: any) {
       console.error('Error approving exception:', error);
-      alert(error.response?.data?.error || '?? ? ??? ??');
+      alert(error.response?.data?.error || 'خطا در ذخیره اطلاعات');
     }
   };
 
@@ -122,12 +122,12 @@ export default function ExceptionsPage() {
     try {
       const response = await securityAPI.rejectExceptionRequest(id, rejectionReason);
       if (response.data.success) {
-        alert('?? ??? ? ?');
+        alert('درخواست با موفقیت رد شد');
         fetchExceptionsData();
       }
     } catch (error: any) {
       console.error('Error rejecting exception:', error);
-      alert(error.response?.data?.error || '?? ? ? ??');
+      alert(error.response?.data?.error || 'خطا در رد درخواست');
     }
   };
 
@@ -135,39 +135,39 @@ export default function ExceptionsPage() {
     try {
       const response = await securityAPI.approveMissionAssignment(id);
       if (response.data.success) {
-        alert('?? ? ??? ??? ?');
+        alert('ماموریت با موفقیت تایید شد');
         fetchExceptionsData();
       }
     } catch (error: any) {
       console.error('Error approving mission:', error);
-      alert(error.response?.data?.error || '?? ? ??? ??');
+      alert(error.response?.data?.error || 'خطا در ذخیره اطلاعات');
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'PENDING': return 'text-yellow-500 bg-yellow-500/20';
-      case 'APPROVED': return 'text-green-500 bg-green-500/20';
-      case 'REJECTED': return 'text-red-500 bg-red-500/20';
+      case 'PENDING': return 'در انتظار';
+      case 'APPROVED': return 'تایید شده';
+      case 'REJECTED': return 'رد شده';
       default: return 'text-gray-500 bg-gray-500/20';
     }
   };
 
   const getStatusLabel = (status: string) => {
     switch (status) {
-      case 'PENDING': return '? ???';
-      case 'APPROVED': return '??? ??';
-      case 'REJECTED': return '? ??';
-      default: return '???';
+      case 'PENDING': return 'در انتظار';
+      case 'APPROVED': return 'تایید شده';
+      case 'REJECTED': return 'رد شده';
+      default: return 'نامشخص';
     }
   };
 
   const getExceptionTypeLabel = (type: string) => {
     switch (type) {
-      case 'HOURLY_LEAVE': return '??? ???';
-      case 'SICK_LEAVE': return '??? ??';
-      case 'VACATION': return '??? ??';
-      case 'EMERGENCY': return '??';
+      case 'HOURLY_LEAVE': return 'مرخصی ساعتی';
+      case 'SICK_LEAVE': return 'مرخصی استعلاجی';
+      case 'VACATION': return 'مرخصی روزانه';
+      case 'EMERGENCY': return 'اضطراری';
       default: return type;
     }
   };
@@ -193,13 +193,13 @@ export default function ExceptionsPage() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
         <div className="glass-liquid-card p-8 text-center">
-          <h2 className="text-xl font-bold text-primary mb-2">?? ? ??</h2>
+          <h2 className="text-xl font-bold text-primary mb-2">ورود و خروج</h2>
           <p className="text-secondary mb-4">{error}</p>
           <button 
             onClick={fetchExceptionsData}
             className="glass-liquid-btn-primary px-6 py-2"
           >
-            ?? ??
+            تلاش مجدد
           </button>
         </div>
       </div>
@@ -214,8 +214,8 @@ export default function ExceptionsPage() {
           <div className="flex items-center space-x-4 space-x-reverse">
             <FaExclamationTriangle className="h-8 w-8 text-teal-500" />
             <div>
-              <h1 className="text-2xl font-bold text-primary">??? ???</h1>
-              <p className="text-secondary">?? ??? ? ???</p>
+              <h1 className="text-2xl font-bold text-primary">درخواست‌ها و ماموریت‌ها</h1>
+              <p className="text-secondary">مدیریت درخواست‌ها و ماموریت‌ها</p>
             </div>
           </div>
         </div>
@@ -232,7 +232,7 @@ export default function ExceptionsPage() {
                 : 'text-gray-400 hover:text-white'
             }`}
           >
-            ?? ??? ({exceptionRequests.length})
+            درخواست‌های استثنا ({exceptionRequests.length})
           </button>
           <button
             onClick={() => setActiveTab('missions')}
@@ -242,7 +242,7 @@ export default function ExceptionsPage() {
                 : 'text-gray-400 hover:text-white'
             }`}
           >
-            ??? ({missionAssignments.length})
+            ماموریت‌ها ({missionAssignments.length})
           </button>
         </div>
       </div>
@@ -250,17 +250,17 @@ export default function ExceptionsPage() {
       {/* Exception Requests */}
       {activeTab === 'exceptions' && (
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">?? ???</h2>
+          <h2 className="text-xl font-bold text-primary mb-4">درخواست‌های استثنا</h2>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-700">
-                  <th className="text-right py-3 px-4 text-secondary">???</th>
-                  <th className="text-right py-3 px-4 text-secondary">?? ???</th>
-                  <th className="text-right py-3 px-4 text-secondary">??</th>
-                  <th className="text-right py-3 px-4 text-secondary">???</th>
-                  <th className="text-right py-3 px-4 text-secondary">???</th>
-                  <th className="text-right py-3 px-4 text-secondary">???</th>
+                  <th className="text-right py-3 px-4 text-secondary">کارمند</th>
+                  <th className="text-right py-3 px-4 text-secondary">نوع درخواست</th>
+                  <th className="text-right py-3 px-4 text-secondary">تاریخ</th>
+                  <th className="text-right py-3 px-4 text-secondary">وضعیت</th>
+                  <th className="text-right py-3 px-4 text-secondary">دلیل</th>
+                  <th className="text-right py-3 px-4 text-secondary">عملیات</th>
                 </tr>
               </thead>
               <tbody>
@@ -288,7 +288,7 @@ export default function ExceptionsPage() {
                       <div className="text-sm">
                         <div>{new Date(request.startDate).toLocaleDateString('fa-IR')}</div>
                         {request.endDate !== request.startDate && (
-                          <div>? {new Date(request.endDate).toLocaleDateString('fa-IR')}</div>
+                          <div>تا {new Date(request.endDate).toLocaleDateString('fa-IR')}</div>
                         )}
                       </div>
                     </td>
@@ -302,7 +302,7 @@ export default function ExceptionsPage() {
                         <button
                           onClick={() => openDetailsModal(request, 'exception')}
                           className="glass-liquid-btn p-2"
-                          title="??? ???"
+                          title="گزارش روزانه"
                         >
                           <FaEye />
                         </button>
@@ -311,17 +311,17 @@ export default function ExceptionsPage() {
                             <button
                               onClick={() => handleApproveException(request.id)}
                               className="glass-liquid-btn p-2 text-green-400"
-                              title="???"
+                              title="رد درخواست"
                             >
                               <FaCheck />
                             </button>
                             <button
                               onClick={() => {
-                                const reason = prompt('?? ? ??:');
+                                const reason = prompt('دلیل رد:');
                                 if (reason) handleRejectException(request.id, reason);
                               }}
                               className="glass-liquid-btn p-2 text-red-400"
-                              title="?"
+                              title="مشاهده جزئیات"
                             >
                               <FaTimes />
                             </button>
@@ -337,7 +337,7 @@ export default function ExceptionsPage() {
           
           {exceptionRequests.length === 0 && (
             <div className="text-center py-8">
-              <p className="text-secondary">?? ?? ?? ?? ???</p>
+              <p className="text-secondary">درخواستی ثبت نشده است</p>
             </div>
           )}
         </div>
@@ -346,17 +346,17 @@ export default function ExceptionsPage() {
       {/* Mission Assignments */}
       {activeTab === 'missions' && (
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">???</h2>
+          <h2 className="text-xl font-bold text-primary mb-4">ماموریت‌ها</h2>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-700">
-                  <th className="text-right py-3 px-4 text-secondary">???</th>
-                  <th className="text-right py-3 px-4 text-secondary">?? ??</th>
-                  <th className="text-right py-3 px-4 text-secondary">??</th>
-                  <th className="text-right py-3 px-4 text-secondary">???</th>
-                  <th className="text-right py-3 px-4 text-secondary">???</th>
-                  <th className="text-right py-3 px-4 text-secondary">???</th>
+                  <th className="text-right py-3 px-4 text-secondary">کارمند</th>
+                  <th className="text-right py-3 px-4 text-secondary">نوع ماموریت</th>
+                  <th className="text-right py-3 px-4 text-secondary">مقصد</th>
+                  <th className="text-right py-3 px-4 text-secondary">تاریخ</th>
+                  <th className="text-right py-3 px-4 text-secondary">وضعیت</th>
+                  <th className="text-right py-3 px-4 text-secondary">عملیات</th>
                 </tr>
               </thead>
               <tbody>
@@ -396,7 +396,7 @@ export default function ExceptionsPage() {
                         <button
                           onClick={() => openDetailsModal(mission, 'mission')}
                           className="glass-liquid-btn p-2"
-                          title="??? ???"
+                          title="گزارش روزانه"
                         >
                           <FaEye />
                         </button>
@@ -404,7 +404,7 @@ export default function ExceptionsPage() {
                           <button
                             onClick={() => handleApproveMission(mission.id)}
                             className="glass-liquid-btn p-2 text-green-400"
-                            title="???"
+                            title="رد ماموریت"
                           >
                             <FaCheck />
                           </button>
@@ -419,7 +419,7 @@ export default function ExceptionsPage() {
           
           {missionAssignments.length === 0 && (
             <div className="text-center py-8">
-              <p className="text-secondary">?? ?? ??? ?? ??</p>
+              <p className="text-secondary">ماموریتی برای نمایش وجود ندارد</p>
             </div>
           )}
         </div>
@@ -430,7 +430,7 @@ export default function ExceptionsPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="glass-liquid-card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-primary">???</h2>
+              <h2 className="text-xl font-bold text-primary">جزئیات</h2>
               <button
                 onClick={() => {
                   setShowDetailsModal(false);
@@ -447,37 +447,37 @@ export default function ExceptionsPage() {
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm text-secondary mb-1">???</label>
+                    <label className="block text-sm text-secondary mb-1">کارمند</label>
                     <p className="text-primary">
                       {selectedRequest.employee.firstName} {selectedRequest.employee.lastName}
                     </p>
                   </div>
                   <div>
-                    <label className="block text-sm text-secondary mb-1">?? ???</label>
+                    <label className="block text-sm text-secondary mb-1">نوع درخواست</label>
                     <p className="text-primary">{getExceptionTypeLabel(selectedRequest.exceptionType)}</p>
                   </div>
                   <div>
-                    <label className="block text-sm text-secondary mb-1">??</label>
+                    <label className="block text-sm text-secondary mb-1">تاریخ</label>
                     <p className="text-primary">{selectedRequest.reason}</p>
                   </div>
                   <div>
-                    <label className="block text-sm text-secondary mb-1">???</label>
+                    <label className="block text-sm text-secondary mb-1">وضعیت</label>
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(selectedRequest.status)}`}>
                       {getStatusLabel(selectedRequest.status)}
                     </span>
                   </div>
                   <div>
-                    <label className="block text-sm text-secondary mb-1">??? ??</label>
+                    <label className="block text-sm text-secondary mb-1">دلیل</label>
                     <p className="text-primary">{new Date(selectedRequest.startDate).toLocaleDateString('fa-IR')}</p>
                   </div>
                   <div>
-                    <label className="block text-sm text-secondary mb-1">??? ???</label>
+                    <label className="block text-sm text-secondary mb-1">گزارش روزانه</label>
                     <p className="text-primary">{new Date(selectedRequest.endDate).toLocaleDateString('fa-IR')}</p>
                   </div>
                 </div>
                 {selectedRequest.notes && (
                   <div>
-                    <label className="block text-sm text-secondary mb-1">???</label>
+                    <label className="block text-sm text-secondary mb-1">پاسخ‌دهنده</label>
                     <p className="text-primary">{selectedRequest.notes}</p>
                   </div>
                 )}
@@ -488,36 +488,36 @@ export default function ExceptionsPage() {
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm text-secondary mb-1">???</label>
+                    <label className="block text-sm text-secondary mb-1">کارمند</label>
                     <p className="text-primary">
                       {selectedMission.employee.firstName} {selectedMission.employee.lastName}
                     </p>
                   </div>
                   <div>
-                    <label className="block text-sm text-secondary mb-1">?? ??</label>
+                    <label className="block text-sm text-secondary mb-1">نوع ماموریت</label>
                     <p className="text-primary">{selectedMission.missionType}</p>
                   </div>
                   <div>
-                    <label className="block text-sm text-secondary mb-1">??</label>
+                    <label className="block text-sm text-secondary mb-1">مقصد</label>
                     <p className="text-primary">{selectedMission.missionLocation}</p>
                   </div>
                   <div>
-                    <label className="block text-sm text-secondary mb-1">???</label>
+                    <label className="block text-sm text-secondary mb-1">تاریخ شروع</label>
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(selectedMission.status)}`}>
                       {getStatusLabel(selectedMission.status)}
                     </span>
                   </div>
                   <div>
-                    <label className="block text-sm text-secondary mb-1">???</label>
+                    <label className="block text-sm text-secondary mb-1">تاریخ پایان</label>
                     <p className="text-primary">{new Date(selectedMission.startDate).toLocaleDateString('fa-IR')}</p>
                   </div>
                   <div>
-                    <label className="block text-sm text-secondary mb-1">??</label>
+                    <label className="block text-sm text-secondary mb-1">وضعیت</label>
                     <p className="text-primary">{selectedMission.startTime} - {selectedMission.endTime}</p>
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm text-secondary mb-1">??</label>
+                  <label className="block text-sm text-secondary mb-1">توضیحات</label>
                   <p className="text-primary">{selectedMission.description}</p>
                 </div>
               </div>

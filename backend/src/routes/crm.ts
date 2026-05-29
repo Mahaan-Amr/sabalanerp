@@ -101,6 +101,7 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
           }
         },
         contacts: {
+          where: { isActive: true },
           select: {
             id: true,
             firstName: true,
@@ -108,7 +109,8 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
             email: true,
             phone: true,
             position: true,
-            isPrimary: true
+            isPrimary: true,
+            isActive: true
           }
         },
         projectAddresses: {
@@ -175,7 +177,9 @@ router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
       where: { id: req.params.id },
       include: {
         primaryContact: true,
-        contacts: true,
+        contacts: {
+          where: { isActive: true }
+        },
         projectAddresses: {
           where: { isActive: true },
           select: {
@@ -188,7 +192,9 @@ router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
             projectManagerNumber: true
           }
         },
-        phoneNumbers: true,
+        phoneNumbers: {
+          where: { isActive: true }
+        },
         leads: {
           orderBy: { createdAt: 'desc' }
         },
@@ -447,7 +453,7 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
 // @desc    Update CRM customer
 // @route   PUT /api/crm/customers/:id
 // @access  Private/CRM Workspace
-router.put('/customers/:id', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_CUSTOMERS_EDIT, FEATURE_PERMISSIONS.EDIT), [
+router.put('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_EDIT, FEATURES.SALES_CUSTOMERS_EDIT], FEATURE_PERMISSIONS.EDIT), [
   body('companyName').optional().notEmpty().withMessage('Company name cannot be empty'),
   body('customerType').optional().notEmpty().withMessage('Customer type cannot be empty'),
 ], async (req: any, res: Response): Promise<void> => {
@@ -500,7 +506,7 @@ router.put('/customers/:id', protect, requireWorkspaceAccess(WORKSPACES.CRM, WOR
 // @desc    Add project address to customer
 // @route   POST /api/crm/customers/:customerId/project-addresses
 // @access  Private/CRM Workspace
-router.post('/customers/:customerId/project-addresses', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_PROJECT_ADDRESSES_CREATE, FEATURE_PERMISSIONS.EDIT), [
+router.post('/customers/:customerId/project-addresses', protect, requireAnyFeatureAccess([FEATURES.CRM_PROJECT_ADDRESSES_CREATE, FEATURES.SALES_CUSTOMERS_EDIT], FEATURE_PERMISSIONS.EDIT), [
   body('address').notEmpty().withMessage('Address is required'),
   body('city').notEmpty().withMessage('City is required'),
 ], async (req: any, res: Response): Promise<void> => {
@@ -555,7 +561,7 @@ router.post('/customers/:customerId/project-addresses', protect, requireWorkspac
 // @desc    Update project address
 // @route   PUT /api/crm/customers/:customerId/project-addresses/:projectId
 // @access  Private/CRM Workspace
-router.put('/customers/:customerId/project-addresses/:projectId', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_PROJECT_ADDRESSES_EDIT, FEATURE_PERMISSIONS.EDIT), [
+router.put('/customers/:customerId/project-addresses/:projectId', protect, requireAnyFeatureAccess([FEATURES.CRM_PROJECT_ADDRESSES_EDIT, FEATURES.SALES_CUSTOMERS_EDIT], FEATURE_PERMISSIONS.EDIT), [
   body('address').notEmpty().withMessage('Address is required'),
   body('city').notEmpty().withMessage('City is required'),
 ], async (req: any, res: Response): Promise<void> => {
@@ -581,8 +587,8 @@ router.put('/customers/:customerId/project-addresses/:projectId', protect, requi
     if (!ensureOwnershipOrDeny(req, res, customer, 'update_project_address')) return;
 
     // Check if project exists
-    const existingProject = await prisma.projectAddress.findUnique({
-      where: { id: projectId }
+    const existingProject = await prisma.projectAddress.findFirst({
+      where: { id: projectId, customerId }
     });
 
     if (!existingProject) {
@@ -619,12 +625,55 @@ router.put('/customers/:customerId/project-addresses/:projectId', protect, requi
   }
 });
 
+// @desc    Soft delete project address
+// @route   DELETE /api/crm/customers/:customerId/project-addresses/:projectId
+// @access  Private/CRM or Sales Customer Edit Access
+router.delete('/customers/:customerId/project-addresses/:projectId', protect, requireAnyFeatureAccess([FEATURES.CRM_PROJECT_ADDRESSES_DELETE, FEATURES.SALES_CUSTOMERS_EDIT], FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response): Promise<void> => {
+  try {
+    const { customerId, projectId } = req.params;
+
+    const customer = await prisma.crmCustomer.findUnique({
+      where: { id: customerId },
+      select: { id: true, ownerUserId: true }
+    });
+    if (!ensureOwnershipOrDeny(req, res, customer, 'delete_project_address')) return;
+
+    const existingProject = await prisma.projectAddress.findFirst({
+      where: { id: projectId, customerId }
+    });
+
+    if (!existingProject) {
+      res.status(404).json({
+        success: false,
+        error: 'Project not found'
+      });
+      return;
+    }
+
+    const projectAddress = await prisma.projectAddress.update({
+      where: { id: projectId },
+      data: { isActive: false }
+    });
+
+    res.json({
+      success: true,
+      data: projectAddress
+    });
+  } catch (error) {
+    console.error('Delete project address error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
+  }
+});
+
 // ==================== PHONE NUMBERS ====================
 
 // @desc    Add phone number to customer
 // @route   POST /api/crm/customers/:customerId/phone-numbers
 // @access  Private/CRM Workspace
-router.post('/customers/:customerId/phone-numbers', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_PHONE_NUMBERS_CREATE, FEATURE_PERMISSIONS.EDIT), [
+router.post('/customers/:customerId/phone-numbers', protect, requireAnyFeatureAccess([FEATURES.CRM_PHONE_NUMBERS_CREATE, FEATURES.SALES_CUSTOMERS_EDIT], FEATURE_PERMISSIONS.EDIT), [
   body('number').notEmpty().withMessage('Phone number is required'),
   body('type').notEmpty().withMessage('Phone type is required'),
 ], async (req: any, res: Response): Promise<void> => {
@@ -673,6 +722,133 @@ router.post('/customers/:customerId/phone-numbers', protect, requireWorkspaceAcc
     });
   } catch (error) {
     console.error('Add phone number error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
+  }
+});
+
+// @desc    Update phone number
+// @route   PUT /api/crm/customers/:customerId/phone-numbers/:phoneId
+// @access  Private/CRM or Sales Customer Edit Access
+router.put('/customers/:customerId/phone-numbers/:phoneId', protect, requireAnyFeatureAccess([FEATURES.CRM_PHONE_NUMBERS_EDIT, FEATURES.SALES_CUSTOMERS_EDIT], FEATURE_PERMISSIONS.EDIT), [
+  body('number').notEmpty().withMessage('Phone number is required'),
+  body('type').notEmpty().withMessage('Phone type is required'),
+], async (req: any, res: Response): Promise<void> => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: errors.array()
+      });
+      return;
+    }
+
+    const { customerId, phoneId } = req.params;
+    const { number, type, isPrimary } = req.body;
+
+    const customer = await prisma.crmCustomer.findUnique({
+      where: { id: customerId },
+      select: { id: true, ownerUserId: true }
+    });
+    if (!ensureOwnershipOrDeny(req, res, customer, 'update_phone_number')) return;
+
+    const existingPhone = await prisma.phoneNumber.findFirst({
+      where: { id: phoneId, customerId }
+    });
+
+    if (!existingPhone) {
+      res.status(404).json({
+        success: false,
+        error: 'Phone number not found'
+      });
+      return;
+    }
+
+    if (isPrimary) {
+      await prisma.phoneNumber.updateMany({
+        where: { customerId, isPrimary: true, NOT: { id: phoneId } },
+        data: { isPrimary: false }
+      });
+    }
+
+    const phoneNumber = await prisma.phoneNumber.update({
+      where: { id: phoneId },
+      data: {
+        number,
+        type,
+        isPrimary: Boolean(isPrimary),
+        isActive: true
+      }
+    });
+
+    res.json({
+      success: true,
+      data: phoneNumber
+    });
+  } catch (error) {
+    console.error('Update phone number error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
+  }
+});
+
+// @desc    Soft delete phone number
+// @route   DELETE /api/crm/customers/:customerId/phone-numbers/:phoneId
+// @access  Private/CRM or Sales Customer Edit Access
+router.delete('/customers/:customerId/phone-numbers/:phoneId', protect, requireAnyFeatureAccess([FEATURES.CRM_PHONE_NUMBERS_DELETE, FEATURES.SALES_CUSTOMERS_EDIT], FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response): Promise<void> => {
+  try {
+    const { customerId, phoneId } = req.params;
+
+    const customer = await prisma.crmCustomer.findUnique({
+      where: { id: customerId },
+      select: { id: true, ownerUserId: true }
+    });
+    if (!ensureOwnershipOrDeny(req, res, customer, 'delete_phone_number')) return;
+
+    const existingPhone = await prisma.phoneNumber.findFirst({
+      where: { id: phoneId, customerId }
+    });
+
+    if (!existingPhone) {
+      res.status(404).json({
+        success: false,
+        error: 'Phone number not found'
+      });
+      return;
+    }
+
+    const activePhoneCount = await prisma.phoneNumber.count({
+      where: { customerId, isActive: true }
+    });
+
+    if (existingPhone.isActive && activePhoneCount <= 1) {
+      res.status(400).json({
+        success: false,
+        error: 'At least one active phone number is required'
+      });
+      return;
+    }
+
+    const phoneNumber = await prisma.phoneNumber.update({
+      where: { id: phoneId },
+      data: {
+        isActive: false,
+        isPrimary: false
+      }
+    });
+
+    res.json({
+      success: true,
+      data: phoneNumber
+    });
+  } catch (error) {
+    console.error('Delete phone number error:', error);
     res.status(500).json({
       success: false,
       error: 'Server error'
@@ -763,7 +939,7 @@ router.put('/customers/:id/lock', protect, requireWorkspaceAccess(WORKSPACES.CRM
 // @desc    Add contact to customer
 // @route   POST /api/crm/customers/:customerId/contacts
 // @access  Private/CRM Workspace
-router.post('/customers/:customerId/contacts', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_CONTACTS_CREATE, FEATURE_PERMISSIONS.EDIT), [
+router.post('/customers/:customerId/contacts', protect, requireAnyFeatureAccess([FEATURES.CRM_CONTACTS_CREATE, FEATURES.SALES_CUSTOMERS_EDIT], FEATURE_PERMISSIONS.EDIT), [
   body('firstName').notEmpty().withMessage('First name is required'),
   body('lastName').notEmpty().withMessage('Last name is required'),
 ], async (req: any, res: Response): Promise<void> => {
@@ -803,6 +979,10 @@ router.post('/customers/:customerId/contacts', protect, requireWorkspaceAccess(W
 
     // If this is set as primary, update customer's primary contact
     if (isPrimary) {
+      await prisma.crmContact.updateMany({
+        where: { customerId, isPrimary: true, NOT: { id: contact.id } },
+        data: { isPrimary: false }
+      });
       await prisma.crmCustomer.update({
         where: { id: customerId },
         data: { primaryContactId: contact.id }
@@ -815,6 +995,144 @@ router.post('/customers/:customerId/contacts', protect, requireWorkspaceAccess(W
     });
   } catch (error) {
     console.error('Add CRM contact error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
+  }
+});
+
+// @desc    Update CRM contact
+// @route   PUT /api/crm/customers/:customerId/contacts/:contactId
+// @access  Private/CRM or Sales Customer Edit Access
+router.put('/customers/:customerId/contacts/:contactId', protect, requireAnyFeatureAccess([FEATURES.CRM_CONTACTS_EDIT, FEATURES.SALES_CUSTOMERS_EDIT], FEATURE_PERMISSIONS.EDIT), [
+  body('firstName').notEmpty().withMessage('First name is required'),
+  body('lastName').notEmpty().withMessage('Last name is required'),
+], async (req: any, res: Response): Promise<void> => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: errors.array()
+      });
+      return;
+    }
+
+    const { customerId, contactId } = req.params;
+    const { firstName, lastName, position, email, phone, mobile, isPrimary } = req.body;
+
+    const customer = await prisma.crmCustomer.findUnique({
+      where: { id: customerId },
+      select: { id: true, ownerUserId: true }
+    });
+    if (!ensureOwnershipOrDeny(req, res, customer, 'update_contact')) return;
+
+    const existingContact = await prisma.crmContact.findFirst({
+      where: { id: contactId, customerId }
+    });
+
+    if (!existingContact) {
+      res.status(404).json({
+        success: false,
+        error: 'Contact not found'
+      });
+      return;
+    }
+
+    if (isPrimary) {
+      await prisma.crmContact.updateMany({
+        where: { customerId, isPrimary: true, NOT: { id: contactId } },
+        data: { isPrimary: false }
+      });
+    }
+
+    const contact = await prisma.crmContact.update({
+      where: { id: contactId },
+      data: {
+        firstName,
+        lastName,
+        position,
+        email,
+        phone,
+        mobile,
+        isPrimary: Boolean(isPrimary),
+        isActive: true
+      }
+    });
+
+    if (isPrimary) {
+      await prisma.crmCustomer.update({
+        where: { id: customerId },
+        data: { primaryContactId: contact.id }
+      });
+    } else if (existingContact.isPrimary) {
+      await prisma.crmCustomer.update({
+        where: { id: customerId },
+        data: { primaryContactId: null }
+      });
+    }
+
+    res.json({
+      success: true,
+      data: contact
+    });
+  } catch (error) {
+    console.error('Update CRM contact error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
+  }
+});
+
+// @desc    Soft delete CRM contact
+// @route   DELETE /api/crm/customers/:customerId/contacts/:contactId
+// @access  Private/CRM or Sales Customer Edit Access
+router.delete('/customers/:customerId/contacts/:contactId', protect, requireAnyFeatureAccess([FEATURES.CRM_CONTACTS_DELETE, FEATURES.SALES_CUSTOMERS_EDIT], FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response): Promise<void> => {
+  try {
+    const { customerId, contactId } = req.params;
+
+    const customer = await prisma.crmCustomer.findUnique({
+      where: { id: customerId },
+      select: { id: true, ownerUserId: true, primaryContactId: true }
+    });
+    if (!ensureOwnershipOrDeny(req, res, customer, 'delete_contact')) return;
+
+    const existingContact = await prisma.crmContact.findFirst({
+      where: { id: contactId, customerId }
+    });
+
+    if (!existingContact) {
+      res.status(404).json({
+        success: false,
+        error: 'Contact not found'
+      });
+      return;
+    }
+
+    const contact = await prisma.crmContact.update({
+      where: { id: contactId },
+      data: {
+        isActive: false,
+        isPrimary: false
+      }
+    });
+
+    if (customer?.primaryContactId === contactId) {
+      await prisma.crmCustomer.update({
+        where: { id: customerId },
+        data: { primaryContactId: null }
+      });
+    }
+
+    res.json({
+      success: true,
+      data: contact
+    });
+  } catch (error) {
+    console.error('Delete CRM contact error:', error);
     res.status(500).json({
       success: false,
       error: 'Server error'

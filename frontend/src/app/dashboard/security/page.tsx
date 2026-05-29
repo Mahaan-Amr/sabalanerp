@@ -149,7 +149,7 @@ export default function SecurityDashboardPage() {
       }
     } catch (error: any) {
       console.error('Error fetching security data:', error);
-      setError(error.response?.data?.error || '?? ? ??? ? ??');
+      setError(error.response?.data?.error || 'خطا در دریافت اطلاعات');
     } finally {
       setLoading(false);
     }
@@ -157,7 +157,7 @@ export default function SecurityDashboardPage() {
 
   const handleCheckIn = async () => {
     if (!selectedEmployee) {
-      alert('??? ??? ? ??? ??');
+      alert('لطفا کارمند را انتخاب کنید');
       return;
     }
 
@@ -166,13 +166,13 @@ export default function SecurityDashboardPage() {
       const response = await securityAPI.checkIn(selectedEmployee);
       
       if (response.data.success) {
-        alert('?? ??? ? ??? ?? ?');
+        alert('خروج با موفقیت ثبت شد');
         setSelectedEmployee('');
         fetchSecurityData(); // Refresh data
       }
     } catch (error: any) {
       console.error('Check-in error:', error);
-      alert(error.response?.data?.error || '?? ? ?? ??');
+      alert(error.response?.data?.error || 'خطا در ثبت عملیات');
     } finally {
       setActionLoading(false);
     }
@@ -180,7 +180,7 @@ export default function SecurityDashboardPage() {
 
   const handleCheckOut = async () => {
     if (!selectedEmployee) {
-      alert('??? ??? ? ??? ??');
+      alert('لطفا کارمند را انتخاب کنید');
       return;
     }
 
@@ -189,13 +189,13 @@ export default function SecurityDashboardPage() {
       const response = await securityAPI.checkOut(selectedEmployee);
       
       if (response.data.success) {
-        alert('?? ??? ? ??? ?? ?');
+        alert('ورود با موفقیت ثبت شد');
         setSelectedEmployee('');
         fetchSecurityData(); // Refresh data
       }
     } catch (error: any) {
       console.error('Check-out error:', error);
-      alert(error.response?.data?.error || '?? ? ?? ??');
+      alert(error.response?.data?.error || 'خطا در ثبت عملیات');
     } finally {
       setActionLoading(false);
     }
@@ -214,14 +214,14 @@ export default function SecurityDashboardPage() {
 
   const getStatusLabel = (status: string) => {
     switch (status) {
-      case 'PRESENT': return '??';
-      case 'ABSENT': return '??';
-      case 'LATE': return '???';
-      case 'MISSION': return '??';
-      case 'HOURLY_LEAVE': return '??? ???';
-      case 'SICK_LEAVE': return '??? ??';
-      case 'VACATION': return '??? ??';
-      default: return '???';
+      case 'PRESENT': return 'حاضر';
+      case 'ABSENT': return 'غایب';
+      case 'LATE': return 'تاخیر';
+      case 'MISSION': return 'ماموریت';
+      case 'HOURLY_LEAVE': return 'مرخصی ساعتی';
+      case 'SICK_LEAVE': return 'مرخصی استعلاجی';
+      case 'VACATION': return 'مرخصی روزانه';
+      default: return 'نامشخص';
     }
   };
 
@@ -229,11 +229,11 @@ export default function SecurityDashboardPage() {
     try {
       setActionLoading(true);
       await securityAPI.createExceptionRequest(data);
-      alert('?? ??? ? ??? ??? ?!');
+      alert('درخواست با موفقیت ثبت شد');
       setShowExceptionForm(false);
       fetchExceptionRequests();
     } catch (error: any) {
-      alert(`?? ? ??? ??: ${error.response?.data?.error || error.message}`);
+      alert(`خطا در ثبت عملیات: ${error.response?.data?.error || error.message}`);
     } finally {
       setActionLoading(false);
     }
@@ -243,11 +243,11 @@ export default function SecurityDashboardPage() {
     try {
       setActionLoading(true);
       await securityAPI.createMissionAssignment(data);
-      alert('?? ? ??? ??? ?!');
+      alert('ماموریت با موفقیت ثبت شد');
       setShowMissionForm(false);
       fetchMissionAssignments();
     } catch (error: any) {
-      alert(`?? ? ??? ??: ${error.response?.data?.error || error.message}`);
+      alert(`خطا در ثبت عملیات: ${error.response?.data?.error || error.message}`);
     } finally {
       setActionLoading(false);
     }
@@ -263,7 +263,7 @@ export default function SecurityDashboardPage() {
       fetchSecurityData(); // Refresh data
     } catch (error: any) {
       console.error('Error saving signature:', error);
-      alert(`?? ? ??? ??: ${error.response?.data?.error || error.message}`);
+      alert(`خطا در ثبت عملیات: ${error.response?.data?.error || error.message}`);
     }
   };
 
@@ -312,13 +312,13 @@ export default function SecurityDashboardPage() {
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
         <div className="glass-liquid-card p-8 text-center">
           <FaExclamationTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-primary mb-2">?? ? ??</h2>
+          <h2 className="text-xl font-bold text-primary mb-2">ورود و خروج</h2>
           <p className="text-secondary mb-4">{error}</p>
           <button 
             onClick={fetchSecurityData}
             className="glass-liquid-btn-primary px-6 py-2"
           >
-            ?? ??
+            تلاش مجدد
           </button>
         </div>
       </div>
@@ -338,14 +338,14 @@ export default function SecurityDashboardPage() {
             <div className="flex items-center space-x-4 space-x-reverse">
               <FaShieldAlt className="h-8 w-8 text-teal-500" />
               <div>
-                <h1 className="text-2xl font-bold text-primary">?? ???</h1>
+                <h1 className="text-2xl font-bold text-primary">حراست</h1>
                 <p className="text-secondary">
                   {stats?.securityPersonnel.name} - {stats?.securityPersonnel.position}
                 </p>
               </div>
             </div>
             <div className="text-right">
-              <div className="text-sm text-secondary">?? ??</div>
+              <div className="text-sm text-secondary">شیفت جاری</div>
               <div className="text-lg font-bold text-primary">
                 {stats?.currentShift.namePersian}
               </div>
@@ -361,7 +361,7 @@ export default function SecurityDashboardPage() {
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-secondary">? ??</p>
+                <p className="text-sm text-secondary">کل کارکنان</p>
                 <p className="text-2xl font-bold text-primary">
                   {stats?.todayStats.totalEmployees}
                 </p>
@@ -373,7 +373,7 @@ export default function SecurityDashboardPage() {
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-secondary">??</p>
+                <p className="text-sm text-secondary">حاضر</p>
                 <p className="text-2xl font-bold text-green-500">
                   {stats?.todayStats.present}
                 </p>
@@ -385,7 +385,7 @@ export default function SecurityDashboardPage() {
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-secondary">??</p>
+                <p className="text-sm text-secondary">غایب</p>
                 <p className="text-2xl font-bold text-red-500">
                   {stats?.todayStats.absent}
                 </p>
@@ -397,7 +397,7 @@ export default function SecurityDashboardPage() {
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-secondary">??</p>
+                <p className="text-sm text-secondary">ماموریت</p>
                 <p className="text-2xl font-bold text-blue-500">
                   {stats?.todayStats.mission}
                 </p>
@@ -409,16 +409,16 @@ export default function SecurityDashboardPage() {
 
         {/* Quick Actions */}
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">??? ??</h2>
+          <h2 className="text-xl font-bold text-primary mb-4">ثبت ورود و خروج</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm text-secondary mb-2">??? ???</label>
+              <label className="block text-sm text-secondary mb-2">انتخاب کارمند</label>
               <select
                 value={selectedEmployee}
                 onChange={(e) => setSelectedEmployee(e.target.value)}
                 className="glass-liquid-input w-full"
               >
-                <option value="">??? ? ??? ??</option>
+                <option value="">کارمند را انتخاب کنید</option>
                 {dailyAttendance?.attendanceSummary.map((record) => (
                   <option key={record.employee.id} value={record.employee.id}>
                     {record.employee.firstName} {record.employee.lastName}
@@ -433,7 +433,7 @@ export default function SecurityDashboardPage() {
                 className="glass-liquid-btn-primary flex-1 flex items-center justify-center space-x-2 space-x-reverse"
               >
                 <FaSignInAlt />
-                <span>??</span>
+                <span>ثبت ورود</span>
               </button>
               <button
                 onClick={handleCheckOut}
@@ -441,7 +441,7 @@ export default function SecurityDashboardPage() {
                 className="glass-liquid-btn flex-1 flex items-center justify-center space-x-2 space-x-reverse"
               >
                 <FaSignOutAlt />
-                <span>??</span>
+                <span>ثبت خروج</span>
               </button>
             </div>
           </div>
@@ -450,12 +450,12 @@ export default function SecurityDashboardPage() {
         {/* Daily Attendance Table */}
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-primary">?? ? ?? ???</h2>
+            <h2 className="text-xl font-bold text-primary">ورود و خروج امروز</h2>
             <div className="flex items-center space-x-4 space-x-reverse">
               <PersianCalendarComponent
                 value={selectedDate}
                 onChange={setSelectedDate}
-                placeholder="??? ???"
+                placeholder="گزارش روزانه"
                 className="w-64"
               />
               <div className="flex items-center space-x-2 space-x-reverse text-sm text-secondary">
@@ -469,11 +469,11 @@ export default function SecurityDashboardPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-700">
-                  <th className="text-right py-3 px-4 text-secondary">?? ???</th>
-                  <th className="text-right py-3 px-4 text-secondary">?? ??</th>
-                  <th className="text-right py-3 px-4 text-secondary">?? ??</th>
-                  <th className="text-right py-3 px-4 text-secondary">???</th>
-                  <th className="text-right py-3 px-4 text-secondary">??</th>
+                  <th className="text-right py-3 px-4 text-secondary">کارمند</th>
+                  <th className="text-right py-3 px-4 text-secondary">ورود</th>
+                  <th className="text-right py-3 px-4 text-secondary">خروج</th>
+                  <th className="text-right py-3 px-4 text-secondary">وضعیت</th>
+                  <th className="text-right py-3 px-4 text-secondary">توضیحات</th>
                 </tr>
               </thead>
               <tbody>
@@ -513,7 +513,7 @@ export default function SecurityDashboardPage() {
         {/* Recent Activity */}
         {stats?.recentActivity && stats.recentActivity.length > 0 && (
           <div className="glass-liquid-card p-6">
-            <h2 className="text-xl font-bold text-primary mb-4">??? ??</h2>
+            <h2 className="text-xl font-bold text-primary mb-4">فعالیت‌های اخیر</h2>
             <div className="space-y-3">
               {stats.recentActivity.map((activity, index) => (
                 <div key={index} className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg">
@@ -521,11 +521,11 @@ export default function SecurityDashboardPage() {
                     <FaClock className="h-4 w-4 text-teal-500" />
                     <div>
                       <div className="text-sm text-primary">
-                        {activity.entryTime && `??: ${activity.entryTime}`}
-                        {activity.exitTime && ` | ??: ${activity.exitTime}`}
+                        {activity.entryTime && `ورود: ${activity.entryTime}`}
+                        {activity.exitTime && ` | خروج: ${activity.exitTime}`}
                       </div>
                       <div className="text-xs text-secondary">
-                        ???: {getStatusLabel(activity.status)}
+                        وضعیت: {getStatusLabel(activity.status)}
                       </div>
                     </div>
                   </div>
@@ -541,14 +541,14 @@ export default function SecurityDashboardPage() {
                     {activity.digitalSignature ? (
                       <SignatureDisplay
                         signatureData={activity.digitalSignature}
-                        employeeName={`??? ${index + 1}`}
+                        employeeName={`کارمند ${index + 1}`}
                         timestamp={activity.entryTime || activity.exitTime || undefined}
                       />
                     ) : (
                       <button
                         onClick={() => openSignatureModal(activity)}
                         className="text-teal-400 hover:text-teal-300 p-1"
-                        title="?? ??"
+                        title="ثبت امضا"
                       >
                         <FaSignature className="h-4 w-4" />
                       </button>
@@ -565,18 +565,18 @@ export default function SecurityDashboardPage() {
           {/* Exception Requests */}
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-primary">?? ???</h2>
+              <h2 className="text-xl font-bold text-primary">درخواست‌های استثنا</h2>
               <button
                 onClick={() => setShowExceptionForm(true)}
                 className="glass-liquid-btn-primary px-4 py-2 text-sm"
               >
-                ?? ??
+                درخواست جدید
               </button>
             </div>
             
             <div className="space-y-3">
               {exceptionRequests.length === 0 ? (
-                <p className="text-secondary text-center py-4">?? ?? ?? ?? ???</p>
+                <p className="text-secondary text-center py-4">درخواستی ثبت نشده است</p>
               ) : (
                 exceptionRequests.map((request) => (
                   <div key={request.id} className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg">
@@ -593,8 +593,7 @@ export default function SecurityDashboardPage() {
                       request.status === 'APPROVED' ? 'bg-green-500/20 text-green-500' :
                       'bg-red-500/20 text-red-500'
                     }`}>
-                      {request.status === 'PENDING' ? '? ???' :
-                       request.status === 'APPROVED' ? '??? ??' : '? ??'}
+                      {request.status === 'PENDING' ? 'در انتظار' : request.status === 'APPROVED' ? 'تایید شده' : 'رد شده'}
                     </span>
                   </div>
                 ))
@@ -605,18 +604,18 @@ export default function SecurityDashboardPage() {
           {/* Mission Assignments */}
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-primary">???</h2>
+              <h2 className="text-xl font-bold text-primary">ماموریت‌ها</h2>
               <button
                 onClick={() => setShowMissionForm(true)}
                 className="glass-liquid-btn-primary px-4 py-2 text-sm"
               >
-                ??? ??
+                ماموریت جدید
               </button>
             </div>
             
             <div className="space-y-3">
               {missionAssignments.length === 0 ? (
-                <p className="text-secondary text-center py-4">?? ?? ??? ??</p>
+                <p className="text-secondary text-center py-4">ماموریتی ثبت نشده است</p>
               ) : (
                 missionAssignments.map((mission) => (
                   <div key={mission.id} className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg">
@@ -633,8 +632,7 @@ export default function SecurityDashboardPage() {
                       mission.status === 'APPROVED' ? 'bg-green-500/20 text-green-500' :
                       'bg-red-500/20 text-red-500'
                     }`}>
-                      {mission.status === 'PENDING' ? '? ???' :
-                       mission.status === 'APPROVED' ? '??? ??' : '? ??'}
+                      {mission.status === 'PENDING' ? 'در انتظار' : mission.status === 'APPROVED' ? 'تایید شده' : 'رد شده'}
                     </span>
                   </div>
                 ))

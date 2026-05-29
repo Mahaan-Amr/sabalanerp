@@ -262,10 +262,11 @@ export default function CustomerDetailPage() {
   };
 
   const handleDeleteContact = async (contactId: string) => {
+    if (!customer) return;
     if (!confirm('آیا از حذف این مخاطب اطمینان دارید؟')) return;
     
     try {
-      const response = await crmAPI.deleteContact(contactId);
+      const response = await crmAPI.deleteContact(customer.id, contactId);
       if (response.data.success) {
         await fetchCustomer(); // Refresh data
       }
@@ -317,14 +318,14 @@ export default function CustomerDetailPage() {
     try {
       if (editingContact) {
         // Update existing contact
-        const response = await crmAPI.updateContact(editingContact.id, contactFormData);
+        const response = await crmAPI.updateContact(customer.id, editingContact.id, contactFormData);
         if (response.data.success) {
           await fetchCustomer();
           setShowAddContactModal(false);
         }
       } else {
         // Create new contact
-        const response = await crmAPI.createContact({ ...contactFormData, customerId: customer.id });
+        const response = await crmAPI.createContact(customer.id, contactFormData);
         if (response.data.success) {
           await fetchCustomer();
           setShowAddContactModal(false);

@@ -36,11 +36,11 @@ const EditStoneFinishingPage: React.FC = () => {
             isActive: data.isActive
           });
         } else {
-          setErrors({ general: '??? ?? ?? ?? ??' });
+          setErrors({ general: 'فرآوری سنگ یافت نشد' });
         }
       } catch (error) {
         console.error('Error loading stone finishing:', error);
-        setErrors({ general: '?? ? ??? ???' });
+        setErrors({ general: 'فرآوری سنگ یافت نشد' });
       } finally {
         setInitialLoading(false);
       }
@@ -64,7 +64,7 @@ const EditStoneFinishingPage: React.FC = () => {
       if (response.data.success) {
         router.push('/dashboard/inventory/services');
       } else {
-        setErrors({ general: '?? ? ??? ???' });
+        setErrors({ general: 'فرآوری سنگ یافت نشد' });
       }
     } catch (error: any) {
       console.error('Error updating stone finishing:', error);
@@ -76,7 +76,7 @@ const EditStoneFinishingPage: React.FC = () => {
         });
         setErrors(newErrors);
       } else {
-        setErrors({ general: '?? ? ??? ???' });
+        setErrors({ general: 'فرآوری سنگ یافت نشد' });
       }
     } finally {
       setLoading(false);
@@ -85,13 +85,13 @@ const EditStoneFinishingPage: React.FC = () => {
 
   const handleDelete = async () => {
     if (!finishingId) return;
-    if (!confirm('?? ? ?? ?? ??? ?? ???')) return;
+    if (!confirm('آیا از حذف این فرآوری سنگ مطمئن هستید؟')) return;
     try {
       await servicesAPI.deleteStoneFinishing(finishingId);
       router.push('/dashboard/inventory/services');
     } catch (error) {
       console.error('Error deleting stone finishing:', error);
-      setErrors({ general: '?? ? ?? ???' });
+      setErrors({ general: 'فرآوری سنگ یافت نشد' });
     }
   };
 
@@ -114,10 +114,10 @@ const EditStoneFinishingPage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
-                ??? ???
+                ویرایش فرآوری سنگ
               </h1>
               <p className="text-slate-600 dark:text-slate-400">
-                ??? ??? ?? ? ??? ??
+                اطلاعات فرآوری سنگ، قیمت و وضعیت آن را به‌روزرسانی کنید
               </p>
             </div>
             <button
@@ -134,7 +134,13 @@ const EditStoneFinishingPage: React.FC = () => {
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  ?? ??? ??? *
+                  
+                  
+                  
+                  نام فارسی فرآوری سنگ *
+                
+                
+                
                 </label>
                 <input
                   type="text"
@@ -143,7 +149,7 @@ const EditStoneFinishingPage: React.FC = () => {
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
                     errors.namePersian ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
                   }`}
-                  placeholder="??: ?? ???"
+                  placeholder="مثال: ساب نهایی"
                 />
                 {errors.namePersian && (
                   <p className="text-red-500 text-sm mt-1">{errors.namePersian}</p>
@@ -152,33 +158,51 @@ const EditStoneFinishingPage: React.FC = () => {
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  ?? ??
+                  
+                  
+                  
+                  نام انگلیسی
+                
+                
+                
                 </label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  placeholder="??: Final Polish"
+                  placeholder="مثال: Final Polish"
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  ??
+                  
+                  
+                  
+                  توضیحات
+                
+                
+                
                 </label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   rows={3}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  placeholder="?? ??? ??? ???..."
+                  placeholder="توضیحات فرآوری سنگ..."
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  ?? ? ?? ?? (???) *
+                  
+                  
+                  
+                  قیمت هر متر مربع (تومان)
+                
+                
+                
                 </label>
                 <input
                   type="number"
@@ -189,13 +213,13 @@ const EditStoneFinishingPage: React.FC = () => {
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
                     errors.pricePerSquareMeter ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
                   }`}
-                  placeholder="??: 150000"
+                  placeholder="مثال: 50000"
                 />
                 {errors.pricePerSquareMeter && (
                   <p className="text-red-500 text-sm mt-1">{errors.pricePerSquareMeter}</p>
                 )}
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  ?? ?? ? ?? ??? ?? ?? ? ?? ??? ? ??? ???.
+                  قیمت پایه فرآوری برای هر متر مربع سنگ را وارد کنید.
                 </p>
               </div>
 
@@ -208,8 +232,7 @@ const EditStoneFinishingPage: React.FC = () => {
                     className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                   />
                   <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                    ?? ?? ?? ? ???
-                  </span>
+                    فعال</span>
                 </label>
               </div>
 
@@ -226,16 +249,14 @@ const EditStoneFinishingPage: React.FC = () => {
                   className="px-4 py-2 flex items-center gap-2 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors"
                 >
                   <FaTrash className="w-4 h-4" />
-                  <span>?? ???</span>
+                  <span>فعال</span>
                 </button>
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={handleCancel}
                     className="px-6 py-2 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                  >
-                    ???
-                  </button>
+                  >انصراف</button>
                   <button
                     type="submit"
                     disabled={loading}
@@ -246,7 +267,7 @@ const EditStoneFinishingPage: React.FC = () => {
                     ) : (
                       <FaSave className="w-4 h-4" />
                     )}
-                    <span>{loading ? '? ?? ???...' : '??? ??'}</span>
+                    <span>{loading ? 'در حال ذخیره...' : 'ذخیره فرآوری سنگ'}</span>
                   </button>
                 </div>
               </div>

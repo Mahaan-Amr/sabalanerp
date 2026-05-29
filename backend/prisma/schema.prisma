@@ -498,6 +498,7 @@ model CrmContact {
   phone                String?
   mobile               String?
   isPrimary            Boolean            @default(false)
+  isActive             Boolean            @default(true)
   communicationHistory Json?
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt

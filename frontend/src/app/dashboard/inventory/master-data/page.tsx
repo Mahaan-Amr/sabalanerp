@@ -62,9 +62,9 @@ const MasterDataManagement: React.FC = () => {
   const [masterDataSections, setMasterDataSections] = useState([
     {
       id: 'cut-types',
-      title: '?? ??',
-      titlePersian: '?? ??',
-      description: '??? ??? ?? ??',
+      title: 'نوع برش',
+      titlePersian: 'نوع برش',
+      description: 'مدیریت انواع برش سنگ',
       icon: FaCog,
       apiMethod: inventoryAPI.getCutTypes,
       createMethod: inventoryAPI.createCutType,
@@ -75,21 +75,21 @@ const MasterDataManagement: React.FC = () => {
       canEdit: false,
       canDelete: false,
       fields: [
-        { key: 'code', label: '?', type: 'text', required: true },
-        { key: 'namePersian', label: '?? ???', type: 'text', required: true },
-        { key: 'name', label: '?? ??', type: 'text', required: false },
-        { key: 'description', label: '??', type: 'textarea', required: false },
-        { key: 'isActive', label: '???', type: 'select', required: false, options: [
-          { value: true, label: '??' },
-          { value: false, label: '??' }
+        { key: 'code', label: 'کد', type: 'text', required: true },
+        { key: 'namePersian', label: 'نام فارسی', type: 'text', required: true },
+        { key: 'name', label: 'نام انگلیسی', type: 'text', required: false },
+        { key: 'description', label: 'توضیحات', type: 'textarea', required: false },
+        { key: 'isActive', label: 'وضعیت', type: 'select', required: false, options: [
+          { value: true, label: 'فعال' },
+          { value: false, label: 'غیرفعال' }
         ]}
       ]
     },
     {
       id: 'stone-materials',
-      title: '?? ??',
-      titlePersian: '?? ??',
-      description: '??? ?? ??? ??',
+      title: 'جنس سنگ',
+      titlePersian: 'جنس سنگ',
+      description: 'مدیریت جنس و متریال سنگ',
       icon: FaBoxes,
       apiMethod: inventoryAPI.getStoneMaterials,
       createMethod: inventoryAPI.createStoneMaterial,
@@ -100,21 +100,21 @@ const MasterDataManagement: React.FC = () => {
       canEdit: false,
       canDelete: false,
       fields: [
-        { key: 'code', label: '?', type: 'text', required: true },
-        { key: 'namePersian', label: '?? ???', type: 'text', required: true },
-        { key: 'name', label: '?? ??', type: 'text', required: false },
-        { key: 'description', label: '??', type: 'textarea', required: false },
-        { key: 'isActive', label: '???', type: 'select', required: false, options: [
-          { value: true, label: '??' },
-          { value: false, label: '??' }
+        { key: 'code', label: 'کد', type: 'text', required: true },
+        { key: 'namePersian', label: 'نام فارسی', type: 'text', required: true },
+        { key: 'name', label: 'نام انگلیسی', type: 'text', required: false },
+        { key: 'description', label: 'توضیحات', type: 'textarea', required: false },
+        { key: 'isActive', label: 'وضعیت', type: 'select', required: false, options: [
+          { value: true, label: 'فعال' },
+          { value: false, label: 'غیرفعال' }
         ]}
       ]
     },
     {
       id: 'cut-widths',
-      title: '?? ??',
-      titlePersian: '?? ??',
-      description: '??? ?? ??? ??',
+      title: 'عرض برش',
+      titlePersian: 'عرض برش',
+      description: 'مدیریت عرض‌های قابل استفاده در برش',
       icon: FaCog,
       apiMethod: inventoryAPI.getCutWidths,
       createMethod: inventoryAPI.createCutWidth,
@@ -125,19 +125,19 @@ const MasterDataManagement: React.FC = () => {
       canEdit: false,
       canDelete: false,
       fields: [
-        { key: 'code', label: '?', type: 'text', required: true },
-        { key: 'namePersian', label: '?? ???', type: 'text', required: true },
-        { key: 'name', label: '?? ??', type: 'text', required: false },
-        { key: 'value', label: '???', type: 'number', required: true },
-        { key: 'unit', label: '??', type: 'select', required: true, options: ['mm', 'cm', 'm'] },
-        { key: 'description', label: '??', type: 'textarea', required: false }
+        { key: 'code', label: 'کد', type: 'text', required: true },
+        { key: 'namePersian', label: 'نام فارسی', type: 'text', required: true },
+        { key: 'name', label: 'نام انگلیسی', type: 'text', required: false },
+        { key: 'value', label: 'مقدار', type: 'number', required: true },
+        { key: 'unit', label: 'واحد', type: 'select', required: true, options: ['mm', 'cm', 'm'] },
+        { key: 'description', label: 'توضیحات', type: 'textarea', required: false }
       ]
     },
     {
       id: 'thicknesses',
-      title: '???',
-      titlePersian: '???',
-      description: '??? ??? ???',
+      title: 'ضخامت',
+      titlePersian: 'ضخامت',
+      description: 'مدیریت ضخامت‌های سنگ',
       icon: FaCog,
       apiMethod: inventoryAPI.getThicknesses,
       createMethod: inventoryAPI.createThickness,
@@ -148,19 +148,19 @@ const MasterDataManagement: React.FC = () => {
       canEdit: false,
       canDelete: false,
       fields: [
-        { key: 'code', label: '?', type: 'text', required: true },
-        { key: 'namePersian', label: '?? ???', type: 'text', required: true },
-        { key: 'name', label: '?? ??', type: 'text', required: false },
-        { key: 'value', label: '???', type: 'number', required: true },
-        { key: 'unit', label: '??', type: 'select', required: true, options: ['mm', 'cm', 'm'] },
-        { key: 'description', label: '??', type: 'textarea', required: false }
+        { key: 'code', label: 'کد', type: 'text', required: true },
+        { key: 'namePersian', label: 'نام فارسی', type: 'text', required: true },
+        { key: 'name', label: 'نام انگلیسی', type: 'text', required: false },
+        { key: 'value', label: 'مقدار', type: 'number', required: true },
+        { key: 'unit', label: 'واحد', type: 'select', required: true, options: ['mm', 'cm', 'm'] },
+        { key: 'description', label: 'توضیحات', type: 'textarea', required: false }
       ]
     },
     {
       id: 'mines',
-      title: '??',
-      titlePersian: '??',
-      description: '??? ??? ???',
+      title: 'معادن',
+      titlePersian: 'معادن',
+      description: 'مدیریت معادن و منابع سنگ',
       icon: FaWarehouse,
       apiMethod: inventoryAPI.getMines,
       createMethod: inventoryAPI.createMine,
@@ -171,21 +171,21 @@ const MasterDataManagement: React.FC = () => {
       canEdit: false,
       canDelete: false,
       fields: [
-        { key: 'code', label: '?', type: 'text', required: true },
-        { key: 'namePersian', label: '?? ???', type: 'text', required: true },
-        { key: 'name', label: '?? ??', type: 'text', required: false },
-        { key: 'description', label: '??', type: 'textarea', required: false },
-        { key: 'isActive', label: '???', type: 'select', required: false, options: [
-          { value: true, label: '??' },
-          { value: false, label: '??' }
+        { key: 'code', label: 'کد', type: 'text', required: true },
+        { key: 'namePersian', label: 'نام فارسی', type: 'text', required: true },
+        { key: 'name', label: 'نام انگلیسی', type: 'text', required: false },
+        { key: 'description', label: 'توضیحات', type: 'textarea', required: false },
+        { key: 'isActive', label: 'وضعیت', type: 'select', required: false, options: [
+          { value: true, label: 'فعال' },
+          { value: false, label: 'غیرفعال' }
         ]}
       ]
     },
     {
       id: 'finish-types',
-      title: '?? ???',
-      titlePersian: '?? ???',
-      description: '??? ??? ???',
+      title: 'نوع فرآوری',
+      titlePersian: 'نوع فرآوری',
+      description: 'مدیریت انواع فرآوری و پرداخت سنگ',
       icon: FaCog,
       apiMethod: inventoryAPI.getFinishTypes,
       createMethod: inventoryAPI.createFinishType,
@@ -196,21 +196,21 @@ const MasterDataManagement: React.FC = () => {
       canEdit: false,
       canDelete: false,
       fields: [
-        { key: 'code', label: '?', type: 'text', required: true },
-        { key: 'namePersian', label: '?? ???', type: 'text', required: true },
-        { key: 'name', label: '?? ??', type: 'text', required: false },
-        { key: 'description', label: '??', type: 'textarea', required: false },
-        { key: 'isActive', label: '???', type: 'select', required: false, options: [
-          { value: true, label: '??' },
-          { value: false, label: '??' }
+        { key: 'code', label: 'کد', type: 'text', required: true },
+        { key: 'namePersian', label: 'نام فارسی', type: 'text', required: true },
+        { key: 'name', label: 'نام انگلیسی', type: 'text', required: false },
+        { key: 'description', label: 'توضیحات', type: 'textarea', required: false },
+        { key: 'isActive', label: 'وضعیت', type: 'select', required: false, options: [
+          { value: true, label: 'فعال' },
+          { value: false, label: 'غیرفعال' }
         ]}
       ]
     },
     {
       id: 'colors',
-      title: '??/??',
-      titlePersian: '??/??',
-      description: '??? ??? ? ??',
+      title: 'رنگ/طرح',
+      titlePersian: 'رنگ/طرح',
+      description: 'مدیریت رنگ‌ها و طرح‌های سنگ',
       icon: FaCog,
       apiMethod: inventoryAPI.getColors,
       createMethod: inventoryAPI.createColor,
@@ -221,13 +221,13 @@ const MasterDataManagement: React.FC = () => {
       canEdit: false,
       canDelete: false,
       fields: [
-        { key: 'code', label: '?', type: 'text', required: true },
-        { key: 'namePersian', label: '?? ???', type: 'text', required: true },
-        { key: 'name', label: '?? ??', type: 'text', required: false },
-        { key: 'description', label: '??', type: 'textarea', required: false },
-        { key: 'isActive', label: '???', type: 'select', required: false, options: [
-          { value: true, label: '??' },
-          { value: false, label: '??' }
+        { key: 'code', label: 'کد', type: 'text', required: true },
+        { key: 'namePersian', label: 'نام فارسی', type: 'text', required: true },
+        { key: 'name', label: 'نام انگلیسی', type: 'text', required: false },
+        { key: 'description', label: 'توضیحات', type: 'textarea', required: false },
+        { key: 'isActive', label: 'وضعیت', type: 'select', required: false, options: [
+          { value: true, label: 'فعال' },
+          { value: false, label: 'غیرفعال' }
         ]}
       ]
     }
@@ -323,7 +323,7 @@ const MasterDataManagement: React.FC = () => {
   };
 
   const handleDelete = async (item: MasterDataItem) => {
-    if (!confirm(`?? ??? ??? ? ??? "${item.namePersian}" ? ?? ???`)) {
+    if (!confirm(`آیا از حذف "${item.namePersian}" مطمئن هستید؟`)) {
       return;
     }
 
@@ -333,13 +333,13 @@ const MasterDataManagement: React.FC = () => {
     setLoading(true);
     try {
       await section.deleteMethod(item.id);
-      setModalMessage(`${item.namePersian} ? ??? ?? ?`);
+      setModalMessage(`وضعیت ${item.namePersian} با موفقیت تغییر کرد.`);
       setShowSuccessModal(true);
       loadSectionData(); // Reload data
     } catch (error: any) {
       console.error('Error deleting item:', error);
-      setModalMessage('?? ? ?? ??');
-      setModalDetails(error.response?.data?.error || '?? ??? ? ?? ??');
+      setModalMessage('عملیات با خطا مواجه شد.');
+      setModalDetails(error.response?.data?.error || 'لطفا دوباره تلاش کنید.');
       setShowErrorModal(true);
     } finally {
       setLoading(false);
@@ -353,13 +353,13 @@ const MasterDataManagement: React.FC = () => {
     setLoading(true);
     try {
       await section.updateMethod(item.id, { isActive: !item.isActive });
-      setModalMessage(`??? ${item.namePersian} ? ??? ??? ??`);
+      setModalMessage(`وضعیت ${item.namePersian} با موفقیت تغییر کرد.`);
       setShowSuccessModal(true);
       loadSectionData(); // Reload data
     } catch (error: any) {
       console.error('Error toggling status:', error);
-      setModalMessage('?? ? ??? ???');
-      setModalDetails(error.response?.data?.error || '?? ??? ? ?? ??');
+      setModalMessage('عملیات با خطا مواجه شد.');
+      setModalDetails(error.response?.data?.error || 'لطفا دوباره تلاش کنید.');
       setShowErrorModal(true);
     } finally {
       setLoading(false);
@@ -391,18 +391,16 @@ const MasterDataManagement: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
-                ??? ?? ??
+                مدیریت اطلاعات پایه
               </h1>
               <p className="text-slate-600 dark:text-slate-400">
-                ??? ??? ?? ?? ?? ??? ??? ?? ??? ? ???
+                مدیریت داده‌های پایه انبار، سنگ، برش و فرآوری
               </p>
             </div>
             <button
               onClick={() => router.push('/dashboard/inventory')}
               className="bg-slate-500 hover:bg-slate-600 text-white px-4 py-2 rounded-lg transition-colors duration-200"
-            >
-              ???
-            </button>
+            >بازگشت</button>
           </div>
         </div>
 
@@ -411,7 +409,7 @@ const MasterDataManagement: React.FC = () => {
           <div className="lg:col-span-1">
             <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-xl p-4 border border-slate-200/50 dark:border-slate-700/50 shadow-lg">
               <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-4">
-                ???
+                بخش‌ها
               </h3>
               <div className="space-y-2">
                 {masterDataSections.map((section) => {
@@ -470,7 +468,7 @@ const MasterDataManagement: React.FC = () => {
                         className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 flex items-center space-x-2 space-x-reverse"
                       >
                         <FaPlus className="w-4 h-4" />
-                        <span>??? ??</span>
+                        <span>ایجاد مورد جدید</span>
                       </button>
                     )}
                   </div>
@@ -482,7 +480,7 @@ const MasterDataManagement: React.FC = () => {
                     <div className="flex-1">
                       <input
                         type="text"
-                        placeholder="??? ? ?? ?? ??? ? ?? ??..."
+                        placeholder="جستجو بر اساس کد، نام فارسی یا نام انگلیسی..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-orange-500 focus:border-transparent"
@@ -502,17 +500,17 @@ const MasterDataManagement: React.FC = () => {
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-slate-200 dark:border-slate-700">
-                            <th className="text-right py-3 px-4 font-medium text-slate-800 dark:text-slate-200">?</th>
-                            <th className="text-right py-3 px-4 font-medium text-slate-800 dark:text-slate-200">?? ???</th>
-                            <th className="text-right py-3 px-4 font-medium text-slate-800 dark:text-slate-200">?? ??</th>
+                            <th className="text-right py-3 px-4 font-medium text-slate-800 dark:text-slate-200">کد</th>
+                            <th className="text-right py-3 px-4 font-medium text-slate-800 dark:text-slate-200">نام فارسی</th>
+                            <th className="text-right py-3 px-4 font-medium text-slate-800 dark:text-slate-200">نام انگلیسی</th>
                             {(currentSection.id === 'cut-widths' || currentSection.id === 'thicknesses') && (
                               <>
-                                <th className="text-right py-3 px-4 font-medium text-slate-800 dark:text-slate-200">???</th>
-                                <th className="text-right py-3 px-4 font-medium text-slate-800 dark:text-slate-200">??</th>
+                                <th className="text-right py-3 px-4 font-medium text-slate-800 dark:text-slate-200">مقدار</th>
+                                <th className="text-right py-3 px-4 font-medium text-slate-800 dark:text-slate-200">واحد</th>
                               </>
                             )}
-                            <th className="text-right py-3 px-4 font-medium text-slate-800 dark:text-slate-200">???</th>
-                            <th className="text-right py-3 px-4 font-medium text-slate-800 dark:text-slate-200">???</th>
+                            <th className="text-right py-3 px-4 font-medium text-slate-800 dark:text-slate-200">کد</th>
+                            <th className="text-right py-3 px-4 font-medium text-slate-800 dark:text-slate-200">کد</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -534,7 +532,7 @@ const MasterDataManagement: React.FC = () => {
                                       ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
                                       : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
                                   }`}>
-                                    {item.isActive ? '??' : '??'}
+                                    {item.isActive ? 'فعال' : 'غیرفعال'}
                                   </span>
                                   {currentSection.canEdit && (
                                     <button
@@ -544,7 +542,7 @@ const MasterDataManagement: React.FC = () => {
                                           ? 'text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300'
                                           : 'text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300'
                                       }`}
-                                      title={item.isActive ? '?? ??' : '?? ??'}
+                                      title={item.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
                                       disabled={loading}
                                     >
                                       {item.isActive ? (
@@ -562,7 +560,7 @@ const MasterDataManagement: React.FC = () => {
                                     <button
                                       onClick={() => handleEdit(item)}
                                       className="p-1.5 text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 transition-colors"
-                                      title="???"
+                                      title="عملیات موفق"
                                     >
                                       <FaEdit className="w-4 h-4" />
                                     </button>
@@ -571,7 +569,7 @@ const MasterDataManagement: React.FC = () => {
                                     <button
                                       onClick={() => handleDelete(item)}
                                       className="p-1.5 text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400 transition-colors"
-                                      title="??"
+                                      title="عملیات موفق"
                                     >
                                       <FaTrash className="w-4 h-4" />
                                     </button>
@@ -586,14 +584,14 @@ const MasterDataManagement: React.FC = () => {
                   ) : (
                     <div className="text-center py-8">
                       <div className="text-slate-500 dark:text-slate-400 mb-2">
-                        {searchTerm ? '?? ??? ?? ??' : '?? ?? ??? ??'}
+                        {searchTerm ? 'موردی مطابق جستجو پیدا نشد' : 'هنوز موردی ثبت نشده است'}
                       </div>
                       {currentSection.canCreate && !searchTerm && (
                         <button
                           onClick={handleCreate}
                           className="text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-medium"
                         >
-                          ??? ?? ? ??? ??
+                          اولین مورد را ایجاد کنید
                         </button>
                       )}
                     </div>
@@ -603,10 +601,10 @@ const MasterDataManagement: React.FC = () => {
             ) : (
               <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-xl p-8 border border-slate-200/50 dark:border-slate-700/50 shadow-lg text-center">
                 <div className="text-slate-500 dark:text-slate-400 mb-4">
-                  ??? ???
+                  دسترسی به این بخش ندارید
                 </div>
                 <p className="text-slate-600 dark:text-slate-400">
-                  ?? ??? ?? ?? ??? ?? ?? ? ???.
+                  برای مشاهده یا مدیریت این اطلاعات با مدیر سیستم تماس بگیرید.
                 </p>
               </div>
             )}
@@ -620,10 +618,10 @@ const MasterDataManagement: React.FC = () => {
           <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl max-w-md w-full mx-4">
             <div className="p-6">
               <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-2">
-                {editingItem ? '???' : '???'} {currentSection?.titlePersian}
+                {editingItem ? 'اطلاعات مورد انتخاب‌شده را ویرایش کنید' : 'اطلاعات مورد جدید را وارد کنید'} {currentSection?.titlePersian}
               </h3>
               <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-                {editingItem ? '?? ? ??? ??' : '?? ?? ? ?? ??'}
+                {editingItem ? 'اطلاعات مورد انتخاب‌شده را ویرایش کنید' : 'اطلاعات مورد جدید را وارد کنید'}
               </p>
               
               <div className="space-y-4">
@@ -639,7 +637,7 @@ const MasterDataManagement: React.FC = () => {
                         value={formData[field.key] || ''}
                         onChange={(e) => setFormData({ ...formData, [field.key]: e.target.value })}
                         className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                        placeholder={`${field.label} ? ?? ??`}
+                        placeholder={`${field.label} را وارد کنید`}
                         rows={3}
                       />
                     ) : field.type === 'select' ? (
@@ -652,7 +650,7 @@ const MasterDataManagement: React.FC = () => {
                         }}
                         className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                       >
-                        <option value="">??? ??</option>
+                        <option value="">انتخاب کنید</option>
                         {field.options?.map((option) => (
                           <option key={typeof option === 'string' ? option : String(option.value)} value={typeof option === 'string' ? option : String(option.value)}>
                             {typeof option === 'string' ? option : option.label}
@@ -666,7 +664,7 @@ const MasterDataManagement: React.FC = () => {
                         value={formData[field.key] || ''}
                         onChange={(e) => setFormData({ ...formData, [field.key]: e.target.value })}
                         className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                        placeholder={`${field.label} ? ?? ??`}
+                        placeholder={`${field.label} را وارد کنید`}
                       />
                     )}
                     {formErrors[field.key] && (
@@ -686,9 +684,7 @@ const MasterDataManagement: React.FC = () => {
                     setEditingItem(null);
                   }}
                   className="px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                >
-                  ???
-                </button>
+                >بازگشت</button>
                 <button
                   type="button"
                   onClick={async () => {
@@ -696,7 +692,7 @@ const MasterDataManagement: React.FC = () => {
                     const errors: Record<string, string> = {};
                     currentSection?.fields.forEach((field) => {
                       if (field.required && !formData[field.key]) {
-                        errors[field.key] = `${field.label} ??? ??`;
+                        errors[field.key] = `${field.label} الزامی است`;
                       }
                     });
 
@@ -710,11 +706,11 @@ const MasterDataManagement: React.FC = () => {
                       if (editingItem) {
                         // Update existing item
                         await currentSection?.updateMethod(editingItem.id, formData);
-                        setModalMessage(`${editingItem.namePersian} ? ??? ?? ?`);
+                        setModalMessage(`${editingItem.namePersian} با موفقیت به‌روزرسانی شد.`);
                       } else {
                         // Create new item
                         await currentSection?.createMethod(formData);
-                        setModalMessage('?? ?? ? ??? ??? ?');
+                        setModalMessage('مورد جدید با موفقیت ایجاد شد.');
                       }
                       
                       setShowSuccessModal(true);
@@ -729,8 +725,8 @@ const MasterDataManagement: React.FC = () => {
                       setEditingItem(null);
                     } catch (error: any) {
                       console.error('Error saving item:', error);
-                      setModalMessage('?? ? ??? ??');
-                      setModalDetails(error.response?.data?.error || '?? ??? ? ?? ??');
+                      setModalMessage('عملیات با خطا مواجه شد.');
+                      setModalDetails(error.response?.data?.error || 'لطفا دوباره تلاش کنید.');
                       setShowErrorModal(true);
                     } finally {
                       setLoading(false);
@@ -738,8 +734,7 @@ const MasterDataManagement: React.FC = () => {
                   }}
                   className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-colors"
                 >
-                  {editingItem ? '??? ??' : '???'}
-                </button>
+                  {editingItem ? 'ذخیره تغییرات' : 'ایجاد'}</button>
               </div>
             </div>
           </div>
@@ -750,9 +745,9 @@ const MasterDataManagement: React.FC = () => {
       <SuccessModal
         isOpen={showSuccessModal}
         onClose={() => setShowSuccessModal(false)}
-        title="??? ??"
+        title="عملیات موفق"
         message={modalMessage}
-        buttonText="??"
+        buttonText="باشه"
         autoClose={true}
         autoCloseDelay={2000}
       />
@@ -761,10 +756,10 @@ const MasterDataManagement: React.FC = () => {
       <ErrorModal
         isOpen={showErrorModal}
         onClose={() => setShowErrorModal(false)}
-        title="??"
+        title="عملیات موفق"
         message={modalMessage}
         details={modalDetails}
-        buttonText="??"
+        buttonText="باشه"
       />
     </div>
   );

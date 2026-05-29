@@ -170,6 +170,10 @@ const getFeatureWorkspace = (feature: string): string => {
     'sales_products_delete': 'sales',
     'sales_products_import': 'sales',
     'sales_products_export': 'sales',
+    'sales_customers_view': 'sales',
+    'sales_customers_edit': 'sales',
+    'sales_customers_create': 'sales',
+    'sales_customers_delete': 'sales',
     'crm_customers_view': 'crm',
     'crm_customers_edit': 'crm',
     'crm_customers_create': 'crm',
@@ -250,7 +254,9 @@ export const getCrmPermissions = (user: User | null) => {
     canCreateCustomers:
       hasFeatureAccess(user, 'crm_customers_create', 'edit') ||
       hasFeatureAccess(user, 'sales_customers_create', 'edit'),
-    canEditCustomers: hasFeatureAccess(user, 'crm_customers_edit', 'edit'),
+    canEditCustomers:
+      hasFeatureAccess(user, 'crm_customers_edit', 'edit') ||
+      hasFeatureAccess(user, 'sales_customers_edit', 'edit'),
     canDeleteCustomers: hasFeatureAccess(user, 'crm_customers_delete', 'edit'),
   };
 };

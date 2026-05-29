@@ -1,6 +1,6 @@
 const FALLBACK_TEXT = 'نامشخص';
 
-const mojibakePattern = /[ØÙÛ]/;
+const mojibakePattern = /[\u00d8\u00d9\u00db\u00c3]/;
 const questionOnlyPattern = /^[\s?؟]+$/;
 
 export const isCorruptedUiText = (value: unknown): boolean => {

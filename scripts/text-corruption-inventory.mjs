@@ -2,13 +2,17 @@ import fs from 'fs';
 import path from 'path';
 
 const ROOT = process.cwd();
-const TARGET_DIRS = ['frontend/src', 'backend/src', 'backend/prisma'];
+const TARGET_PATHS = [
+  'frontend/src/app/dashboard/inventory',
+  'frontend/src/app/dashboard/security',
+  'frontend/src/components/MobileSecurityDashboard.tsx'
+];
 const ALLOWED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.prisma']);
 const SKIP_DIRS = new Set(['node_modules', '.next', 'dist', '.git']);
 
-const mojibakeRegex = /[ØÙÛÃ]/;
-const replacementRegex = /�/;
-const questionRegex = /\?{2,}|؟{2,}/;
+const mojibakeRegex = /[\u00d8\u00d9\u00db\u00c3]/;
+const replacementRegex = /\uFFFD|\u00ef\u00bf\u00bd/;
+const questionRegex = /\?{2,}/;
 
 const records = [];
 
@@ -58,9 +62,15 @@ function scanFile(filePath) {
   });
 }
 
-for (const dir of TARGET_DIRS) {
-  const full = path.join(ROOT, dir);
-  if (fs.existsSync(full)) walk(full);
+for (const target of TARGET_PATHS) {
+  const full = path.join(ROOT, target);
+  if (!fs.existsSync(full)) continue;
+  const stat = fs.statSync(full);
+  if (stat.isDirectory()) {
+    walk(full);
+  } else {
+    scanFile(full);
+  }
 }
 
 const outDir = path.join(ROOT, 'reports');

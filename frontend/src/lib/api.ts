@@ -294,11 +294,26 @@ export const crmAPI = {
   
   getContact: (id: string) => api.get(`/crm/contacts/${id}`),
   
-  createContact: (contactData: any) => api.post('/crm/contacts', contactData),
+  createContact: (customerIdOrData: string | any, contactData?: any) => {
+    if (typeof customerIdOrData === 'string') {
+      return api.post(`/crm/customers/${customerIdOrData}/contacts`, contactData);
+    }
+    return api.post(`/crm/customers/${customerIdOrData.customerId}/contacts`, customerIdOrData);
+  },
   
-  updateContact: (id: string, contactData: any) => api.put(`/crm/contacts/${id}`, contactData),
+  updateContact: (customerIdOrId: string, contactIdOrData: string | any, contactData?: any) => {
+    if (typeof contactIdOrData === 'string') {
+      return api.put(`/crm/customers/${customerIdOrId}/contacts/${contactIdOrData}`, contactData);
+    }
+    return api.put(`/crm/contacts/${customerIdOrId}`, contactIdOrData);
+  },
   
-  deleteContact: (id: string) => api.delete(`/crm/contacts/${id}`),
+  deleteContact: (customerIdOrId: string, contactId?: string) => {
+    if (contactId) {
+      return api.delete(`/crm/customers/${customerIdOrId}/contacts/${contactId}`);
+    }
+    return api.delete(`/crm/contacts/${customerIdOrId}`);
+  },
   
   // Leads
   getLeads: (params?: { page?: number; limit?: number; status?: string; assignedTo?: string }) =>

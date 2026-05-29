@@ -29,7 +29,7 @@ const CreateServicePage: React.FC = () => {
         // Redirect back to services page
         router.push('/dashboard/inventory/services');
       } else {
-        setErrors({ general: '?? ? ??? ??' });
+        setErrors({ general: 'خطا در ایجاد خدمت' });
       }
     } catch (error: any) {
       console.error('Error creating service:', error);
@@ -41,7 +41,7 @@ const CreateServicePage: React.FC = () => {
         });
         setErrors(newErrors);
       } else {
-        setErrors({ general: '?? ? ??? ??' });
+        setErrors({ general: 'خطا در ایجاد خدمت' });
       }
     } finally {
       setLoading(false);
@@ -60,10 +60,10 @@ const CreateServicePage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
-                ??? ?? ??
+                ایجاد خدمت جدید
               </h1>
               <p className="text-slate-600 dark:text-slate-400">
-                ?? ?? ? ??? ??
+                تعریف خدمت اصلی برای دسته‌بندی خدمات سنگ
               </p>
             </div>
             <button
@@ -82,7 +82,13 @@ const CreateServicePage: React.FC = () => {
               {/* Code */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  ? ?? *
+                  
+                  
+                  
+                  کد خدمت *
+                
+                
+                
                 </label>
                 <input
                   type="text"
@@ -91,7 +97,7 @@ const CreateServicePage: React.FC = () => {
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
                     errors.code ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
                   }`}
-                  placeholder="??: CUT001"
+                  placeholder="مثال: CUT001"
                 />
                 {errors.code && (
                   <p className="text-red-500 text-sm mt-1">{errors.code}</p>
@@ -101,7 +107,13 @@ const CreateServicePage: React.FC = () => {
               {/* Persian Name */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  ?? ??? *
+                  
+                  
+                  
+                  نام فارسی خدمت *
+                
+                
+                
                 </label>
                 <input
                   type="text"
@@ -110,7 +122,7 @@ const CreateServicePage: React.FC = () => {
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
                     errors.namePersian ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
                   }`}
-                  placeholder="??: ?? ??"
+                  placeholder="مثال: برش سنگ"
                 />
                 {errors.namePersian && (
                   <p className="text-red-500 text-sm mt-1">{errors.namePersian}</p>
@@ -120,28 +132,40 @@ const CreateServicePage: React.FC = () => {
               {/* English Name */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  ?? ??
+                  
+                  
+                  
+                  نام انگلیسی
+                
+                
+                
                 </label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  placeholder="??: Longitudinal Cut"
+                  placeholder="مثال: Stone Cutting"
                 />
               </div>
 
               {/* Description */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  ??
+                  
+                  
+                  
+                  توضیحات
+                
+                
+                
                 </label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   rows={3}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  placeholder="?? ??..."
+                  placeholder="توضیحات خدمت..."
                 />
               </div>
 
@@ -154,9 +178,7 @@ const CreateServicePage: React.FC = () => {
                     onChange={(e) => setFormData(prev => ({ ...prev, isActive: e.target.checked }))}
                     className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                   />
-                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                    ??
-                  </span>
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">فعال</span>
                 </label>
               </div>
 
@@ -173,9 +195,7 @@ const CreateServicePage: React.FC = () => {
                   type="button"
                   onClick={handleCancel}
                   className="px-6 py-2 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                >
-                  ???
-                </button>
+                >انصراف</button>
                 <button
                   type="submit"
                   disabled={loading}
@@ -186,7 +206,7 @@ const CreateServicePage: React.FC = () => {
                   ) : (
                     <FaSave className="w-4 h-4" />
                   )}
-                  <span>{loading ? '? ?? ???...' : '??? ??'}</span>
+                  <span>{loading ? 'در حال ذخیره...' : 'ایجاد خدمت'}</span>
                 </button>
               </div>
             </form>

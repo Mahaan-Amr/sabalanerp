@@ -12,7 +12,7 @@ import { CADShape } from '../types/CADTypes';
 export class CircleTool extends BaseTool {
   name = 'circle';
   icon = 'FaCircle';
-  displayName = '???';
+  displayName = 'دایره';
   
   private isDrawing = false;
   private centerPoint: { x: number; y: number } | null = null;

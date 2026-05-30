@@ -152,7 +152,7 @@ export const useProductConfiguration = () => {
       totalPrice: metrics.totalPrice,
       originalTotalPrice: metrics.originalTotalPrice,
       description: '',
-      currency: selectedProduct.currency || '???',
+      currency: selectedProduct.currency || 'تومان',
       lengthUnit: dimensions.lengthUnit,
       widthUnit: dimensions.widthUnit,
       isMandatory: mandatoryPricing.isMandatory,

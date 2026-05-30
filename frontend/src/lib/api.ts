@@ -690,7 +690,7 @@ export const servicesAPI = {
   deleteLayerType: (id: string) => api.delete(`/layer-types/${id}`),
   toggleLayerTypeStatus: (id: string) => api.patch(`/layer-types/${id}/toggle`),
 
-  // Stone finishing services (???)
+  // Stone finishing services (ساب‌سرویس‌ها)
   getStoneFinishings: (params?: any) => api.get('/stone-finishings', { params }),
   getStoneFinishing: (id: string) => api.get(`/stone-finishings/${id}`),
   createStoneFinishing: (data: any) => api.post('/stone-finishings', data),

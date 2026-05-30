@@ -12,7 +12,7 @@ import { CADShape } from '../types/CADTypes';
 export class RectangleTool extends BaseTool {
   name = 'rectangle';
   icon = 'FaSquare';
-  displayName = '???';
+  displayName = 'مستطیل';
   
   private isDrawing = false;
   private startPoint: { x: number; y: number } | null = null;

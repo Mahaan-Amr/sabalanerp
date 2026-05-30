@@ -69,7 +69,7 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
       window.URL.revokeObjectURL(url);
     } catch (error: any) {
       console.error('Template download error:', error);
-      setError('?? ? ??? ?? Excel');
+      setError('خطا در دانلود فایل Excel');
     } finally {
       setLoading(false);
     }
@@ -77,7 +77,7 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
 
   const handleImport = async () => {
     if (!selectedFile) {
-      setError('??? ?? Excel ? ??? ??');
+      setError('لطفا فایل Excel را انتخاب کنید');
       return;
     }
 
@@ -93,11 +93,11 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
           onImportComplete(response.data.data);
         }
       } else {
-        setError(response.data.error || '?? ? ?? ?? ??');
+        setError(response.data.error || 'خطا در ورود اطلاعات');
       }
     } catch (error: any) {
       console.error('Import error:', error);
-      setError(error.response?.data?.error || '?? ? ?? ?? ?? Excel');
+      setError(error.response?.data?.error || 'خطا در ورود فایل Excel');
     } finally {
       setLoading(false);
     }
@@ -124,7 +124,7 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
       window.URL.revokeObjectURL(url);
     } catch (error: any) {
       console.error('Export error:', error);
-      setError(error.response?.data?.error || '?? ? ?? ?? ??');
+      setError(error.response?.data?.error || 'خطا در خروج اطلاعات');
     } finally {
       setLoading(false);
     }
@@ -147,7 +147,7 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-700">
           <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
-            ?? ?? / ?? ?? ??
+            ورود و خروج اطلاعات محصول
           </h2>
           <button
             onClick={handleClose}
@@ -169,7 +169,7 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
               }`}
             >
               <FaUpload className="w-4 h-4 inline ml-2" />
-              ?? ??
+              ورود اطلاعات
             </button>
           )}
           {canExportProducts(currentUser || null) && (
@@ -182,7 +182,7 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
               }`}
             >
               <FaDownload className="w-4 h-4 inline ml-2" />
-              ?? ??
+              خروج اطلاعات
             </button>
           )}
         </div>
@@ -197,10 +197,10 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
                   <FaFileExcel className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5" />
                   <div className="flex-1">
                     <h3 className="font-medium text-blue-900 dark:text-blue-100">
-                      ??? ?? Excel
+                      دانلود قالب Excel
                     </h3>
                     <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
-                      ??? ?? Excel ? ??? ?? ? ? ? ? ?? ?? ? ??
+                      ابتدا قالب Excel را دانلود کنید و اطلاعات محصولات را در همان ساختار تکمیل کنید.
                     </p>
                     <button
                       onClick={handleDownloadTemplate}
@@ -212,7 +212,7 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
                       ) : (
                         <FaDownload className="w-4 h-4 ml-2" />
                       )}
-                      ??? ??
+                      دانلود قالب
                     </button>
                   </div>
                 </div>
@@ -221,7 +221,7 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
               {/* File Upload */}
               <div>
                 <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100 mb-3">
-                  ??? ?? Excel
+                  انتخاب فایل Excel
                 </h3>
                 <ExcelFileUpload
                   onFileSelect={handleFileSelect}
@@ -244,7 +244,7 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
                     ) : (
                       <FaUpload className="w-5 h-5 ml-2" />
                     )}
-                    ?? ?? ??
+                    شروع ورود اطلاعات
                   </button>
                 </div>
               )}
@@ -253,43 +253,43 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
               {importResults && (
                 <div className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-4">
                   <h4 className="font-medium text-slate-900 dark:text-slate-100 mb-3">
-                    ??? ?? ??
+                    نتیجه ورود اطلاعات
                   </h4>
                   <div className="grid grid-cols-3 gap-4 mb-4">
                     <div className="text-center">
                       <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
                         {importResults.total}
                       </div>
-                      <div className="text-sm text-slate-500 dark:text-slate-400">?</div>
+                      <div className="text-sm text-slate-500 dark:text-slate-400">کل</div>
                     </div>
                     <div className="text-center">
                       <div className="text-2xl font-bold text-green-600 dark:text-green-400">
                         {importResults.success}
                       </div>
-                      <div className="text-sm text-slate-500 dark:text-slate-400">??</div>
+                      <div className="text-sm text-slate-500 dark:text-slate-400">موفق</div>
                     </div>
                     <div className="text-center">
                       <div className="text-2xl font-bold text-red-600 dark:text-red-400">
                         {importResults.failed}
                       </div>
-                      <div className="text-sm text-slate-500 dark:text-slate-400">???</div>
+                      <div className="text-sm text-slate-500 dark:text-slate-400">ناموفق</div>
                     </div>
                   </div>
 
                   {importResults.errors.length > 0 && (
                     <div className="mt-4">
                       <h5 className="font-medium text-red-600 dark:text-red-400 mb-2">
-                        ???:
+                        خطاها:
                       </h5>
                       <div className="max-h-32 overflow-y-auto space-y-2">
                         {importResults.errors.slice(0, 10).map((error, index) => (
                           <div key={index} className="text-sm text-red-600 dark:text-red-400">
-                            <span className="font-medium">?? {error.row}:</span> {error.error}
+                            <span className="font-medium">ردیف {error.row}:</span> {error.error}
                           </div>
                         ))}
                         {importResults.errors.length > 10 && (
                           <div className="text-sm text-slate-500 dark:text-slate-400">
-                            ? {importResults.errors.length - 10} ?? ??...
+                            و {importResults.errors.length - 10} خطای دیگر...
                           </div>
                         )}
                       </div>
@@ -306,10 +306,10 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
                   <FaDownload className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5" />
                   <div className="flex-1">
                     <h3 className="font-medium text-green-900 dark:text-green-100">
-                      ?? ?? ??
+                      خروجی محصولات
                     </h3>
                     <p className="text-sm text-green-700 dark:text-green-300 mt-1">
-                      ?? ?? ? ?? ?? ? ?? ?? Excel ?? ??
+                      محصولات فعلی با فیلترهای انتخاب شده در قالب Excel دانلود می‌شوند.
                     </p>
                   </div>
                 </div>
@@ -327,14 +327,14 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
                   ) : (
                     <FaDownload className="w-5 h-5 ml-2" />
                   )}
-                  ?? ?? ??
+                  دانلود خروجی
                 </button>
               </div>
             </div>
           ) : (
             <div className="text-center py-8">
               <p className="text-slate-500 dark:text-slate-400">
-                ?? ??? ?? ?? ?? ??? ? ???
+                شما دسترسی لازم برای ورود یا خروج اطلاعات محصول را ندارید.
               </p>
             </div>
           )}
@@ -345,7 +345,7 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
               <div className="flex items-start space-x-3 space-x-reverse">
                 <FaExclamationTriangle className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5" />
                 <div>
-                  <h4 className="font-medium text-red-900 dark:text-red-100">??</h4>
+                  <h4 className="font-medium text-red-900 dark:text-red-100">خطا</h4>
                   <p className="text-sm text-red-700 dark:text-red-300 mt-1">{error}</p>
                 </div>
               </div>
@@ -359,7 +359,7 @@ const ProductImportExportModal: React.FC<ProductImportExportModalProps> = ({
             onClick={handleClose}
             className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-md transition-colors"
           >
-            ??
+            بستن
           </button>
         </div>
       </div>

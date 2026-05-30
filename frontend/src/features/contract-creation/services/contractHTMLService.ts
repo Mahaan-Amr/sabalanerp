@@ -22,23 +22,23 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
     <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
       <thead>
         <tr style="background-color: #f5f5f5;">
-          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">?? ???</th>
-          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">???</th>
-          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">???</th>
-          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">?? ??</th>
-          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">?</th>
-          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">?? ?</th>
+          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">نام محصول</th>
+          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">ابعاد</th>
+          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">تعداد</th>
+          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">متر مربع</th>
+          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">فی</th>
+          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">مبلغ کل</th>
         </tr>
       </thead>
       <tbody>
         ${data.products.map((product: ContractProduct) => `
           <tr>
-            <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.namePersian || product.product?.name || product.stoneName || '???'}</td>
-            <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.widthValue && product.product?.thicknessValue ? `${product.product.widthValue} ? ${product.product.thicknessValue}` : product.length && product.width ? `${product.length} ? ${product.width}` : '???'}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.namePersian || product.product?.name || product.stoneName || 'نامشخص'}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.widthValue && product.product?.thicknessValue ? `${product.product.widthValue} × ${product.product.thicknessValue}` : product.length && product.width ? `${product.length} × ${product.width}` : 'نامشخص'}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatQuantity(product.quantity || 0)}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatSquareMeters(product.squareMeters || 0)}</td>
-            <td style="border: 1px solid #ddd; padding: 8px;">${product.pricePerSquareMeter ? formatPrice(product.pricePerSquareMeter, product.currency || '???') : '???'}</td>
-            <td style="border: 1px solid #ddd; padding: 8px;">${product.totalPrice ? formatPrice(product.totalPrice, product.currency || '???') : '???'}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${product.pricePerSquareMeter ? formatPrice(product.pricePerSquareMeter, product.currency || 'تومان') : 'نامشخص'}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${product.totalPrice ? formatPrice(product.totalPrice, product.currency || 'تومان') : 'نامشخص'}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -46,10 +46,10 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
   ` : '';
 
   const deliveriesSection = data.deliveries && data.deliveries.length > 0 ? `
-    <h3>??? ???:</h3>
+    <h3>برنامه تحویل:</h3>
     <ul>
       ${data.deliveries.map((delivery: DeliverySchedule) => `
-        <li>???: ${delivery.deliveryDate} - ${delivery.notes || '?? ??'}</li>
+        <li>تاریخ: ${delivery.deliveryDate} - ${delivery.notes || 'بدون توضیح'}</li>
       `).join('')}
     </ul>
   ` : '';
@@ -59,47 +59,47 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
 
   return `
     <div style="font-family: 'Tahoma', sans-serif; direction: rtl; text-align: right;">
-      <h1 style="text-align: center; color: #333;">?? ?? ??? ???</h1>
+      <h1 style="text-align: center; color: #333;">قرارداد فروش سنگ</h1>
       
       <div style="margin: 20px 0;">
-        <p><strong>??? ??:</strong> ${data.contractNumber}</p>
-        <p><strong>??? ??:</strong> ${data.contractDate}</p>
+        <p><strong>شماره قرارداد:</strong> ${data.contractNumber}</p>
+        <p><strong>تاریخ قرارداد:</strong> ${data.contractDate}</p>
       </div>
 
       <div style="margin: 20px 0;">
-        <h3>?? ???:</h3>
-        <p><strong>??:</strong> ${data.customer?.firstName || ''} ${data.customer?.lastName || ''}</p>
-        ${data.customer?.companyName ? `<p><strong>?? ??:</strong> ${data.customer.companyName}</p>` : ''}
-        ${data.customer?.phoneNumbers && data.customer.phoneNumbers.length > 0 ? `<p><strong>??? ??:</strong> ${data.customer.phoneNumbers[0].number}</p>` : ''}
+        <h3>اطلاعات مشتری:</h3>
+        <p><strong>نام:</strong> ${data.customer?.firstName || ''} ${data.customer?.lastName || ''}</p>
+        ${data.customer?.companyName ? `<p><strong>نام شرکت:</strong> ${data.customer.companyName}</p>` : ''}
+        ${data.customer?.phoneNumbers && data.customer.phoneNumbers.length > 0 ? `<p><strong>شماره تماس:</strong> ${data.customer.phoneNumbers[0].number}</p>` : ''}
       </div>
 
       ${data.project ? `
         <div style="margin: 20px 0;">
-          <h3>?? ???:</h3>
-          <p><strong>?? ???:</strong> ${data.project.address || '???'}</p>
-          <p><strong>?? ???:</strong> ${data.project.projectName || '???'}</p>
+          <h3>اطلاعات پروژه:</h3>
+          <p><strong>آدرس پروژه:</strong> ${data.project.address || 'نامشخص'}</p>
+          <p><strong>نام پروژه:</strong> ${data.project.projectName || 'نامشخص'}</p>
         </div>
       ` : ''}
 
       <div style="margin: 20px 0;">
-        <h3>??? ??:</h3>
+        <h3>اقلام قرارداد:</h3>
         ${productsTable}
       </div>
 
       ${data.payment ? `
         <div style="margin: 20px 0;">
-          <h3>?? ???:</h3>
-          <p><strong>?? ?:</strong> ${formatPrice(totalAmount, data.payment.currency || '???')}</p>
+          <h3>اطلاعات پرداخت:</h3>
+          <p><strong>مبلغ کل:</strong> ${formatPrice(totalAmount, data.payment.currency || 'تومان')}</p>
           ${data.payment.payments && data.payment.payments.length > 0 ? `
-            <h4>??? ???:</h4>
+            <h4>روش‌های پرداخت:</h4>
             <ul>
               ${data.payment.payments.map((payment: any) => {
-                const methodLabel = payment.method === 'CASH_CARD' ? '?? (??)' : payment.method === 'CASH_SHIBA' ? '?? (??)' : payment.method === 'CHECK' ? '?' : payment.method === 'CASH' ? '??' : payment.method || '???';
+                const methodLabel = payment.method === 'CASH_CARD' ? 'نقدی (کارت)' : payment.method === 'CASH_SHIBA' ? 'نقدی (شبا)' : payment.method === 'CHECK' ? 'چک' : payment.method === 'CASH' ? 'نقدی' : payment.method || 'نامشخص';
                 return `
                 <li>
                   ${methodLabel} - 
-                  ${formatPrice(payment.amount, data.payment.currency || '???')} - 
-                  ${payment.status === 'PAID' ? '??? ??' : '? ??? ???'}
+                  ${formatPrice(payment.amount, data.payment.currency || 'تومان')} - 
+                  ${payment.status === 'PAID' ? 'پرداخت شده' : 'در انتظار پرداخت'}
                 </li>
               `;
               }).join('')}
@@ -111,7 +111,7 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
       ${deliveriesSection}
 
       <div style="margin-top: 40px; text-align: center;">
-        <p>?? ?? ? ??? ${data.contractDate} ??? ?? ??.</p>
+        <p>این قرارداد در تاریخ ${data.contractDate} ثبت شده است.</p>
       </div>
     </div>
   `;

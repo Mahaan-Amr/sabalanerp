@@ -74,8 +74,8 @@ describe('partitionPositioningService', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].position).toBeUndefined();
-      expect(result[0].validationError).toContain('?? ??');
-      expect(result[0].validationError).toContain('?? ?');
+      expect(result[0].validationError).toContain('عرض پارتیشن');
+      expect(result[0].validationError).toContain('عرض فضای باقی‌مانده');
     });
 
     it('should detect when partition length exceeds available length', () => {
@@ -87,8 +87,8 @@ describe('partitionPositioningService', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].position).toBeUndefined();
-      expect(result[0].validationError).toContain('?? ??');
-      expect(result[0].validationError).toContain('?? ?');
+      expect(result[0].validationError).toContain('طول پارتیشن');
+      expect(result[0].validationError).toContain('طول فضای باقی‌مانده');
     });
 
     it('should detect when partition cannot fit in remaining space', () => {
@@ -211,7 +211,7 @@ describe('partitionPositioningService', () => {
       const result = validatePartitionFit(partition, 100, 5);
 
       expect(result.isValid).toBe(false);
-      expect(result.error).toBe('??? ?? ?? ??');
+      expect(result.error).toBe('ابعاد پارتیشن الزامی است');
     });
 
     it('should reject partition with excessive width', () => {
@@ -225,8 +225,8 @@ describe('partitionPositioningService', () => {
       const result = validatePartitionFit(partition, 100, 5);
 
       expect(result.isValid).toBe(false);
-      expect(result.error).toContain('?? ??');
-      expect(result.error).toContain('?? ? ?? ???');
+      expect(result.error).toContain('عرض پارتیشن');
+      expect(result.error).toContain('عرض موجود');
     });
 
     it('should reject partition with excessive length', () => {
@@ -240,8 +240,8 @@ describe('partitionPositioningService', () => {
       const result = validatePartitionFit(partition, 100, 5);
 
       expect(result.isValid).toBe(false);
-      expect(result.error).toContain('?? ??');
-      expect(result.error).toContain('?? ? ?? ???');
+      expect(result.error).toContain('طول پارتیشن');
+      expect(result.error).toContain('طول موجود');
     });
 
     it('should validate partition at exact bounds', () => {

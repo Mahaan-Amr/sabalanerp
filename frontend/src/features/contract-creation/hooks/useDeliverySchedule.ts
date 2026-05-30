@@ -105,7 +105,7 @@ export const useDeliverySchedule = (products: ContractProduct[]) => {
     const errors: Record<string, string> = {};
     
     if (deliveries.length === 0) {
-      errors.general = '??? ? ??? ??? ?? ??? ??';
+      errors.general = 'حداقل یک برنامه تحویل تعریف کنید';
       return { isValid: false, errors };
     }
 
@@ -118,7 +118,7 @@ export const useDeliverySchedule = (products: ContractProduct[]) => {
 
     // Check if all products are fully distributed
     if (!areAllProductsDistributed) {
-      errors.distribution = '?? ?? ?? ? ?? ?? ? ??? ??? ??? ??';
+      errors.distribution = 'همه محصولات باید در برنامه‌های تحویل توزیع شوند';
     }
 
     return {

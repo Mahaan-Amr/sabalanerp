@@ -913,7 +913,7 @@ export const createLayerProduct = (params: {
     stairSystemId,
     stairPartType: parentPartType,
     stoneCode: stoneProduct.code,
-    stoneName: `${layerStoneName} - ?? (${draft.numberOfLayersPerStair} ?? ?? ? ??)`,
+    stoneName: `${layerStoneName} - لایه (${draft.numberOfLayersPerStair} لایه برای هر پله)`,
     diameterOrWidth: draft.thicknessCm ?? stoneProduct.thicknessValue ?? 0,
     length: convertMetersToUnit(getActualLengthMeters(draft), draft.lengthUnit || 'm'),
     lengthUnit: draft.lengthUnit || 'm',
@@ -923,8 +923,8 @@ export const createLayerProduct = (params: {
     squareMeters: totalLayerSqm,
     pricePerSquareMeter: layerPricePerSquareMeter,
     totalPrice: typeof layerTotalPrice === 'number' ? Number(layerTotalPrice.toFixed(2)) : Number(parseFloat(String(layerTotalPrice || 0)).toFixed(2)),
-    description: `?? ?? ${getPartDisplayLabel(parentPartType)} - ${draft.numberOfLayersPerStair} ?? ?? ? ??${layersFromRemainingStones > 0 ? ` (${layersFromRemainingStones} ? ?? ${layersFromNewStones} ? ?? ??)` : ''}${draft.layerTypeName ? ` | ?? ??: ${draft.layerTypeName}` : ''}`,
-    currency: '???',
+    description: `لایه ${getPartDisplayLabel(parentPartType)} - ${draft.numberOfLayersPerStair} لایه برای هر پله${layersFromRemainingStones > 0 ? ` (${layersFromRemainingStones} از باقیمانده، ${layersFromNewStones} از سنگ جدید)` : ''}${draft.layerTypeName ? ` | نوع لایه: ${draft.layerTypeName}` : ''}`,
+    currency: 'تومان',
     isMandatory: false,
     mandatoryPercentage: 0,
     originalTotalPrice: layerMaterialPrice,
@@ -935,7 +935,7 @@ export const createLayerProduct = (params: {
     cuttingCost: totalLayerCuttingCost,
     cuttingCostPerMeter: layerCuttingCostPerMeter,
     cutDescription: layersFromRemainingStones > 0 
-      ? `?? ? ???: ${layersFromRemainingStones} ??? ?? ??: ${layersFromNewStones} ??`
+      ? `ترکیبی: ${layersFromRemainingStones} لایه از باقیمانده، ${layersFromNewStones} لایه از سنگ جدید`
       : '',
     remainingStones: layerRemainingPieces || [],
     cutDetails: layerCutDetails,
@@ -1088,9 +1088,9 @@ export const mergeLayerProduct = (
     usedRemainingStones: mergedUsedRemainingStones,
     totalUsedRemainingWidth: mergedUsedRemainingStones.reduce((sum, rs) => sum + (rs.width || 0), 0),
     totalUsedRemainingLength: mergedUsedRemainingStones.reduce((sum, rs) => sum + (rs.length || 0), 0),
-    description: `?? ?? ${getPartDisplayLabel(parentPartType)} - ${draft.numberOfLayersPerStair} ?? ?? ? ?? (${updatedLayersFromRemaining} ? ?? ${updatedLayersFromNew} ? ?? ??)${draft.layerTypeName ? ` | ?? ??: ${draft.layerTypeName}` : ''}`,
+    description: `لایه ${getPartDisplayLabel(parentPartType)} - ${draft.numberOfLayersPerStair} لایه برای هر پله (${updatedLayersFromRemaining} از باقیمانده، ${updatedLayersFromNew} از سنگ جدید)${draft.layerTypeName ? ` | نوع لایه: ${draft.layerTypeName}` : ''}`,
     cutDescription: mergedUsedRemainingStones.length > 0 
-      ? `?? ? ???: ${updatedLayersFromRemaining} ??? ?? ??: ${updatedLayersFromNew} ??`
+      ? `ترکیبی: ${updatedLayersFromRemaining} لایه از باقیمانده، ${updatedLayersFromNew} لایه از سنگ جدید`
       : '',
     layerTypeId: draft.layerTypeId ?? existing.layerTypeId ?? null,
     layerTypeName: draft.layerTypeName ?? existing.layerTypeName ?? null,

@@ -17,9 +17,9 @@ interface SuccessModalProps {
 export default function SuccessModal({
   isOpen,
   onClose,
-  title = '???',
+  title = 'موفقیت',
   message,
-  buttonText = '??',
+  buttonText = 'باشه',
   showIcon = true,
   autoClose = false,
   autoCloseDelay = 3000
@@ -80,7 +80,7 @@ export default function SuccessModal({
         {autoClose && (
           <div className="mt-4 text-center">
             <div className="text-xs text-slate-500 dark:text-slate-400">
-              ?? ?? ? {autoCloseDelay / 1000} ??? ?? ???
+              این پنجره تا {autoCloseDelay / 1000} ثانیه دیگر بسته می‌شود
             </div>
           </div>
         )}

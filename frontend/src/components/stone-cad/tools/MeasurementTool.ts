@@ -12,7 +12,7 @@ import { Measurement } from '../types/CADTypes';
 export class MeasurementTool extends BaseTool {
   name = 'measurement';
   icon = 'FaRuler';
-  displayName = '??';
+  displayName = 'اندازه‌گیری';
   
   private isMeasuring = false;
   private startPoint: { x: number; y: number } | null = null;

@@ -53,8 +53,8 @@ export default function AdminSecurityPage() {
         {
           id: '1',
           userId: 'user1',
-          userName: '?? ???',
-          action: '?? ? ???',
+          userName: 'مدیر سیستم',
+          action: 'ورود به سیستم',
           ipAddress: '192.168.1.100',
           userAgent: 'Chrome/120.0.0.0',
           timestamp: '2025-01-20T10:30:00Z',
@@ -64,7 +64,7 @@ export default function AdminSecurityPage() {
           id: '2',
           userId: 'user2',
           userName: 'Sales User',
-          action: '?? ???',
+          action: 'ورود ناموفق',
           ipAddress: '192.168.1.101',
           userAgent: 'Firefox/121.0.0.0',
           timestamp: '2025-01-20T09:15:00Z',
@@ -73,8 +73,8 @@ export default function AdminSecurityPage() {
         {
           id: '3',
           userId: 'user3',
-          userName: '??? ??',
-          action: '??? ?? ??',
+          userName: 'کاربر فروش',
+          action: 'مشاهده قراردادها',
           ipAddress: '192.168.1.102',
           userAgent: 'Safari/17.2.0',
           timestamp: '2025-01-20T08:45:00Z',
@@ -131,8 +131,8 @@ export default function AdminSecurityPage() {
             <FaUserShield className="h-8 w-8 text-red-400" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">??? ???</h1>
-            <p className="text-gray-300">??? ? ??? ? ??? ??</p>
+            <h1 className="text-2xl font-bold text-white">امنیت سیستم</h1>
+            <p className="text-gray-300">نظارت بر ورودها و فعالیت‌های امنیتی</p>
           </div>
         </div>
       </div>
@@ -142,7 +142,7 @@ export default function AdminSecurityPage() {
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-400 text-sm">? ???</p>
+              <p className="text-gray-400 text-sm">کل ورودها</p>
               <p className="text-2xl font-bold text-white">{stats.totalLogins}</p>
             </div>
             <div className="glass-liquid-card p-3">
@@ -154,7 +154,7 @@ export default function AdminSecurityPage() {
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-400 text-sm">?? ???</p>
+              <p className="text-gray-400 text-sm">ورودهای ناموفق</p>
               <p className="text-2xl font-bold text-white">{stats.failedLogins}</p>
             </div>
             <div className="glass-liquid-card p-3">
@@ -166,7 +166,7 @@ export default function AdminSecurityPage() {
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-400 text-sm">?? ??</p>
+              <p className="text-gray-400 text-sm">کاربران فعال</p>
               <p className="text-2xl font-bold text-white">{stats.activeUsers}</p>
             </div>
             <div className="glass-liquid-card p-3">
@@ -178,7 +178,7 @@ export default function AdminSecurityPage() {
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-400 text-sm">??? ???</p>
+              <p className="text-gray-400 text-sm">فعالیت‌های مشکوک</p>
               <p className="text-2xl font-bold text-white">{stats.suspiciousActivities}</p>
             </div>
             <div className="glass-liquid-card p-3">
@@ -192,24 +192,24 @@ export default function AdminSecurityPage() {
       <div className="glass-liquid-card p-6">
         <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
           <FaHistory className="h-5 w-5 text-purple-400" />
-          ??? ??? ???
+          رخدادهای امنیتی اخیر
         </h2>
         
         {securityLogs.length === 0 ? (
           <div className="text-center py-8">
             <FaHistory className="mx-auto text-4xl text-gray-400 mb-4" />
-            <p className="text-gray-400">?? ??? ??? ?? ?? ??</p>
+            <p className="text-gray-400">رخداد امنیتی ثبت نشده است</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-600">
-                  <th className="text-right py-3 px-4 text-gray-400">???</th>
-                  <th className="text-right py-3 px-4 text-gray-400">???</th>
-                  <th className="text-right py-3 px-4 text-gray-400">???</th>
-                  <th className="text-right py-3 px-4 text-gray-400">???</th>
-                  <th className="text-right py-3 px-4 text-gray-400">??</th>
+                  <th className="text-right py-3 px-4 text-gray-400">کاربر</th>
+                  <th className="text-right py-3 px-4 text-gray-400">عملیات</th>
+                  <th className="text-right py-3 px-4 text-gray-400">آدرس IP</th>
+                  <th className="text-right py-3 px-4 text-gray-400">وضعیت</th>
+                  <th className="text-right py-3 px-4 text-gray-400">زمان</th>
                 </tr>
               </thead>
               <tbody>
@@ -222,8 +222,8 @@ export default function AdminSecurityPage() {
                       <div className="flex items-center gap-2">
                         {getStatusIcon(log.status)}
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(log.status)}`}>
-                          {log.status === 'success' ? '??' : 
-                           log.status === 'failed' ? '???' : '???'}
+                          {log.status === 'success' ? 'موفق' : 
+                           log.status === 'failed' ? 'ناموفق' : 'هشدار'}
                         </span>
                       </div>
                     </td>
@@ -240,29 +240,29 @@ export default function AdminSecurityPage() {
 
       {/* Security Recommendations */}
       <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-semibold text-white mb-4">??? ???</h2>
+        <h2 className="text-xl font-semibold text-white mb-4">توصیه‌های امنیتی</h2>
         <div className="space-y-4">
           <div className="flex items-start gap-3 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
             <FaExclamationTriangle className="h-5 w-5 text-yellow-400 mt-0.5" />
             <div>
-              <h3 className="text-white font-medium">??? ?? ??</h3>
-              <p className="text-gray-400 text-sm">?? ?? ? ??? ?? ?? ?? ??. ??? ??? ??? ?? ?? ?? ??? ??.</p>
+              <h3 className="text-white font-medium">بررسی ورودهای ناموفق</h3>
+              <p className="text-gray-400 text-sm">ورودهای ناموفق اخیر را بررسی کنید. در صورت تکرار، محدودسازی دسترسی پیشنهاد می‌شود.</p>
             </div>
           </div>
 
           <div className="flex items-start gap-3 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
             <FaCheckCircle className="h-5 w-5 text-green-400 mt-0.5" />
             <div>
-              <h3 className="text-white font-medium">??? ?? ? ??</h3>
-              <p className="text-gray-400 text-sm">??? ?? ? ?? ?? ?? ?? ?? ??. ?? ?? ??? ??? ? ??? ???.</p>
+              <h3 className="text-white font-medium">فعال‌سازی احراز هویت دومرحله‌ای</h3>
+              <p className="text-gray-400 text-sm">برای حساب‌های مدیریتی احراز هویت دومرحله‌ای را فعال نگه دارید.</p>
             </div>
           </div>
 
           <div className="flex items-start gap-3 p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
             <FaEye className="h-5 w-5 text-blue-400 mt-0.5" />
             <div>
-              <h3 className="text-white font-medium">??? ? ???</h3>
-              <p className="text-gray-400 text-sm">?? ??? ?? ?? ? ??? ???. ??? ??? ?? ??.</p>
+              <h3 className="text-white font-medium">بازبینی سطح دسترسی</h3>
+              <p className="text-gray-400 text-sm">دسترسی کاربران را دوره‌ای بررسی کنید و دسترسی‌های غیرضروری را حذف کنید.</p>
             </div>
           </div>
         </div>

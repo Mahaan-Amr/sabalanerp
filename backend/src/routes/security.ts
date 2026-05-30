@@ -448,9 +448,9 @@ router.post('/attendance/exception', protect, requireWorkspaceAccess(WORKSPACES.
 
     // Determine status based on exception type
     let status = 'PRESENT';
-    if (exceptionType === '??') status = 'MISSION';
-    else if (exceptionType === '??? ???') status = 'HOURLY_LEAVE';
-    else if (exceptionType === '??') status = 'ABSENT';
+    if (exceptionType === 'ماموریت') status = 'MISSION';
+    else if (exceptionType === 'مرخصی ساعتی') status = 'HOURLY_LEAVE';
+    else if (exceptionType === 'غیبت') status = 'ABSENT';
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1096,7 +1096,7 @@ router.put('/exceptions/:id/reject', protect, authorize('ADMIN'), requireWorkspa
 // @access  Private/Security Personnel
 router.post('/missions/assign', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_MISSIONS_ASSIGN, FEATURE_PERMISSIONS.EDIT), [
   body('employeeId').notEmpty().withMessage('Employee ID is required'),
-  body('missionType').isIn(['?? ???', '?? ???']).withMessage('Invalid mission type'),
+  body('missionType').isIn(['داخل شهری', 'خارج شهری']).withMessage('Invalid mission type'),
   body('missionLocation').notEmpty().withMessage('Mission location is required'),
   body('missionPurpose').notEmpty().withMessage('Mission purpose is required'),
   body('startDate').isISO8601().withMessage('Start date must be valid'),

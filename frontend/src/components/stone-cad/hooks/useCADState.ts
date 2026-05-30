@@ -14,7 +14,7 @@ const DEFAULT_LAYER_ID = 'default-layer';
 function createInitialCADState(): CADState {
   const defaultLayer: CADLayer = {
     id: DEFAULT_LAYER_ID,
-    name: '?? ??',
+    name: 'لایه اصلی',
     visible: true,
     locked: false,
     order: 0
@@ -251,7 +251,7 @@ export function useCADState(initialDesign?: any) {
       
       const newLayer: CADLayer = {
         id: newId,
-        name: (name && name.trim()) || `?? ${prev.layers.length + 1}`,
+        name: (name && name.trim()) || `لایه ${prev.layers.length + 1}`,
         visible: true,
         locked: false,
         order: maxOrder + 1
@@ -377,7 +377,7 @@ function deserializeCADDesign(design: any): CADState {
   // If design has shapes, measurements, layers, restore them
   const defaultLayer: CADLayer = {
     id: 'default-layer',
-    name: '?? ??',
+    name: 'لایه اصلی',
     visible: true,
     locked: false,
     order: 0

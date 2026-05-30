@@ -35,93 +35,93 @@ export const validateDraftNumericFields = (
       const hasStandardLength = getDraftStandardLengthMeters(draft) > 0;
       if (value === null || value === undefined || value <= 0) {
         if (!hasStandardLength) {
-          return `??? ?? ? ?? ${partLabel} ?? ??`;
+          return `طول برای ${partLabel} الزامی است`;
         }
         return null;
       }
       if (value > 1000) { // Reasonable max: 10 meters or 1000 cm
         const unit = draft.lengthUnit || 'm';
         const maxValue = unit === 'm' ? 10 : 1000;
-        return `?? ??? ??? ? ${maxValue} ${unit === 'm' ? '??' : '???'} ??`;
+        return `طول نمی‌تواند بیشتر از ${maxValue} ${unit === 'm' ? 'متر' : 'سانتی‌متر'} باشد`;
       }
       return null;
     }
 
     case 'width':
       if (value === null || value === undefined) {
-        return `??? ?? ? ?? ${partLabel} ?? ??`;
+        return `عرض برای ${partLabel} الزامی است`;
       }
       if (value <= 0) {
-        return `?? ?? ??? ? ?? ??`;
+        return `عرض باید بزرگ‌تر از صفر باشد`;
       }
       if (originalWidthCm > 0 && value > originalWidthCm) {
-        return `?? ?? ?? (${formatDisplayNumber(value)}cm) ??? ??? ? ?? ?? ?? (${formatDisplayNumber(originalWidthCm)}cm) ??`;
+        return `عرض وارد شده (${formatDisplayNumber(value)}cm) نمی‌تواند بیشتر از عرض سنگ (${formatDisplayNumber(originalWidthCm)}cm) باشد`;
       }
       if (value < 1) {
-        return `?? ?? ??? 1 ??? ??`;
+        return `عرض باید حداقل 1 سانتی‌متر باشد`;
       }
       return null;
 
     case 'quantity':
       if (value === null || value === undefined) {
-        return `??? ??? ? ?? ${partLabel} ?? ??`;
+        return `تعداد برای ${partLabel} الزامی است`;
       }
       if (value <= 0) {
-        return `??? ?? ??? ? ?? ??`;
+        return `تعداد باید بزرگ‌تر از صفر باشد`;
       }
       if (!Number.isInteger(value)) {
-        return `??? ?? ? ?? ?? ??`;
+        return `تعداد باید عدد صحیح باشد`;
       }
       if (value > 10000) {
-        return `??? ??? ??? ? 10,000 ?? ??`;
+        return `تعداد نمی‌تواند بیشتر از 10,000 باشد`;
       }
       return null;
 
     case 'pricePerSquareMeter':
       if (value === null || value === undefined) {
-        return `??? ?? ? ?? ?? ? ?? ${partLabel} ?? ??`;
+        return `قیمت هر متر مربع برای ${partLabel} الزامی است`;
       }
       if (value <= 0) {
-        return `?? ? ?? ?? ?? ??? ? ?? ??`;
+        return `قیمت هر متر مربع باید بزرگ‌تر از صفر باشد`;
       }
       if (value > 100000000) { // Reasonable max: 100 million Toman per sqm
-        return `?? ? ?? ?? ??? ??? ? 100,000,000 ??? ??`;
+        return `قیمت هر متر مربع نمی‌تواند بیشتر از 100,000,000 تومان باشد`;
       }
       return null;
 
     case 'layerStonePrice':
       if (value === null || value === undefined) {
-        return '??? ?? ? ?? ?? ?? ? ?? ??';
+        return 'قیمت سنگ لایه الزامی است';
       }
       if (value <= 0) {
-        return '?? ? ?? ?? ?? ?? ??? ? ?? ??';
+        return 'قیمت سنگ لایه باید بزرگ‌تر از صفر باشد';
       }
       if (value > 100000000) {
-        return '?? ? ?? ?? ?? ??? ??? ? 100,000,000 ??? ??';
+        return 'قیمت سنگ لایه نمی‌تواند بیشتر از 100,000,000 تومان باشد';
       }
       return null;
 
     case 'layerMandatoryPercentage':
       if (value === null || value === undefined) {
-        return '??? ?? ?? ?? ? ?? ??';
+        return 'درصد حکمی لایه الزامی است';
       }
       if (value < 0) {
-        return '?? ?? ??? ?? ? 0 ??';
+        return 'درصد حکمی نباید کمتر از 0 باشد';
       }
       if (value > 100) {
-        return '?? ?? ??? ??? ? 100 ??';
+        return 'درصد حکمی نباید بیشتر از 100 باشد';
       }
       return null;
 
     case 'mandatoryPercentage':
       if (value === null || value === undefined) {
-        return `??? ?? ?? ${partLabel} ? ?? ??`;
+        return `درصد حکمی ${partLabel} الزامی است`;
       }
       if (value < 0) {
-        return '?? ?? ??? ?? ? 0 ??';
+        return 'درصد حکمی نباید کمتر از 0 باشد';
       }
       if (value > 100) {
-        return '?? ?? ??? ??? ? 100 ??';
+        return 'درصد حکمی نباید بیشتر از 100 باشد';
       }
       return null;
 
@@ -130,7 +130,7 @@ export const validateDraftNumericFields = (
       if (originalThicknessCm > 0) {
         const currentThickness = draft.thicknessCm ?? 0;
         if (Math.abs(currentThickness - originalThicknessCm) > 0.01) {
-          return `?? ?? ? ?? ??? ??? ?? (${formatDisplayNumber(originalThicknessCm)}cm) ??? ??? ??`;
+          return `ضخامت باید با ضخامت محصول (${formatDisplayNumber(originalThicknessCm)}cm) برابر باشد`;
         }
       }
       return null;
@@ -152,7 +152,7 @@ export const validateDraftRequiredFields = (
   const errors: StairDraftFieldErrors = {};
 
   if (!draft.stoneId || !draft.stoneProduct) {
-    errors.thickness = `??? ??? ??? ${partLabel} ? ??? ??`;
+    errors.thickness = `انتخاب سنگ برای ${partLabel} الزامی است`;
     return errors; // Can't validate other fields without product
   }
 
@@ -182,12 +182,12 @@ export const validateDraftRequiredFields = (
   }
 
   if (draft.numberOfLayersPerStair && draft.numberOfLayersPerStair > 0 && layerTypes.length > 0 && !draft.layerTypeId) {
-    errors.layerType = '??? ?? ?? ? ??? ??';
+    errors.layerType = 'انتخاب نوع لایه الزامی است';
   }
 
   if (draft.numberOfLayersPerStair && draft.numberOfLayersPerStair > 0 && draft.layerUseDifferentStone) {
     if (!draft.layerStoneProduct || !draft.layerStoneProductId) {
-      errors.layerStone = '??? ?? ?? ?? ?? ?? ? ??? ??';
+      errors.layerStone = 'انتخاب سنگ لایه الزامی است';
     }
     const layerPriceError = validateDraftNumericFields(part, draft, 'layerStonePrice', draft.layerPricePerSquareMeter ?? null, layerTypes);
     if (layerPriceError) {

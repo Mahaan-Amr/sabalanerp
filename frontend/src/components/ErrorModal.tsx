@@ -16,9 +16,9 @@ interface ErrorModalProps {
 export default function ErrorModal({
   isOpen,
   onClose,
-  title = '??',
+  title = 'خطا',
   message,
-  buttonText = '??',
+  buttonText = 'باشه',
   showIcon = true,
   details
 }: ErrorModalProps) {

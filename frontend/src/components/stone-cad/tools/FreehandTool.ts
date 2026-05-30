@@ -12,7 +12,7 @@ import { CADShape } from '../types/CADTypes';
 export class FreehandTool extends BaseTool {
   name = 'freehand';
   icon = 'FaPencilAlt';
-  displayName = '??';
+  displayName = 'طراحی آزاد';
   
   private isDrawing = false;
   private points: number[] = [];

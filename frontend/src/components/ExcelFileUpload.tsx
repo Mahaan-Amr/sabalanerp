@@ -30,13 +30,13 @@ const ExcelFileUpload: React.FC<ExcelFileUploadProps> = ({
     // Check file type
     const allowedTypes = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'];
     if (!allowedTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls)$/i)) {
-      setError('?? ?? Excel (.xlsx, .xls) ?? ???');
+      setError('فقط فایل Excel با پسوند .xlsx یا .xls مجاز است');
       return false;
     }
 
     // Check file size
     if (file.size > maxSize * 1024 * 1024) {
-      setError(`?? ?? ??? ??? ? ${maxSize} ?? ??`);
+      setError(`حجم فایل باید کمتر از ${maxSize} مگابایت باشد`);
       return false;
     }
 
@@ -126,10 +126,10 @@ const ExcelFileUpload: React.FC<ExcelFileUploadProps> = ({
             
             <div>
               <p className="text-lg font-medium text-slate-700 dark:text-slate-300">
-                ?? Excel ? ??? ??? ? ?? ??
+                فایل Excel را اینجا رها کنید یا انتخاب کنید
               </p>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                ?? ??: .xlsx, .xls (??? {maxSize} ??)
+                فرمت مجاز: .xlsx, .xls (حداکثر {maxSize} مگابایت)
               </p>
             </div>
             
@@ -139,7 +139,7 @@ const ExcelFileUpload: React.FC<ExcelFileUploadProps> = ({
               disabled={loading}
             >
               <FaUpload className="w-4 h-4 ml-2" />
-              ??? ??
+              انتخاب فایل
             </button>
           </div>
         </div>

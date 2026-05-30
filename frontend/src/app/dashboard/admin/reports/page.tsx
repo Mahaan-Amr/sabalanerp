@@ -32,8 +32,8 @@ export default function AdminReportsPage() {
         {
           id: '1',
           name: 'user_activity_report',
-          namePersian: '??? ??? ??',
-          description: '??? ?? ??? ?? ? ???',
+          namePersian: 'گزارش فعالیت کاربران',
+          description: 'گزارش ورود، خروج و فعالیت کاربران',
           type: 'pdf',
           lastGenerated: '2025-01-20T10:30:00Z',
           size: '2.3 MB'
@@ -41,8 +41,8 @@ export default function AdminReportsPage() {
         {
           id: '2',
           name: 'contract_summary',
-          namePersian: '??? ???',
-          description: '??? ??? ??? ? ??? ???',
+          namePersian: 'خلاصه قراردادها',
+          description: 'گزارش وضعیت قراردادها و مبالغ فروش',
           type: 'excel',
           lastGenerated: '2025-01-20T09:15:00Z',
           size: '1.8 MB'
@@ -50,8 +50,8 @@ export default function AdminReportsPage() {
         {
           id: '3',
           name: 'financial_summary',
-          namePersian: '??? ??',
-          description: '??? ?? ? ?? ???',
+          namePersian: 'خلاصه مالی',
+          description: 'گزارش پرداخت‌ها و وضعیت مالی',
           type: 'pdf',
           lastGenerated: '2025-01-19T16:45:00Z',
           size: '3.1 MB'
@@ -59,8 +59,8 @@ export default function AdminReportsPage() {
         {
           id: '4',
           name: 'security_audit',
-          namePersian: '??? ???',
-          description: '??? ??? ? ??? ???',
+          namePersian: 'ممیزی امنیتی',
+          description: 'گزارش رخدادها و وضعیت امنیتی',
           type: 'pdf',
           lastGenerated: '2025-01-19T14:20:00Z',
           size: '1.5 MB'
@@ -127,8 +127,8 @@ export default function AdminReportsPage() {
             <FaChartLine className="h-8 w-8 text-teal-400" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">?? ??</h1>
-            <p className="text-gray-300">?? ?? ? ??? ???</p>
+            <h1 className="text-2xl font-bold text-white">گزارش‌ها</h1>
+            <p className="text-gray-300">مدیریت گزارش‌ها و خروجی‌های سیستم</p>
           </div>
         </div>
       </div>
@@ -138,7 +138,7 @@ export default function AdminReportsPage() {
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-400 text-sm">? ??</p>
+              <p className="text-gray-400 text-sm">کل گزارش‌ها</p>
               <p className="text-2xl font-bold text-white">{reports.length}</p>
             </div>
             <div className="glass-liquid-card p-3">
@@ -150,7 +150,7 @@ export default function AdminReportsPage() {
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-400 text-sm">?? PDF</p>
+              <p className="text-gray-400 text-sm">گزارش‌های PDF</p>
               <p className="text-2xl font-bold text-white">
                 {reports.filter(r => r.type === 'pdf').length}
               </p>
@@ -164,7 +164,7 @@ export default function AdminReportsPage() {
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-400 text-sm">?? Excel</p>
+              <p className="text-gray-400 text-sm">گزارش‌های Excel</p>
               <p className="text-2xl font-bold text-white">
                 {reports.filter(r => r.type === 'excel').length}
               </p>
@@ -178,12 +178,12 @@ export default function AdminReportsPage() {
 
       {/* Reports List */}
       <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-semibold text-white mb-4">?? ???</h2>
+        <h2 className="text-xl font-semibold text-white mb-4">لیست گزارش‌ها</h2>
         
         {reports.length === 0 ? (
           <div className="text-center py-8">
             <FaChartLine className="mx-auto text-4xl text-gray-400 mb-4" />
-            <p className="text-gray-400">?? ??? ??? ??</p>
+            <p className="text-gray-400">گزارشی موجود نیست</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -200,9 +200,9 @@ export default function AdminReportsPage() {
                       <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
                         <span className="flex items-center gap-1">
                           <FaCalendarAlt className="h-3 w-3" />
-                          ??? ???: {new Date(report.lastGenerated).toLocaleDateString('fa-IR')}
+                          آخرین تولید: {new Date(report.lastGenerated).toLocaleDateString('fa-IR')}
                         </span>
-                        <span>??: {report.size}</span>
+                        <span>حجم: {report.size}</span>
                       </div>
                     </div>
                   </div>
@@ -218,7 +218,7 @@ export default function AdminReportsPage() {
                       ) : (
                         <FaChartLine className="h-4 w-4" />
                       )}
-                      {generating === report.id ? '? ?? ???...' : '??? ??'}
+                      {generating === report.id ? 'در حال تولید...' : 'تولید گزارش'}
                     </button>
                     
                     <button
@@ -226,7 +226,7 @@ export default function AdminReportsPage() {
                       className="glass-liquid-btn-primary px-4 py-2 flex items-center gap-2"
                     >
                       <FaDownload className="h-4 w-4" />
-                      ???
+                      دانلود
                     </button>
                   </div>
                 </div>
@@ -238,39 +238,39 @@ export default function AdminReportsPage() {
 
       {/* Report Generation Options */}
       <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-semibold text-white mb-4">??? ??? ???</h2>
+        <h2 className="text-xl font-semibold text-white mb-4">گزینه‌های تولید گزارش</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-white">?? ??</h3>
+            <h3 className="text-lg font-semibold text-white">بر اساس نوع</h3>
             <div className="space-y-2">
               <button className="w-full glass-liquid-btn p-3 text-right flex items-center justify-between">
-                <span>??? ?? ??</span>
+                <span>گزارش فعالیت کاربران</span>
                 <FaUsers className="h-4 w-4" />
               </button>
               <button className="w-full glass-liquid-btn p-3 text-right flex items-center justify-between">
-                <span>??? ??? ???</span>
+                <span>گزارش خلاصه قراردادها</span>
                 <FaFileContract className="h-4 w-4" />
               </button>
               <button className="w-full glass-liquid-btn p-3 text-right flex items-center justify-between">
-                <span>??? ???</span>
+                <span>گزارش مالی</span>
                 <FaChartLine className="h-4 w-4" />
               </button>
             </div>
           </div>
           
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-white">?? ?? ??</h3>
+            <h3 className="text-lg font-semibold text-white">بر اساس بازه زمانی</h3>
             <div className="space-y-2">
               <button className="w-full glass-liquid-btn p-3 text-right flex items-center justify-between">
-                <span>??? ???</span>
+                <span>گزارش روزانه</span>
                 <FaCalendarAlt className="h-4 w-4" />
               </button>
               <button className="w-full glass-liquid-btn p-3 text-right flex items-center justify-between">
-                <span>??? ???</span>
+                <span>گزارش هفتگی</span>
                 <FaCalendarAlt className="h-4 w-4" />
               </button>
               <button className="w-full glass-liquid-btn p-3 text-right flex items-center justify-between">
-                <span>??? ???</span>
+                <span>گزارش ماهانه</span>
                 <FaCalendarAlt className="h-4 w-4" />
               </button>
             </div>

@@ -33,15 +33,15 @@ export default function CreateDepartmentPage() {
 
   const validateForm = () => {
     if (!formData.name.trim()) {
-      setError('?? ?? ??? ??');
+      setError('نام انگلیسی الزامی است');
       return false;
     }
     if (!formData.namePersian.trim()) {
-      setError('?? ??? ?? ??? ??');
+      setError('نام فارسی الزامی است');
       return false;
     }
     if (!formData.description.trim()) {
-      setError('?? ??? ??');
+      setError('توضیحات الزامی است');
       return false;
     }
     return true;
@@ -61,12 +61,12 @@ export default function CreateDepartmentPage() {
       const response = await departmentsAPI.createDepartment(formData);
       
       if (response.data.success) {
-        alert('?? ? ??? ??? ?');
+        alert('دپارتمان با موفقیت ایجاد شد');
         router.push('/dashboard/departments');
       }
     } catch (error: any) {
       console.error('Error creating department:', error);
-      setError(error.response?.data?.error || '?? ? ??? ??');
+      setError(error.response?.data?.error || 'خطا در ایجاد دپارتمان');
     } finally {
       setLoading(false);
     }
@@ -80,8 +80,8 @@ export default function CreateDepartmentPage() {
           <div className="flex items-center space-x-4 space-x-reverse">
             <FaBuilding className="h-8 w-8 text-teal-500" />
             <div>
-              <h1 className="text-2xl font-bold text-primary">??? ?? ??</h1>
-              <p className="text-secondary">??? ?? ?? ? ???</p>
+              <h1 className="text-2xl font-bold text-primary">ایجاد دپارتمان جدید</h1>
+              <p className="text-secondary">تعریف دپارتمان و واحد سازمانی جدید</p>
             </div>
           </div>
           <Link
@@ -89,7 +89,7 @@ export default function CreateDepartmentPage() {
             className="glass-liquid-btn px-6 py-2 flex items-center space-x-2 space-x-reverse"
           >
             <FaArrowRight />
-            <span>??? ? ??</span>
+            <span>بازگشت به لیست</span>
           </Link>
         </div>
       </div>
@@ -106,10 +106,10 @@ export default function CreateDepartmentPage() {
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Department Information */}
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">?? ??</h2>
+          <h2 className="text-xl font-bold text-primary mb-4">اطلاعات دپارتمان</h2>
           <div className="space-y-6">
             <div>
-              <label className="block text-sm text-secondary mb-2">?? ?? (??) *</label>
+              <label className="block text-sm text-secondary mb-2">نام انگلیسی *</label>
               <input
                 type="text"
                 name="name"
@@ -122,26 +122,26 @@ export default function CreateDepartmentPage() {
             </div>
             
             <div>
-              <label className="block text-sm text-secondary mb-2">?? ?? (???) *</label>
+              <label className="block text-sm text-secondary mb-2">نام فارسی *</label>
               <input
                 type="text"
                 name="namePersian"
                 value={formData.namePersian}
                 onChange={handleInputChange}
                 className="glass-liquid-input w-full"
-                placeholder="?? ??"
+                placeholder="نام دپارتمان"
                 required
               />
             </div>
             
             <div>
-              <label className="block text-sm text-secondary mb-2">?? *</label>
+              <label className="block text-sm text-secondary mb-2">توضیحات *</label>
               <textarea
                 name="description"
                 value={formData.description}
                 onChange={handleInputChange}
                 className="glass-liquid-input w-full h-24 resize-none"
-                placeholder="?? ??? ? ??..."
+                placeholder="توضیح کوتاه درباره دپارتمان..."
                 required
               />
             </div>
@@ -155,7 +155,7 @@ export default function CreateDepartmentPage() {
                   onChange={handleInputChange}
                   className="rounded border-gray-600 bg-gray-700 text-teal-500 focus:ring-teal-500"
                 />
-                <span className="text-secondary">?? ??</span>
+                <span className="text-secondary">فعال باشد</span>
               </label>
             </div>
           </div>
@@ -168,7 +168,7 @@ export default function CreateDepartmentPage() {
               href="/dashboard/departments"
               className="glass-liquid-btn px-6 py-2"
             >
-              ??
+              انصراف
             </Link>
             <button
               type="submit"
@@ -180,7 +180,7 @@ export default function CreateDepartmentPage() {
               ) : (
                 <FaCheck />
               )}
-              <span>{loading ? '? ?? ???...' : '??? ??'}</span>
+              <span>{loading ? 'در حال ذخیره...' : 'ایجاد دپارتمان'}</span>
             </button>
           </div>
         </div>

@@ -12,11 +12,11 @@ import { CADShape } from '../types/CADTypes';
 export class TextTool extends BaseTool {
   name = 'text';
   icon = 'FaFont';
-  displayName = '??';
+  displayName = 'متن';
   
   private isPlacing = false;
   private tempText: any = null; // Konva.Text
-  private defaultText = '??';
+  private defaultText = 'متن';
   
   onMouseDown(e: KonvaEventObject<MouseEvent | TouchEvent>, context: ToolContext) {
     const stage = e.target.getStage();

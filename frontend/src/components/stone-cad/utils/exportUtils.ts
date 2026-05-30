@@ -120,7 +120,7 @@ export function exportToSVG(
           }
           break;
         case 'text':
-          svg += `  <text x="${canvasPos.x}" y="${canvasPos.y}" font-size="${shape.fontSize || 16}" fill="${shape.fill || shape.stroke || '#000'}" font-family="Arial" class="shape">${(shape.text || '??').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</text>\n`;
+          svg += `  <text x="${canvasPos.x}" y="${canvasPos.y}" font-size="${shape.fontSize || 16}" fill="${shape.fill || shape.stroke || '#000'}" font-family="Arial" class="shape">${(shape.text || 'متن').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</text>\n`;
           break;
       }
     });

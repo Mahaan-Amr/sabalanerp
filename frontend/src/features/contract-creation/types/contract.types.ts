@@ -74,37 +74,37 @@ export interface Product {
 export interface StoneCut {
   id: string;
   originalWidth: number; // ?? ?? ??
-  cutWidth: number; // ?? ?? ???
-  remainingWidth: number; // ?? ???
+  cutWidth: number; // cut width
+  remainingWidth: number; // remaining width
   length: number; // ?? ??
-  cuttingCost: number; // ??? ??
-  cuttingCostPerMeter: number; // ??? ?? ? ?? ? ??
+  cuttingCost: number; // cutting cost
+  cuttingCostPerMeter: number; // cutting cost per meter
   orientation?: 'longitudinal' | 'cross';
 }
 
 export interface RemainingStone {
   id: string;
-  width: number; // ?? ??? (in cm)
-  length: number; // ?? ??? (in meters)
-  squareMeters: number; // ?? ?? ???
+  width: number; // partition width in cm
+  length: number; // partition length in meters
+  squareMeters: number; // partition area
   isAvailable: boolean; // ?? ?? ?? ??
-  sourceCutId: string; // ??? ?? ??
-  position?: { // ??? ? ?? ?? (?? ??? ? canvas) - ?? ?? ???
+  sourceCutId: string; // source cut id
+  position?: { // placement position on stone/canvas
     startWidth: number; // ?? ?? (in cm)
     startLength: number; // ?? ?? (in meters)
   };
   // Cutting cost fields for partitions (when created from remaining stone)
-  cuttingCost?: number; // ??? ?? ?? ?? ??
-  cuttingCostPerMeter?: number; // ??? ?? ? ?? ? ??
+  cuttingCost?: number; // cutting cost for this partition
+  cuttingCostPerMeter?: number; // cutting cost per meter
   cutType?: 'longitudinal' | 'cross' | null; // ?? ??
-  quantity?: number; // ??? (?? ??? ??? ??)
+  quantity?: number; // quantity
 }
 
 export interface SlabStandardDimensionEntry {
   id: string; // Unique ID for this entry
-  standardLengthCm: number; // ?? ??? (in cm)
-  standardWidthCm: number; // ?? ??? (in cm)
-  quantity: number; // ??? ?? ??? ???
+  standardLengthCm: number; // standard length in cm
+  standardWidthCm: number; // standard width in cm
+  quantity: number; // quantity of stones
 }
 
 export interface StonePartition {
@@ -112,12 +112,12 @@ export interface StonePartition {
   width: number; // ?? ?? (in cm)
   length: number; // ?? ?? (in meters)
   quantity: number; // partition piece count
-  squareMeters: number; // ?? ?? (??? ??)
-  position?: { // ??? ? ?? ?? (?? ??? ? canvas)
+  squareMeters: number; // area in square meters
+  position?: { // placement position on stone/canvas
     startWidth: number; // ?? ?? (in cm)
     startLength: number; // ?? ?? (in meters)
   };
-  validationError?: string; // ?? ??? ?? ?? ?? ??
+  validationError?: string; // placement validation error
 }
 
 export interface SubService {
@@ -126,7 +126,7 @@ export interface SubService {
   name?: string;
   namePersian: string;
   description?: string;
-  pricePerMeter: number; // ??? ? ?? ??? (???)
+  pricePerMeter: number; // price per meter
   calculationBase: 'length' | 'squareMeters'; // ? ?? ?? ? ?? ??
   isActive: boolean;
 }
@@ -144,9 +144,9 @@ export interface AppliedSubService {
   id: string; // Unique ID for this applied service
   subServiceId: string; // Reference to SubService
   subService: SubService; // Full SubService object
-  meter: number; // ??? ?? ?? (?? ? ?? ??)
-  cost: number; // ??? ??? ??
-  calculationBase: 'length' | 'squareMeters'; // ??? ???
+  meter: number; // used length or area
+  cost: number; // total service cost
+  calculationBase: 'length' | 'squareMeters'; // calculation base
 }
 
 export interface CuttingBreakdownEntry {
@@ -171,7 +171,7 @@ export interface ServiceEntry {
 // Stair Part interface for individual parts of a stair system
 export interface StairPart {
   // Part identification
-  partType: 'tread' | 'riser' | 'landing'; // ? ??, ?? ??, ???
+  partType: 'tread' | 'riser' | 'landing'; // stair part type
   isSelected: boolean; // Whether this part is included in the stair system
   
   // Product selection
@@ -183,14 +183,14 @@ export interface StairPart {
   treadWidth?: number; // ?? ?? (width of staircase) - in cm or m
   treadDepth?: number; // ?? ?? (depth of step) - in cm
   // For Riser (?? ??):
-  riserHeight?: number; // ??? ??? - in cm
-  // For Landing (???):
-  landingWidth?: number; // ?? ??? - in cm
-  landingDepth?: number; // ?? ??? - in cm
-  numberOfLandings?: number; // ??? ???
+  riserHeight?: number; // riser height in cm
+  // For landing:
+  landingWidth?: number; // landing width in cm
+  landingDepth?: number; // landing depth in cm
+  numberOfLandings?: number; // number of landings
   
   // Quantity and pricing
-  quantity: number; // ???
+  quantity: number; // quantity
   squareMeters: number; // ?? ??
   pricePerSquareMeter: number; // ? ? ?? ??
   totalPrice: number; // ?? ?
@@ -215,7 +215,7 @@ export interface StairPart {
 // Stair Part interface for individual parts of a stair system (old flow)
 export interface StairPart {
   // Part identification
-  partType: 'tread' | 'riser' | 'landing'; // ? ??, ?? ??, ???
+  partType: 'tread' | 'riser' | 'landing'; // stair part type
   isSelected: boolean; // Whether this part is included in the stair system
   
   // Product selection
@@ -227,14 +227,14 @@ export interface StairPart {
   treadWidth?: number; // ?? ?? (width of staircase) - in cm or m
   treadDepth?: number; // ?? ?? (depth of step) - in cm
   // For Riser (?? ??):
-  riserHeight?: number; // ??? ??? - in cm
-  // For Landing (???):
-  landingWidth?: number; // ?? ??? - in cm
-  landingDepth?: number; // ?? ??? - in cm
-  numberOfLandings?: number; // ??? ???
+  riserHeight?: number; // riser height in cm
+  // For landing:
+  landingWidth?: number; // landing width in cm
+  landingDepth?: number; // landing depth in cm
+  numberOfLandings?: number; // number of landings
   
   // Quantity and pricing
-  quantity: number; // ???
+  quantity: number; // quantity
   squareMeters: number; // ?? ??
   pricePerSquareMeter: number; // ? ? ?? ??
   totalPrice: number; // ?? ?
@@ -259,8 +259,8 @@ export interface StairPart {
 // Stair System configuration (old flow)
 export interface StairSystemConfig {
   // Common configuration
-  numberOfSteps: number; // ??? ??
-  quantityType: 'steps' | 'staircases'; // ?? ???
+  numberOfSteps: number; // number of steps
+  quantityType: 'steps' | 'staircases'; // quantity type
   numberOfStaircases?: number; // if quantityType === 'staircases'
   
   // Default product (used when user first selects a product)
@@ -269,14 +269,14 @@ export interface StairSystemConfig {
   // Three parts
   tread: StairPart;      // ? ??
   riser: StairPart;      // ?? ??
-  landing: StairPart;    // ???
+  landing: StairPart;    // landing
 }
 
 export interface ContractProduct {
   productId: string;
   product: Product;
   // Product type
-  productType: 'longitudinal' | 'stair' | 'slab'; // ?? ???
+  productType: 'longitudinal' | 'stair' | 'slab'; // product type
   // Stair system linking (only for stair parts)
   stairSystemId?: string; // ID to link multiple items belonging to same stair system
   stairPartType?: 'tread' | 'riser' | 'landing'; // ?? ?? ??
@@ -286,7 +286,7 @@ export interface ContractProduct {
   diameterOrWidth: number; // ?? ? ?? (constant for ?? and ??)
   length: number; // ??
   width: number; // ??
-  quantity: number; // ???
+  quantity: number; // quantity
   squareMeters: number; // ?? ??
   pricePerSquareMeter: number; // ? ? ?? ??
   unitPrice?: number; // ?? ?? (used in some calculations)
@@ -314,15 +314,15 @@ export interface ContractProduct {
   mandatoryPercentage: number; // ?? ?? (default 20%)
   originalTotalPrice: number; // ?? ?? ?? ? ??
   // Stone cutting fields
-  isCut: boolean; // ?? ?? ?? ??? ??
+  isCut: boolean; // whether product is cut
   cutType: 'longitudinal' | 'cross' | null; // ?? ??
   originalWidth: number; // ?? ?? ?? ?? ? ??
-  originalLength: number; // ?? ?? ?? ?? ? ?? (in meters) - ?? ??? ???
-  cuttingCost: number; // ??? ??
-  cuttingCostPerMeter: number; // ??? ?? ? ?? ? ??
+  originalLength: number; // original length before cutting in meters
+  cuttingCost: number; // cutting cost
+  cuttingCostPerMeter: number; // cutting cost per meter
   cutDescription: string; // ?? ??
-  remainingStones: RemainingStone[]; // ?? ???
-  cutDetails: StoneCut[]; // ??? ???
+  remainingStones: RemainingStone[]; // remaining stones
+  cutDetails: StoneCut[]; // cut details
   // Legacy single standard dimension fields (kept for backward compatibility)
   slabStandardLengthCm?: number | null;
   slabStandardWidthCm?: number | null;
@@ -336,23 +336,23 @@ export interface ContractProduct {
   // ?? ?? (vertical/perpendicular edge cuts) for slab stones
   slabVerticalCutSides?: {
     top: boolean;    // ??
-    bottom: boolean; // ???
+    bottom: boolean; // bottom
     left: boolean;  // ?
     right: boolean; // ??
   };
-  slabVerticalCutCost?: number; // ??? ?? ??
-  slabVerticalCutCostPerMeter?: number; // ??? ?? ?? ? ?? ? ??
+  slabVerticalCutCost?: number; // vertical slab cutting cost
+  slabVerticalCutCostPerMeter?: number; // vertical slab cutting cost per meter
   // Remaining stone usage tracking
-  usedRemainingStones: RemainingStone[]; // ?? ??? ?? ??
-  totalUsedRemainingWidth: number; // ??? ?? ??? ?? ??
-  totalUsedRemainingLength: number; // ??? ?? ??? ?? ?? (in meters)
+  usedRemainingStones: RemainingStone[]; // used remaining stones
+  totalUsedRemainingWidth: number; // total used remaining width
+  totalUsedRemainingLength: number; // total used remaining length in meters
   // Parent-child relationship (explicit reference instead of stoneCode parsing)
   parentProductIndex?: number; // Index of parent product in wizardData.products array (for remaining stone relationships)
   // SubService tracking
-  appliedSubServices: AppliedSubService[]; // ?? ??? ??
-  totalSubServiceCost: number; // ??? ??? ??
-  usedLengthForSubServices: number; // ?? ?? ?? ?? ?? ??? ? ?? (in meters)
-  usedSquareMetersForSubServices: number; // ?? ?? ?? ?? ?? ?? ??? ? ?? ??
+  appliedSubServices: AppliedSubService[]; // applied sub-services
+  totalSubServiceCost: number; // total sub-service cost
+  usedLengthForSubServices: number; // length used for sub-services in meters
+  usedSquareMetersForSubServices: number; // square meters used for sub-services
   cuttingBreakdown?: CuttingBreakdownEntry[];
   // Stair-specific fields (for backward compatibility and display)
   treadWidth?: number;
@@ -387,11 +387,11 @@ export interface DeliveryProductItem {
 
 export interface DeliverySchedule {
   deliveryDate: string;
-  projectManagerName: string; // ?? ?? ???
+  projectManagerName: string; // project manager name
   receiverName: string; // ?? ??
-  deliveryAddress?: string; // ?? ???
-  driver?: string; // ???
-  vehicle?: string; // ??? ???
+  deliveryAddress?: string; // delivery address
+  driver?: string; // driver
+  vehicle?: string; // vehicle
   products: DeliveryProductItem[]; // Products with quantities for this delivery
   notes?: string;
 }
@@ -402,20 +402,20 @@ export type PaymentEntryMethod = 'CASH_CARD' | 'CASH_SHIBA' | 'CHECK';
 export interface PaymentEntry {
   id: string; // Unique ID for this payment entry
   method: PaymentEntryMethod; // ?? (??) | ?? (??) | ?
-  amount: number; // Amount in ???
+  amount: number; // amount in currency
   status?: 'PAID' | 'WILL_BE_PAID'; // Optional, for display
-  paymentDate: string; // ??: ??? ??? (when customer will pay). ?: ??? ??? (when check will pass)
+  paymentDate: string; // cash: payment date; check: clearance date
   description?: string;
   nationalCode?: string;
-  checkNumber?: string; // ?: ??? ?
+  checkNumber?: string; // check number
   checkOwnerName?: string; // ?: ?? ?? ?
-  handoverDate?: string; // ?: ??? ??? ? (when customer gives/brings check) - Persian date
+  handoverDate?: string; // check handover date - Persian date
   cashType?: string; // Legacy / API: ?? | ?? for CASH
 }
 
 export interface PaymentMethod {
   payments: PaymentEntry[]; // Array of payment entries (compound payments)
-  currency: string; // Default: '???'
+  currency: string; // default currency
   totalContractAmount: number; // Sum of all products (for validation)
 }
 
@@ -597,7 +597,7 @@ export interface StairPartDraftV2 {
   tools?: ToolSelectionV2[];
   totalPrice?: number | null;
   // Layer fields (??)
-  numberOfLayersPerStair?: number | null; // ??? ?? ?? ? ?? (e.g., 2 for double)
+  numberOfLayersPerStair?: number | null; // layers per stair, e.g. 2 for double
   layerWidthCm?: number | null; // ?? ?? (cm) - width of the layer strip
   layerTypeId?: string | null;
   layerTypeName?: string | null;

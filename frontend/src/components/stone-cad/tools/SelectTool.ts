@@ -10,7 +10,7 @@ import Konva from 'konva';
 export class SelectTool extends BaseTool {
   name = 'select';
   icon = 'FaHandPointer';
-  displayName = '???';
+  displayName = 'انتخاب';
   
   private isSelecting = false;
   private selectionBox: any = null; // Konva.Rect

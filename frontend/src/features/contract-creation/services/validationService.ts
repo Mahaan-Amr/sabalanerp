@@ -10,23 +10,23 @@ export const validateProduct = (product: Partial<ContractProduct>): { isValid: b
   const errors: string[] = [];
   
   if (!product.productId) {
-    errors.push('??? ?? ??? ??');
+    errors.push('انتخاب محصول الزامی است');
   }
   
   if (!product.quantity || product.quantity <= 0) {
-    errors.push('??? ?? ??? ? ?? ??');
+    errors.push('تعداد باید بزرگ‌تر از صفر باشد');
   }
   
   if (!product.pricePerSquareMeter || product.pricePerSquareMeter <= 0) {
-    errors.push('?? ? ?? ?? ?? ?? ??');
+    errors.push('قیمت هر متر مربع الزامی است');
   }
   
   if (product.productType === 'longitudinal' || product.productType === 'slab') {
     if (!product.length || product.length <= 0) {
-      errors.push('?? ?? ?? ??');
+      errors.push('طول محصول الزامی است');
     }
     if (!product.width || product.width <= 0) {
-      errors.push('?? ?? ?? ??');
+      errors.push('عرض محصول الزامی است');
     }
   }
   
@@ -46,15 +46,15 @@ export const validateDelivery = (
   const errors: string[] = [];
   
   if (!delivery.deliveryDate) {
-    errors.push('??? ??? ?? ??? ??');
+    errors.push('تاریخ تحویل الزامی است');
   }
   
   if (!delivery.receiverName || delivery.receiverName.trim() === '') {
-    errors.push('?? ?? ?? ?? ??');
+    errors.push('نام تحویل‌گیرنده الزامی است');
   }
   
   if (!delivery.products || delivery.products.length === 0) {
-    errors.push('??? ? ??? ?? ?? ??? ??? ??');
+    errors.push('حداقل یک محصول برای تحویل انتخاب کنید');
   }
   
   // Validate product quantities don't exceed available quantities
@@ -67,7 +67,7 @@ export const validateDelivery = (
           .reduce((sum, p) => sum + p.quantity, 0);
         
         if (totalDelivered > product.quantity) {
-          errors.push(`??? ??? ?? ??? ${product.stoneName} ?? ? ??? ??? ??`);
+          errors.push(`تعداد تحویل برای ${product.stoneName} بیشتر از تعداد محصول است`);
         }
       }
     }
@@ -89,43 +89,43 @@ export const validatePayment = (
   const errors: string[] = [];
   
   if (!payment.payments || payment.payments.length === 0) {
-    errors.push('??? ? ?? ??? ?? ??? ??');
+    errors.push('حداقل یک روش پرداخت الزامی است');
   }
   
   if (payment.payments && payment.payments.length > 0) {
     const totalPaymentAmount = payment.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
     
     if (Math.abs(totalPaymentAmount - totalContractAmount) > 0.01) {
-      errors.push(`??? ??? ??? (${totalPaymentAmount}) ?? ??? ? ?? ? ?? (${totalContractAmount}) ??`);
+      errors.push(`جمع پرداخت‌ها (${totalPaymentAmount}) باید با مبلغ کل قرارداد (${totalContractAmount}) برابر باشد`);
     }
     
     // Validate individual payment entries (CASH_CARD | CASH_SHIBA | CHECK)
     for (const paymentEntry of payment.payments) {
       const method = (paymentEntry as { method?: string }).method;
       if (!paymentEntry.amount || paymentEntry.amount <= 0) {
-        errors.push('?? ??? ?? ??? ? ?? ??');
+        errors.push('مبلغ پرداخت باید بزرگ‌تر از صفر باشد');
       }
       if (method === 'CASH_CARD' || method === 'CASH_SHIBA') {
         if (!paymentEntry.paymentDate || !String(paymentEntry.paymentDate).trim()) {
-          errors.push('??? ??? ?? ?? ??? ??');
+          errors.push('تاریخ پرداخت برای پرداخت نقدی الزامی است');
         }
       }
       if (method === 'CHECK') {
         if (!paymentEntry.checkNumber || !String(paymentEntry.checkNumber).trim()) {
-          errors.push('??? ? ?? ??? ?? ??? ??');
+          errors.push('شماره چک الزامی است');
         }
         if (!paymentEntry.checkOwnerName || !String(paymentEntry.checkOwnerName).trim()) {
-          errors.push('?? ?? ? ??? ??');
+          errors.push('نام صاحب چک الزامی است');
         }
         if (!paymentEntry.handoverDate || !String(paymentEntry.handoverDate).trim()) {
-          errors.push('??? ??? ? ??? ??');
+          errors.push('تاریخ تحویل چک الزامی است');
         }
         if (!paymentEntry.paymentDate || !String(paymentEntry.paymentDate).trim()) {
-          errors.push('??? ??? ? ??? ??');
+          errors.push('تاریخ پاس شدن چک الزامی است');
         }
       }
       if (method === 'CASH' && !(paymentEntry as { cashType?: string }).cashType) {
-        errors.push('?? ??? ?? ?? ??? ??');
+        errors.push('نوع پرداخت نقدی الزامی است');
       }
     }
   }
@@ -148,28 +148,28 @@ export const validateWizardStep = (
   switch (step) {
     case 1: // Contract Date
       if (!wizardData.contractDate) {
-        errors.contractDate = '??? ?? ?? ??? ??';
+        errors.contractDate = 'تاریخ قرارداد الزامی است';
       }
       if (!wizardData.contractNumber) {
-        errors.contractNumber = '??? ?? ?? ??? ??';
+        errors.contractNumber = 'شماره قرارداد الزامی است';
       }
       break;
       
     case 2: // Customer Selection
       if (!wizardData.customerId || !wizardData.customer) {
-        errors.customer = '??? ?? ??? ??';
+        errors.customer = 'انتخاب مشتری الزامی است';
       }
       break;
       
     case 3: // Project Management
       if (!wizardData.projectId || !wizardData.project) {
-        errors.project = '??? ?? ??? ? ??? ??';
+        errors.project = 'انتخاب پروژه الزامی است';
       }
       break;
       
     case 4: // Product Selection
       if (!wizardData.products || wizardData.products.length === 0) {
-        errors.products = '??? ? ??? ?? ? ?? ??? ??';
+        errors.products = 'حداقل یک محصول به قرارداد اضافه کنید';
       } else {
         // Validate each product
         wizardData.products.forEach((product, index) => {
@@ -183,7 +183,7 @@ export const validateWizardStep = (
       
     case 5: // Delivery Schedule
       if (!wizardData.deliveries || wizardData.deliveries.length === 0) {
-        errors.deliveries = '??? ? ??? ??? ?? ??? ??';
+        errors.deliveries = 'حداقل یک برنامه تحویل تعریف کنید';
       } else {
         // Validate all products are distributed
         const totalProductQuantities = wizardData.products.reduce((acc, p) => {
@@ -205,7 +205,7 @@ export const validateWizardStep = (
         for (const [productId, totalQuantity] of Object.entries(totalProductQuantities)) {
           const delivered = deliveredQuantities[productId] || 0;
           if (delivered < totalQuantity) {
-            errors.deliveries = `?? ?? ?? ? ?? ?? ? ??? ??? ??? ??`;
+            errors.deliveries = `همه محصولات باید در برنامه‌های تحویل توزیع شوند`;
             break;
           }
         }

@@ -170,7 +170,7 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
               cost: product.cuttingCost || 0
             }];
 
-        // Count cross cuts to determine if we should use "?? ?? ?"
+        // Count cross cuts to determine if we should use singular or plural cross-cut labels.
         const crossCuts = breakdown.filter(cut => cut.type === 'cross');
         const hasOnlyOneCrossCut = crossCuts.length === 1 && breakdown.length === 1;
 

@@ -116,9 +116,13 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       
       if (response.data.success) {
         const contractId = response.data.data.id;
+        const savedContractNumber = response.data.data.contractNumber || wizardData.contractNumber;
+        const creatorSequenceNumber = response.data.data.creatorSequenceNumber ?? wizardData.creatorSequenceNumber ?? null;
         
         // Store contract ID in signature state for Step 8
         updateWizardData({
+          contractNumber: savedContractNumber,
+          creatorSequenceNumber,
           signature: {
             ...(wizardData.signature || {
               phoneNumber: null,

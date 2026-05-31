@@ -1,4 +1,4 @@
-import type { RemainingStone, SlabStandardDimensionEntry } from '../types/contract.types';
+import type { CuttingBreakdownEntry, RemainingStone, SlabStandardDimensionEntry, SmartLongitudinalCutPlan } from '../types/contract.types';
 
 type UnitType = 'cm' | 'm';
 
@@ -85,6 +85,149 @@ export const calculateLongitudinalRemainingStones = ({
     remainingStones: [remainingStone],
     enteredWidthCm,
     enteredLengthM
+  };
+};
+
+export const calculateSmartLongitudinalCutPlan = ({
+  originalWidthCm,
+  enteredWidth,
+  enteredWidthUnit,
+  enteredLength,
+  enteredLengthUnit,
+  quantity,
+  longitudinalRatePerMeter = 0,
+  crossRatePerMeter = 0,
+  optimizationEnabled = true,
+  seed
+}: LongitudinalRemainingInput & {
+  longitudinalRatePerMeter?: number;
+  crossRatePerMeter?: number;
+  optimizationEnabled?: boolean;
+}): SmartLongitudinalCutPlan => {
+  const sourceWidthCm = Math.max(0, Number(originalWidthCm) || 0);
+  const requestedWidthCm = toCentimeters(Number(enteredWidth) || 0, enteredWidthUnit);
+  const requestedLengthM = toMeters(Number(enteredLength) || 0, enteredLengthUnit);
+  const requestedQuantity = Math.max(0, Number(quantity) || 0);
+  const totalRequestedLengthM = requestedLengthM * requestedQuantity;
+  const warnings: string[] = [];
+  const baseSeed = seed ?? Date.now();
+
+  if (sourceWidthCm <= 0 || requestedWidthCm <= 0 || requestedLengthM <= 0 || requestedQuantity <= 0) {
+    return {
+      enabled: false,
+      mode: 'none',
+      sourceWidthCm,
+      requestedWidthCm,
+      requestedLengthM,
+      requestedQuantity,
+      totalRequestedLengthM,
+      stripsPerSource: 0,
+      sourceLengthConsumedM: 0,
+      consumedAreaSqm: 0,
+      requestedAreaSqm: 0,
+      productionPieces: [],
+      remainingStones: [],
+      cuttingBreakdown: [],
+      totalCuttingCost: 0,
+      warnings: ['ابعاد یا تعداد برای محاسبه برش هوشمند کامل نیست.']
+    };
+  }
+
+  if (requestedWidthCm > sourceWidthCm) {
+    return {
+      enabled: false,
+      mode: 'none',
+      sourceWidthCm,
+      requestedWidthCm,
+      requestedLengthM,
+      requestedQuantity,
+      totalRequestedLengthM,
+      stripsPerSource: 0,
+      sourceLengthConsumedM: 0,
+      consumedAreaSqm: 0,
+      requestedAreaSqm: 0,
+      productionPieces: [],
+      remainingStones: [],
+      cuttingBreakdown: [],
+      totalCuttingCost: 0,
+      warnings: ['عرض درخواستی از عرض سنگ اصلی بیشتر است.']
+    };
+  }
+
+  const possibleStrips = Math.max(1, Math.floor(sourceWidthCm / requestedWidthCm));
+  const stripsPerSource = optimizationEnabled ? possibleStrips : 1;
+  const sourceLengthConsumedM = totalRequestedLengthM / stripsPerSource;
+  const consumedAreaSqm = (sourceWidthCm / 100) * sourceLengthConsumedM;
+  const requestedAreaSqm = (requestedWidthCm / 100) * totalRequestedLengthM;
+  const remainingWidthCm = sourceWidthCm - requestedWidthCm * stripsPerSource;
+  const mode: SmartLongitudinalCutPlan['mode'] = stripsPerSource > 1 ? 'optimized' : 'single-strip';
+
+  if (!longitudinalRatePerMeter) {
+    warnings.push('نرخ برش طولی پیدا نشد؛ هزینه برش طولی صفر محاسبه شد.');
+  }
+  if (mode === 'optimized' && !crossRatePerMeter) {
+    warnings.push('نرخ برش عرضی پیدا نشد؛ هزینه برش عرضی صفر محاسبه شد.');
+  }
+
+  const productionPieces = [{
+    widthCm: requestedWidthCm,
+    lengthM: sourceLengthConsumedM,
+    quantity: stripsPerSource
+  }];
+
+  const remainingStones: RemainingStone[] = remainingWidthCm > 0
+    ? [{
+        id: `remaining_smart_${baseSeed}_0`,
+        width: remainingWidthCm,
+        length: sourceLengthConsumedM,
+        squareMeters: (remainingWidthCm / 100) * sourceLengthConsumedM,
+        isAvailable: true,
+        sourceCutId: `cut_smart_${baseSeed}_0`,
+        quantity: 1
+      }]
+    : [];
+
+  const cuttingBreakdown: CuttingBreakdownEntry[] = [];
+  const longitudinalMeters = stripsPerSource * sourceLengthConsumedM;
+  const longitudinalCost = longitudinalMeters * longitudinalRatePerMeter;
+  if (requestedWidthCm < sourceWidthCm) {
+    cuttingBreakdown.push({
+      type: 'longitudinal',
+      meters: longitudinalMeters,
+      rate: longitudinalRatePerMeter,
+      cost: longitudinalCost
+    });
+  }
+
+  const needsCrossSplit = mode === 'optimized' && stripsPerSource > 1;
+  const crossMeters = needsCrossSplit ? sourceWidthCm / 100 : 0;
+  const crossCost = crossMeters * crossRatePerMeter;
+  if (needsCrossSplit) {
+    cuttingBreakdown.push({
+      type: 'cross',
+      meters: crossMeters,
+      rate: crossRatePerMeter,
+      cost: crossCost
+    });
+  }
+
+  return {
+    enabled: requestedWidthCm < sourceWidthCm,
+    mode,
+    sourceWidthCm,
+    requestedWidthCm,
+    requestedLengthM,
+    requestedQuantity,
+    totalRequestedLengthM,
+    stripsPerSource,
+    sourceLengthConsumedM,
+    consumedAreaSqm,
+    requestedAreaSqm,
+    productionPieces,
+    remainingStones,
+    cuttingBreakdown,
+    totalCuttingCost: cuttingBreakdown.reduce((sum, cut) => sum + cut.cost, 0),
+    warnings
   };
 };
 

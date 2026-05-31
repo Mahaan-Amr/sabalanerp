@@ -68,6 +68,7 @@ export const WIZARD_STEPS = [
 const getInitialWizardData = (): ContractWizardData => ({
   contractDate: getCurrentPersianDate(),
   contractNumber: '',
+  creatorSequenceNumber: null,
   customerId: '',
   customer: null,
   projectId: '',

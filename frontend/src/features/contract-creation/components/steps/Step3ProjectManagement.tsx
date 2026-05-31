@@ -41,7 +41,21 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
           <div className="space-y-3">
             {projects.length === 0 && (
               <div className="text-center py-6 border border-dashed border-gray-500/40 rounded-lg text-gray-400">
-                هیچ پروژه‌ای برای این مشتری ثبت نشده است. برای ادامه یک پروژه جدید ایجاد کنید.
+                <p>هیچ پروژه‌ای برای این مشتری ثبت نشده است.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.setItem('contractWizardState', JSON.stringify({
+                      currentStep: currentStep,
+                      wizardData: wizardData
+                    }));
+                    router.push(`/dashboard/crm/customers/${wizardData.customerId}?returnTo=contract&step=${currentStep}&action=addProject`);
+                  }}
+                  className="mt-4 inline-flex items-center justify-center gap-2 px-4 py-2 border border-blue-400/70 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors text-sm font-medium"
+                >
+                  <FaPlus className="h-4 w-4" />
+                  ایجاد پروژه
+                </button>
               </div>
             )}
             {projects.map((project) => (
@@ -112,8 +126,8 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
             ))}
           </div>
 
-          {/* Quick Create Project Button */}
-          <div className="mt-4">
+          {/* Secondary create project action */}
+          <div className="mt-4 flex justify-start">
             <button
               type="button"
               onClick={() => {
@@ -129,14 +143,11 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
                 // Redirect to customer detail page to add project
                 router.push(`/dashboard/crm/customers/${wizardData.customerId}?returnTo=contract&step=${currentStep}&action=addProject`);
               }}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+              className="inline-flex items-center justify-center gap-2 px-3 py-2 border border-blue-400/70 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors text-sm font-medium"
             >
               <FaPlus className="h-4 w-4" />
-              <span className="font-medium">ایجاد پروژه جدید</span>
+              <span>ایجاد پروژه</span>
             </button>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-center">
-              پروژه مورد نظر را پیدا نکردید؟ پروژه جدید ایجاد کنید
-            </p>
           </div>
           {errors.projectId && (
             <p className="text-red-500 text-sm mt-1">{errors.projectId}</p>

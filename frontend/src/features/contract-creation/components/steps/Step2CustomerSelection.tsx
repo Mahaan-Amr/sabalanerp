@@ -68,8 +68,8 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
             : 'مشتری را از CRM انتخاب کنید. در صورت نیاز مشتری جدید بسازید.'}
         </div>
 
-        {/* Quick Create Customer Button */}
-        <div className="mb-4">
+        {/* Secondary create customer action */}
+        <div className="mb-4 flex justify-start">
           <button
             type="button"
             onClick={() => {
@@ -85,14 +85,11 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
               // Redirect to customer creation
               router.push(`/dashboard/crm/customers/create?returnTo=contract&step=${currentStep}`);
             }}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 border border-teal-400/70 text-teal-700 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded-lg transition-colors text-sm font-medium"
           >
             <FaPlus className="h-4 w-4" />
-            <span className="font-medium">ایجاد مشتری جدید</span>
+            <span>ایجاد مشتری</span>
           </button>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-center">
-            مشتری مورد نظر را پیدا نکردید؟ مشتری جدید ایجاد کنید
-          </p>
         </div>
         
         <div className="space-y-3">
@@ -101,6 +98,20 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
               <p className="text-gray-500 dark:text-gray-400">
                 {customerSearchTerm ? 'مشتری‌ای با این عبارت پیدا نشد' : 'هیچ مشتری‌ای موجود نیست'}
               </p>
+              <button
+                type="button"
+                onClick={() => {
+                  localStorage.setItem('contractWizardState', JSON.stringify({
+                    currentStep: currentStep,
+                    wizardData: wizardData
+                  }));
+                  router.push(`/dashboard/crm/customers/create?returnTo=contract&step=${currentStep}`);
+                }}
+                className="mt-4 inline-flex items-center justify-center gap-2 px-4 py-2 border border-teal-400/70 text-teal-700 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded-lg transition-colors text-sm font-medium"
+              >
+                <FaPlus className="h-4 w-4" />
+                ایجاد مشتری
+              </button>
             </div>
           ) : (
             <div className="space-y-3">

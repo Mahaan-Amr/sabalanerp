@@ -99,7 +99,7 @@ import {
   clearDraftFieldError
 } from '@/features/contract-creation/services/stairValidationService';
 import {
-  calculateLongitudinalRemainingStones,
+  calculateSmartLongitudinalCutPlan,
   calculateSlabRemainingStones,
   hasLongitudinalGeometryChanged,
   hasSlabGeometryChanged
@@ -1521,7 +1521,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       if (response.data.success) {
         setWizardData(prev => ({
           ...prev,
-          contractNumber: response.data.data.contractNumber
+          contractNumber: response.data.data.contractNumber,
+          creatorSequenceNumber: response.data.data.creatorSequenceNumber ?? null
         }));
       }
     } catch (error) {
@@ -3590,15 +3591,17 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     // Use cutting cost from calculated result (which already includes the auto-fetched price if applicable)
     const finalCuttingCost = calculated.cuttingCost || 0;
     const finalCuttingCostPerMeter = cuttingCostPerMeterForCalc;
-    const longitudinalRemaining = calculateLongitudinalRemainingStones({
+    const smartCutPlan = calculateSmartLongitudinalCutPlan({
       originalWidthCm: originalWidth,
       enteredWidth: userEnteredWidth,
       enteredWidthUnit: widthUnit as 'cm' | 'm',
       enteredLength: calculated.length,
       enteredLengthUnit: lengthUnit as 'cm' | 'm',
-      quantity: effectiveQuantity
+      quantity: effectiveQuantity,
+      longitudinalRatePerMeter: finalCuttingCostPerMeter,
+      crossRatePerMeter: getCuttingTypePricePerMeter('CROSS') || 0
     });
-    const shouldCutByGeometry = longitudinalRemaining.isCut;
+    const shouldCutByGeometry = smartCutPlan.enabled;
     const previousLongitudinalProduct =
       isEditMode && editingProductIndex !== null ? wizardData.products[editingProductIndex] : null;
     const longitudinalGeometryChanged = hasLongitudinalGeometryChanged({
@@ -3622,7 +3625,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     const computedLongitudinalRemainingStones =
       isEditMode && !longitudinalGeometryChanged
         ? (productConfig.remainingStones || previousLongitudinalProduct?.remainingStones || [])
-        : longitudinalRemaining.remainingStones;
+        : smartCutPlan.remainingStones;
     const resetLongitudinalRemainingUsage = isEditMode && longitudinalGeometryChanged;
     const missingCuttingRateWarning = shouldCutByGeometry && finalCuttingCostPerMeter <= 0;
     
@@ -3637,9 +3640,11 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       length: calculated.length,
       width: calculated.width,
       quantity: effectiveQuantity,
-      squareMeters: calculated.squareMeters,
+      squareMeters: smartCutPlan.enabled ? smartCutPlan.requestedAreaSqm : calculated.squareMeters,
       pricePerSquareMeter: productConfig.pricePerSquareMeter || 0,
-      totalPrice: calculated.totalPrice,
+      totalPrice: smartCutPlan.enabled
+        ? smartCutPlan.consumedAreaSqm * (productConfig.pricePerSquareMeter || 0) * (isMandatory && mandatoryPercentage > 0 ? (1 + mandatoryPercentage / 100) : 1)
+        : calculated.totalPrice,
       description: productConfig.description || '',
       finishingId: finishingEnabled ? (productConfig.finishingId || null) : null,
       finishingName: finishingEnabled
@@ -3655,7 +3660,9 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       // Mandatory pricing fields
       isMandatory: isMandatory,
       mandatoryPercentage: mandatoryPercentage,
-      originalTotalPrice: calculated.originalTotalPrice,
+      originalTotalPrice: smartCutPlan.enabled
+        ? smartCutPlan.consumedAreaSqm * (productConfig.pricePerSquareMeter || 0)
+        : calculated.originalTotalPrice,
       // Stone cutting is geometry-driven; pricing can be unavailable while cut still exists.
       isCut: shouldCutByGeometry,
       cutType: shouldCutByGeometry ? 'longitudinal' : null,
@@ -3666,8 +3673,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       originalLength: (isEditMode && productConfig.originalLength !== undefined) 
         ? productConfig.originalLength 
         : (lengthUnit === 'm' ? calculated.length : (calculated.length / 100)),
-      cuttingCost: finalCuttingCost,
+      cuttingCost: smartCutPlan.enabled ? smartCutPlan.totalCuttingCost : finalCuttingCost,
       cuttingCostPerMeter: finalCuttingCostPerMeter,
+      cuttingBreakdown: smartCutPlan.enabled ? smartCutPlan.cuttingBreakdown : undefined,
+      smartCutPlan: smartCutPlan.enabled ? smartCutPlan : null,
       cutDescription:
         productConfig.cutDescription ||
         (shouldCutByGeometry
@@ -3701,7 +3710,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     
     // Add SubService costs to totalPrice if they exist
     const existingSubServiceCost = (isEditMode && productConfig.totalSubServiceCost) ? productConfig.totalSubServiceCost : 0;
-    finalProduct.totalPrice = calculated.totalPrice + existingSubServiceCost + finishingCost;
+    finalProduct.totalPrice = finalProduct.totalPrice + (smartCutPlan.enabled ? smartCutPlan.totalCuttingCost : finalCuttingCost) + existingSubServiceCost + finishingCost;
     
     // Add to contract or update existing product
     if (isEditMode && editingProductIndex !== null) {
@@ -3788,16 +3797,36 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             }
           });
           
-          // Validate that all products are distributed across deliveries
+          const getDeliveryUnit = (product: ContractProduct | undefined): 'meter' | 'squareMeter' | 'count' => {
+            if (product?.productType === 'longitudinal') return 'meter';
+            if (product?.productType === 'slab') return 'squareMeter';
+            return 'count';
+          };
+          const getDeliveryTargetAmount = (product: ContractProduct): number => {
+            const unit = getDeliveryUnit(product);
+            if (unit === 'meter') {
+              const lengthM = product.lengthUnit === 'm' ? product.length : (product.length || 0) / 100;
+              return lengthM * (product.quantity || 0);
+            }
+            if (unit === 'squareMeter') return product.squareMeters || 0;
+            return product.quantity || 0;
+          };
+          const getDeliveryUnitLabel = (unit: 'meter' | 'squareMeter' | 'count') => {
+            if (unit === 'meter') return 'متر';
+            if (unit === 'squareMeter') return 'متر مربع';
+            return 'عدد';
+          };
+
+          // Validate that all products are distributed across deliveries in their delivery unit
           const totalProductQuantities = new Map<number, number>();
           wizardData.products.forEach((product, index) => {
-            totalProductQuantities.set(index, product.quantity);
+            totalProductQuantities.set(index, getDeliveryTargetAmount(product));
           });
           
           wizardData.deliveries.forEach(delivery => {
             delivery.products.forEach(dp => {
               const current = totalProductQuantities.get(dp.productIndex) || 0;
-              totalProductQuantities.set(dp.productIndex, current - dp.quantity);
+              totalProductQuantities.set(dp.productIndex, current - (dp.amount ?? dp.quantity ?? 0));
             });
           });
           
@@ -4036,6 +4065,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             errors={errors}
             showPaymentEntryModal={paymentHandlers.showPaymentEntryModal}
             setShowPaymentEntryModal={paymentHandlers.setShowPaymentEntryModal}
+            onAddPaymentEntry={paymentHandlers.handleAddPaymentEntry}
             onEditPaymentEntry={paymentHandlers.handleEditPaymentEntry}
           />
         );
@@ -9493,6 +9523,85 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                       </div>
                     );
                   })()}
+
+                  {productConfig.productType === 'longitudinal' && selectedProduct && (
+                    (() => {
+                      const sourceWidthCm = Number(selectedProduct.widthValue || 0);
+                      const requestedWidthCm = widthUnit === 'm'
+                        ? Number(productConfig.width || 0) * 100
+                        : Number(productConfig.width || 0);
+                      const requestedLengthM = lengthUnit === 'cm'
+                        ? Number(productConfig.length || 0) / 100
+                        : Number(productConfig.length || 0);
+                      const plan = calculateSmartLongitudinalCutPlan({
+                        originalWidthCm: sourceWidthCm,
+                        enteredWidth: requestedWidthCm,
+                        enteredWidthUnit: 'cm',
+                        enteredLength: requestedLengthM,
+                        enteredLengthUnit: 'm',
+                        quantity: getEffectiveQuantity(),
+                        longitudinalRatePerMeter: getCuttingTypePricePerMeter('LONG') || 0,
+                        crossRatePerMeter: getCuttingTypePricePerMeter('CROSS') || 0,
+                        optimizationEnabled: true
+                      });
+
+                      if (!plan.enabled || plan.warnings.length > 0) return null;
+
+                      return (
+                        <div className="bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-lg p-4">
+                          <div className="flex items-center justify-between gap-3 mb-3">
+                            <h5 className="text-sm font-semibold text-teal-800 dark:text-teal-200">
+                              پیشنهاد برش هوشمند
+                            </h5>
+                            {currentUser && ['ADMIN', 'MANAGER'].includes(currentUser.role || '') ? (
+                              <button
+                                type="button"
+                                onClick={() => router.push('/dashboard/inventory/services')}
+                                className="text-xs text-teal-700 dark:text-teal-300 hover:underline"
+                              >
+                                ویرایش نرخ‌های برش در تنظیمات خدمات
+                              </button>
+                            ) : (
+                              <span className="text-xs text-teal-700 dark:text-teal-300">
+                                خودکار و قابل بازبینی
+                              </span>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-teal-900 dark:text-teal-100">
+                            <div className="space-y-1">
+                              <p className="font-medium">قطعات تولیدی</p>
+                              {plan.productionPieces.map((piece, pieceIndex) => (
+                                <p key={pieceIndex}>
+                                  {formatDisplayNumber(piece.quantity)} × عرض {formatDisplayNumber(piece.widthCm)}cm × طول {formatDisplayNumber(piece.lengthM)}m
+                                </p>
+                              ))}
+                            </div>
+                            <div className="space-y-1">
+                              <p>سطح مصرفی: {formatSquareMeters(plan.consumedAreaSqm)}</p>
+                              <p>سطح درخواستی: {formatSquareMeters(plan.requestedAreaSqm)}</p>
+                              {plan.remainingStones.map((stone, stoneIndex) => (
+                                <p key={stoneIndex}>
+                                  باقی‌مانده: عرض {formatDisplayNumber(stone.width)}cm × طول {formatDisplayNumber(stone.length)}m
+                                </p>
+                              ))}
+                            </div>
+                            {plan.cuttingBreakdown.length > 0 && (
+                              <div className="md:col-span-2 pt-2 border-t border-teal-200 dark:border-teal-700 space-y-1">
+                                {plan.cuttingBreakdown.map((cut, cutIndex) => (
+                                  <p key={cutIndex}>
+                                    {cut.type === 'longitudinal' ? 'برش طولی' : 'برش عرضی'}: {formatDisplayNumber(cut.meters)}m × {formatPrice(cut.rate)} = {formatPrice(cut.cost)}
+                                  </p>
+                                ))}
+                                <p className="font-semibold">
+                                  جمع هزینه برش: {formatPrice(plan.totalCuttingCost)}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>

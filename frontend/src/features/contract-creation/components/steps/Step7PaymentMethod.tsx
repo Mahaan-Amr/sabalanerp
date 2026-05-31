@@ -21,6 +21,7 @@ interface Step7PaymentMethodProps {
   errors: Record<string, string>;
   showPaymentEntryModal: boolean;
   setShowPaymentEntryModal: (show: boolean) => void;
+  onAddPaymentEntry?: () => void;
   onEditPaymentEntry?: (entryId: string) => void;
 }
 
@@ -30,6 +31,7 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
   errors,
   showPaymentEntryModal,
   setShowPaymentEntryModal,
+  onAddPaymentEntry,
   onEditPaymentEntry
 }) => {
   const paymentSum = wizardData.payment.payments.reduce((sum, p) => sum + p.amount, 0);
@@ -37,6 +39,10 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
   const paymentSumMatchesTotal = Math.abs(remainingAmount) < 0.01;
 
   const handleAddPaymentEntry = () => {
+    if (onAddPaymentEntry) {
+      onAddPaymentEntry();
+      return;
+    }
     setShowPaymentEntryModal(true);
   };
 
@@ -141,7 +147,12 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
               className="px-4 py-2 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white rounded-lg transition-all duration-200 font-medium flex items-center gap-2"
             >
               <FaPlus className="w-4 h-4" />
-              افزودن پرداخت
+              <span>افزودن پرداخت</span>
+              {remainingAmount > 0 && (
+                <span className="text-xs font-normal opacity-90">
+                  مانده: {formatPrice(remainingAmount, wizardData.payment.currency)}
+                </span>
+              )}
             </button>
           </div>
 

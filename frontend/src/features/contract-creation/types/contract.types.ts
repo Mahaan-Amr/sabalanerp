@@ -156,6 +156,31 @@ export interface CuttingBreakdownEntry {
   cost: number;
 }
 
+export interface SmartCutProductionPiece {
+  widthCm: number;
+  lengthM: number;
+  quantity: number;
+}
+
+export interface SmartLongitudinalCutPlan {
+  enabled: boolean;
+  mode: 'optimized' | 'single-strip' | 'none';
+  sourceWidthCm: number;
+  requestedWidthCm: number;
+  requestedLengthM: number;
+  requestedQuantity: number;
+  totalRequestedLengthM: number;
+  stripsPerSource: number;
+  sourceLengthConsumedM: number;
+  consumedAreaSqm: number;
+  requestedAreaSqm: number;
+  productionPieces: SmartCutProductionPiece[];
+  remainingStones: RemainingStone[];
+  cuttingBreakdown: CuttingBreakdownEntry[];
+  totalCuttingCost: number;
+  warnings: string[];
+}
+
 export interface ServiceEntry {
   key: string;
   type: 'tool' | 'layer' | 'cut' | 'finishing';
@@ -354,6 +379,7 @@ export interface ContractProduct {
   usedLengthForSubServices: number; // length used for sub-services in meters
   usedSquareMetersForSubServices: number; // square meters used for sub-services
   cuttingBreakdown?: CuttingBreakdownEntry[];
+  smartCutPlan?: SmartLongitudinalCutPlan | null;
   // Stair-specific fields (for backward compatibility and display)
   treadWidth?: number;
   treadDepth?: number;
@@ -383,6 +409,8 @@ export interface DeliveryProductItem {
   productIndex: number; // Index in wizardData.products array
   productId: string;
   quantity: number; // Quantity for this specific delivery
+  unit?: 'meter' | 'squareMeter' | 'count';
+  amount?: number;
 }
 
 export interface DeliverySchedule {
@@ -431,6 +459,7 @@ export interface ContractWizardData {
   // Step 1: Contract Date
   contractDate: string;
   contractNumber: string;
+  creatorSequenceNumber?: number | null;
   
   // Step 2: Customer
   customerId: string;

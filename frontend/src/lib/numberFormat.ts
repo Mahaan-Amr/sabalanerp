@@ -1,14 +1,25 @@
 /**
- * Number formatting utilities for the Sablan ERP platform
- * Provides consistent number formatting with thousands separators
+ * Number formatting utilities for the Sabalan ERP platform.
  */
 
-/**
- * Format a number with thousands separators using Persian locale
- * @param value - The number to format
- * @param options - Formatting options
- * @returns Formatted number string
- */
+export const normalizeDigits = (value: string): string => {
+  return value
+    .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0))
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/\u066B/g, '.')
+    .replace(/[\u066C،]/g, ',');
+};
+
+export const parseFormattedNumber = (formattedValue: string): number => {
+  if (!formattedValue) return 0;
+
+  const normalized = normalizeDigits(formattedValue).replace(/[,\s]/g, '');
+  const cleaned = normalized.replace(/[^\d.-]/g, '');
+  const num = parseFloat(cleaned);
+
+  return isNaN(num) ? 0 : num;
+};
+
 export const formatNumber = (
   value: number | string | null | undefined,
   options: {
@@ -22,7 +33,7 @@ export const formatNumber = (
     return '0';
   }
 
-  const num = typeof value === 'string' ? parseFloat(value) : value;
+  const num = typeof value === 'string' ? parseFormattedNumber(value) : value;
 
   if (isNaN(num)) {
     return '0';
@@ -37,7 +48,7 @@ export const formatNumber = (
 
   const formatOptions: Intl.NumberFormatOptions = {
     minimumFractionDigits,
-    maximumFractionDigits,
+    maximumFractionDigits
   };
 
   if (currency) {
@@ -48,16 +59,11 @@ export const formatNumber = (
   return num.toLocaleString(locale, formatOptions);
 };
 
-/**
- * Format a number for display with thousands separators
- * @param value - The number to format
- * @returns Formatted number string
- */
 export const formatDisplayNumber = (value: number | string | null | undefined): string => {
   if (value === null || value === undefined || value === '') {
     return '0';
   }
-  const num = typeof value === 'string' ? parseFloat(value) : value;
+  const num = typeof value === 'string' ? parseFormattedNumber(value) : value;
   if (isNaN(num)) return '0';
   const roundedValue = Math.round(num * 100) / 100;
 
@@ -68,12 +74,20 @@ export const formatDisplayNumber = (value: number | string | null | undefined): 
   });
 };
 
-/**
- * Format a currency amount with thousands separators
- * @param value - The amount to format
- * @param currency - The currency code (default: 'IRR')
- * @returns Formatted currency string
- */
+export const formatDisplayNumberLatin = (value: number | string | null | undefined): string => {
+  if (value === null || value === undefined || value === '') {
+    return '0';
+  }
+  const num = typeof value === 'string' ? parseFormattedNumber(value) : value;
+  if (isNaN(num)) return '0';
+  const roundedValue = Math.round(num * 100) / 100;
+
+  return roundedValue.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  });
+};
+
 export const formatCurrency = (
   value: number | string | null | undefined,
   currency: string = 'IRR'
@@ -86,12 +100,6 @@ export const formatCurrency = (
   });
 };
 
-/**
- * Format a price with thousands separators (for Toman/Rial)
- * @param value - The price to format
- * @param currency - The currency unit (default: 'تومان')
- * @returns Formatted price string
- */
 export const formatPrice = (
   value: number | string | null | undefined,
   currency: string = 'تومان'
@@ -100,27 +108,15 @@ export const formatPrice = (
   return `${formatted} ${currency}`;
 };
 
-/**
- * Convert Toman to Rial (1 Toman = 10 Rials)
- * @param tomanValue - The value in Toman
- * @returns The value in Rial
- */
 export const tomanToRial = (tomanValue: number | string | null | undefined): number => {
   if (tomanValue === null || tomanValue === undefined || tomanValue === '') {
     return 0;
   }
-  const num = typeof tomanValue === 'string' ? parseFloat(tomanValue) : tomanValue;
+  const num = typeof tomanValue === 'string' ? parseFormattedNumber(tomanValue) : tomanValue;
   if (isNaN(num)) return 0;
   return num * 10;
 };
 
-/**
- * Format price with Toman and show Rial conversion
- * @param value - The price in Toman
- * @param currency - The currency unit (default: 'تومان')
- * @param showRialConversion - Whether to show Rial conversion (default: true)
- * @returns Formatted price string with optional Rial conversion
- */
 export const formatPriceWithRial = (
   value: number | string | null | undefined,
   currency: string = 'تومان',
@@ -135,39 +131,12 @@ export const formatPriceWithRial = (
   return formatted;
 };
 
-/**
- * Parse a formatted number string back to a number
- * @param formattedValue - The formatted number string
- * @returns The parsed number
- */
-export const parseFormattedNumber = (formattedValue: string): number => {
-  if (!formattedValue) return 0;
-
-  const normalizedDigits = formattedValue
-    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 1728))
-    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632));
-
-  const normalized = normalizedDigits
-    .replace(/٫/g, '.')
-    .replace(/[٬،,\s]/g, '');
-
-  const cleaned = normalized.replace(/[^\d.-]/g, '');
-  const num = parseFloat(cleaned);
-
-  return isNaN(num) ? 0 : num;
-};
-
-/**
- * Format a number input value for display in input fields
- * @param value - The number to format
- * @returns Formatted number string for input display
- */
 export const formatInputNumber = (value: number | string | null | undefined): string => {
   if (value === null || value === undefined || value === '') {
     return '';
   }
 
-  const num = typeof value === 'string' ? parseFloat(value) : value;
+  const num = typeof value === 'string' ? parseFormattedNumber(value) : value;
 
   if (isNaN(num)) {
     return '';
@@ -177,13 +146,21 @@ export const formatInputNumber = (value: number | string | null | undefined): st
   return formatDisplayNumber(roundedValue);
 };
 
-/**
- * Format dimensions with proper labels
- * @param width - Width value
- * @param thickness - Thickness value
- * @param unit - Unit (default: 'cm')
- * @returns Formatted dimensions string
- */
+export const formatInputNumberLatin = (value: number | string | null | undefined): string => {
+  if (value === null || value === undefined || value === '') {
+    return '';
+  }
+
+  const num = typeof value === 'string' ? parseFormattedNumber(value) : value;
+
+  if (isNaN(num)) {
+    return '';
+  }
+
+  const roundedValue = Math.round(num * 100) / 100;
+  return formatDisplayNumberLatin(roundedValue);
+};
+
 export const formatDimensions = (
   width: number | string | null | undefined,
   thickness: number | string | null | undefined,
@@ -195,21 +172,11 @@ export const formatDimensions = (
   return `عرض ${formattedWidth} × ضخامت ${formattedThickness} ${unit}`;
 };
 
-/**
- * Format square meters with proper label
- * @param value - The square meter value
- * @returns Formatted square meters string
- */
 export const formatSquareMeters = (value: number | string | null | undefined): string => {
   const formatted = formatDisplayNumber(value);
   return `${formatted} متر مربع`;
 };
 
-/**
- * Format quantity with proper label
- * @param value - The quantity value
- * @returns Formatted quantity string
- */
 export const formatQuantity = (value: number | string | null | undefined): string => {
   const formatted = formatDisplayNumber(value);
   return `${formatted} عدد`;

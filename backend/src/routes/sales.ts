@@ -12,7 +12,7 @@ import { createContractItem } from '../services/contractItemService';
 import { createDelivery, getDeliveries } from '../services/deliveryService';
 import { createPayment, getPayments, validatePaymentData } from '../services/paymentService';
 import { createContract, updateContract, getContract, validateContractAccess, approveContract, rejectContract } from '../services/contractService';
-import { generateContractNumber, getUserPrefix } from '../services/contractNumberService';
+import { getNextContractNumberPreview } from '../services/contractNumberService';
 import { contractConfirmationService } from '../services/contractConfirmationService';
 import { getRequestEvidence } from '../utils/requestEvidence';
 
@@ -181,11 +181,11 @@ const userHasCancelAfterApprovalPermission = async (user: any): Promise<boolean>
 // @access  Private/Sales Workspace
 router.get('/contracts/next-number', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_CONTRACT_NUMBER_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
-    const contractNumber = await generateContractNumber(req.user.id);
+    const preview = await getNextContractNumberPreview(req.user.id, prisma);
     
     res.json({
       success: true,
-      data: { contractNumber }
+      data: preview
     });
     return;
   } catch (error) {

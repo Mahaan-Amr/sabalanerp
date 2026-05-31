@@ -107,6 +107,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
                     value={form.amount ?? 0}
                     onChange={(v) => onFormChange({ amount: v })}
                     min={0}
+                    formatWhileTyping
                     className={inputClass}
                   />
                 </div>
@@ -151,6 +152,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
                     value={form.amount ?? 0}
                     onChange={(v) => onFormChange({ amount: v })}
                     min={0}
+                    formatWhileTyping
                     className={inputClass}
                   />
                 </div>

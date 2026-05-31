@@ -369,6 +369,7 @@ model RoleFeaturePermission {
 model SalesContract {
   id             String            @id @default(cuid())
   contractNumber String            @unique
+  creatorSequenceNumber Int?
   title          String
   titlePersian   String
   content        String
@@ -406,6 +407,7 @@ model SalesContract {
   signedByUser         User?                      @relation("SalesContractSignedBy", fields: [signedBy], references: [id])
   template             ContractTemplate?          @relation("SalesContractTemplate", fields: [templateId], references: [id])
 
+  @@index([createdBy, creatorSequenceNumber])
   @@map("sales_contracts")
 }
 

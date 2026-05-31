@@ -98,8 +98,11 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
           />
         </div>
 
-        {/* Quick Create Product Button */}
-        <div className="mb-6">
+        {/* Secondary create action */}
+        <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            محصول را جستجو و انتخاب کنید؛ ایجاد محصول فقط زمانی لازم است که در کاتالوگ وجود ندارد.
+          </p>
           <button
             type="button"
             onClick={() => {
@@ -109,14 +112,11 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
               }));
               router.push(`/dashboard/sales/products/create?returnTo=contract&step=${currentStep}`);
             }}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl"
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 border border-purple-400/70 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg transition-colors text-sm font-medium"
           >
             <FaPlus className="h-4 w-4" />
-            <span className="font-medium">ایجاد محصول جدید</span>
+            <span>ایجاد محصول</span>
           </button>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-center">
-            محصول مورد نظر را پیدا نکردید؟ محصول جدید ایجاد کنید
-          </p>
         </div>
         
         {filteredProducts.length === 0 ? (
@@ -124,6 +124,20 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
             <p className="text-gray-500 dark:text-gray-400 text-lg">
               {productSearchTerm ? 'هیچ محصولی با این جستجو یافت نشد' : 'لطفاً در کادر جستجو تایپ کنید تا محصولات نمایش داده شوند'}
             </p>
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.setItem('contractWizardState', JSON.stringify({
+                  currentStep: currentStep,
+                  wizardData: wizardData
+                }));
+                router.push(`/dashboard/sales/products/create?returnTo=contract&step=${currentStep}`);
+              }}
+              className="mt-4 inline-flex items-center justify-center gap-2 px-4 py-2 border border-purple-400/70 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg transition-colors text-sm font-medium"
+            >
+              <FaPlus className="h-4 w-4" />
+              ایجاد محصول
+            </button>
           </div>
         ) : (
           <div className="relative z-10 bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl border border-white/20 dark:border-slate-700/50 isolate">
@@ -257,6 +271,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                 const catalogProduct = product.product;
                 const productTypeLabel = PRODUCT_TYPES.find(t => t.id === product.productType)?.name ?? product.productType;
                 const availableRemainingStones = normalizeRemainingStoneCollection(product.remainingStones || []).filter(isUsableRemainingStone);
+                const smartCutPlan = product.smartCutPlan;
                 const hasGeometryCutWithoutRate =
                   product.productType === 'longitudinal' &&
                   !!product.isCut &&
@@ -344,6 +359,42 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                       </button>
                     </div>
                   </div>
+
+                  {smartCutPlan?.enabled && (
+                    <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
+                      <h6 className="font-medium text-teal-800 dark:text-teal-200 mb-2 text-sm">
+                        خلاصه برش هوشمند
+                      </h6>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                        <div className="p-3 rounded-lg bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800">
+                          <p className="text-xs text-teal-700 dark:text-teal-300 mb-1">قطعات تولیدی</p>
+                          {smartCutPlan.productionPieces.map((piece, pieceIndex) => (
+                            <p key={pieceIndex} className="text-gray-700 dark:text-gray-300">
+                              {formatDisplayNumber(piece.quantity)} × عرض {formatDisplayNumber(piece.widthCm)} cm × طول {formatDisplayNumber(piece.lengthM)} m
+                            </p>
+                          ))}
+                        </div>
+                        <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                          <p className="text-xs text-blue-700 dark:text-blue-300 mb-1">سطح مصرفی قابل قیمت‌گذاری</p>
+                          <p className="text-gray-700 dark:text-gray-300">
+                            {formatSquareMeters(smartCutPlan.consumedAreaSqm)}
+                          </p>
+                        </div>
+                        {smartCutPlan.cuttingBreakdown.length > 0 && (
+                          <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 md:col-span-2">
+                            <p className="text-xs text-amber-700 dark:text-amber-300 mb-1">هزینه برش</p>
+                            <div className="space-y-1">
+                              {smartCutPlan.cuttingBreakdown.map((cut, cutIndex) => (
+                                <p key={cutIndex} className="text-gray-700 dark:text-gray-300">
+                                  {cut.type === 'longitudinal' ? 'برش طولی' : 'برش عرضی'}: {formatDisplayNumber(cut.meters)}m × {formatPrice(cut.rate, 'تومان')} = {formatPrice(cut.cost, 'تومان')}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Remaining stones section - for longitudinal products */}
                   {product.productType === 'longitudinal' && (

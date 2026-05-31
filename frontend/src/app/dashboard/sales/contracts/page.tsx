@@ -26,6 +26,7 @@ import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitize
 interface Contract {
   id: string;
   contractNumber: string;
+  creatorSequenceNumber?: number | null;
   title: string;
   titlePersian: string;
   status: string;
@@ -141,8 +142,10 @@ export default function ContractsPage() {
     const companyName = contract.customer.companyName?.toLowerCase() || '';
     const projectManager = contract.customer.projectManagerName?.toLowerCase() || '';
     
+    const creatorSequence = contract.creatorSequenceNumber != null ? String(contract.creatorSequenceNumber) : '';
     const matchesSearch = contract.titlePersian.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          contract.contractNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         creatorSequence.includes(searchTerm.trim()) ||
                          customerName.includes(searchTerm.toLowerCase()) ||
                          companyName.includes(searchTerm.toLowerCase()) ||
                          projectManager.includes(searchTerm.toLowerCase());
@@ -328,7 +331,10 @@ export default function ContractsPage() {
                       </span>
                     </div>
                     <div className="flex items-center gap-4 text-sm text-gray-400 mt-1">
-                      <span>شماره: {sanitizeUiText(contract.contractNumber, '—')}</span>
+                      <span>شماره عمومی: {sanitizeUiText(contract.contractNumber, '—')}</span>
+                      {contract.creatorSequenceNumber != null && (
+                        <span>شماره داخلی من: {contract.creatorSequenceNumber}</span>
+                      )}
                       <span>مبلغ: {formatCurrency(contract.totalAmount, sanitizeUiText(contract.currency, 'تومان'))}</span>
                       <span>تاریخ: {PersianCalendar.formatForDisplay(contract.createdAt)}</span>
                     </div>

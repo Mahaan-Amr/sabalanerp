@@ -60,7 +60,7 @@ export const Step1ContractDate: React.FC<Step1ContractDateProps> = ({
       
       <div className="max-w-md mx-auto">
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          شماره قرارداد
+          پیش‌نمایش شماره احتمالی قرارداد
         </label>
         <input
           type="text"
@@ -68,6 +68,9 @@ export const Step1ContractDate: React.FC<Step1ContractDateProps> = ({
           readOnly
           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
         />
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          شماره نهایی هنگام ثبت قرارداد در سرور قطعی می‌شود.
+        </p>
       </div>
     </div>
   );

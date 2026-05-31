@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useMemo } from 'react';
 import { FaPlus, FaTrash, FaChevronUp, FaChevronDown } from 'react-icons/fa';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
+import { formatDisplayNumber } from '@/lib/numberFormat';
 import type { ContractWizardData, DeliverySchedule, DeliveryProductItem } from '../../types/contract.types';
 
 interface Step6DeliveryScheduleProps {
@@ -83,12 +84,14 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
     updateWizardData({ deliveries: newDeliveries });
   };
 
-  // Total quantity already assigned for a product across deliveries, optionally excluding one delivery
+  const formatAmount = (value: number): string => formatDisplayNumber(value);
+
+  // Total delivery amount already assigned for a product across deliveries, optionally excluding one delivery
   const getTotalDeliveredForProduct = useCallback((productIndex: number, excludeDeliveryIndex?: number): number => {
     return wizardData.deliveries.reduce((sum, d, i) => {
       if (excludeDeliveryIndex !== undefined && i === excludeDeliveryIndex) return sum;
       const dp = d.products?.find(p => p.productIndex === productIndex);
-      return sum + (dp?.quantity ?? 0);
+      return sum + (dp?.amount ?? dp?.quantity ?? 0);
     }, 0);
   }, [wizardData.deliveries]);
 
@@ -100,13 +103,37 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
     if (quantity <= 0) {
       newProducts = current.filter(p => p.productIndex !== productIndex);
     } else if (existing) {
+      const unit = getDeliveryUnit(wizardData.products[productIndex]);
       newProducts = current.map(p =>
-        p.productIndex === productIndex ? { ...p, productId, quantity } : p
+        p.productIndex === productIndex ? { ...p, productId, quantity, amount: quantity, unit } : p
       );
     } else {
-      newProducts = [...current, { productIndex, productId, quantity }];
+      const unit = getDeliveryUnit(wizardData.products[productIndex]);
+      newProducts = [...current, { productIndex, productId, quantity, amount: quantity, unit }];
     }
     handleUpdateDelivery(deliveryIndex, { products: newProducts });
+  };
+
+  const getDeliveryUnit = (product: ContractWizardData['products'][number] | undefined): 'meter' | 'squareMeter' | 'count' => {
+    if (product?.productType === 'longitudinal') return 'meter';
+    if (product?.productType === 'slab') return 'squareMeter';
+    return 'count';
+  };
+
+  const getDeliveryTargetAmount = (product: ContractWizardData['products'][number]): number => {
+    const unit = getDeliveryUnit(product);
+    if (unit === 'meter') {
+      const lengthM = product.lengthUnit === 'm' ? product.length : (product.length || 0) / 100;
+      return lengthM * (product.quantity || 0);
+    }
+    if (unit === 'squareMeter') return product.squareMeters || 0;
+    return product.quantity || 0;
+  };
+
+  const getDeliveryUnitLabel = (unit: 'meter' | 'squareMeter' | 'count') => {
+    if (unit === 'meter') return 'متر';
+    if (unit === 'squareMeter') return 'متر مربع';
+    return 'عدد';
   };
 
   return (
@@ -247,14 +274,16 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                       محصولات این تحویل
                     </h6>
                     <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">
-                      تعداد هر محصول را برای این تحویل مشخص کنید. مجموع تعدادها نباید از تعداد کل قرارداد بیشتر شود.
+                      مقدار تحویل هر محصول را با واحد خودش مشخص کنید. مجموع تحویل‌ها نباید از مقدار کل قرارداد بیشتر شود.
                     </p>
                     <div className="space-y-4">
                       {wizardData.products.map((product, productIndex) => {
-                        const contractQty = product.quantity ?? 0;
+                        const deliveryUnit = getDeliveryUnit(product);
+                        const contractQty = getDeliveryTargetAmount(product);
                         const alreadyAssigned = getTotalDeliveredForProduct(productIndex, index);
                         const maxForThisDelivery = Math.max(0, contractQty - alreadyAssigned);
-                        const currentQty = delivery.products?.find(p => p.productIndex === productIndex)?.quantity ?? 0;
+                        const currentDeliveryProduct = delivery.products?.find(p => p.productIndex === productIndex);
+                        const currentQty = currentDeliveryProduct?.amount ?? currentDeliveryProduct?.quantity ?? 0;
                         const remaining = maxForThisDelivery;
                         const productLabel = product.stoneName || product.product?.namePersian || `محصول ${productIndex + 1}`;
                         const setQty = (value: number) => handleDeliveryProductQuantityChange(index, productIndex, Math.max(0, Math.min(maxForThisDelivery, value)), product.productId);
@@ -282,6 +311,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                                   onChange={(value) => handleDeliveryProductQuantityChange(index, productIndex, value, product.productId)}
                                   min={0}
                                   max={maxForThisDelivery}
+                                  step={deliveryUnit === 'count' ? 1 : 0.01}
                                   className="w-20 px-2 py-1.5 text-sm text-center border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
                                 />
                                 <button
@@ -297,13 +327,13 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                             </div>
                             <div className="flex flex-wrap items-center gap-3 text-xs">
                               <span className="text-gray-500 dark:text-gray-400">
-                                کل قرارداد: <strong className="text-gray-700 dark:text-gray-300">{contractQty}</strong>
+                                کل قرارداد: <strong className="text-gray-700 dark:text-gray-300">{formatAmount(contractQty)} {getDeliveryUnitLabel(deliveryUnit)}</strong>
                               </span>
                               <span className="text-gray-500 dark:text-gray-400">
-                                ارسال‌شده در تحویل‌های دیگر: <strong className="text-gray-700 dark:text-gray-300">{alreadyAssigned}</strong>
+                                ارسال‌شده در تحویل‌های دیگر: <strong className="text-gray-700 dark:text-gray-300">{formatAmount(alreadyAssigned)} {getDeliveryUnitLabel(deliveryUnit)}</strong>
                               </span>
                               <span className="text-teal-600 dark:text-teal-400 font-medium">
-                                مانده: <strong>{remaining}</strong>
+                                مانده: <strong>{formatAmount(remaining)} {getDeliveryUnitLabel(deliveryUnit)}</strong>
                               </span>
                               {remaining > 0 && currentQty < remaining && (
                                 <button
@@ -311,7 +341,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                                   onClick={() => setQty(remaining)}
                                   className="text-teal-600 dark:text-teal-400 hover:underline font-medium"
                                 >
-                                  پر کردن ({remaining})
+                                  پر کردن ({formatAmount(remaining)})
                                 </button>
                               )}
                             </div>
@@ -340,4 +370,3 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
     </div>
   );
 };
-

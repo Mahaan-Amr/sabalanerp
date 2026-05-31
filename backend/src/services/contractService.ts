@@ -1,8 +1,8 @@
 ﻿// Contract service
 // Handles contract business logic
 
-import { PrismaClient } from '@prisma/client';
-import { generateContractNumber } from './contractNumberService';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { generateContractNumberAssignment } from './contractNumberService';
 
 const prisma = new PrismaClient();
 
@@ -36,45 +36,67 @@ export async function createContract(
   data: CreateContractData,
   userId: string
 ) {
-  // Generate contract number
-  const contractNumber = await generateContractNumber(userId);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const { contractNumber, creatorSequenceNumber } = await generateContractNumberAssignment(userId, tx);
+        const previousContractNumber = data.contractData?.contractNumber;
+        const contractData = {
+          ...(data.contractData || {}),
+          contractNumber,
+          creatorSequenceNumber
+        };
+        const content = previousContractNumber
+          ? String(data.content).split(String(previousContractNumber)).join(contractNumber)
+          : data.content;
 
-  // Create contract
-  const contract = await prisma.salesContract.create({
-    data: {
-      contractNumber,
-      title: data.title,
-      titlePersian: data.titlePersian,
-      content: data.content,
-      customerId: data.customerId,
-      departmentId: data.departmentId,
-      templateId: data.templateId || null,
-      createdBy: userId,
-      totalAmount: data.totalAmount ? parseFloat(String(data.totalAmount)) : null,
-      currency: data.currency || 'تومان',
-      notes: data.notes || null,
-      contractData: data.contractData || null,
-    },
-    include: {
-      customer: {
-        include: {
-          primaryContact: true
-        }
-      },
-      department: true,
-      template: true,
-      createdByUser: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          username: true,
-        }
+        return tx.salesContract.create({
+          data: {
+            contractNumber,
+            creatorSequenceNumber,
+            title: data.title,
+            titlePersian: data.titlePersian,
+            content,
+            customerId: data.customerId,
+            departmentId: data.departmentId,
+            templateId: data.templateId || null,
+            createdBy: userId,
+            totalAmount: data.totalAmount ? parseFloat(String(data.totalAmount)) : null,
+            currency: data.currency || 'تومان',
+            notes: data.notes || null,
+            contractData
+          },
+          include: {
+            customer: {
+              include: {
+                primaryContact: true
+              }
+            },
+            department: true,
+            template: true,
+            createdByUser: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                username: true,
+              }
+            }
+          }
+        });
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002' &&
+        attempt < 2
+      ) {
+        continue;
       }
+      throw error;
     }
-  });
-
-  return contract;
+  }
+  throw new Error('Unable to create contract number after retry');
 }
 
 /**

@@ -955,8 +955,8 @@ export default function PermissionsManagementPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6">
-        <div className="max-w-7xl mx-auto">
+      <div className="mx-auto w-full max-w-7xl">
+        <div>
           <div className="glass-liquid-card p-8 text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-400 mx-auto mb-4"></div>
             <p className="text-gray-300">در حال بارگذاری...</p>
@@ -969,8 +969,8 @@ export default function PermissionsManagementPage() {
   // Check if user is not admin or manager
   if (currentUser && !['ADMIN', 'MANAGER'].includes(currentUser.role)) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6">
-        <div className="max-w-7xl mx-auto">
+      <div className="mx-auto w-full max-w-7xl">
+        <div>
           <div className="glass-liquid-card p-8 text-center">
             <FaLock className="h-16 w-16 text-red-400 mx-auto mb-4" />
             <h1 className="text-2xl font-bold text-white mb-4">دسترسی محدود</h1>
@@ -990,10 +990,10 @@ export default function PermissionsManagementPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6">
-      <div className="max-w-7xl mx-auto">
+    <div className="mx-auto w-full max-w-7xl">
+      <div className="space-y-6">
         {/* Header */}
-        <div className="glass-liquid-card p-6 mb-6">
+        <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-white mb-2">مدیریت مجوزهای کاربران</h1>
@@ -1003,7 +1003,7 @@ export default function PermissionsManagementPage() {
         </div>
 
         {canManageRoleDefaults && (
-        <div className="glass-liquid-card p-2 mb-6">
+        <div className="glass-liquid-card p-2">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             <button
               type="button"
@@ -1032,7 +1032,7 @@ export default function PermissionsManagementPage() {
         )}
 
         {feedback && (
-          <div className={`mb-6 rounded-lg border p-4 ${
+          <div className={`rounded-lg border p-4 ${
             feedback.type === 'success'
               ? 'bg-green-500/10 border-green-500/30 text-green-200'
               : 'bg-red-500/10 border-red-500/30 text-red-200'

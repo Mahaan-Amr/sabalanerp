@@ -153,7 +153,7 @@ export default function CreateDepartmentPage() {
                   name="isActive"
                   checked={formData.isActive}
                   onChange={handleInputChange}
-                  className="rounded border-gray-600 bg-gray-700 text-teal-500 focus:ring-teal-500"
+                  className="rounded border-slate-300 bg-white text-[#074747] focus:ring-[#074747] dark:border-slate-600 dark:bg-slate-800 dark:text-teal-400 dark:focus:ring-teal-500"
                 />
                 <span className="text-secondary">فعال باشد</span>
               </label>

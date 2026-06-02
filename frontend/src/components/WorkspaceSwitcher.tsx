@@ -104,11 +104,11 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
         >
           <div className="flex items-center gap-4">
             <div className="glass-liquid-card p-3">
-              <FaHome className="h-6 w-6 text-gray-400" />
+              <FaHome className="h-6 w-6 text-slate-700 dark:text-slate-300" />
             </div>
             <div className="flex-1">
-              <h3 className="text-white font-semibold">داشبورد اصلی</h3>
-              <p className="text-gray-400 text-sm">نمای کلی سیستم</p>
+              <h3 className="font-semibold text-slate-950 dark:text-white">داشبورد اصلی</h3>
+              <p className="text-sm text-slate-900 dark:text-slate-300">نمای کلی سیستم</p>
             </div>
           </div>
         </div>
@@ -131,8 +131,8 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
                   <Icon className={`h-6 w-6 text-${workspace.color}-400`} />
                 </div>
                 <div className="flex-1">
-                  <h3 className="text-white font-semibold">{workspace.namePersian}</h3>
-                  <p className="text-gray-400 text-sm">{workspace.description}</p>
+                  <h3 className="font-semibold text-slate-950 dark:text-white">{workspace.namePersian}</h3>
+                  <p className="text-sm text-slate-900 dark:text-slate-300">{workspace.description}</p>
                   <div className="mt-2">
                     {getPermissionBadge(workspace.id)}
                   </div>
@@ -154,7 +154,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
           className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-all duration-200 ${
             !currentWorkspace 
               ? 'bg-teal-500/20 text-teal-400 border border-teal-500/30' 
-              : 'text-gray-300 hover:bg-white/5 hover:text-white'
+              : 'text-slate-950 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white'
           }`}
         >
           <FaHome className="h-5 w-5" />
@@ -173,7 +173,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
               className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-all duration-200 ${
                 isActive 
                   ? `bg-${workspace.color}-500/20 text-${workspace.color}-400 border border-${workspace.color}-500/30` 
-                  : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                  : 'text-slate-950 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white'
               }`}
             >
               <Icon className="h-5 w-5" />
@@ -199,8 +199,8 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
           </div>
           {showLabel && (
             <div className="text-right">
-              <p className="text-white font-medium">{currentInfo.namePersian}</p>
-              <p className="text-gray-400 text-sm">فضای کاری فعال</p>
+              <p className="font-medium text-slate-950 dark:text-white">{currentInfo.namePersian}</p>
+              <p className="text-sm text-slate-900 dark:text-slate-300">فضای کاری فعال</p>
             </div>
           )}
         </div>
@@ -223,7 +223,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
               className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-all duration-200 ${
                 !currentWorkspace 
                   ? 'bg-teal-500/20 text-teal-400' 
-                  : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                  : 'text-slate-950 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white'
               }`}
             >
               <FaHome className="h-5 w-5" />
@@ -245,7 +245,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
                   className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-all duration-200 ${
                     isActive 
                       ? `bg-${workspace.color}-500/20 text-${workspace.color}-400` 
-                      : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                      : 'text-slate-950 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white'
                   }`}
                 >
                   <Icon className="h-5 w-5" />

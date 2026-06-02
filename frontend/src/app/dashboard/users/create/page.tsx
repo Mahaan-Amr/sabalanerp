@@ -445,7 +445,7 @@ export default function CreateUserPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-600 dark:text-slate-400"
                 >
                   {showPassword ? <FaEyeSlash /> : <FaEye />}
                 </button>
@@ -467,7 +467,7 @@ export default function CreateUserPage() {
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-600 dark:text-slate-400"
                 >
                   {showConfirmPassword ? <FaEyeSlash /> : <FaEye />}
                 </button>
@@ -525,7 +525,7 @@ export default function CreateUserPage() {
                 name="isActive"
                 checked={formData.isActive}
                 onChange={handleInputChange}
-                className="rounded border-gray-600 bg-gray-700 text-teal-500 focus:ring-teal-500"
+                className="rounded border-slate-300 bg-white text-[#074747] focus:ring-[#074747] dark:border-slate-600 dark:bg-slate-800 dark:text-teal-400 dark:focus:ring-teal-500"
               />
               <span className="text-secondary">کاربر فعال</span>
             </label>
@@ -564,13 +564,13 @@ export default function CreateUserPage() {
                   onClick={() => applyPermissionPreset(preset.id)}
                   className={`text-right p-4 rounded-lg border transition-all duration-200 ${
                     selectedPresetId === preset.id
-                      ? 'bg-teal-500/20 border-teal-400/60 text-teal-100'
-                      : 'bg-gray-800/40 border-gray-700 text-secondary hover:border-teal-500/40 hover:bg-teal-500/10'
+                      ? 'border-[#074747]/50 bg-[#074747]/10 text-[#074747] dark:border-teal-400/60 dark:bg-teal-500/20 dark:text-teal-100'
+                      : 'border-slate-200 bg-white text-slate-950 hover:border-[#074747]/40 hover:bg-[#074747]/5 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-200 dark:hover:border-teal-500/40 dark:hover:bg-teal-500/10'
                   }`}
                 >
                   <span className="block text-primary font-medium mb-1">{preset.label}</span>
                   <span className="block text-sm text-secondary">{preset.description}</span>
-                  <span className="block text-xs text-teal-300 mt-3">
+                  <span className="mt-3 block text-xs font-semibold text-[#074747] dark:text-teal-300">
                     نقش پیشنهادی: {preset.recommendedRole}
                   </span>
                 </button>
@@ -594,7 +594,7 @@ export default function CreateUserPage() {
                         value={permission}
                         checked={getCurrentPermission(workspace) === permission}
                         onChange={() => handleWorkspacePermissionChange(workspace, permission)}
-                        className="text-teal-500 focus:ring-teal-500"
+                        className="text-[#074747] focus:ring-[#074747] dark:text-teal-400 dark:focus:ring-teal-500"
                       />
                       <span className="text-secondary text-sm">
                         {PERMISSION_LABELS[permission as keyof typeof PERMISSION_LABELS]}
@@ -609,9 +609,9 @@ export default function CreateUserPage() {
                       value="none"
                       checked={getCurrentPermission(workspace) === 'none'}
                       onChange={() => handleWorkspacePermissionChange(workspace, 'none')}
-                      className="text-gray-500 focus:ring-gray-500"
+                      className="text-slate-500 focus:ring-slate-500"
                     />
-                    <span className="text-gray-500 text-sm">بدون دسترسی</span>
+                    <span className="text-sm text-slate-900 dark:text-slate-300">بدون دسترسی</span>
                   </label>
                 </div>
               </div>
@@ -623,7 +623,7 @@ export default function CreateUserPage() {
         <div className="glass-liquid-card p-6">
           <h2 className="text-xl font-bold text-primary mb-4">بازبینی نهایی</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div className="p-4 rounded-lg bg-gray-800/40 border border-gray-700">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/40">
               <p className="text-secondary mb-2">کاربر</p>
               <p className="text-primary font-medium">
                 {formData.firstName || 'نام'} {formData.lastName || 'نام خانوادگی'}
@@ -631,19 +631,19 @@ export default function CreateUserPage() {
               <p className="text-secondary mt-1">{formData.email || 'ایمیل وارد نشده'}</p>
               <p className="text-secondary mt-2">نقش انتخاب‌شده: {formData.role}</p>
               {selectedPreset && selectedPreset.recommendedRole !== formData.role && (
-                <p className="text-amber-300 mt-2">
+                <p className="mt-2 font-medium text-amber-700 dark:text-amber-300">
                   نقش پیشنهادی این الگو: {selectedPreset.recommendedRole}
                 </p>
               )}
             </div>
-            <div className="p-4 rounded-lg bg-gray-800/40 border border-gray-700">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/40">
               <p className="text-secondary mb-2">دسترسی‌ها</p>
               {workspacePermissions.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {workspacePermissions.map((permission) => (
                     <span
                       key={permission.workspace}
-                      className="px-3 py-1 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-200"
+                      className="rounded-full border border-[#074747]/25 bg-[#074747]/10 px-3 py-1 text-[#074747] dark:border-teal-500/30 dark:bg-teal-500/15 dark:text-teal-200"
                     >
                       {getWorkspacePermissionLabel(permission)}
                     </span>
@@ -651,8 +651,8 @@ export default function CreateUserPage() {
                 </div>
               ) : (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-                  <p className="text-amber-200 font-medium">هیچ دسترسی فضای کاری انتخاب نشده است</p>
-                  <p className="text-amber-100/80 mt-1">
+                  <p className="font-medium text-amber-800 dark:text-amber-200">هیچ دسترسی فضای کاری انتخاب نشده است</p>
+                  <p className="mt-1 text-amber-700 dark:text-amber-100/80">
                     کاربر ایجاد می‌شود، اما تا زمان افزودن دسترسی مستقیم یا نقش مناسب، دسترسی عملی محدودی خواهد داشت.
                   </p>
                 </div>

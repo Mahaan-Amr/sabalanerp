@@ -543,7 +543,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           } ${
             isActive
               ? 'bg-teal-500/20 text-teal-400 border border-teal-500/30'
-              : 'text-gray-300 hover:bg-white/5 hover:text-white'
+              : 'text-slate-950 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white'
           }`}
         >
           {hasChildren ? (
@@ -582,7 +582,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
   return (
     <div className={`flex flex-col h-full ${className}`}>
       {/* Collapse Toggle */}
-      <div className="p-4 border-b border-gray-700/50 flex-shrink-0">
+      <div className="flex-shrink-0 border-b border-slate-200 p-4 dark:border-gray-700/50">
         <button
           onClick={handleToggleCollapse}
           className="glass-liquid-btn w-full flex items-center justify-center gap-2"
@@ -593,23 +593,23 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
       </div>
 
       {/* Navigation Items */}
-      <nav className="flex-1 p-4 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
+      <nav className="scrollbar-thin flex-1 space-y-2 overflow-y-auto p-4 scrollbar-thumb-slate-300 scrollbar-track-slate-100 dark:scrollbar-thumb-gray-600 dark:scrollbar-track-gray-800">
         {navigationItems.map(item => renderNavigationItem(item))}
       </nav>
 
       {/* Workspace Info */}
       {!collapsed && currentWorkspace && (
-        <div className="p-4 border-t border-gray-700/50 flex-shrink-0">
+        <div className="flex-shrink-0 border-t border-slate-200 p-4 dark:border-gray-700/50">
           <div className="glass-liquid-card p-3">
             <div className="flex items-center gap-3">
               <div className="glass-liquid-card p-2">
                 <FaShieldAlt className="h-4 w-4 text-teal-400" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-white text-sm font-medium truncate">
+                <p className="truncate text-sm font-medium text-slate-950 dark:text-white">
                   {WORKSPACE_CONFIG[currentWorkspace].namePersian}
                 </p>
-                <p className="text-gray-400 text-xs truncate">
+                <p className="truncate text-xs text-slate-900 dark:text-slate-300">
                   {WORKSPACE_CONFIG[currentWorkspace].description}
                 </p>
               </div>

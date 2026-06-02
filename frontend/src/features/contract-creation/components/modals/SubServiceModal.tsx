@@ -5,7 +5,7 @@ import React from 'react';
 import { FaTimes } from 'react-icons/fa';
 import type { ContractWizardData, SubService, AppliedSubService } from '../../types/contract.types';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
-import { formatDisplayNumber, formatPrice } from '@/lib/numberFormat';
+import { formatDisplayNumber, formatPrice, sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 
 interface SubServiceModalProps {
   isOpen: boolean;
@@ -354,7 +354,7 @@ export const SubServiceModal: React.FC<SubServiceModalProps> = ({
                       const existingSubServices = currentProduct.appliedSubServices || [];
                       const allAppliedSubServices = [...existingSubServices, ...appliedSubServices];
                       
-                      const totalSubServiceCost = allAppliedSubServices.reduce((sum, applied) => sum + applied.cost, 0);
+                      const totalSubServiceCost = sumNumericValues(allAppliedSubServices, (applied) => applied.cost);
                       const usedLength = allAppliedSubServices
                         .filter(applied => applied.calculationBase === 'length')
                         .reduce((sum, applied) => sum + applied.meter, 0);
@@ -363,7 +363,7 @@ export const SubServiceModal: React.FC<SubServiceModalProps> = ({
                         .reduce((sum, applied) => sum + applied.meter, 0);
                       
                       // Calculate base price without sub-services (preserve it)
-                      const basePriceWithoutSubServices = currentProduct.totalPrice - (currentProduct.totalSubServiceCost || 0);
+                      const basePriceWithoutSubServices = toFiniteNumber(currentProduct.totalPrice) - toFiniteNumber(currentProduct.totalSubServiceCost);
                       
                       // Update product with sub-services
                       const updatedProducts = [...wizardData.products];

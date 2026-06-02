@@ -2,6 +2,7 @@
 // Handles validation for products, deliveries, payments, and wizard steps
 
 import type { ContractProduct, DeliverySchedule, PaymentMethod, ContractWizardData } from '../types/contract.types';
+import { sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 
 /**
  * Validate a product configuration
@@ -64,9 +65,9 @@ export const validateDelivery = (
       if (product) {
         const totalDelivered = delivery.products
           .filter(p => p.productIndex === deliveryProduct.productIndex)
-          .reduce((sum, p) => sum + p.quantity, 0);
+          .reduce((sum, p) => sum + toFiniteNumber(p.quantity), 0);
         
-        if (totalDelivered > product.quantity) {
+        if (totalDelivered > toFiniteNumber(product.quantity)) {
           errors.push(`تعداد تحویل برای ${product.stoneName} بیشتر از تعداد محصول است`);
         }
       }
@@ -93,16 +94,17 @@ export const validatePayment = (
   }
   
   if (payment.payments && payment.payments.length > 0) {
-    const totalPaymentAmount = payment.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+    const totalPaymentAmount = sumNumericValues(payment.payments, (paymentEntry) => paymentEntry.amount);
+    const normalizedContractAmount = toFiniteNumber(totalContractAmount);
     
-    if (Math.abs(totalPaymentAmount - totalContractAmount) > 0.01) {
-      errors.push(`جمع پرداخت‌ها (${totalPaymentAmount}) باید با مبلغ کل قرارداد (${totalContractAmount}) برابر باشد`);
+    if (Math.abs(totalPaymentAmount - normalizedContractAmount) > 0.01) {
+      errors.push(`جمع پرداخت‌ها (${totalPaymentAmount}) باید با مبلغ کل قرارداد (${normalizedContractAmount}) برابر باشد`);
     }
     
     // Validate individual payment entries (CASH_CARD | CASH_SHIBA | CHECK)
     for (const paymentEntry of payment.payments) {
       const method = (paymentEntry as { method?: string }).method;
-      if (!paymentEntry.amount || paymentEntry.amount <= 0) {
+      if (toFiniteNumber(paymentEntry.amount) <= 0) {
         errors.push('مبلغ پرداخت باید بزرگ‌تر از صفر باشد');
       }
       if (method === 'CASH_CARD' || method === 'CASH_SHIBA') {
@@ -187,7 +189,7 @@ export const validateWizardStep = (
       } else {
         // Validate all products are distributed
         const totalProductQuantities = wizardData.products.reduce((acc, p) => {
-          acc[p.productId] = p.quantity;
+          acc[p.productId] = toFiniteNumber(p.quantity);
           return acc;
         }, {} as Record<string, number>);
         
@@ -197,7 +199,7 @@ export const validateWizardStep = (
             if (!deliveredQuantities[dp.productId]) {
               deliveredQuantities[dp.productId] = 0;
             }
-            deliveredQuantities[dp.productId] += dp.quantity;
+            deliveredQuantities[dp.productId] += toFiniteNumber(dp.quantity);
           });
         });
         
@@ -221,7 +223,7 @@ export const validateWizardStep = (
       break;
       
     case 6: // Payment Method
-      const contractTotal = wizardData.products.reduce((sum, p) => sum + (p.totalPrice || 0), 0);
+      const contractTotal = sumNumericValues(wizardData.products, (product) => product.totalPrice);
       const paymentValidation = validatePayment(wizardData.payment, contractTotal);
       if (!paymentValidation.isValid) {
         errors.payment = paymentValidation.errors.join(', ');

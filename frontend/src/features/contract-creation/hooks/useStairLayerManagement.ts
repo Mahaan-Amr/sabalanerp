@@ -13,6 +13,7 @@ import {
   convertMetersToUnit,
   getPricingLengthMeters
 } from '../utils/stairCalculations';
+import { toFiniteNumber } from '@/lib/numberFormat';
 
 interface UseStairLayerManagementProps {
   getDraftByPart: (part: StairStepperPart) => StairPartDraftV2 | null;
@@ -180,7 +181,7 @@ export const useStairLayerManagement = ({
       const newLengthValue = convertMetersToUnit(newLengthMeters, newLengthUnit);
 
       const currentSqm = item.squareMeters || 0;
-      const currentTotal = typeof item.totalPrice === 'number' ? item.totalPrice : parseFloat(String(item.totalPrice || 0));
+      const currentTotal = toFiniteNumber(item.totalPrice);
 
       if (Math.abs(newLayerSqm - currentSqm) < 0.0001 &&
           Math.abs(newTotalPrice - (currentTotal || 0)) < 0.5 &&

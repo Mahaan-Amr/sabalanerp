@@ -141,6 +141,7 @@ export default function CreateUserPage() {
     lastName: '',
     email: '',
     username: '',
+    phone: '',
     password: '',
     confirmPassword: '',
     role: 'USER',
@@ -302,6 +303,7 @@ export default function CreateUserPage() {
         lastName: formData.lastName,
         email: formData.email,
         username: formData.username,
+        phone: formData.phone,
         password: formData.password,
         role: formData.role,
         departmentId: formData.departmentId,
@@ -412,6 +414,19 @@ export default function CreateUserPage() {
                 className="glass-liquid-input w-full"
                 placeholder="نام کاربری"
                 required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-secondary mb-2">شماره تماس</label>
+              <input
+                type="tel"
+                name="phone"
+                value={formData.phone}
+                onChange={handleInputChange}
+                className="glass-liquid-input w-full"
+                placeholder="09123456789"
+                dir="ltr"
               />
             </div>
             

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import type { ContractWizardData } from '../types/contract.types';
 import { salesAPI } from '@/lib/api';
 import { PersianCalendar } from '@/lib/persian-calendar';
+import { sumNumericValues } from '@/lib/numberFormat';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
@@ -80,7 +81,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     setLoading(true);
     try {
       // Calculate total amount
-      const totalAmount = wizardData.products.reduce((sum, product) => sum + product.totalPrice, 0);
+      const totalAmount = sumNumericValues(wizardData.products, (product) => product.totalPrice);
       
       // Create contract
       const contractData = {

@@ -6,6 +6,7 @@ import type {
   StairStepperPart,
   ContractProduct
 } from '../types/contract.types';
+import { sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 
 /**
  * Check if a draft has any layer edge selection
@@ -75,16 +76,16 @@ export const getPartDisplayLabel = (part: StairStepperPart): string => {
  */
 export const getProductCuttingCost = (product: ContractProduct): number => {
   if (product.cuttingBreakdown && product.cuttingBreakdown.length > 0) {
-    return product.cuttingBreakdown.reduce((sum, entry) => sum + (entry.cost || 0), 0);
+    return sumNumericValues(product.cuttingBreakdown, (entry) => entry.cost);
   }
-  return product.isCut ? product.cuttingCost || 0 : 0;
+  return product.isCut ? toFiniteNumber(product.cuttingCost) : 0;
 };
 
 /**
  * Calculate total service cost (tools + cutting) for a contract product
  */
 export const getProductServiceCost = (product: ContractProduct): number => {
-  const toolCost = product.totalSubServiceCost || 0;
+  const toolCost = toFiniteNumber(product.totalSubServiceCost);
   const cuttingCost = getProductCuttingCost(product);
   return toolCost + cuttingCost;
 };

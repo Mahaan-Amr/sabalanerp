@@ -4,6 +4,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { PaymentMethod, PaymentEntry } from '../types/contract.types';
 import { validatePayment } from '../services/validationService';
+import { sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 
 export const usePaymentMethod = (totalContractAmount: number) => {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>({
@@ -22,12 +23,12 @@ export const usePaymentMethod = (totalContractAmount: number) => {
 
   // Calculate total payment amount
   const totalPaymentAmount = useMemo(() => {
-    return paymentMethod.payments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
+    return sumNumericValues(paymentMethod.payments, (payment) => payment.amount);
   }, [paymentMethod.payments]);
 
   // Check if payment is balanced
   const isPaymentBalanced = useMemo(() => {
-    return Math.abs(totalPaymentAmount - totalContractAmount) < 0.01;
+    return Math.abs(totalPaymentAmount - toFiniteNumber(totalContractAmount)) < 0.01;
   }, [totalPaymentAmount, totalContractAmount]);
 
   // Add payment entry
@@ -69,14 +70,14 @@ export const usePaymentMethod = (totalContractAmount: number) => {
 
   // Auto-balance payments (distribute remaining amount)
   const autoBalancePayments = useCallback(() => {
-    const remaining = totalContractAmount - totalPaymentAmount;
+    const remaining = toFiniteNumber(totalContractAmount) - totalPaymentAmount;
     if (remaining <= 0 || paymentMethod.payments.length === 0) return;
 
     // Add remaining to first payment or create new payment
     if (paymentMethod.payments.length > 0) {
       const firstPayment = paymentMethod.payments[0];
       updatePaymentEntry(firstPayment.id, {
-        amount: (firstPayment.amount || 0) + remaining
+        amount: toFiniteNumber(firstPayment.amount) + remaining
       });
     } else {
       addPaymentEntry({

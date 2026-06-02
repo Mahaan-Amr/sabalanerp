@@ -27,6 +27,7 @@ import { salesAPI, dashboardAPI } from '@/lib/api';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import PersianCalendar from '@/lib/persian-calendar';
 import { getContractPermissions, User } from '@/lib/permissions';
+import { formatPrice, sumNumericValues } from '@/lib/numberFormat';
 import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
 
 interface Contract {
@@ -36,7 +37,7 @@ interface Contract {
   title: string;
   titlePersian: string;
   status: string;
-  totalAmount: number;
+  totalAmount: number | string | null;
   currency: string;
   createdAt: string;
   customer: {
@@ -100,8 +101,8 @@ const getStatusIcon = (status: string) => {
   }
 };
 
-const formatCurrency = (amount: number, currency: string) => {
-  return `${new Intl.NumberFormat('fa-IR').format(amount || 0)} ${currency}`;
+const formatCurrency = (amount: Contract['totalAmount'], currency: string) => {
+  return formatPrice(amount, currency);
 };
 
 const getCustomerName = (contract: Contract) =>
@@ -185,7 +186,7 @@ export default function ContractsPage() {
   }, [contracts, searchTerm, statusFilter]);
 
   const metrics: ErpMetric[] = useMemo(() => {
-    const totalAmount = filteredContracts.reduce((sum, contract) => sum + (contract.totalAmount || 0), 0);
+    const totalAmount = sumNumericValues(filteredContracts, (contract) => contract.totalAmount);
     return [
       { label: 'کل قراردادها', value: contracts.length.toLocaleString('fa-IR'), icon: FaFileContract, tone: 'primary' },
       { label: 'نتایج فعلی', value: filteredContracts.length.toLocaleString('fa-IR'), hint: statusFilter === 'ALL' ? 'همه وضعیت‌ها' : statusLabels[statusFilter], icon: FaEye, tone: 'info' },

@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { FaPlus, FaTrash, FaEdit, FaCheck } from 'react-icons/fa';
-import { formatPrice, formatDisplayNumber, tomanToRial } from '@/lib/numberFormat';
+import { formatPrice, formatDisplayNumber, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
 import type { ContractWizardData, PaymentEntry, PaymentEntryMethod } from '../../types/contract.types';
 
 function getPaymentMethodLabel(payment: PaymentEntry): string {
@@ -34,8 +34,9 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
   onAddPaymentEntry,
   onEditPaymentEntry
 }) => {
-  const paymentSum = wizardData.payment.payments.reduce((sum, p) => sum + p.amount, 0);
-  const remainingAmount = wizardData.payment.totalContractAmount - paymentSum;
+  const paymentSum = sumNumericValues(wizardData.payment.payments, (payment) => payment.amount);
+  const totalContractAmount = toFiniteNumber(wizardData.payment.totalContractAmount);
+  const remainingAmount = totalContractAmount - paymentSum;
   const paymentSumMatchesTotal = Math.abs(remainingAmount) < 0.01;
 
   const handleAddPaymentEntry = () => {
@@ -75,11 +76,11 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
               <span className="text-sm text-gray-600 dark:text-gray-400">مبلغ قرارداد:</span>
               <div className="mr-2">
                 <span className="font-semibold text-gray-800 dark:text-white">
-                  {formatPrice(wizardData.payment.totalContractAmount, wizardData.payment.currency)}
+                  {formatPrice(totalContractAmount, wizardData.payment.currency)}
                 </span>
                 {wizardData.payment.currency === 'تومان' && (
                   <span className="mr-2 text-xs text-gray-500 dark:text-gray-400">
-                    ({formatDisplayNumber(tomanToRial(wizardData.payment.totalContractAmount))} ریال)
+                    ({formatDisplayNumber(tomanToRial(totalContractAmount))} ریال)
                   </span>
                 )}
               </div>
@@ -121,7 +122,7 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
           {!paymentSumMatchesTotal && (
             <div className="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded">
               <p className="text-yellow-700 dark:text-yellow-300 text-sm">
-                مجموع پرداخت‌ها ({formatPrice(paymentSum, wizardData.payment.currency)}) با مبلغ قرارداد ({formatPrice(wizardData.payment.totalContractAmount, wizardData.payment.currency)}) برابر نیست
+                مجموع پرداخت‌ها ({formatPrice(paymentSum, wizardData.payment.currency)}) با مبلغ قرارداد ({formatPrice(totalContractAmount, wizardData.payment.currency)}) برابر نیست
               </p>
             </div>
           )}

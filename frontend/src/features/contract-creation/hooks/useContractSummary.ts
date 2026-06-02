@@ -3,7 +3,7 @@
 
 import { useMemo } from 'react';
 import type { ContractProduct, StairStepperPart } from '../types/contract.types';
-import { formatDisplayNumber, formatSquareMeters, formatPrice } from '@/lib/numberFormat';
+import { formatDisplayNumber, formatSquareMeters, formatPrice, toFiniteNumber } from '@/lib/numberFormat';
 
 interface ServiceEntry {
   key: string;
@@ -62,19 +62,9 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
   // Calculate products summary (total price, square meters, quantity)
   const productsSummary = useMemo<ProductsSummary>(() => {
     const summary = products.reduce((acc, product) => {
-      const totalPriceValue = typeof product.totalPrice === 'number'
-        ? product.totalPrice
-        : parseFloat(String(product.totalPrice || '0'));
-      const squareMetersValue = typeof product.squareMeters === 'number'
-        ? product.squareMeters
-        : parseFloat(String(product.squareMeters || '0'));
-      const quantityValue = typeof product.quantity === 'number'
-        ? product.quantity
-        : parseFloat(String(product.quantity || '0'));
-
-      acc.totalPrice += isNaN(totalPriceValue) ? 0 : totalPriceValue;
-      acc.totalSquareMeters += isNaN(squareMetersValue) ? 0 : squareMetersValue;
-      acc.totalQuantity += isNaN(quantityValue) ? 0 : quantityValue;
+      acc.totalPrice += toFiniteNumber(product.totalPrice);
+      acc.totalSquareMeters += toFiniteNumber(product.squareMeters);
+      acc.totalQuantity += toFiniteNumber(product.quantity);
       return acc;
     }, { totalPrice: 0, totalSquareMeters: 0, totalQuantity: 0 });
 
@@ -98,7 +88,7 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
             productName: productLabel,
             description: applied.subService?.namePersian || applied.subService?.name || 'نامشخص',
             amountLabel,
-            cost: applied.cost || 0,
+            cost: toFiniteNumber(applied.cost),
             meta: {
               rateLabel: applied.subService?.pricePerMeter
                 ? `${formatPrice(applied.subService.pricePerMeter, 'تومان')}/${unitLabel}`
@@ -116,7 +106,7 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
           productName: productLabel,
           description: product.finishingName || 'فینیشینگ',
           amountLabel: `${formatSquareMeters(product.finishingSquareMeters || product.squareMeters || 0)}`,
-          cost: product.finishingCost || 0,
+          cost: toFiniteNumber(product.finishingCost),
           meta: product.finishingPricePerSquareMeter
             ? {
                 rateLabel: `${formatPrice(product.finishingPricePerSquareMeter, 'تومان')}/متر مربع`
@@ -146,7 +136,7 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
           productName: productLabel,
           description: descriptionParts.length ? descriptionParts.join(' | ') : 'لایه',
           amountLabel: `${formatDisplayNumber(product.quantity || 0)} عدد | ${formatSquareMeters(product.squareMeters || 0)}`,
-          cost: typeof product.totalPrice === 'number' ? product.totalPrice : parseFloat(String(product.totalPrice || '0')) || 0,
+          cost: toFiniteNumber(product.totalPrice),
           meta: product.layerUseDifferentStone && product.layerStonePricePerSquareMeter
             ? {
                 rateLabel: `${formatPrice(product.layerStonePricePerSquareMeter, 'تومان')}/متر مربع${
@@ -186,7 +176,7 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
             productName: productLabel,
             description: cutDescription,
             amountLabel: metersLabel,
-            cost: cut.cost || 0,
+            cost: toFiniteNumber(cut.cost),
             meta: {
               rateLabel: cut.rate ? `${formatPrice(cut.rate, 'تومان')}/متر` : undefined
             }
@@ -205,7 +195,7 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
           productName: `${productLabel} (باقی‌مانده)`,
           description: partition.cutType === 'cross' ? 'برش عرضی باقی‌مانده' : 'برش طولی باقی‌مانده',
           amountLabel: `${formatDisplayNumber(partition.length * (partition.quantity || 1))} متر`,
-          cost: partition.cuttingCost || 0,
+          cost: toFiniteNumber(partition.cuttingCost),
           meta: {
             rateLabel: partition.cuttingCostPerMeter ? `${formatPrice(partition.cuttingCostPerMeter, 'تومان')}/متر` : undefined
           }
@@ -218,9 +208,9 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
   // Calculate service totals
   const serviceTotals = useMemo<ServiceTotals>(() => {
     return serviceEntries.reduce((acc, entry) => {
-      acc.total += entry.cost || 0;
+      acc.total += toFiniteNumber(entry.cost);
       acc.counts[entry.type] = (acc.counts[entry.type] || 0) + 1;
-      acc.amounts[entry.type] = (acc.amounts[entry.type] || 0) + (entry.cost || 0);
+      acc.amounts[entry.type] = (acc.amounts[entry.type] || 0) + toFiniteNumber(entry.cost);
       return acc;
     }, {
       total: 0,
@@ -248,10 +238,8 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
       if (product.isMandatory && product.mandatoryPercentage && product.mandatoryPercentage > 0) {
         partLabel = `${partLabel}/حکمی`;
       }
-      const pricePerSqmValue = product.pricePerSquareMeter || null;
-      const totalPriceValue = typeof product.totalPrice === 'number'
-        ? product.totalPrice
-        : parseFloat(String(product.totalPrice || '0')) || 0;
+      const pricePerSqmValue = toFiniteNumber(product.pricePerSquareMeter) || null;
+      const totalPriceValue = toFiniteNumber(product.totalPrice);
       // For layer products, get stone area used from meta
       const layerMeta = isLayer ? (product.meta as any) : null;
       const stoneAreaUsedSqm = layerMeta?.stoneAreaUsedSqm;
@@ -259,9 +247,9 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
         key: `product-price-${index}-${product.productId}`,
         name: product.stoneName || product.product?.namePersian || product.product?.name || `محصول ${index + 1}`,
         partLabel,
-        quantity: product.quantity || 0,
-        squareMeters: product.squareMeters || 0,
-        stoneAreaUsedSqm: stoneAreaUsedSqm || null,
+        quantity: toFiniteNumber(product.quantity),
+        squareMeters: toFiniteNumber(product.squareMeters),
+        stoneAreaUsedSqm: toFiniteNumber(stoneAreaUsedSqm) || null,
         isLayer,
         pricePerSquareMeter: pricePerSqmValue,
         totalPrice: totalPriceValue

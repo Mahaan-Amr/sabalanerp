@@ -1,6 +1,8 @@
 // Pricing calculation service
 // Handles all pricing calculations including mandatory pricing
 
+import { sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
+
 /**
  * Calculate base price from dimensions and price per square meter
  */
@@ -61,17 +63,17 @@ export const calculateFinalPrice = (data: {
 /**
  * Calculate total contract amount from products
  */
-export const calculateContractTotal = (products: Array<{ totalPrice: number }>): number => {
-  return products.reduce((sum, product) => sum + (product.totalPrice || 0), 0);
+export const calculateContractTotal = (products: Array<{ totalPrice: number | string | null | undefined }>): number => {
+  return sumNumericValues(products, (product) => product.totalPrice);
 };
 
 /**
  * Calculate sub-service costs
  */
 export const calculateSubServiceCosts = (subServices: Array<{
-  meter: number;
-  pricePerMeter: number;
+  meter: number | string | null | undefined;
+  pricePerMeter: number | string | null | undefined;
 }>): number => {
-  return subServices.reduce((sum, service) => sum + (service.meter * service.pricePerMeter), 0);
+  return subServices.reduce((sum, service) => sum + (toFiniteNumber(service.meter) * toFiniteNumber(service.pricePerMeter)), 0);
 };
 

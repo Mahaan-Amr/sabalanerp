@@ -24,6 +24,7 @@ import {
 import { salesAPI, dashboardAPI, crmAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
+import { formatPrice, sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 
 // Types from contract creation wizard
 interface CrmCustomer {
@@ -307,8 +308,8 @@ export default function ContractEditPage() {
               <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.widthValue && product.product?.thicknessValue ? `${product.product.widthValue} × ${product.product.thicknessValue}` : product.length && product.width ? `${product.length} × ${product.width}` : 'نامشخص'}</td>
               <td style="border: 1px solid #ddd; padding: 8px;">${product.quantity || 0}</td>
               <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.squareMeter || product.squareMeter || 'نامشخص'}</td>
-              <td style="border: 1px solid #ddd; padding: 8px;">${product.unitPrice ? `${product.unitPrice.toLocaleString('fa-IR')} ریال` : 'نامشخص'}</td>
-              <td style="border: 1px solid #ddd; padding: 8px;">${product.totalPrice ? `${product.totalPrice.toLocaleString('fa-IR')} ریال` : 'نامشخص'}</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">${toFiniteNumber(product.unitPrice) > 0 ? formatPrice(product.unitPrice, 'ریال') : 'نامشخص'}</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">${toFiniteNumber(product.totalPrice) > 0 ? formatPrice(product.totalPrice, 'ریال') : 'نامشخص'}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -357,7 +358,7 @@ export default function ContractEditPage() {
           <div style="margin: 20px 0;">
             <h3>اطلاعات پرداخت:</h3>
             <p><strong>نحوه پرداخت:</strong> ${data.payment.method}</p>
-            <p><strong>مبلغ کل:</strong> ${data.payment.totalAmount?.toLocaleString('fa-IR')} ریال</p>
+            <p><strong>مبلغ کل:</strong> ${formatPrice(data.payment.totalAmount, 'ریال')}</p>
           </div>
         ` : ''}
 
@@ -378,14 +379,14 @@ export default function ContractEditPage() {
     
     try {
       // Calculate total amount from products
-      const totalAmount = wizardData.products.reduce((sum, product) => sum + product.totalPrice, 0);
+      const totalAmount = sumNumericValues(wizardData.products, (product) => product.totalPrice);
       
       // Generate updated HTML content
       const updatedContent = generateContractHTML(wizardData);
       
       const updateData = {
         ...formData,
-        totalAmount: formData.totalAmount ? parseFloat(formData.totalAmount) : totalAmount,
+        totalAmount: formData.totalAmount ? toFiniteNumber(formData.totalAmount) : totalAmount,
         content: updatedContent,
         contractData: wizardData
       };
@@ -700,7 +701,7 @@ export default function ContractEditPage() {
                         </div>
                         <div className="text-right">
                           <span className="text-sm font-bold text-teal-600 dark:text-teal-400">
-                            {product.totalPrice.toLocaleString()} {product.currency}
+                            {formatPrice(product.totalPrice, product.currency)}
                           </span>
                         </div>
                         <button
@@ -850,7 +851,7 @@ export default function ContractEditPage() {
                     payment: {
                       ...wizardData.payment,
                       method,
-                      totalAmount: wizardData.products.reduce((sum, p) => sum + p.totalPrice, 0)
+                      totalAmount: sumNumericValues(wizardData.products, (product) => product.totalPrice)
                     }
                   });
                 }}
@@ -938,7 +939,7 @@ export default function ContractEditPage() {
               <div>
                 <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">مبلغ کل</label>
                 <FormattedNumberInput
-                  value={parseFloat(formData.totalAmount) || 0}
+                  value={toFiniteNumber(formData.totalAmount)}
                   onChange={(value) => setFormData(prev => ({ ...prev, totalAmount: value.toString() }))}
                   className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   placeholder="0"
@@ -981,7 +982,7 @@ export default function ContractEditPage() {
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
             <div className="text-sm text-slate-500 dark:text-slate-400">
-              مبلغ کل: {wizardData.products.reduce((sum, product) => sum + product.totalPrice, 0).toLocaleString('fa-IR')} ریال
+              مبلغ کل: {formatPrice(sumNumericValues(wizardData.products, (product) => product.totalPrice), 'ریال')}
             </div>
             <div className="flex items-center gap-3">
               <button

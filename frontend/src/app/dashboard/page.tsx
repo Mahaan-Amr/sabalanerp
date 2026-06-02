@@ -25,6 +25,7 @@ import { ErpActionGrid, ErpBadge, ErpEmptyState, ErpFieldView, ErpLoading, ErpPa
 import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
 import { useWorkspace, WORKSPACE_CONFIG } from '@/contexts/WorkspaceContext';
 import { dashboardAPI } from '@/lib/api';
+import { formatPrice } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
 import { CONTRACT_STATUS_LABELS } from '@/lib/persianText';
 
@@ -43,14 +44,14 @@ interface DashboardStats {
     total: number;
   };
   revenue: {
-    total: number;
-    average: number;
+    total: number | string | null;
+    average: number | string | null;
     completionRate: number;
   };
   recentContracts: RecentContract[];
   monthlyRevenue: Array<{
     month: string;
-    amount: number;
+    amount: number | string | null;
     count: number;
   }>;
 }
@@ -60,7 +61,7 @@ interface RecentContract {
   contractNumber: string;
   titlePersian: string;
   status: string;
-  totalAmount: number | null;
+  totalAmount: number | string | null;
   currency: string;
   customer: {
     firstName: string;
@@ -146,7 +147,7 @@ export default function DashboardPage() {
     }
   };
 
-  const formatAmount = (amount: number) => `${amount.toLocaleString('fa-IR')} ریال`;
+  const formatAmount = (amount: number | string | null | undefined) => formatPrice(amount, 'ریال');
   const formatDate = (dateString: string) => PersianCalendar.formatForDisplay(dateString);
 
   const getStatusIcon = (status: string) => {

@@ -27,7 +27,7 @@ import {
   type ErpTone,
 } from '@/components/erp';
 import { dashboardAPI, salesAPI } from '@/lib/api';
-import { formatPrice, formatSquareMeters } from '@/lib/numberFormat';
+import { formatDisplayNumber, formatPrice, formatSquareMeters, sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
 import { getContractPermissions, User as PermissionUser } from '@/lib/permissions';
 import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
@@ -39,7 +39,7 @@ interface Contract {
   titlePersian: string;
   content?: string;
   status: string;
-  totalAmount: number;
+  totalAmount: number | string | null;
   currency: string;
   notes?: string;
   contractData?: any;
@@ -104,7 +104,7 @@ const statusTones: Record<string, ErpTone> = {
   EXPIRED: 'neutral',
 };
 
-const formatCurrency = (amount: number, currency: string) => `${new Intl.NumberFormat('fa-IR').format(amount || 0)} ${currency}`;
+const formatCurrency = (amount: number | string | null | undefined, currency: string) => formatPrice(amount, currency);
 
 const getCustomerName = (contract: Contract) =>
   sanitizeUiTextWithCandidates(
@@ -294,10 +294,9 @@ export default function ContractDetailPage() {
   }
 
   const totalAmount =
-    contract.totalAmount ||
-    products.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0) ||
-    contract.contractData?.payment?.totalAmount ||
-    0;
+    toFiniteNumber(contract.totalAmount) ||
+    sumNumericValues(products, (item: any) => item.totalPrice) ||
+    toFiniteNumber(contract.contractData?.payment?.totalAmount);
 
   const canEdit = contract.status === 'DRAFT' && (contractPermissions.canEdit || contract.createdByUser.id === currentUser?.id);
   const canApprove = (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canApprove;
@@ -367,10 +366,10 @@ export default function ContractDetailPage() {
                   {products.map((item: any, index: number) => {
                     const product = item.product || item;
                     const productName = sanitizeUiTextWithCandidates([product.namePersian, product.name, item.namePersian, item.name], `محصول ${index + 1}`);
-                    const quantity = item.quantity || 0;
-                    const squareMeters = item.squareMeters || product.squareMeter || 0;
-                    const unitPrice = item.unitPrice || item.pricePerSquareMeter || 0;
-                    const itemTotal = item.totalPrice || 0;
+                    const quantity = toFiniteNumber(item.quantity);
+                    const squareMeters = item.squareMeters ?? product.squareMeter ?? 0;
+                    const unitPrice = item.unitPrice ?? item.pricePerSquareMeter ?? 0;
+                    const itemTotal = item.totalPrice ?? 0;
 
                     return (
                       <div key={`${productName}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
@@ -384,10 +383,10 @@ export default function ContractDetailPage() {
                           <ErpBadge tone="primary">{formatCurrency(itemTotal, sanitizeUiText(item.currency || contract.currency, 'تومان'))}</ErpBadge>
                         </div>
                         <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-                          <ErpFieldView label="تعداد" value={quantity.toLocaleString?.('fa-IR') || quantity} />
-                          <ErpFieldView label="متراژ" value={typeof squareMeters === 'number' ? formatSquareMeters(squareMeters) : squareMeters} />
-                          <ErpFieldView label="قیمت واحد" value={unitPrice ? formatPrice(unitPrice, sanitizeUiText(item.currency || contract.currency, 'تومان')) : 'نامشخص'} />
-                          <ErpFieldView label="جمع" value={itemTotal ? formatPrice(itemTotal, sanitizeUiText(item.currency || contract.currency, 'تومان')) : 'نامشخص'} tone="primary" />
+                          <ErpFieldView label="تعداد" value={formatDisplayNumber(quantity)} />
+                          <ErpFieldView label="متراژ" value={formatSquareMeters(squareMeters)} />
+                          <ErpFieldView label="قیمت واحد" value={toFiniteNumber(unitPrice) > 0 ? formatPrice(unitPrice, sanitizeUiText(item.currency || contract.currency, 'تومان')) : 'نامشخص'} />
+                          <ErpFieldView label="جمع" value={toFiniteNumber(itemTotal) > 0 ? formatPrice(itemTotal, sanitizeUiText(item.currency || contract.currency, 'تومان')) : 'نامشخص'} tone="primary" />
                         </div>
                       </div>
                     );

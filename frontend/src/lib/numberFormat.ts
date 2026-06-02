@@ -20,6 +20,24 @@ export const parseFormattedNumber = (formattedValue: string): number => {
   return isNaN(num) ? 0 : num;
 };
 
+export type NumericValue = number | string | null | undefined;
+
+export const toFiniteNumber = (value: NumericValue): number => {
+  if (value === null || value === undefined || value === '') {
+    return 0;
+  }
+
+  const num = typeof value === 'string' ? parseFormattedNumber(value) : value;
+  return Number.isFinite(num) ? num : 0;
+};
+
+export const sumNumericValues = <T>(
+  items: T[],
+  selector: (item: T) => NumericValue
+): number => {
+  return items.reduce((sum, item) => sum + toFiniteNumber(selector(item)), 0);
+};
+
 export const formatNumber = (
   value: number | string | null | undefined,
   options: {
@@ -33,9 +51,9 @@ export const formatNumber = (
     return '0';
   }
 
-  const num = typeof value === 'string' ? parseFormattedNumber(value) : value;
+  const num = toFiniteNumber(value);
 
-  if (isNaN(num)) {
+  if (!Number.isFinite(num)) {
     return '0';
   }
 
@@ -63,8 +81,8 @@ export const formatDisplayNumber = (value: number | string | null | undefined): 
   if (value === null || value === undefined || value === '') {
     return '0';
   }
-  const num = typeof value === 'string' ? parseFormattedNumber(value) : value;
-  if (isNaN(num)) return '0';
+  const num = toFiniteNumber(value);
+  if (!Number.isFinite(num)) return '0';
   const roundedValue = Math.round(num * 100) / 100;
 
   return formatNumber(roundedValue, {
@@ -78,8 +96,8 @@ export const formatDisplayNumberLatin = (value: number | string | null | undefin
   if (value === null || value === undefined || value === '') {
     return '0';
   }
-  const num = typeof value === 'string' ? parseFormattedNumber(value) : value;
-  if (isNaN(num)) return '0';
+  const num = toFiniteNumber(value);
+  if (!Number.isFinite(num)) return '0';
   const roundedValue = Math.round(num * 100) / 100;
 
   return roundedValue.toLocaleString('en-US', {
@@ -112,8 +130,8 @@ export const tomanToRial = (tomanValue: number | string | null | undefined): num
   if (tomanValue === null || tomanValue === undefined || tomanValue === '') {
     return 0;
   }
-  const num = typeof tomanValue === 'string' ? parseFormattedNumber(tomanValue) : tomanValue;
-  if (isNaN(num)) return 0;
+  const num = toFiniteNumber(tomanValue);
+  if (!Number.isFinite(num)) return 0;
   return num * 10;
 };
 
@@ -136,9 +154,9 @@ export const formatInputNumber = (value: number | string | null | undefined): st
     return '';
   }
 
-  const num = typeof value === 'string' ? parseFormattedNumber(value) : value;
+  const num = toFiniteNumber(value);
 
-  if (isNaN(num)) {
+  if (!Number.isFinite(num)) {
     return '';
   }
 
@@ -151,9 +169,9 @@ export const formatInputNumberLatin = (value: number | string | null | undefined
     return '';
   }
 
-  const num = typeof value === 'string' ? parseFormattedNumber(value) : value;
+  const num = toFiniteNumber(value);
 
-  if (isNaN(num)) {
+  if (!Number.isFinite(num)) {
     return '';
   }
 

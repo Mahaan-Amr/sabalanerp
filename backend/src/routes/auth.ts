@@ -15,6 +15,12 @@ const generateToken = (id: string) => {
   });
 };
 
+const normalizeLoginPhone = (value: string) =>
+  value
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/[\s\-().]/g, '');
+
 // @desc    Register user
 // @route   POST /api/auth/register
 // @access  Public
@@ -101,7 +107,8 @@ router.post('/register', [
 // @route   POST /api/auth/login
 // @access  Public
 router.post('/login', [
-  body('email').isEmail().normalizeEmail(),
+  body('identifier').optional().isString().trim(),
+  body('email').optional().isString().trim(),
   body('password').exists(),
 ], async (req, res) => {
   try {
@@ -114,11 +121,31 @@ router.post('/login', [
       });
     }
 
-    const { email, password } = req.body;
+    const identifier = String(req.body.identifier || req.body.email || '').trim();
+    const password = req.body.password;
+
+    if (!identifier) {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: [{ msg: 'Login identifier is required', path: 'identifier' }]
+      });
+    }
+
+    const normalizedEmail = identifier.includes('@') ? identifier.toLowerCase() : identifier;
+    const normalizedPhone = normalizeLoginPhone(identifier);
+    const phoneCandidates = Array.from(new Set([identifier, normalizedPhone].filter(Boolean)));
 
     // Check for user
-    const user = await prisma.user.findUnique({
-      where: { email },
+    const users = await prisma.user.findMany({
+      where: {
+        OR: [
+          { email: normalizedEmail },
+          { username: identifier },
+          ...phoneCandidates.map((phone) => ({ profile: { is: { phone } } }))
+        ]
+      },
+      take: 2,
       select: {
         id: true,
         email: true,
@@ -130,8 +157,9 @@ router.post('/login', [
         isActive: true,
       }
     });
+    const user = users.length === 1 ? users[0] : null;
 
-    if (!user || !user.isActive) {
+    if (!user || !user.isActive || users.length > 1) {
       return res.status(401).json({
         success: false,
         error: 'Invalid credentials'

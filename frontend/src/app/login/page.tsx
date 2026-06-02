@@ -9,7 +9,7 @@ import { authAPI } from '@/lib/api';
 
 export default function LoginPage() {
   const [formData, setFormData] = useState({
-    email: '',
+    identifier: '',
     password: ''
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -36,10 +36,8 @@ export default function LoginPage() {
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
 
-    if (!formData.email.trim()) {
-      newErrors.email = 'ایمیل الزامی است';
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'فرمت ایمیل معتبر نیست';
+    if (!formData.identifier.trim()) {
+      newErrors.identifier = 'ایمیل، نام کاربری یا شماره تماس الزامی است';
     }
 
     if (!formData.password.trim()) {
@@ -59,7 +57,7 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      const response = await authAPI.login(formData.email, formData.password);
+      const response = await authAPI.login(formData.identifier, formData.password);
       const data = response.data;
 
       if (data.success) {
@@ -119,24 +117,24 @@ export default function LoginPage() {
               </div>
             )}
 
-            {/* Email Field */}
+            {/* Login Identifier Field */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
-                ایمیل
+                ایمیل، نام کاربری یا شماره تماس
               </label>
               <div className="relative">
                 <FaUser className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                 <input
-                  type="email"
-                  name="email"
-                  value={formData.email}
+                  type="text"
+                  name="identifier"
+                  value={formData.identifier}
                   onChange={handleInputChange}
-                  className={`glass-liquid-input w-full pr-10 ${errors.email ? 'border-red-500' : ''}`}
-                  placeholder="ایمیل خود را وارد کنید"
+                  className={`glass-liquid-input w-full pr-10 ${errors.identifier ? 'border-red-500' : ''}`}
+                  placeholder="ایمیل، نام کاربری یا شماره تماس"
                   dir="ltr"
                 />
               </div>
-              {errors.email && <p className="text-red-400 text-sm mt-1">{errors.email}</p>}
+              {errors.identifier && <p className="text-red-400 text-sm mt-1">{errors.identifier}</p>}
             </div>
 
             {/* Password Field */}

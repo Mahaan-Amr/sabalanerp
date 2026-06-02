@@ -3,6 +3,7 @@
 
 import type { ContractProduct } from '../types/contract.types';
 import { calculateFinalPrice } from './pricingService';
+import { sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 
 /**
  * Calculate product total including all costs
@@ -16,18 +17,18 @@ export const calculateProductTotal = (
 ): number => {
   const { includeCuttingCost = true, includeSubServiceCost = true } = config || {};
   
-  let total = product.totalPrice || 0;
+  let total = toFiniteNumber(product.totalPrice);
   
   if (includeCuttingCost && product.cuttingCost) {
-    total += product.cuttingCost;
+    total += toFiniteNumber(product.cuttingCost);
   }
   
   if (includeSubServiceCost && product.totalSubServiceCost) {
-    total += product.totalSubServiceCost;
+    total += toFiniteNumber(product.totalSubServiceCost);
   }
   
   if (product.finishingCost) {
-    total += product.finishingCost;
+    total += toFiniteNumber(product.finishingCost);
   }
   
   return total;
@@ -57,18 +58,18 @@ export const calculateContractTotal = (
   let finishingCostsTotal = 0;
   
   products.forEach(product => {
-    productsTotal += product.totalPrice || 0;
+    productsTotal += toFiniteNumber(product.totalPrice);
     
     if (includeCuttingCosts && product.cuttingCost) {
-      cuttingCostsTotal += product.cuttingCost;
+      cuttingCostsTotal += toFiniteNumber(product.cuttingCost);
     }
     
     if (includeSubServiceCosts && product.totalSubServiceCost) {
-      subServiceCostsTotal += product.totalSubServiceCost;
+      subServiceCostsTotal += toFiniteNumber(product.totalSubServiceCost);
     }
     
     if (product.finishingCost) {
-      finishingCostsTotal += product.finishingCost;
+      finishingCostsTotal += toFiniteNumber(product.finishingCost);
     }
   });
   
@@ -115,7 +116,7 @@ export const calculateCuttingCosts = (
     return 0;
   }
   
-  return product.cuttingCost;
+  return toFiniteNumber(product.cuttingCost);
 };
 
 /**
@@ -128,6 +129,6 @@ export const calculateSubServiceCosts = (
     return 0;
   }
   
-  return product.appliedSubServices.reduce((sum, service) => sum + (service.cost || 0), 0);
+  return sumNumericValues(product.appliedSubServices, (service) => service.cost);
 };
 

@@ -1,4 +1,5 @@
 import type { CuttingBreakdownEntry, RemainingStone, SlabStandardDimensionEntry, SmartLongitudinalCutPlan } from '../types/contract.types';
+import { sumNumericValues } from '@/lib/numberFormat';
 
 type UnitType = 'cm' | 'm';
 
@@ -226,7 +227,7 @@ export const calculateSmartLongitudinalCutPlan = ({
     productionPieces,
     remainingStones,
     cuttingBreakdown,
-    totalCuttingCost: cuttingBreakdown.reduce((sum, cut) => sum + cut.cost, 0),
+    totalCuttingCost: sumNumericValues(cuttingBreakdown, (cut) => cut.cost),
     warnings
   };
 };

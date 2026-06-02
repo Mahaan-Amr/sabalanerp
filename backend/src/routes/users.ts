@@ -24,6 +24,15 @@ const getFeatureWorkspace = (feature: string): string | null => {
 const hasAdminPermissionLevel = (permissions: Array<{ permissionLevel?: string }>) =>
   permissions.some((permission) => permission.permissionLevel === WORKSPACE_PERMISSIONS.ADMIN);
 
+const normalizePhone = (value?: string | null) => {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return null;
+  return trimmed
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/[\s\-().]/g, '');
+};
+
 // @desc    Get all users
 // @route   GET /api/users
 // @access  Private/Admin
@@ -51,6 +60,13 @@ router.get('/', protect, authorize('ADMIN', 'MANAGER'), async (req: AuthRequest,
         isActive: true,
         createdAt: true,
         updatedAt: true,
+        department: {
+          select: {
+            id: true,
+            name: true,
+            namePersian: true,
+          }
+        },
         profile: true,
       },
       orderBy: {
@@ -88,6 +104,7 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
   body('password').isLength({ min: 6 }),
   body('firstName').trim().escape(),
   body('lastName').trim().escape(),
+  body('phone').optional({ values: 'falsy' }).isString().trim(),
   body('role').optional().isIn(['USER', 'MODERATOR', 'ADMIN', 'SALES', 'MANAGER']),
   body('departmentId')
     .optional({ values: 'falsy' })
@@ -142,6 +159,7 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
       password, 
       firstName, 
       lastName, 
+      phone,
       role = 'USER',
       departmentId,
       isActive = true,
@@ -231,6 +249,7 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
+    const normalizedPhone = normalizePhone(phone);
 
     const user = await prisma.$transaction(async (tx) => {
       const createdUser = await tx.user.create({
@@ -243,6 +262,13 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
           role,
           departmentId: departmentId || null,
           isActive,
+          ...(normalizedPhone && {
+            profile: {
+              create: {
+                phone: normalizedPhone
+              }
+            }
+          }),
         },
         select: {
           id: true,
@@ -260,7 +286,8 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
               name: true,
               namePersian: true,
             }
-          }
+          },
+          profile: true,
         }
       });
 
@@ -328,6 +355,13 @@ router.get('/:id', protect, async (req: AuthRequest, res: Response) => {
         isActive: true,
         createdAt: true,
         updatedAt: true,
+        department: {
+          select: {
+            id: true,
+            name: true,
+            namePersian: true,
+          }
+        },
         profile: true,
       }
     });
@@ -374,6 +408,8 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
   body('firstName').optional().trim().escape(),
   body('lastName').optional().trim().escape(),
   body('email').optional().isEmail().normalizeEmail(),
+  body('username').optional().isLength({ min: 3 }).trim().escape(),
+  body('phone').optional({ values: 'falsy' }).isString().trim(),
   body('role').optional().isIn(['USER', 'MODERATOR', 'ADMIN', 'SALES', 'MANAGER']),
   body('departmentId')
     .optional({ values: 'falsy' })
@@ -392,7 +428,7 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
-    const { firstName, lastName, email, role, departmentId, isActive } = req.body;
+    const { firstName, lastName, email, username, phone, role, departmentId, isActive } = req.body;
 
     if (departmentId) {
       const department = await prisma.department.findUnique({
@@ -456,15 +492,39 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
       }
     }
 
+    if (username && username !== existingUser.username) {
+      const usernameExists = await prisma.user.findUnique({
+        where: { username }
+      });
+
+      if (usernameExists) {
+        return res.status(400).json({
+          success: false,
+          error: 'Username already taken'
+        });
+      }
+    }
+
+    const normalizedPhone = phone !== undefined ? normalizePhone(phone) : undefined;
+
     const updatedUser = await prisma.user.update({
       where: { id: req.params.id },
       data: {
         ...(firstName && { firstName }),
         ...(lastName && { lastName }),
         ...(email && { email }),
+        ...(username && { username }),
         ...(role && { role }),
         ...(departmentId !== undefined && { departmentId: departmentId || null }),
         ...(isActive !== undefined && { isActive }),
+        ...(normalizedPhone !== undefined && {
+          profile: {
+            upsert: {
+              create: { phone: normalizedPhone },
+              update: { phone: normalizedPhone }
+            }
+          }
+        }),
       },
       select: {
         id: true,
@@ -476,6 +536,13 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
         isActive: true,
         createdAt: true,
         updatedAt: true,
+        department: {
+          select: {
+            id: true,
+            name: true,
+            namePersian: true,
+          }
+        },
         profile: true,
       }
     });

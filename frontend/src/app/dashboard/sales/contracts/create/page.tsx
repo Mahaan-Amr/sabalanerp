@@ -30,7 +30,7 @@ import {
 import { salesAPI, crmAPI, dashboardAPI, servicesAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
-import { formatDisplayNumber, formatPrice, formatPriceWithRial, formatDimensions, formatSquareMeters, formatQuantity, tomanToRial } from '@/lib/numberFormat';
+import { formatDisplayNumber, formatPrice, formatPriceWithRial, formatDimensions, formatSquareMeters, formatQuantity, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import StoneCanvas from '@/components/StoneCanvas';
 import { StoneCADDesigner } from '@/components/stone-cad/StoneCADDesigner';
@@ -4122,10 +4122,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             productType: mapProductTypeLabel(product.productType),
             stairPartType: mapStairPartLabel(product.stairPartType),
             dimensions,
-            quantity: Number(product.quantity || 0),
-            squareMeters: Number(product.squareMeters || 0),
-            unitPrice: Number(product.pricePerSquareMeter || product.unitPrice || 0),
-            totalPrice: Number(product.totalPrice || 0),
+            quantity: toFiniteNumber(product.quantity),
+            squareMeters: toFiniteNumber(product.squareMeters),
+            unitPrice: toFiniteNumber(product.pricePerSquareMeter) || toFiniteNumber(product.unitPrice),
+            totalPrice: toFiniteNumber(product.totalPrice),
             description: product.description || '—'
           };
         });
@@ -4142,7 +4142,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
               name: service.subService?.namePersian || service.subService?.name || '—',
               amountLabel: `${service.meter || 0} ${service.calculationBase === 'squareMeters' ? 'متر مربع' : 'متر'}`,
               rateLabel: service.subService?.pricePerMeter ? `${service.subService.pricePerMeter}` : '—',
-              cost: Number(service.cost || 0)
+              cost: toFiniteNumber(service.cost)
             });
           });
 
@@ -4152,9 +4152,9 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
               productName,
               category: 'برش',
               name: cut.type === 'cross' ? 'برش عرضی' : 'برش طولی',
-              amountLabel: `${Number(cut.meters || 0)} متر`,
+              amountLabel: `${toFiniteNumber(cut.meters)} متر`,
               rateLabel: cut.rate ? `${cut.rate}` : '—',
-              cost: Number(cut.cost || 0)
+              cost: toFiniteNumber(cut.cost)
             });
           });
 
@@ -4164,9 +4164,9 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
               productName,
               category: 'فینیشینگ',
               name: product.finishingName || '—',
-              amountLabel: `${Number(product.finishingSquareMeters || product.squareMeters || 0)} متر مربع`,
+              amountLabel: `${toFiniteNumber(product.finishingSquareMeters) || toFiniteNumber(product.squareMeters)} متر مربع`,
               rateLabel: product.finishingPricePerSquareMeter ? `${product.finishingPricePerSquareMeter}` : '—',
-              cost: Number(product.finishingCost || 0)
+              cost: toFiniteNumber(product.finishingCost)
             });
           }
         });
@@ -4182,14 +4182,14 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             productName: wizardData.products[deliveryProduct.productIndex]?.stoneName ||
               wizardData.products[deliveryProduct.productIndex]?.product?.namePersian ||
               `محصول ${deliveryProduct.productIndex + 1}`,
-            quantity: Number(deliveryProduct.quantity || 0)
+            quantity: toFiniteNumber(deliveryProduct.quantity)
           }))
         }));
 
         const paymentDetails: ContractStep8PaymentDetail[] = wizardData.payment.payments.map((payment, index) => ({
           id: payment.id || `payment-${index}`,
           methodLabel: mapPaymentMethodLabel(payment.method),
-          amount: Number(payment.amount || 0),
+          amount: toFiniteNumber(payment.amount),
           paymentDate: payment.paymentDate || '—',
           handoverDate: payment.handoverDate || '—',
           checkNumber: payment.checkNumber || '—',
@@ -4198,16 +4198,16 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           description: payment.description || '—'
         }));
 
-        const productsTotal = wizardData.products.reduce((sum, product) => sum + Number(product.totalPrice || 0), 0);
+        const productsTotal = sumNumericValues(wizardData.products, (product) => product.totalPrice);
         const cutsTotal = serviceDetails
           .filter((service) => service.category === 'برش')
-          .reduce((sum, service) => sum + Number(service.cost || 0), 0);
+          .reduce((sum, service) => sum + toFiniteNumber(service.cost), 0);
         const finishingTotal = serviceDetails
           .filter((service) => service.category === 'فینیشینگ')
-          .reduce((sum, service) => sum + Number(service.cost || 0), 0);
-        const servicesTotal = serviceDetails.reduce((sum, service) => sum + Number(service.cost || 0), 0);
-        const paymentTotal = paymentDetails.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-        const grandTotal = Number(wizardData.payment.totalContractAmount || productsTotal);
+          .reduce((sum, service) => sum + toFiniteNumber(service.cost), 0);
+        const servicesTotal = serviceDetails.reduce((sum, service) => sum + toFiniteNumber(service.cost), 0);
+        const paymentTotal = paymentDetails.reduce((sum, payment) => sum + toFiniteNumber(payment.amount), 0);
+        const grandTotal = toFiniteNumber(wizardData.payment.totalContractAmount) || productsTotal;
         const financialSummary: ContractStep8FinancialSummary = {
           productsTotal,
           servicesTotal,
@@ -5875,7 +5875,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                         </thead>
                         <tbody>
                           {stairSystemV2.stairSessionItems.map((it, idx) => {
-                            const toolsTotal = ((it as any).meta?.tools || [])?.reduce((s: number, x: any) => s + (x.totalPrice || 0), 0) || 0;
+                            const toolsTotal = sumNumericValues(((it as any).meta?.tools || []), (tool: any) => tool.totalPrice);
                             const isLayer = ((it as any).meta?.isLayer) || false;
                             const layerInfo = ((it as any).meta?.layerInfo) || null;
                             const partTypeLabel = isLayer 
@@ -5986,7 +5986,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                             <td className="py-3 px-4 font-bold text-teal-900 dark:text-teal-200" colSpan={7}>جمع کل گروه</td>
                             <td className="py-3 px-4">
                               <span className="font-bold text-lg text-teal-700 dark:text-teal-300">
-                                {formatPrice(stairSystemV2.stairSessionItems.reduce((s, it) => s + (it.totalPrice || 0), 0))}
+                                {formatPrice(sumNumericValues(stairSystemV2.stairSessionItems, (item) => item.totalPrice))}
                               </span>
                             </td>
                           </tr>
@@ -6073,7 +6073,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                       }
                     ];
                   }
-                  const toolsTotal = metaTools.reduce((sum, t) => sum + (t.totalPrice || 0), 0);
+                  const toolsTotal = sumNumericValues(metaTools, (tool) => tool.totalPrice);
                   
                   // 🎯 Use original width for pricing (like long stone products)
                   const originalWidthCm = stoneProduct.widthValue || 0;

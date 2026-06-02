@@ -1,6 +1,6 @@
 'use client';
 
-import { formatPriceWithRial } from '@/lib/numberFormat';
+import { formatPriceWithRial, toFiniteNumber } from '@/lib/numberFormat';
 
 export type ConfirmationData = {
   sessionId: string;
@@ -14,7 +14,7 @@ export type ConfirmationData = {
     title: string;
     titlePersian: string;
     contractData: any;
-    totalAmount: number;
+    totalAmount: number | string | null;
     currency: string;
     customer: {
       firstName?: string;
@@ -76,7 +76,7 @@ export default function ConfirmationContractView({
             <p>شماره قرارداد: <span className="font-semibold">{data.contract.contractNumber}</span></p>
             <p>مشتری: <span className="font-semibold">{customerName}</span></p>
             <p>شماره تماس: <span className="font-semibold">{data.contract.customer.phoneNumber || 'ثبت نشده'}</span></p>
-            <p>مبلغ کل: <span className="font-semibold">{formatPriceWithRial(Number(data.contract.totalAmount || 0), data.contract.currency || 'تومان')}</span></p>
+            <p>مبلغ کل: <span className="font-semibold">{formatPriceWithRial(data.contract.totalAmount, data.contract.currency || 'تومان')}</span></p>
             <p>تعداد اقلام: <span className="font-semibold">{data.contract.items?.length || 0}</span></p>
             <p>وضعیت: <span className="font-semibold">{statusLabel(data.contractStatus)}</span></p>
           </div>
@@ -99,7 +99,7 @@ export default function ConfirmationContractView({
                     <tr key={item.id} className="border-b border-white/5">
                       <td className="py-3">{item.product?.namePersian || item.product?.name || item.description || 'محصول'}</td>
                       <td className="py-3">{item.quantity || 0}</td>
-                      <td className="py-3">{formatPriceWithRial(Number(item.totalPrice || item.price || 0), data.contract.currency || 'تومان')}</td>
+                      <td className="py-3">{formatPriceWithRial(toFiniteNumber(item.totalPrice) || item.price, data.contract.currency || 'تومان')}</td>
                     </tr>
                   ))}
                 </tbody>

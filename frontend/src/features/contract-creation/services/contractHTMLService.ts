@@ -2,7 +2,7 @@
 // Generates HTML content for contract documents
 
 import type { ContractWizardData, CrmCustomer, ProjectAddress, ContractProduct, DeliverySchedule, PaymentMethod } from '../types/contract.types';
-import { formatPrice, formatQuantity, formatSquareMeters } from '@/lib/numberFormat';
+import { formatPrice, formatQuantity, formatSquareMeters, sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 
 interface ContractHTMLData {
   contractNumber: string;
@@ -37,8 +37,8 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
             <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.widthValue && product.product?.thicknessValue ? `${product.product.widthValue} × ${product.product.thicknessValue}` : product.length && product.width ? `${product.length} × ${product.width}` : 'نامشخص'}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatQuantity(product.quantity || 0)}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatSquareMeters(product.squareMeters || 0)}</td>
-            <td style="border: 1px solid #ddd; padding: 8px;">${product.pricePerSquareMeter ? formatPrice(product.pricePerSquareMeter, product.currency || 'تومان') : 'نامشخص'}</td>
-            <td style="border: 1px solid #ddd; padding: 8px;">${product.totalPrice ? formatPrice(product.totalPrice, product.currency || 'تومان') : 'نامشخص'}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${toFiniteNumber(product.pricePerSquareMeter) > 0 ? formatPrice(product.pricePerSquareMeter, product.currency || 'تومان') : 'نامشخص'}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${toFiniteNumber(product.totalPrice) > 0 ? formatPrice(product.totalPrice, product.currency || 'تومان') : 'نامشخص'}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -54,8 +54,8 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
     </ul>
   ` : '';
 
-  const totalAmount = data.payment?.totalContractAmount || 
-    data.products.reduce((sum, product) => sum + (product.totalPrice || 0), 0);
+  const totalAmount = toFiniteNumber(data.payment?.totalContractAmount) || 
+    sumNumericValues(data.products, (product) => product.totalPrice);
 
   return `
     <div style="font-family: 'Tahoma', sans-serif; direction: rtl; text-align: right;">

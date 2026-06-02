@@ -41,8 +41,8 @@ api.interceptors.response.use(
 
 // Auth API
 export const authAPI = {
-  login: (email: string, password: string) =>
-    api.post('/auth/login', { email, password }),
+  login: (identifier: string, password: string) =>
+    api.post('/auth/login', { identifier, email: identifier, password }),
   
   register: (userData: {
     email: string;
@@ -68,6 +68,7 @@ export const usersAPI = {
     password: string;
     firstName: string;
     lastName: string;
+    phone?: string;
     role?: string;
     departmentId?: string;
     isActive?: boolean;

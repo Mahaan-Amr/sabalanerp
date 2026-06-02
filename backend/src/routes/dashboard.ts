@@ -126,8 +126,9 @@ router.get('/stats', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_STATS
       ? Math.round((signedContracts / totalContracts) * 100) 
       : 0;
 
+    const totalRevenueAmount = Number(totalRevenue._sum.totalAmount || 0);
     const averageContractValue = signedContracts > 0 
-      ? Math.round(Number(totalRevenue._sum.totalAmount || 0) / signedContracts)
+      ? Math.round(totalRevenueAmount / signedContracts)
       : 0;
 
     // Get monthly revenue for the last 6 months
@@ -168,14 +169,14 @@ router.get('/stats', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_STATS
           total: totalCustomers
         },
         revenue: {
-          total: totalRevenue._sum.totalAmount || 0,
+          total: totalRevenueAmount,
           average: averageContractValue,
           completionRate
         },
         recentContracts,
         monthlyRevenue: monthlyRevenue.map(item => ({
           month: item.createdAt.toISOString().substring(0, 7), // YYYY-MM
-          amount: item._sum.totalAmount || 0,
+          amount: Number(item._sum.totalAmount || 0),
           count: item._count.id
         }))
       }

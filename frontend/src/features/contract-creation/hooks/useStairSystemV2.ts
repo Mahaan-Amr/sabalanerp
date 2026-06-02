@@ -15,6 +15,7 @@ import { generateFullProductName } from '../utils/productUtils';
 import { computeLayerSqmV2, getTotalLayerLengthPerStairM } from '../services/stairCalculationService';
 import { getActualLengthMeters, convertMetersToUnit } from '../utils/stairUtils';
 import { servicesAPI, dashboardAPI } from '@/lib/api';
+import { toFiniteNumber } from '@/lib/numberFormat';
 
 interface UseStairSystemV2Options {
   onError?: (error: string) => void;
@@ -377,7 +378,7 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
       const newLengthValue = convertMetersToUnit(newLengthMeters, newLengthUnit);
 
       const currentSqm = item.squareMeters || 0;
-      const currentTotal = typeof item.totalPrice === 'number' ? item.totalPrice : parseFloat(String(item.totalPrice || 0));
+      const currentTotal = toFiniteNumber(item.totalPrice);
 
       if (Math.abs(newLayerSqm - currentSqm) < 0.0001 &&
           Math.abs(newTotalPrice - (currentTotal || 0)) < 0.5 &&

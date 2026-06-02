@@ -26,6 +26,7 @@ import {
 import { crmAPI } from '@/lib/api';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import PersianCalendar from '@/lib/persian-calendar';
+import { formatPrice } from '@/lib/numberFormat';
 
 interface CrmCustomer {
   id: string;
@@ -366,11 +367,11 @@ export default function CustomerDetailPage() {
   };
 
 
-  const formatAmount = (amount: number | null | undefined) => {
+  const formatAmount = (amount: number | string | null | undefined) => {
     if (amount === null || amount === undefined) {
       return 'تعریف نشده';
     }
-    return `${amount.toLocaleString('fa-IR')} ریال`;
+    return formatPrice(amount, 'ریال');
   };
 
   const formatDate = (dateString: string) => {

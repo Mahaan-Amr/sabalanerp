@@ -3,6 +3,7 @@
 
 import { useState, useCallback } from 'react';
 import type { ContractWizardData, PaymentEntry, PaymentEntryMethod } from '../types/contract.types';
+import { sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 
 interface UsePaymentHandlersOptions {
   wizardData: ContractWizardData;
@@ -28,8 +29,8 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
   // Handler to add a new payment entry
   const handleAddPaymentEntry = useCallback(() => {
     setEditingPaymentEntryId(null);
-    const existingPaymentsSum = wizardData.payment.payments.reduce((sum, p) => sum + p.amount, 0);
-    const remainingAmount = wizardData.payment.totalContractAmount - existingPaymentsSum;
+    const existingPaymentsSum = sumNumericValues(wizardData.payment.payments, (payment) => payment.amount);
+    const remainingAmount = toFiniteNumber(wizardData.payment.totalContractAmount) - existingPaymentsSum;
     setPaymentEntryForm({
       method: 'CASH_CARD',
       paymentDate: getCurrentPersianDate(),
@@ -63,7 +64,8 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       setErrors({ paymentMethod: 'نوع پرداخت را انتخاب کنید' });
       return;
     }
-    if (!paymentEntryForm.amount || paymentEntryForm.amount <= 0) {
+    const paymentAmount = toFiniteNumber(paymentEntryForm.amount);
+    if (paymentAmount <= 0) {
       setErrors({ paymentMethod: 'مبلغ باید بیشتر از صفر باشد' });
       return;
     }
@@ -99,7 +101,7 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     const entry: PaymentEntry = {
       id: editingPaymentEntryId || `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       method: method as PaymentEntryMethod,
-      amount: paymentEntryForm.amount,
+      amount: paymentAmount,
       paymentDate: paymentEntryForm.paymentDate!,
       description: paymentEntryForm.description,
       nationalCode: paymentEntryForm.nationalCode,

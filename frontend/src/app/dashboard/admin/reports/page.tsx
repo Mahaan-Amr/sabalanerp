@@ -1,7 +1,8 @@
-﻿'use client';
+'use client';
 
-import { useState, useEffect } from 'react';
-import { FaChartLine, FaDownload, FaFilePdf, FaFileExcel, FaCalendarAlt, FaUsers, FaFileContract } from 'react-icons/fa';
+import { useEffect, useState } from 'react';
+import { FaCalendarAlt, FaChartLine, FaDownload, FaFileContract, FaFileExcel, FaFilePdf, FaUsers } from 'react-icons/fa';
+import { ErpActionGrid, ErpBadge, ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection, type ErpMetric, type ErpTone } from '@/components/erp';
 
 interface ReportData {
   id: string;
@@ -25,46 +26,12 @@ export default function AdminReportsPage() {
   const loadReports = async () => {
     try {
       setLoading(true);
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       setReports([
-        {
-          id: '1',
-          name: 'user_activity_report',
-          namePersian: 'گزارش فعالیت کاربران',
-          description: 'گزارش ورود، خروج و فعالیت کاربران',
-          type: 'pdf',
-          lastGenerated: '2025-01-20T10:30:00Z',
-          size: '2.3 MB'
-        },
-        {
-          id: '2',
-          name: 'contract_summary',
-          namePersian: 'خلاصه قراردادها',
-          description: 'گزارش وضعیت قراردادها و مبالغ فروش',
-          type: 'excel',
-          lastGenerated: '2025-01-20T09:15:00Z',
-          size: '1.8 MB'
-        },
-        {
-          id: '3',
-          name: 'financial_summary',
-          namePersian: 'خلاصه مالی',
-          description: 'گزارش پرداخت‌ها و وضعیت مالی',
-          type: 'pdf',
-          lastGenerated: '2025-01-19T16:45:00Z',
-          size: '3.1 MB'
-        },
-        {
-          id: '4',
-          name: 'security_audit',
-          namePersian: 'ممیزی امنیتی',
-          description: 'گزارش رخدادها و وضعیت امنیتی',
-          type: 'pdf',
-          lastGenerated: '2025-01-19T14:20:00Z',
-          size: '1.5 MB'
-        }
+        { id: '1', name: 'user_activity_report', namePersian: 'گزارش فعالیت کاربران', description: 'گزارش ورود، خروج و فعالیت کاربران', type: 'pdf', lastGenerated: '2025-01-20T10:30:00Z', size: '2.3 MB' },
+        { id: '2', name: 'contract_summary', namePersian: 'خلاصه قراردادها', description: 'گزارش وضعیت قراردادها و مبالغ فروش', type: 'excel', lastGenerated: '2025-01-20T09:15:00Z', size: '1.8 MB' },
+        { id: '3', name: 'financial_summary', namePersian: 'خلاصه مالی', description: 'گزارش پرداخت‌ها و وضعیت مالی', type: 'pdf', lastGenerated: '2025-01-19T16:45:00Z', size: '3.1 MB' },
+        { id: '4', name: 'security_audit', namePersian: 'ممیزی امنیتی', description: 'گزارش رخدادها و وضعیت امنیتی', type: 'pdf', lastGenerated: '2025-01-19T14:20:00Z', size: '1.5 MB' },
       ]);
     } catch (error) {
       console.error('Error loading reports:', error);
@@ -76,15 +43,8 @@ export default function AdminReportsPage() {
   const generateReport = async (reportId: string) => {
     setGenerating(reportId);
     try {
-      // Simulate report generation
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Update the report's last generated time
-      setReports(prev => prev.map(report => 
-        report.id === reportId 
-          ? { ...report, lastGenerated: new Date().toISOString() }
-          : report
-      ));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      setReports((prev) => prev.map((report) => report.id === reportId ? { ...report, lastGenerated: new Date().toISOString() } : report));
     } catch (error) {
       console.error('Error generating report:', error);
     } finally {
@@ -93,191 +53,94 @@ export default function AdminReportsPage() {
   };
 
   const downloadReport = (reportId: string) => {
-    // Simulate download
     console.log('Downloading report:', reportId);
   };
 
-  const getReportIcon = (type: string) => {
-    switch (type) {
-      case 'pdf':
-        return <FaFilePdf className="h-6 w-6 text-red-400" />;
-      case 'excel':
-        return <FaFileExcel className="h-6 w-6 text-green-400" />;
-      case 'csv':
-        return <FaFileExcel className="h-6 w-6 text-blue-400" />;
-      default:
-        return <FaFileContract className="h-6 w-6 text-gray-400" />;
-    }
+  const getTypeTone = (type: ReportData['type']): ErpTone => {
+    if (type === 'pdf') return 'danger';
+    if (type === 'excel') return 'success';
+    return 'info';
+  };
+
+  const getTypeIcon = (type: ReportData['type']) => {
+    if (type === 'pdf') return FaFilePdf;
+    if (type === 'excel') return FaFileExcel;
+    return FaFileContract;
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500"></div>
-      </div>
-    );
+    return <ErpLoading />;
   }
 
+  const metrics: ErpMetric[] = [
+    { label: 'کل گزارش‌ها', value: reports.length.toLocaleString('fa-IR'), icon: FaFileContract, tone: 'primary' },
+    { label: 'گزارش‌های PDF', value: reports.filter((report) => report.type === 'pdf').length.toLocaleString('fa-IR'), icon: FaFilePdf, tone: 'danger' },
+    { label: 'گزارش‌های Excel', value: reports.filter((report) => report.type === 'excel').length.toLocaleString('fa-IR'), icon: FaFileExcel, tone: 'success' },
+  ];
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="glass-liquid-card p-6">
-        <div className="flex items-center gap-4">
-          <div className="glass-liquid-card p-3">
-            <FaChartLine className="h-8 w-8 text-teal-400" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-white">گزارش‌ها</h1>
-            <p className="text-gray-300">مدیریت گزارش‌ها و خروجی‌های سیستم</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="glass-liquid-card p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-400 text-sm">کل گزارش‌ها</p>
-              <p className="text-2xl font-bold text-white">{reports.length}</p>
-            </div>
-            <div className="glass-liquid-card p-3">
-              <FaFileContract className="h-6 w-6 text-blue-400" />
-            </div>
-          </div>
-        </div>
-
-        <div className="glass-liquid-card p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-400 text-sm">گزارش‌های PDF</p>
-              <p className="text-2xl font-bold text-white">
-                {reports.filter(r => r.type === 'pdf').length}
-              </p>
-            </div>
-            <div className="glass-liquid-card p-3">
-              <FaFilePdf className="h-6 w-6 text-red-400" />
-            </div>
-          </div>
-        </div>
-
-        <div className="glass-liquid-card p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-400 text-sm">گزارش‌های Excel</p>
-              <p className="text-2xl font-bold text-white">
-                {reports.filter(r => r.type === 'excel').length}
-              </p>
-            </div>
-            <div className="glass-liquid-card p-3">
-              <FaFileExcel className="h-6 w-6 text-green-400" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Reports List */}
-      <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-semibold text-white mb-4">لیست گزارش‌ها</h2>
-        
+    <ErpPage
+      eyebrow="مدیریت سیستم"
+      title="گزارش‌ها"
+      description="مدیریت گزارش‌ها، تولید خروجی و دانلود فایل‌های مدیریتی."
+      metrics={metrics}
+    >
+      <ErpSection title="لیست گزارش‌ها" description="گزارش‌های آماده یا قابل تولید برای مدیران سیستم.">
         {reports.length === 0 ? (
-          <div className="text-center py-8">
-            <FaChartLine className="mx-auto text-4xl text-gray-400 mb-4" />
-            <p className="text-gray-400">گزارشی موجود نیست</p>
-          </div>
+          <ErpEmptyState icon={FaChartLine} title="گزارشی موجود نیست" />
         ) : (
-          <div className="space-y-4">
-            {reports.map((report) => (
-              <div key={report.id} className="glass-liquid-card p-4 hover:bg-white/5 transition-all duration-200">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="glass-liquid-card p-3">
-                      {getReportIcon(report.type)}
-                    </div>
-                    <div>
-                      <h3 className="text-white font-semibold">{report.namePersian}</h3>
-                      <p className="text-gray-400 text-sm">{report.description}</p>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-                        <span className="flex items-center gap-1">
-                          <FaCalendarAlt className="h-3 w-3" />
-                          آخرین تولید: {new Date(report.lastGenerated).toLocaleDateString('fa-IR')}
-                        </span>
-                        <span>حجم: {report.size}</span>
+          <div className="space-y-3">
+            {reports.map((report) => {
+              const Icon = getTypeIcon(report.type);
+              return (
+                <div key={report.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-[#074747]/10 text-[#074747] dark:bg-teal-900/40 dark:text-teal-100">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="font-semibold text-slate-900 dark:text-white">{report.namePersian}</h3>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{report.description}</p>
+                        <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
+                          <span className="inline-flex items-center gap-1"><FaCalendarAlt className="h-3 w-3" />{new Date(report.lastGenerated).toLocaleDateString('fa-IR')}</span>
+                          <span>حجم: {report.size}</span>
+                          <ErpBadge tone={getTypeTone(report.type)}>{report.type.toUpperCase()}</ErpBadge>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => generateReport(report.id)}
-                      disabled={generating === report.id}
-                      className="glass-liquid-btn px-4 py-2 flex items-center gap-2 disabled:opacity-50"
-                    >
-                      {generating === report.id ? (
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      ) : (
-                        <FaChartLine className="h-4 w-4" />
-                      )}
-                      {generating === report.id ? 'در حال تولید...' : 'تولید گزارش'}
-                    </button>
-                    
-                    <button
-                      onClick={() => downloadReport(report.id)}
-                      className="glass-liquid-btn-primary px-4 py-2 flex items-center gap-2"
-                    >
-                      <FaDownload className="h-4 w-4" />
-                      دانلود
-                    </button>
+                    <div className="flex flex-wrap gap-2 lg:justify-end">
+                      <ErpButton
+                        label={generating === report.id ? 'در حال تولید...' : 'تولید گزارش'}
+                        onClick={() => generateReport(report.id)}
+                        disabled={generating === report.id}
+                        icon={FaChartLine}
+                        tone="neutral"
+                        variant="outline"
+                      />
+                      <ErpButton label="دانلود" onClick={() => downloadReport(report.id)} icon={FaDownload} tone="primary" variant="solid" />
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
-      </div>
+      </ErpSection>
 
-      {/* Report Generation Options */}
-      <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-semibold text-white mb-4">گزینه‌های تولید گزارش</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-white">بر اساس نوع</h3>
-            <div className="space-y-2">
-              <button className="w-full glass-liquid-btn p-3 text-right flex items-center justify-between">
-                <span>گزارش فعالیت کاربران</span>
-                <FaUsers className="h-4 w-4" />
-              </button>
-              <button className="w-full glass-liquid-btn p-3 text-right flex items-center justify-between">
-                <span>گزارش خلاصه قراردادها</span>
-                <FaFileContract className="h-4 w-4" />
-              </button>
-              <button className="w-full glass-liquid-btn p-3 text-right flex items-center justify-between">
-                <span>گزارش مالی</span>
-                <FaChartLine className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-          
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-white">بر اساس بازه زمانی</h3>
-            <div className="space-y-2">
-              <button className="w-full glass-liquid-btn p-3 text-right flex items-center justify-between">
-                <span>گزارش روزانه</span>
-                <FaCalendarAlt className="h-4 w-4" />
-              </button>
-              <button className="w-full glass-liquid-btn p-3 text-right flex items-center justify-between">
-                <span>گزارش هفتگی</span>
-                <FaCalendarAlt className="h-4 w-4" />
-              </button>
-              <button className="w-full glass-liquid-btn p-3 text-right flex items-center justify-between">
-                <span>گزارش ماهانه</span>
-                <FaCalendarAlt className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+      <ErpSection title="گزینه‌های تولید گزارش">
+        <ErpActionGrid
+          columns={3}
+          items={[
+            { title: 'گزارش فعالیت کاربران', icon: FaUsers, tone: 'info' },
+            { title: 'گزارش خلاصه قراردادها', icon: FaFileContract, tone: 'primary' },
+            { title: 'گزارش مالی', icon: FaChartLine, tone: 'success' },
+            { title: 'گزارش روزانه', icon: FaCalendarAlt, tone: 'neutral' },
+            { title: 'گزارش هفتگی', icon: FaCalendarAlt, tone: 'neutral' },
+            { title: 'گزارش ماهانه', icon: FaCalendarAlt, tone: 'neutral' },
+          ]}
+        />
+      </ErpSection>
+    </ErpPage>
   );
 }
-

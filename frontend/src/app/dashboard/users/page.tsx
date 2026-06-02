@@ -1,25 +1,10 @@
-﻿'use client';
+'use client';
 
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { 
-  FaUsers, 
-  FaPlus, 
-  FaEdit, 
-  FaTrash, 
-  FaEye, 
-  FaShieldAlt,
-  FaBuilding,
-  FaSearch,
-  FaFilter,
-  FaDownload,
-  FaUserCheck,
-  FaUserTimes,
-  FaCog,
-  FaTimes
-} from 'react-icons/fa';
-import { usersAPI, workspacePermissionsAPI, departmentsAPI, authAPI } from '@/lib/api';
+import { FaBuilding, FaCog, FaDownload, FaEdit, FaEye, FaPlus, FaShieldAlt, FaTimes, FaTrash, FaUserCheck, FaUserTimes, FaUsers } from 'react-icons/fa';
+import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpListPage, ErpLoading, ErpSection, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
+import { authAPI, departmentsAPI, usersAPI, workspacePermissionsAPI } from '@/lib/api';
 
 interface User {
   id: string;
@@ -131,23 +116,23 @@ export default function UsersManagementPage() {
     try {
       setLoading(true);
       setError(null);
-      
+
       const [usersResponse, departmentsResponse, permissionsResponse, rolePermissionsResponse] = await Promise.all([
         usersAPI.getUsers(currentPage, 10),
         departmentsAPI.getDepartments(),
         workspacePermissionsAPI.getUserPermissions({ page: 1, limit: 1000 }),
-        workspacePermissionsAPI.getRolePermissions()
+        workspacePermissionsAPI.getRolePermissions(),
       ]);
-      
+
       if (usersResponse.data.success) {
         setUsers(usersResponse.data.data);
         setTotalPages(usersResponse.data.pagination.pages);
       }
-      
+
       if (departmentsResponse.data.success) {
         setDepartments(departmentsResponse.data.data);
       }
-      
+
       if (permissionsResponse.data.success) {
         setPermissions(permissionsResponse.data.data);
       }
@@ -163,14 +148,14 @@ export default function UsersManagementPage() {
     }
   };
 
-  const handleDeleteUser = async (user: User) => {
+  const handleDeleteUser = (user: User) => {
     setUserToDelete(user);
     setShowDeleteModal(true);
   };
 
   const confirmDeleteUser = async () => {
     if (!userToDelete) return;
-    
+
     try {
       await usersAPI.deleteUser(userToDelete.id);
       alert('کاربر با موفقیت حذف شد');
@@ -184,9 +169,7 @@ export default function UsersManagementPage() {
     }
   };
 
-  const getUserWorkspacePermissions = (userId: string) => {
-    return permissions.filter(p => p.userId === userId && p.isActive);
-  };
+  const getUserWorkspacePermissions = (userId: string) => permissions.filter((permission) => permission.userId === userId && permission.isActive);
 
   const getEffectiveWorkspacePermissions = (user: User): EffectiveWorkspacePermission[] => {
     if (user.role === 'ADMIN') {
@@ -194,31 +177,29 @@ export default function UsersManagementPage() {
         key: `admin-${workspace}`,
         workspace,
         permissionLevel: 'admin',
-        source: 'admin'
+        source: 'admin',
       }));
     }
 
     const directPermissions = getUserWorkspacePermissions(user.id);
-    const roleDefaults = rolePermissions.filter(
-      permission => permission.role === user.role && permission.isActive
-    );
-    const directWorkspaces = new Set(directPermissions.map(permission => permission.workspace));
+    const roleDefaults = rolePermissions.filter((permission) => permission.role === user.role && permission.isActive);
+    const directWorkspaces = new Set(directPermissions.map((permission) => permission.workspace));
 
     return [
       ...directPermissions.map((permission) => ({
         key: permission.id,
         workspace: permission.workspace,
         permissionLevel: permission.permissionLevel,
-        source: 'direct' as const
+        source: 'direct' as const,
       })),
       ...roleDefaults
-        .filter(permission => !directWorkspaces.has(permission.workspace))
+        .filter((permission) => !directWorkspaces.has(permission.workspace))
         .map((permission) => ({
           key: permission.id,
           workspace: permission.workspace,
           permissionLevel: permission.permissionLevel,
-          source: 'role' as const
-        }))
+          source: 'role' as const,
+        })),
     ];
   };
 
@@ -233,14 +214,14 @@ export default function UsersManagementPage() {
     }
   };
 
-  const getRoleColor = (role: string) => {
+  const getRoleTone = (role: string): ErpTone => {
     switch (role) {
-      case 'ADMIN': return 'text-red-500 bg-red-500/20';
-      case 'USER': return 'text-blue-500 bg-blue-500/20';
-      case 'MODERATOR': return 'text-yellow-500 bg-yellow-500/20';
-      case 'SALES': return 'text-green-500 bg-green-500/20';
-      case 'MANAGER': return 'text-purple-500 bg-purple-500/20';
-      default: return 'text-gray-500 bg-gray-500/20';
+      case 'ADMIN': return 'danger';
+      case 'USER': return 'info';
+      case 'MODERATOR': return 'warning';
+      case 'SALES': return 'success';
+      case 'MANAGER': return 'purple';
+      default: return 'neutral';
     }
   };
 
@@ -274,467 +255,252 @@ export default function UsersManagementPage() {
     }
   };
 
-  const getPermissionSourceColor = (source: EffectiveWorkspacePermission['source']) => {
+  const getPermissionSourceTone = (source: EffectiveWorkspacePermission['source']): ErpTone => {
     switch (source) {
-      case 'direct': return 'bg-teal-500/20 text-teal-300 border-teal-500/30';
-      case 'role': return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
-      case 'admin': return 'bg-red-500/20 text-red-300 border-red-500/30';
-      default: return 'bg-gray-500/20 text-gray-300 border-gray-500/30';
+      case 'direct': return 'primary';
+      case 'role': return 'info';
+      case 'admin': return 'danger';
+      default: return 'neutral';
     }
   };
 
-  const filteredUsers = users.filter(user => {
-    const matchesSearch = 
-      user.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.username.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesDepartment = !selectedDepartment || user.department?.id === selectedDepartment;
-    const matchesRole = !selectedRole || user.role === selectedRole;
-    const matchesStatus = !selectedStatus || 
-      (selectedStatus === 'active' && user.isActive) ||
-      (selectedStatus === 'inactive' && !user.isActive);
-    
-    return matchesSearch && matchesDepartment && matchesRole && matchesStatus;
-  });
-  const createdUser = createdUserId
-    ? users.find(user => user.id === createdUserId)
-    : null;
+  const filteredUsers = useMemo(() => {
+    return users.filter((user) => {
+      const matchesSearch =
+        user.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.username.toLowerCase().includes(searchTerm.toLowerCase());
+
+      const matchesDepartment = !selectedDepartment || user.department?.id === selectedDepartment;
+      const matchesRole = !selectedRole || user.role === selectedRole;
+      const matchesStatus =
+        !selectedStatus ||
+        (selectedStatus === 'active' && user.isActive) ||
+        (selectedStatus === 'inactive' && !user.isActive);
+
+      return matchesSearch && matchesDepartment && matchesRole && matchesStatus;
+    });
+  }, [users, searchTerm, selectedDepartment, selectedRole, selectedStatus]);
+
+  const createdUser = createdUserId ? users.find((user) => user.id === createdUserId) : null;
+
+  const metrics: ErpMetric[] = [
+    { label: 'کل کاربران', value: users.length.toLocaleString('fa-IR'), icon: FaUsers, tone: 'primary' },
+    { label: 'کاربران فعال', value: users.filter((user) => user.isActive).length.toLocaleString('fa-IR'), icon: FaUserCheck, tone: 'success' },
+    { label: 'مدیران', value: users.filter((user) => user.role === 'ADMIN').length.toLocaleString('fa-IR'), icon: FaShieldAlt, tone: 'danger' },
+    { label: 'کل بخش‌ها', value: departments.length.toLocaleString('fa-IR'), icon: FaBuilding, tone: 'purple' },
+  ];
+
+  const columns: ErpColumn<User>[] = [
+    {
+      id: 'user',
+      header: 'کاربر',
+      priority: 'primary',
+      cell: (user) => (
+        <div>
+          <p className="font-semibold text-slate-900 dark:text-white">{user.firstName} {user.lastName}</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{user.email}</p>
+          <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">@{user.username}</p>
+        </div>
+      ),
+    },
+    {
+      id: 'role',
+      header: 'نقش',
+      mobileLabel: 'نقش',
+      priority: 'secondary',
+      cell: (user) => <ErpBadge tone={getRoleTone(user.role)}>{getRoleLabel(user.role)}</ErpBadge>,
+    },
+    {
+      id: 'department',
+      header: 'بخش',
+      mobileLabel: 'بخش',
+      priority: 'meta',
+      cell: (user) => user.department ? user.department.namePersian : 'بدون بخش',
+    },
+    {
+      id: 'workspaces',
+      header: 'فضاهای کاری',
+      mobileLabel: 'فضاهای کاری',
+      priority: 'secondary',
+      cell: (user) => {
+        const userPermissions = getEffectiveWorkspacePermissions(user);
+        if (userPermissions.length === 0) {
+          return <span className="text-xs text-slate-500 dark:text-slate-400">بدون دسترسی</span>;
+        }
+        return (
+          <div className="flex max-w-lg flex-wrap gap-1.5">
+            {userPermissions.map((permission) => (
+              <span key={permission.key} title={`منبع دسترسی: ${getPermissionSourceLabel(permission.source)}`}>
+                <ErpBadge tone={getPermissionSourceTone(permission.source)}>
+                  {getWorkspaceLabel(permission.workspace)} ({getPermissionLabel(permission.permissionLevel)} - {getPermissionSourceLabel(permission.source)})
+                </ErpBadge>
+              </span>
+            ))}
+          </div>
+        );
+      },
+    },
+    {
+      id: 'status',
+      header: 'وضعیت',
+      mobileLabel: 'وضعیت',
+      priority: 'meta',
+      cell: (user) => <ErpBadge tone={user.isActive ? 'success' : 'danger'}>{user.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge>,
+    },
+    {
+      id: 'createdAt',
+      header: 'تاریخ ایجاد',
+      mobileLabel: 'تاریخ ایجاد',
+      priority: 'hidden-mobile',
+      cell: (user) => new Date(user.createdAt).toLocaleDateString('fa-IR'),
+    },
+  ];
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500"></div>
-      </div>
-    );
+    return <ErpLoading />;
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
-        <div className="glass-liquid-card p-8 text-center">
-          <h2 className="text-xl font-bold text-primary mb-2">خطا در بارگذاری</h2>
-          <p className="text-secondary mb-4">{error}</p>
-          <button 
-            onClick={fetchData}
-            className="glass-liquid-btn-primary px-6 py-2"
-          >
-            تلاش مجدد
-          </button>
-        </div>
-      </div>
+      <ErpEmptyState
+        icon={FaUsers}
+        title="خطا در بارگذاری"
+        description={error}
+        action={{ label: 'تلاش مجدد', onClick: fetchData, variant: 'solid', tone: 'primary' }}
+      />
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="glass-liquid-card p-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4 space-x-reverse">
-            <FaUsers className="h-8 w-8 text-teal-500" />
-            <div>
-              <h1 className="text-2xl font-bold text-primary">مدیریت کاربران</h1>
-              <p className="text-secondary">مدیریت کاربران، نقش‌ها و دسترسی‌های سیستم</p>
+    <>
+      <ErpListPage
+        eyebrow="مدیریت سیستم"
+        title="مدیریت کاربران"
+        description="مدیریت کاربران، نقش‌ها، وضعیت حساب و دسترسی‌های موثر در فضاهای کاری ERP."
+        metrics={metrics}
+        actions={[
+          { label: 'کاربر جدید', href: '/dashboard/users/create', icon: FaPlus, tone: 'primary', variant: 'solid' },
+          { label: 'مدیریت بخش‌ها', href: '/dashboard/departments', icon: FaBuilding, tone: 'neutral', variant: 'outline' },
+          { label: 'صادرات', icon: FaDownload, tone: 'neutral', variant: 'ghost', title: 'صادرات' },
+        ]}
+        filters={[
+          {
+            id: 'search',
+            label: 'جستجو',
+            type: 'search',
+            value: searchTerm,
+            placeholder: 'جستجو در نام، ایمیل یا نام کاربری...',
+            onChange: setSearchTerm,
+          },
+          {
+            id: 'department',
+            label: 'بخش',
+            type: 'select',
+            value: selectedDepartment,
+            onChange: setSelectedDepartment,
+            options: [
+              { label: 'همه بخش‌ها', value: '' },
+              ...departments.map((department) => ({ label: department.namePersian, value: department.id })),
+            ],
+          },
+          {
+            id: 'role',
+            label: 'نقش',
+            type: 'select',
+            value: selectedRole,
+            onChange: setSelectedRole,
+            options: [
+              { label: 'همه نقش‌ها', value: '' },
+              { label: 'مدیر', value: 'ADMIN' },
+              { label: 'مدیر فروش', value: 'MANAGER' },
+              { label: 'فروش', value: 'SALES' },
+              { label: 'کاربر', value: 'USER' },
+              { label: 'ناظر', value: 'MODERATOR' },
+            ],
+          },
+          {
+            id: 'status',
+            label: 'وضعیت',
+            type: 'select',
+            value: selectedStatus,
+            onChange: setSelectedStatus,
+            options: [
+              { label: 'همه وضعیت‌ها', value: '' },
+              { label: 'فعال', value: 'active' },
+              { label: 'غیرفعال', value: 'inactive' },
+            ],
+          },
+        ]}
+        rows={filteredUsers}
+        rowKey={(user) => user.id}
+        columns={columns}
+        rowActions={(user) => {
+          const disableAdminActions = currentUserRole === 'MANAGER' && user.role === 'ADMIN';
+          return [
+            { label: 'مشاهده جزئیات', href: `/dashboard/users/${user.id}`, icon: FaEye, title: 'مشاهده جزئیات' },
+            { label: 'ویرایش', href: `/dashboard/users/${user.id}/edit`, icon: FaEdit, disabled: disableAdminActions, title: disableAdminActions ? 'دسترسی برای مدیر فروش محدود است' : 'ویرایش' },
+            { label: 'مدیریت دسترسی‌ها', href: `/dashboard/admin/permissions?userId=${user.id}`, icon: FaCog, disabled: disableAdminActions, title: disableAdminActions ? 'دسترسی برای مدیر فروش محدود است' : 'مدیریت دسترسی‌ها' },
+            { label: 'حذف', onClick: () => handleDeleteUser(user), icon: FaTrash, tone: 'danger', disabled: disableAdminActions, title: disableAdminActions ? 'دسترسی برای مدیر فروش محدود است' : 'حذف' },
+          ];
+        }}
+        emptyState={<ErpEmptyState icon={FaUserTimes} title="هیچ کاربری یافت نشد" description="عبارت جستجو یا فیلترها را تغییر دهید." />}
+        footer={
+          totalPages > 1 ? (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-sm text-slate-500 dark:text-slate-400">
+                صفحه {currentPage.toLocaleString('fa-IR')} از {totalPages.toLocaleString('fa-IR')}
+              </span>
+              <div className="flex items-center gap-2">
+                <ErpButton label="قبلی" onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))} disabled={currentPage === 1} tone="neutral" variant="outline" />
+                <ErpButton label="بعدی" onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} tone="neutral" variant="outline" />
+              </div>
             </div>
-          </div>
-          <div className="flex items-center space-x-4 space-x-reverse">
-            <Link
-              href="/dashboard/users/create"
-              className="glass-liquid-btn-primary px-6 py-2 flex items-center space-x-2 space-x-reverse"
-            >
-              <FaPlus />
-              <span>کاربر جدید</span>
-            </Link>
-            <Link
-              href="/dashboard/departments"
-              className="glass-liquid-btn px-6 py-2 flex items-center space-x-2 space-x-reverse"
-            >
-              <FaBuilding />
-              <span>مدیریت بخش‌ها</span>
-            </Link>
-          </div>
-        </div>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="glass-liquid-card p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-secondary">کل کاربران</p>
-              <p className="text-2xl font-bold text-primary">{users.length}</p>
+          ) : null
+        }
+      >
+        {createdUserId && (
+          <ErpCard tone="primary" className="p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="font-semibold text-slate-900 dark:text-white">
+                  کاربر {createdUser ? `${createdUser.firstName} ${createdUser.lastName}` : 'جدید'} ایجاد شد
+                </p>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                  برای موارد خاص، می‌توانید مجوزهای جزئی و استثناها را مدیریت کنید.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <ErpButton label="مدیریت استثناها" href={`/dashboard/admin/permissions?userId=${createdUserId}&section=exceptions`} tone="primary" variant="solid" />
+                <ErpButton label="بستن" href="/dashboard/users" tone="neutral" variant="outline" />
+              </div>
             </div>
-            <FaUsers className="h-8 w-8 text-blue-500" />
-          </div>
-        </div>
-        
-        <div className="glass-liquid-card p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-secondary">کاربران فعال</p>
-              <p className="text-2xl font-bold text-primary">
-                {users.filter(u => u.isActive).length}
-              </p>
-            </div>
-            <FaUserCheck className="h-8 w-8 text-green-500" />
-          </div>
-        </div>
-        
-        <div className="glass-liquid-card p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-secondary">مدیران</p>
-              <p className="text-2xl font-bold text-primary">
-                {users.filter(u => u.role === 'ADMIN').length}
-              </p>
-            </div>
-            <FaShieldAlt className="h-8 w-8 text-red-500" />
-          </div>
-        </div>
-        
-        <div className="glass-liquid-card p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-secondary">کل بخش‌ها</p>
-              <p className="text-2xl font-bold text-primary">{departments.length}</p>
-            </div>
-            <FaBuilding className="h-8 w-8 text-purple-500" />
-          </div>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="glass-liquid-card p-6">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          <div>
-            <label className="block text-sm text-secondary mb-2">جستجو</label>
-            <div className="relative">
-              <FaSearch className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="جستجو در نام، ایمیل یا نام کاربری..."
-                className="glass-liquid-input w-full pr-10"
-              />
-            </div>
-          </div>
-          
-          <div>
-            <label className="block text-sm text-secondary mb-2">بخش</label>
-            <select
-              title="فیلتر بر اساس بخش"
-              aria-label="فیلتر بر اساس بخش"
-              value={selectedDepartment}
-              onChange={(e) => setSelectedDepartment(e.target.value)}
-              className="glass-liquid-input w-full"
-            >
-              <option value="">همه بخش‌ها</option>
-              {departments.map(dept => (
-                <option key={dept.id} value={dept.id}>
-                  {dept.namePersian}
-                </option>
-              ))}
-            </select>
-          </div>
-          
-          <div>
-            <label className="block text-sm text-secondary mb-2">نقش</label>
-            <select
-              title="فیلتر بر اساس نقش"
-              aria-label="فیلتر بر اساس نقش"
-              value={selectedRole}
-              onChange={(e) => setSelectedRole(e.target.value)}
-              className="glass-liquid-input w-full"
-            >
-              <option value="">همه نقش‌ها</option>
-              <option value="ADMIN">مدیر</option>
-              <option value="MANAGER">مدیر فروش</option>
-              <option value="SALES">فروش</option>
-              <option value="USER">کاربر</option>
-              <option value="MODERATOR">ناظر</option>
-            </select>
-          </div>
-          
-          <div>
-            <label className="block text-sm text-secondary mb-2">وضعیت</label>
-            <select
-              title="فیلتر بر اساس وضعیت"
-              aria-label="فیلتر بر اساس وضعیت"
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="glass-liquid-input w-full"
-            >
-              <option value="">همه وضعیت‌ها</option>
-              <option value="active">فعال</option>
-              <option value="inactive">غیرفعال</option>
-            </select>
-          </div>
-          
-          <div className="flex items-end">
-            <button
-              onClick={() => {
-                setSearchTerm('');
-                setSelectedDepartment('');
-                setSelectedRole('');
-                setSelectedStatus('');
-              }}
-              className="glass-liquid-btn w-full px-4 py-2 flex items-center justify-center space-x-2 space-x-reverse"
-            >
-              <FaFilter />
-              <span>پاک کردن فیلترها</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {createdUserId && (
-        <div className="glass-liquid-card p-4 border border-teal-500/30 bg-teal-500/10">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div>
-              <p className="text-primary font-medium">
-                کاربر {createdUser ? `${createdUser.firstName} ${createdUser.lastName}` : 'جدید'} ایجاد شد
-              </p>
-              <p className="text-secondary text-sm mt-1">
-                برای موارد خاص، می‌توانید مجوزهای جزئی و استثناها را مدیریت کنید.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Link
-                href={`/dashboard/admin/permissions?userId=${createdUserId}&section=exceptions`}
-                className="glass-liquid-btn-primary px-4 py-2 text-sm"
-              >
-                مدیریت استثناها
-              </Link>
-              <Link
-                href="/dashboard/users"
-                className="glass-liquid-btn px-4 py-2 text-sm"
-              >
-                بستن
-              </Link>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Users Table */}
-      <div className="glass-liquid-card p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-primary">لیست کاربران</h2>
-          <div className="flex items-center space-x-2 space-x-reverse">
-            <button className="glass-liquid-btn p-2" title="صادرات">
-              <FaDownload />
-            </button>
-          </div>
-        </div>
-        
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-700">
-                <th className="text-right py-3 px-4 text-secondary">کاربر</th>
-                <th className="text-right py-3 px-4 text-secondary">نقش</th>
-                <th className="text-right py-3 px-4 text-secondary">بخش</th>
-                <th className="text-right py-3 px-4 text-secondary">فضاهای کاری</th>
-                <th className="text-right py-3 px-4 text-secondary">وضعیت</th>
-                <th className="text-right py-3 px-4 text-secondary">تاریخ ایجاد</th>
-                <th className="text-right py-3 px-4 text-secondary">عملیات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredUsers.map((user) => {
-                const userPermissions = getEffectiveWorkspacePermissions(user);
-                const isManager = currentUserRole === 'MANAGER';
-                const isAdminTarget = user.role === 'ADMIN';
-                const disableAdminActions = isManager && isAdminTarget;
-                return (
-                  <tr key={user.id} className="border-b border-gray-800 hover:bg-white/5">
-                    <td className="py-3 px-4">
-                      <div>
-                        <div className="font-medium text-primary">
-                          {user.firstName} {user.lastName}
-                        </div>
-                        <div className="text-sm text-secondary">
-                          {user.email}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          @{user.username}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getRoleColor(user.role)}`}>
-                        {getRoleLabel(user.role)}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-secondary">
-                      {user.department ? user.department.namePersian : 'بدون بخش'}
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex flex-wrap gap-1">
-                        {userPermissions.length > 0 ? (
-                          userPermissions.map(permission => (
-                            <span
-                              key={permission.key}
-                              className={`px-2 py-1 rounded text-xs border ${getPermissionSourceColor(permission.source)}`}
-                              title={`منبع دسترسی: ${getPermissionSourceLabel(permission.source)}`}
-                            >
-                              {getWorkspaceLabel(permission.workspace)} ({getPermissionLabel(permission.permissionLevel)} - {getPermissionSourceLabel(permission.source)})
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-xs text-gray-500">بدون دسترسی</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        user.isActive 
-                          ? 'text-green-500 bg-green-500/20' 
-                          : 'text-red-500 bg-red-500/20'
-                      }`}>
-                        {user.isActive ? 'فعال' : 'غیرفعال'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-secondary text-sm">
-                      {new Date(user.createdAt).toLocaleDateString('fa-IR')}
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex space-x-2 space-x-reverse">
-                        <Link
-                          href={`/dashboard/users/${user.id}`}
-                          className="glass-liquid-btn p-2"
-                          title="مشاهده جزئیات"
-                        >
-                          <FaEye />
-                        </Link>
-                        {disableAdminActions ? (
-                          <>
-                            <span
-                              className="glass-liquid-btn p-2 opacity-50 cursor-not-allowed"
-                              title="دسترسی برای مدیر فروش محدود است"
-                            >
-                              <FaEdit />
-                            </span>
-                            <span
-                              className="glass-liquid-btn p-2 opacity-50 cursor-not-allowed"
-                              title="دسترسی برای مدیر فروش محدود است"
-                            >
-                              <FaCog />
-                            </span>
-                            <button
-                              disabled
-                              className="glass-liquid-btn p-2 text-red-400 opacity-50 cursor-not-allowed"
-                              title="دسترسی برای مدیر فروش محدود است"
-                            >
-                              <FaTrash />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <Link
-                              href={`/dashboard/users/${user.id}/edit`}
-                              className="glass-liquid-btn p-2"
-                              title="ویرایش"
-                            >
-                              <FaEdit />
-                            </Link>
-                            <Link
-                              href={`/dashboard/admin/permissions?userId=${user.id}`}
-                              className="glass-liquid-btn p-2"
-                              title="مدیریت دسترسی‌ها"
-                            >
-                              <FaCog />
-                            </Link>
-                            <button
-                              onClick={() => handleDeleteUser(user)}
-                              className="glass-liquid-btn p-2 text-red-400"
-                              title="حذف"
-                            >
-                              <FaTrash />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        
-        {filteredUsers.length === 0 && (
-          <div className="text-center py-8">
-            <p className="text-secondary">هیچ کاربری یافت نشد</p>
-          </div>
+          </ErpCard>
         )}
+      </ErpListPage>
 
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-center space-x-2 space-x-reverse mt-6">
-            <button
-              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-              className="glass-liquid-btn px-4 py-2 disabled:opacity-50"
-            >
-              قبلی
-            </button>
-            <span className="text-secondary">
-              صفحه {currentPage} از {totalPages}
-            </span>
-            <button
-              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-              disabled={currentPage === totalPages}
-              className="glass-liquid-btn px-4 py-2 disabled:opacity-50"
-            >
-              بعدی
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Delete Confirmation Modal */}
       {showDeleteModal && userToDelete && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="glass-liquid-card p-6 w-full max-w-md">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-primary">تایید حذف</h2>
-              <button
-                onClick={() => setShowDeleteModal(false)}
-                className="glass-liquid-btn p-2"
-                title="بستن پنجره حذف"
-                aria-label="بستن پنجره حذف"
-              >
-                <FaTimes />
-              </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <ErpSection className="w-full max-w-md">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">تایید حذف</h2>
+              <ErpButton label="بستن" onClick={() => setShowDeleteModal(false)} icon={FaTimes} variant="ghost" tone="neutral" />
             </div>
-            <p className="text-secondary mb-6">
+            <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
               آیا مطمئن هستید که می‌خواهید کاربر{' '}
-              <span className="font-medium text-primary">
+              <span className="font-semibold text-slate-900 dark:text-white">
                 {userToDelete.firstName} {userToDelete.lastName}
               </span>{' '}
               را حذف کنید؟ این عمل قابل بازگشت نیست.
             </p>
-            <div className="flex space-x-4 space-x-reverse">
-              <button
-                onClick={confirmDeleteUser}
-                className="glass-liquid-btn-primary px-6 py-2 flex-1"
-              >
-                حذف
-              </button>
-              <button
-                onClick={() => setShowDeleteModal(false)}
-                className="glass-liquid-btn px-6 py-2 flex-1"
-              >
-                لغو
-              </button>
+            <div className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <ErpButton label="حذف" onClick={confirmDeleteUser} tone="danger" variant="solid" />
+              <ErpButton label="لغو" onClick={() => setShowDeleteModal(false)} tone="neutral" variant="outline" />
             </div>
-          </div>
+          </ErpSection>
         </div>
       )}
-    </div>
+    </>
   );
 }

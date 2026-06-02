@@ -1,7 +1,8 @@
-﻿'use client';
+'use client';
 
-import { useState, useEffect } from 'react';
-import { FaCog, FaSave, FaUndo, FaInfoCircle } from 'react-icons/fa';
+import { useState } from 'react';
+import { FaCog, FaInfoCircle, FaSave, FaUndo } from 'react-icons/fa';
+import { ErpBadge, ErpButton, ErpPage, ErpSection } from '@/components/erp';
 
 interface SystemSettings {
   companyName: string;
@@ -17,29 +18,32 @@ interface SystemSettings {
   sessionTimeout: number;
 }
 
-export default function AdminSettingsPage() {
-  const [settings, setSettings] = useState<SystemSettings>({
-    companyName: 'Soblan Stone',
-    companyNamePersian: 'سنگ سبلان',
-    defaultCurrency: 'IRR',
-    defaultLanguage: 'fa',
-    timezone: 'Asia/Tehran',
-    dateFormat: 'jalali',
-    contractNumberPrefix: 'SAB',
-    emailNotifications: true,
-    smsNotifications: false,
-    autoBackup: true,
-    sessionTimeout: 30
-  });
+const defaultSettings: SystemSettings = {
+  companyName: 'Soblan Stone',
+  companyNamePersian: 'سنگ سبلان',
+  defaultCurrency: 'IRR',
+  defaultLanguage: 'fa',
+  timezone: 'Asia/Tehran',
+  dateFormat: 'jalali',
+  contractNumberPrefix: 'SAB',
+  emailNotifications: true,
+  smsNotifications: false,
+  autoBackup: true,
+  sessionTimeout: 30,
+};
 
+const inputClassName = 'min-h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
+const labelClassName = 'mb-2 block text-sm font-medium text-slate-600 dark:text-slate-300';
+
+export default function AdminSettingsPage() {
+  const [settings, setSettings] = useState<SystemSettings>(defaultSettings);
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const handleSave = async () => {
     setLoading(true);
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (error) {
@@ -50,236 +54,122 @@ export default function AdminSettingsPage() {
   };
 
   const handleReset = () => {
-    setSettings({
-      companyName: 'Soblan Stone',
-      companyNamePersian: 'سنگ سبلان',
-      defaultCurrency: 'IRR',
-      defaultLanguage: 'fa',
-      timezone: 'Asia/Tehran',
-      dateFormat: 'jalali',
-      contractNumberPrefix: 'SAB',
-      emailNotifications: true,
-      smsNotifications: false,
-      autoBackup: true,
-      sessionTimeout: 30
-    });
+    setSettings(defaultSettings);
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="glass-liquid-card p-6">
-        <div className="flex items-center gap-4">
-          <div className="glass-liquid-card p-3">
-            <FaCog className="h-8 w-8 text-orange-400" />
+    <ErpPage
+      eyebrow="مدیریت سیستم"
+      title="تنظیمات سیستم"
+      description="مدیریت تنظیمات عمومی شرکت، زبان، واحد پول، اعلان‌ها و امنیت نشست."
+      actions={[
+        { label: loading ? 'در حال ذخیره...' : 'ذخیره تنظیمات', onClick: handleSave, icon: FaSave, tone: 'primary', variant: 'solid', disabled: loading },
+        { label: 'بازنشانی', onClick: handleReset, icon: FaUndo, tone: 'neutral', variant: 'outline' },
+      ]}
+    >
+      {saved && (
+        <ErpSection className="border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-900/20">
+          <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-200">
+            <FaSave className="h-4 w-4" />
+            تنظیمات با موفقیت ذخیره شد
+          </div>
+        </ErpSection>
+      )}
+
+      <ErpSection title="اطلاعات شرکت" description="نام‌ها و پیشوندهای رسمی مورد استفاده در قراردادها." actions={[]}>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div>
+            <label className={labelClassName}>نام شرکت (انگلیسی)</label>
+            <input type="text" value={settings.companyName} onChange={(event) => setSettings({ ...settings, companyName: event.target.value })} className={inputClassName} />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">تنظیمات سیستم</h1>
-            <p className="text-gray-300">مدیریت تنظیمات عمومی سیستم</p>
+            <label className={labelClassName}>نام شرکت (فارسی)</label>
+            <input type="text" value={settings.companyNamePersian} onChange={(event) => setSettings({ ...settings, companyNamePersian: event.target.value })} className={inputClassName} />
           </div>
-        </div>
-      </div>
-
-      {/* Settings Form */}
-      <div className="glass-liquid-card p-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Company Information */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-              <FaInfoCircle className="h-5 w-5 text-blue-400" />
-              اطلاعات شرکت
-            </h3>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
-                نام شرکت (انگلیسی)
-              </label>
-              <input
-                type="text"
-                value={settings.companyName}
-                onChange={(e) => setSettings({...settings, companyName: e.target.value})}
-                className="w-full px-4 py-2 bg-white/10 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
-                نام شرکت (فارسی)
-              </label>
-              <input
-                type="text"
-                value={settings.companyNamePersian}
-                onChange={(e) => setSettings({...settings, companyNamePersian: e.target.value})}
-                className="w-full px-4 py-2 bg-white/10 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
-                پیشوند شماره قرارداد
-              </label>
-              <input
-                type="text"
-                value={settings.contractNumberPrefix}
-                onChange={(e) => setSettings({...settings, contractNumberPrefix: e.target.value})}
-                className="w-full px-4 py-2 bg-white/10 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500"
-              />
-            </div>
-          </div>
-
-          {/* System Preferences */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-              <FaCog className="h-5 w-5 text-green-400" />
-              تنظیمات سیستم
-            </h3>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
-                واحد پول
-              </label>
-              <select
-                value={settings.defaultCurrency}
-                onChange={(e) => setSettings({...settings, defaultCurrency: e.target.value})}
-                className="w-full px-4 py-2 bg-white/10 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-              >
-                <option value="IRR">ریال (IRR)</option>
-                <option value="USD">دلار (USD)</option>
-                <option value="EUR">یورو (EUR)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
-                زبان پیش‌فرض
-              </label>
-              <select
-                value={settings.defaultLanguage}
-                onChange={(e) => setSettings({...settings, defaultLanguage: e.target.value})}
-                className="w-full px-4 py-2 bg-white/10 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-              >
-                <option value="fa">فارسی</option>
-                <option value="en">English</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
-                منطقه زمانی
-              </label>
-              <select
-                value={settings.timezone}
-                onChange={(e) => setSettings({...settings, timezone: e.target.value})}
-                className="w-full px-4 py-2 bg-white/10 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-              >
-                <option value="Asia/Tehran">تهران (UTC+3:30)</option>
-                <option value="UTC">UTC</option>
-                <option value="America/New_York">نیویورک (UTC-5)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
-                قالب تاریخ
-              </label>
-              <select
-                value={settings.dateFormat}
-                onChange={(e) => setSettings({...settings, dateFormat: e.target.value})}
-                className="w-full px-4 py-2 bg-white/10 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-              >
-                <option value="jalali">شمسی (جلالی)</option>
-                <option value="gregorian">میلادی</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* Notifications */}
-        <div className="mt-8 space-y-4">
-          <h3 className="text-lg font-semibold text-white">اعلان‌ها</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <label className="flex items-center gap-3">
-              <input
-                type="checkbox"
-                checked={settings.emailNotifications}
-                onChange={(e) => setSettings({...settings, emailNotifications: e.target.checked})}
-                className="w-4 h-4 text-orange-500 bg-white/10 border-gray-600 rounded focus:ring-orange-500"
-              />
-              <span className="text-white">اعلان ایمیلی</span>
-            </label>
-
-            <label className="flex items-center gap-3">
-              <input
-                type="checkbox"
-                checked={settings.smsNotifications}
-                onChange={(e) => setSettings({...settings, smsNotifications: e.target.checked})}
-                className="w-4 h-4 text-orange-500 bg-white/10 border-gray-600 rounded focus:ring-orange-500"
-              />
-              <span className="text-white">اعلان پیامکی</span>
-            </label>
-
-            <label className="flex items-center gap-3">
-              <input
-                type="checkbox"
-                checked={settings.autoBackup}
-                onChange={(e) => setSettings({...settings, autoBackup: e.target.checked})}
-                className="w-4 h-4 text-orange-500 bg-white/10 border-gray-600 rounded focus:ring-orange-500"
-              />
-              <span className="text-white">پشتیبان‌گیری خودکار</span>
-            </label>
-          </div>
-        </div>
-
-        {/* Security */}
-        <div className="mt-8 space-y-4">
-          <h3 className="text-lg font-semibold text-white">امنیت سیستم</h3>
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-2">
-              مهلت نشست کاربر (دقیقه)
-            </label>
+            <label className={labelClassName}>پیشوند شماره قرارداد</label>
+            <input type="text" value={settings.contractNumberPrefix} onChange={(event) => setSettings({ ...settings, contractNumberPrefix: event.target.value })} className={inputClassName} />
+          </div>
+        </div>
+      </ErpSection>
+
+      <ErpSection title="تنظیمات سیستم" description="گزینه‌های پایه برای زبان، تاریخ، منطقه زمانی و واحد پول.">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div>
+            <label className={labelClassName}>واحد پول</label>
+            <select value={settings.defaultCurrency} onChange={(event) => setSettings({ ...settings, defaultCurrency: event.target.value })} className={inputClassName}>
+              <option value="IRR">ریال (IRR)</option>
+              <option value="USD">دلار (USD)</option>
+              <option value="EUR">یورو (EUR)</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClassName}>زبان پیش‌فرض</label>
+            <select value={settings.defaultLanguage} onChange={(event) => setSettings({ ...settings, defaultLanguage: event.target.value })} className={inputClassName}>
+              <option value="fa">فارسی</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClassName}>منطقه زمانی</label>
+            <select value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} className={inputClassName}>
+              <option value="Asia/Tehran">تهران (UTC+3:30)</option>
+              <option value="UTC">UTC</option>
+              <option value="America/New_York">نیویورک (UTC-5)</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClassName}>قالب تاریخ</label>
+            <select value={settings.dateFormat} onChange={(event) => setSettings({ ...settings, dateFormat: event.target.value })} className={inputClassName}>
+              <option value="jalali">شمسی (جلالی)</option>
+              <option value="gregorian">میلادی</option>
+            </select>
+          </div>
+        </div>
+      </ErpSection>
+
+      <ErpSection title="اعلان‌ها و امنیت" description="تنظیمات ارتباطی و مدت اعتبار نشست کاربران.">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            {[
+              ['emailNotifications', 'اعلان ایمیلی'],
+              ['smsNotifications', 'اعلان پیامکی'],
+              ['autoBackup', 'پشتیبان‌گیری خودکار'],
+            ].map(([key, label]) => (
+              <label key={key} className="flex min-h-12 items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                <span>{label}</span>
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings[key as keyof SystemSettings])}
+                  onChange={(event) => setSettings({ ...settings, [key]: event.target.checked })}
+                  className="h-4 w-4 rounded border-slate-300 text-[#074747] focus:ring-[#074747]"
+                />
+              </label>
+            ))}
+          </div>
+          <div>
+            <label className={labelClassName}>مهلت نشست کاربر (دقیقه)</label>
             <input
               type="number"
               min="5"
               max="480"
               value={settings.sessionTimeout}
-              onChange={(e) => setSettings({...settings, sessionTimeout: parseInt(e.target.value)})}
-              className="w-full px-4 py-2 bg-white/10 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500"
+              onChange={(event) => setSettings({ ...settings, sessionTimeout: parseInt(event.target.value, 10) })}
+              className={inputClassName}
             />
           </div>
         </div>
-
-        {/* Action Buttons */}
-        <div className="mt-8 flex items-center gap-4">
-          <button
-            onClick={handleSave}
-            disabled={loading}
-            className="glass-liquid-btn-primary px-6 py-2 flex items-center gap-2 disabled:opacity-50"
-          >
-            {loading ? (
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-            ) : (
-              <FaSave className="h-4 w-4" />
-            )}
-            {loading ? 'در حال ذخیره...' : 'ذخیره تنظیمات'}
-          </button>
-
-          <button
-            onClick={handleReset}
-            className="glass-liquid-btn px-6 py-2 flex items-center gap-2"
-          >
-            <FaUndo className="h-4 w-4" />
-            بازنشانی
-          </button>
-
-          {saved && (
-            <div className="text-green-400 flex items-center gap-2">
-              <FaSave className="h-4 w-4" />
-              تنظیمات با موفقیت ذخیره شد
-            </div>
-          )}
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+          <FaInfoCircle className="h-4 w-4" />
+          <span>این صفحه هنوز از داده شبیه‌سازی‌شده استفاده می‌کند؛ فقط پوسته و خوانایی آن به الگوی ERP منتقل شده است.</span>
+          <ErpBadge tone="warning">فرم متوسط</ErpBadge>
         </div>
+      </ErpSection>
+
+      <div className="flex flex-wrap gap-2">
+        <ErpButton label={loading ? 'در حال ذخیره...' : 'ذخیره تنظیمات'} onClick={handleSave} icon={FaCog} tone="primary" variant="solid" disabled={loading} />
+        <ErpButton label="بازنشانی" onClick={handleReset} icon={FaUndo} tone="neutral" variant="outline" />
       </div>
-    </div>
+    </ErpPage>
   );
 }
-

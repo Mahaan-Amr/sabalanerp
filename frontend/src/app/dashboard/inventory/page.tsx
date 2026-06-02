@@ -1,8 +1,8 @@
-﻿'use client';
+'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { FaWarehouse, FaBoxes, FaClipboardList, FaChartLine, FaCog, FaPlus, FaTools, FaCut } from 'react-icons/fa';
+import React, { useEffect, useState } from 'react';
+import { FaBoxes, FaChartLine, FaClipboardList, FaCog, FaCut, FaPlus, FaTools, FaWarehouse } from 'react-icons/fa';
+import { ErpActionGrid, ErpBadge, ErpEmptyState, ErpLoading, ErpPage, ErpSection, type ErpMetric } from '@/components/erp';
 import { dashboardAPI } from '@/lib/api';
 import { getInventoryMasterDataPermissions } from '@/lib/permissions';
 
@@ -11,21 +11,12 @@ interface User {
   role: string;
   departmentId?: string;
   permissions?: {
-    features: Array<{
-      feature: string;
-      permissionLevel: string;
-      workspace: string;
-    }>;
-    workspaces: Array<{
-      workspace: string;
-      permissionLevel: string;
-    }>;
+    features: Array<{ feature: string; permissionLevel: string; workspace: string }>;
+    workspaces: Array<{ workspace: string; permissionLevel: string }>;
   };
 }
 
 const InventoryDashboard: React.FC = () => {
-  const router = useRouter();
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [inventoryPermissions, setInventoryPermissions] = useState<any>(null);
 
@@ -34,8 +25,7 @@ const InventoryDashboard: React.FC = () => {
       try {
         const response = await dashboardAPI.getProfile();
         if (response.data.success) {
-          setCurrentUser(response.data.data);
-          setInventoryPermissions(getInventoryMasterDataPermissions(response.data.data));
+          setInventoryPermissions(getInventoryMasterDataPermissions(response.data.data as User));
         }
       } catch (error) {
         console.error('Error loading user profile:', error);
@@ -48,334 +38,87 @@ const InventoryDashboard: React.FC = () => {
   }, []);
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600"></div>
-      </div>
-    );
+    return <ErpLoading />;
   }
 
-  const hasAnyMasterDataPermission = inventoryPermissions && (
-    inventoryPermissions.cutTypes.canView ||
-    inventoryPermissions.stoneMaterials.canView ||
-    inventoryPermissions.cutWidths.canView ||
-    inventoryPermissions.thicknesses.canView ||
-    inventoryPermissions.mines.canView ||
-    inventoryPermissions.finishTypes.canView ||
-    inventoryPermissions.colors.canView
-  );
-
   const masterDataSections = [
-    {
-      id: 'cut-types',
-      title: 'نوع برش',
-      titlePersian: 'نوع برش',
-      description: 'مدیریت انواع برش سنگ (طولی، اسلب، پله و...)',
-      icon: FaCog,
-      canView: inventoryPermissions?.cutTypes.canView || false,
-      canCreate: inventoryPermissions?.cutTypes.canCreate || false,
-      href: '/dashboard/inventory/master-data/cut-types'
-    },
-    {
-      id: 'stone-materials',
-      title: 'جنس سنگ',
-      titlePersian: 'جنس سنگ',
-      description: 'مدیریت جنس‌های سنگ (تراورتن، مرمریت و...)',
-      icon: FaBoxes,
-      canView: inventoryPermissions?.stoneMaterials.canView || false,
-      canCreate: inventoryPermissions?.stoneMaterials.canCreate || false,
-      href: '/dashboard/inventory/master-data/stone-materials'
-    },
-    {
-      id: 'cut-widths',
-      title: 'عرض برش',
-      titlePersian: 'عرض برش',
-      description: 'مدیریت عرض‌های برش (۴۰ سانتی، ۶۰ سانتی و...)',
-      icon: FaCog,
-      canView: inventoryPermissions?.cutWidths.canView || false,
-      canCreate: inventoryPermissions?.cutWidths.canCreate || false,
-      href: '/dashboard/inventory/master-data/cut-widths'
-    },
-    {
-      id: 'thicknesses',
-      title: 'ضخامت',
-      titlePersian: 'ضخامت',
-      description: 'مدیریت ضخامت سنگ (۲ سانتی، ۳ سانتی و...)',
-      icon: FaCog,
-      canView: inventoryPermissions?.thicknesses.canView || false,
-      canCreate: inventoryPermissions?.thicknesses.canCreate || false,
-      href: '/dashboard/inventory/master-data/thicknesses'
-    },
-    {
-      id: 'mines',
-      title: 'معدن',
-      titlePersian: 'معدن',
-      description: 'مدیریت معادن سنگ (عباس‌آباد، دره‌بخاری و...)',
-      icon: FaWarehouse,
-      canView: inventoryPermissions?.mines.canView || false,
-      canCreate: inventoryPermissions?.mines.canCreate || false,
-      href: '/dashboard/inventory/master-data/mines'
-    },
-    {
-      id: 'finish-types',
-      title: 'نوع فرآوری',
-      titlePersian: 'نوع فرآوری',
-      description: 'مدیریت نوع فرآوری سنگ (سابیده، چرمی و...)',
-      icon: FaCog,
-      canView: inventoryPermissions?.finishTypes.canView || false,
-      canCreate: inventoryPermissions?.finishTypes.canCreate || false,
-      href: '/dashboard/inventory/master-data/finish-types'
-    },
-    {
-      id: 'colors',
-      title: 'رنگ/تم',
-      titlePersian: 'رنگ/تم',
-      description: 'مدیریت رنگ و تم سنگ (سفید، کرم و...)',
-      icon: FaCog,
-      canView: inventoryPermissions?.colors.canView || false,
-      canCreate: inventoryPermissions?.colors.canCreate || false,
-      href: '/dashboard/inventory/master-data/colors'
-    },
-    {
-      id: 'cutting-types',
-      title: 'نوع ابزار',
-      titlePersian: 'نوع ابزار',
-      description: 'مدیریت انواع ابزار و برش‌های خدماتی',
-      icon: FaCut,
-      canView: inventoryPermissions?.cuttingTypes?.canView || false,
-      canCreate: inventoryPermissions?.cuttingTypes?.canCreate || false,
-      href: '/dashboard/inventory/master-data/cutting-types'
-    }
+    { id: 'cut-types', title: 'نوع برش', description: 'مدیریت انواع برش سنگ', icon: FaCog, canView: inventoryPermissions?.cutTypes.canView || false, canCreate: inventoryPermissions?.cutTypes.canCreate || false, href: '/dashboard/inventory/master-data/cut-types' },
+    { id: 'stone-materials', title: 'جنس سنگ', description: 'مدیریت جنس‌های سنگ', icon: FaBoxes, canView: inventoryPermissions?.stoneMaterials.canView || false, canCreate: inventoryPermissions?.stoneMaterials.canCreate || false, href: '/dashboard/inventory/master-data/stone-materials' },
+    { id: 'cut-widths', title: 'عرض برش', description: 'مدیریت عرض‌های برش', icon: FaCog, canView: inventoryPermissions?.cutWidths.canView || false, canCreate: inventoryPermissions?.cutWidths.canCreate || false, href: '/dashboard/inventory/master-data/cut-widths' },
+    { id: 'thicknesses', title: 'ضخامت', description: 'مدیریت ضخامت سنگ', icon: FaCog, canView: inventoryPermissions?.thicknesses.canView || false, canCreate: inventoryPermissions?.thicknesses.canCreate || false, href: '/dashboard/inventory/master-data/thicknesses' },
+    { id: 'mines', title: 'معدن', description: 'مدیریت معادن سنگ', icon: FaWarehouse, canView: inventoryPermissions?.mines.canView || false, canCreate: inventoryPermissions?.mines.canCreate || false, href: '/dashboard/inventory/master-data/mines' },
+    { id: 'finish-types', title: 'نوع فرآوری', description: 'مدیریت نوع فرآوری سنگ', icon: FaCog, canView: inventoryPermissions?.finishTypes.canView || false, canCreate: inventoryPermissions?.finishTypes.canCreate || false, href: '/dashboard/inventory/master-data/finish-types' },
+    { id: 'colors', title: 'رنگ/تم', description: 'مدیریت رنگ و تم سنگ', icon: FaCog, canView: inventoryPermissions?.colors.canView || false, canCreate: inventoryPermissions?.colors.canCreate || false, href: '/dashboard/inventory/master-data/colors' },
+    { id: 'cutting-types', title: 'نوع ابزار', description: 'مدیریت انواع ابزار و برش‌های خدماتی', icon: FaCut, canView: inventoryPermissions?.cuttingTypes?.canView || false, canCreate: inventoryPermissions?.cuttingTypes?.canCreate || false, href: '/dashboard/inventory/master-data/cutting-types' },
+  ];
+
+  const hasAnyMasterDataPermission = masterDataSections.some((section) => section.canView);
+
+  const metrics: ErpMetric[] = [
+    { label: 'بخش‌های داده پایه', value: masterDataSections.length.toLocaleString('fa-IR'), icon: FaCog, tone: 'primary' },
+    { label: 'قابل مشاهده', value: masterDataSections.filter((section) => section.canView).length.toLocaleString('fa-IR'), icon: FaWarehouse, tone: 'success' },
+    { label: 'قابل ایجاد', value: masterDataSections.filter((section) => section.canCreate).length.toLocaleString('fa-IR'), icon: FaPlus, tone: 'info' },
+    { label: 'بدون دسترسی', value: masterDataSections.filter((section) => !section.canView).length.toLocaleString('fa-IR'), icon: FaClipboardList, tone: 'warning' },
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
-      <div className="container mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
-            انبار
-          </h1>
-          <p className="text-slate-600 dark:text-slate-400">
-            مدیریت موجودی، خدمات و داده‌های پایه
-          </p>
-        </div>
+    <ErpPage
+      eyebrow="انبار"
+      title="مدیریت انبار"
+      description="مدیریت داده‌های پایه سنگ، کاتالوگ محصولات، خدمات و مسیرهای عملیاتی انبار."
+      metrics={metrics}
+    >
+      <ErpSection title="عملیات اصلی" description="ورود به بخش‌های اصلی انبار و سرویس‌ها با الگوی ERP جدید.">
+        <ErpActionGrid
+          columns={3}
+          items={[
+            {
+              title: 'داده‌های پایه',
+              description: 'تعریف مشخصات سنگ، برش، ضخامت، معدن، رنگ و فرآوری',
+              href: hasAnyMasterDataPermission ? '/dashboard/inventory/master-data' : undefined,
+              icon: FaCog,
+              tone: 'warning',
+              disabled: !hasAnyMasterDataPermission,
+              meta: hasAnyMasterDataPermission ? 'قابل دسترسی' : 'بدون دسترسی',
+            },
+            { title: 'محصولات', description: 'مشاهده و مدیریت محصولات قابل استفاده در قراردادها', href: '/dashboard/sales/products', icon: FaBoxes, tone: 'primary', meta: 'کاتالوگ فروش' },
+            { title: 'گردش موجودی', description: 'ثبت ورود، خروج و انتقال موجودی', icon: FaClipboardList, tone: 'info', disabled: true, meta: 'به‌زودی' },
+            { title: 'خدمات', description: 'مدیریت خدمات، ابزارها، ساب‌ها و هزینه‌های وابسته', href: '/dashboard/inventory/services', icon: FaTools, tone: 'success' },
+            { title: 'گزارش‌ها', description: 'گزارش‌های موجودی، محصولات و خدمات', icon: FaChartLine, tone: 'purple', disabled: true, meta: 'به‌زودی' },
+          ]}
+        />
+      </ErpSection>
 
-        {/* Main Actions Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-          {/* Master Data Management */}
-          <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-xl p-6 border border-slate-200/50 dark:border-slate-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3 space-x-reverse">
-                <div className="p-3 bg-orange-100 dark:bg-orange-900/30 rounded-lg">
-                  <FaCog className="w-6 h-6 text-orange-600 dark:text-orange-400" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-                    داده‌های پایه
-                  </h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    مدیریت مشخصات سنگ
-                  </p>
-                </div>
-              </div>
-            </div>
-            
-            <p className="text-slate-600 dark:text-slate-400 mb-4 text-sm">
-              تعریف و مدیریت اطلاعات پایه سنگ برای استفاده در فروش و تولید
-            </p>
-            
-            {hasAnyMasterDataPermission ? (
-              <button
-                onClick={() => router.push('/dashboard/inventory/master-data')}
-                className="w-full bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2 space-x-reverse"
-              >
-                <FaCog className="w-4 h-4" />
-                <span>مدیریت داده‌های پایه</span>
-              </button>
-            ) : (
-              <div className="w-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-4 py-2 rounded-lg text-center">
-                بدون دسترسی
-              </div>
-            )}
-          </div>
-
-          {/* Products */}
-          <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-xl p-6 border border-slate-200/50 dark:border-slate-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3 space-x-reverse">
-                <div className="p-3 bg-teal-100 dark:bg-teal-900/30 rounded-lg">
-                  <FaBoxes className="w-6 h-6 text-teal-600 dark:text-teal-400" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-                    محصولات
-                  </h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    کاتالوگ فروش
-                  </p>
-                </div>
-              </div>
-            </div>
-            
-            <p className="text-slate-600 dark:text-slate-400 mb-4 text-sm">
-              مشاهده و مدیریت محصولات قابل استفاده در قراردادها
-            </p>
-            
-            <button
-              onClick={() => router.push('/dashboard/sales/products')}
-              className="w-full bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2 space-x-reverse"
-            >
-              <FaBoxes className="w-4 h-4" />
-              <span>مدیریت محصولات</span>
-            </button>
-          </div>
-
-          {/* Stock Movements */}
-          <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-xl p-6 border border-slate-200/50 dark:border-slate-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3 space-x-reverse">
-                <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                  <FaClipboardList className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-                    گردش موجودی
-                  </h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    ورود و خروج کالا
-                  </p>
-                </div>
-              </div>
-            </div>
-            
-            <p className="text-slate-600 dark:text-slate-400 mb-4 text-sm">
-              ثبت و پیگیری ورود، خروج و انتقال موجودی
-            </p>
-            
-            <div className="w-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-4 py-2 rounded-lg text-center">
-              به‌زودی
-            </div>
-          </div>
-
-          {/* Services */}
-          <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-xl p-6 border border-slate-200/50 dark:border-slate-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3 space-x-reverse">
-                <div className="p-3 bg-green-100 dark:bg-green-900/30 rounded-lg">
-                  <FaTools className="w-6 h-6 text-green-600 dark:text-green-400" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-                    خدمات
-                  </h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    خدمات و ابزار سنگ
-                  </p>
-                </div>
-              </div>
-            </div>
-            
-            <p className="text-slate-600 dark:text-slate-400 mb-4 text-sm">
-              مدیریت خدمات، ابزارها، ساب‌ها و هزینه‌های وابسته
-            </p>
-            
-            <button
-              onClick={() => router.push('/dashboard/inventory/services')}
-              className="w-full bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2 space-x-reverse"
-            >
-              <FaTools className="w-4 h-4" />
-              <span>مدیریت خدمات</span>
-            </button>
-          </div>
-
-          {/* Reports */}
-          <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-xl p-6 border border-slate-200/50 dark:border-slate-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3 space-x-reverse">
-                <div className="p-3 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
-                  <FaChartLine className="w-6 h-6 text-purple-600 dark:text-purple-400" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-                    گزارش‌ها
-                  </h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    تحلیل و کنترل
-                  </p>
-                </div>
-              </div>
-            </div>
-            
-            <p className="text-slate-600 dark:text-slate-400 mb-4 text-sm">
-              گزارش‌های موجودی، محصولات و خدمات
-            </p>
-            
-            <div className="w-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-4 py-2 rounded-lg text-center">
-              به‌زودی
-            </div>
-          </div>
-        </div>
-
-        {/* Master Data Sections Preview */}
-        {hasAnyMasterDataPermission && (
-          <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-xl p-6 border border-slate-200/50 dark:border-slate-700/50 shadow-lg">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200">
-                بخش‌های داده‌های پایه
-              </h2>
-              <button
-                onClick={() => router.push('/dashboard/inventory/master-data')}
-                className="text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 text-sm font-medium"
-              >
-                مشاهده همه
-              </button>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {masterDataSections.map((section) => {
-                const IconComponent = section.icon;
-                return (
-                  <div
-                    key={section.id}
-                    className={`p-4 rounded-lg border transition-all duration-200 ${
-                      section.canView
-                        ? 'bg-slate-50 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer'
-                        : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700 opacity-60'
-                    }`}
-                    onClick={() => section.canView && router.push(section.href)}
-                  >
-                    <div className="flex items-center space-x-3 space-x-reverse mb-2">
-                      <IconComponent className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-                      <h3 className="font-medium text-slate-800 dark:text-slate-200 text-sm">
-                        {section.titlePersian}
-                      </h3>
-                    </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">
-                      {section.description}
-                    </p>
-                    <div className="flex items-center justify-between">
-                      <span className={`text-xs px-2 py-1 rounded ${
-                        section.canView
-                          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                          : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                      }`}>
-                        {section.canView ? 'قابل مشاهده' : 'بدون دسترسی'}
-                      </span>
-                      {section.canCreate && (
-                        <FaPlus className="w-3 h-3 text-orange-500" />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+      {hasAnyMasterDataPermission ? (
+        <ErpSection
+          title="بخش‌های داده‌های پایه"
+          description="نمای سریع از دسترسی شما به داده‌های پایه انبار."
+          actions={[{ label: 'مشاهده همه', href: '/dashboard/inventory/master-data', tone: 'neutral', variant: 'outline' }]}
+        >
+          <ErpActionGrid
+            columns={4}
+            compact
+            items={masterDataSections.map((section) => ({
+              title: section.title,
+              description: section.description,
+              href: section.canView ? section.href : undefined,
+              icon: section.icon,
+              tone: section.canView ? 'success' : 'danger',
+              disabled: !section.canView,
+              badge: <ErpBadge tone={section.canView ? 'success' : 'danger'}>{section.canView ? 'قابل مشاهده' : 'بدون دسترسی'}</ErpBadge>,
+              meta: section.canCreate ? 'ایجاد مجاز' : undefined,
+            }))}
+          />
+        </ErpSection>
+      ) : (
+        <ErpEmptyState
+          icon={FaWarehouse}
+          title="دسترسی داده‌های پایه ندارید"
+          description="برای مشاهده یا مدیریت داده‌های پایه انبار با مدیر سیستم تماس بگیرید."
+        />
+      )}
+    </ErpPage>
   );
 };
 
 export default InventoryDashboard;
-

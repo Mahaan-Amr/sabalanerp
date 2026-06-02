@@ -69,6 +69,7 @@ import { useContractSubmission } from '@/features/contract-creation/hooks/useCon
 import { useDataLoading } from '@/features/contract-creation/hooks/useDataLoading';
 import { useContractSummary } from '@/features/contract-creation/hooks/useContractSummary';
 import { useProductFiltering } from '@/features/contract-creation/hooks/useProductFiltering';
+import { useContractProductCartController } from '@/features/contract-creation/hooks/useContractProductCartController';
 
 // Import constants
 import { NOSING_TYPES, PRODUCT_TYPES, WIZARD_STEPS } from '@/features/contract-creation/constants/contract.constants';
@@ -1407,7 +1408,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     treadProductSearchTerm,
     riserProductSearchTerm,
     landingProductSearchTerm,
-    selectedProductTypeForAddition: null
+    selectedProductTypeForAddition: wizardData.selectedProductTypeForAddition
   });
   const {
     filteredCustomers,
@@ -2453,6 +2454,83 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     
     remainingStoneModal.setShowRemainingStoneModal(true);
   };
+
+  const handleRemoveProductFromContract = (index: number) => {
+    const productToRemove = wizardData.products[index];
+    const remainingSourceMeta = productToRemove?.meta?.remainingSource;
+
+    if (!remainingSourceMeta) {
+      const newProducts = wizardData.products.filter((_, i) => i !== index);
+      updateWizardData({ products: newProducts });
+      return;
+    }
+
+    const sourceProductIndex = remainingSourceMeta.sourceProductIndex as number;
+    const partitionId = remainingSourceMeta.partitionId as string | undefined;
+    const sourceRemainingStoneId = remainingSourceMeta.sourceRemainingStoneId as string | undefined;
+    const productsAfterRemoval = wizardData.products.filter((_, i) => i !== index);
+
+    const normalizedSourceIndex = index < sourceProductIndex ? sourceProductIndex - 1 : sourceProductIndex;
+    if (normalizedSourceIndex < 0 || normalizedSourceIndex >= productsAfterRemoval.length) {
+      updateWizardData({ products: productsAfterRemoval });
+      return;
+    }
+
+    const sourceProduct = productsAfterRemoval[normalizedSourceIndex];
+    const restoredRemainingStone = sanitizeRemainingStoneEntry({
+      id: `restored_${Date.now()}_${partitionId || 'partition'}`,
+      width: productToRemove.width,
+      length: productToRemove.length,
+      squareMeters: productToRemove.squareMeters,
+      isAvailable: true,
+      sourceCutId: sourceRemainingStoneId || '',
+      quantity: productToRemove.quantity
+    } as RemainingStone);
+
+    const cleanedUsedRemaining = (sourceProduct.usedRemainingStones || []).filter(stone => {
+      if (!partitionId) return true;
+      return !(stone.id && stone.id.includes(partitionId));
+    });
+    const recalculated = recalculateUsedRemainingDimensions(cleanedUsedRemaining);
+    const mergedRemaining = mergeRemainingStoneCollection([
+      ...(sourceProduct.remainingStones || []),
+      restoredRemainingStone
+    ]);
+
+    const updatedSourceProduct = {
+      ...sourceProduct,
+      usedRemainingStones: cleanedUsedRemaining,
+      remainingStones: mergedRemaining,
+      totalUsedRemainingWidth: recalculated.totalUsedWidth,
+      totalUsedRemainingLength: recalculated.totalUsedLength
+    };
+
+    productsAfterRemoval[normalizedSourceIndex] = updatedSourceProduct;
+    updateWizardData({ products: productsAfterRemoval });
+  };
+
+  const handleCreateProductFromContractFlow = () => {
+    localStorage.setItem('contractWizardState', JSON.stringify({
+      currentStep,
+      wizardData
+    }));
+    router.push(`/dashboard/sales/products/create?returnTo=contract&step=${currentStep}`);
+  };
+
+  const productCartController = useContractProductCartController({
+    wizardData,
+    updateWizardData,
+    products,
+    filteredProducts,
+    productSearchTerm,
+    setProductSearchTerm,
+    productsSummary,
+    selectProduct: handleProductSelection,
+    editProduct: handleEditProduct,
+    removeProduct: handleRemoveProductFromContract,
+    useRemainingStone: handleCreateFromRemainingStone,
+    createProduct: handleCreateProductFromContractFlow
+  });
 
   // Digital confirmation handlers
   const refreshConfirmationStatus = async () => {
@@ -3977,74 +4055,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       case 4:
         return (
           <Step5ProductSelection
-            wizardData={wizardData}
-            updateWizardData={updateWizardData}
+            controller={productCartController}
             errors={errors}
-            productSearchTerm={productSearchTerm}
-            setProductSearchTerm={setProductSearchTerm}
-            products={products}
-            filteredProducts={filteredProducts}
-            handleProductSelection={handleProductSelection}
-            setShowProductModal={setShowProductModal}
-            setSelectedProductForConfiguration={setSelectedProduct}
-            setSelectedProductIndexForEdit={setEditingProductIndex}
-            handleRemoveProduct={(index) => {
-              const productToRemove = wizardData.products[index];
-              const remainingSourceMeta = productToRemove?.meta?.remainingSource;
-
-              if (!remainingSourceMeta) {
-                const newProducts = wizardData.products.filter((_, i) => i !== index);
-                updateWizardData({ products: newProducts });
-                return;
-              }
-
-              const sourceProductIndex = remainingSourceMeta.sourceProductIndex as number;
-              const partitionId = remainingSourceMeta.partitionId as string | undefined;
-              const sourceRemainingStoneId = remainingSourceMeta.sourceRemainingStoneId as string | undefined;
-              const productsAfterRemoval = wizardData.products.filter((_, i) => i !== index);
-
-              const normalizedSourceIndex = index < sourceProductIndex ? sourceProductIndex - 1 : sourceProductIndex;
-              if (normalizedSourceIndex < 0 || normalizedSourceIndex >= productsAfterRemoval.length) {
-                updateWizardData({ products: productsAfterRemoval });
-                return;
-              }
-
-              const sourceProduct = productsAfterRemoval[normalizedSourceIndex];
-              const restoredRemainingStone = sanitizeRemainingStoneEntry({
-                id: `restored_${Date.now()}_${partitionId || 'partition'}`,
-                width: productToRemove.width,
-                length: productToRemove.length,
-                squareMeters: productToRemove.squareMeters,
-                isAvailable: true,
-                sourceCutId: sourceRemainingStoneId || '',
-                quantity: productToRemove.quantity
-              } as RemainingStone);
-
-              const cleanedUsedRemaining = (sourceProduct.usedRemainingStones || []).filter(stone => {
-                if (!partitionId) return true;
-                return !(stone.id && stone.id.includes(partitionId));
-              });
-              const recalculated = recalculateUsedRemainingDimensions(cleanedUsedRemaining);
-              const mergedRemaining = mergeRemainingStoneCollection([
-                ...(sourceProduct.remainingStones || []),
-                restoredRemainingStone
-              ]);
-
-              const updatedSourceProduct = {
-                ...sourceProduct,
-                usedRemainingStones: cleanedUsedRemaining,
-                remainingStones: mergedRemaining,
-                totalUsedRemainingWidth: recalculated.totalUsedWidth,
-                totalUsedRemainingLength: recalculated.totalUsedLength
-              };
-
-              productsAfterRemoval[normalizedSourceIndex] = updatedSourceProduct;
-              updateWizardData({ products: productsAfterRemoval });
-            }}
-            onEditProduct={handleEditProduct}
-            onUseRemainingStone={handleCreateFromRemainingStone}
-            currentStep={currentStep}
-            productsSummary={productsSummary}
           />
         );
 
@@ -4258,11 +4270,11 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
   });
   
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 py-8 relative z-0">
-      <div className="max-w-6xl mx-auto px-4 relative z-0">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 py-4 sm:py-8 relative z-0">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 relative z-0">
         {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-800 dark:text-white mb-2">
+        <div className="text-center mb-5 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white mb-2">
             ایجاد قرارداد جدید
           </h1>
           <p className="text-gray-600 dark:text-gray-300">
@@ -4274,7 +4286,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         <WizardProgressBar currentStep={currentStep} steps={WIZARD_STEPS as WizardStep[]} />
 
         {/* Step Content */}
-        <div className="glass-liquid-card step-content-card p-8 mb-8 relative z-0">
+        <div className="glass-liquid-card step-content-card p-4 sm:p-6 lg:p-8 mb-6 sm:mb-8 relative z-0">
           {renderStepContent()}
         </div>
 

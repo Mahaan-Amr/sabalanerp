@@ -209,8 +209,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500"></div>
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
+        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-[#074747] dark:border-teal-300"></div>
       </div>
     );
   }
@@ -220,7 +220,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
+    <div className="dashboard-shell min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
         <div 
@@ -230,21 +230,21 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       )}
 
       {/* Sidebar */}
-      <div className={`fixed inset-y-0 right-0 z-50 bg-gray-900/95 backdrop-blur-xl border-l border-gray-700/50 transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'} lg:translate-x-0 ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-64'} w-64`}>
+      <div className={`fixed inset-y-0 right-0 z-50 border-l border-slate-200 bg-white/95 shadow-xl backdrop-blur-xl transform transition-transform duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-950/95 ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'} lg:translate-x-0 ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-64'} w-64`}>
         <div className="flex flex-col h-full">
           {/* Sidebar Header */}
-          <div className={`flex items-center border-b border-gray-700/50 ${sidebarCollapsed ? 'justify-center p-4' : 'justify-between p-6'}`}>
+          <div className={`flex items-center border-b border-slate-200 dark:border-slate-800 ${sidebarCollapsed ? 'justify-center p-4' : 'justify-between p-6'}`}>
             <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-3'}`}>
-              <div className="glass-liquid-card p-2">
-                <FaFileContract className="h-6 w-6 text-teal-400" />
+              <div className="rounded-lg border border-[#074747]/20 bg-[#074747]/10 p-2 text-[#074747] dark:border-teal-800 dark:bg-teal-900/30 dark:text-teal-100">
+                <FaFileContract className="h-6 w-6" />
               </div>
               {!sidebarCollapsed && (
-                <h1 className="text-xl font-bold text-white">Sabalan ERP</h1>
+                <h1 className="text-xl font-bold text-slate-950 dark:text-white">Sabalan ERP</h1>
               )}
             </div>
             <button
               onClick={() => setSidebarOpen(false)}
-              className="lg:hidden text-gray-400 hover:text-white"
+              className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white lg:hidden"
             >
               <FaTimes />
             </button>
@@ -252,23 +252,23 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
           {/* User Info */}
           {!sidebarCollapsed && (
-            <div className="p-6 border-b border-gray-700/50">
+            <div className="border-b border-slate-200 p-6 dark:border-slate-800">
               <div className="flex items-center gap-3">
-                <div className="glass-liquid-card p-3">
-                  <FaUser className="h-6 w-6 text-teal-400" />
+                <div className="rounded-lg bg-slate-100 p-3 text-[#074747] dark:bg-slate-900 dark:text-teal-200">
+                  <FaUser className="h-6 w-6" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-white font-medium truncate">
+                  <p className="truncate font-medium text-slate-950 dark:text-white">
                     {user.firstName} {user.lastName}
                   </p>
-                  <p className="text-gray-400 text-sm truncate">
+                  <p className="truncate text-sm text-slate-500 dark:text-slate-400">
                     {user.department?.namePersian || 'بدون دپارتمان'}
                   </p>
-                  <p className="text-gray-500 text-xs truncate">
+                  <p className="truncate text-xs text-slate-400 dark:text-slate-500">
                     @{user.username}
                   </p>
                   {user.role === 'ADMIN' && (
-                    <span className="inline-block mt-1 px-2 py-1 bg-teal-500/20 text-teal-400 text-xs rounded-full">
+                    <span className="mt-1 inline-block rounded-full bg-[#074747]/10 px-2 py-1 text-xs text-[#074747] dark:bg-teal-900/30 dark:text-teal-200">
                       مدیر سیستم
                     </span>
                   )}
@@ -279,7 +279,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
           {/* Workspace Switcher */}
           {!sidebarCollapsed && (
-            <div className="p-6 border-b border-gray-700/50">
+            <div className="border-b border-slate-200 p-6 dark:border-slate-800">
               <WorkspaceSwitcher variant="sidebar" />
             </div>
           )}
@@ -293,14 +293,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
 
           {/* Sidebar Footer */}
-          <div className={`${sidebarCollapsed ? 'p-4' : 'p-6 space-y-4'} border-t border-gray-700/50`}>
+          <div className={`${sidebarCollapsed ? 'p-4' : 'p-6 space-y-4'} border-t border-slate-200 dark:border-slate-800`}>
             <div className={`flex ${sidebarCollapsed ? 'flex-col items-center gap-2' : 'items-center justify-between gap-3'}`}>
-              {!sidebarCollapsed && <span className="text-gray-400 text-sm">?</span>}
+              {!sidebarCollapsed && <span className="text-sm text-slate-500 dark:text-slate-400">حالت نمایش</span>}
               <ThemeToggle />
             </div>
             <button
               onClick={handleLogout}
-              className={`flex items-center text-gray-300 hover:bg-red-500/20 hover:text-red-400 transition-all duration-200 ${
+              className={`flex items-center text-slate-600 transition-all duration-200 hover:bg-red-50 hover:text-red-600 dark:text-slate-300 dark:hover:bg-red-500/20 dark:hover:text-red-300 ${
                 sidebarCollapsed
                   ? 'justify-center w-12 h-12 rounded-full mx-auto'
                   : 'gap-3 w-full px-4 py-3 rounded-lg'
@@ -316,23 +316,23 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Main Content */}
       <div className={`transition-all duration-300 ${sidebarCollapsed ? 'lg:mr-20' : 'lg:mr-64'}`}>
         {/* Top Bar */}
-        <header className="bg-gray-900/50 backdrop-blur-xl border-b border-gray-700/50 p-4">
+        <header className="border-b border-slate-200 bg-white/85 p-4 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/70">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="lg:hidden text-gray-400 hover:text-white"
+                className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white lg:hidden"
               >
                 <FaBars className="h-6 w-6" />
               </button>
               <div>
-                <h1 className="text-2xl font-bold text-white">
+                <h1 className="text-xl font-bold text-slate-950 dark:text-white sm:text-2xl">
                   {currentWorkspace ? 
                     accessibleWorkspaces.find(w => w.id === currentWorkspace)?.namePersian || 'داشبورد اصلی' :
                     'داشبورد اصلی'
                   }
                 </h1>
-                <p className="text-gray-400 text-sm">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
                   {currentWorkspace ? 
                     accessibleWorkspaces.find(w => w.id === currentWorkspace)?.description || '' :
                     'خوش آمدید ' + user.firstName + ' ' + user.lastName
@@ -342,27 +342,27 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
             
             <div className="flex items-center gap-4">
-              <button className="glass-liquid-btn p-3">
+              <button className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:text-[#074747] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
                 <FaBell className="h-5 w-5" />
               </button>
               <div className="relative profile-dropdown-container">
                 <button 
                   onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
-                  className="glass-liquid-card p-3 hover:bg-teal-500/20 transition-colors"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-[#074747] transition hover:bg-[#074747]/10 dark:border-slate-700 dark:bg-slate-900 dark:text-teal-200"
                 >
-                  <FaUser className="h-5 w-5 text-teal-400" />
+                  <FaUser className="h-5 w-5" />
                 </button>
                 {/* Profile Dropdown */}
                 {profileDropdownOpen && (
-                  <div className="absolute left-0 top-full mt-2 w-48 glass-liquid-card p-2 z-50">
+                  <div className="absolute left-0 top-full z-50 mt-2 w-48 rounded-lg border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-900">
                     <div className="py-2">
-                      <div className="px-3 py-2 text-sm text-gray-300 border-b border-gray-700/50">
+                      <div className="border-b border-slate-200 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-300">
                         <p className="font-medium">{user.firstName} {user.lastName}</p>
-                        <p className="text-xs text-gray-500">@{user.username}</p>
+                        <p className="text-xs text-slate-500">@{user.username}</p>
                       </div>
                       <button
                         onClick={handleLogout}
-                        className="w-full text-right px-3 py-2 text-sm text-gray-300 hover:bg-red-500/20 hover:text-red-400 transition-colors flex items-center gap-2"
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-slate-600 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-slate-300 dark:hover:bg-red-500/20 dark:hover:text-red-300"
                       >
                         <FaSignOutAlt className="h-4 w-4" />
                         خروج
@@ -376,7 +376,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         </header>
 
         {/* Page Content */}
-        <main className="p-6">
+        <main className="p-4 sm:p-6">
           {children}
         </main>
       </div>

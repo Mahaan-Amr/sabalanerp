@@ -1,23 +1,21 @@
-﻿'use client';
+'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { 
-  FaUsers, 
-  FaUser, 
-  FaBullhorn, 
-  FaHandshake, 
-  FaChartLine, 
-  FaPlus,
-  FaPhone,
-  FaEnvelope,
+import {
   FaBuilding,
-  FaMapMarkerAlt,
-  FaCalendarAlt,
-  FaExclamationTriangle
+  FaBullhorn,
+  FaChartLine,
+  FaEnvelope,
+  FaExclamationTriangle,
+  FaHandshake,
+  FaPhone,
+  FaPlus,
+  FaUser,
+  FaUsers,
 } from 'react-icons/fa';
-import { crmAPI, dashboardAPI } from '@/lib/api';
-import { useWorkspace } from '@/contexts/WorkspaceContext';
+import { ErpActionGrid, ErpBadge, ErpEmptyState, ErpFieldView, ErpLoading, ErpPage, ErpSection, ErpTwoColumn, type ErpMetric, type ErpTone } from '@/components/erp';
+import { dashboardAPI } from '@/lib/api';
 import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
 import PersianCalendar from '@/lib/persian-calendar';
 
@@ -45,16 +43,6 @@ interface CrmStats {
   recentLeads: any[];
 }
 
-const leadStatusColors = {
-  NEW: 'text-blue-500 bg-blue-500/20',
-  CONTACTED: 'text-yellow-500 bg-yellow-500/20',
-  QUALIFIED: 'text-green-500 bg-green-500/20',
-  PROPOSAL: 'text-purple-500 bg-purple-500/20',
-  NEGOTIATION: 'text-orange-500 bg-orange-500/20',
-  CONVERTED: 'text-teal-500 bg-teal-500/20',
-  LOST: 'text-red-500 bg-red-500/20'
-};
-
 const leadStatusLabels = {
   NEW: 'جدید',
   CONTACTED: 'تماس گرفته شد',
@@ -62,14 +50,23 @@ const leadStatusLabels = {
   PROPOSAL: 'پیشنهاد',
   NEGOTIATION: 'مذاکره',
   CONVERTED: 'تبدیل شده',
-  LOST: 'از دست رفته'
+  LOST: 'از دست رفته',
+};
+
+const leadStatusTone: Record<string, ErpTone> = {
+  NEW: 'info',
+  CONTACTED: 'warning',
+  QUALIFIED: 'success',
+  PROPOSAL: 'purple',
+  NEGOTIATION: 'warning',
+  CONVERTED: 'primary',
+  LOST: 'danger',
 };
 
 interface User extends PermissionUser {}
 
 export default function CrmWorkspacePage() {
   const [stats, setStats] = useState<CrmStats | null>(null);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [crmPermissions, setCrmPermissions] = useState({
     canViewCustomers: false,
     canCreateCustomers: false,
@@ -78,7 +75,6 @@ export default function CrmWorkspacePage() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { hasPermission } = useWorkspace();
 
   useEffect(() => {
     fetchCrmData();
@@ -89,8 +85,7 @@ export default function CrmWorkspacePage() {
     try {
       const response = await dashboardAPI.getProfile();
       if (response.data.success) {
-        const user = response.data.data;
-        setCurrentUser(user);
+        const user: User = response.data.data;
         setCrmPermissions(getCrmPermissions(user));
       }
     } catch (error) {
@@ -102,28 +97,26 @@ export default function CrmWorkspacePage() {
     try {
       setLoading(true);
       setError(null);
-      
-      // For now, we'll use mock data
-      // Later this will be replaced with crmAPI.getCrmStats()
+
       const mockStats: CrmStats = {
         customers: {
           total: 45,
           active: 38,
-          inactive: 7
+          inactive: 7,
         },
         contacts: {
           total: 120,
-          primary: 45
+          primary: 45,
         },
         leads: {
           total: 23,
           new: 8,
           qualified: 12,
-          converted: 3
+          converted: 3,
         },
         communications: {
           total: 156,
-          thisMonth: 23
+          thisMonth: 23,
         },
         recentCustomers: [
           {
@@ -135,9 +128,9 @@ export default function CrmWorkspacePage() {
               firstName: 'احمد',
               lastName: 'محمدی',
               email: 'ahmad@aseman.com',
-              phone: '09123456789'
+              phone: '09123456789',
             },
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
           },
           {
             id: '2',
@@ -148,10 +141,10 @@ export default function CrmWorkspacePage() {
               firstName: 'فاطمه',
               lastName: 'کریمی',
               email: 'fateme@pars.com',
-              phone: '09187654321'
+              phone: '09187654321',
             },
-            createdAt: new Date(Date.now() - 86400000).toISOString()
-          }
+            createdAt: new Date(Date.now() - 86400000).toISOString(),
+          },
         ],
         recentLeads: [
           {
@@ -163,7 +156,7 @@ export default function CrmWorkspacePage() {
             status: 'NEW',
             expectedValue: 50000000,
             probability: 25,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
           },
           {
             id: '2',
@@ -174,11 +167,11 @@ export default function CrmWorkspacePage() {
             status: 'QUALIFIED',
             expectedValue: 75000000,
             probability: 60,
-            createdAt: new Date(Date.now() - 172800000).toISOString()
-          }
-        ]
+            createdAt: new Date(Date.now() - 172800000).toISOString(),
+          },
+        ],
       };
-      
+
       setStats(mockStats);
     } catch (error: any) {
       console.error('Error fetching CRM data:', error);
@@ -188,296 +181,150 @@ export default function CrmWorkspacePage() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return `${amount.toLocaleString('fa-IR')} تومان`;
-  };
-
-  const formatDate = (dateString: string) => {
-    return PersianCalendar.formatForDisplay(dateString);
-  };
+  const formatAmount = (amount: number) => `${amount.toLocaleString('fa-IR')} تومان`;
+  const formatDate = (dateString: string) => PersianCalendar.formatForDisplay(dateString);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500"></div>
-      </div>
-    );
+    return <ErpLoading />;
   }
 
   if (error) {
     return (
-      <div className="glass-liquid-card p-6 text-center">
-        <FaExclamationTriangle className="mx-auto text-4xl text-red-400 mb-4" />
-        <h2 className="text-xl font-semibold text-white mb-2">خطا در بارگذاری داده‌ها</h2>
-        <p className="text-gray-400 mb-4">{error}</p>
-        <button 
-          onClick={fetchCrmData}
-          className="glass-liquid-btn-primary px-6 py-2"
-        >
-          تلاش مجدد
-        </button>
-      </div>
+      <ErpEmptyState
+        icon={FaExclamationTriangle}
+        title="خطا در بارگذاری داده‌ها"
+        description={error}
+        action={{ label: 'تلاش دوباره', onClick: fetchCrmData, variant: 'solid', tone: 'primary' }}
+      />
     );
   }
 
   if (!stats) {
-    return (
-      <div className="glass-liquid-card p-6 text-center">
-        <FaUsers className="mx-auto text-4xl text-gray-400 mb-4" />
-        <h2 className="text-xl font-semibold text-white mb-2">داده‌ای موجود نیست</h2>
-        <p className="text-gray-400">اطلاعات CRM برای نمایش موجود نیست</p>
-      </div>
-    );
+    return <ErpEmptyState icon={FaUsers} title="داده‌ای موجود نیست" description="اطلاعات CRM برای نمایش موجود نیست." />;
   }
 
+  const metrics: ErpMetric[] = [
+    { label: 'کل مشتریان', value: stats.customers.total.toLocaleString('fa-IR'), hint: `${stats.customers.active.toLocaleString('fa-IR')} فعال`, icon: FaUsers, tone: 'info' },
+    { label: 'مخاطبین', value: stats.contacts.total.toLocaleString('fa-IR'), hint: `${stats.contacts.primary.toLocaleString('fa-IR')} مخاطب اصلی`, icon: FaUser, tone: 'success' },
+    { label: 'سرنخ‌ها', value: stats.leads.total.toLocaleString('fa-IR'), hint: `${stats.leads.qualified.toLocaleString('fa-IR')} واجد شرایط`, icon: FaBullhorn, tone: 'warning' },
+    { label: 'ارتباطات', value: stats.communications.total.toLocaleString('fa-IR'), hint: `${stats.communications.thisMonth.toLocaleString('fa-IR')} مورد این ماه`, icon: FaHandshake, tone: 'purple' },
+  ];
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-white mb-2">داشبورد CRM</h1>
-          <p className="text-gray-300">مدیریت مشتریان و ارتباطات</p>
-        </div>
-        {crmPermissions.canCreateCustomers && (
-          <Link 
-            href="/dashboard/crm/customers/create" 
-            className="glass-liquid-btn-primary inline-flex items-center gap-2 px-6 py-3"
-          >
-            <FaPlus className="text-lg" />
-            مشتری جدید
-          </Link>
-        )}
-      </div>
+    <ErpPage
+      eyebrow="CRM"
+      title="مدیریت ارتباط با مشتری"
+      description="نمای عملیاتی مشتریان، مخاطبین، سرنخ‌ها و ارتباطات تجاری."
+      metrics={metrics}
+      actions={crmPermissions.canCreateCustomers ? [{ label: 'مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaPlus, tone: 'primary', variant: 'solid' }] : []}
+    >
+      <ErpSection title="اقدامات سریع" description="دسترسی به بخش‌های اصلی CRM با همان الگوی ERP جدید.">
+        <ErpActionGrid
+          columns={4}
+          items={[
+            { title: 'مشتریان', description: 'فهرست مشتریان و وضعیت همکاری', href: '/dashboard/crm/customers', icon: FaUsers, tone: 'primary' },
+            { title: 'مخاطبین', description: 'افراد کلیدی و راه‌های تماس', href: '/dashboard/crm/contacts', icon: FaUser, tone: 'success' },
+            { title: 'سرنخ‌ها', description: 'پیگیری فرصت‌های فروش', href: '/dashboard/crm/leads', icon: FaBullhorn, tone: 'warning' },
+            { title: 'گزارش‌ها', description: 'تحلیل عملکرد CRM', href: '/dashboard/crm/reports', icon: FaChartLine, tone: 'info' },
+          ]}
+        />
+      </ErpSection>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="glass-liquid-card p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-400 text-sm">کل مشتریان</p>
-              <p className="text-2xl font-bold text-white">{stats.customers.total}</p>
-              <p className="text-gray-500 text-xs">{stats.customers.active} فعال</p>
-            </div>
-            <div className="glass-liquid-card p-3">
-              <FaUsers className="h-6 w-6 text-blue-400" />
-            </div>
-          </div>
-        </div>
-
-        <div className="glass-liquid-card p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-400 text-sm">مخاطبین</p>
-              <p className="text-2xl font-bold text-white">{stats.contacts.total}</p>
-              <p className="text-gray-500 text-xs">{stats.contacts.primary} اصلی</p>
-            </div>
-            <div className="glass-liquid-card p-3">
-              <FaUser className="h-6 w-6 text-green-400" />
-            </div>
-          </div>
-        </div>
-
-        <div className="glass-liquid-card p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-400 text-sm">سرنخ‌ها</p>
-              <p className="text-2xl font-bold text-white">{stats.leads.total}</p>
-              <p className="text-gray-500 text-xs">{stats.leads.qualified} واجد شرایط</p>
-            </div>
-            <div className="glass-liquid-card p-3">
-              <FaBullhorn className="h-6 w-6 text-yellow-400" />
-            </div>
-          </div>
-        </div>
-
-        <div className="glass-liquid-card p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-400 text-sm">ارتباطات</p>
-              <p className="text-2xl font-bold text-white">{stats.communications.total}</p>
-              <p className="text-gray-500 text-xs">{stats.communications.thisMonth} این ماه</p>
-            </div>
-            <div className="glass-liquid-card p-3">
-              <FaHandshake className="h-6 w-6 text-purple-400" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-semibold text-white mb-4">اقدامات سریع</h2>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Link 
-            href="/dashboard/crm/customers" 
-            className="glass-liquid-btn-primary p-4 flex items-center gap-3 hover:bg-blue-600/20 transition-all duration-200"
-          >
-            <FaUsers className="h-5 w-5" />
-            <span>مشتریان</span>
-          </Link>
-          
-          <Link 
-            href="/dashboard/crm/contacts" 
-            className="glass-liquid-btn p-4 flex items-center gap-3 hover:bg-white/10 transition-all duration-200"
-          >
-            <FaUser className="h-5 w-5" />
-            <span>مخاطبین</span>
-          </Link>
-          
-          <Link 
-            href="/dashboard/crm/leads" 
-            className="glass-liquid-btn p-4 flex items-center gap-3 hover:bg-white/10 transition-all duration-200"
-          >
-            <FaBullhorn className="h-5 w-5" />
-            <span>سرنخ‌ها</span>
-          </Link>
-          
-          <Link 
-            href="/dashboard/crm/reports" 
-            className="glass-liquid-btn p-4 flex items-center gap-3 hover:bg-white/10 transition-all duration-200"
-          >
-            <FaChartLine className="h-5 w-5" />
-            <span>گزارش‌ها</span>
-          </Link>
-        </div>
-      </div>
-
-      {/* Recent Customers and Leads */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Customers */}
-        <div className="glass-liquid-card p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-white">مشتریان اخیر</h2>
-            <Link 
-              href="/dashboard/crm/customers" 
-              className="text-blue-400 hover:text-blue-300 text-sm"
+      <ErpTwoColumn
+        main={
+          <>
+            <ErpSection
+              title="مشتریان اخیر"
+              description="آخرین مشتریان اضافه‌شده یا فعال‌شده."
+              actions={[{ label: 'مشاهده همه', href: '/dashboard/crm/customers', variant: 'outline', tone: 'neutral' }]}
             >
-              مشاهده همه
-            </Link>
-          </div>
-          
-          <div className="space-y-4">
-            {stats.recentCustomers.map((customer) => (
-              <div key={customer.id} className="flex items-center justify-between p-4 bg-white/5 rounded-lg hover:bg-white/10 transition-all duration-200">
-                <div className="flex items-center gap-4">
-                  <div className="glass-liquid-card p-3">
-                    <FaBuilding className="h-5 w-5 text-blue-400" />
-                  </div>
-                  <div>
-                    <h3 className="text-white font-medium">{customer.companyName}</h3>
-                    <p className="text-gray-400 text-sm">
-                      {customer.primaryContact.firstName} {customer.primaryContact.lastName}
-                    </p>
-                    <div className="flex items-center gap-4 text-gray-500 text-xs">
-                      <span className="flex items-center gap-1">
-                        <FaEnvelope className="h-3 w-3" />
-                        {customer.primaryContact.email}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <FaPhone className="h-3 w-3" />
-                        {customer.primaryContact.phone}
-                      </span>
+              <div className="space-y-3">
+                {stats.recentCustomers.map((customer) => (
+                  <Link
+                    key={customer.id}
+                    href={`/dashboard/crm/customers/${customer.id}`}
+                    className="block rounded-lg border border-slate-200 bg-slate-50 p-4 transition hover:border-[#074747]/40 hover:bg-white dark:border-slate-800 dark:bg-slate-800/50 dark:hover:border-teal-700 dark:hover:bg-slate-800"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">
+                          <FaBuilding className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <h3 className="truncate text-sm font-semibold text-slate-900 dark:text-white">{customer.companyName}</h3>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                            {customer.primaryContact.firstName} {customer.primaryContact.lastName}
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                            <span className="inline-flex items-center gap-1"><FaEnvelope className="h-3 w-3" />{customer.primaryContact.email}</span>
+                            <span className="inline-flex items-center gap-1"><FaPhone className="h-3 w-3" />{customer.primaryContact.phone}</span>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{formatDate(customer.createdAt)}</p>
+                        </div>
+                      </div>
+                      <ErpBadge tone={customer.status === 'ACTIVE' ? 'success' : 'neutral'}>
+                        {customer.status === 'ACTIVE' ? 'فعال' : 'غیرفعال'}
+                      </ErpBadge>
                     </div>
-                    <p className="text-gray-500 text-xs">{formatDate(customer.createdAt)}</p>
-                  </div>
-                </div>
-                
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                  customer.status === 'ACTIVE' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'
-                }`}>
-                  {customer.status === 'ACTIVE' ? 'فعال' : 'غیرفعال'}
-                </span>
+                  </Link>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
+            </ErpSection>
 
-        {/* Recent Leads */}
-        <div className="glass-liquid-card p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-white">سرنخ‌های اخیر</h2>
-            <Link 
-              href="/dashboard/crm/leads" 
-              className="text-yellow-400 hover:text-yellow-300 text-sm"
+            <ErpSection
+              title="سرنخ‌های اخیر"
+              description="فرصت‌های تازه و واجد شرایط برای پیگیری فروش."
+              actions={[{ label: 'مشاهده همه', href: '/dashboard/crm/leads', variant: 'outline', tone: 'neutral' }]}
             >
-              مشاهده همه
-            </Link>
-          </div>
-          
-          <div className="space-y-4">
-            {stats.recentLeads.map((lead) => (
-              <div key={lead.id} className="flex items-center justify-between p-4 bg-white/5 rounded-lg hover:bg-white/10 transition-all duration-200">
-                <div className="flex items-center gap-4">
-                  <div className="glass-liquid-card p-3">
-                    <FaBullhorn className="h-5 w-5 text-yellow-400" />
-                  </div>
-                  <div>
-                    <h3 className="text-white font-medium">{lead.companyName}</h3>
-                    <p className="text-gray-400 text-sm">{lead.contactName}</p>
-                    <div className="flex items-center gap-4 text-gray-500 text-xs">
-                      <span className="flex items-center gap-1">
-                        <FaEnvelope className="h-3 w-3" />
-                        {lead.email}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <FaPhone className="h-3 w-3" />
-                        {lead.phone}
-                      </span>
+              <div className="space-y-3">
+                {stats.recentLeads.map((lead) => (
+                  <div key={lead.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
+                          <FaBullhorn className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <h3 className="truncate text-sm font-semibold text-slate-900 dark:text-white">{lead.companyName}</h3>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{lead.contactName}</p>
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                            <span className="inline-flex items-center gap-1"><FaEnvelope className="h-3 w-3" />{lead.email}</span>
+                            <span className="inline-flex items-center gap-1"><FaPhone className="h-3 w-3" />{lead.phone}</span>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{formatDate(lead.createdAt)}</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:text-left">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900 dark:text-white">{formatAmount(lead.expectedValue)}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">{lead.probability.toLocaleString('fa-IR')}٪ احتمال</p>
+                        </div>
+                        <ErpBadge tone={leadStatusTone[lead.status] || 'neutral'}>
+                          {leadStatusLabels[lead.status as keyof typeof leadStatusLabels] || lead.status}
+                        </ErpBadge>
+                      </div>
                     </div>
-                    <p className="text-gray-500 text-xs">{formatDate(lead.createdAt)}</p>
                   </div>
-                </div>
-                
-                <div className="text-left">
-                  <p className="text-white font-semibold">{formatAmount(lead.expectedValue)}</p>
-                  <p className="text-gray-400 text-sm">{lead.probability}% احتمال</p>
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${leadStatusColors[lead.status as keyof typeof leadStatusColors]}`}>
-                    {leadStatusLabels[lead.status as keyof typeof leadStatusLabels]}
-                  </span>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Lead Conversion Funnel */}
-      <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-semibold text-white mb-4">قیف تبدیل سرنخ</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="text-center">
-            <div className="glass-liquid-card p-4 mb-2">
-              <FaBullhorn className="h-8 w-8 text-blue-400 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-white">{stats.leads.new}</p>
-              <p className="text-gray-400 text-sm">جدید</p>
+            </ErpSection>
+          </>
+        }
+        aside={
+          <ErpSection title="قیف تبدیل سرنخ" description="نمای خلاصه تبدیل سرنخ‌ها به مشتری.">
+            <div className="grid grid-cols-1 gap-3">
+              <ErpFieldView label="جدید" value={stats.leads.new.toLocaleString('fa-IR')} tone="info" />
+              <ErpFieldView label="واجد شرایط" value={stats.leads.qualified.toLocaleString('fa-IR')} tone="warning" />
+              <ErpFieldView label="تبدیل شده" value={stats.leads.converted.toLocaleString('fa-IR')} tone="success" />
+              <ErpFieldView
+                label="نرخ تبدیل"
+                value={`${(stats.leads.total > 0 ? Math.round((stats.leads.converted / stats.leads.total) * 100) : 0).toLocaleString('fa-IR')}٪`}
+                tone="primary"
+              />
             </div>
-          </div>
-          <div className="text-center">
-            <div className="glass-liquid-card p-4 mb-2">
-              <FaHandshake className="h-8 w-8 text-yellow-400 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-white">{stats.leads.qualified}</p>
-              <p className="text-gray-400 text-sm">واجد شرایط</p>
-            </div>
-          </div>
-          <div className="text-center">
-            <div className="glass-liquid-card p-4 mb-2">
-              <FaUsers className="h-8 w-8 text-green-400 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-white">{stats.leads.converted}</p>
-              <p className="text-gray-400 text-sm">تبدیل شده</p>
-            </div>
-          </div>
-          <div className="text-center">
-            <div className="glass-liquid-card p-4 mb-2">
-              <FaChartLine className="h-8 w-8 text-teal-400 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-white">
-                {stats.leads.total > 0 ? Math.round((stats.leads.converted / stats.leads.total) * 100) : 0}%
-              </p>
-              <p className="text-gray-400 text-sm">نرخ تبدیل</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+          </ErpSection>
+        }
+      />
+    </ErpPage>
   );
 }
-

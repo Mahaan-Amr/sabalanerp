@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaPlus, FaEdit, FaTrash, FaToggleOn, FaToggleOff, FaTools, FaCut, FaLayerGroup, FaRuler, FaShapes, FaPaintBrush } from 'react-icons/fa';
 import { servicesAPI } from '@/lib/api';
+import { ErpButton, ErpLoading, ErpPage, ErpQuickFilters, ErpSection } from '@/components/erp';
 
 interface Service {
   id: string;
@@ -73,9 +74,11 @@ interface StoneFinishing {
   updatedAt: string;
 }
 
+type ActiveTab = 'services' | 'cutting-types' | 'sub-services' | 'stair-lengths' | 'layer-types' | 'stone-finishings';
+
 const ServicesPage: React.FC = () => {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'services' | 'cutting-types' | 'sub-services' | 'stair-lengths' | 'layer-types' | 'stone-finishings'>('services');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('services');
   const [services, setServices] = useState<Service[]>([]);
   const [cuttingTypes, setCuttingTypes] = useState<CuttingType[]>([]);
   const [subServices, setSubServices] = useState<SubService[]>([]);
@@ -390,7 +393,7 @@ const ServicesPage: React.FC = () => {
     (finishing.description && finishing.description.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const tabLabels: Record<typeof activeTab, string> = {
+  const tabLabels: Record<ActiveTab, string> = {
     services: 'خدمات',
     'cutting-types': 'انواع ابزار',
     'sub-services': 'ساب‌ها',
@@ -398,146 +401,69 @@ const ServicesPage: React.FC = () => {
     'layer-types': 'نوع لایه',
     'stone-finishings': 'فرآوری سنگ'
   };
+  const tabOptions = [
+    { id: 'services', label: 'خدمات', value: 'services', count: services.length, tone: 'primary' as const },
+    { id: 'cutting-types', label: 'انواع ابزار', value: 'cutting-types', count: cuttingTypes.length, tone: 'info' as const },
+    { id: 'sub-services', label: 'ساب‌ها', value: 'sub-services', count: subServices.length, tone: 'success' as const },
+    { id: 'stair-lengths', label: 'طول پله', value: 'stair-lengths', count: stairLengths.length, tone: 'warning' as const },
+    { id: 'layer-types', label: 'نوع لایه', value: 'layer-types', count: layerTypes.length, tone: 'purple' as const },
+    { id: 'stone-finishings', label: 'فرآوری سنگ', value: 'stone-finishings', count: stoneFinishings.length, tone: 'neutral' as const },
+  ];
 
   const searchPlaceholder = `جستجو در ${tabLabels[activeTab]}...`;
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600"></div>
-      </div>
-    );
+    return <ErpLoading />;
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
-      <div className="container mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
-            مدیریت خدمات
-          </h1>
-          <p className="text-slate-600 dark:text-slate-400">
-            مدیریت خدمات، ابزار، ساب، طول پله و فرآوری سنگ
-          </p>
-        </div>
+    <ErpPage
+      eyebrow="انبار"
+      title="مدیریت خدمات"
+      description="مدیریت خدمات، ابزار، ساب، طول پله، نوع لایه و فرآوری سنگ برای محاسبات قرارداد."
+      backHref="/dashboard/inventory"
+      metrics={[
+        { label: 'خدمات', value: services.length.toLocaleString('fa-IR'), icon: FaTools, tone: 'primary' },
+        { label: 'انواع ابزار', value: cuttingTypes.length.toLocaleString('fa-IR'), icon: FaCut, tone: 'info' },
+        { label: 'ساب‌ها', value: subServices.length.toLocaleString('fa-IR'), icon: FaLayerGroup, tone: 'success' },
+        { label: 'فرآوری سنگ', value: stoneFinishings.length.toLocaleString('fa-IR'), icon: FaPaintBrush, tone: 'neutral' },
+      ]}
+    >
+      <ErpSection title="بخش خدمات" description="یک بخش را انتخاب کنید و فهرست همان بخش را مدیریت کنید.">
+        <ErpQuickFilters value={activeTab} onChange={(value) => setActiveTab(value as ActiveTab)} items={tabOptions} />
+      </ErpSection>
 
-        {/* Tabs */}
-        <div className="mb-6">
-          <div className="flex space-x-1 space-x-reverse bg-slate-200 dark:bg-slate-700 rounded-lg p-1">
-            <button
-              onClick={() => setActiveTab('services')}
-              className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                activeTab === 'services'
-                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-              }`}
-            >
-              <div className="flex items-center justify-center space-x-2 space-x-reverse">
-                <FaTools className="w-4 h-4" />
-                <span>خدمات</span>
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab('cutting-types')}
-              className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                activeTab === 'cutting-types'
-                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-              }`}
-            >
-              <div className="flex items-center justify-center space-x-2 space-x-reverse">
-                <FaCut className="w-4 h-4" />
-                <span>انواع ابزار</span>
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab('sub-services')}
-              className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                activeTab === 'sub-services'
-                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-              }`}
-            >
-              <div className="flex items-center justify-center space-x-2 space-x-reverse">
-                <FaLayerGroup className="w-4 h-4" />
-                <span>ساب‌ها</span>
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab('stair-lengths')}
-              className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                activeTab === 'stair-lengths'
-                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-              }`}
-            >
-              <div className="flex items-center justify-center space-x-2 space-x-reverse">
-                <FaRuler className="w-4 h-4" />
-                <span>طول استاندارد پله</span>
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab('layer-types')}
-              className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                activeTab === 'layer-types'
-                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-              }`}
-            >
-              <div className="flex items-center justify-center space-x-2 space-x-reverse">
-                <FaShapes className="w-4 h-4" />
-                <span>نوع لایه</span>
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab('stone-finishings')}
-              className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                activeTab === 'stone-finishings'
-                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-              }`}
-            >
-              <div className="flex items-center justify-center space-x-2 space-x-reverse">
-                <FaPaintBrush className="w-4 h-4" />
-                <span>فرآوری سنگ</span>
-              </div>
-            </button>
-          </div>
-        </div>
-
-        {/* Search and Actions */}
-        <div className="mb-6 flex flex-col sm:flex-row gap-4">
-          <div className="flex-1">
+      <ErpSection title={`فیلتر ${tabLabels[activeTab]}`} description="جستجو و ایجاد رکورد جدید برای بخش انتخاب‌شده.">
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="min-w-0 flex-1">
             <input
               type="text"
               placeholder={searchPlaceholder}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              className="min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder-slate-400 dark:focus:border-teal-500 dark:focus:bg-slate-900"
             />
           </div>
           {activeTab !== 'stair-lengths' && activeTab !== 'layer-types' && (
-            <button
-              onClick={() => router.push(`/dashboard/inventory/services/${activeTab}/create`)}
-              className="px-6 py-2 bg-teal-500 hover:bg-teal-600 text-white rounded-lg transition-colors flex items-center space-x-2 space-x-reverse"
-            >
-              <FaPlus className="w-4 h-4" />
-              <span>
-                افزودن {activeTab === 'services'
+            <ErpButton
+              label={`افزودن ${
+                activeTab === 'services'
                   ? 'خدمت'
                   : activeTab === 'cutting-types'
                   ? 'نوع ابزار'
                   : activeTab === 'sub-services'
                   ? 'ساب'
-                  : 'فرآوری'}
-              </span>
-            </button>
+                  : 'فرآوری'
+              }`}
+              onClick={() => router.push(`/dashboard/inventory/services/${activeTab}/create`)}
+              icon={FaPlus}
+              variant="solid"
+            />
           )}
         </div>
+      </ErpSection>
 
-        {/* Content */}
-        <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-xl border border-slate-200/50 dark:border-slate-700/50 shadow-lg">
+      <ErpSection title={tabLabels[activeTab]}>
           {activeTab === 'services' ? (
             <div className="p-6">
               <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mb-4">
@@ -556,9 +482,9 @@ const ServicesPage: React.FC = () => {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-slate-700">
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">کد خدمت</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام فارسی</th>
-                    <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">کد خدمت</th>
+                    <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام انگلیسی</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">توضیحات</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">وضعیت</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">عملیات</th>
@@ -642,9 +568,9 @@ const ServicesPage: React.FC = () => {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-slate-700">
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">کد ابزار</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام فارسی</th>
-                    <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">کد ابزار</th>
+                    <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام انگلیسی</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">توضیحات</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">وضعیت</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">عملیات</th>
@@ -733,9 +659,9 @@ const ServicesPage: React.FC = () => {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-slate-700">
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">?</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">کد ساب</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام فارسی</th>
-                    <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">کد ساب</th>
+                    <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام انگلیسی</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">توضیحات</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">قیمت/متر</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">مبنای محاسبه</th>
@@ -814,7 +740,7 @@ const ServicesPage: React.FC = () => {
               <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mb-4">
                 طول استاندارد پله
               </h2>
-              <div className="bg-slate-50 dark:bg-slate-900/30 border border-slate-200 dark:border-slate-700 rounded-xl p-4 mb-6">
+              <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/30">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -872,7 +798,7 @@ const ServicesPage: React.FC = () => {
                   <button
                     onClick={handleSaveStairLength}
                     disabled={savingStairLength}
-                    className="px-6 py-2 bg-teal-500 hover:bg-teal-600 disabled:bg-teal-400 text-white rounded-lg transition-colors"
+                    className="rounded-lg bg-[#074747] px-6 py-2 text-white transition-colors hover:bg-[#0b5c5c] disabled:bg-[#074747]/60"
                   >
                     {savingStairLength ? 'در حال ذخیره...' : editingStairLengthId ? 'به‌روزرسانی طول' : 'افزودن طول'}
                   </button>
@@ -970,7 +896,7 @@ const ServicesPage: React.FC = () => {
               <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mb-4">
                 نوع لایه
               </h2>
-              <div className="bg-slate-50 dark:bg-slate-900/30 border border-slate-200 dark:border-slate-700 rounded-xl p-4 mb-6">
+              <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/30">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -1015,7 +941,7 @@ const ServicesPage: React.FC = () => {
                   <button
                     onClick={handleSaveLayerType}
                     disabled={savingLayerType}
-                    className="px-6 py-2 bg-teal-500 hover:bg-teal-600 disabled:bg-teal-400 text-white rounded-lg transition-colors"
+                    className="rounded-lg bg-[#074747] px-6 py-2 text-white transition-colors hover:bg-[#0b5c5c] disabled:bg-[#074747]/60"
                   >
                     {savingLayerType ? 'در حال ذخیره...' : editingLayerTypeId ? 'به‌روزرسانی نوع لایه' : 'افزودن نوع لایه'}
                   </button>
@@ -1194,9 +1120,8 @@ const ServicesPage: React.FC = () => {
               )}
             </div>
           )}
-        </div>
-      </div>
-    </div>
+      </ErpSection>
+    </ErpPage>
   );
 };
 

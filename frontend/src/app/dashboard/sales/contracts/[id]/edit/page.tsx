@@ -419,8 +419,8 @@ export default function ContractEditPage() {
   if (error || !contract) {
     return (
       <div className="text-center py-12">
-        <FaFileContract className="mx-auto text-4xl text-gray-400 mb-4" />
-        <p className="text-gray-400 mb-4">{error || 'قرارداد یافت نشد'}</p>
+        <FaFileContract className="mx-auto text-4xl text-slate-500 dark:text-slate-400 mb-4" />
+        <p className="text-slate-500 dark:text-slate-400 mb-4">{error || 'قرارداد یافت نشد'}</p>
         <Link href="/dashboard/sales/contracts" className="glass-liquid-btn-primary">
           بازگشت به لیست قراردادها
         </Link>
@@ -431,8 +431,8 @@ export default function ContractEditPage() {
   if (!canEdit) {
     return (
       <div className="text-center py-12">
-        <FaFileContract className="mx-auto text-4xl text-gray-400 mb-4" />
-        <p className="text-gray-400 mb-4">شما مجاز به ویرایش این قرارداد نیستید</p>
+        <FaFileContract className="mx-auto text-4xl text-slate-500 dark:text-slate-400 mb-4" />
+        <p className="text-slate-500 dark:text-slate-400 mb-4">شما مجاز به ویرایش این قرارداد نیستید</p>
         <Link href={`/dashboard/sales/contracts/${contract.id}`} className="glass-liquid-btn-primary">
           مشاهده قرارداد
         </Link>
@@ -448,16 +448,16 @@ export default function ContractEditPage() {
           <FaArrowRight />
         </Link>
         <div className="flex-1">
-          <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-2">
+          <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
             <FaEdit className="text-teal-400" />
             ویرایش قرارداد
           </h1>
-          <p className="text-gray-300">شماره قرارداد: {contract.contractNumber}</p>
+          <p className="text-slate-600 dark:text-slate-300">شماره قرارداد: {contract.contractNumber}</p>
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.push(`/dashboard/sales/contracts/${contract.id}`)}
-            className="glass-liquid-btn p-3 text-gray-400 hover:text-white"
+            className="glass-liquid-btn p-3 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:text-white"
           >
             <FaTimes />
           </button>
@@ -486,13 +486,13 @@ export default function ContractEditPage() {
       <div className="space-y-6">
         {/* Step 1: Contract Date & Number */}
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
             <FaCalendarAlt className="text-teal-400" />
             تاریخ و شماره قرارداد
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">تاریخ قرارداد</label>
+              <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">تاریخ قرارداد</label>
               <PersianCalendarComponent
                 value={wizardData.contractDate}
                 onChange={(date: string) => updateWizardData({ contractDate: date })}
@@ -500,12 +500,12 @@ export default function ContractEditPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">شماره قرارداد</label>
+              <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">شماره قرارداد</label>
               <input
                 type="text"
                 value={wizardData.contractNumber}
                 readOnly
-                className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400"
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400"
               />
             </div>
           </div>
@@ -513,7 +513,7 @@ export default function ContractEditPage() {
 
         {/* Step 2: Customer Selection */}
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
             <FaUser className="text-teal-400" />
             انتخاب مشتری
           </h2>
@@ -534,13 +534,13 @@ export default function ContractEditPage() {
                 >
                   <div className="flex justify-between items-start">
                     <div>
-                      <h4 className="font-medium text-gray-800 dark:text-white">
+                      <h4 className="font-medium text-slate-900 dark:text-white">
                         {customer.firstName} {customer.lastName}
                       </h4>
                       {customer.companyName && (
-                        <p className="text-sm text-gray-600 dark:text-gray-300">{customer.companyName}</p>
+                        <p className="text-sm text-gray-600 dark:text-slate-600 dark:text-slate-300">{customer.companyName}</p>
                       )}
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <p className="text-sm text-gray-500 dark:text-slate-500 dark:text-slate-400">
                         {customer.customerType} • {customer.status}
                       </p>
                     </div>
@@ -557,7 +557,7 @@ export default function ContractEditPage() {
         {/* Step 3: Project Selection */}
         {wizardData.customer && (
           <div className="glass-liquid-card p-6">
-            <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
               <FaBuilding className="text-teal-400" />
               انتخاب پروژه
             </h2>
@@ -578,11 +578,11 @@ export default function ContractEditPage() {
                   >
                     <div className="flex justify-between items-start">
                       <div>
-                        <h4 className="font-medium text-gray-800 dark:text-white">
+                        <h4 className="font-medium text-slate-900 dark:text-white">
                           {project.projectName || 'پروژه بدون نام'}
                         </h4>
-                        <p className="text-sm text-gray-600 dark:text-gray-300">{project.address}</p>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">{project.city}</p>
+                        <p className="text-sm text-gray-600 dark:text-slate-600 dark:text-slate-300">{project.address}</p>
+                        <p className="text-sm text-gray-500 dark:text-slate-500 dark:text-slate-400">{project.city}</p>
                       </div>
                       {wizardData.projectId === project.id && (
                         <FaCheck className="text-teal-500" />
@@ -597,14 +597,14 @@ export default function ContractEditPage() {
 
         {/* Step 4: Product Selection */}
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
             <FaWarehouse className="text-teal-400" />
             انتخاب محصولات
           </h2>
           <div className="space-y-6">
             {/* Available Products */}
             <div>
-              <h3 className="text-lg font-medium text-white mb-4">محصولات موجود</h3>
+              <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-4">محصولات موجود</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {products.map((product) => (
                   <div
@@ -612,14 +612,14 @@ export default function ContractEditPage() {
                     className="group p-6 border border-gray-200 dark:border-gray-600 rounded-xl hover:border-teal-300 dark:hover:border-teal-500 transition-all duration-300 hover:shadow-lg hover:shadow-teal-500/10 bg-white dark:bg-gray-800/50 backdrop-blur-sm"
                   >
                     <div className="mb-4">
-                      <h4 className="font-semibold text-gray-800 dark:text-white mb-2 text-lg">
+                      <h4 className="font-semibold text-slate-900 dark:text-white mb-2 text-lg">
                         {product.namePersian}
                       </h4>
                       <div className="space-y-1">
-                        <p className="text-sm text-gray-600 dark:text-gray-300">
+                        <p className="text-sm text-gray-600 dark:text-slate-600 dark:text-slate-300">
                           {product.stoneTypeNamePersian}
                         </p>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                        <p className="text-sm text-gray-500 dark:text-slate-500 dark:text-slate-400">
                           {product.widthValue}×{product.thicknessValue}cm
                         </p>
                       </div>
@@ -667,7 +667,7 @@ export default function ContractEditPage() {
                   <div className="w-8 h-8 bg-teal-500 rounded-full flex items-center justify-center">
                     <FaCheck className="w-4 h-4 text-white" />
                   </div>
-                  <h4 className="font-semibold text-gray-800 dark:text-white text-lg">محصولات انتخاب شده</h4>
+                  <h4 className="font-semibold text-slate-900 dark:text-white text-lg">محصولات انتخاب شده</h4>
                   <span className="bg-teal-500 text-white px-3 py-1 rounded-full text-sm font-medium">
                     {wizardData.products.length} محصول
                   </span>
@@ -676,16 +676,16 @@ export default function ContractEditPage() {
                   {wizardData.products.map((product, index) => (
                     <div key={index} className="flex justify-between items-center p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 shadow-sm">
                       <div className="flex-1">
-                        <span className="text-sm font-medium text-gray-800 dark:text-white">
+                        <span className="text-sm font-medium text-slate-900 dark:text-white">
                           {product.product.namePersian}
                         </span>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        <p className="text-xs text-gray-500 dark:text-slate-500 dark:text-slate-400 mt-1">
                           {product.product.stoneTypeNamePersian} • {product.product.widthValue}×{product.product.thicknessValue}cm
                         </p>
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="flex items-center gap-2">
-                          <label className="text-xs text-gray-500 dark:text-gray-400">تعداد:</label>
+                          <label className="text-xs text-gray-500 dark:text-slate-500 dark:text-slate-400">تعداد:</label>
                           <FormattedNumberInput
                             value={product.quantity}
                             onChange={(value) => {
@@ -694,7 +694,7 @@ export default function ContractEditPage() {
                               newProducts[index].totalPrice = newProducts[index].quantity * newProducts[index].unitPrice;
                               updateWizardData({ products: newProducts });
                             }}
-                            className="w-20 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                            className="w-20 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                             min={1}
                           />
                         </div>
@@ -723,7 +723,7 @@ export default function ContractEditPage() {
 
         {/* Step 5: Delivery Schedule */}
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
             <FaTruck className="text-teal-400" />
             برنامه تحویل
           </h2>
@@ -744,7 +744,7 @@ export default function ContractEditPage() {
               }}
               className="w-full p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-teal-500 transition-colors"
             >
-              <div className="flex items-center justify-center gap-2 text-gray-500 dark:text-gray-400">
+              <div className="flex items-center justify-center gap-2 text-gray-500 dark:text-slate-500 dark:text-slate-400">
                 <FaPlus className="w-4 h-4" />
                 افزودن برنامه تحویل جدید
               </div>
@@ -754,7 +754,7 @@ export default function ContractEditPage() {
               <div key={index} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">تاریخ تحویل</label>
+                    <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">تاریخ تحویل</label>
                     <input
                       type="text"
                       value={delivery.deliveryDate}
@@ -763,11 +763,11 @@ export default function ContractEditPage() {
                         newDeliveries[index].deliveryDate = e.target.value;
                         updateWizardData({ deliveries: newDeliveries });
                       }}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-slate-900 dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">آدرس تحویل</label>
+                    <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">آدرس تحویل</label>
                     <input
                       type="text"
                       value={delivery.deliveryAddress}
@@ -776,11 +776,11 @@ export default function ContractEditPage() {
                         newDeliveries[index].deliveryAddress = e.target.value;
                         updateWizardData({ deliveries: newDeliveries });
                       }}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-slate-900 dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">راننده</label>
+                    <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">راننده</label>
                     <input
                       type="text"
                       value={delivery.driver}
@@ -789,11 +789,11 @@ export default function ContractEditPage() {
                         newDeliveries[index].driver = e.target.value;
                         updateWizardData({ deliveries: newDeliveries });
                       }}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-slate-900 dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">وسیله نقلیه</label>
+                    <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">وسیله نقلیه</label>
                     <input
                       type="text"
                       value={delivery.vehicle}
@@ -802,11 +802,11 @@ export default function ContractEditPage() {
                         newDeliveries[index].vehicle = e.target.value;
                         updateWizardData({ deliveries: newDeliveries });
                       }}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-slate-900 dark:text-white"
                     />
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-400 mb-2">توضیحات</label>
+                    <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">توضیحات</label>
                     <textarea
                       value={delivery.notes}
                       onChange={(e) => {
@@ -815,7 +815,7 @@ export default function ContractEditPage() {
                         updateWizardData({ deliveries: newDeliveries });
                       }}
                       rows={2}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-slate-900 dark:text-white"
                     />
                   </div>
                 </div>
@@ -835,13 +835,13 @@ export default function ContractEditPage() {
 
         {/* Step 6: Payment Method */}
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
             <FaCreditCard className="text-teal-400" />
             روش پرداخت
           </h2>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">نحوه پرداخت</label>
+              <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">نحوه پرداخت</label>
               <select
                 value={wizardData.payment.method}
                 onChange={(e) => {
@@ -854,7 +854,7 @@ export default function ContractEditPage() {
                     }
                   });
                 }}
-                className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
               >
                 <option value="CASH">نقدی کامل</option>
                 <option value="RECEIPT_BASE">قسطی (بر اساس رسید)</option>
@@ -864,7 +864,7 @@ export default function ContractEditPage() {
             
             {wizardData.payment.method === 'CHECK' && (
               <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">کد ملی</label>
+                <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">کد ملی</label>
                 <input
                   type="text"
                   value={wizardData.payment.nationalCode || ''}
@@ -876,14 +876,14 @@ export default function ContractEditPage() {
                       }
                     });
                   }}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   placeholder="کد ملی مشتری"
                 />
               </div>
             )}
             
             <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">توضیحات پرداخت</label>
+              <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">توضیحات پرداخت</label>
               <textarea
                 value={wizardData.payment.notes || ''}
                 onChange={(e) => {
@@ -895,7 +895,7 @@ export default function ContractEditPage() {
                   });
                 }}
                 rows={3}
-                className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 resize-none"
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 resize-none"
                 placeholder="توضیحات اضافی در مورد پرداخت..."
               />
             </div>
@@ -904,31 +904,31 @@ export default function ContractEditPage() {
 
         {/* Basic Information */}
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
             <FaFileContract className="text-teal-400" />
             اطلاعات پایه
           </h2>
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">عنوان (انگلیسی)</label>
+                <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">عنوان (انگلیسی)</label>
                 <input
                   type="text"
                   name="title"
                   value={formData.title}
                   onChange={handleInputChange}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   placeholder="Contract Title"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">عنوان (فارسی)</label>
+                <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">عنوان (فارسی)</label>
                 <input
                   type="text"
                   name="titlePersian"
                   value={formData.titlePersian}
                   onChange={handleInputChange}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   placeholder="عنوان قرارداد"
                 />
               </div>
@@ -936,21 +936,21 @@ export default function ContractEditPage() {
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">مبلغ کل</label>
+                <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">مبلغ کل</label>
                 <FormattedNumberInput
                   value={parseFloat(formData.totalAmount) || 0}
                   onChange={(value) => setFormData(prev => ({ ...prev, totalAmount: value.toString() }))}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   placeholder="0"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">واحد پول</label>
+                <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">واحد پول</label>
                 <select
                   name="currency"
                   value={formData.currency}
                   onChange={handleInputChange}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                 >
                   <option value="ریال">ریال</option>
                   <option value="دلار">دلار</option>
@@ -963,15 +963,15 @@ export default function ContractEditPage() {
 
         {/* Notes */}
         <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-semibold text-white mb-4">یادداشت‌ها</h2>
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4">یادداشت‌ها</h2>
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-2">یادداشت‌های اضافی</label>
+            <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">یادداشت‌های اضافی</label>
             <textarea
               name="notes"
               value={formData.notes}
               onChange={handleInputChange}
               rows={4}
-              className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 resize-none"
+              className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 resize-none"
               placeholder="یادداشت‌های اضافی..."
             />
           </div>
@@ -980,7 +980,7 @@ export default function ContractEditPage() {
         {/* Save Actions */}
         <div className="glass-liquid-card p-6">
           <div className="flex items-center justify-between">
-            <div className="text-sm text-gray-400">
+            <div className="text-sm text-slate-500 dark:text-slate-400">
               مبلغ کل: {wizardData.products.reduce((sum, product) => sum + product.totalPrice, 0).toLocaleString('fa-IR')} ریال
             </div>
             <div className="flex items-center gap-3">

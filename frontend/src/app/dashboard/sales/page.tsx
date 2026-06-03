@@ -5,7 +5,6 @@ import {
   FaBox,
   FaChartLine,
   FaFileContract,
-  FaHandshake,
   FaPlus,
   FaUsers,
 } from 'react-icons/fa';
@@ -67,11 +66,6 @@ export default function SalesWorkspacePage() {
       eyebrow="فضای کاری"
       title="فروش"
       description="مسیرهای اصلی فروش در یک صفحه فشرده و آماده برای کار روزانه تیم."
-      metrics={[
-        { label: 'تمرکز اصلی', value: 'قراردادها', hint: 'ثبت، پیگیری و امضا', icon: FaHandshake, tone: 'primary' },
-        { label: 'ورودی سریع', value: 'مشتری و محصول', hint: 'بدون خروج از جریان فروش', icon: FaPlus, tone: 'success' },
-        { label: 'نمای عملیاتی', value: 'موبایل‌فرست', hint: 'همسو با قراردادسازی جدید', icon: FaFileContract, tone: 'info' },
-      ]}
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {salesActions.map((action) => {

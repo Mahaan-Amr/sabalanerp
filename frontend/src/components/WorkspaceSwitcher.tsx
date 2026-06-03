@@ -27,12 +27,14 @@ const iconMap = {
 interface WorkspaceSwitcherProps {
   className?: string;
   showLabel?: boolean;
+  compact?: boolean;
   variant?: 'dropdown' | 'grid' | 'sidebar';
 }
 
 export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({ 
   className = '', 
   showLabel = true,
+  compact = false,
   variant = 'dropdown'
 }) => {
   const { 
@@ -191,16 +193,16 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
     <div className={`relative ${className}`}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="glass-liquid-btn flex items-center gap-3 px-4 py-3 w-full justify-between"
+        className={`glass-liquid-btn flex w-full items-center justify-between gap-3 ${compact ? 'px-3 py-2 text-sm' : 'px-4 py-3'}`}
       >
         <div className="flex items-center gap-3">
-          <div className="glass-liquid-card p-2">
+          <div className={`glass-liquid-card ${compact ? 'p-1.5' : 'p-2'}`}>
             <CurrentIcon className={`h-5 w-5 text-${currentInfo.color}-400`} />
           </div>
           {showLabel && (
             <div className="text-right">
               <p className="font-medium text-slate-950 dark:text-white">{currentInfo.namePersian}</p>
-              <p className="text-sm text-slate-900 dark:text-slate-300">فضای کاری فعال</p>
+              {!compact && <p className="text-sm text-slate-900 dark:text-slate-300">فضای کاری فعال</p>}
             </div>
           )}
         </div>
@@ -220,7 +222,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
             {/* Main Dashboard */}
             <div
               onClick={handleMainDashboard}
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-all duration-200 ${
+              className={`flex items-center gap-3 rounded-lg px-3 py-2 cursor-pointer transition-all duration-200 ${
                 !currentWorkspace 
                   ? 'bg-teal-500/20 text-teal-400' 
                   : 'text-slate-950 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white'
@@ -229,7 +231,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
               <FaHome className="h-5 w-5" />
               <div className="flex-1">
                 <p className="font-medium">داشبورد اصلی</p>
-                <p className="text-sm opacity-75">نمای کلی سیستم</p>
+                {!compact && <p className="text-sm opacity-75">نمای کلی سیستم</p>}
               </div>
             </div>
 
@@ -242,7 +244,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
                 <div
                   key={workspace.id}
                   onClick={() => handleWorkspaceSelect(workspace.id)}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-all duration-200 ${
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2 cursor-pointer transition-all duration-200 ${
                     isActive 
                       ? `bg-${workspace.color}-500/20 text-${workspace.color}-400` 
                       : 'text-slate-950 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white'
@@ -251,7 +253,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
                   <Icon className="h-5 w-5" />
                   <div className="flex-1">
                     <p className="font-medium">{workspace.namePersian}</p>
-                    <p className="text-sm opacity-75">{workspace.description}</p>
+                    {!compact && <p className="text-sm opacity-75">{workspace.description}</p>}
                   </div>
                   {getPermissionBadge(workspace.id)}
                 </div>

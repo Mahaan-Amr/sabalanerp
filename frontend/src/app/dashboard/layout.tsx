@@ -1,6 +1,7 @@
 ﻿'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { 
@@ -59,6 +60,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [profileDropdownPosition, setProfileDropdownPosition] = useState({ top: 0, left: 0 });
+  const profileButtonRef = useRef<HTMLButtonElement | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
@@ -73,6 +76,31 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       setSidebarCollapsed(false);
     }
   }, [sidebarOpen]);
+
+  useEffect(() => {
+    if (!profileDropdownOpen || !profileButtonRef.current) return;
+
+    const updatePosition = () => {
+      const rect = profileButtonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const menuWidth = 192;
+      const margin = 12;
+
+      setProfileDropdownPosition({
+        top: rect.bottom + 8,
+        left: Math.max(margin, Math.min(rect.left, window.innerWidth - menuWidth - margin)),
+      });
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [profileDropdownOpen]);
 
   // Close profile dropdown when clicking outside
   useEffect(() => {
@@ -230,10 +258,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       )}
 
       {/* Sidebar */}
-      <div className={`fixed inset-y-0 right-0 z-50 border-l border-slate-200 bg-white/95 shadow-xl backdrop-blur-xl transform transition-transform duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-950/95 ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'} lg:translate-x-0 ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-64'} w-64`}>
-        <div className="flex flex-col h-full">
+      <div className={`fixed inset-y-0 right-0 z-50 w-[min(86vw,320px)] transform overflow-y-auto border-l border-slate-200 bg-white/95 shadow-xl backdrop-blur-xl transition-transform duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-950/95 lg:overflow-hidden ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'} lg:translate-x-0 ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-64'}`}>
+        <div className="flex min-h-full flex-col lg:h-full">
           {/* Sidebar Header */}
-          <div className={`flex items-center border-b border-slate-200 dark:border-slate-800 ${sidebarCollapsed ? 'justify-center p-4' : 'justify-between p-6'}`}>
+          <div className={`flex items-center border-b border-slate-200 p-4 dark:border-slate-800 lg:p-6 ${sidebarCollapsed ? 'lg:justify-center lg:p-4' : 'justify-between'}`}>
             <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-3'}`}>
               <div className="rounded-lg border border-[#074747]/20 bg-[#074747]/10 p-2 text-[#074747] dark:border-teal-800 dark:bg-teal-900/30 dark:text-teal-100">
                 <FaFileContract className="h-6 w-6" />
@@ -252,40 +280,37 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
           {/* User Info */}
           {!sidebarCollapsed && (
-            <div className="border-b border-slate-200 p-6 dark:border-slate-800">
+            <div className="border-b border-slate-200 p-4 dark:border-slate-800 lg:p-5">
               <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-slate-100 p-3 text-[#074747] dark:bg-slate-900 dark:text-teal-200">
-                  <FaUser className="h-6 w-6" />
+                <div className="rounded-lg bg-slate-100 p-2.5 text-[#074747] dark:bg-slate-900 dark:text-teal-200">
+                  <FaUser className="h-5 w-5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="truncate font-medium text-slate-950 dark:text-white">
+                  <p className="truncate text-sm font-semibold text-slate-950 dark:text-white">
                     {user.firstName} {user.lastName}
                   </p>
-                  <p className="truncate text-sm text-slate-500 dark:text-slate-400">
-                    {user.department?.namePersian || 'بدون دپارتمان'}
-                  </p>
                   <p className="truncate text-xs text-slate-400 dark:text-slate-500">
-                    @{user.username}
+                    {user.department?.namePersian || 'بدون دپارتمان'} · @{user.username}
                   </p>
-                  {user.role === 'ADMIN' && (
-                    <span className="mt-1 inline-block rounded-full bg-[#074747]/10 px-2 py-1 text-xs text-[#074747] dark:bg-teal-900/30 dark:text-teal-200">
-                      مدیر سیستم
-                    </span>
-                  )}
                 </div>
+                {user.role === 'ADMIN' && (
+                  <span className="rounded-full bg-[#074747]/10 px-2 py-1 text-xs font-semibold text-[#074747] dark:bg-teal-900/30 dark:text-teal-200">
+                    مدیر
+                  </span>
+                )}
               </div>
             </div>
           )}
 
           {/* Workspace Switcher */}
           {!sidebarCollapsed && (
-            <div className="border-b border-slate-200 p-6 dark:border-slate-800">
-              <WorkspaceSwitcher variant="sidebar" />
+            <div className="border-b border-slate-200 p-4 dark:border-slate-800 lg:p-5">
+              <WorkspaceSwitcher variant="dropdown" compact />
             </div>
           )}
 
           {/* Workspace Navigation */}
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-none lg:flex-1 lg:overflow-hidden">
             <WorkspaceNavigation
               collapsed={sidebarCollapsed}
               onToggleCollapse={setSidebarCollapsed}
@@ -293,7 +318,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
 
           {/* Sidebar Footer */}
-          <div className={`${sidebarCollapsed ? 'p-4' : 'p-6 space-y-4'} border-t border-slate-200 dark:border-slate-800`}>
+          <div className={`${sidebarCollapsed ? 'p-4' : 'space-y-3 p-4 lg:p-5'} border-t border-slate-200 dark:border-slate-800`}>
             <div className={`flex ${sidebarCollapsed ? 'flex-col items-center gap-2' : 'items-center justify-between gap-3'}`}>
               {!sidebarCollapsed && <span className="text-sm text-slate-500 dark:text-slate-400">حالت نمایش</span>}
               <ThemeToggle />
@@ -347,29 +372,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               </button>
               <div className="relative profile-dropdown-container">
                 <button 
+                  ref={profileButtonRef}
                   onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
                   className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-[#074747] transition hover:bg-[#074747]/10 dark:border-slate-700 dark:bg-slate-900 dark:text-teal-200"
                 >
                   <FaUser className="h-5 w-5" />
                 </button>
-                {/* Profile Dropdown */}
-                {profileDropdownOpen && (
-                  <div className="absolute left-0 top-full z-50 mt-2 w-48 rounded-lg border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-900">
-                    <div className="py-2">
-                      <div className="border-b border-slate-200 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-300">
-                        <p className="font-medium">{user.firstName} {user.lastName}</p>
-                        <p className="text-xs text-slate-500">@{user.username}</p>
-                      </div>
-                      <button
-                        onClick={handleLogout}
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-slate-600 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-slate-300 dark:hover:bg-red-500/20 dark:hover:text-red-300"
-                      >
-                        <FaSignOutAlt className="h-4 w-4" />
-                        خروج
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -380,6 +388,27 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           {children}
         </main>
       </div>
+      {profileDropdownOpen && createPortal(
+        <div
+          className="profile-dropdown-container fixed z-[100000] w-48 rounded-lg border border-slate-200 bg-white p-2 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+          style={{ top: profileDropdownPosition.top, left: profileDropdownPosition.left }}
+        >
+          <div className="py-2">
+            <div className="border-b border-slate-200 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-300">
+              <p className="font-medium">{user.firstName} {user.lastName}</p>
+              <p className="text-xs text-slate-500">@{user.username}</p>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-slate-600 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-slate-300 dark:hover:bg-red-500/20 dark:hover:text-red-300"
+            >
+              <FaSignOutAlt className="h-4 w-4" />
+              خروج
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

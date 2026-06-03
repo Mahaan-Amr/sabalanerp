@@ -580,12 +580,12 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
   const navigationItems = getNavigationItems();
 
   return (
-    <div className={`flex flex-col h-full ${className}`}>
+    <div className={`flex min-h-0 flex-col lg:h-full ${className}`}>
       {/* Collapse Toggle */}
-      <div className="flex-shrink-0 border-b border-slate-200 p-4 dark:border-gray-700/50">
+      <div className="hidden flex-shrink-0 border-b border-slate-200 p-3 dark:border-gray-700/50 lg:block">
         <button
           onClick={handleToggleCollapse}
-          className="glass-liquid-btn w-full flex items-center justify-center gap-2"
+          className="glass-liquid-btn flex w-full items-center justify-center gap-2 text-sm"
         >
           {collapsed ? <FaChevronRight className="h-4 w-4" /> : <FaChevronLeft className="h-4 w-4" />}
           {!collapsed && <span>جمع‌کردن منو</span>}
@@ -593,7 +593,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
       </div>
 
       {/* Navigation Items */}
-      <nav className="scrollbar-thin flex-1 space-y-2 overflow-y-auto p-4 scrollbar-thumb-slate-300 scrollbar-track-slate-100 dark:scrollbar-thumb-gray-600 dark:scrollbar-track-gray-800">
+      <nav className="scrollbar-thin flex-none space-y-1 overflow-visible p-3 text-sm scrollbar-thumb-slate-300 scrollbar-track-slate-100 dark:scrollbar-thumb-gray-600 dark:scrollbar-track-gray-800 lg:flex-1 lg:space-y-2 lg:overflow-y-auto lg:p-4">
         {navigationItems.map(item => renderNavigationItem(item))}
       </nav>
 

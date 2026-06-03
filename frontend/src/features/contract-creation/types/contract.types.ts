@@ -19,6 +19,13 @@ export interface CrmCustomer {
   projectManagerNumber?: string;
   brandName?: string;
   brandNameDescription?: string;
+  ownerUserId?: string | null;
+  ownerUser?: {
+    id: string;
+    firstName?: string;
+    lastName?: string;
+    username?: string;
+  } | null;
   isBlacklisted: boolean;
   isLocked: boolean;
 }

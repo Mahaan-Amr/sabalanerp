@@ -1,0 +1,49 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<?mso-application progid='Excel.Sheet'?>
+<Workbook xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:html="http://www.w3.org/TR/REC-html40" xmlns="urn:schemas-microsoft-com:office:spreadsheet">
+ <o:OfficeDocumentSettings>
+  <Colors>
+   <Color>
+    <Index>1</Index>
+    <RGB>#000000</RGB>
+   </Color>
+   <Color>
+    <Index>2</Index>
+    <RGB>#ffffff</RGB>
+   </Color>
+  </Colors>
+ </o:OfficeDocumentSettings>
+ <Styles>
+  <Style ss:ID="s1">
+   <ss:Font ss:FontName="Tahoma" ss:Size="8.25" ss:Color="#000000" />
+  </Style>
+ </Styles>
+ <ss:Worksheet ss:Name="Sheet">
+  <Table>
+   <Column ss:AutoFit="0" ss:Width="75" />
+   <Column ss:AutoFit="0" ss:Width="75" />
+   <Column ss:AutoFit="0" ss:Width="54.75" />
+   <Column ss:AutoFit="0" ss:Width="89.25" />
+   <Column ss:AutoFit="0" ss:Width="75" />
+   <Column ss:AutoFit="0" ss:Width="66" />
+   <Column ss:AutoFit="0" ss:Width="69" />
+   <Column ss:AutoFit="0" ss:Width="75" />
+   <Column ss:AutoFit="0" ss:Width="75" />
+   <Column ss:AutoFit="0" ss:Width="75" />
+   <Column ss:AutoFit="0" ss:Width="150" />
+   <Row>
+    <Cell ss:StyleID="s1"><Data ss:Type="String">كد نوع فروش</Data></Cell>
+    <Cell ss:StyleID="s1"><Data ss:Type="String">عنوان نوع فروش</Data></Cell>
+    <Cell ss:StyleID="s1"><Data ss:Type="String">عنوان واحد</Data></Cell>
+    <Cell ss:StyleID="s1"><Data ss:Type="String">گروه فروش كالا</Data></Cell>
+    <Cell ss:StyleID="s1"><Data ss:Type="String">في مصرف كننده</Data></Cell>
+    <Cell ss:StyleID="s1"><Data ss:Type="String">في</Data></Cell>
+    <Cell ss:StyleID="s1"><Data ss:Type="String">درصد تخفيف</Data></Cell>
+    <Cell ss:StyleID="s1"><Data ss:Type="String">درصد اضافات</Data></Cell>
+    <Cell ss:StyleID="s1"><Data ss:Type="String">امكان تغيير في در فاكتور</Data></Cell>
+    <Cell ss:StyleID="s1"><Data ss:Type="String">امكان تغيير تخفيف در فاكتور</Data></Cell>
+    <Cell ss:StyleID="s1"><Data ss:Type="String">جلوگيری از ورود قيمت با درصدغير مجاز</Data></Cell>
+   </Row>
+  </Table>
+ </ss:Worksheet>
+</Workbook>

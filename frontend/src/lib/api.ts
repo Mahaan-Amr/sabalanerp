@@ -260,12 +260,17 @@ export const crmAPI = {
   // Customers
   getCustomers: (params?: { page?: number; limit?: number; search?: string; status?: string; customerType?: string }) =>
     api.get('/crm/customers', { params }),
+
+  getCustomerOwners: () => api.get('/crm/customer-owners'),
   
   getCustomer: (id: string) => api.get(`/crm/customers/${id}`),
   
   createCustomer: (customerData: any) => api.post('/crm/customers', customerData),
   
   updateCustomer: (id: string, customerData: any) => api.put(`/crm/customers/${id}`, customerData),
+
+  assignCustomerOwner: (id: string, ownerUserId: string | null) =>
+    api.put(`/crm/customers/${id}/owner`, { ownerUserId }),
   
   deleteCustomer: (id: string) => api.delete(`/crm/customers/${id}`),
   

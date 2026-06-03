@@ -3974,6 +3974,17 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
               newErrors.paymentMethod = `نوع پرداخت نقدی برای پرداخت #${index + 1} الزامی است`;
               return;
             }
+            if (payment.paymentDate && String(payment.paymentDate).trim() !== getCurrentPersianDate()) {
+              const paymentNationalCode = String(payment.nationalCode || '').trim();
+              if (!paymentNationalCode) {
+                newErrors.paymentMethod = `کد ملی برای پرداخت #${index + 1} با تاریخ غیر از امروز الزامی است`;
+                return;
+              }
+              if (paymentNationalCode.length !== 10) {
+                newErrors.paymentMethod = `کد ملی پرداخت #${index + 1} باید ۱۰ رقم باشد`;
+                return;
+              }
+            }
           });
         }
         break;
@@ -10037,11 +10048,12 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             isOpen={paymentHandlers.showPaymentEntryModal}
             onClose={paymentHandlers.handleClosePaymentEntryModal}
             form={paymentHandlers.paymentEntryForm}
-            onFormChange={(updates) => paymentHandlers.setPaymentEntryForm((prev) => ({ ...prev, ...updates }))}
+            onFormChange={paymentHandlers.updatePaymentEntryForm}
             onSave={paymentHandlers.handleSavePaymentEntry}
             currency={wizardData.payment.currency}
             error={errors.paymentMethod}
             isEdit={!!paymentHandlers.editingPaymentEntryId}
+            nationalCodeRequired={paymentHandlers.paymentEntryNationalCodeRequired}
           />
         )}
       </div>

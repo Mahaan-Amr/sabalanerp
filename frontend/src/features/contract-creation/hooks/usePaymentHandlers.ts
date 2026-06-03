@@ -26,12 +26,51 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     amount: 0
   });
 
+  const getCustomerNationalCode = useCallback(() => (
+    wizardData.customer?.nationalCode?.trim() || ''
+  ), [wizardData.customer?.nationalCode]);
+
+  const isPaymentNationalCodeRequired = useCallback((paymentDate?: string) => {
+    const normalizedPaymentDate = paymentDate?.trim();
+    return !!normalizedPaymentDate && normalizedPaymentDate !== getCurrentPersianDate();
+  }, [getCurrentPersianDate]);
+
+  const paymentEntryNationalCodeRequired = isPaymentNationalCodeRequired(paymentEntryForm.paymentDate);
+
+  const normalizePaymentEntryForm = useCallback((
+    form: Partial<PaymentEntry>,
+    updates: Partial<PaymentEntry> = {}
+  ): Partial<PaymentEntry> => {
+    const nextForm = { ...form, ...updates };
+    const nationalCodeRequired = isPaymentNationalCodeRequired(nextForm.paymentDate);
+
+    if (!nationalCodeRequired) {
+      return {
+        ...nextForm,
+        nationalCode: undefined
+      };
+    }
+
+    if ('nationalCode' in updates) {
+      return nextForm;
+    }
+
+    return {
+      ...nextForm,
+      nationalCode: nextForm.nationalCode || getCustomerNationalCode()
+    };
+  }, [getCustomerNationalCode, isPaymentNationalCodeRequired]);
+
+  const updatePaymentEntryForm = useCallback((updates: Partial<PaymentEntry>) => {
+    setPaymentEntryForm((prev) => normalizePaymentEntryForm(prev, updates));
+  }, [normalizePaymentEntryForm]);
+
   // Handler to add a new payment entry
   const handleAddPaymentEntry = useCallback(() => {
     setEditingPaymentEntryId(null);
     const existingPaymentsSum = sumNumericValues(wizardData.payment.payments, (payment) => payment.amount);
     const remainingAmount = toFiniteNumber(wizardData.payment.totalContractAmount) - existingPaymentsSum;
-    setPaymentEntryForm({
+    setPaymentEntryForm(normalizePaymentEntryForm({
       method: 'CASH_CARD',
       paymentDate: getCurrentPersianDate(),
       amount: remainingAmount > 0 ? remainingAmount : 0,
@@ -39,9 +78,9 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       checkOwnerName: undefined,
       handoverDate: undefined,
       nationalCode: undefined
-    });
+    }));
     setShowPaymentEntryModal(true);
-  }, [wizardData.payment, getCurrentPersianDate]);
+  }, [wizardData.payment, getCurrentPersianDate, normalizePaymentEntryForm]);
 
   // Handler to edit an existing payment entry (normalize legacy CASH to CASH_CARD/CASH_SHIBA)
   const handleEditPaymentEntry = useCallback((entryId: string) => {
@@ -52,10 +91,10 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       const method: PaymentEntryMethod = rawMethod === 'CASH'
         ? (entry.cashType === 'SHIBA' ? 'CASH_SHIBA' : 'CASH_CARD')
         : (entry.method as PaymentEntryMethod);
-      setPaymentEntryForm({ ...entry, method });
+      setPaymentEntryForm(normalizePaymentEntryForm({ ...entry, method }));
       setShowPaymentEntryModal(true);
     }
-  }, [wizardData.payment.payments]);
+  }, [wizardData.payment.payments, normalizePaymentEntryForm]);
 
   // Handler to save payment entry (add or update)
   const handleSavePaymentEntry = useCallback(() => {
@@ -98,13 +137,27 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       }
     }
 
+    if (isPaymentNationalCodeRequired(paymentEntryForm.paymentDate)) {
+      const normalizedNationalCode = paymentEntryForm.nationalCode?.trim() || '';
+      if (!normalizedNationalCode) {
+        setErrors({ paymentMethod: 'کد ملی برای پرداخت با تاریخ غیر از امروز الزامی است' });
+        return;
+      }
+      if (normalizedNationalCode.length !== 10) {
+        setErrors({ paymentMethod: 'کد ملی باید ۱۰ رقم باشد' });
+        return;
+      }
+    }
+
     const entry: PaymentEntry = {
       id: editingPaymentEntryId || `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       method: method as PaymentEntryMethod,
       amount: paymentAmount,
       paymentDate: paymentEntryForm.paymentDate!,
       description: paymentEntryForm.description,
-      nationalCode: paymentEntryForm.nationalCode,
+      nationalCode: isPaymentNationalCodeRequired(paymentEntryForm.paymentDate)
+        ? paymentEntryForm.nationalCode?.trim()
+        : undefined,
       checkNumber: paymentEntryForm.checkNumber,
       checkOwnerName: paymentEntryForm.checkOwnerName,
       handoverDate: paymentEntryForm.handoverDate,
@@ -132,7 +185,7 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       amount: 0
     });
     setErrors({});
-  }, [paymentEntryForm, editingPaymentEntryId, wizardData.payment, updateWizardData, setErrors]);
+  }, [paymentEntryForm, editingPaymentEntryId, wizardData.payment, updateWizardData, setErrors, isPaymentNationalCodeRequired]);
 
   // Handler to delete a payment entry
   const handleDeletePaymentEntry = useCallback((entryId: string) => {
@@ -143,7 +196,7 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
         payments: updatedPayments
       }
     });
-  }, [wizardData.payment.payments, updateWizardData]);
+  }, [wizardData.payment, updateWizardData]);
 
   // Handler to close modal and reset state
   const handleClosePaymentEntryModal = useCallback(() => {
@@ -167,6 +220,8 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     // Form state
     paymentEntryForm,
     setPaymentEntryForm,
+    updatePaymentEntryForm,
+    paymentEntryNationalCodeRequired,
     
     // Handlers
     handleAddPaymentEntry,

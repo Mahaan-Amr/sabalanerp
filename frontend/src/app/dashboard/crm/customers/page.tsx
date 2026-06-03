@@ -42,6 +42,13 @@ interface CrmCustomer {
     isPrimary: boolean;
     isActive: boolean;
   }>;
+  ownerUserId?: string | null;
+  ownerUser?: {
+    id: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    username?: string | null;
+  } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -199,6 +206,11 @@ export default function CustomersPage() {
     }
   };
 
+  const getOwnerLabel = (customer: CrmCustomer) => {
+    const ownerName = [customer.ownerUser?.firstName, customer.ownerUser?.lastName].filter(Boolean).join(' ').trim();
+    return ownerName || customer.ownerUser?.username || 'بدون مسئول فروش';
+  };
+
   const clearFilters = () => {
     setFilters({
       search: '',
@@ -226,6 +238,7 @@ export default function CustomersPage() {
         <div>
           <p className="font-semibold text-slate-900 dark:text-white">{customer.firstName} {customer.lastName}</p>
           {customer.companyName && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{customer.companyName}</p>}
+          <p className="mt-1 text-xs text-purple-600 dark:text-purple-300">مسئول فروش: {getOwnerLabel(customer)}</p>
           {customer.nationalCode && <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">کد ملی: {customer.nationalCode}</p>}
         </div>
       ),

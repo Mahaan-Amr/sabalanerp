@@ -1,0 +1,99 @@
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index f3e92d6..710c72f 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -15,7 +15,7 @@ COPY prisma ./prisma
+ COPY tsconfig.json ./
+ COPY src ./src
+ 
+-RUN npx prisma generate
++RUN HTTP_PROXY=http://127.0.0.1:2081 HTTPS_PROXY=http://127.0.0.1:2081 http_proxy=http://127.0.0.1:2081 https_proxy=http://127.0.0.1:2081 npx prisma generate
+ RUN npm run build
+ RUN npm prune --omit=dev
+ 
+@@ -23,10 +23,23 @@ FROM node:20-bookworm-slim AS runner
+ 
+ WORKDIR /app
+ 
+-RUN apt-get update && apt-get install -y --no-install-recommends \
++RUN printf 'Types: deb\nURIs: http://mirror.iranserver.com/debian\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: http://mirror.iranserver.com/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' > /etc/apt/sources.list.d/debian.sources \
++  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
++  apt-get -o Acquire::ForceIPv4=true update \
++  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
++  apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
++  openssl \
++  ca-certificates \
++  && rm -rf /var/lib/apt/lists/*
++
++RUN printf 'Types: deb\nURIs: http://mirror.iranserver.com/debian\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: http://mirror.iranserver.com/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' > /etc/apt/sources.list.d/debian.sources \
++  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
++  apt-get -o Acquire::ForceIPv4=true update \
++  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
++  apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
+   chromium \
+   ca-certificates \
+-  fonts-dejavu \
++  fonts-dejavu-core \
+   fonts-liberation \
+   && rm -rf /var/lib/apt/lists/*
+ 
+diff --git a/deploy/docker/inquiry.Dockerfile b/deploy/docker/inquiry.Dockerfile
+index d809ffa..bd76777 100644
+--- a/deploy/docker/inquiry.Dockerfile
++++ b/deploy/docker/inquiry.Dockerfile
+@@ -1,22 +1,40 @@
+-FROM node:22-alpine AS runner
++FROM sabalanerp-backend AS backend-engines
++
++FROM node:20-bookworm-slim AS runner
+ 
+ WORKDIR /app
+ 
+-RUN apk add --no-cache openssl
++RUN printf 'Types: deb\nURIs: http://mirror.iranserver.com/debian\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: http://mirror.iranserver.com/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' > /etc/apt/sources.list.d/debian.sources \
++  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
++  apt-get -o Acquire::ForceIPv4=true update \
++  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
++  apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
++  openssl \
++  ca-certificates \
++  && rm -rf /var/lib/apt/lists/*
+ 
+ COPY apps/sabalan-inquiry/package*.json ./
++COPY apps/sabalan-inquiry/prisma ./prisma
+ RUN --mount=type=cache,target=/root/.npm \
+   npm config set fetch-retries 5 \
+   && npm config set fetch-retry-factor 2 \
+   && npm config set fetch-retry-mintimeout 20000 \
+   && npm config set fetch-retry-maxtimeout 120000 \
+-  && npm ci --prefer-offline --no-audit --fund=false
++  && npm ci --ignore-scripts --prefer-offline --no-audit --fund=false
++
++COPY --from=backend-engines /app/node_modules/@prisma/engines/schema-engine-debian-openssl-1.1.x /tmp/prisma-engines/schema-engine-debian-openssl-3.0.x
++COPY --from=backend-engines /app/node_modules/@prisma/engines/libquery_engine-debian-openssl-1.1.x.so.node /tmp/prisma-engines/libquery_engine-debian-openssl-3.0.x.so.node
++
++RUN mkdir -p node_modules/@prisma/engines \
++  && cp /tmp/prisma-engines/schema-engine-debian-openssl-3.0.x node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x \
++  && cp /tmp/prisma-engines/libquery_engine-debian-openssl-3.0.x.so.node node_modules/@prisma/engines/libquery_engine-debian-openssl-3.0.x.so.node
+ 
+ COPY apps/sabalan-inquiry ./
+ 
+ ENV NODE_ENV=production
+ ENV NEXT_TELEMETRY_DISABLED=1
+ ENV PORT=3001
++ENV PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1
+ 
+ RUN npx prisma generate
+ RUN DATABASE_URL=file:/tmp/inquiry-build.db npx prisma db push
+diff --git a/deploy/nginx/nginx.conf b/deploy/nginx/nginx.conf
+index 994ec50..73d2dcd 100644
+--- a/deploy/nginx/nginx.conf
++++ b/deploy/nginx/nginx.conf
+@@ -23,6 +23,7 @@ http {
+   tcp_nodelay on;
+   keepalive_timeout 65;
+   types_hash_max_size 2048;
++  server_names_hash_bucket_size 128;
+   server_tokens off;
+ 
+   include /etc/nginx/conf.d/*.conf;

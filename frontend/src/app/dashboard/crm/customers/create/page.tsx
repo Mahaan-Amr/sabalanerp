@@ -19,9 +19,10 @@ import {
 import { crmAPI, dashboardAPI } from '@/lib/api';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
+import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
-import EnhancedDropdown, { DropdownOption } from '@/components/EnhancedDropdown';
+import EnhancedDropdown from '@/components/EnhancedDropdown';
 
 interface ProjectAddress {
   id?: string;
@@ -39,6 +40,28 @@ interface PhoneNumber {
   number: string;
   type: 'mobile' | 'home' | 'work' | 'other';
   isPrimary: boolean;
+}
+
+interface DuplicateCustomerSuggestion {
+  id: string;
+  firstName: string;
+  lastName: string;
+  companyName?: string | null;
+  nationalCode?: string | null;
+  ownerUser?: {
+    id: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    username?: string | null;
+  } | null;
+  phoneNumbers?: Array<{
+    id: string;
+    number: string;
+    type: string;
+    isPrimary: boolean;
+    isActive?: boolean;
+  }>;
+  projectAddresses?: ProjectAddress[];
 }
 
 interface CustomerFormData {
@@ -97,6 +120,7 @@ export default function CreateCustomerPage() {
   });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [duplicateCustomers, setDuplicateCustomers] = useState<DuplicateCustomerSuggestion[]>([]);
   const [step, setStep] = useState(0);
   const [showAdditionalInfo, setShowAdditionalInfo] = useState(false);
 
@@ -287,11 +311,46 @@ export default function CreateCustomerPage() {
     }));
   };
 
+  const getOwnerLabel = (customer: DuplicateCustomerSuggestion) => {
+    const ownerName = [customer.ownerUser?.firstName, customer.ownerUser?.lastName].filter(Boolean).join(' ').trim();
+    return ownerName || customer.ownerUser?.username || 'بدون مسئول فروش';
+  };
+
+  const selectDuplicateForContract = (customer: DuplicateCustomerSuggestion) => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const returnTo = urlParams.get('returnTo');
+    const stepParam = urlParams.get('step') || '2';
+
+    if (returnTo !== 'contract') return;
+
+    try {
+      const savedStateRaw = localStorage.getItem('contractWizardState');
+      const savedState = savedStateRaw ? JSON.parse(savedStateRaw) : { currentStep: Number(stepParam), wizardData: {} };
+      localStorage.setItem('contractWizardState', JSON.stringify({
+        currentStep: Number(stepParam),
+        wizardData: {
+          ...savedState.wizardData,
+          customerId: customer.id,
+          customer: {
+            ...customer,
+            projectAddresses: customer.projectAddresses || [],
+            phoneNumbers: customer.phoneNumbers || []
+          }
+        }
+      }));
+    } catch (error) {
+      console.error('Error preparing duplicate customer selection:', error);
+    }
+
+    router.push(`/dashboard/sales/contracts/create?returnTo=contract&step=${stepParam}`);
+  };
+
   const handleSubmit = async () => {
     if (!validateStep(step)) return;
 
     try {
       setLoading(true);
+      setDuplicateCustomers([]);
       
       // Prepare data for API
       const customerData = {
@@ -362,7 +421,15 @@ export default function CreateCustomerPage() {
       }
     } catch (error: any) {
       console.error('Error creating customer:', error);
-      setErrors({ submit: 'خطا در ایجاد مشتری' });
+      if (error.response?.status === 409 && error.response?.data?.code === 'DUPLICATE_CUSTOMER') {
+        const matches = error.response?.data?.data?.matches || [];
+        setDuplicateCustomers(matches);
+        setErrors({
+          submit: 'مشتری با این شماره تماس یا کد ملی قبلا ثبت شده است. از مشتری‌های پیشنهادی انتخاب کنید.'
+        });
+      } else {
+        setErrors({ submit: error.response?.data?.error || 'خطا در ایجاد مشتری' });
+      }
     } finally {
       setLoading(false);
     }
@@ -669,16 +736,7 @@ export default function CreateCustomerPage() {
                   value={formData.projectType}
                   onChange={(value) => handleInputChange('projectType', value)}
                   placeholder="نوع پروژه را انتخاب کنید"
-                  options={[
-                    { value: 'مسکونی', label: 'مسکونی' },
-                    { value: 'تجاری', label: 'تجاری' },
-                    { value: 'اداری', label: 'اداری' },
-                    { value: 'صنعتی', label: 'صنعتی' },
-                    { value: 'عمرانی', label: 'عمرانی' },
-                    { value: 'بازسازی', label: 'بازسازی' },
-                    { value: 'ویلا', label: 'ویلا' },
-                    { value: 'سایر', label: 'سایر' }
-                  ]}
+                  options={PROJECT_TYPE_OPTIONS}
                   searchable={true}
                   clearable={true}
                 />
@@ -747,15 +805,19 @@ export default function CreateCustomerPage() {
     );
   }
 
+  const isReturningToContract =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('returnTo') === 'contract';
+
   return (
-    <div className="min-h-screen p-8">
+    <div className="min-h-screen space-y-5 p-3 sm:p-6 lg:p-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-white mb-2">ایجاد مشتری جدید</h1>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-white sm:text-3xl">ایجاد مشتری جدید</h1>
           <p className="text-gray-300">مراحل ایجاد مشتری را تکمیل کنید</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {/* Cancel button - return to contract wizard */}
           {(() => {
             const urlParams = new URLSearchParams(window.location.search);
@@ -817,6 +879,54 @@ export default function CreateCustomerPage() {
       <div className="glass-liquid-card p-6">
         {renderStepContent()}
       </div>
+
+      {duplicateCustomers.length > 0 && (
+        <div className="glass-liquid-card p-6 border border-amber-500/40">
+          <div className="mb-4">
+            <h3 className="text-lg font-semibold text-white">مشتری مشابه پیدا شد</h3>
+            <p className="mt-1 text-sm text-gray-300">
+              ایجاد مشتری تکراری مجاز نیست. مشتری موجود را انتخاب کنید یا اطلاعات وارد شده را اصلاح کنید.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {duplicateCustomers.map((customer) => {
+              const primaryPhone =
+                customer.phoneNumbers?.find((phone) => phone.isPrimary)?.number ||
+                customer.phoneNumbers?.[0]?.number;
+
+              return (
+                <div key={customer.id} className="rounded-lg border border-white/10 bg-white/5 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h4 className="font-semibold text-white">
+                        {customer.firstName} {customer.lastName}
+                      </h4>
+                      {customer.companyName && <p className="mt-1 text-sm text-gray-300">{customer.companyName}</p>}
+                    </div>
+                    <span className="rounded-full bg-amber-500/20 px-3 py-1 text-xs font-semibold text-amber-200">
+                      تکراری
+                    </span>
+                  </div>
+                  <div className="mt-3 space-y-1 text-sm text-gray-300">
+                    {primaryPhone && <p>شماره تماس: {primaryPhone}</p>}
+                    {customer.nationalCode && <p>کد ملی: {customer.nationalCode}</p>}
+                    <p>مسئول فروش: {getOwnerLabel(customer)}</p>
+                  </div>
+                  {isReturningToContract && (
+                    <button
+                      type="button"
+                      onClick={() => selectDuplicateForContract(customer)}
+                      className="mt-4 w-full rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-500"
+                    >
+                      انتخاب این مشتری و ادامه قرارداد
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Navigation */}
       <div className="flex items-center justify-between">

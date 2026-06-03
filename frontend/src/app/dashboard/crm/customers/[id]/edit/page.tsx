@@ -18,6 +18,7 @@ import {
 } from 'react-icons/fa';
 import { crmAPI, dashboardAPI } from '@/lib/api';
 import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
+import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
 
 type CustomerType = 'Individual' | 'Company' | 'Government';
 type CustomerStatus = 'Active' | 'Inactive' | 'Prospect' | 'Lead';
@@ -564,8 +565,14 @@ export default function EditCustomerPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <input className={inputClass} placeholder="نام پروژه" value={project.projectName} onChange={(e) => updateProject(index, 'projectName', e.target.value)} />
                   <input className={inputClass} placeholder="شهر" value={project.city} onChange={(e) => updateProject(index, 'city', e.target.value)} />
-                  <input className={inputClass} placeholder="نوع پروژه" value={project.projectType} onChange={(e) => updateProject(index, 'projectType', e.target.value)} />
-                  <input className={inputClass} placeholder="کد پستی" value={project.postalCode} onChange={(e) => updateProject(index, 'postalCode', e.target.value)} />
+                  <select className={inputClass} value={project.projectType} onChange={(e) => updateProject(index, 'projectType', e.target.value)}>
+                    <option value="">انتخاب نوع پروژه</option>
+                    {PROJECT_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                   <input className={inputClass} placeholder="نام مدیر پروژه" value={project.projectManagerName} onChange={(e) => updateProject(index, 'projectManagerName', e.target.value)} />
                   <input className={inputClass} placeholder="شماره مدیر پروژه" value={project.projectManagerNumber} onChange={(e) => updateProject(index, 'projectManagerNumber', e.target.value)} />
                   <textarea className={`${inputClass} md:col-span-2`} rows={2} placeholder="آدرس پروژه *" value={project.address} onChange={(e) => updateProject(index, 'address', e.target.value)} />

@@ -68,15 +68,6 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
             محصول را پیدا کنید، تنظیماتش را ثبت کنید و لیست قرارداد را همین‌جا مرور کنید.
           </p>
         </div>
-
-        <button
-          type="button"
-          onClick={catalog.createProduct}
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-purple-300 bg-white px-4 py-2 text-sm font-semibold text-purple-700 shadow-sm transition-colors hover:bg-purple-50 dark:border-purple-700 dark:bg-slate-900/60 dark:text-purple-200 dark:hover:bg-purple-900/20"
-        >
-          <FaPlus className="h-4 w-4" />
-          <span>ایجاد محصول</span>
-        </button>
       </div>
 
       {errors.products && (

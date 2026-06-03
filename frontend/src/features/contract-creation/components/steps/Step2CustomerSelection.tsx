@@ -34,6 +34,12 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
   const selectedCustomer = wizardData.customer;
   const hasSearch = customerSearchTerm.trim().length > 0;
 
+  const getOwnerLabel = (customer?: CrmCustomer | null) => {
+    if (!customer) return 'بدون مسئول فروش';
+    const ownerName = [customer.ownerUser?.firstName, customer.ownerUser?.lastName].filter(Boolean).join(' ').trim();
+    return ownerName || customer.ownerUser?.username || 'بدون مسئول فروش';
+  };
+
   const persistAndCreateCustomer = () => {
     localStorage.setItem('contractWizardState', JSON.stringify({
       currentStep,
@@ -108,6 +114,7 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
               <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600 dark:text-slate-300">
                 {selectedCustomer.companyName && <span>{selectedCustomer.companyName}</span>}
                 {selectedCustomer.phoneNumbers?.[0]?.number && <span>{selectedCustomer.phoneNumbers[0].number}</span>}
+                <span>مسئول فروش: {getOwnerLabel(selectedCustomer)}</span>
                 <span>{selectedCustomer.projectAddresses?.length || 0} پروژه</span>
               </div>
             </div>
@@ -128,7 +135,7 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
           <span>{hasSearch ? `${filteredCustomers.length} نتیجه پیدا شد` : `نمایش ${filteredCustomers.length} مشتری اخیر`}</span>
-          <span>{isOwnerScopedUser ? 'فقط مشتریان متعلق به شما نمایش داده می‌شود' : `${customers.length} مشتری در CRM`}</span>
+          <span>{`${customers.length} مشتری در CRM`}</span>
         </div>
       </section>
 
@@ -193,6 +200,9 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
                       {customer.phoneNumbers[0].number}
                     </span>
                   )}
+                  <span className="rounded-full bg-purple-50 px-2 py-1 font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-200">
+                    مسئول فروش: {getOwnerLabel(customer)}
+                  </span>
                 </div>
               </button>
             );

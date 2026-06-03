@@ -10,6 +10,7 @@ import {
   FaEdit,
   FaFileContract,
   FaPrint,
+  FaRedo,
   FaSignature,
   FaTimes,
   FaTruck,
@@ -29,7 +30,7 @@ import {
 import { dashboardAPI, salesAPI } from '@/lib/api';
 import { formatDisplayNumber, formatPrice, formatSquareMeters, sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
-import { getContractPermissions, User as PermissionUser } from '@/lib/permissions';
+import { getContractPermissions, hasFeatureAccess, User as PermissionUser } from '@/lib/permissions';
 import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
 
 interface Contract {
@@ -47,6 +48,7 @@ interface Contract {
   updatedAt: string;
   signedAt?: string;
   printedAt?: string;
+  isSigned?: boolean;
   customer: {
     id: string;
     firstName: string;
@@ -263,6 +265,23 @@ export default function ContractDetailPage() {
     }
   };
 
+  const handleResendConfirmation = async () => {
+    if (!contract) return;
+    setActionLoading('resend-confirmation');
+    try {
+      const response = await salesAPI.resendConfirmation(contract.id);
+      if (response.data?.success) {
+        setError(null);
+      } else {
+        setError(response.data?.error || 'ارسال دوباره کد تایید ناموفق بود');
+      }
+    } catch (error: any) {
+      setError(error.response?.data?.error || 'خطا در ارسال دوباره کد تایید');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const products = useMemo(() => {
     if (!contract) return [];
     return contract.items?.length ? contract.items : contract.contractData?.products || [];
@@ -302,7 +321,12 @@ export default function ContractDetailPage() {
   const canApprove = (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canApprove;
   const canReject = (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canReject;
   const canSign = contract.status === 'APPROVED' && contractPermissions.canSign;
-  const canPrint = (contract.status === 'SIGNED' || contract.status === 'PRINTED') && contractPermissions.canPrint;
+  const canDownloadPdf = contractPermissions.canView;
+  const canPrint = contractPermissions.canPrint;
+  const canResendConfirmation =
+    contract.status !== 'CANCELLED' &&
+    !contract.isSigned &&
+    hasFeatureAccess(currentUser, 'sales_verification_send', 'edit');
 
   const actions: ErpAction[] = [
     ...(canEdit ? [{ label: 'ویرایش', href: `/dashboard/sales/contracts/${contract.id}/edit`, icon: FaEdit, tone: 'info' as ErpTone, variant: 'soft' as const }] : []),
@@ -312,6 +336,26 @@ export default function ContractDetailPage() {
     ...(canPrint ? [{ label: 'دانلود PDF', onClick: handleDownloadPdf, icon: FaDownload, tone: 'success' as ErpTone, disabled: actionLoading === 'download' }] : []),
     ...(canPrint ? [{ label: 'پرینت', onClick: handlePrintContract, icon: FaPrint, tone: 'purple' as ErpTone, disabled: actionLoading === 'print' }] : []),
   ];
+
+  if (!canPrint && canDownloadPdf) {
+    actions.push({
+      label: 'دانلود PDF',
+      onClick: handleDownloadPdf,
+      icon: FaDownload,
+      tone: 'success' as ErpTone,
+      disabled: actionLoading === 'download'
+    });
+  }
+
+  if (canResendConfirmation) {
+    actions.push({
+      label: 'ارسال دوباره کد تایید',
+      onClick: handleResendConfirmation,
+      icon: FaRedo,
+      tone: 'info' as ErpTone,
+      disabled: actionLoading === 'resend-confirmation'
+    });
+  }
 
   const metrics: ErpMetric[] = [
     { label: 'وضعیت', value: statusLabels[contract.status] || contract.status, icon: FaFileContract, tone: statusTones[contract.status] || 'neutral' },

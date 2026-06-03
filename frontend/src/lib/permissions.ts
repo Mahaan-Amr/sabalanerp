@@ -174,10 +174,12 @@ const getFeatureWorkspace = (feature: string): string => {
     'sales_customers_edit': 'sales',
     'sales_customers_create': 'sales',
     'sales_customers_delete': 'sales',
+    'sales_customers_assign_owner': 'sales',
     'crm_customers_view': 'crm',
     'crm_customers_edit': 'crm',
     'crm_customers_create': 'crm',
     'crm_customers_delete': 'crm',
+    'crm_customers_assign_owner': 'crm',
     
     // Inventory Master Data Features
     'inventory_cut_types_view': 'inventory',
@@ -258,6 +260,9 @@ export const getCrmPermissions = (user: User | null) => {
       hasFeatureAccess(user, 'crm_customers_edit', 'edit') ||
       hasFeatureAccess(user, 'sales_customers_edit', 'edit'),
     canDeleteCustomers: hasFeatureAccess(user, 'crm_customers_delete', 'edit'),
+    canAssignCustomerOwner:
+      hasFeatureAccess(user, 'crm_customers_assign_owner', 'edit') ||
+      hasFeatureAccess(user, 'sales_customers_assign_owner', 'edit'),
   };
 };
 

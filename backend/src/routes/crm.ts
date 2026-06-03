@@ -12,13 +12,111 @@ const DEBUG_LOGS = process.env.NODE_ENV !== 'production';
 const isOwnerScopedUser = (req: any) => req?.user?.role && req.user.role !== 'ADMIN';
 
 const buildCustomerScope = (req: any) => {
-  if (isOwnerScopedUser(req)) {
-    return { ownerUserId: req.user.id };
-  }
   return {};
 };
 
-const ensureOwnershipOrDeny = (
+const normalizeDigits = (value: unknown): string => {
+  if (typeof value !== 'string' && typeof value !== 'number') return '';
+  return String(value)
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/\D/g, '');
+};
+
+const normalizePhoneNumber = (value: unknown): string => {
+  const digits = normalizeDigits(value);
+  if (digits.startsWith('0098')) return `0${digits.slice(4)}`;
+  if (digits.startsWith('98') && digits.length === 12) return `0${digits.slice(2)}`;
+  if (digits.startsWith('9') && digits.length === 10) return `0${digits}`;
+  return digits;
+};
+
+const normalizeNationalCode = (value: unknown): string => normalizeDigits(value);
+
+const hasFeaturePermission = async (
+  user: any,
+  features: string[],
+  requiredPermission: 'view' | 'edit' | 'admin'
+): Promise<boolean> => {
+  if (!user) return false;
+  if (user.role === 'ADMIN') return true;
+
+  const levels = ['view', 'edit', 'admin'];
+  const requiredLevel = levels.indexOf(requiredPermission);
+
+  const userPermission = await prisma.featurePermission.findFirst({
+    where: {
+      userId: user.id,
+      feature: { in: features },
+      isActive: true
+    }
+  });
+
+  if (userPermission && levels.indexOf(userPermission.permissionLevel) >= requiredLevel) {
+    return true;
+  }
+
+  const rolePermission = await prisma.roleFeaturePermission.findFirst({
+    where: {
+      role: user.role,
+      feature: { in: features },
+      isActive: true
+    }
+  });
+
+  return !!rolePermission && levels.indexOf(rolePermission.permissionLevel) >= requiredLevel;
+};
+
+const canAssignCustomerOwner = async (req: any): Promise<boolean> =>
+  hasFeaturePermission(
+    req.user,
+    [FEATURES.CRM_CUSTOMERS_ASSIGN_OWNER, FEATURES.SALES_CUSTOMERS_ASSIGN_OWNER],
+    'edit'
+  );
+
+const customerSuggestionSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  companyName: true,
+  customerType: true,
+  status: true,
+  nationalCode: true,
+  ownerUserId: true,
+  ownerUser: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      username: true
+    }
+  },
+  phoneNumbers: {
+    where: { isActive: true },
+    select: {
+      id: true,
+      number: true,
+      type: true,
+      isPrimary: true,
+      isActive: true
+    }
+  },
+  projectAddresses: {
+    where: { isActive: true },
+    select: {
+      id: true,
+      address: true,
+      city: true,
+      projectName: true,
+      projectType: true,
+      projectManagerName: true,
+      projectManagerNumber: true,
+      isActive: true
+    }
+  }
+} as const;
+
+const ensureOwnershipOrDeny = async (
   req: any,
   res: Response,
   customer: { id: string; ownerUserId: string | null } | null,
@@ -32,7 +130,11 @@ const ensureOwnershipOrDeny = (
     return false;
   }
 
-  if (isOwnerScopedUser(req) && customer.ownerUserId !== req.user.id) {
+  if (
+    isOwnerScopedUser(req) &&
+    customer.ownerUserId !== req.user.id &&
+    !(await canAssignCustomerOwner(req))
+  ) {
     console.warn('[crm-customer-owner-deny]', {
       userId: req.user?.id,
       role: req.user?.role,
@@ -49,7 +151,95 @@ const ensureOwnershipOrDeny = (
   return true;
 };
 
+const findDuplicateCustomers = async (params: {
+  nationalCode?: unknown;
+  phoneNumbers?: Array<{ number?: unknown }>;
+}) => {
+  const normalizedNationalCode = normalizeNationalCode(params.nationalCode);
+  const normalizedPhones = Array.from(
+    new Set(
+      (Array.isArray(params.phoneNumbers) ? params.phoneNumbers : [])
+        .map((phone) => normalizePhoneNumber(phone?.number))
+        .filter(Boolean)
+    )
+  );
+
+  if (!normalizedNationalCode && normalizedPhones.length === 0) {
+    return [];
+  }
+
+  const candidates = await prisma.crmCustomer.findMany({
+    where: {
+      isActive: true,
+      OR: [
+        normalizedNationalCode ? { nationalCode: { not: null } } : undefined,
+        normalizedPhones.length > 0 ? { phoneNumbers: { some: { isActive: true } } } : undefined
+      ].filter(Boolean) as any
+    },
+    select: customerSuggestionSelect
+  });
+
+  return candidates.filter((customer) => {
+    const nationalCodeMatches =
+      !!normalizedNationalCode && normalizeNationalCode(customer.nationalCode) === normalizedNationalCode;
+    const phoneMatches = customer.phoneNumbers.some((phone) =>
+      normalizedPhones.includes(normalizePhoneNumber(phone.number))
+    );
+    return nationalCodeMatches || phoneMatches;
+  });
+};
+
 // ==================== CRM CUSTOMERS ====================
+
+// @desc    Get assignable CRM customer owners
+// @route   GET /api/crm/customer-owners
+// @access  Private/CRM or Sales Customer Owner Assignment
+router.get('/customer-owners', protect, async (req: any, res: Response): Promise<void> => {
+  try {
+    if (!(await canAssignCustomerOwner(req))) {
+      res.status(403).json({
+        success: false,
+        error: 'Access denied: customer owner assignment permission is required'
+      });
+      return;
+    }
+
+    const users = await prisma.user.findMany({
+      where: {
+        isActive: true
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        username: true,
+        role: true,
+        department: {
+          select: {
+            id: true,
+            name: true,
+            namePersian: true
+          }
+        }
+      },
+      orderBy: [
+        { firstName: 'asc' },
+        { lastName: 'asc' }
+      ]
+    });
+
+    res.json({
+      success: true,
+      data: users
+    });
+  } catch (error) {
+    console.error('Get CRM customer owners error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
+  }
+});
 
 // @desc    Get all CRM customers
 // @route   GET /api/crm/customers
@@ -134,6 +324,14 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
             isPrimary: true
           }
         },
+        ownerUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            username: true
+          }
+        },
         _count: {
           select: {
             leads: true,
@@ -195,6 +393,14 @@ router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
         phoneNumbers: {
           where: { isActive: true }
         },
+        ownerUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            username: true
+          }
+        },
         leads: {
           orderBy: { createdAt: 'desc' }
         },
@@ -216,7 +422,13 @@ router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
         }
       }
     });
-    if (!ensureOwnershipOrDeny(req, res, customer, 'get_customer')) return;
+    if (!customer) {
+      res.status(404).json({
+        success: false,
+        error: 'Customer not found'
+      });
+      return;
+    }
 
     res.json({
       success: true,
@@ -304,6 +516,21 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
       primaryContact
     } = req.body;
 
+    const duplicateCustomers = await findDuplicateCustomers({ nationalCode, phoneNumbers });
+    if (duplicateCustomers.length > 0) {
+      res.status(409).json({
+        success: false,
+        code: 'DUPLICATE_CUSTOMER',
+        error: 'Customer already exists with this phone number or national code',
+        data: {
+          matches: duplicateCustomers
+        }
+      });
+      return;
+    }
+
+    const normalizedNationalCode = normalizeNationalCode(nationalCode) || null;
+
     // Create customer with all related data
     if (DEBUG_LOGS) {
       console.log('Creating customer with data:', {
@@ -313,7 +540,7 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
         customerType,
         industry,
         status,
-        nationalCode,
+        nationalCode: normalizedNationalCode,
         homeAddress,
         homeNumber,
         workAddress,
@@ -386,8 +613,8 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
         
         phoneNumbers: phoneNumbers && phoneNumbers.length > 0 ? {
           create: phoneNumbers.map((phone: any) => ({
-            number: phone.number,
-            type: phone.type,
+            number: normalizePhoneNumber(phone.number),
+            type: String(phone.type || 'mobile').toLowerCase(),
             isPrimary: phone.isPrimary || false,
             isActive: true
           }))
@@ -404,7 +631,15 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
         primaryContact: true,
         contacts: true,
         projectAddresses: true,
-        phoneNumbers: true
+        phoneNumbers: true,
+        ownerUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            username: true
+          }
+        }
       }
     });
 
@@ -472,7 +707,7 @@ router.put('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
       where: { id: req.params.id },
       select: { id: true, ownerUserId: true }
     });
-    if (!ensureOwnershipOrDeny(req, res, customer, 'update_customer')) return;
+    if (!(await ensureOwnershipOrDeny(req, res, customer, 'update_customer'))) return;
 
     const { ownerUserId, createdBy, updatedBy, ...safeBody } = req.body || {};
 
@@ -494,6 +729,83 @@ router.put('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
     });
   } catch (error) {
     console.error('Update CRM customer error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
+  }
+});
+
+// @desc    Assign CRM customer owner
+// @route   PUT /api/crm/customers/:id/owner
+// @access  Private/CRM or Sales Customer Owner Assignment
+router.put('/customers/:id/owner', protect, async (req: any, res: Response): Promise<void> => {
+  try {
+    if (!(await canAssignCustomerOwner(req))) {
+      res.status(403).json({
+        success: false,
+        error: 'Access denied: customer owner assignment permission is required'
+      });
+      return;
+    }
+
+    const ownerUserId = req.body?.ownerUserId || null;
+    if (ownerUserId) {
+      const owner = await prisma.user.findUnique({
+        where: { id: ownerUserId },
+        select: { id: true }
+      });
+
+      if (!owner) {
+        res.status(404).json({
+          success: false,
+          error: 'Owner user not found'
+        });
+        return;
+      }
+    }
+
+    const customer = await prisma.crmCustomer.findUnique({
+      where: { id: req.params.id },
+      select: { id: true }
+    });
+
+    if (!customer) {
+      res.status(404).json({
+        success: false,
+        error: 'Customer not found'
+      });
+      return;
+    }
+
+    const updatedCustomer = await prisma.crmCustomer.update({
+      where: { id: req.params.id },
+      data: {
+        ownerUserId,
+        updatedBy: req.user.id
+      },
+      include: {
+        ownerUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            username: true
+          }
+        },
+        primaryContact: true,
+        contacts: true,
+        projectAddresses: true,
+        phoneNumbers: true
+      }
+    });
+
+    res.json({
+      success: true,
+      data: updatedCustomer
+    });
+  } catch (error) {
+    console.error('Assign CRM customer owner error:', error);
     res.status(500).json({
       success: false,
       error: 'Server error'
@@ -529,7 +841,7 @@ router.post('/customers/:customerId/project-addresses', protect, requireAnyFeatu
       where: { id: customerId },
       select: { id: true, ownerUserId: true }
     });
-    if (!ensureOwnershipOrDeny(req, res, customer, 'create_project_address')) return;
+    if (!(await ensureOwnershipOrDeny(req, res, customer, 'create_project_address'))) return;
 
     const projectAddress = await prisma.projectAddress.create({
       data: {
@@ -584,7 +896,7 @@ router.put('/customers/:customerId/project-addresses/:projectId', protect, requi
       where: { id: customerId },
       select: { id: true, ownerUserId: true }
     });
-    if (!ensureOwnershipOrDeny(req, res, customer, 'update_project_address')) return;
+    if (!(await ensureOwnershipOrDeny(req, res, customer, 'update_project_address'))) return;
 
     // Check if project exists
     const existingProject = await prisma.projectAddress.findFirst({
@@ -636,7 +948,7 @@ router.delete('/customers/:customerId/project-addresses/:projectId', protect, re
       where: { id: customerId },
       select: { id: true, ownerUserId: true }
     });
-    if (!ensureOwnershipOrDeny(req, res, customer, 'delete_project_address')) return;
+    if (!(await ensureOwnershipOrDeny(req, res, customer, 'delete_project_address'))) return;
 
     const existingProject = await prisma.projectAddress.findFirst({
       where: { id: projectId, customerId }
@@ -696,7 +1008,7 @@ router.post('/customers/:customerId/phone-numbers', protect, requireAnyFeatureAc
       where: { id: customerId },
       select: { id: true, ownerUserId: true }
     });
-    if (!ensureOwnershipOrDeny(req, res, customer, 'create_phone_number')) return;
+    if (!(await ensureOwnershipOrDeny(req, res, customer, 'create_phone_number'))) return;
 
     // If setting as primary, unset other primary numbers
     if (isPrimary) {
@@ -754,7 +1066,7 @@ router.put('/customers/:customerId/phone-numbers/:phoneId', protect, requireAnyF
       where: { id: customerId },
       select: { id: true, ownerUserId: true }
     });
-    if (!ensureOwnershipOrDeny(req, res, customer, 'update_phone_number')) return;
+    if (!(await ensureOwnershipOrDeny(req, res, customer, 'update_phone_number'))) return;
 
     const existingPhone = await prisma.phoneNumber.findFirst({
       where: { id: phoneId, customerId }
@@ -809,7 +1121,7 @@ router.delete('/customers/:customerId/phone-numbers/:phoneId', protect, requireA
       where: { id: customerId },
       select: { id: true, ownerUserId: true }
     });
-    if (!ensureOwnershipOrDeny(req, res, customer, 'delete_phone_number')) return;
+    if (!(await ensureOwnershipOrDeny(req, res, customer, 'delete_phone_number'))) return;
 
     const existingPhone = await prisma.phoneNumber.findFirst({
       where: { id: phoneId, customerId }
@@ -867,7 +1179,7 @@ router.put('/customers/:id/blacklist', protect, requireWorkspaceAccess(WORKSPACE
       where: { id: req.params.id },
       select: { id: true, ownerUserId: true, isBlacklisted: true }
     });
-    if (!ensureOwnershipOrDeny(req, res, customer, 'toggle_blacklist')) return;
+    if (!(await ensureOwnershipOrDeny(req, res, customer, 'toggle_blacklist'))) return;
 
     const updatedCustomer = await prisma.crmCustomer.update({
       where: { id: req.params.id },
@@ -905,7 +1217,7 @@ router.put('/customers/:id/lock', protect, requireWorkspaceAccess(WORKSPACES.CRM
       where: { id: req.params.id },
       select: { id: true, ownerUserId: true, isLocked: true }
     });
-    if (!ensureOwnershipOrDeny(req, res, customer, 'toggle_lock')) return;
+    if (!(await ensureOwnershipOrDeny(req, res, customer, 'toggle_lock'))) return;
 
     const updatedCustomer = await prisma.crmCustomer.update({
       where: { id: req.params.id },
@@ -962,7 +1274,7 @@ router.post('/customers/:customerId/contacts', protect, requireAnyFeatureAccess(
       where: { id: customerId },
       select: { id: true, ownerUserId: true }
     });
-    if (!ensureOwnershipOrDeny(req, res, customer, 'create_contact')) return;
+    if (!(await ensureOwnershipOrDeny(req, res, customer, 'create_contact'))) return;
 
     const contact = await prisma.crmContact.create({
       data: {
@@ -1027,7 +1339,7 @@ router.put('/customers/:customerId/contacts/:contactId', protect, requireAnyFeat
       where: { id: customerId },
       select: { id: true, ownerUserId: true }
     });
-    if (!ensureOwnershipOrDeny(req, res, customer, 'update_contact')) return;
+    if (!(await ensureOwnershipOrDeny(req, res, customer, 'update_contact'))) return;
 
     const existingContact = await prisma.crmContact.findFirst({
       where: { id: contactId, customerId }
@@ -1098,7 +1410,7 @@ router.delete('/customers/:customerId/contacts/:contactId', protect, requireAnyF
       where: { id: customerId },
       select: { id: true, ownerUserId: true, primaryContactId: true }
     });
-    if (!ensureOwnershipOrDeny(req, res, customer, 'delete_contact')) return;
+    if (!(await ensureOwnershipOrDeny(req, res, customer, 'delete_contact'))) return;
 
     const existingContact = await prisma.crmContact.findFirst({
       where: { id: contactId, customerId }

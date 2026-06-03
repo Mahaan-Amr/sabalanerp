@@ -637,13 +637,6 @@ router.put('/contracts/:id/print', protect, requireFeatureAccess(FEATURES.SALES_
       });
     }
 
-    if (contract.status !== 'SIGNED' && contract.status !== 'PRINTED') {
-      return res.status(400).json({
-        success: false,
-        error: 'Contract must be signed before printing'
-      });
-    }
-
     const contractWithRelations = await prisma.salesContract.findUnique({
       where: { id: req.params.id },
       include: salesContractPrintableInclude
@@ -663,7 +656,7 @@ router.put('/contracts/:id/print', protect, requireFeatureAccess(FEATURES.SALES_
     const updatedContract = await prisma.salesContract.update({
       where: { id: req.params.id },
       data: {
-        status: 'PRINTED',
+        status: contract.status === 'SIGNED' ? 'PRINTED' : contract.status,
         printedAt: new Date(),
         signatures: {
           ...(contract.signatures as any || {}),

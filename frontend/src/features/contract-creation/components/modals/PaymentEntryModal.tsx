@@ -15,6 +15,7 @@ interface PaymentEntryModalProps {
   currency: string;
   error?: string;
   isEdit?: boolean;
+  nationalCodeRequired?: boolean;
 }
 
 const METHOD_OPTIONS: { value: PaymentEntryMethod; label: string }[] = [
@@ -35,7 +36,8 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
   onSave,
   currency: _currency,
   error,
-  isEdit
+  isEdit,
+  nationalCodeRequired = false
 }) => {
   if (!isOpen) return null;
 
@@ -177,6 +179,24 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
                   </div>
                 </div>
               </>
+            )}
+
+            {nationalCodeRequired && (
+              <div>
+                <label className={labelClass}>کد ملی *</label>
+                <input
+                  type="text"
+                  value={form.nationalCode ?? ''}
+                  onChange={(e) => onFormChange({ nationalCode: e.target.value })}
+                  className={inputClass}
+                  placeholder="کد ملی مشتری"
+                  maxLength={10}
+                  inputMode="numeric"
+                />
+                <p className="mt-1 text-[11px] leading-5 text-gray-500 dark:text-gray-400">
+                  برای پرداخت با تاریخ غیر از امروز الزامی است.
+                </p>
+              </div>
             )}
 
             {error && <p className="text-red-500 text-xs">{error}</p>}

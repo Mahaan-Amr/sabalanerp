@@ -23,10 +23,12 @@ import {
   FaSave,
   FaEye
 } from 'react-icons/fa';
-import { crmAPI } from '@/lib/api';
+import { crmAPI, dashboardAPI } from '@/lib/api';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import PersianCalendar from '@/lib/persian-calendar';
 import { formatPrice } from '@/lib/numberFormat';
+import { getCrmPermissions } from '@/lib/permissions';
+import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
 
 interface CrmCustomer {
   id: string;
@@ -82,6 +84,13 @@ interface CrmCustomer {
     isPrimary: boolean;
     isActive: boolean;
   }>;
+  ownerUserId?: string | null;
+  ownerUser?: {
+    id: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    username?: string | null;
+  } | null;
   leads: Array<{
     id: string;
     companyName: string;
@@ -102,11 +111,28 @@ interface CrmCustomer {
   updatedAt: string;
 }
 
+interface OwnerOption {
+  id: string;
+  firstName?: string;
+  lastName?: string;
+  username?: string;
+  role?: string;
+}
+
 export default function CustomerDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { hasPermission } = useWorkspace();
   const [customer, setCustomer] = useState<CrmCustomer | null>(null);
+  const [ownerOptions, setOwnerOptions] = useState<OwnerOption[]>([]);
+  const [ownerSaving, setOwnerSaving] = useState(false);
+  const [crmPermissions, setCrmPermissions] = useState({
+    canViewCustomers: false,
+    canCreateCustomers: false,
+    canEditCustomers: false,
+    canDeleteCustomers: false,
+    canAssignCustomerOwner: false,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'projects' | 'contacts' | 'leads' | 'contracts'>('overview');
@@ -136,8 +162,15 @@ export default function CustomerDetailPage() {
   useEffect(() => {
     if (params.id) {
       fetchCustomer();
+      loadCurrentUser();
     }
   }, [params.id]);
+
+  useEffect(() => {
+    if (crmPermissions.canAssignCustomerOwner) {
+      loadOwnerOptions();
+    }
+  }, [crmPermissions.canAssignCustomerOwner]);
 
   const fetchCustomer = async () => {
     try {
@@ -156,6 +189,50 @@ export default function CustomerDetailPage() {
       setError('خطا در دریافت اطلاعات مشتری');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadCurrentUser = async () => {
+    try {
+      const response = await dashboardAPI.getProfile();
+      if (response.data.success) {
+        const user = response.data.data;
+        setCrmPermissions(getCrmPermissions(user));
+      }
+    } catch (error) {
+      console.error('Error loading user profile:', error);
+    }
+  };
+
+  const loadOwnerOptions = async () => {
+    try {
+      const response = await crmAPI.getCustomerOwners();
+      if (response.data.success) {
+        setOwnerOptions(response.data.data || []);
+      }
+    } catch (error) {
+      console.error('Error loading owner options:', error);
+    }
+  };
+
+  const getOwnerLabel = (owner?: CrmCustomer['ownerUser'] | null) => {
+    const ownerName = [owner?.firstName, owner?.lastName].filter(Boolean).join(' ').trim();
+    return ownerName || owner?.username || 'بدون مسئول فروش';
+  };
+
+  const handleOwnerChange = async (ownerUserId: string) => {
+    if (!customer) return;
+
+    setOwnerSaving(true);
+    try {
+      const response = await crmAPI.assignCustomerOwner(customer.id, ownerUserId || null);
+      if (response.data.success) {
+        setCustomer(response.data.data);
+      }
+    } catch (error) {
+      console.error('Error assigning customer owner:', error);
+    } finally {
+      setOwnerSaving(false);
     }
   };
 
@@ -405,11 +482,11 @@ export default function CustomerDetailPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-white mb-2">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="break-words text-2xl font-bold text-white sm:text-3xl">
             {customer.firstName} {customer.lastName}
           </h1>
           <p className="text-gray-300">
@@ -417,7 +494,7 @@ export default function CustomerDetailPage() {
             {getCustomerTypeLabel(customer.customerType)}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {/* Cancel button - return to contract wizard */}
           {(() => {
             const urlParams = new URLSearchParams(window.location.search);
@@ -469,7 +546,7 @@ export default function CustomerDetailPage() {
       </div>
 
       {/* Status Indicators */}
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-3 sm:gap-4">
         <span className={`px-4 py-2 rounded-full text-sm font-medium ${getStatusColor(customer.status)}`}>
           {getStatusLabel(customer.status)}
         </span>
@@ -492,7 +569,7 @@ export default function CustomerDetailPage() {
       {/* Tabs */}
       <div className="glass-liquid-card">
         <div className="border-b border-white/10">
-          <nav className="flex space-x-8 px-6">
+          <nav className="flex gap-6 overflow-x-auto px-4 sm:px-6">
             {[
               { key: 'overview', label: 'نمای کلی', icon: FaUser },
               { key: 'projects', label: 'پروژه‌ها', icon: FaMapMarkerAlt },
@@ -516,7 +593,7 @@ export default function CustomerDetailPage() {
           </nav>
         </div>
 
-        <div className="p-6">
+        <div className="p-4 sm:p-6">
           {activeTab === 'overview' && (
             <div className="space-y-6">
               {/* Basic Information */}
@@ -544,6 +621,29 @@ export default function CustomerDetailPage() {
                     <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(customer.status)}`}>
                       {getStatusLabel(customer.status)}
                     </span>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-1">مسئول فروش</label>
+                    {crmPermissions.canAssignCustomerOwner ? (
+                      <select
+                        value={customer.ownerUserId || ''}
+                        onChange={(event) => handleOwnerChange(event.target.value)}
+                        disabled={ownerSaving}
+                        className="w-full rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-white outline-none focus:border-teal-400"
+                      >
+                        <option value="">بدون مسئول فروش</option>
+                        {ownerOptions.map((owner) => {
+                          const label = [owner.firstName, owner.lastName].filter(Boolean).join(' ').trim() || owner.username || owner.id;
+                          return (
+                            <option key={owner.id} value={owner.id} className="bg-slate-900 text-white">
+                              {label}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    ) : (
+                      <p className="text-white">{getOwnerLabel(customer.ownerUser)}</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -930,9 +1030,9 @@ export default function CustomerDetailPage() {
 
       {/* Add/Edit Project Address Modal */}
       {showAddProjectModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="glass-liquid-card p-6 w-full max-w-md mx-4">
-            <div className="flex items-center justify-between mb-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="glass-liquid-card flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden">
+            <div className="flex flex-shrink-0 items-center justify-between border-b border-white/10 p-4 sm:p-6">
               <h3 className="text-lg font-semibold text-white">
                 {editingProject ? 'ویرایش آدرس پروژه' : 'افزودن آدرس پروژه'}
               </h3>
@@ -944,7 +1044,7 @@ export default function CustomerDetailPage() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmitProject} className="space-y-4">
+            <form onSubmit={handleSubmitProject} className="space-y-4 overflow-y-auto p-4 sm:p-6">
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">نام پروژه</label>
                 <input
@@ -969,7 +1069,7 @@ export default function CustomerDetailPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-2">شهر</label>
                   <input
@@ -979,16 +1079,6 @@ export default function CustomerDetailPage() {
                     className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
                     placeholder="شهر"
                     required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">کد پستی</label>
-                  <input
-                    type="text"
-                    value={projectFormData.postalCode}
-                    onChange={(e) => setProjectFormData(prev => ({ ...prev, postalCode: e.target.value }))}
-                    className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                    placeholder="کد پستی"
                   />
                 </div>
               </div>
@@ -1001,14 +1091,11 @@ export default function CustomerDetailPage() {
                   className="w-full px-4 py-3 min-h-[48px] bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
                 >
                   <option value="" className="bg-gray-800 text-white">انتخاب نوع پروژه</option>
-                  <option value="مسکونی" className="bg-gray-800 text-white">مسکونی</option>
-                  <option value="تجاری" className="bg-gray-800 text-white">تجاری</option>
-                  <option value="پزشکی" className="bg-gray-800 text-white">پزشکی</option>
-                  <option value="اداری" className="bg-gray-800 text-white">اداری</option>
-                  <option value="صنعتی" className="bg-gray-800 text-white">صنعتی</option>
-                  <option value="آموزشی" className="bg-gray-800 text-white">آموزشی</option>
-                  <option value="تفریحی" className="bg-gray-800 text-white">تفریحی</option>
-                  <option value="سایر" className="bg-gray-800 text-white">سایر</option>
+                  {PROJECT_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value} className="bg-gray-800 text-white">
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </div>
 

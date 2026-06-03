@@ -467,7 +467,7 @@ const renderProductDetails = (products: NormalizedProduct[], currency: string): 
       : `<tr><td colspan="5" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
 
     return `
-      <section class="section product-detail ${index > 0 ? 'page-break' : ''}">
+      <section class="section product-detail">
         <h3>جزئیات فنی و خدمات - ${escapeHtml(product.name)}</h3>
         <div class="grid two-col">
           <div><strong>شرح:</strong> ${escapeHtml(product.description || EMPTY)}</div>
@@ -642,7 +642,7 @@ export function renderContractHtml(contract: RenderableContract): string {
       </div>
     </section>
 
-    <section class="section page-break">
+    <section class="section">
       <h2>جدول اصلی محصولات</h2>
       <table>
         <thead>
@@ -667,7 +667,7 @@ export function renderContractHtml(contract: RenderableContract): string {
 
     ${renderProductDetails(normalizedProducts, financials.currency)}
 
-    <section class="section page-break">
+    <section class="section">
       <h2>برنامه تحویل</h2>
       <table>
         <thead>
@@ -687,7 +687,7 @@ export function renderContractHtml(contract: RenderableContract): string {
       </table>
     </section>
 
-    <section class="section page-break">
+    <section class="section">
       <h2>برنامه پرداخت</h2>
       <table>
         <thead>
@@ -733,13 +733,18 @@ export function renderContractHtml(contract: RenderableContract): string {
 
     <section class="section">
       <h2>توضیحات و بند حقوقی</h2>
-      <p class="notes">${escapeHtml(contract.notes || EMPTY)}</p>
-      <p class="legal">
-        این قرارداد بر اساس اطلاعات ثبت شده در سامانه تهیه شده است. تمامی مشخصات فنی، مالی، زمان‌بندی تحویل و روش‌های پرداخت پس از تایید طرفین ملاک اجرا خواهد بود.
-      </p>
-      <p class="legal">
-        هرگونه تغییر در مفاد قرارداد صرفاً با ثبت الحاقیه رسمی معتبر است و مسئولیت تطابق خدمات تحویلی با مفاد قرارداد بر عهده فروشنده و تایید دریافت بر عهده خریدار خواهد بود.
-      </p>
+      ${contract.notes ? `<p class="notes">${escapeHtml(contract.notes)}</p>` : ''}
+      <ol class="legal-list">
+        <li>خریدار با امضای این قرارداد، نوع سنگ، ابعاد، ضخامت، متراژ، تعداد، کیفیت، فرآوری، قیمت و سایر مشخصات مندرج در قرارداد را تأیید می‌نماید.</li>
+        <li>با توجه به ماهیت طبیعی سنگ، تفاوت‌های متعارف در رنگ، طرح، رگه، بافت، خلل و فرج و سایر ویژگی‌های طبیعی، مغایرت یا عیب محسوب نمی‌شود.</li>
+        <li>خریدار موظف است کالا را هنگام تحویل از نظر نوع، تعداد، متراژ، سلامت ظاهری و انطباق با سفارش بررسی نماید. هرگونه ادعای مغایرت یا کسری باید حداکثر ظرف ۲۴ ساعت اعلام گردد؛ در غیر این صورت کالا مورد تأیید خریدار تلقی خواهد شد.</li>
+        <li>تحویل‌گیرنده کالا، امضاکننده اسناد حمل یا هر شخص معرفی‌شده از سوی خریدار، نماینده قانونی خریدار محسوب می‌گردد و تأیید وی به منزله تأیید خریدار خواهد بود.</li>
+        <li>هزینه حمل، تخلیه، جابجایی، انبارش، برش و نصب کالا بر عهده خریدار بوده و مسئولیت کالا پس از تحویل به خریدار یا نماینده وی منتقل می‌گردد.</li>
+        <li>کالاهای فرآوری‌شده، برش‌خورده، تولیدی یا سفارشی پس از تأیید سفارش توسط خریدار، قابل مرجوع یا استرداد نمی‌باشند.</li>
+        <li>در صورت عدم پرداخت هر یک از تعهدات مالی در سررسید مقرر، فروشنده حق توقف تحویل سفارش، مطالبه کلیه مطالبات، خسارات قانونی، هزینه‌های دادرسی و حق‌الوکاله را خواهد داشت.</li>
+        <li>اعتبار این قرارداد منوط به تسویه کامل و به‌موقع کلیه تعهدات مالی خریدار در مواعد مقرر می‌باشد و عدم پرداخت، موجب سلب حقوق قانونی فروشنده در مطالبه مطالبات و خسارات نخواهد بود.</li>
+        <li>امضای این قرارداد به منزله مطالعه، پذیرش و تأیید کامل مفاد آن توسط خریدار می‌باشد.</li>
+      </ol>
     </section>
 
     <section class="section signatures">
@@ -813,7 +818,7 @@ export function renderContractHtml(contract: RenderableContract): string {
       border: 1px solid #e5e7eb;
       border-radius: 8px;
       padding: 8px 10px;
-      page-break-inside: avoid;
+      break-inside: auto;
     }
 
     .section h2 {
@@ -892,6 +897,23 @@ export function renderContractHtml(contract: RenderableContract): string {
       text-align: justify;
     }
 
+    .legal-list {
+      margin: 0;
+      padding-right: 18px;
+      text-align: justify;
+    }
+
+    .legal-list li {
+      margin-bottom: 4px;
+    }
+
+    .contract-header,
+    .signatures,
+    .footer {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
     .signatures {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -921,10 +943,6 @@ export function renderContractHtml(contract: RenderableContract): string {
       color: #6b7280;
     }
 
-    .page-break {
-      break-before: page;
-      page-break-before: always;
-    }
   </style>
   `;
 }

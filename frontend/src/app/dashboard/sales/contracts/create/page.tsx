@@ -106,6 +106,16 @@ import {
   hasSlabGeometryChanged
 } from '@/features/contract-creation/services/remainingStoneService';
 import {
+  mergeEditedRemainingStoneState,
+  resolveLongitudinalWidth
+} from '@/features/contract-creation/utils/productConfigurationController';
+import {
+  CONTRACT_DRAFT_STORAGE_KEY,
+  clampContractDraftStep,
+  createContractAutosaveDraft,
+  parseContractAutosaveDraft
+} from '@/features/contract-creation/utils/contractDraftStorage';
+import {
   toMeters,
   convertMetersToUnit,
   getDraftStandardLengthMeters,
@@ -190,6 +200,8 @@ export default function CreateContractWizard() {
   // Use wizard state, but allow local overrides if needed
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [draftRestoredNotice, setDraftRestoredNotice] = useState(false);
+  const [autosaveHydrated, setAutosaveHydrated] = useState(false);
   // Stair stepper v2 states are now provided by useStairSystemV2 hook
   const [useStairFlowV2, setUseStairFlowV2] = useState(true); // Feature flag - stays local
   const stairSystemV2 = useStairSystemV2({
@@ -1303,6 +1315,19 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
   const setRiserProductSearchTerm = productModal.setRiserProductSearchTerm;
   const landingProductSearchTerm = productModal.landingProductSearchTerm;
   const setLandingProductSearchTerm = productModal.setLandingProductSearchTerm;
+  const clearProductAdditionSearches = useCallback(() => {
+    setProductSearchTerm('');
+    setTreadProductSearchTerm('');
+    setRiserProductSearchTerm('');
+    setLandingProductSearchTerm('');
+    stairSystemV2.setStoneSearchTerm('');
+  }, [
+    setProductSearchTerm,
+    setTreadProductSearchTerm,
+    setRiserProductSearchTerm,
+    setLandingProductSearchTerm,
+    stairSystemV2
+  ]);
   
   // Calculation handler aliases
   const getEffectiveQuantity = productCalculations.getEffectiveQuantity;
@@ -1419,6 +1444,163 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
   } = productFiltering;
 
   useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('returnTo') === 'contract') {
+      if (!urlParams.get('step')) {
+        setAutosaveHydrated(true);
+      }
+      return;
+    }
+
+    const draft = parseContractAutosaveDraft(localStorage.getItem(CONTRACT_DRAFT_STORAGE_KEY));
+    if (!draft) {
+      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+      setAutosaveHydrated(true);
+      return;
+    }
+
+    setCurrentStep(clampContractDraftStep(draft.currentStep, WIZARD_STEPS.length));
+    setWizardData(draft.wizardData);
+    setCustomerSearchTerm(draft.searches?.customerSearchTerm || '');
+    setProductSearchTerm(draft.searches?.productSearchTerm || '');
+    setTreadProductSearchTerm(draft.searches?.treadProductSearchTerm || '');
+    setRiserProductSearchTerm(draft.searches?.riserProductSearchTerm || '');
+    setLandingProductSearchTerm(draft.searches?.landingProductSearchTerm || '');
+    stairSystemV2.setStoneSearchTerm(draft.searches?.stairStoneSearchTerm || '');
+
+    const savedProductModal = draft.productModal || {};
+    if (savedProductModal.selectedProduct !== undefined) setSelectedProduct(savedProductModal.selectedProduct as Product | null);
+    if (savedProductModal.productConfig) setProductConfig(savedProductModal.productConfig as Partial<ContractProduct>);
+    if (savedProductModal.lengthUnit === 'cm' || savedProductModal.lengthUnit === 'm') setLengthUnit(savedProductModal.lengthUnit);
+    if (savedProductModal.widthUnit === 'cm' || savedProductModal.widthUnit === 'm') setWidthUnit(savedProductModal.widthUnit);
+    if (typeof savedProductModal.isMandatory === 'boolean') setIsMandatory(savedProductModal.isMandatory);
+    if (typeof savedProductModal.mandatoryPercentage === 'number') setMandatoryPercentage(savedProductModal.mandatoryPercentage);
+    if (typeof savedProductModal.hasQuantityBeenInteracted === 'boolean') {
+      setHasQuantityBeenInteracted(savedProductModal.hasQuantityBeenInteracted);
+    }
+    if (savedProductModal.quantityType === 'steps' || savedProductModal.quantityType === 'staircases') {
+      setQuantityType(savedProductModal.quantityType);
+    }
+    if (savedProductModal.stairSystemConfig) setStairSystemConfig(savedProductModal.stairSystemConfig as any);
+
+    const savedStairSystem = draft.stairSystemV2 || {};
+    if (savedStairSystem.draftTread) stairSystemV2.setDraftTread(savedStairSystem.draftTread as StairPartDraftV2);
+    if (savedStairSystem.draftRiser) stairSystemV2.setDraftRiser(savedStairSystem.draftRiser as StairPartDraftV2);
+    if (savedStairSystem.draftLanding) stairSystemV2.setDraftLanding(savedStairSystem.draftLanding as StairPartDraftV2);
+    if (savedStairSystem.stairActivePart === 'tread' || savedStairSystem.stairActivePart === 'riser' || savedStairSystem.stairActivePart === 'landing') {
+      stairSystemV2.setStairActivePart(savedStairSystem.stairActivePart);
+    }
+    if (Array.isArray(savedStairSystem.stairSessionItems)) {
+      stairSystemV2.setStairSessionItems(savedStairSystem.stairSessionItems as ContractProduct[]);
+    }
+    if (typeof savedStairSystem.stairSessionId === 'string' || savedStairSystem.stairSessionId === null) {
+      stairSystemV2.setStairSessionId(savedStairSystem.stairSessionId as string | null);
+    }
+
+    const savedPaymentModal = draft.productModal?.paymentEntryForm;
+    if (savedPaymentModal) paymentHandlers.setPaymentEntryForm(savedPaymentModal as any);
+
+    setShowProductModal(false);
+    remainingStoneModal.setShowRemainingStoneModal(false);
+    paymentHandlers.setShowPaymentEntryModal(false);
+    setStateRestored(true);
+    restorationAttempted.current = true;
+    setDraftRestoredNotice(true);
+    setAutosaveHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!autosaveHydrated) return;
+    if (wizardData.signature?.contractId) {
+      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+      return;
+    }
+
+    const hasMeaningfulDraftProgress =
+      currentStep > 1 ||
+      Boolean(wizardData.customerId) ||
+      Boolean(wizardData.projectId) ||
+      wizardData.products.length > 0 ||
+      wizardData.deliveries.length > 0 ||
+      wizardData.payment.payments.length > 0 ||
+      Boolean(customerSearchTerm.trim()) ||
+      Boolean(productSearchTerm.trim()) ||
+      Boolean(treadProductSearchTerm.trim()) ||
+      Boolean(riserProductSearchTerm.trim()) ||
+      Boolean(landingProductSearchTerm.trim()) ||
+      Boolean(stairSystemV2.stoneSearchTerm.trim()) ||
+      Boolean(selectedProduct) ||
+      stairSystemV2.stairSessionItems.length > 0;
+
+    if (!hasMeaningfulDraftProgress) {
+      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+      return;
+    }
+
+    const draft = createContractAutosaveDraft({
+      currentStep,
+      wizardData,
+      searches: {
+        customerSearchTerm,
+        productSearchTerm,
+        treadProductSearchTerm,
+        riserProductSearchTerm,
+        landingProductSearchTerm,
+        stairStoneSearchTerm: stairSystemV2.stoneSearchTerm
+      },
+      productModal: {
+        selectedProduct,
+        productConfig,
+        lengthUnit,
+        widthUnit,
+        isMandatory,
+        mandatoryPercentage,
+        hasQuantityBeenInteracted,
+        quantityType,
+        stairSystemConfig,
+        paymentEntryForm: paymentHandlers.paymentEntryForm
+      },
+      stairSystemV2: {
+        draftTread: stairSystemV2.draftTread,
+        draftRiser: stairSystemV2.draftRiser,
+        draftLanding: stairSystemV2.draftLanding,
+        stairActivePart: stairSystemV2.stairActivePart,
+        stairSessionId: stairSystemV2.stairSessionId,
+        stairSessionItems: stairSystemV2.stairSessionItems
+      }
+    });
+
+    localStorage.setItem(CONTRACT_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  }, [
+    autosaveHydrated,
+    currentStep,
+    wizardData,
+    customerSearchTerm,
+    productSearchTerm,
+    treadProductSearchTerm,
+    riserProductSearchTerm,
+    landingProductSearchTerm,
+    stairSystemV2.stoneSearchTerm,
+    selectedProduct,
+    productConfig,
+    lengthUnit,
+    widthUnit,
+    isMandatory,
+    mandatoryPercentage,
+    hasQuantityBeenInteracted,
+    quantityType,
+    stairSystemConfig,
+    paymentHandlers.paymentEntryForm,
+    stairSystemV2.draftTread,
+    stairSystemV2.draftRiser,
+    stairSystemV2.draftLanding,
+    stairSystemV2.stairActivePart,
+    stairSystemV2.stairSessionId,
+    stairSystemV2.stairSessionItems
+  ]);
+
+  useEffect(() => {
     const initializeData = async () => {
       await loadData();
       await generateContractNumber();
@@ -1504,7 +1686,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           await loadData();
           await generateContractNumber();
         }
-      })();
+      })().finally(() => setAutosaveHydrated(true));
     }
   }, []);
 
@@ -3181,6 +3363,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       setIsEditMode(false);
       setEditingProductIndex(null);
       setTouchedFields(new Set());
+      clearProductAdditionSearches();
       setErrors({});
       
       return;
@@ -3550,12 +3733,24 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       setIsEditMode(false);
       setEditingProductIndex(null);
       setTouchedFields(new Set());
+      clearProductAdditionSearches();
       setErrors({});
       
       return;
     }
     
     // LONGITUDINAL STONE VALIDATION AND CALCULATION (existing logic)
+    const widthResolvedProductConfig = resolveLongitudinalWidth(
+      productConfig,
+      selectedProduct,
+      widthUnit,
+      isEditMode
+    );
+    if (widthResolvedProductConfig.width !== productConfig.width) {
+      Object.assign(productConfig, widthResolvedProductConfig);
+      setProductConfig(prev => ({ ...prev, width: widthResolvedProductConfig.width }));
+    }
+
     // Validate required fields - at least one of length/width or squareMeters must be provided
     const hasDimensions = (productConfig.length && productConfig.width) || productConfig.squareMeters;
     const hasRequiredFields = productConfig.quantity && productConfig.pricePerSquareMeter;
@@ -3700,11 +3895,11 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       nextLengthUnit: lengthUnit as 'cm' | 'm',
       nextQuantity: effectiveQuantity
     });
-    const computedLongitudinalRemainingStones =
-      isEditMode && !longitudinalGeometryChanged
-        ? (productConfig.remainingStones || previousLongitudinalProduct?.remainingStones || [])
-        : smartCutPlan.remainingStones;
-    const resetLongitudinalRemainingUsage = isEditMode && longitudinalGeometryChanged;
+    const remainingStoneEditState = mergeEditedRemainingStoneState({
+      geometryChanged: !!(isEditMode && longitudinalGeometryChanged),
+      nextAvailableRemainingStones: smartCutPlan.remainingStones,
+      previousProduct: previousLongitudinalProduct
+    });
     const missingCuttingRateWarning = shouldCutByGeometry && finalCuttingCostPerMeter <= 0;
     
     // Create final product configuration for longitudinal stone
@@ -3762,12 +3957,12 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
               missingCuttingRateWarning ? ' - نرخ برش طولی یافت نشد و هزینه برش صفر شد.' : ''
             }`
           : ''),
-      remainingStones: computedLongitudinalRemainingStones,
+      remainingStones: remainingStoneEditState.remainingStones,
       cutDetails: (isEditMode && productConfig.cutDetails) ? productConfig.cutDetails : [],
       // Preserve remaining stone usage tracking when editing
-      usedRemainingStones: resetLongitudinalRemainingUsage ? [] : ((isEditMode && productConfig.usedRemainingStones) ? productConfig.usedRemainingStones : []),
-      totalUsedRemainingWidth: resetLongitudinalRemainingUsage ? 0 : ((isEditMode && productConfig.totalUsedRemainingWidth) ? productConfig.totalUsedRemainingWidth : 0),
-      totalUsedRemainingLength: resetLongitudinalRemainingUsage ? 0 : ((isEditMode && productConfig.totalUsedRemainingLength) ? productConfig.totalUsedRemainingLength : 0),
+      usedRemainingStones: remainingStoneEditState.usedRemainingStones,
+      totalUsedRemainingWidth: remainingStoneEditState.totalUsedRemainingWidth,
+      totalUsedRemainingLength: remainingStoneEditState.totalUsedRemainingLength,
       // SubService tracking - preserve when editing
       appliedSubServices: (isEditMode && productConfig.appliedSubServices) ? productConfig.appliedSubServices : [],
       totalSubServiceCost: (isEditMode && productConfig.totalSubServiceCost !== undefined) ? productConfig.totalSubServiceCost : 0,
@@ -3825,7 +4020,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     setIsEditMode(false);
     setEditingProductIndex(null);
     setTouchedFields(new Set()); // Reset touched fields
-    setErrors({});
+    clearProductAdditionSearches();
+    setErrors(remainingStoneEditState.warning ? { products: remainingStoneEditState.warning } : {});
   };
 
   // Partition handlers are now provided by useRemainingStoneModal hook
@@ -4292,6 +4488,49 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             مراحل ایجاد قرارداد را تکمیل کنید
           </p>
         </div>
+
+        {draftRestoredNotice && (
+          <div className="mb-4 rounded-xl border border-teal-400/40 bg-teal-50 px-4 py-3 text-sm text-teal-900 shadow-sm dark:bg-teal-900/20 dark:text-teal-100">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>پیش‌نویس ذخیره‌شده بازیابی شد.</span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDraftRestoredNotice(false)}
+                  className="rounded-lg border border-teal-500/50 px-3 py-2 font-semibold transition hover:bg-teal-100 dark:hover:bg-teal-900/40"
+                >
+                  ادامه
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+                    localStorage.removeItem('contractWizardState');
+                    setDraftRestoredNotice(false);
+                    setCurrentStep(1);
+                    setWizardData({
+                      contractDate: getCurrentPersianDate(),
+                      contractNumber: '',
+                      creatorSequenceNumber: null,
+                      customerId: '',
+                      customer: null,
+                      projectId: '',
+                      project: null,
+                      selectedProductTypeForAddition: null,
+                      products: [],
+                      deliveries: [],
+                      payment: { payments: [], currency: 'تومان', totalContractAmount: 0 },
+                      signature: null
+                    });
+                  }}
+                  className="rounded-lg bg-slate-800 px-3 py-2 font-semibold text-white transition hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                >
+                  شروع مجدد
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Progress Bar */}
         <WizardProgressBar currentStep={currentStep} steps={WIZARD_STEPS as WizardStep[]} />
@@ -6010,7 +6249,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
               </div>
               <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-2 flex-shrink-0">
                 <button type="button" className="px-3 py-2 rounded-md bg-gray-200 dark:bg-gray-700" onClick={() => setShowProductModal(false)}>انصراف</button>
-                <button type="button" className="px-3 py-2 rounded-md bg-purple-600 text-white" onClick={() => {
+                <button type="button" className="min-h-11 rounded-lg border border-teal-400/60 bg-teal-500/10 px-4 py-2 text-sm font-semibold text-teal-700 transition hover:bg-teal-500/20 dark:text-teal-200" onClick={() => {
                   const [draft] = getActiveDraft();
                   // Validate required fields
                   const fieldErrors = validateDraftRequiredFields(stairSystemV2.stairActivePart, draft, stairSystemV2.layerTypes);
@@ -6598,7 +6837,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                   stairSystemV2.setToolsDropdownOpen(false);
                   setErrors({});
                 }}>افزودن این بخش</button>
-                <button type="button" className="px-3 py-2 rounded-md bg-green-600 text-white" onClick={() => {
+                <button type="button" className="min-h-11 rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:from-teal-600 hover:to-teal-700" onClick={() => {
                   if (!stairSystemV2.stairSessionItems.length) { setShowProductModal(false); return; }
                   
                   // Handle edit mode: replace existing products instead of adding new ones
@@ -6655,11 +6894,13 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                       
                       // Add updated products
                       updateWizardData({ products: [...updatedProducts, ...productsToAdd], selectedProductTypeForAddition: 'stair' });
+                      clearProductAdditionSearches();
                     } else {
                       // Fallback: just replace the single product
                       const updatedProducts = [...wizardData.products];
                       updatedProducts[editingProductIndex] = stairSystemV2.stairSessionItems[0];
                       updateWizardData({ products: updatedProducts, selectedProductTypeForAddition: 'stair' });
+                      clearProductAdditionSearches();
                     }
                   } else {
                     // Add mode: append session items to wizardData
@@ -6813,6 +7054,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                     });
                     
                     updateWizardData({ products: [...updatedProducts, ...productsToAdd], selectedProductTypeForAddition: 'stair' });
+                    clearProductAdditionSearches();
                   }
                   
                   stairSystemV2.setStairSessionItems([]);
@@ -8148,12 +8390,17 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                           onFocus={() => handleFieldFocus('length', productConfig.length, 0)}
                           onChange={(value) => {
                             // Update the length first
-                            setProductConfig(prev => {
-                              const updatedConfig = { ...prev, length: value };
-                              // Trigger smart calculation with updated config
-                              const smartResult = handleSmartCalculation('length', value, updatedConfig, lengthUnit, widthUnit, getEffectiveQuantity());
-                              const finalConfig = {
-                                ...updatedConfig,
+                              setProductConfig(prev => {
+                                const updatedConfig = resolveLongitudinalWidth(
+                                  { ...prev, length: value },
+                                  selectedProduct,
+                                  widthUnit,
+                                  isEditMode
+                                );
+                                // Trigger smart calculation with updated config
+                                const smartResult = handleSmartCalculation('length', value, updatedConfig, lengthUnit, widthUnit, getEffectiveQuantity());
+                                const finalConfig = {
+                                  ...updatedConfig,
                                 width: smartResult.width,
                                 squareMeters: smartResult.squareMeters
                               };
@@ -8509,7 +8756,12 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                             onFocus={() => handleFieldFocus('length', productConfig.length, 0)}
                             onChange={(value) => {
                               setProductConfig(prev => {
-                                const updatedConfig = { ...prev, length: value };
+                                const updatedConfig = resolveLongitudinalWidth(
+                                  { ...prev, length: value },
+                                  selectedProduct,
+                                  widthUnit,
+                                  isEditMode
+                                );
                                 const smartResult = handleSmartCalculation('length', value, updatedConfig, lengthUnit, widthUnit, getEffectiveQuantity());
                                 return {
                                   ...updatedConfig,

@@ -19,6 +19,7 @@ import { formatDisplayNumber, formatPrice, formatSquareMeters } from '@/lib/numb
 import { isUsableRemainingStone, normalizeRemainingStoneCollection } from '../../utils/remainingStoneGuards';
 import { PRODUCT_TYPES } from '../../constants/contract.constants';
 import { productSupportsContractType } from '../../utils/productUtils';
+import { resolveLongitudinalWidth } from '../../utils/productConfigurationController';
 
 // Comprehensive props interface for Product Configuration Modal
 interface ProductConfigurationModalProps {
@@ -233,10 +234,10 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
   // Modal content extracted from page.tsx lines 10640-13626
   // Content is in product_modal_content_fixed.txt - needs to be inserted here
   return (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4">
-            <div className="bg-white dark:bg-gray-800 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto z-[10000]">
-              <div className="p-6">
-                <div className="flex justify-between items-center mb-6">
+          <div className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4">
+            <div className="z-[10000] flex max-h-[96vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-h-[90vh] sm:rounded-xl">
+              <div className="border-b border-slate-200 bg-white/95 p-4 backdrop-blur dark:border-slate-700 dark:bg-gray-800/95 sm:p-6">
+                <div className="flex justify-between items-center">
                   <h3 className="text-xl font-semibold text-gray-800 dark:text-white">
                     {isEditMode ? 'ویرایش تنظیمات محصول' : 'تنظیمات محصول'}
                   </h3>
@@ -275,6 +276,8 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                     <FaTimes className="w-6 h-6" />
                   </button>
                 </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 pb-28 sm:p-6 sm:pb-6">
 
                 {/* Error Display */}
                 {errors.products && (
@@ -1721,7 +1724,12 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                           onChange={(value) => {
                             // Update the length first
                             setProductConfig((prev: any) => {
-                              const updatedConfig = { ...prev, length: value };
+                              const updatedConfig = resolveLongitudinalWidth(
+                                { ...prev, length: value },
+                                selectedProduct,
+                                widthUnit,
+                                isEditMode
+                              );
                               // Trigger smart calculation with updated config
                               const smartResult = handleSmartCalculation('length', value, updatedConfig, lengthUnit, widthUnit, getEffectiveQuantity());
                               const finalConfig = {
@@ -2081,7 +2089,12 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                             onFocus={() => handleFieldFocus('length', productConfig.length, 0)}
                             onChange={(value) => {
                               setProductConfig((prev: any) => {
-                                const updatedConfig = { ...prev, length: value };
+                                const updatedConfig = resolveLongitudinalWidth(
+                                  { ...prev, length: value },
+                                  selectedProduct,
+                                  widthUnit,
+                                  isEditMode
+                                );
                                 const smartResult = handleSmartCalculation('length', value, updatedConfig, lengthUnit, widthUnit, getEffectiveQuantity());
                                 return {
                                   ...updatedConfig,
@@ -3518,7 +3531,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
             </div>
 
                 {/* Action Buttons */}
-                <div className="flex justify-end gap-3 mt-6">
+                <div className="sticky bottom-0 -mx-4 mt-6 flex justify-end gap-3 border-t border-slate-200 bg-white/95 p-4 backdrop-blur dark:border-slate-700 dark:bg-gray-800/95 sm:-mx-6 sm:px-6">
                   <button
                     onClick={() => {
                       // Validate before closing if it's a stair system

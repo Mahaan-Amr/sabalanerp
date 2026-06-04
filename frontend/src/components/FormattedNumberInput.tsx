@@ -30,7 +30,7 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
   id,
   name,
   onFocus,
-  formatWhileTyping = false
+  formatWhileTyping = true
 }) => {
   const [displayValue, setDisplayValue] = useState<string>('');
   const [isFocused, setIsFocused] = useState(false);
@@ -122,7 +122,7 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
   return (
     <input
       type="text"
-      inputMode="numeric"
+      inputMode="decimal"
       value={displayValue}
       onChange={handleChange}
       onFocus={handleFocus}

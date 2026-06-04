@@ -293,6 +293,12 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                 const catalogProduct = product.product;
                 const availableRemainingStones = normalizeRemainingStoneCollection(product.remainingStones || []).filter(isUsableRemainingStone);
                 const smartCutPlan = product.smartCutPlan;
+                const isLayerProduct = Boolean((product.meta as any)?.isLayer);
+                const isRemainingStoneChild = Boolean((product.meta as any)?.remainingSource);
+                const shouldShowRemainingStones =
+                  !isLayerProduct &&
+                  (!isRemainingStoneChild || availableRemainingStones.length > 0) &&
+                  (availableRemainingStones.length > 0 || product.productType === 'longitudinal');
                 const hasGeometryCutWithoutRate =
                   product.productType === 'longitudinal' &&
                   !!product.isCut &&
@@ -391,7 +397,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                       </div>
                     )}
 
-                    {product.productType === 'longitudinal' && (
+                    {shouldShowRemainingStones && (
                       <div className="mt-4 rounded-lg border border-orange-200 bg-orange-50 p-3 dark:border-orange-800 dark:bg-orange-900/20">
                         <p className="text-sm font-semibold text-orange-800 dark:text-orange-100">
                           سنگ‌های باقیمانده

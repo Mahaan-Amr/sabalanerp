@@ -13,6 +13,12 @@ interface WizardNavigationProps {
   loading?: boolean;
   canGoNext?: boolean;
   canGoPrevious?: boolean;
+  labels?: {
+    previous?: string;
+    next?: string;
+    submit?: string;
+    submitting?: string;
+  };
 }
 
 export const WizardNavigation: React.FC<WizardNavigationProps> = ({
@@ -23,10 +29,15 @@ export const WizardNavigation: React.FC<WizardNavigationProps> = ({
   onSubmit,
   loading = false,
   canGoNext = true,
-  canGoPrevious = true
+  canGoPrevious = true,
+  labels
 }) => {
   const isFirstStep = currentStep === 1;
   const isLastStep = currentStep === totalSteps;
+  const previousLabel = labels?.previous ?? 'قبلی';
+  const nextLabel = labels?.next ?? 'بعدی';
+  const submitLabel = labels?.submit ?? 'ثبت قرارداد';
+  const submittingLabel = labels?.submitting ?? submitLabel;
 
   return (
     <div className="flex justify-between items-center relative z-0">
@@ -36,7 +47,7 @@ export const WizardNavigation: React.FC<WizardNavigationProps> = ({
           disabled={!canGoNext}
           className="glass-liquid-btn-primary flex items-center gap-3 px-8 py-4 rounded-xl hover:scale-105 hover:shadow-lg transition-all duration-300 transform disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <span className="font-medium">بعدی</span>
+          <span className="font-medium">{nextLabel}</span>
           <FaArrowLeft className="w-4 h-4" />
         </button>
       ) : (
@@ -50,7 +61,7 @@ export const WizardNavigation: React.FC<WizardNavigationProps> = ({
           ) : (
             <FaFileContract className="w-5 h-5" />
           )}
-          <span className="font-medium">ثبت قرارداد</span>
+          <span className="font-medium">{loading ? submittingLabel : submitLabel}</span>
         </button>
       )}
 
@@ -72,7 +83,7 @@ export const WizardNavigation: React.FC<WizardNavigationProps> = ({
         }`}
       >
         <FaArrowRight className="w-4 h-4" />
-        <span className="font-medium">قبلی</span>
+        <span className="font-medium">{previousLabel}</span>
       </button>
     </div>
   );

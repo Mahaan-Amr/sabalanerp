@@ -3,8 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
-  FaArrowRight, 
-  FaArrowLeft, 
   FaCheck, 
   FaTimes,
   FaCut,
@@ -19,6 +17,7 @@ import {
 import { salesAPI, inventoryAPI } from '@/lib/api';
 import SuccessModal from '@/components/SuccessModal';
 import ErrorModal from '@/components/ErrorModal';
+import { WizardNavigation } from '@/features/contract-creation/components/shared/WizardNavigation';
 
 // Stone type definitions
 const STONE_TYPES = [
@@ -853,40 +852,23 @@ export default function CreateStoneProductWizard() {
         </div>
 
         {/* Navigation */}
-        <div className="flex justify-between items-center mt-8">
-          <button
-            onClick={goToPreviousStep}
-            disabled={currentStep === 1}
-            className="flex items-center gap-2 px-6 py-3 bg-slate-500 text-white rounded-lg hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <FaArrowLeft />
-            مرحله قبل
-          </button>
-
-          <div className="text-center">
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              مرحله {currentStep} از {WIZARD_STEPS.length}
-            </p>
-          </div>
-
-          {currentStep < WIZARD_STEPS.length ? (
-            <button
-              onClick={goToNextStep}
-              className="flex items-center gap-2 px-6 py-3 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors"
-            >
-              مرحله بعد
-              <FaArrowRight />
-            </button>
-          ) : (
-            <button
-              onClick={handleCreateProduct}
-              disabled={loading}
-              className="flex items-center gap-2 px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'در حال ایجاد...' : 'ایجاد محصول'}
-              <FaCheck />
-            </button>
-          )}
+        <div className="mt-8">
+          <WizardNavigation
+            currentStep={currentStep}
+            totalSteps={WIZARD_STEPS.length}
+            onPrevious={goToPreviousStep}
+            onNext={goToNextStep}
+            onSubmit={handleCreateProduct}
+            loading={loading}
+            canGoNext={true}
+            canGoPrevious={currentStep > 1}
+            labels={{
+              previous: 'مرحله قبل',
+              next: 'مرحله بعد',
+              submit: 'ایجاد محصول',
+              submitting: 'در حال ایجاد...'
+            }}
+          />
         </div>
       </div>
 

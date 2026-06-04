@@ -23,6 +23,12 @@ import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
+import {
+  normalizeIranianMobile,
+  normalizePhoneDigits,
+  validateOptionalIranianMobile,
+  validateRequiredIranianMobile
+} from '@/lib/phoneFormat';
 
 interface ProjectAddress {
   id?: string;
@@ -203,7 +209,10 @@ export default function CreateCustomerPage() {
       // Only these 3 fields are required in basic step
       if (!formData.firstName.trim()) newErrors.firstName = 'نام الزامی است';
       if (!formData.lastName.trim()) newErrors.lastName = 'نام خانوادگی الزامی است';
-      if (!formData.phoneNumber1.trim()) newErrors.phoneNumber1 = 'شماره تماس اول الزامی است';
+      const phone1Error = validateRequiredIranianMobile(formData.phoneNumber1);
+      if (phone1Error) newErrors.phoneNumber1 = phone1Error;
+      const phone2Error = validateOptionalIranianMobile(formData.phoneNumber2);
+      if (phone2Error) newErrors.phoneNumber2 = phone2Error;
       
       // Optional fields with validation if provided
       if (formData.nationalCode && formData.nationalCode.length !== 10) {
@@ -217,6 +226,8 @@ export default function CreateCustomerPage() {
       if (!formData.projectAddress.trim()) newErrors.projectAddress = 'آدرس پروژه الزامی است';
       
       // Project type is now optional - no validation needed
+      const projectManagerNumberError = validateOptionalIranianMobile(formData.projectManagerNumber);
+      if (projectManagerNumberError) newErrors.projectManagerNumber = projectManagerNumberError;
     }
 
     setErrors(newErrors);
@@ -224,7 +235,16 @@ export default function CreateCustomerPage() {
   };
 
   const handleInputChange = (field: keyof CustomerFormData, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    const nextValue =
+      field === 'phoneNumber1' ||
+      field === 'phoneNumber2' ||
+      field === 'whatsappNumber' ||
+      field === 'projectManagerNumber'
+        ? normalizeIranianMobile(value)
+        : field === 'nationalCode' || field === 'homeNumber' || field === 'workNumber'
+          ? normalizePhoneDigits(value)
+          : value;
+    setFormData(prev => ({ ...prev, [field]: nextValue }));
     // Clear error when user starts typing
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: '' }));
@@ -347,10 +367,24 @@ export default function CreateCustomerPage() {
 
   const handleSubmit = async () => {
     if (!validateStep(step)) return;
+    const submitErrors: Record<string, string> = {};
+    const phone1Error = validateRequiredIranianMobile(formData.phoneNumber1);
+    const phone2Error = validateOptionalIranianMobile(formData.phoneNumber2);
+    const projectManagerNumberError = validateOptionalIranianMobile(formData.projectManagerNumber);
+    if (phone1Error) submitErrors.phoneNumber1 = phone1Error;
+    if (phone2Error) submitErrors.phoneNumber2 = phone2Error;
+    if (projectManagerNumberError) submitErrors.projectManagerNumber = projectManagerNumberError;
+    if (Object.keys(submitErrors).length > 0) {
+      setErrors(submitErrors);
+      return;
+    }
 
     try {
       setLoading(true);
       setDuplicateCustomers([]);
+      const phoneNumber1 = normalizeIranianMobile(formData.phoneNumber1);
+      const phoneNumber2 = normalizeIranianMobile(formData.phoneNumber2);
+      const projectManagerNumber = normalizeIranianMobile(formData.projectManagerNumber);
       
       // Prepare data for API
       const customerData = {
@@ -363,20 +397,20 @@ export default function CreateCustomerPage() {
         // Contact Information
         nationalCode: formData.nationalCode.trim() || null,
         homeAddress: formData.homeAddress.trim() || null,
-        homeNumber: formData.homeNumber.trim() || null,
+        homeNumber: normalizePhoneDigits(formData.homeNumber) || null,
         workAddress: formData.workAddress.trim() || null,
-        workNumber: formData.workNumber.trim() || null,
+        workNumber: normalizePhoneDigits(formData.workNumber) || null,
         
         // Additional Information
         companyName: formData.companyName.trim() || null,
         brandName: formData.brandName.trim() || null,
-        whatsappNumber: formData.whatsappNumber.trim() || null,
+        whatsappNumber: normalizeIranianMobile(formData.whatsappNumber) || null,
         birthDate: formData.birthDate || null,
         mainJob: formData.mainJob.trim() || null,
         
         // Project Management
         projectManagerName: formData.projectManagerName.trim() || null,
-        projectManagerNumber: formData.projectManagerNumber.trim() || null,
+        projectManagerNumber: projectManagerNumber || null,
         
         // Security & Access Control
         isBlacklisted: false,
@@ -390,13 +424,13 @@ export default function CreateCustomerPage() {
           projectName: formData.projectName.trim(),
           projectType: formData.projectType.trim() || null,
           projectManagerName: formData.projectManagerName.trim() || null,
-          projectManagerNumber: formData.projectManagerNumber.trim() || null
+          projectManagerNumber: projectManagerNumber || null
         }] : [],
         
         // Create phoneNumbers array from individual phone fields
         phoneNumbers: [
-          ...(formData.phoneNumber1.trim() ? [{ number: formData.phoneNumber1.trim(), type: 'MOBILE', isPrimary: true }] : []),
-          ...(formData.phoneNumber2.trim() ? [{ number: formData.phoneNumber2.trim(), type: 'MOBILE', isPrimary: false }] : [])
+          ...(phoneNumber1 ? [{ number: phoneNumber1, type: 'MOBILE', isPrimary: true }] : []),
+          ...(phoneNumber2 ? [{ number: phoneNumber2, type: 'MOBILE', isPrimary: false }] : [])
         ]
       };
 

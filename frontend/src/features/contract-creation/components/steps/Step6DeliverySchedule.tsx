@@ -7,6 +7,15 @@ import PersianCalendarComponent from '@/components/PersianCalendar';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { formatDisplayNumber } from '@/lib/numberFormat';
 import type { ContractWizardData, DeliverySchedule, DeliveryProductItem } from '../../types/contract.types';
+import {
+  createDeliveryDraft,
+  getDefaultDeliveryAddress,
+  getDefaultProjectManagerName,
+  getDeliveryTargetAmount,
+  getDeliveryUnit,
+  getDeliveryUnitLabel,
+  syncDeliveryDefaults
+} from '../../utils/deliveryScheduleController';
 
 interface Step6DeliveryScheduleProps {
   wizardData: ContractWizardData;
@@ -20,54 +29,32 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
   errors
 }) => {
   const defaultProjectManagerName = useMemo(
-    () => wizardData.project?.projectManagerName || wizardData.customer?.projectManagerName || '',
-    [wizardData.project?.projectManagerName, wizardData.customer?.projectManagerName]
+    () => getDefaultProjectManagerName(wizardData),
+    [wizardData]
   );
 
   const defaultDeliveryAddress = useMemo(
-    () => wizardData.project?.address || wizardData.customer?.projectAddresses?.[0]?.address || '',
-    [wizardData.project?.address, wizardData.customer?.projectAddresses]
+    () => getDefaultDeliveryAddress(wizardData),
+    [wizardData]
   );
 
   useEffect(() => {
     if (!wizardData.deliveries.length) return;
 
-    let hasChanges = false;
-    const syncedDeliveries = wizardData.deliveries.map((delivery) => {
-      const updates: Partial<DeliverySchedule> = {};
-
-      if (!delivery.projectManagerName?.trim() && defaultProjectManagerName) {
-        updates.projectManagerName = defaultProjectManagerName;
-      }
-
-      if (!delivery.deliveryAddress?.trim() && defaultDeliveryAddress) {
-        updates.deliveryAddress = defaultDeliveryAddress;
-      }
-
-      if (Object.keys(updates).length > 0) {
-        hasChanges = true;
-        return { ...delivery, ...updates };
-      }
-
-      return delivery;
-    });
+    const syncedDeliveries = syncDeliveryDefaults(wizardData.deliveries, wizardData);
+    const hasChanges = syncedDeliveries.some((delivery, index) =>
+      delivery.projectManagerName !== wizardData.deliveries[index].projectManagerName ||
+      delivery.receiverName !== wizardData.deliveries[index].receiverName ||
+      delivery.deliveryAddress !== wizardData.deliveries[index].deliveryAddress
+    );
 
     if (hasChanges) {
       updateWizardData({ deliveries: syncedDeliveries });
     }
-  }, [wizardData.deliveries, defaultProjectManagerName, defaultDeliveryAddress, updateWizardData]);
+  }, [wizardData, updateWizardData]);
 
   const handleAddDelivery = () => {
-    const newDelivery: DeliverySchedule = {
-      deliveryDate: '',
-      projectManagerName: defaultProjectManagerName,
-      receiverName: '',
-      deliveryAddress: defaultDeliveryAddress,
-      driver: '',
-      vehicle: '',
-      notes: '',
-      products: []
-    };
+    const newDelivery: DeliverySchedule = createDeliveryDraft(wizardData);
     updateWizardData({
       deliveries: [...wizardData.deliveries, newDelivery]
     });
@@ -112,28 +99,6 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
       newProducts = [...current, { productIndex, productId, quantity, amount: quantity, unit }];
     }
     handleUpdateDelivery(deliveryIndex, { products: newProducts });
-  };
-
-  const getDeliveryUnit = (product: ContractWizardData['products'][number] | undefined): 'meter' | 'squareMeter' | 'count' => {
-    if (product?.productType === 'longitudinal') return 'meter';
-    if (product?.productType === 'slab') return 'squareMeter';
-    return 'count';
-  };
-
-  const getDeliveryTargetAmount = (product: ContractWizardData['products'][number]): number => {
-    const unit = getDeliveryUnit(product);
-    if (unit === 'meter') {
-      const lengthM = product.lengthUnit === 'm' ? product.length : (product.length || 0) / 100;
-      return lengthM * (product.quantity || 0);
-    }
-    if (unit === 'squareMeter') return product.squareMeters || 0;
-    return product.quantity || 0;
-  };
-
-  const getDeliveryUnitLabel = (unit: 'meter' | 'squareMeter' | 'count') => {
-    if (unit === 'meter') return 'متر';
-    if (unit === 'squareMeter') return 'متر مربع';
-    return 'عدد';
   };
 
   return (

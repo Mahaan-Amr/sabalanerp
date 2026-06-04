@@ -69,10 +69,10 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
   // Modal content extracted from page.tsx lines 13627-14014
   // Content is in remaining_stone_modal_fixed.txt - needs to be inserted here
   return (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-gray-800 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="p-6">
-                <div className="flex justify-between items-center mb-6">
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4">
+            <div className="flex max-h-[96vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-h-[90vh] sm:rounded-xl">
+              <div className="border-b border-slate-200 bg-white/95 p-4 backdrop-blur dark:border-slate-700 dark:bg-gray-800/95 sm:p-6">
+                <div className="flex justify-between items-center">
                   <h3 className="text-xl font-semibold text-gray-800 dark:text-white">
                     ایجاد محصول از سنگ باقی‌مانده
                   </h3>
@@ -100,6 +100,8 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                     <FaTimes className="w-6 h-6" />
                   </button>
                 </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 pb-28 sm:p-6 sm:pb-6">
 
                 {/* Error Display */}
                 {errors.products && (
@@ -109,27 +111,27 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                 )}
 
                 {/* Remaining Stone Info */}
-                <div className="mb-6 p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                <div className="mb-6 rounded-lg border border-teal-200 bg-teal-50 p-4 dark:border-teal-800 dark:bg-teal-900/20">
                   <div className="flex items-center justify-between mb-2">
-                    <h4 className="font-medium text-orange-800 dark:text-orange-200">
+                    <h4 className="font-medium text-teal-800 dark:text-teal-200">
                       سنگ باقی‌مانده
                     </h4>
-                    <span className="px-2 py-1 bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200 text-xs rounded-full">
+                    <span className="px-2 py-1 bg-teal-100 dark:bg-teal-900/30 text-teal-800 dark:text-teal-200 text-xs rounded-full">
                       عرض: {formatDisplayNumber(remainingStone.width)}cm
                     </span>
                   </div>
-                  <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <span className="text-orange-600 dark:text-orange-400">عرض باقی‌مانده:</span>
-                      <span className="font-medium text-orange-800 dark:text-orange-200 mr-2">{formatDisplayNumber(remainingStone.width)}cm</span>
+                  <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+                    <div className="rounded-lg bg-white/70 p-3 dark:bg-slate-900/40">
+                      <span className="block text-xs text-teal-600 dark:text-teal-400">عرض باقی‌مانده</span>
+                      <span className="font-medium text-teal-800 dark:text-teal-200">{formatDisplayNumber(remainingStone.width)}cm</span>
                     </div>
-                    <div>
-                      <span className="text-orange-600 dark:text-orange-400">طول باقی‌مانده:</span>
-                      <span className="font-medium text-orange-800 dark:text-orange-200 mr-2">{formatDisplayNumber(remainingStone.length * 100)}cm</span>
+                    <div className="rounded-lg bg-white/70 p-3 dark:bg-slate-900/40">
+                      <span className="block text-xs text-teal-600 dark:text-teal-400">طول باقی‌مانده</span>
+                      <span className="font-medium text-teal-800 dark:text-teal-200">{formatDisplayNumber(remainingStone.length)}m</span>
                     </div>
-                    <div>
-                      <span className="text-orange-600 dark:text-orange-400">متر مربع:</span>
-                      <span className="font-medium text-orange-800 dark:text-orange-200 mr-2">{formatDisplayNumber(remainingStone.squareMeters)}</span>
+                    <div className="rounded-lg bg-white/70 p-3 dark:bg-slate-900/40">
+                      <span className="block text-xs text-teal-600 dark:text-teal-400">متر مربع</span>
+                      <span className="font-medium text-teal-800 dark:text-teal-200">{formatDisplayNumber(remainingStone.squareMeters)}</span>
                     </div>
                   </div>
                 </div>
@@ -142,7 +144,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                     </h4>
                     <button
                       onClick={handleAddPartition}
-                      className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-colors flex items-center gap-2 text-sm"
+                      className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-600"
                     >
                       <FaPlus className="w-4 h-4" />
                       افزودن ردیف
@@ -161,7 +163,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                           onClick={() => setPartitionWidthUnit('cm')}
                           className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-all ${
                             partitionWidthUnit === 'cm'
-                              ? 'bg-orange-500 text-white shadow-lg'
+                              ? 'bg-teal-500 text-white shadow-lg'
                               : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
                           }`}
                         >
@@ -172,7 +174,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                           onClick={() => setPartitionWidthUnit('m')}
                           className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-all ${
                             partitionWidthUnit === 'm'
-                              ? 'bg-orange-500 text-white shadow-lg'
+                              ? 'bg-teal-500 text-white shadow-lg'
                               : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
                           }`}
                         >
@@ -190,7 +192,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                           onClick={() => setPartitionLengthUnit('cm')}
                           className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-all ${
                             partitionLengthUnit === 'cm'
-                              ? 'bg-orange-500 text-white shadow-lg'
+                              ? 'bg-teal-500 text-white shadow-lg'
                               : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
                           }`}
                         >
@@ -201,7 +203,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                           onClick={() => setPartitionLengthUnit('m')}
                           className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-all ${
                             partitionLengthUnit === 'm'
-                              ? 'bg-orange-500 text-white shadow-lg'
+                              ? 'bg-teal-500 text-white shadow-lg'
                               : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
                           }`}
                         >
@@ -212,8 +214,8 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                   </div>
 
                   {/* Partitions Table */}
-                  <div className="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
-                    <table className="w-full">
+                  <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                    <table className="w-full min-w-[680px]">
                       <thead className="bg-gray-50 dark:bg-gray-700">
                         <tr>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-600">
@@ -386,8 +388,8 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                 </div>
 
                 {/* CAD Designer for Remaining Stone */}
-                <div className="mt-6 bg-white dark:bg-gray-800 rounded-xl border-2 border-orange-200 dark:border-orange-800 shadow-lg overflow-hidden">
-                  <div className="bg-gradient-to-r from-orange-500 to-orange-600 dark:from-orange-600 dark:to-orange-700 px-6 py-4">
+                <div className="mt-6 overflow-hidden rounded-xl border border-teal-200 bg-white shadow-lg dark:border-teal-800 dark:bg-gray-800">
+                  <div className="bg-gradient-to-r from-teal-500 to-teal-600 px-4 py-4 sm:px-6">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
@@ -395,7 +397,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                         </div>
                         <div>
                           <h4 className="text-lg font-bold text-white">ابزار طراحی CAD</h4>
-                          <p className="text-xs text-orange-100">طراحی پارتیشن‌ها روی سنگ باقی‌مانده</p>
+                          <p className="text-xs text-teal-100">طراحی پارتیشن‌ها روی سنگ باقی‌مانده</p>
                         </div>
                       </div>
                       <button
@@ -437,7 +439,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                 </div>
 
                 {/* Action Buttons */}
-                <div className="flex justify-end gap-3 mt-6">
+                <div className="sticky bottom-0 -mx-4 mt-6 flex justify-end gap-3 border-t border-slate-200 bg-white/95 p-4 backdrop-blur dark:border-slate-700 dark:bg-gray-800/95 sm:-mx-6 sm:px-6">
                   <button
                     onClick={() => {
                       onClose();
@@ -466,7 +468,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                       console.log('🔘 Partition Button clicked!');
                       onCreatePartitions();
                     }}
-                    className="px-6 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg transition-all duration-200 font-medium"
+                    className="min-h-11 rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 px-6 py-2 font-medium text-white transition-all duration-200 hover:from-teal-600 hover:to-teal-700"
                   >
                     ایجاد پارتیشن‌ها
                   </button>

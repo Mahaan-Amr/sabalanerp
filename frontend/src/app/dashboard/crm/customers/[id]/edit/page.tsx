@@ -19,6 +19,12 @@ import {
 import { crmAPI, dashboardAPI } from '@/lib/api';
 import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
 import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
+import {
+  normalizeIranianMobile,
+  normalizePhoneDigits,
+  validateOptionalIranianMobile,
+  validateRequiredIranianMobile
+} from '@/lib/phoneFormat';
 
 type CustomerType = 'Individual' | 'Company' | 'Government';
 type CustomerStatus = 'Active' | 'Inactive' | 'Prospect' | 'Lead';
@@ -236,29 +242,43 @@ export default function EditCustomerPage() {
   }, [customerId]);
 
   const updateField = (field: keyof CustomerFormData, value: any) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
+    const nextValue =
+      field === 'projectManagerNumber'
+        ? normalizeIranianMobile(value)
+        : field === 'nationalCode' || field === 'homeNumber' || field === 'workNumber'
+          ? normalizePhoneDigits(value)
+          : value;
+    setFormData((prev) => ({ ...prev, [field]: nextValue }));
     setErrors((prev) => ({ ...prev, [field]: '' }));
   };
 
   const updateProject = (index: number, field: keyof EditableProject, value: any) => {
-    setProjects((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item));
+    const nextValue = field === 'projectManagerNumber' ? normalizeIranianMobile(value) : value;
+    setProjects((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: nextValue } : item));
   };
 
   const updatePhone = (index: number, field: keyof EditablePhone, value: any) => {
+    const nextValue = field === 'number' ? normalizeIranianMobile(value) : value;
     setPhones((prev) => prev.map((item, itemIndex) => {
-      if (field === 'isPrimary' && value) {
+      if (field === 'isPrimary' && nextValue) {
         return { ...item, isPrimary: itemIndex === index };
       }
-      return itemIndex === index ? { ...item, [field]: value } : item;
+      return itemIndex === index ? { ...item, [field]: nextValue } : item;
     }));
   };
 
   const updateContact = (index: number, field: keyof EditableContact, value: any) => {
+    const nextValue =
+      field === 'mobile'
+        ? normalizeIranianMobile(value)
+        : field === 'phone'
+          ? normalizePhoneDigits(value)
+          : value;
     setContacts((prev) => prev.map((item, itemIndex) => {
-      if (field === 'isPrimary' && value) {
+      if (field === 'isPrimary' && nextValue) {
         return { ...item, isPrimary: itemIndex === index };
       }
-      return itemIndex === index ? { ...item, [field]: value } : item;
+      return itemIndex === index ? { ...item, [field]: nextValue } : item;
     }));
   };
 
@@ -312,6 +332,22 @@ export default function EditCustomerPage() {
 
   const handleSave = async () => {
     if (!validate()) return;
+    const phoneErrors: Record<string, string> = {};
+    const customerManagerPhoneError = validateOptionalIranianMobile(formData.projectManagerNumber);
+    if (customerManagerPhoneError) phoneErrors.projectManagerNumber = customerManagerPhoneError;
+    if (phones.some((phone) => phone.isActive && validateRequiredIranianMobile(phone.number))) {
+      phoneErrors.phones = 'شماره‌های تماس باید ۱۱ رقم و با 09 شروع شوند';
+    }
+    if (projects.some((project) => project.isActive && validateOptionalIranianMobile(project.projectManagerNumber))) {
+      phoneErrors.projects = 'شماره مدیر پروژه باید ۱۱ رقم و با 09 شروع شود';
+    }
+    if (contacts.some((contact) => contact.isActive && validateOptionalIranianMobile(contact.mobile))) {
+      phoneErrors.contacts = 'شماره موبایل مخاطب باید ۱۱ رقم و با 09 شروع شود';
+    }
+    if (Object.keys(phoneErrors).length > 0) {
+      setErrors((prev) => ({ ...prev, ...phoneErrors }));
+      return;
+    }
 
     try {
       setSaving(true);
@@ -321,17 +357,17 @@ export default function EditCustomerPage() {
         lastName: formData.lastName.trim(),
         customerType: formData.customerType,
         status: formData.status,
-        nationalCode: formData.nationalCode.trim() || null,
+        nationalCode: normalizePhoneDigits(formData.nationalCode) || null,
         companyName: formData.companyName.trim() || null,
         industry: formData.industry.trim() || null,
         brandName: formData.brandName.trim() || null,
         brandNameDescription: formData.brandNameDescription.trim() || null,
         homeAddress: formData.homeAddress.trim() || null,
-        homeNumber: formData.homeNumber.trim() || null,
+        homeNumber: normalizePhoneDigits(formData.homeNumber) || null,
         workAddress: formData.workAddress.trim() || null,
-        workNumber: formData.workNumber.trim() || null,
+        workNumber: normalizePhoneDigits(formData.workNumber) || null,
         projectManagerName: formData.projectManagerName.trim() || null,
-        projectManagerNumber: formData.projectManagerNumber.trim() || null,
+        projectManagerNumber: normalizeIranianMobile(formData.projectManagerNumber) || null,
         isBlacklisted: formData.isBlacklisted,
         isLocked: formData.isLocked
       });
@@ -347,7 +383,7 @@ export default function EditCustomerPage() {
             projectName: project.projectName.trim() || null,
             projectType: project.projectType.trim() || null,
             projectManagerName: project.projectManagerName.trim() || null,
-            projectManagerNumber: project.projectManagerNumber.trim() || null
+            projectManagerNumber: normalizeIranianMobile(project.projectManagerNumber) || null
           };
           return project.id
             ? crmAPI.updateProjectAddress(customerId, project.id, payload)
@@ -357,7 +393,7 @@ export default function EditCustomerPage() {
           if (!phone.isActive && phone.id) return crmAPI.deletePhoneNumber(customerId, phone.id);
           if (!phone.isActive) return Promise.resolve();
           const payload = {
-            number: phone.number.trim(),
+            number: normalizeIranianMobile(phone.number),
             type: phone.type,
             isPrimary: phone.isPrimary
           };
@@ -373,8 +409,8 @@ export default function EditCustomerPage() {
             lastName: contact.lastName.trim(),
             position: contact.position.trim() || null,
             email: contact.email.trim() || null,
-            phone: contact.phone.trim() || null,
-            mobile: contact.mobile.trim() || null,
+            phone: normalizePhoneDigits(contact.phone) || null,
+            mobile: normalizeIranianMobile(contact.mobile) || null,
             isPrimary: contact.isPrimary
           };
           return contact.id

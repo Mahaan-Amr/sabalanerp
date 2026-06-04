@@ -7,6 +7,7 @@ import type { ContractWizardData } from '../types/contract.types';
 import { salesAPI } from '@/lib/api';
 import { PersianCalendar } from '@/lib/persian-calendar';
 import { sumNumericValues } from '@/lib/numberFormat';
+import { CONTRACT_DRAFT_STORAGE_KEY } from '../utils/contractDraftStorage';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
@@ -224,6 +225,9 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         }
         
         // Move to final step (Digital Signature) instead of redirecting
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+        }
         setCurrentStep(7);
       } else {
         setErrors({ general: response.data.error || 'خطا در ثبت قرارداد' });

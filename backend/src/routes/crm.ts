@@ -32,6 +32,25 @@ const normalizePhoneNumber = (value: unknown): string => {
 };
 
 const normalizeNationalCode = (value: unknown): string => normalizeDigits(value);
+const validateOptionalIranianMobileNumber = (value: unknown): string | null => {
+  const normalized = normalizePhoneNumber(value);
+  if (!normalized) return null;
+  return /^09\d{9}$/.test(normalized) ? null : 'Phone number must be 11 digits and start with 09';
+};
+const validateRequiredIranianMobileNumber = (value: unknown): string | null => {
+  const normalized = normalizePhoneNumber(value);
+  if (!normalized) return 'Phone number is required';
+  return /^09\d{9}$/.test(normalized) ? null : 'Phone number must be 11 digits and start with 09';
+};
+const normalizeOptionalIranianMobileNumber = (value: unknown): string | null => {
+  const normalized = normalizePhoneNumber(value);
+  return normalized || null;
+};
+const validatePhoneNumbersPayload = (phoneNumbers: unknown): string | null => {
+  if (!Array.isArray(phoneNumbers)) return null;
+  const invalidPhone = phoneNumbers.find((phone: any) => validateRequiredIranianMobileNumber(phone?.number));
+  return invalidPhone ? 'All customer phone numbers must be 11 digits and start with 09' : null;
+};
 
 const hasFeaturePermission = async (
   user: any,
@@ -516,6 +535,19 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
       primaryContact
     } = req.body;
 
+    const phoneValidationError = validatePhoneNumbersPayload(phoneNumbers);
+    const projectManagerPhoneError = validateOptionalIranianMobileNumber(projectManagerNumber);
+    const projectAddressPhoneError = Array.isArray(projectAddresses)
+      ? projectAddresses.find((addr: any) => validateOptionalIranianMobileNumber(addr?.projectManagerNumber))
+      : null;
+    if (phoneValidationError || projectManagerPhoneError || projectAddressPhoneError) {
+      res.status(400).json({
+        success: false,
+        error: phoneValidationError || projectManagerPhoneError || 'Project manager phone number must be 11 digits and start with 09'
+      });
+      return;
+    }
+
     const duplicateCustomers = await findDuplicateCustomers({ nationalCode, phoneNumbers });
     if (duplicateCustomers.length > 0) {
       res.status(409).json({
@@ -569,15 +601,15 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
         status: status || 'Active',
         
         // Contact Information
-        nationalCode,
+        nationalCode: normalizedNationalCode,
         homeAddress,
-        homeNumber,
+        homeNumber: normalizeDigits(homeNumber) || null,
         workAddress,
-        workNumber,
+        workNumber: normalizeDigits(workNumber) || null,
         
         // Project Management
         projectManagerName,
-        projectManagerNumber,
+        projectManagerNumber: normalizeOptionalIranianMobileNumber(projectManagerNumber),
         
         // Brand Information
         brandName,
@@ -606,7 +638,7 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
             projectName: addr.projectName || null,
             projectType: addr.projectType || null,
             projectManagerName: addr.projectManagerName || null,
-            projectManagerNumber: addr.projectManagerNumber || null,
+            projectManagerNumber: normalizeOptionalIranianMobileNumber(addr.projectManagerNumber),
             isActive: true
           }))
         } : undefined,
@@ -710,6 +742,20 @@ router.put('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
     if (!(await ensureOwnershipOrDeny(req, res, customer, 'update_customer'))) return;
 
     const { ownerUserId, createdBy, updatedBy, ...safeBody } = req.body || {};
+    const projectManagerPhoneError = validateOptionalIranianMobileNumber(safeBody.projectManagerNumber);
+    if (projectManagerPhoneError) {
+      res.status(400).json({
+        success: false,
+        error: projectManagerPhoneError
+      });
+      return;
+    }
+    if ('nationalCode' in safeBody) safeBody.nationalCode = normalizeNationalCode(safeBody.nationalCode) || null;
+    if ('homeNumber' in safeBody) safeBody.homeNumber = normalizeDigits(safeBody.homeNumber) || null;
+    if ('workNumber' in safeBody) safeBody.workNumber = normalizeDigits(safeBody.workNumber) || null;
+    if ('projectManagerNumber' in safeBody) {
+      safeBody.projectManagerNumber = normalizeOptionalIranianMobileNumber(safeBody.projectManagerNumber);
+    }
 
     const updatedCustomer = await prisma.crmCustomer.update({
       where: { id: req.params.id },
@@ -835,6 +881,14 @@ router.post('/customers/:customerId/project-addresses', protect, requireAnyFeatu
 
     const { customerId } = req.params;
     const { address, city, postalCode, projectName, projectType, projectManagerName, projectManagerNumber } = req.body;
+    const projectManagerPhoneError = validateOptionalIranianMobileNumber(projectManagerNumber);
+    if (projectManagerPhoneError) {
+      res.status(400).json({
+        success: false,
+        error: projectManagerPhoneError
+      });
+      return;
+    }
 
     // Check if customer exists
     const customer = await prisma.crmCustomer.findUnique({
@@ -852,7 +906,7 @@ router.post('/customers/:customerId/project-addresses', protect, requireAnyFeatu
         projectName,
         projectType,
         projectManagerName,
-        projectManagerNumber,
+        projectManagerNumber: normalizeOptionalIranianMobileNumber(projectManagerNumber),
         isActive: true
       }
     });
@@ -890,6 +944,14 @@ router.put('/customers/:customerId/project-addresses/:projectId', protect, requi
 
     const { customerId, projectId } = req.params;
     const { address, city, postalCode, projectName, projectType, projectManagerName, projectManagerNumber } = req.body;
+    const projectManagerPhoneError = validateOptionalIranianMobileNumber(projectManagerNumber);
+    if (projectManagerPhoneError) {
+      res.status(400).json({
+        success: false,
+        error: projectManagerPhoneError
+      });
+      return;
+    }
 
     // Check if customer exists
     const customer = await prisma.crmCustomer.findUnique({
@@ -920,7 +982,7 @@ router.put('/customers/:customerId/project-addresses/:projectId', protect, requi
         projectName,
         projectType,
         projectManagerName,
-        projectManagerNumber
+        projectManagerNumber: normalizeOptionalIranianMobileNumber(projectManagerNumber)
       }
     });
 
@@ -1002,6 +1064,15 @@ router.post('/customers/:customerId/phone-numbers', protect, requireAnyFeatureAc
 
     const { customerId } = req.params;
     const { number, type, isPrimary } = req.body;
+    const phoneValidationError = validateRequiredIranianMobileNumber(number);
+    if (phoneValidationError) {
+      res.status(400).json({
+        success: false,
+        error: phoneValidationError
+      });
+      return;
+    }
+    const normalizedNumber = normalizePhoneNumber(number);
 
     // Check if customer exists
     const customer = await prisma.crmCustomer.findUnique({
@@ -1021,7 +1092,7 @@ router.post('/customers/:customerId/phone-numbers', protect, requireAnyFeatureAc
     const phoneNumber = await prisma.phoneNumber.create({
       data: {
         customerId,
-        number,
+        number: normalizedNumber,
         type,
         isPrimary: isPrimary || false,
         isActive: true
@@ -1061,6 +1132,15 @@ router.put('/customers/:customerId/phone-numbers/:phoneId', protect, requireAnyF
 
     const { customerId, phoneId } = req.params;
     const { number, type, isPrimary } = req.body;
+    const phoneValidationError = validateRequiredIranianMobileNumber(number);
+    if (phoneValidationError) {
+      res.status(400).json({
+        success: false,
+        error: phoneValidationError
+      });
+      return;
+    }
+    const normalizedNumber = normalizePhoneNumber(number);
 
     const customer = await prisma.crmCustomer.findUnique({
       where: { id: customerId },
@@ -1090,7 +1170,7 @@ router.put('/customers/:customerId/phone-numbers/:phoneId', protect, requireAnyF
     const phoneNumber = await prisma.phoneNumber.update({
       where: { id: phoneId },
       data: {
-        number,
+        number: normalizedNumber,
         type,
         isPrimary: Boolean(isPrimary),
         isActive: true

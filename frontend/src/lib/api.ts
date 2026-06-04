@@ -436,6 +436,22 @@ export const inventoryAPI = {
   deleteColor: (id: string) => api.delete(`/inventory/colors/${id}`),
 };
 
+// Accounting Workspace API
+export const accountingAPI = {
+  getWorkspace: () => api.get('/accounting/workspace'),
+  getContracts: (params?: any) => api.get('/accounting/contracts', { params }),
+  getContract: (contractId: string) => api.get(`/accounting/contracts/${contractId}`),
+  getFinancialRecords: (params?: any) => api.get('/accounting/financial-records', { params }),
+  getReceivables: (params?: any) => api.get('/accounting/receivables', { params }),
+  getPayments: (params?: any) => api.get('/accounting/payments', { params }),
+  getTaxRecords: (params?: any) => api.get('/accounting/tax', { params }),
+  getCorrectionRequests: (params?: any) => api.get('/accounting/correction-requests', { params }),
+  getAuditLogs: (params?: any) => api.get('/accounting/audit', { params }),
+  getSettings: () => api.get('/accounting/settings'),
+  updateSettings: (data: any) => api.put('/accounting/settings', data),
+  executeAction: (data: any) => api.post('/accounting/actions', data),
+};
+
 // Contract Templates API
 export const contractTemplatesAPI = {
   getAll: (params?: { page?: number; limit?: number; category?: string; isActive?: boolean }) =>

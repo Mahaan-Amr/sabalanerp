@@ -407,24 +407,52 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             show: true
           },
           {
-            name: 'Invoices',
-            namePersian: 'فاکتورها',
-            href: '/dashboard/accounting/invoices',
+            name: 'Contracts',
+            namePersian: 'قراردادهای قابل بررسی',
+            href: '/dashboard/accounting/contracts',
             icon: FaFileContract,
             show: true
           },
           {
+            name: 'Invoice Candidates',
+            namePersian: 'پیش‌نویس صورتحساب‌ها',
+            href: '/dashboard/accounting/invoice-candidates',
+            icon: FaFileAlt,
+            show: true
+          },
+          {
+            name: 'Receivables',
+            namePersian: 'دریافتنی‌ها',
+            href: '/dashboard/accounting/receivables',
+            icon: FaCalculator,
+            show: true
+          },
+          {
             name: 'Payments',
-            namePersian: 'پرداخت‌ها',
+            namePersian: 'دریافت‌ها و چک‌ها',
             href: '/dashboard/accounting/payments',
             icon: FaCalculator,
             show: true
           },
           {
-            name: 'Reports',
-            namePersian: 'گزارش‌های مالی',
-            href: '/dashboard/accounting/reports',
+            name: 'Tax',
+            namePersian: 'مالیات و سامانه مودیان',
+            href: '/dashboard/accounting/tax',
+            icon: FaClipboardList,
+            show: true
+          },
+          {
+            name: 'Audit',
+            namePersian: 'سوابق عملیات',
+            href: '/dashboard/accounting/audit',
             icon: FaChartLine,
+            show: true
+          },
+          {
+            name: 'Settings',
+            namePersian: 'تنظیمات حسابداری',
+            href: '/dashboard/accounting/settings',
+            icon: FaCog,
             show: true
           }
         ];

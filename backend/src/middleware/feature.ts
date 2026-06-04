@@ -180,6 +180,18 @@ export const FEATURES = {
   INVENTORY_STONE_FINISHINGS_DELETE: 'inventory_stone_finishings_delete',
   INVENTORY_STONE_FINISHINGS_TOGGLE: 'inventory_stone_finishings_toggle',
 
+  // Accounting Features
+  ACCOUNTING_DASHBOARD_VIEW: 'accounting_dashboard_view',
+  ACCOUNTING_CONTRACTS_VIEW: 'accounting_contracts_view',
+  ACCOUNTING_INVOICE_CANDIDATES_MANAGE: 'accounting_invoice_candidates_manage',
+  ACCOUNTING_RECEIVABLES_MANAGE: 'accounting_receivables_manage',
+  ACCOUNTING_PAYMENTS_MANAGE: 'accounting_payments_manage',
+  ACCOUNTING_TAX_MANAGE: 'accounting_tax_manage',
+  ACCOUNTING_CORRECTIONS_MANAGE: 'accounting_corrections_manage',
+  ACCOUNTING_AUDIT_VIEW: 'accounting_audit_view',
+  ACCOUNTING_RECORDS_APPROVE_VOID: 'accounting_records_approve_void',
+  ACCOUNTING_ACTIONS_MANAGE: 'accounting_actions_manage',
+
   // Security Features
   SECURITY_SHIFTS_VIEW: 'security_shifts_view',
   SECURITY_SHIFTS_CREATE: 'security_shifts_create',
@@ -376,6 +388,18 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.INVENTORY_STONE_FINISHINGS_DELETE]: 'inventory',
   [FEATURES.INVENTORY_STONE_FINISHINGS_TOGGLE]: 'inventory',
 
+  // Accounting Features
+  [FEATURES.ACCOUNTING_DASHBOARD_VIEW]: 'accounting',
+  [FEATURES.ACCOUNTING_CONTRACTS_VIEW]: 'accounting',
+  [FEATURES.ACCOUNTING_INVOICE_CANDIDATES_MANAGE]: 'accounting',
+  [FEATURES.ACCOUNTING_RECEIVABLES_MANAGE]: 'accounting',
+  [FEATURES.ACCOUNTING_PAYMENTS_MANAGE]: 'accounting',
+  [FEATURES.ACCOUNTING_TAX_MANAGE]: 'accounting',
+  [FEATURES.ACCOUNTING_CORRECTIONS_MANAGE]: 'accounting',
+  [FEATURES.ACCOUNTING_AUDIT_VIEW]: 'accounting',
+  [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID]: 'accounting',
+  [FEATURES.ACCOUNTING_ACTIONS_MANAGE]: 'accounting',
+
   // Security Features
   [FEATURES.SECURITY_SHIFTS_VIEW]: 'security',
   [FEATURES.SECURITY_SHIFTS_CREATE]: 'security',
@@ -549,6 +573,17 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   [FEATURES.INVENTORY_STONE_FINISHINGS_EDIT]: 'Inventory Stone Finishings - Edit',
   [FEATURES.INVENTORY_STONE_FINISHINGS_DELETE]: 'Inventory Stone Finishings - Delete',
   [FEATURES.INVENTORY_STONE_FINISHINGS_TOGGLE]: 'Inventory Stone Finishings - Toggle',
+
+  [FEATURES.ACCOUNTING_DASHBOARD_VIEW]: 'Accounting Dashboard - View',
+  [FEATURES.ACCOUNTING_CONTRACTS_VIEW]: 'Accounting Contracts - View',
+  [FEATURES.ACCOUNTING_INVOICE_CANDIDATES_MANAGE]: 'Accounting Invoice Candidates - Manage',
+  [FEATURES.ACCOUNTING_RECEIVABLES_MANAGE]: 'Accounting Receivables - Manage',
+  [FEATURES.ACCOUNTING_PAYMENTS_MANAGE]: 'Accounting Payments - Manage',
+  [FEATURES.ACCOUNTING_TAX_MANAGE]: 'Accounting Tax - Manage',
+  [FEATURES.ACCOUNTING_CORRECTIONS_MANAGE]: 'Accounting Corrections - Manage',
+  [FEATURES.ACCOUNTING_AUDIT_VIEW]: 'Accounting Audit - View',
+  [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID]: 'Accounting Records - Approve/Void',
+  [FEATURES.ACCOUNTING_ACTIONS_MANAGE]: 'Accounting Actions - Manage',
 
   [FEATURES.SECURITY_SHIFTS_VIEW]: 'Security Shifts - View',
   [FEATURES.SECURITY_SHIFTS_CREATE]: 'Security Shifts - Create',

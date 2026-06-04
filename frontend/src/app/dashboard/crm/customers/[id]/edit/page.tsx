@@ -28,7 +28,7 @@ import {
 
 type CustomerType = 'Individual' | 'Company' | 'Government';
 type CustomerStatus = 'Active' | 'Inactive' | 'Prospect' | 'Lead';
-type PhoneType = 'MOBILE' | 'HOME' | 'WORK' | 'OTHER';
+type PhoneType = 'mobile' | 'home' | 'work' | 'other';
 
 interface EditableProject {
   id?: string;
@@ -95,7 +95,7 @@ const emptyProject = (): EditableProject => ({
 
 const emptyPhone = (isPrimary = false): EditablePhone => ({
   number: '',
-  type: 'MOBILE',
+  type: 'mobile',
   isPrimary,
   isActive: true
 });
@@ -113,6 +113,18 @@ const emptyContact = (): EditableContact => ({
 
 const inputClass = 'w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500';
 const labelClass = 'block text-sm font-medium text-gray-300 mb-2';
+const normalizePhoneTypeValue = (value: unknown): PhoneType => {
+  const normalized = String(value || '').toLowerCase();
+  return ['mobile', 'home', 'work', 'other'].includes(normalized) ? normalized as PhoneType : 'mobile';
+};
+const formatApiValidationError = (errorData: any, fallback: string) => {
+  const details = Array.isArray(errorData?.details) ? errorData.details : [];
+  const detailMessage = details
+    .map((detail: any) => detail?.msg || detail?.message)
+    .filter(Boolean)
+    .join('، ');
+  return detailMessage || errorData?.error || fallback;
+};
 
 export default function EditCustomerPage() {
   const params = useParams();
@@ -214,7 +226,7 @@ export default function EditCustomerPage() {
         setPhones((customer.phoneNumbers || []).map((phone: any) => ({
           id: phone.id,
           number: phone.number || '',
-          type: phone.type || 'MOBILE',
+          type: normalizePhoneTypeValue(phone.type),
           isPrimary: Boolean(phone.isPrimary),
           isActive: phone.isActive !== false
         })));
@@ -394,7 +406,7 @@ export default function EditCustomerPage() {
           if (!phone.isActive) return Promise.resolve();
           const payload = {
             number: normalizeIranianMobile(phone.number),
-            type: phone.type,
+            type: normalizePhoneTypeValue(phone.type),
             isPrimary: phone.isPrimary
           };
           return phone.id
@@ -422,7 +434,7 @@ export default function EditCustomerPage() {
       router.push(returnPath);
     } catch (err: any) {
       console.error('Error saving customer:', err);
-      setError(err.response?.data?.error || 'خطا در ذخیره اطلاعات مشتری');
+      setError(formatApiValidationError(err.response?.data, 'خطا در ذخیره اطلاعات مشتری'));
     } finally {
       setSaving(false);
     }
@@ -642,10 +654,10 @@ export default function EditCustomerPage() {
               <div key={phone.id || index} className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 rounded-lg bg-white/5 border border-white/10">
                 <input className={inputClass} placeholder="شماره تماس *" value={phone.number} onChange={(e) => updatePhone(index, 'number', e.target.value)} />
                 <select className={inputClass} value={phone.type} onChange={(e) => updatePhone(index, 'type', e.target.value as PhoneType)}>
-                  <option value="MOBILE">موبایل</option>
-                  <option value="HOME">منزل</option>
-                  <option value="WORK">محل کار</option>
-                  <option value="OTHER">سایر</option>
+                  <option value="mobile">موبایل</option>
+                  <option value="home">منزل</option>
+                  <option value="work">محل کار</option>
+                  <option value="other">سایر</option>
                 </select>
                 <label className="flex items-center gap-2 text-gray-300">
                   <input type="checkbox" checked={phone.isPrimary} onChange={(e) => updatePhone(index, 'isPrimary', e.target.checked)} />

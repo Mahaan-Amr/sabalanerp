@@ -49,6 +49,7 @@ interface WorkspaceNavigationProps {
   className?: string;
   collapsed?: boolean;
   onToggleCollapse?: (collapsed: boolean) => void;
+  onNavigate?: (href: string) => void;
 }
 
 interface User {
@@ -59,7 +60,7 @@ interface User {
   role: string;
 }
 
-export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ className = '', collapsed: collapsedProp, onToggleCollapse }) => {
+export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ className = '', collapsed: collapsedProp, onToggleCollapse, onNavigate }) => {
   const { currentWorkspace, hasPermission } = useWorkspace();
   const [internalCollapsed, setInternalCollapsed] = useState(false);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
@@ -560,6 +561,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           ) : (
             <Link
               href={item.href}
+              onClick={() => onNavigate?.(item.href)}
               className="flex items-center gap-3 flex-1"
             >
               <Icon className="h-5 w-5" />

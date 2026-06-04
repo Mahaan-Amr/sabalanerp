@@ -46,6 +46,12 @@ const normalizeOptionalIranianMobileNumber = (value: unknown): string | null => 
   const normalized = normalizePhoneNumber(value);
   return normalized || null;
 };
+const normalizeNullableText = (value: unknown): string | null => {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  return trimmed || null;
+};
+const normalizePhoneType = (value: unknown): string => String(value || '').trim().toLowerCase();
 const validatePhoneNumbersPayload = (phoneNumbers: unknown): string | null => {
   if (!Array.isArray(phoneNumbers)) return null;
   const invalidPhone = phoneNumbers.find((phone: any) => validateRequiredIranianMobileNumber(phone?.number));
@@ -721,8 +727,39 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
 // @route   PUT /api/crm/customers/:id
 // @access  Private/CRM Workspace
 router.put('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_EDIT, FEATURES.SALES_CUSTOMERS_EDIT], FEATURE_PERMISSIONS.EDIT), [
-  body('companyName').optional().notEmpty().withMessage('Company name cannot be empty'),
-  body('customerType').optional().notEmpty().withMessage('Customer type cannot be empty'),
+  body('firstName').optional({ values: 'null' }).custom((value) => {
+    if (value !== undefined && !normalizeNullableText(value)) {
+      throw new Error('First name cannot be empty');
+    }
+    return true;
+  }),
+  body('lastName').optional({ values: 'null' }).custom((value) => {
+    if (value !== undefined && !normalizeNullableText(value)) {
+      throw new Error('Last name cannot be empty');
+    }
+    return true;
+  }),
+  body('customerType').optional({ values: 'null' }).custom((value) => {
+    if (!value) return true;
+    if (!['Individual', 'Company', 'Government'].includes(String(value))) {
+      throw new Error('Invalid customer type');
+    }
+    return true;
+  }),
+  body('status').optional({ values: 'null' }).custom((value) => {
+    if (!value) return true;
+    if (!['Active', 'Inactive', 'Prospect', 'Lead'].includes(String(value))) {
+      throw new Error('Invalid customer status');
+    }
+    return true;
+  }),
+  body('nationalCode').optional({ values: 'null' }).custom((value) => {
+    const normalized = normalizeNationalCode(value);
+    if (normalized && normalized.length !== 10) {
+      throw new Error('National code must be 10 digits');
+    }
+    return true;
+  }),
 ], async (req: any, res: Response): Promise<void> => {
   try {
     const errors = validationResult(req);
@@ -741,26 +778,57 @@ router.put('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
     });
     if (!(await ensureOwnershipOrDeny(req, res, customer, 'update_customer'))) return;
 
-    const { ownerUserId, createdBy, updatedBy, ...safeBody } = req.body || {};
-    const projectManagerPhoneError = validateOptionalIranianMobileNumber(safeBody.projectManagerNumber);
+    const bodyPayload = req.body || {};
+    const projectManagerPhoneError = validateOptionalIranianMobileNumber(bodyPayload.projectManagerNumber);
     if (projectManagerPhoneError) {
       res.status(400).json({
         success: false,
-        error: projectManagerPhoneError
+        error: projectManagerPhoneError,
+        details: [{ path: 'projectManagerNumber', msg: projectManagerPhoneError }]
       });
       return;
     }
-    if ('nationalCode' in safeBody) safeBody.nationalCode = normalizeNationalCode(safeBody.nationalCode) || null;
-    if ('homeNumber' in safeBody) safeBody.homeNumber = normalizeDigits(safeBody.homeNumber) || null;
-    if ('workNumber' in safeBody) safeBody.workNumber = normalizeDigits(safeBody.workNumber) || null;
-    if ('projectManagerNumber' in safeBody) {
-      safeBody.projectManagerNumber = normalizeOptionalIranianMobileNumber(safeBody.projectManagerNumber);
+
+    const updateData: any = {};
+    const nullableTextFields = [
+      'companyName',
+      'industry',
+      'brandName',
+      'brandNameDescription',
+      'homeAddress',
+      'workAddress',
+      'projectManagerName'
+    ];
+
+    if ('firstName' in bodyPayload) updateData.firstName = normalizeNullableText(bodyPayload.firstName);
+    if ('lastName' in bodyPayload) updateData.lastName = normalizeNullableText(bodyPayload.lastName);
+    if ('customerType' in bodyPayload && bodyPayload.customerType) updateData.customerType = bodyPayload.customerType;
+    if ('status' in bodyPayload && bodyPayload.status) updateData.status = bodyPayload.status;
+    nullableTextFields.forEach((field) => {
+      if (field in bodyPayload) updateData[field] = normalizeNullableText(bodyPayload[field]);
+    });
+    if ('nationalCode' in bodyPayload) updateData.nationalCode = normalizeNationalCode(bodyPayload.nationalCode) || null;
+    if ('homeNumber' in bodyPayload) updateData.homeNumber = normalizeDigits(bodyPayload.homeNumber) || null;
+    if ('workNumber' in bodyPayload) updateData.workNumber = normalizeDigits(bodyPayload.workNumber) || null;
+    if ('projectManagerNumber' in bodyPayload) {
+      updateData.projectManagerNumber = normalizeOptionalIranianMobileNumber(bodyPayload.projectManagerNumber);
+    }
+    if ('isBlacklisted' in bodyPayload) updateData.isBlacklisted = Boolean(bodyPayload.isBlacklisted);
+    if ('isLocked' in bodyPayload) updateData.isLocked = Boolean(bodyPayload.isLocked);
+
+    if (('firstName' in updateData && !updateData.firstName) || ('lastName' in updateData && !updateData.lastName)) {
+      res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: [{ msg: 'First name and last name cannot be empty' }]
+      });
+      return;
     }
 
     const updatedCustomer = await prisma.crmCustomer.update({
       where: { id: req.params.id },
       data: {
-        ...safeBody,
+        ...updateData,
         updatedBy: req.user.id
       },
       include: {
@@ -1093,7 +1161,7 @@ router.post('/customers/:customerId/phone-numbers', protect, requireAnyFeatureAc
       data: {
         customerId,
         number: normalizedNumber,
-        type,
+        type: normalizePhoneType(type),
         isPrimary: isPrimary || false,
         isActive: true
       }
@@ -1171,7 +1239,7 @@ router.put('/customers/:customerId/phone-numbers/:phoneId', protect, requireAnyF
       where: { id: phoneId },
       data: {
         number: normalizedNumber,
-        type,
+        type: normalizePhoneType(type),
         isPrimary: Boolean(isPrimary),
         isActive: true
       }

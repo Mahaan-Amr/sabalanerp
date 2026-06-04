@@ -429,8 +429,8 @@ export default function CreateCustomerPage() {
         
         // Create phoneNumbers array from individual phone fields
         phoneNumbers: [
-          ...(phoneNumber1 ? [{ number: phoneNumber1, type: 'MOBILE', isPrimary: true }] : []),
-          ...(phoneNumber2 ? [{ number: phoneNumber2, type: 'MOBILE', isPrimary: false }] : [])
+          ...(phoneNumber1 ? [{ number: phoneNumber1, type: 'mobile', isPrimary: true }] : []),
+          ...(phoneNumber2 ? [{ number: phoneNumber2, type: 'mobile', isPrimary: false }] : [])
         ]
       };
 

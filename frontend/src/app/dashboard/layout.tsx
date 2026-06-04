@@ -161,6 +161,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     router.push('/login');
   };
 
+  const handleSidebarNavigate = () => {
+    setSidebarOpen(false);
+  };
+
   const getNavigationItems = () => {
     const baseItems = [
       {
@@ -314,6 +318,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             <WorkspaceNavigation
               collapsed={sidebarCollapsed}
               onToggleCollapse={setSidebarCollapsed}
+              onNavigate={handleSidebarNavigate}
             />
           </div>
 

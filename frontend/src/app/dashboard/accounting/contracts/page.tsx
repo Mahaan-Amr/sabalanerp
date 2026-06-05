@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   FaBalanceScale,
+  FaCheckCircle,
   FaClipboardCheck,
   FaExclamationTriangle,
   FaEye,
@@ -101,6 +102,7 @@ export default function AccountingContractsPage() {
       await loadContracts(pagination.page);
     } catch (error) {
       console.error('Accounting action failed:', error);
+      window.alert((error as any)?.response?.data?.error || 'اقدام حسابداری انجام نشد');
     } finally {
       setActionLoading(null);
     }
@@ -121,6 +123,37 @@ export default function AccountingContractsPage() {
     dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
     idempotencyKey: `receivable:${contract.contractId}:planned`,
   });
+
+  const getPendingInvoiceCandidates = (contract: AccountingContractRow) =>
+    (contract.financialRecords || []).filter((record) => (
+      record.kind === 'INVOICE_CANDIDATE' &&
+      !['ISSUED', 'POSTED', 'VOIDED'].includes(record.status)
+    ));
+
+  const defaultSystemInvoiceDate = () =>
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Tehran',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+
+  const approveFinancialInvoice = (contract: AccountingContractRow) => {
+    const pendingInvoices = getPendingInvoiceCandidates(contract);
+    if (pendingInvoices.length !== 1) return;
+
+    const systemInvoiceNumber = window.prompt('شماره فاکتور سیستمی را وارد کنید');
+    if (!systemInvoiceNumber?.trim()) return;
+    const systemInvoiceDate = window.prompt('تاریخ فاکتور سیستمی را به صورت YYYY-MM-DD وارد کنید', defaultSystemInvoiceDate());
+    if (!systemInvoiceDate?.trim()) return;
+
+    execute(contract, {
+      kind: 'APPROVE_FINANCIAL_INVOICE',
+      invoiceId: pendingInvoices[0].id,
+      systemInvoiceNumber: systemInvoiceNumber.trim(),
+      systemInvoiceDate: systemInvoiceDate.trim(),
+    });
+  };
 
   const requestCorrection = (contract: AccountingContractRow) => {
     const reason = window.prompt('متن درخواست اصلاح را وارد کنید');
@@ -230,9 +263,17 @@ export default function AccountingContractsPage() {
       label: 'دریافتنی',
       icon: FaReceipt,
       tone: 'success',
-      disabled: !contract.accounting.eligibleForFinancialRecords || actionLoading === `${contract.contractId}:CREATE_RECEIVABLE`,
-      title: contract.accounting.eligibilityReason,
+      disabled: !contract.accounting.eligibleForFinancialRecords || contract.accounting.invoiceStatus !== 'ISSUED' || actionLoading === `${contract.contractId}:CREATE_RECEIVABLE`,
+      title: contract.accounting.eligibilityReason || (contract.accounting.invoiceStatus !== 'ISSUED' ? 'ابتدا صورتحساب را تایید مالی کنید' : undefined),
       onClick: () => createReceivable(contract),
+    },
+    {
+      label: 'تایید مالی',
+      icon: FaCheckCircle,
+      tone: 'success',
+      disabled: !contract.accounting.eligibleForFinancialRecords || getPendingInvoiceCandidates(contract).length !== 1 || actionLoading === `${contract.contractId}:APPROVE_FINANCIAL_INVOICE`,
+      title: getPendingInvoiceCandidates(contract).length !== 1 ? 'برای تایید سریع باید دقیقا یک صورتحساب تایید نشده وجود داشته باشد' : undefined,
+      onClick: () => approveFinancialInvoice(contract),
     },
     { label: 'پرچم', icon: FaFlag, tone: 'warning', onClick: () => flagContract(contract) },
     { label: 'درخواست اصلاح', icon: FaExclamationTriangle, tone: 'danger', onClick: () => requestCorrection(contract) },

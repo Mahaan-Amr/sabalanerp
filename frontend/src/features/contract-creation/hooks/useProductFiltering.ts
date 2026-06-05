@@ -5,7 +5,7 @@ import { useMemo } from 'react';
 import type { CrmCustomer, Product, ContractUsageType } from '../types/contract.types';
 import { productSupportsContractType } from '../utils/productUtils';
 
-const CUSTOMER_PREVIEW_COUNT = 10;
+const CUSTOMER_PREVIEW_COUNT = 3;
 
 interface UseProductFilteringOptions {
   customers: CrmCustomer[];

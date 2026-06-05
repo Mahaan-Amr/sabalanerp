@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import {
   FaBalanceScale,
+  FaCheckCircle,
   FaExclamationTriangle,
   FaFileInvoice,
   FaFlag,
@@ -35,6 +36,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [approvalForms, setApprovalForms] = useState<Record<string, { systemInvoiceNumber: string; systemInvoiceDate: string }>>({});
 
   const loadDetail = async () => {
     try {
@@ -59,10 +61,51 @@ export default function AccountingContractDetailPage({ params }: { params: { con
       await loadDetail();
     } catch (error) {
       console.error('Accounting action failed:', error);
+      window.alert((error as any)?.response?.data?.error || 'اقدام حسابداری انجام نشد');
     } finally {
       setActionLoading(false);
     }
   };
+
+  const defaultSystemInvoiceDate = () =>
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Tehran',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+
+  const updateApprovalForm = (recordId: string, field: 'systemInvoiceNumber' | 'systemInvoiceDate', value: string) => {
+    setApprovalForms((prev) => ({
+      ...prev,
+      [recordId]: {
+        systemInvoiceNumber: prev[recordId]?.systemInvoiceNumber || '',
+        systemInvoiceDate: prev[recordId]?.systemInvoiceDate || defaultSystemInvoiceDate(),
+        [field]: value,
+      },
+    }));
+  };
+
+  const approveFinancialInvoice = (record: any) => {
+    const form = approvalForms[record.id] || {
+      systemInvoiceNumber: '',
+      systemInvoiceDate: defaultSystemInvoiceDate(),
+    };
+    if (!form.systemInvoiceNumber.trim() || !form.systemInvoiceDate.trim()) {
+      window.alert('شماره فاکتور سیستمی و تاریخ آن الزامی است');
+      return;
+    }
+    execute({
+      kind: 'APPROVE_FINANCIAL_INVOICE',
+      invoiceId: record.id,
+      systemInvoiceNumber: form.systemInvoiceNumber.trim(),
+      systemInvoiceDate: form.systemInvoiceDate.trim(),
+    });
+  };
+
+  const canApproveInvoice = (record: any) =>
+    record.kind === 'INVOICE_CANDIDATE' &&
+    !['ISSUED', 'POSTED', 'VOIDED'].includes(record.status);
 
   if (loading) return <ErpLoading />;
   if (!data?.contract) {
@@ -134,9 +177,40 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                     key={record.id}
                     icon={FaFileInvoice}
                     title={record.kind}
-                    meta={`ایجاد: ${dateFa(record.createdAt)}`}
+                    meta={[
+                      `ایجاد: ${dateFa(record.createdAt)}`,
+                      record.systemInvoiceNumber ? `شماره فاکتور سیستمی: ${record.systemInvoiceNumber}` : null,
+                      record.systemInvoiceDate ? `تاریخ فاکتور سیستمی: ${dateFa(record.systemInvoiceDate)}` : null,
+                    ].filter(Boolean).join(' · ')}
                     amount={money(record.amount, record.currency)}
                     status={<StatusBadge status={record.status} />}
+                    footer={canApproveInvoice(record) ? (
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <input
+                            className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                            placeholder="شماره فاکتور سیستمی"
+                            value={approvalForms[record.id]?.systemInvoiceNumber || ''}
+                            onChange={(event) => updateApprovalForm(record.id, 'systemInvoiceNumber', event.target.value)}
+                          />
+                          <input
+                            type="date"
+                            className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                            value={approvalForms[record.id]?.systemInvoiceDate || defaultSystemInvoiceDate()}
+                            onChange={(event) => updateApprovalForm(record.id, 'systemInvoiceDate', event.target.value)}
+                          />
+                        </div>
+                        <ErpButton
+                          label="تایید مالی"
+                          icon={FaCheckCircle}
+                          tone="success"
+                          disabled={actionLoading}
+                          onClick={() => approveFinancialInvoice(record)}
+                        />
+                      </div>
+                    ) : record.systemInvoiceNumber ? (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">اطلاعات فاکتور سیستمی پس از تایید مالی قفل شده است.</p>
+                    ) : undefined}
                   />
                 ))}
                 {(!data.financialRecords || data.financialRecords.length === 0) && (
@@ -193,8 +267,8 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                   label="ایجاد دریافتنی"
                   icon={FaReceipt}
                   tone="success"
-                  disabled={!canCreateRecords || actionLoading}
-                  title={contract.accounting.eligibilityReason}
+                  disabled={!canCreateRecords || contract.accounting.invoiceStatus !== 'ISSUED' || actionLoading}
+                  title={contract.accounting.eligibilityReason || (contract.accounting.invoiceStatus !== 'ISSUED' ? 'ابتدا صورتحساب را تایید مالی کنید' : undefined)}
                   onClick={() => execute({
                     kind: 'CREATE_RECEIVABLE',
                     contractId: contract.contractId,

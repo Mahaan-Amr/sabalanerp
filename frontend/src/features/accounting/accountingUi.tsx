@@ -14,7 +14,7 @@ import {
   FaTimesCircle
 } from 'react-icons/fa';
 import { ErpBadge, ErpCard, type ErpTone } from '@/components/erp';
-import { formatPrice } from '@/lib/numberFormat';
+import { formatDisplayNumber, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
 
 export type AccountingMetric = {
@@ -54,6 +54,10 @@ export type AccountingContractRow = {
     kind: string;
     status: string;
     amount: string;
+    currency?: string;
+    systemInvoiceNumber?: string | null;
+    systemInvoiceDate?: string | null;
+    financiallyApprovedAt?: string | null;
     createdAt: string;
   }>;
   nextBestActions?: Array<{
@@ -122,7 +126,23 @@ export const sourceStatusLabels: Record<string, string> = {
   NEEDS_CORRECTION: 'نیازمند اصلاح',
 };
 
-export const money = (amount?: string | number | null, currency = 'تومان') => formatPrice(amount || 0, currency);
+const normalizeCurrency = (currency?: string | null): 'toman' | 'rial' => {
+  const normalized = String(currency || '').trim().toLowerCase();
+  if (normalized === 'rial' || normalized === 'irr' || normalized === 'ریال') return 'rial';
+  return 'toman';
+};
+
+export const money = (amount?: string | number | null, currency = 'تومان') => {
+  const value = toFiniteNumber(amount);
+  const unit = normalizeCurrency(currency);
+  const convertedValue = unit === 'toman' ? value * 10 : value / 10;
+
+  if (unit === 'rial') {
+    return `${formatDisplayNumber(value)} ریال (${formatDisplayNumber(convertedValue)} تومان)`;
+  }
+
+  return `${formatDisplayNumber(value)} تومان (${formatDisplayNumber(convertedValue)} ریال)`;
+};
 
 export const dateFa = (value?: string | Date | null) => {
   if (!value) return '—';

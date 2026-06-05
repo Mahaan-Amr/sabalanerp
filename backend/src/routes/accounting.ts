@@ -180,7 +180,9 @@ router.post(
     body('invoiceId').optional().isString(),
     body('receivableId').optional().isString(),
     body('paymentEventId').optional().isString(),
-    body('note').optional().isString()
+    body('note').optional().isString(),
+    body('systemInvoiceNumber').optional().isString(),
+    body('systemInvoiceDate').optional().isString()
   ],
   async (req: AuthRequest, res: Response) => {
     if (handleValidation(req, res)) return;

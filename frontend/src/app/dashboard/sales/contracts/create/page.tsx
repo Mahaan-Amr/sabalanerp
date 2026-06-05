@@ -242,9 +242,24 @@ export default function CreateContractWizard() {
     setCuttingTypes,
     setSubServices,
     setStoneFinishings,
+    loadCustomers,
     loadInitialData: loadData,
     getCuttingTypePricePerMeter
   } = dataLoading;
+
+  useEffect(() => {
+    if (!capabilities.canLoadCustomers) return;
+
+    const search = customerSearchTerm.trim();
+    const timeoutId = window.setTimeout(() => {
+      loadCustomers({
+        limit: search ? 20 : 3,
+        search: search || undefined
+      });
+    }, search ? 300 : 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [capabilities.canLoadCustomers, customerSearchTerm, loadCustomers]);
 
   // Delivery step state is now provided by useDeliverySchedule hook
   const deliverySchedule = useDeliverySchedule(wizardData.products);

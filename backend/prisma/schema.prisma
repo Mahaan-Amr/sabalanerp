@@ -949,6 +949,10 @@ model AccountingFinancialRecord {
   sourceSnapshot  Json?
   metadata        Json?
   idempotencyKey  String?                          @unique
+  systemInvoiceNumber String?                       @unique
+  systemInvoiceDate DateTime?
+  financiallyApprovedAt DateTime?
+  financiallyApprovedBy String?
   createdBy       String
   postedAt        DateTime?
   voidedAt        DateTime?

@@ -43,6 +43,7 @@ interface DataCapabilities {
 type StoneFinishingLoadState = 'idle' | 'available' | 'empty' | 'forbidden' | 'error';
 
 type PermissionLevel = 'view' | 'edit' | 'admin';
+type CustomerLoadParams = { limit?: number; search?: string };
 
 const permissionLevels: PermissionLevel[] = ['view', 'edit', 'admin'];
 
@@ -137,9 +138,12 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     [hasAnyFeature, hasWorkspaceAccess]
   );
 
-  const loadCustomers = useCallback(async () => {
+  const loadCustomers = useCallback(async (params: CustomerLoadParams = {}) => {
     try {
-      const response = await crmAPI.getCustomers({ limit: 1000 });
+      const response = await crmAPI.getCustomers({
+        limit: params.limit ?? 3,
+        search: params.search?.trim() || undefined
+      });
       if (response.data.success) {
         const data = response.data.data || [];
         setCustomers(data);

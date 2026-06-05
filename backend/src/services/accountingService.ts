@@ -68,6 +68,8 @@ type AccountingActionRequest = {
   trackingCode?: string;
   submittedAt?: string;
   rejectionReason?: string;
+  systemInvoiceNumber?: string;
+  systemInvoiceDate?: string;
   category?: keyof typeof CorrectionRequestCategory | keyof typeof AccountingFlagCategory;
   priority?: keyof typeof CorrectionRequestPriority;
   severity?: keyof typeof AccountingFlagSeverity;
@@ -113,6 +115,53 @@ const parseDate = (value: string | undefined, fallback: Date) => {
   return Number.isNaN(parsed.getTime()) ? fallback : parsed;
 };
 
+const normalizeDigits = (value: string) =>
+  value
+    .replace(/[\u06F0-\u06F9]/g, (digit) => String(digit.charCodeAt(0) - 0x06F0))
+    .replace(/[\u0660-\u0669]/g, (digit) => String(digit.charCodeAt(0) - 0x0660));
+
+const getTehranDateKey = (date: Date) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tehran',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === 'year')?.value || '1970';
+  const month = parts.find((part) => part.type === 'month')?.value || '01';
+  const day = parts.find((part) => part.type === 'day')?.value || '01';
+  return `${year}-${month}-${day}`;
+};
+
+const dateKeyToUtcDay = (dateKey: string) => {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return Date.UTC(year, month - 1, day);
+};
+
+const parseBusinessDateKey = (value?: string) => {
+  const normalized = normalizeDigits(String(value || '').trim());
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) throw new Error('System invoice date is required');
+  return `${match[1]}-${match[2]}-${match[3]}`;
+};
+
+const validateSystemInvoiceDate = (value?: string) => {
+  const dateKey = parseBusinessDateKey(value);
+  const todayKey = getTehranDateKey(new Date());
+  const invoiceDay = dateKeyToUtcDay(dateKey);
+  const today = dateKeyToUtcDay(todayKey);
+  const oldestAllowed = today - (2 * 24 * 60 * 60 * 1000);
+
+  if (invoiceDay > today) {
+    throw new Error('System invoice date cannot be in the future');
+  }
+  if (invoiceDay < oldestAllowed) {
+    throw new Error('System invoice date cannot be older than 2 days');
+  }
+
+  return new Date(`${dateKey}T00:00:00.000Z`);
+};
+
 const getCustomerName = (customer: { firstName?: string | null; lastName?: string | null; companyName?: string | null }) => {
   const personName = `${customer.firstName || ''} ${customer.lastName || ''}`.trim();
   return personName || customer.companyName || 'مشتری بدون نام';
@@ -129,12 +178,26 @@ const mapPaymentMethod = (method?: string | null): AccountingPaymentMethod => {
   return AccountingPaymentMethod.CASH;
 };
 
-const normalizeFinancialRecords = (records: Array<{ id: string; kind: FinancialRecordKind; status: AccountingRecordStatus; amount: Prisma.Decimal; createdAt: Date }>) =>
+const normalizeFinancialRecords = (records: Array<{
+  id: string;
+  kind: FinancialRecordKind;
+  status: AccountingRecordStatus;
+  amount: Prisma.Decimal;
+  currency?: string | null;
+  systemInvoiceNumber?: string | null;
+  systemInvoiceDate?: Date | null;
+  financiallyApprovedAt?: Date | null;
+  createdAt: Date;
+}>) =>
   records.map((record) => ({
     id: record.id,
     kind: record.kind,
     status: record.status,
     amount: decimalToString(record.amount),
+    currency: record.currency,
+    systemInvoiceNumber: record.systemInvoiceNumber,
+    systemInvoiceDate: record.systemInvoiceDate,
+    financiallyApprovedAt: record.financiallyApprovedAt,
     createdAt: record.createdAt
   }));
 
@@ -225,6 +288,14 @@ const buildContractRow = async (contract: any, settings: any) => {
   const openCorrections = corrections.filter((item: any) => item.status === CorrectionRequestStatus.OPEN || item.status === CorrectionRequestStatus.ACKNOWLEDGED);
   const openFlags = flags.filter((item: any) => item.status === 'OPEN');
   const hasRecords = records.length > 0 || receivables.length > 0 || payments.length > 0 || taxRecords.length > 0;
+  const issuedInvoices = records.filter((record: any) => (
+    record.kind === FinancialRecordKind.INVOICE_CANDIDATE &&
+    (record.status === AccountingRecordStatus.ISSUED || record.status === AccountingRecordStatus.POSTED)
+  ));
+  const openInvoiceCandidates = records.filter((record: any) => (
+    record.kind === FinancialRecordKind.INVOICE_CANDIDATE &&
+    ![AccountingRecordStatus.ISSUED, AccountingRecordStatus.POSTED, AccountingRecordStatus.VOIDED].includes(record.status)
+  ));
 
   const invoiceStatus = records.some((record: any) => record.status === AccountingRecordStatus.ISSUED || record.status === AccountingRecordStatus.POSTED)
     ? 'ISSUED'
@@ -269,8 +340,14 @@ const buildContractRow = async (contract: any, settings: any) => {
     {
       kind: 'CREATE_RECEIVABLE',
       labelFa: 'ایجاد دریافتنی',
-      enabled: eligible,
-      disabledReason
+      enabled: eligible && issuedInvoices.length > 0,
+      disabledReason: !eligible ? disabledReason : issuedInvoices.length === 0 ? 'ابتدا صورتحساب باید با شماره فاکتور سیستمی تایید مالی شود' : undefined
+    },
+    {
+      kind: 'APPROVE_FINANCIAL_INVOICE',
+      labelFa: 'تایید مالی',
+      enabled: eligible && openInvoiceCandidates.length > 0,
+      disabledReason: !eligible ? disabledReason : openInvoiceCandidates.length === 0 ? 'صورتحساب تایید نشده‌ای برای تایید مالی وجود ندارد' : undefined
     },
     {
       kind: 'MARK_TAX_READY',
@@ -603,6 +680,8 @@ export const executeAccountingAction = async (command: AccountingActionRequest, 
       return createInvoiceCandidate(command, actor, period.id);
     case 'CREATE_RECEIVABLE':
       return createReceivable(command, actor, period.id);
+    case 'APPROVE_FINANCIAL_INVOICE':
+      return approveFinancialInvoice(command, actor);
     case 'REGISTER_RECEIPT':
       return registerReceipt(command, actor);
     case 'UPDATE_CHECK_STATUS':
@@ -707,14 +786,92 @@ const createInvoiceCandidate = async (command: AccountingActionRequest, actor: A
   return actionResponse('APPLIED', 'پیش‌نویس صورتحساب ایجاد شد', { contractId: contract.id, financialRecordIds: [record.id] });
 };
 
+const approveFinancialInvoice = async (command: AccountingActionRequest, actor: Actor) => {
+  const invoiceId = command.invoiceId || command.recordId;
+  if (!invoiceId) throw new Error('invoiceId is required');
+
+  const systemInvoiceNumber = normalizeDigits(command.systemInvoiceNumber || '').trim();
+  if (!systemInvoiceNumber) throw new Error('System invoice number is required');
+  const systemInvoiceDate = validateSystemInvoiceDate(command.systemInvoiceDate);
+
+  const result = await prisma.$transaction(async (tx) => {
+    const before = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceId } });
+    if (!before) throw new Error('Invoice record not found');
+    if (before.kind !== FinancialRecordKind.INVOICE_CANDIDATE) {
+      throw new Error('Only invoice records can be financially approved');
+    }
+    if (before.status === AccountingRecordStatus.ISSUED || before.status === AccountingRecordStatus.POSTED || before.financiallyApprovedAt) {
+      throw new Error('Financially approved invoices are locked');
+    }
+    if (before.status === AccountingRecordStatus.VOIDED) {
+      throw new Error('Voided invoices cannot be financially approved');
+    }
+
+    const duplicate = await tx.accountingFinancialRecord.findFirst({
+      where: {
+        systemInvoiceNumber,
+        id: { not: invoiceId }
+      }
+    });
+    if (duplicate) throw new Error('System invoice number is already used');
+
+    const updated = await tx.accountingFinancialRecord.update({
+      where: { id: invoiceId },
+      data: {
+        status: AccountingRecordStatus.ISSUED,
+        systemInvoiceNumber,
+        systemInvoiceDate,
+        financiallyApprovedAt: new Date(),
+        financiallyApprovedBy: actor.userId,
+        postedAt: new Date()
+      }
+    });
+
+    await audit(tx, {
+      action: 'APPROVE_FINANCIAL_INVOICE',
+      actorId: actor.userId,
+      contractId: updated.contractId,
+      recordId: updated.id,
+      entityType: 'AccountingFinancialRecord',
+      entityId: updated.id,
+      beforeState: toJsonValue(before),
+      afterState: toJsonValue(updated),
+      note: command.note || null
+    });
+
+    return updated;
+  });
+
+  return actionResponse('APPLIED', 'تایید مالی ثبت شد', { contractId: result.contractId || undefined, financialRecordIds: [result.id] });
+};
+
 const createReceivable = async (command: AccountingActionRequest, actor: Actor, periodId: string) => {
   if (!command.contractId) throw new Error('contractId is required');
   const contract = await ensureEligibleContract(command.contractId);
   const settings = await getDefaultSettings();
   const dueDate = parseDate(command.dueDate, addDays(new Date(), settings.defaultInvoiceDueDays));
+  const issuedInvoiceWhere = {
+    kind: FinancialRecordKind.INVOICE_CANDIDATE,
+    status: { in: [AccountingRecordStatus.ISSUED, AccountingRecordStatus.POSTED] }
+  };
   const sourceInvoice = command.invoiceId || command.recordId
-    ? await prisma.accountingFinancialRecord.findFirst({ where: { id: command.invoiceId || command.recordId, contractId: contract.id } })
-    : await prisma.accountingFinancialRecord.findFirst({ where: { contractId: contract.id, kind: FinancialRecordKind.INVOICE_CANDIDATE }, orderBy: { createdAt: 'desc' } });
+    ? await prisma.accountingFinancialRecord.findFirst({
+        where: {
+          id: command.invoiceId || command.recordId,
+          contractId: contract.id,
+          ...issuedInvoiceWhere
+        }
+      })
+    : await prisma.accountingFinancialRecord.findFirst({
+        where: {
+          contractId: contract.id,
+          ...issuedInvoiceWhere
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+  if (!sourceInvoice) {
+    throw new Error('A financially approved issued invoice is required before creating receivables');
+  }
   const amount = command.amount != null ? toDecimal(command.amount) : sourceInvoice?.amount || getContractAmount(contract);
   const idempotencyKey = command.idempotencyKey || `receivable:${contract.id}:${sourceInvoice?.id || 'contract'}`;
   const existingRecord = await prisma.accountingFinancialRecord.findUnique({ where: { idempotencyKey } });

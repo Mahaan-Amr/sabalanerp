@@ -10,6 +10,7 @@ import {
   normalizeRemainingStoneCollection
 } from '../../utils/remainingStoneGuards';
 import type { ContractProduct } from '../../types/contract.types';
+import type { RemainingStone } from '../../types/contract.types';
 import type { ContractProductCartController } from '../../hooks/useContractProductCartController';
 
 const PRODUCT_TYPES = [
@@ -43,6 +44,15 @@ const getProductTypeClasses = (type: ContractProduct['productType']) => {
   if (type === 'longitudinal') return 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/20 dark:text-teal-200 dark:border-teal-800';
   if (type === 'slab') return 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-200 dark:border-indigo-800';
   return 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-200 dark:border-purple-800';
+};
+
+const getRemainingStoneUsageKeys = (stone: RemainingStone): string[] => {
+  const keys = [stone.id, stone.sourceCutId].filter(Boolean);
+  const layerSourceMatch = stone.id.match(/^used_layer_(.*)_\d+$/);
+  if (layerSourceMatch?.[1]) {
+    keys.push(layerSourceMatch[1]);
+  }
+  return keys;
 };
 
 export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
@@ -291,7 +301,10 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
             <div className="space-y-3">
               {cart.items.map((product, index) => {
                 const catalogProduct = product.product;
-                const availableRemainingStones = normalizeRemainingStoneCollection(product.remainingStones || []).filter(isUsableRemainingStone);
+                const usedRemainingStoneKeys = new Set((product.usedRemainingStones || []).flatMap(getRemainingStoneUsageKeys));
+                const availableRemainingStones = normalizeRemainingStoneCollection(product.remainingStones || [])
+                  .filter(isUsableRemainingStone)
+                  .filter((stone) => !getRemainingStoneUsageKeys(stone).some((key) => usedRemainingStoneKeys.has(key)));
                 const smartCutPlan = product.smartCutPlan;
                 const isLayerProduct = Boolean((product.meta as any)?.isLayer);
                 const isRemainingStoneChild = Boolean((product.meta as any)?.remainingSource);

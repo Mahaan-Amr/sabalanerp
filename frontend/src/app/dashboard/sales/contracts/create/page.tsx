@@ -541,6 +541,15 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     currentProductRemainingStones: RemainingStone[]
   ): RemainingStone[] => {
     const allAvailable: RemainingStone[] = [];
+
+    const getRemainingStoneUsageKeys = (stone: RemainingStone): string[] => {
+      const keys = [stone.id, stone.sourceCutId].filter(Boolean);
+      const layerSourceMatch = stone.id.match(/^used_layer_(.*)_\d+$/);
+      if (layerSourceMatch?.[1]) {
+        keys.push(layerSourceMatch[1]);
+      }
+      return keys;
+    };
     
     // Collect from all non-layer products in session (including longitudinal and slab)
     sessionItems.forEach(item => {
@@ -548,12 +557,13 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       if (!itemIsLayer && item.remainingStones && item.remainingStones.length > 0) {
         // Get remaining stones that haven't been used yet
         const usedRemainingStones = item.usedRemainingStones || [];
-        const usedRemainingStoneIds = new Set(usedRemainingStones.map(rs => rs.id));
+        const usedRemainingStoneIds = new Set(usedRemainingStones.flatMap(getRemainingStoneUsageKeys));
         
         item.remainingStones.forEach(rs => {
           // Only include if not already used and usable after sanitization
-          if (!usedRemainingStoneIds.has(rs.id)) {
-            const sanitizedStone = sanitizeRemainingStoneEntry(rs);
+          const sanitizedStone = sanitizeRemainingStoneEntry(rs);
+          const isAlreadyUsed = getRemainingStoneUsageKeys(sanitizedStone).some(key => usedRemainingStoneIds.has(key));
+          if (!isAlreadyUsed) {
             if (isUsableRemainingStone(sanitizedStone)) {
               allAvailable.push(sanitizedStone);
             }
@@ -757,8 +767,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     const usageEntries: { source: RemainingStone; lengthM: number; quantity: number }[] = [];
     const unfulfilledDemands: Array<{ edge: LayerEdgeDemand['edge']; lengthM: number; quantity: number }> = [];
 
-    const canUseRemainingForEdge = (edge: LayerEdgeDemand['edge']) =>
-      edge === 'front' || edge === 'back' || edge === 'perimeter';
+    const canUseRemainingForEdge = (_edge: LayerEdgeDemand['edge']) => true;
 
     sortedDemands.forEach(demand => {
       let needed = demand.layersNeeded;

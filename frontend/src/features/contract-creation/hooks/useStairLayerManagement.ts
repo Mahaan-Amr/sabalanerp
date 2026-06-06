@@ -89,6 +89,15 @@ interface MergeLayerProductParams {
   stoneAreaUsedSqm?: number;
 }
 
+const getRemainingStoneUsageKeys = (stone: RemainingStone): string[] => {
+  const keys = [stone.id, stone.sourceCutId].filter(Boolean);
+  const layerSourceMatch = stone.id.match(/^used_layer_(.*)_\d+$/);
+  if (layerSourceMatch?.[1]) {
+    keys.push(layerSourceMatch[1]);
+  }
+  return keys;
+};
+
 /**
  * Hook for managing stair layer products - creation, synchronization, and pricing
  */
@@ -756,13 +765,18 @@ export const useStairLayerManagement = ({
       if (!itemIsLayer && item.remainingStones && item.remainingStones.length > 0) {
         item.remainingStones.forEach(rs => {
           remainingStoneSourceMap.set(rs.id, idx);
+          if (rs.sourceCutId) {
+            remainingStoneSourceMap.set(rs.sourceCutId, idx);
+          }
         });
       }
     });
 
     const usedBySource = new Map<number, RemainingStone[]>();
     usedRemainingStones.forEach(usedRs => {
-      const sourceIdx = remainingStoneSourceMap.get(usedRs.id);
+      const sourceIdx = getRemainingStoneUsageKeys(usedRs)
+        .map(key => remainingStoneSourceMap.get(key))
+        .find((idx): idx is number => idx !== undefined);
       if (sourceIdx !== undefined) {
         if (!usedBySource.has(sourceIdx)) {
           usedBySource.set(sourceIdx, []);

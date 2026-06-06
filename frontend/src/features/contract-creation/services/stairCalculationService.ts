@@ -24,6 +24,15 @@ import {
 } from '../utils/stairUtils';
 import { formatDisplayNumber } from '../utils/formatUtils';
 
+const getRemainingStoneUsageKeys = (stone: RemainingStone): string[] => {
+  const keys = [stone.id, stone.sourceCutId].filter(Boolean);
+  const layerSourceMatch = stone.id.match(/^used_layer_(.*)_\d+$/);
+  if (layerSourceMatch?.[1]) {
+    keys.push(layerSourceMatch[1]);
+  }
+  return keys;
+};
+
 /**
  * Calculate stair stone usage (pieces per stone, leftover width, etc.)
  */
@@ -650,8 +659,7 @@ export const calculateLayerMetrics = (params: {
   const usageEntries: { source: RemainingStone; lengthM: number; quantity: number }[] = [];
   const unfulfilledDemands: Array<{ edge: LayerEdgeDemand['edge']; lengthM: number; quantity: number }> = [];
 
-  const canUseRemainingForEdge = (edge: LayerEdgeDemand['edge']) =>
-    edge === 'front' || edge === 'back' || edge === 'perimeter';
+  const canUseRemainingForEdge = (_edge: LayerEdgeDemand['edge']) => true;
 
   sortedDemands.forEach(demand => {
     let needed = demand.layersNeeded;
@@ -821,11 +829,12 @@ export const collectAvailableRemainingStones = (
     if (!itemIsLayer && item.remainingStones && item.remainingStones.length > 0) {
       // Get remaining stones that haven't been used yet
       const usedRemainingStones = item.usedRemainingStones || [];
-      const usedRemainingStoneIds = new Set(usedRemainingStones.map(rs => rs.id));
+      const usedRemainingStoneIds = new Set(usedRemainingStones.flatMap(getRemainingStoneUsageKeys));
       
       item.remainingStones.forEach(rs => {
         // Only include if not already used
-        if (!usedRemainingStoneIds.has(rs.id)) {
+        const isAlreadyUsed = getRemainingStoneUsageKeys(rs).some(key => usedRemainingStoneIds.has(key));
+        if (!isAlreadyUsed) {
           allAvailable.push(rs);
         }
       });
@@ -1173,6 +1182,9 @@ export const updateRemainingStoneUsage = (
     if (!itemIsLayer && item.remainingStones && item.remainingStones.length > 0) {
       item.remainingStones.forEach(rs => {
         remainingStoneSourceMap.set(rs.id, idx);
+        if (rs.sourceCutId) {
+          remainingStoneSourceMap.set(rs.sourceCutId, idx);
+        }
       });
     }
   });
@@ -1180,7 +1192,9 @@ export const updateRemainingStoneUsage = (
   // Group used remaining stones by their source product
   const usedBySource = new Map<number, RemainingStone[]>();
   usedRemainingStones.forEach(usedRs => {
-    const sourceIdx = remainingStoneSourceMap.get(usedRs.id);
+    const sourceIdx = getRemainingStoneUsageKeys(usedRs)
+      .map(key => remainingStoneSourceMap.get(key))
+      .find((idx): idx is number => idx !== undefined);
     if (sourceIdx !== undefined) {
       if (!usedBySource.has(sourceIdx)) {
         usedBySource.set(sourceIdx, []);

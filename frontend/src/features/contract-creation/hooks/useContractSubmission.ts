@@ -82,6 +82,12 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     setIsSubmitting(true);
     setLoading(true);
     try {
+      const targetDepartmentId = userDepartment || departments?.[0]?.id;
+      if (!targetDepartmentId) {
+        setErrors({ general: 'برای ثبت قرارداد، دپارتمان فروش کاربر باید مشخص باشد.' });
+        return;
+      }
+
       // Calculate total amount
       const totalAmount = sumNumericValues(wizardData.products, (product) => product.totalPrice);
       
@@ -90,7 +96,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         title: 'قرارداد فروش سنگ',
         titlePersian: 'قرارداد فروش سنگ',
         customerId: wizardData.customerId,
-        departmentId: userDepartment || departments?.[0]?.id || 'default-department-id',
+        departmentId: targetDepartmentId,
         content: generateContractHTML({
           contractNumber: wizardData.contractNumber,
           contractDate: wizardData.contractDate,

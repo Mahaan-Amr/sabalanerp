@@ -10,7 +10,7 @@ export interface AuthRequest extends Request {
     email: string;
     username: string;
     role: string;
-    departmentId: string;
+    departmentId: string | null;
     isActive: boolean;
   };
 }
@@ -58,7 +58,7 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
       email: user.email,
       username: user.username,
       role: user.role,
-      departmentId: user.departmentId || '',
+      departmentId: user.departmentId,
       isActive: user.isActive
     };
     next();

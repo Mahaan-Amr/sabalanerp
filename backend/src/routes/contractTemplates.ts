@@ -392,7 +392,7 @@ router.post('/:id/generate', protect, requireFeatureAccess(FEATURES.SALES_CONTRA
 
     // Check if user has access to this department
     // Allow if user is ADMIN, or if user belongs to the department, or if user has no department assigned (flexible access)
-    if (req.user!.role !== 'ADMIN' && req.user!.departmentId !== null && departmentId !== req.user!.departmentId) {
+    if (req.user!.role !== 'ADMIN' && req.user!.departmentId && finalDepartmentId !== req.user!.departmentId) {
       return res.status(403).json({
         success: false,
         error: 'Access denied to this department'

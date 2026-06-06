@@ -98,10 +98,12 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
       // Admins can see all contracts
       if (status) whereClause.status = status;
       if (departmentId) whereClause.departmentId = departmentId;
-    } else {
+    } else if (req.user.departmentId) {
       // Regular users can only see contracts from their department
       whereClause.departmentId = req.user.departmentId;
       if (status) whereClause.status = status;
+    } else if (status) {
+      whereClause.status = status;
     }
 
     const contracts = await prisma.salesContract.findMany({
@@ -372,7 +374,7 @@ router.post('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
 
     // Check if user has access to this department
     // Allow if user is ADMIN, or if user belongs to the department, or if user has no department assigned (flexible access)
-    if (req.user.role !== 'ADMIN' && req.user.departmentId !== null && departmentId !== req.user.departmentId) {
+    if (req.user.role !== 'ADMIN' && req.user.departmentId && departmentId !== req.user.departmentId) {
       return res.status(403).json({
         success: false,
         error: 'Access denied to this department'
@@ -512,7 +514,7 @@ router.put('/contracts/:id/print', protect, requireFeatureAccess(FEATURES.SALES_
     }
 
     // Check if user has access to this contract
-    if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
+    if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
       return res.status(403).json({
         success: false,
         error: 'Access denied'
@@ -652,7 +654,7 @@ router.put('/contracts/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_C
     }
 
     // Check if user has access to this contract
-    if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
+    if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
       return res.status(403).json({
         success: false,
         error: 'Access denied'
@@ -743,7 +745,7 @@ router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SALES,
     // Build where clause based on user role and department
     let whereClause: any = {};
     
-    if (req.user.role !== 'ADMIN') {
+    if (req.user.role !== 'ADMIN' && req.user.departmentId) {
       whereClause.departmentId = req.user.departmentId;
     }
 
@@ -829,7 +831,7 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     // Build where clause based on user role and department
     let whereClause: any = {};
     
-    if (req.user.role !== 'ADMIN') {
+    if (req.user.role !== 'ADMIN' && req.user.departmentId) {
       whereClause.departmentId = req.user.departmentId;
     }
 
@@ -1129,7 +1131,7 @@ router.post(
         });
       }
 
-      if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
+      if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
         return res.status(403).json({
           success: false,
           error: 'Access denied'
@@ -1187,7 +1189,7 @@ router.post(
         });
       }
 
-      if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
+      if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
         return res.status(403).json({
           success: false,
           error: 'Access denied'
@@ -1245,7 +1247,7 @@ router.get(
         });
       }
 
-      if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
+      if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
         return res.status(403).json({
           success: false,
           error: 'Access denied'
@@ -1296,7 +1298,7 @@ router.post(
         });
       }
 
-      if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
+      if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
         return res.status(403).json({
           success: false,
           error: 'Access denied'

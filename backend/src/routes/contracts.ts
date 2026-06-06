@@ -27,10 +27,12 @@ router.get('/', protect, requireFeatureAccess(FEATURES.SALES_LEGACY_CONTRACTS_VI
       // Admins can see all contracts
       if (status) whereClause.status = status;
       if (departmentId) whereClause.departmentId = departmentId;
-    } else {
+    } else if (req.user.departmentId) {
       // Regular users can only see contracts from their department
       whereClause.departmentId = req.user.departmentId;
       if (status) whereClause.status = status;
+    } else if (status) {
+      whereClause.status = status;
     }
 
     const contracts = await prisma.contract.findMany({
@@ -159,7 +161,7 @@ router.get('/:id', protect, requireFeatureAccess(FEATURES.SALES_LEGACY_CONTRACTS
     }
 
     // Check if user has access to this contract
-    if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
+    if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
       return res.status(403).json({
         success: false,
         error: 'Access denied'
@@ -213,7 +215,7 @@ router.post('/', protect, requireFeatureAccess(FEATURES.SALES_LEGACY_CONTRACTS_C
 
     // Check if user has access to this department
     // Allow if user is ADMIN, or if user belongs to the department, or if user has no department assigned (flexible access)
-    if (req.user.role !== 'ADMIN' && req.user.departmentId !== null && departmentId !== req.user.departmentId) {
+    if (req.user.role !== 'ADMIN' && req.user.departmentId && departmentId !== req.user.departmentId) {
       return res.status(403).json({
         success: false,
         error: 'Access denied to this department'
@@ -297,7 +299,7 @@ router.put('/:id', protect, requireFeatureAccess(FEATURES.SALES_LEGACY_CONTRACTS
     }
 
     // Check if user has access to this contract
-    if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
+    if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
       return res.status(403).json({
         success: false,
         error: 'Access denied'
@@ -513,7 +515,7 @@ router.put('/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_LEGACY_CONT
     }
 
     // Check if user has access to this contract
-    if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
+    if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
       return res.status(403).json({
         success: false,
         error: 'Access denied'
@@ -605,7 +607,7 @@ router.put('/:id/print', protect, requireFeatureAccess(FEATURES.SALES_LEGACY_CON
     }
 
     // Check if user has access to this contract
-    if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
+    if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
       return res.status(403).json({
         success: false,
         error: 'Access denied'

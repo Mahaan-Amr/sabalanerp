@@ -884,7 +884,7 @@ model AccountingSetting {
   branchCode            String?
   fiscalMemoryId        String?
   defaultVatRate        Decimal  @default(10.00) @db.Decimal(5, 2)
-  defaultCurrency       String   @default("TOMAN")
+  defaultCurrency       String   @default("ریال")
   invoiceNumberPrefix   String   @default("ACC")
   nextInvoiceSequence   Int      @default(1)
   defaultInvoiceDueDays Int      @default(30)
@@ -945,12 +945,13 @@ model AccountingFinancialRecord {
   customerId      String?
   periodId        String?
   amount          Decimal                          @default(0) @db.Decimal(18, 2)
-  currency        String                           @default("TOMAN")
+  currency        String                           @default("ریال")
   sourceSnapshot  Json?
   metadata        Json?
   idempotencyKey  String?                          @unique
   systemInvoiceNumber String?                       @unique
   systemInvoiceDate DateTime?
+  sepidarAmount Decimal?                            @db.Decimal(18, 2)
   financiallyApprovedAt DateTime?
   financiallyApprovedBy String?
   createdBy       String
@@ -999,7 +1000,7 @@ model AccountingReceivable {
   originalAmount  Decimal                    @db.Decimal(18, 2)
   paidAmount      Decimal                    @default(0) @db.Decimal(18, 2)
   remainingAmount Decimal                    @db.Decimal(18, 2)
-  currency        String                     @default("TOMAN")
+  currency        String                     @default("ریال")
   dueDate         DateTime
   status          ReceivableStatus           @default(OPEN)
   metadata        Json?
@@ -1024,7 +1025,7 @@ model AccountingPaymentStatus {
   sourceInstallmentId String?
   method              AccountingPaymentMethod
   amount              Decimal                 @db.Decimal(18, 2)
-  currency            String                  @default("TOMAN")
+  currency            String                  @default("ریال")
   status              PaymentAccountingStatus @default(EXPECTED)
   checkStatus         CheckAccountingStatus?
   checkNumber         String?

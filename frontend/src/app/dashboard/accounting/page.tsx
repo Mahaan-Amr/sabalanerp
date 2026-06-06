@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   FaBalanceScale,
@@ -16,7 +16,6 @@ import {
   ErpActionGrid,
   ErpButton,
   ErpLoading,
-  ErpMetric,
   ErpPage,
   ErpSection,
 } from '@/components/erp';
@@ -55,40 +54,6 @@ export default function AccountingDashboardPage() {
     loadWorkspace();
   }, []);
 
-  const metrics: ErpMetric[] = useMemo(() => {
-    const commandCenter = workspace?.commandCenter || {};
-    return [
-      {
-        label: 'ارزش قراردادهای قابل اقدام',
-        value: money(commandCenter.approvedAndSignedContractValue),
-        hint: 'تایید شده، امضا شده یا چاپ شده',
-        icon: FaClipboardCheck,
-        tone: 'primary',
-      },
-      {
-        label: 'دریافتنی‌های باز',
-        value: money(commandCenter.openReceivables?.amount),
-        hint: `${(commandCenter.openReceivables?.count || 0).toLocaleString('fa-IR')} مورد، ${(commandCenter.openReceivables?.urgentCount || 0).toLocaleString('fa-IR')} سررسید گذشته`,
-        icon: FaReceipt,
-        tone: commandCenter.openReceivables?.urgentCount ? 'danger' : 'info',
-      },
-      {
-        label: 'چک‌های نزدیک سررسید',
-        value: money(commandCenter.checksDue?.amount),
-        hint: `${(commandCenter.checksDue?.count || 0).toLocaleString('fa-IR')} چک در صف پیگیری`,
-        icon: FaMoneyCheckAlt,
-        tone: commandCenter.checksDue?.urgentCount ? 'danger' : 'warning',
-      },
-      {
-        label: 'مالیات آماده نیست',
-        value: (commandCenter.taxNotReady?.count || 0).toLocaleString('fa-IR'),
-        hint: `${(commandCenter.taxNotReady?.urgentCount || 0).toLocaleString('fa-IR')} مورد رد شده یا نیازمند اصلاح`,
-        icon: FaBalanceScale,
-        tone: commandCenter.taxNotReady?.urgentCount ? 'danger' : 'warning',
-      },
-    ];
-  }, [workspace]);
-
   if (loading) {
     return <ErpLoading />;
   }
@@ -103,7 +68,6 @@ export default function AccountingDashboardPage() {
       actions={[
         { label: 'به‌روزرسانی', icon: FaSync, onClick: loadWorkspace, tone: 'neutral' },
       ]}
-      metrics={metrics}
     >
       <ErpActionGrid
         columns={3}

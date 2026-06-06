@@ -101,6 +101,7 @@ backend/uploads/
 backend/storage/contracts/*.pdf
 backend/storage/contracts/**/*.pdf
 backend/storage/contracts/*
+backend/storage/accounting-contracts/*
 !backend/storage/contracts/.gitkeep
 !backend/uploads/.gitkeep
 

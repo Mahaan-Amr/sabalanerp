@@ -1,31 +1,35 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  FaBalanceScale,
   FaCheckCircle,
   FaClipboardCheck,
   FaExclamationTriangle,
   FaEye,
   FaFileInvoice,
   FaFlag,
+  FaPrint,
   FaReceipt,
   FaSync,
 } from 'react-icons/fa';
 import {
   ErpBadge,
-  ErpButton,
   ErpEmptyState,
   ErpListPage,
   ErpPagination,
+  ErpSection,
   type ErpAction,
   type ErpColumn,
-  type ErpMetric,
 } from '@/components/erp';
+import PersianCalendarComponent from '@/components/PersianCalendar';
+import PersianCalendar from '@/lib/persian-calendar';
 import { accountingAPI } from '@/lib/api';
 import {
   AccountingContractRow,
+  FinancialInvoiceApprovalForm,
+  FinancialInvoiceApprovalPayload,
   StatusBadge,
+  dateFa,
   contractStatusLabels,
   contractStatusTones,
   invoiceStatusLabels,
@@ -54,15 +58,30 @@ const sourceStatusOptions = [
   { label: 'نیازمند اصلاح', value: 'NEEDS_CORRECTION' },
 ];
 
+const toPdfViewerUrl = (url: string) => `${url}#page=1&zoom=page-fit`;
+
 export default function AccountingContractsPage() {
   const [rows, setRows] = useState<AccountingContractRow[]>([]);
-  const [totals, setTotals] = useState<any>({});
   const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0 });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('ALL');
   const [sourceStatus, setSourceStatus] = useState('ALL');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [approvalTarget, setApprovalTarget] = useState<{
+    contract: AccountingContractRow;
+    invoice: NonNullable<AccountingContractRow['financialRecords']>[number];
+  } | null>(null);
+
+  const toGregorianFilterDate = (value: string, endOfDay = false) => {
+    if (!value) return undefined;
+    const date = PersianCalendar.toGregorian(value);
+    if (endOfDay) date.setHours(23, 59, 59, 999);
+    else date.setHours(0, 0, 0, 0);
+    return date.toISOString();
+  };
 
   const loadContracts = async (page = pagination.page) => {
     try {
@@ -71,13 +90,14 @@ export default function AccountingContractsPage() {
         search,
         status,
         sourceStatus,
+        dateFrom: toGregorianFilterDate(dateFrom),
+        dateTo: toGregorianFilterDate(dateTo, true),
         sort: 'attention',
         page,
         pageSize: pagination.pageSize,
       });
       if (response.data.success) {
         setRows(response.data.data.items);
-        setTotals(response.data.data.totals);
         setPagination({
           page: response.data.data.page,
           pageSize: response.data.data.pageSize,
@@ -93,7 +113,7 @@ export default function AccountingContractsPage() {
 
   useEffect(() => {
     loadContracts(1);
-  }, [search, status, sourceStatus]);
+  }, [search, status, sourceStatus, dateFrom, dateTo]);
 
   const execute = async (contract: AccountingContractRow, action: any) => {
     setActionLoading(`${contract.contractId}:${action.kind}`);
@@ -130,29 +150,44 @@ export default function AccountingContractsPage() {
       !['ISSUED', 'POSTED', 'VOIDED'].includes(record.status)
     ));
 
-  const defaultSystemInvoiceDate = () =>
-    new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Tehran',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(new Date());
-
-  const approveFinancialInvoice = (contract: AccountingContractRow) => {
+  const openApprovalModal = (contract: AccountingContractRow) => {
     const pendingInvoices = getPendingInvoiceCandidates(contract);
     if (pendingInvoices.length !== 1) return;
+    setApprovalTarget({ contract, invoice: pendingInvoices[0] });
+  };
 
-    const systemInvoiceNumber = window.prompt('شماره فاکتور سیستمی را وارد کنید');
-    if (!systemInvoiceNumber?.trim()) return;
-    const systemInvoiceDate = window.prompt('تاریخ فاکتور سیستمی را به صورت YYYY-MM-DD وارد کنید', defaultSystemInvoiceDate());
-    if (!systemInvoiceDate?.trim()) return;
-
-    execute(contract, {
+  const approveFinancialInvoice = async (payload: FinancialInvoiceApprovalPayload) => {
+    if (!approvalTarget) return;
+    await execute(approvalTarget.contract, {
       kind: 'APPROVE_FINANCIAL_INVOICE',
-      invoiceId: pendingInvoices[0].id,
-      systemInvoiceNumber: systemInvoiceNumber.trim(),
-      systemInvoiceDate: systemInvoiceDate.trim(),
+      invoiceId: payload.invoiceId,
+      systemInvoiceNumber: payload.systemInvoiceNumber,
+      systemInvoiceDate: payload.systemInvoiceDate,
+      sepidarAmount: payload.sepidarAmount,
     });
+    setApprovalTarget(null);
+  };
+
+  const openAccountingPdf = async (contract: AccountingContractRow) => {
+    const actionKey = `${contract.contractId}:PRINT_PDF`;
+    setActionLoading(actionKey);
+    const pdfWindow = window.open('', '_blank', 'noopener,noreferrer');
+    try {
+      const response = await accountingAPI.getContractPdf(contract.contractId);
+      const url = response.data?.data?.url;
+      if (!response.data?.success || !url) throw new Error('PDF url was not returned');
+      if (pdfWindow) {
+        pdfWindow.location.href = toPdfViewerUrl(url);
+      } else {
+        window.open(toPdfViewerUrl(url), '_blank', 'noopener,noreferrer');
+      }
+    } catch (error) {
+      pdfWindow?.close();
+      console.error('Accounting PDF generation failed:', error);
+      window.alert('چاپ پرونده حسابداری انجام نشد');
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const requestCorrection = (contract: AccountingContractRow) => {
@@ -180,14 +215,29 @@ export default function AccountingContractsPage() {
     });
   };
 
-  const metrics: ErpMetric[] = useMemo(() => [
-    { label: 'ارزش قراردادها', value: money(totals.contractAmount), icon: FaClipboardCheck, tone: 'primary' },
-    { label: 'صورتحساب شده', value: money(totals.invoicedAmount), icon: FaFileInvoice, tone: 'info' },
-    { label: 'دریافت شده', value: money(totals.receivedAmount), icon: FaReceipt, tone: 'success' },
-    { label: 'مانده', value: money(totals.remainingAmount), icon: FaBalanceScale, tone: 'warning' },
-  ], [totals]);
-
   const columns: ErpColumn<AccountingContractRow>[] = [
+    {
+      id: 'rowNumber',
+      header: 'ردیف',
+      mobileLabel: 'ردیف',
+      align: 'center',
+      priority: 'secondary',
+      cell: (contract) => ((pagination.page - 1) * pagination.pageSize + rows.findIndex((row) => row.contractId === contract.contractId) + 1).toLocaleString('fa-IR'),
+    },
+    {
+      id: 'customerName',
+      header: 'نام مشتری',
+      mobileLabel: 'نام مشتری',
+      priority: 'secondary',
+      cell: (contract) => contract.customer.displayName,
+    },
+    {
+      id: 'date',
+      header: 'تاریخ',
+      mobileLabel: 'تاریخ',
+      priority: 'secondary',
+      cell: (contract) => dateFa(contract.contractDate || contract.signedAt || contract.createdAt),
+    },
     {
       id: 'contract',
       header: 'قرارداد',
@@ -252,6 +302,14 @@ export default function AccountingContractsPage() {
   const rowActions = (contract: AccountingContractRow): ErpAction[] => [
     { label: 'مشاهده', href: `/dashboard/accounting/contracts/${contract.contractId}`, icon: FaEye, tone: 'primary' },
     {
+      label: 'چاپ پرونده',
+      icon: FaPrint,
+      tone: 'purple',
+      title: 'چاپ کامل پرونده حسابداری قرارداد',
+      disabled: actionLoading === `${contract.contractId}:PRINT_PDF`,
+      onClick: () => openAccountingPdf(contract),
+    },
+    {
       label: 'پیش‌نویس صورتحساب',
       icon: FaFileInvoice,
       tone: 'info',
@@ -273,7 +331,7 @@ export default function AccountingContractsPage() {
       tone: 'success',
       disabled: !contract.accounting.eligibleForFinancialRecords || getPendingInvoiceCandidates(contract).length !== 1 || actionLoading === `${contract.contractId}:APPROVE_FINANCIAL_INVOICE`,
       title: getPendingInvoiceCandidates(contract).length !== 1 ? 'برای تایید سریع باید دقیقا یک صورتحساب تایید نشده وجود داشته باشد' : undefined,
-      onClick: () => approveFinancialInvoice(contract),
+      onClick: () => openApprovalModal(contract),
     },
     { label: 'پرچم', icon: FaFlag, tone: 'warning', onClick: () => flagContract(contract) },
     { label: 'درخواست اصلاح', icon: FaExclamationTriangle, tone: 'danger', onClick: () => requestCorrection(contract) },
@@ -285,7 +343,6 @@ export default function AccountingContractsPage() {
       title="قراردادهای قابل بررسی"
       description="همه قراردادها در هر وضعیت دیده می‌شوند؛ اقدام مالی فقط برای قراردادهای تایید شده، امضا شده یا چاپ شده فعال است."
       actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: () => loadContracts(pagination.page), tone: 'neutral' }]}
-      metrics={metrics}
       filters={[
         {
           id: 'search',
@@ -328,6 +385,50 @@ export default function AccountingContractsPage() {
           itemLabel="قرارداد"
         />
       }
-    />
+    >
+      <ErpSection>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">از تاریخ</span>
+            <PersianCalendarComponent value={dateFrom} onChange={setDateFrom} placeholder="از تاریخ" />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">تا تاریخ</span>
+            <PersianCalendarComponent value={dateTo} onChange={setDateTo} placeholder="تا تاریخ" />
+          </label>
+        </div>
+      </ErpSection>
+
+      {approvalTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold text-teal-600 dark:text-teal-300">تایید مالی</p>
+                <h2 className="mt-1 text-lg font-bold text-slate-950 dark:text-white">
+                  {approvalTarget.contract.contractNumber}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  {approvalTarget.contract.customer.displayName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setApprovalTarget(null)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                بستن
+              </button>
+            </div>
+            <FinancialInvoiceApprovalForm
+              invoice={approvalTarget.invoice}
+              busy={actionLoading === `${approvalTarget.contract.contractId}:APPROVE_FINANCIAL_INVOICE`}
+              compact
+              onApprove={approveFinancialInvoice}
+            />
+          </div>
+        </div>
+      )}
+    </ErpListPage>
   );
 }

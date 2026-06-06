@@ -13,7 +13,9 @@ import {
   FaReceipt,
   FaTimesCircle
 } from 'react-icons/fa';
-import { ErpBadge, ErpCard, type ErpTone } from '@/components/erp';
+import PersianCalendarComponent from '@/components/PersianCalendar';
+import FormattedNumberInput from '@/components/FormattedNumberInput';
+import { ErpBadge, ErpButton, ErpCard, type ErpTone } from '@/components/erp';
 import { formatDisplayNumber, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
 
@@ -28,6 +30,8 @@ export type AccountingContractRow = {
   contractNumber: string;
   titlePersian: string;
   createdAt?: string;
+  signedAt?: string | null;
+  contractDate?: string | null;
   customer: {
     id?: string;
     displayName: string;
@@ -57,6 +61,7 @@ export type AccountingContractRow = {
     currency?: string;
     systemInvoiceNumber?: string | null;
     systemInvoiceDate?: string | null;
+    sepidarAmount?: string | null;
     financiallyApprovedAt?: string | null;
     createdAt: string;
   }>;
@@ -126,22 +131,9 @@ export const sourceStatusLabels: Record<string, string> = {
   NEEDS_CORRECTION: 'نیازمند اصلاح',
 };
 
-const normalizeCurrency = (currency?: string | null): 'toman' | 'rial' => {
-  const normalized = String(currency || '').trim().toLowerCase();
-  if (normalized === 'rial' || normalized === 'irr' || normalized === 'ریال') return 'rial';
-  return 'toman';
-};
-
-export const money = (amount?: string | number | null, currency = 'تومان') => {
+export const money = (amount?: string | number | null, _currency = 'ریال') => {
   const value = toFiniteNumber(amount);
-  const unit = normalizeCurrency(currency);
-  const convertedValue = unit === 'toman' ? value * 10 : value / 10;
-
-  if (unit === 'rial') {
-    return `${formatDisplayNumber(value)} ریال (${formatDisplayNumber(convertedValue)} تومان)`;
-  }
-
-  return `${formatDisplayNumber(value)} تومان (${formatDisplayNumber(convertedValue)} ریال)`;
+  return `${formatDisplayNumber(value)} ریال`;
 };
 
 export const dateFa = (value?: string | Date | null) => {
@@ -238,3 +230,117 @@ export const accountingIcons = {
   ok: FaCheckCircle,
   danger: FaTimesCircle,
 };
+
+export type FinancialInvoiceApprovalPayload = {
+  invoiceId: string;
+  systemInvoiceNumber: string;
+  systemInvoiceDate: string;
+  sepidarAmount: number;
+};
+
+type FinancialInvoiceApprovalFormProps = {
+  invoice?: {
+    id: string;
+    amount: string | number;
+    status: string;
+    systemInvoiceNumber?: string | null;
+    systemInvoiceDate?: string | null;
+    sepidarAmount?: string | number | null;
+  } | null;
+  busy?: boolean;
+  compact?: boolean;
+  onApprove: (payload: FinancialInvoiceApprovalPayload) => void | Promise<void>;
+};
+
+const isInvoiceLocked = (invoice?: FinancialInvoiceApprovalFormProps['invoice']) =>
+  !invoice || ['ISSUED', 'POSTED', 'VOIDED'].includes(invoice.status);
+
+export function FinancialInvoiceApprovalForm({
+  invoice,
+  busy = false,
+  compact = false,
+  onApprove,
+}: FinancialInvoiceApprovalFormProps) {
+  const [systemInvoiceNumber, setSystemInvoiceNumber] = React.useState('');
+  const [systemInvoiceDate, setSystemInvoiceDate] = React.useState(PersianCalendar.now());
+  const [sepidarAmount, setSepidarAmount] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!invoice) return;
+    setSystemInvoiceNumber(invoice.systemInvoiceNumber || '');
+    setSystemInvoiceDate(invoice.systemInvoiceDate ? PersianCalendar.toPersian(invoice.systemInvoiceDate) : PersianCalendar.now());
+    setSepidarAmount(invoice.sepidarAmount != null ? toFiniteNumber(invoice.sepidarAmount) : 0);
+  }, [invoice?.id]);
+
+  if (!invoice) return null;
+
+  const expectedAmount = toFiniteNumber(invoice.amount);
+  const hasMismatch = sepidarAmount > 0 && Math.round(sepidarAmount) !== Math.round(expectedAmount);
+  const isValid = systemInvoiceNumber.trim().length > 0 && systemInvoiceDate.trim().length > 0 && sepidarAmount > 0 && !hasMismatch;
+  const locked = isInvoiceLocked(invoice);
+
+  if (locked) {
+    return (
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-950/40">
+        <p className="font-semibold text-slate-900 dark:text-white">تایید مالی ثبت شده</p>
+        <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-slate-600 dark:text-slate-300 sm:grid-cols-3">
+          <span>شماره فاکتور: {invoice.systemInvoiceNumber || '—'}</span>
+          <span>تاریخ: {invoice.systemInvoiceDate ? dateFa(invoice.systemInvoiceDate) : '—'}</span>
+          <span>مبلغ سپیدار: {money(invoice.sepidarAmount)}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950/30">
+      <div className={compact ? 'space-y-3' : 'grid grid-cols-1 gap-3 lg:grid-cols-3'}>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">شماره فاکتور سیستمی</span>
+          <input
+            className="min-h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            value={systemInvoiceNumber}
+            onChange={(event) => setSystemInvoiceNumber(event.target.value)}
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">تاریخ فاکتور سیستمی</span>
+          <PersianCalendarComponent
+            value={systemInvoiceDate}
+            onChange={setSystemInvoiceDate}
+            placeholder="انتخاب تاریخ"
+            className="min-h-11 w-full"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">مبلغ سپیدار (ریال)</span>
+          <FormattedNumberInput
+            value={sepidarAmount}
+            onChange={setSepidarAmount}
+            min={0}
+            placeholder="مبلغ سپیدار"
+            className="min-h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+          />
+        </label>
+      </div>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className={`text-xs ${hasMismatch ? 'text-red-600 dark:text-red-300' : 'text-slate-500 dark:text-slate-400'}`}>
+          مبلغ صورتحساب سبلان: {money(expectedAmount)}
+          {hasMismatch ? ' · مبلغ سپیدار باید با مبلغ صورتحساب برابر باشد.' : ''}
+        </p>
+        <ErpButton
+          label="تایید مالی"
+          icon={accountingIcons.ok}
+          tone="success"
+          disabled={!isValid || busy}
+          onClick={() => onApprove({
+            invoiceId: invoice.id,
+            systemInvoiceNumber: systemInvoiceNumber.trim(),
+            systemInvoiceDate: PersianCalendar.toGregorian(systemInvoiceDate).toISOString(),
+            sepidarAmount,
+          })}
+        />
+      </div>
+    </div>
+  );
+}

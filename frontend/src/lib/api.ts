@@ -441,6 +441,7 @@ export const accountingAPI = {
   getWorkspace: () => api.get('/accounting/workspace'),
   getContracts: (params?: any) => api.get('/accounting/contracts', { params }),
   getContract: (contractId: string) => api.get(`/accounting/contracts/${contractId}`),
+  getContractPdf: (contractId: string) => api.get(`/accounting/contracts/${contractId}/pdf`),
   getFinancialRecords: (params?: any) => api.get('/accounting/financial-records', { params }),
   getReceivables: (params?: any) => api.get('/accounting/receivables', { params }),
   getPayments: (params?: any) => api.get('/accounting/payments', { params }),

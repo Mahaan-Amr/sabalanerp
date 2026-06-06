@@ -27,7 +27,7 @@ const ELIGIBLE_CONTRACT_STATUSES: ContractStatus[] = [
 ];
 
 const DEFAULT_PAGE_SIZE = 50;
-const DEFAULT_CURRENCY = 'TOMAN';
+const DEFAULT_CURRENCY = 'ریال';
 
 type Actor = {
   userId: string;
@@ -39,6 +39,8 @@ type ListContractsQuery = {
   status?: string;
   sourceStatus?: string;
   taxStatus?: string;
+  dateFrom?: string;
+  dateTo?: string;
   page?: number;
   pageSize?: number;
   sort?: string;
@@ -70,6 +72,7 @@ type AccountingActionRequest = {
   rejectionReason?: string;
   systemInvoiceNumber?: string;
   systemInvoiceDate?: string;
+  sepidarAmount?: string | number;
   category?: keyof typeof CorrectionRequestCategory | keyof typeof AccountingFlagCategory;
   priority?: keyof typeof CorrectionRequestPriority;
   severity?: keyof typeof AccountingFlagSeverity;
@@ -97,6 +100,36 @@ const toDecimal = (value: unknown, fallback = 0) => {
 const decimalToString = (value: Prisma.Decimal | number | string | null | undefined) => {
   if (value == null) return '0';
   return new Prisma.Decimal(String(value)).toFixed(0);
+};
+
+const isTomanCurrency = (currency?: string | null) => {
+  const normalized = String(currency || '').trim().toLowerCase();
+  return normalized === 'تومان' || normalized === 'toman';
+};
+
+const toRialDecimal = (value: Prisma.Decimal | number | string | null | undefined, currency?: string | null) => {
+  const amount = toDecimal(value);
+  return isTomanCurrency(currency) ? amount.mul(10) : amount;
+};
+
+const amountsEqual = (left: Prisma.Decimal, right: Prisma.Decimal) => left.toFixed(0) === right.toFixed(0);
+
+const getContractDateValue = (contract: any): Date | null => {
+  const data = contract.contractData;
+  const candidates = [
+    data?.contractDate,
+    data?.date,
+    data?.contract?.date,
+    contract.signedAt,
+    contract.createdAt
+  ].filter(Boolean);
+
+  for (const value of candidates) {
+    const parsed = new Date(String(value));
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+
+  return null;
 };
 
 const toJsonValue = (value: unknown): Prisma.InputJsonValue => {
@@ -186,6 +219,7 @@ const normalizeFinancialRecords = (records: Array<{
   currency?: string | null;
   systemInvoiceNumber?: string | null;
   systemInvoiceDate?: Date | null;
+  sepidarAmount?: Prisma.Decimal | null;
   financiallyApprovedAt?: Date | null;
   createdAt: Date;
 }>) =>
@@ -197,6 +231,7 @@ const normalizeFinancialRecords = (records: Array<{
     currency: record.currency,
     systemInvoiceNumber: record.systemInvoiceNumber,
     systemInvoiceDate: record.systemInvoiceDate,
+    sepidarAmount: record.sepidarAmount == null ? null : decimalToString(record.sepidarAmount),
     financiallyApprovedAt: record.financiallyApprovedAt,
     createdAt: record.createdAt
   }));
@@ -275,7 +310,8 @@ const buildContractRow = async (contract: any, settings: any) => {
   const corrections = contract.accountingCorrections || [];
   const flags = contract.accountingFlags || [];
 
-  const contractAmount = getContractAmount(contract);
+  const contractAmount = toRialDecimal(getContractAmount(contract), contract.currency);
+  const accountingDate = getContractDateValue(contract);
   const invoicedAmount = records
     .filter((record: any) => record.kind === FinancialRecordKind.INVOICE_CANDIDATE && record.status !== AccountingRecordStatus.VOIDED)
     .reduce((sum: Prisma.Decimal, record: any) => sum.plus(record.amount), new Prisma.Decimal(0));
@@ -367,6 +403,8 @@ const buildContractRow = async (contract: any, settings: any) => {
     contractNumber: contract.contractNumber,
     titlePersian: contract.titlePersian || contract.title || 'قرارداد فروش',
     createdAt: contract.createdAt,
+    signedAt: contract.signedAt,
+    contractDate: accountingDate,
     customer: {
       id: contract.customer?.id,
       displayName: getCustomerName(contract.customer || {}),
@@ -452,17 +490,6 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
   if (query.status && query.status !== 'ALL') {
     where.status = query.status as ContractStatus;
   }
-  if (search) {
-    where.OR = [
-      { contractNumber: { contains: search, mode: 'insensitive' } },
-      { title: { contains: search, mode: 'insensitive' } },
-      { titlePersian: { contains: search, mode: 'insensitive' } },
-      { customer: { firstName: { contains: search, mode: 'insensitive' } } },
-      { customer: { lastName: { contains: search, mode: 'insensitive' } } },
-      { customer: { companyName: { contains: search, mode: 'insensitive' } } },
-      { customer: { nationalCode: { contains: search, mode: 'insensitive' } } }
-    ];
-  }
 
   const orderBy: Prisma.SalesContractOrderByWithRelationInput =
     query.sort === 'amount_desc' ? { totalAmount: 'desc' } :
@@ -470,26 +497,64 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
     query.sort === 'oldest' ? { createdAt: 'asc' } :
     { createdAt: 'desc' };
 
-  const [rawContracts, total, settings] = await Promise.all([
+  const [rawContracts, settings] = await Promise.all([
     prisma.salesContract.findMany({
       where,
-      skip,
-      take: pageSize,
       include: getAccountingInclude(),
       orderBy
     }),
-    prisma.salesContract.count({ where }),
     getDefaultSettings()
   ]);
 
   const contracts = await attachAccountingCollections(rawContracts);
   let items = await Promise.all(contracts.map((contract) => buildContractRow(contract, settings)));
 
+  if (search) {
+    const lowered = search.toLowerCase();
+    items = items.filter((item: any) => {
+      const date = item.contractDate ? new Date(item.contractDate) : null;
+      const dateParts = date && !Number.isNaN(date.getTime())
+        ? [date.toISOString(), getTehranDateKey(date)]
+        : [];
+      const haystack = [
+        item.contractNumber,
+        item.titlePersian,
+        item.customer?.displayName,
+        item.customer?.nationalCode,
+        item.customer?.economicCode,
+        item.status,
+        item.accounting?.sourceStatus,
+        item.accounting?.invoiceStatus,
+        item.accounting?.receivableStatus,
+        item.accounting?.taxStatus,
+        ...dateParts
+      ].filter(Boolean).join(' ').toLowerCase();
+
+      return haystack.includes(lowered);
+    });
+  }
+
   if (query.sourceStatus && query.sourceStatus !== 'ALL') {
     items = items.filter((item) => item.accounting.sourceStatus === query.sourceStatus);
   }
   if (query.taxStatus && query.taxStatus !== 'ALL') {
     items = items.filter((item) => item.accounting.taxStatus === query.taxStatus);
+  }
+  if (query.dateFrom || query.dateTo) {
+    const from = query.dateFrom ? new Date(query.dateFrom) : null;
+    const to = query.dateTo ? new Date(query.dateTo) : null;
+    const fromTime = from && !Number.isNaN(from.getTime()) ? from.getTime() : null;
+    const toTime = to && !Number.isNaN(to.getTime()) ? to.getTime() : null;
+
+    items = items.filter((item: any) => {
+      if (!item.contractDate) return false;
+      const date = new Date(item.contractDate);
+      if (Number.isNaN(date.getTime())) return false;
+      const time = date.getTime();
+      if (fromTime != null && time < fromTime) return false;
+      if (toTime != null && time > toTime) return false;
+      return true;
+    });
   }
   if (query.sort === 'attention') {
     items.sort((a, b) => {
@@ -502,6 +567,9 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
       return score(b) - score(a);
     });
   }
+
+  const total = items.length;
+  const pagedItems = items.slice(skip, skip + pageSize);
 
   const totals = items.reduce((acc, item) => ({
     contractAmount: acc.contractAmount.plus(item.accounting.totalContractAmount),
@@ -516,7 +584,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
   });
 
   return {
-    items,
+    items: pagedItems,
     page,
     pageSize,
     total,
@@ -631,15 +699,15 @@ export const getAccountingContractDetail = async (contractId: string) => {
       contractNumber: contract.contractNumber,
       status: contract.status,
       titlePersian: contract.titlePersian,
-      totalAmount: decimalToString(getContractAmount(contract)),
-      currency: contract.currency || DEFAULT_CURRENCY,
+      totalAmount: decimalToString(toRialDecimal(getContractAmount(contract), contract.currency)),
+      currency: DEFAULT_CURRENCY,
       items: contract.items.map((item) => ({
         id: item.id,
         productId: item.productId,
         productName: item.product?.namePersian || item.product?.name || item.description || 'قلم قرارداد',
         quantity: decimalToString(item.quantity),
-        unitPrice: decimalToString(item.unitPrice),
-        totalPrice: decimalToString(item.totalPrice)
+        unitPrice: decimalToString(toRialDecimal(item.unitPrice, contract.currency)),
+        totalPrice: decimalToString(toRialDecimal(item.totalPrice, contract.currency))
       })),
       deliveries: contract.deliveries,
       salesPayments: contract.payments
@@ -712,7 +780,9 @@ const createInvoiceCandidate = async (command: AccountingActionRequest, actor: A
   const selectedItems = command.mode === 'FROM_SELECTED_ITEMS' && command.selectedContractItemIds?.length
     ? contract.items.filter((item) => command.selectedContractItemIds!.includes(item.id))
     : contract.items;
-  const amount = command.amount != null ? toDecimal(command.amount) : selectedItems.reduce((sum, item) => sum.plus(item.totalPrice), new Prisma.Decimal(0));
+  const amount = command.amount != null
+    ? toDecimal(command.amount)
+    : selectedItems.reduce((sum, item) => sum.plus(toRialDecimal(item.totalPrice, contract.currency)), new Prisma.Decimal(0));
   const missingFields = getTaxMissingFields(contract, settings);
   const vatRate = settings.defaultVatRate || new Prisma.Decimal(0);
   const vatAmount = amount.mul(vatRate).div(100);
@@ -728,7 +798,7 @@ const createInvoiceCandidate = async (command: AccountingActionRequest, actor: A
         customerId: contract.customerId,
         periodId,
         amount,
-        currency: contract.currency || DEFAULT_CURRENCY,
+        currency: DEFAULT_CURRENCY,
         sourceSnapshot: toJsonValue(contract),
         metadata: {
           mode: command.mode || 'FROM_CONTRACT_TOTAL',
@@ -748,8 +818,8 @@ const createInvoiceCandidate = async (command: AccountingActionRequest, actor: A
           productId: item.productId,
           description: item.product?.namePersian || item.description || 'قلم قرارداد',
           quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          totalPrice: item.totalPrice,
+          unitPrice: toRialDecimal(item.unitPrice, contract.currency),
+          totalPrice: toRialDecimal(item.totalPrice, contract.currency),
           taxRate: vatRate
         }))
       });
@@ -793,6 +863,8 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
   const systemInvoiceNumber = normalizeDigits(command.systemInvoiceNumber || '').trim();
   if (!systemInvoiceNumber) throw new Error('System invoice number is required');
   const systemInvoiceDate = validateSystemInvoiceDate(command.systemInvoiceDate);
+  const sepidarAmount = toDecimal(command.sepidarAmount);
+  if (sepidarAmount.lte(0)) throw new Error('Sepidar amount is required');
 
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceId } });
@@ -805,6 +877,9 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
     }
     if (before.status === AccountingRecordStatus.VOIDED) {
       throw new Error('Voided invoices cannot be financially approved');
+    }
+    if (!amountsEqual(sepidarAmount, before.amount)) {
+      throw new Error('Sepidar amount must match the Sabalan invoice amount');
     }
 
     const duplicate = await tx.accountingFinancialRecord.findFirst({
@@ -821,6 +896,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
         status: AccountingRecordStatus.ISSUED,
         systemInvoiceNumber,
         systemInvoiceDate,
+        sepidarAmount,
         financiallyApprovedAt: new Date(),
         financiallyApprovedBy: actor.userId,
         postedAt: new Date()
@@ -888,7 +964,7 @@ const createReceivable = async (command: AccountingActionRequest, actor: Actor, 
         customerId: contract.customerId,
         periodId,
         amount,
-        currency: contract.currency || DEFAULT_CURRENCY,
+        currency: DEFAULT_CURRENCY,
         sourceSnapshot: toJsonValue(contract),
         metadata: { invoiceRecordId: sourceInvoice?.id, dueDate: dueDate.toISOString() },
         idempotencyKey,
@@ -903,7 +979,7 @@ const createReceivable = async (command: AccountingActionRequest, actor: Actor, 
         customerId: contract.customerId,
         originalAmount: amount,
         remainingAmount: amount,
-        currency: contract.currency || DEFAULT_CURRENCY,
+        currency: DEFAULT_CURRENCY,
         dueDate,
         createdBy: actor.userId
       }
@@ -944,7 +1020,7 @@ const registerReceipt = async (command: AccountingActionRequest, actor: Actor) =
         receivableId: command.receivableId,
         method,
         amount,
-        currency: contract.currency || DEFAULT_CURRENCY,
+        currency: DEFAULT_CURRENCY,
         status,
         checkStatus,
         checkNumber: command.check?.checkNumber,

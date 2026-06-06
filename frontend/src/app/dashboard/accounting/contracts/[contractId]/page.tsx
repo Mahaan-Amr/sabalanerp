@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react';
 import {
   FaBalanceScale,
-  FaCheckCircle,
   FaExclamationTriangle,
   FaFileInvoice,
   FaFlag,
   FaMoneyCheckAlt,
+  FaPrint,
   FaReceipt,
   FaSync,
 } from 'react-icons/fa';
@@ -22,6 +22,8 @@ import {
 import { accountingAPI } from '@/lib/api';
 import {
   CompactQueueItem,
+  FinancialInvoiceApprovalForm,
+  FinancialInvoiceApprovalPayload,
   StatusBadge,
   contractStatusLabels,
   dateFa,
@@ -32,11 +34,13 @@ import {
   taxStatusLabels,
 } from '@/features/accounting/accountingUi';
 
+const toPdfViewerUrl = (url: string) => `${url}#page=1&zoom=page-fit`;
+
 export default function AccountingContractDetailPage({ params }: { params: { contractId: string } }) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  const [approvalForms, setApprovalForms] = useState<Record<string, { systemInvoiceNumber: string; systemInvoiceDate: string }>>({});
+  const [printLoading, setPrintLoading] = useState(false);
 
   const loadDetail = async () => {
     try {
@@ -67,45 +71,44 @@ export default function AccountingContractDetailPage({ params }: { params: { con
     }
   };
 
-  const defaultSystemInvoiceDate = () =>
-    new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Tehran',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(new Date());
-
-  const updateApprovalForm = (recordId: string, field: 'systemInvoiceNumber' | 'systemInvoiceDate', value: string) => {
-    setApprovalForms((prev) => ({
-      ...prev,
-      [recordId]: {
-        systemInvoiceNumber: prev[recordId]?.systemInvoiceNumber || '',
-        systemInvoiceDate: prev[recordId]?.systemInvoiceDate || defaultSystemInvoiceDate(),
-        [field]: value,
-      },
-    }));
-  };
-
-  const approveFinancialInvoice = (record: any) => {
-    const form = approvalForms[record.id] || {
-      systemInvoiceNumber: '',
-      systemInvoiceDate: defaultSystemInvoiceDate(),
-    };
-    if (!form.systemInvoiceNumber.trim() || !form.systemInvoiceDate.trim()) {
-      window.alert('شماره فاکتور سیستمی و تاریخ آن الزامی است');
-      return;
-    }
+  const approveFinancialInvoice = (payload: FinancialInvoiceApprovalPayload) => {
     execute({
       kind: 'APPROVE_FINANCIAL_INVOICE',
-      invoiceId: record.id,
-      systemInvoiceNumber: form.systemInvoiceNumber.trim(),
-      systemInvoiceDate: form.systemInvoiceDate.trim(),
+      invoiceId: payload.invoiceId,
+      systemInvoiceNumber: payload.systemInvoiceNumber,
+      systemInvoiceDate: payload.systemInvoiceDate,
+      sepidarAmount: payload.sepidarAmount,
     });
   };
 
-  const canApproveInvoice = (record: any) =>
-    record.kind === 'INVOICE_CANDIDATE' &&
-    !['ISSUED', 'POSTED', 'VOIDED'].includes(record.status);
+  useEffect(() => {
+    const shouldAutoPrint = new URLSearchParams(window.location.search).get('print') === '1';
+    if (!loading && data?.contract && shouldAutoPrint) {
+      const timeoutId = window.setTimeout(() => window.print(), 400);
+      return () => window.clearTimeout(timeoutId);
+    }
+  }, [loading, data?.contract]);
+
+  const openAccountingPdf = async () => {
+    setPrintLoading(true);
+    const pdfWindow = window.open('', '_blank', 'noopener,noreferrer');
+    try {
+      const response = await accountingAPI.getContractPdf(params.contractId);
+      const url = response.data?.data?.url;
+      if (!response.data?.success || !url) throw new Error('PDF url was not returned');
+      if (pdfWindow) {
+        pdfWindow.location.href = toPdfViewerUrl(url);
+      } else {
+        window.open(toPdfViewerUrl(url), '_blank', 'noopener,noreferrer');
+      }
+    } catch (error) {
+      pdfWindow?.close();
+      console.error('Accounting PDF generation failed:', error);
+      window.alert('چاپ پرونده حسابداری انجام نشد');
+    } finally {
+      setPrintLoading(false);
+    }
+  };
 
   if (loading) return <ErpLoading />;
   if (!data?.contract) {
@@ -127,6 +130,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
       description="نمای عملیاتی حسابداری از قرارداد، بدون تغییر دادن اصل قرارداد فروش."
       backHref="/dashboard/accounting/contracts"
       actions={[
+        { label: 'چاپ پرونده', icon: FaPrint, onClick: openAccountingPdf, tone: 'purple', disabled: printLoading },
         { label: 'به‌روزرسانی', icon: FaSync, onClick: loadDetail, tone: 'neutral' },
       ]}
       metrics={[
@@ -136,9 +140,10 @@ export default function AccountingContractDetailPage({ params }: { params: { con
         { label: 'مانده', value: money(contract.accounting.remainingAmount), icon: FaMoneyCheckAlt, tone: contract.accounting.receivableStatus === 'OVERDUE' ? 'danger' : 'warning' },
       ]}
     >
-      <ErpTwoColumn
-        main={
-          <>
+      <div className="accounting-print-view">
+        <ErpTwoColumn
+          main={
+            <>
             <ErpSection title="خلاصه قرارداد">
               <ErpSummaryGrid
                 columns={3}
@@ -184,32 +189,12 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                     ].filter(Boolean).join(' · ')}
                     amount={money(record.amount, record.currency)}
                     status={<StatusBadge status={record.status} />}
-                    footer={canApproveInvoice(record) ? (
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
-                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                          <input
-                            className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                            placeholder="شماره فاکتور سیستمی"
-                            value={approvalForms[record.id]?.systemInvoiceNumber || ''}
-                            onChange={(event) => updateApprovalForm(record.id, 'systemInvoiceNumber', event.target.value)}
-                          />
-                          <input
-                            type="date"
-                            className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                            value={approvalForms[record.id]?.systemInvoiceDate || defaultSystemInvoiceDate()}
-                            onChange={(event) => updateApprovalForm(record.id, 'systemInvoiceDate', event.target.value)}
-                          />
-                        </div>
-                        <ErpButton
-                          label="تایید مالی"
-                          icon={FaCheckCircle}
-                          tone="success"
-                          disabled={actionLoading}
-                          onClick={() => approveFinancialInvoice(record)}
-                        />
-                      </div>
-                    ) : record.systemInvoiceNumber ? (
-                      <p className="text-xs text-slate-500 dark:text-slate-400">اطلاعات فاکتور سیستمی پس از تایید مالی قفل شده است.</p>
+                    footer={record.kind === 'INVOICE_CANDIDATE' ? (
+                      <FinancialInvoiceApprovalForm
+                        invoice={record}
+                        busy={actionLoading}
+                        onApprove={approveFinancialInvoice}
+                      />
                     ) : undefined}
                   />
                 ))}
@@ -243,10 +228,10 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                 ))}
               </div>
             </ErpSection>
-          </>
-        }
-        aside={
-          <>
+            </>
+          }
+          aside={
+            <>
             <ErpSection title="اقدام سریع">
               <div className="space-y-2">
                 <ErpButton
@@ -341,9 +326,10 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                 ))}
               </div>
             </ErpSection>
-          </>
-        }
-      />
+            </>
+          }
+        />
+      </div>
     </ErpPage>
   );
 }

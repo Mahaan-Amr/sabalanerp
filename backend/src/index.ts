@@ -151,6 +151,21 @@ app.use('/files/contracts', express.static(path.join(process.cwd(), 'storage', '
   }
 }));
 
+app.use('/files/accounting-contracts', express.static(path.join(process.cwd(), 'storage', 'accounting-contracts'), {
+  etag: false,
+  maxAge: '0',
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
+  }
+}));
+
+app.get('/favicon.ico', (_req, res) => {
+  res.status(204).end();
+});
+
 // Health check
 app.get('/api/health', async (req, res) => {
   try {

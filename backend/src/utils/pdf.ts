@@ -10,6 +10,12 @@ export interface GeneratePdfOptions {
   scale?: number;
   widthMm?: number;
   heightMm?: number;
+  margin?: {
+    top?: string;
+    right?: string;
+    bottom?: string;
+    left?: string;
+  };
 }
 
 // Ensure a directory exists
@@ -52,7 +58,7 @@ export async function generatePdfFromHtml(options: GeneratePdfOptions): Promise<
       width,
       height,
       printBackground: true,
-      margin: { top: '3mm', right: '5px', bottom: '3mm', left: '3mm' },
+      margin: options.margin || { top: '3mm', right: '5px', bottom: '3mm', left: '3mm' },
       scale: options.scale ?? 1.0
     });
   } finally {

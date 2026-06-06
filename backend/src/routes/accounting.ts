@@ -1,8 +1,11 @@
 import express, { Response } from 'express';
+import path from 'path';
 import { body, validationResult } from 'express-validator';
 import { protect, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess } from '../middleware/feature';
+import { generatePdfFromHtml } from '../utils/pdf';
+import { renderAccountingContractHtml } from '../utils/accountingPrintTemplate';
 import {
   executeAccountingAction,
   getAccountingSettings,
@@ -19,6 +22,7 @@ import {
 } from '../services/accountingService';
 
 const router = express.Router();
+const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
 
 const accountingView = [
   protect,
@@ -41,6 +45,15 @@ const handleValidation = (req: AuthRequest, res: Response) => {
     details: errors.array()
   });
   return true;
+};
+
+const resolveAccountingPdfUrl = (req: AuthRequest, pdfPath: string): string | null => {
+  const fileName = path.basename(pdfPath);
+  if (!fileName) return null;
+
+  const host = req.get('host');
+  const protocol = req.protocol || 'http';
+  return `${protocol}://${host}/files/accounting-contracts/${encodeURIComponent(fileName)}`;
 };
 
 router.get('/workspace', accountingView, async (_req: AuthRequest, res: Response) => {
@@ -69,6 +82,46 @@ router.get('/contracts/:contractId', accountingView, async (req: AuthRequest, re
     res.json({ success: true, data });
   } catch (error: any) {
     console.error('Accounting contract detail error:', error);
+    res.status(error.message === 'Contract not found' ? 404 : 500).json({
+      success: false,
+      error: error.message === 'Contract not found' ? 'Contract not found' : 'Server error'
+    });
+  }
+});
+
+router.get('/contracts/:contractId/pdf', accountingView, async (req: AuthRequest, res: Response) => {
+  try {
+    const data = await getAccountingContractDetail(req.params.contractId);
+    const html = renderAccountingContractHtml(data);
+    const contractNumber = data.contract?.contractNumber || req.params.contractId;
+    const timestamp = Date.now();
+    const pdfPath = await generatePdfFromHtml({
+      htmlContent: html,
+      outputDir: ACCOUNTING_PDF_DIR,
+      fileName: `accounting_contract_${contractNumber}_${timestamp}`,
+      landscape: true,
+      scale: 0.94,
+      widthMm: 297,
+      heightMm: 210,
+      margin: { top: '6mm', right: '6mm', bottom: '6mm', left: '6mm' }
+    });
+    const url = resolveAccountingPdfUrl(req, pdfPath);
+
+    if (!url) {
+      res.status(500).json({ success: false, error: 'Failed to build PDF url' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        url,
+        generatedAt: new Date().toISOString(),
+        fromCache: false
+      }
+    });
+  } catch (error: any) {
+    console.error('Accounting contract PDF error:', error);
     res.status(error.message === 'Contract not found' ? 404 : 500).json({
       success: false,
       error: error.message === 'Contract not found' ? 'Contract not found' : 'Server error'
@@ -182,7 +235,8 @@ router.post(
     body('paymentEventId').optional().isString(),
     body('note').optional().isString(),
     body('systemInvoiceNumber').optional().isString(),
-    body('systemInvoiceDate').optional().isString()
+    body('systemInvoiceDate').optional().isString(),
+    body('sepidarAmount').optional().isNumeric()
   ],
   async (req: AuthRequest, res: Response) => {
     if (handleValidation(req, res)) return;

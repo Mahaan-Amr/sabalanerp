@@ -256,13 +256,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
         <div 
+          data-dashboard-overlay
           className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
       {/* Sidebar */}
-      <div className={`fixed inset-y-0 right-0 z-50 w-[min(86vw,320px)] transform overflow-y-auto border-l border-slate-200 bg-white/95 shadow-xl backdrop-blur-xl transition-transform duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-950/95 lg:overflow-hidden ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'} lg:translate-x-0 ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-64'}`}>
+      <div data-dashboard-sidebar className={`fixed inset-y-0 right-0 z-50 w-[min(86vw,320px)] transform overflow-y-auto border-l border-slate-200 bg-white/95 shadow-xl backdrop-blur-xl transition-transform duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-950/95 lg:overflow-hidden ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'} lg:translate-x-0 ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-64'}`}>
         <div className="flex min-h-full flex-col lg:h-full">
           {/* Sidebar Header */}
           <div className={`flex items-center border-b border-slate-200 p-4 dark:border-slate-800 lg:p-6 ${sidebarCollapsed ? 'lg:justify-center lg:p-4' : 'justify-between'}`}>
@@ -344,9 +345,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       </div>
 
       {/* Main Content */}
-      <div className={`transition-all duration-300 ${sidebarCollapsed ? 'lg:mr-20' : 'lg:mr-64'}`}>
+      <div data-dashboard-content className={`transition-all duration-300 ${sidebarCollapsed ? 'lg:mr-20' : 'lg:mr-64'}`}>
         {/* Top Bar */}
-        <header className="border-b border-slate-200 bg-white/85 p-4 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/70">
+        <header data-dashboard-topbar className="border-b border-slate-200 bg-white/85 p-4 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/70">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <button
@@ -389,7 +390,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         </header>
 
         {/* Page Content */}
-        <main className="p-4 sm:p-6">
+        <main data-dashboard-main className="p-4 sm:p-6">
           {children}
         </main>
       </div>

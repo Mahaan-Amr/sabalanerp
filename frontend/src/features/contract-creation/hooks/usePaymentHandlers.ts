@@ -5,6 +5,11 @@ import { useState, useCallback } from 'react';
 import type { ContractWizardData, PaymentEntry, PaymentEntryMethod } from '../types/contract.types';
 import { sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 
+export type PaymentEntryFieldErrors = Partial<Record<
+  'amount' | 'paymentDate' | 'checkNumber' | 'checkOwnerName' | 'handoverDate' | 'nationalCode',
+  string
+>>;
+
 interface UsePaymentHandlersOptions {
   wizardData: ContractWizardData;
   updateWizardData: (updates: Partial<ContractWizardData>) => void;
@@ -15,11 +20,10 @@ interface UsePaymentHandlersOptions {
 export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
   const { wizardData, updateWizardData, setErrors, getCurrentPersianDate } = options;
 
-  // Modal visibility
   const [showPaymentEntryModal, setShowPaymentEntryModal] = useState(false);
   const [editingPaymentEntryId, setEditingPaymentEntryId] = useState<string | null>(null);
-  
-  // Payment entry form state (CASH_CARD | CASH_SHIBA | CHECK)
+  const [paymentEntryErrors, setPaymentEntryErrors] = useState<PaymentEntryFieldErrors>({});
+
   const [paymentEntryForm, setPaymentEntryForm] = useState<Partial<PaymentEntry>>({
     method: 'CASH_CARD',
     paymentDate: '',
@@ -62,10 +66,16 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
   }, [getCustomerNationalCode, isPaymentNationalCodeRequired]);
 
   const updatePaymentEntryForm = useCallback((updates: Partial<PaymentEntry>) => {
+    setPaymentEntryErrors((prev) => {
+      const next = { ...prev };
+      Object.keys(updates).forEach((key) => {
+        delete next[key as keyof PaymentEntryFieldErrors];
+      });
+      return next;
+    });
     setPaymentEntryForm((prev) => normalizePaymentEntryForm(prev, updates));
   }, [normalizePaymentEntryForm]);
 
-  // Handler to add a new payment entry
   const handleAddPaymentEntry = useCallback(() => {
     setEditingPaymentEntryId(null);
     const existingPaymentsSum = sumNumericValues(wizardData.payment.payments, (payment) => payment.amount);
@@ -79,10 +89,10 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       handoverDate: undefined,
       nationalCode: undefined
     }));
+    setPaymentEntryErrors({});
     setShowPaymentEntryModal(true);
   }, [wizardData.payment, getCurrentPersianDate, normalizePaymentEntryForm]);
 
-  // Handler to edit an existing payment entry (normalize legacy CASH to CASH_CARD/CASH_SHIBA)
   const handleEditPaymentEntry = useCallback((entryId: string) => {
     const entry = wizardData.payment.payments.find(p => p.id === entryId);
     if (entry) {
@@ -92,66 +102,64 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
         ? (entry.cashType === 'SHIBA' ? 'CASH_SHIBA' : 'CASH_CARD')
         : (entry.method as PaymentEntryMethod);
       setPaymentEntryForm(normalizePaymentEntryForm({ ...entry, method }));
+      setPaymentEntryErrors({});
       setShowPaymentEntryModal(true);
     }
   }, [wizardData.payment.payments, normalizePaymentEntryForm]);
 
-  // Handler to save payment entry (add or update)
   const handleSavePaymentEntry = useCallback(() => {
     const method = paymentEntryForm.method as PaymentEntryMethod | undefined;
+    const nextErrors: PaymentEntryFieldErrors = {};
+
     if (!method) {
       setErrors({ paymentMethod: 'نوع پرداخت را انتخاب کنید' });
       return;
     }
+
     const paymentAmount = toFiniteNumber(paymentEntryForm.amount);
     if (paymentAmount <= 0) {
-      setErrors({ paymentMethod: 'مبلغ باید بیشتر از صفر باشد' });
-      return;
+      nextErrors.amount = 'مبلغ باید بیشتر از صفر باشد';
     }
 
-    // نقدی (CASH_CARD / CASH_SHIBA): amount + paymentDate
     if (method === 'CASH_CARD' || method === 'CASH_SHIBA') {
       if (!paymentEntryForm.paymentDate || !paymentEntryForm.paymentDate.trim()) {
-        setErrors({ paymentMethod: 'تاریخ پرداخت الزامی است' });
-        return;
+        nextErrors.paymentDate = 'تاریخ پرداخت الزامی است';
       }
     }
 
-    // چک: checkNumber, checkOwnerName, amount, handoverDate, paymentDate (سررسید)
     if (method === 'CHECK') {
       if (!paymentEntryForm.checkNumber || !paymentEntryForm.checkNumber.trim()) {
-        setErrors({ paymentMethod: 'شماره چک الزامی است' });
-        return;
+        nextErrors.checkNumber = 'شماره چک الزامی است';
       }
       if (!paymentEntryForm.checkOwnerName || !paymentEntryForm.checkOwnerName.trim()) {
-        setErrors({ paymentMethod: 'نام صاحب چک الزامی است' });
-        return;
+        nextErrors.checkOwnerName = 'نام صاحب چک الزامی است';
       }
       if (!paymentEntryForm.handoverDate || !paymentEntryForm.handoverDate.trim()) {
-        setErrors({ paymentMethod: 'تاریخ تحویل چک الزامی است' });
-        return;
+        nextErrors.handoverDate = 'تاریخ تحویل چک الزامی است';
       }
       if (!paymentEntryForm.paymentDate || !paymentEntryForm.paymentDate.trim()) {
-        setErrors({ paymentMethod: 'تاریخ سررسید چک الزامی است' });
-        return;
+        nextErrors.paymentDate = 'تاریخ سررسید چک الزامی است';
       }
     }
 
     if (isPaymentNationalCodeRequired(paymentEntryForm.paymentDate)) {
       const normalizedNationalCode = paymentEntryForm.nationalCode?.trim() || '';
       if (!normalizedNationalCode) {
-        setErrors({ paymentMethod: 'کد ملی برای پرداخت با تاریخ غیر از امروز الزامی است' });
-        return;
+        nextErrors.nationalCode = 'کد ملی برای پرداخت با تاریخ غیر از امروز الزامی است';
+      } else if (normalizedNationalCode.length !== 10) {
+        nextErrors.nationalCode = 'کد ملی باید 10 رقم باشد';
       }
-      if (normalizedNationalCode.length !== 10) {
-        setErrors({ paymentMethod: 'کد ملی باید ۱۰ رقم باشد' });
-        return;
-      }
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setPaymentEntryErrors(nextErrors);
+      setErrors({});
+      return;
     }
 
     const entry: PaymentEntry = {
       id: editingPaymentEntryId || `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      method: method as PaymentEntryMethod,
+      method,
       amount: paymentAmount,
       paymentDate: paymentEntryForm.paymentDate!,
       description: paymentEntryForm.description,
@@ -176,7 +184,6 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       }
     });
 
-    // Close modal and reset form
     setShowPaymentEntryModal(false);
     setEditingPaymentEntryId(null);
     setPaymentEntryForm({
@@ -184,10 +191,10 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       paymentDate: '',
       amount: 0
     });
+    setPaymentEntryErrors({});
     setErrors({});
   }, [paymentEntryForm, editingPaymentEntryId, wizardData.payment, updateWizardData, setErrors, isPaymentNationalCodeRequired]);
 
-  // Handler to delete a payment entry
   const handleDeletePaymentEntry = useCallback((entryId: string) => {
     const updatedPayments = wizardData.payment.payments.filter(p => p.id !== entryId);
     updateWizardData({
@@ -198,7 +205,6 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     });
   }, [wizardData.payment, updateWizardData]);
 
-  // Handler to close modal and reset state
   const handleClosePaymentEntryModal = useCallback(() => {
     setShowPaymentEntryModal(false);
     setEditingPaymentEntryId(null);
@@ -207,23 +213,21 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       paymentDate: '',
       amount: 0
     });
+    setPaymentEntryErrors({});
     setErrors({});
   }, [setErrors]);
 
   return {
-    // Modal state
     showPaymentEntryModal,
     setShowPaymentEntryModal,
     editingPaymentEntryId,
     setEditingPaymentEntryId,
-    
-    // Form state
     paymentEntryForm,
     setPaymentEntryForm,
     updatePaymentEntryForm,
+    paymentEntryErrors,
+    setPaymentEntryErrors,
     paymentEntryNationalCodeRequired,
-    
-    // Handlers
     handleAddPaymentEntry,
     handleEditPaymentEntry,
     handleSavePaymentEntry,
@@ -231,5 +235,3 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     handleClosePaymentEntryModal
   };
 };
-
-

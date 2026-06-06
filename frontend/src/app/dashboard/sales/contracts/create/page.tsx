@@ -4044,7 +4044,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
   const validateCurrentStep = (): boolean => {
     const newErrors: Record<string, string> = {};
-    
+
     switch (currentStep) {
       case 1:
         if (!wizardData.contractDate) {
@@ -4061,16 +4061,15 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           newErrors.projectId = 'انتخاب پروژه الزامی است';
         }
         break;
-      case 4: // Product Selection
+      case 4:
         if (wizardData.products.length === 0) {
           newErrors.products = 'انتخاب حداقل یک محصول الزامی است';
         }
         break;
-      case 5: // Delivery Schedule
+      case 5:
         if (wizardData.deliveries.length === 0) {
           newErrors.deliveries = 'تعیین حداقل یک تحویل الزامی است';
         } else {
-          // Validate each delivery
           wizardData.deliveries.forEach((delivery, index) => {
             if (!delivery.deliveryDate) {
               newErrors[`delivery_${index}_date`] = 'تاریخ تحویل الزامی است';
@@ -4079,13 +4078,13 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
               newErrors[`delivery_${index}_projectManager`] = 'نام مدیر پروژه الزامی است';
             }
             if (!delivery.receiverName || delivery.receiverName.trim() === '') {
-              newErrors[`delivery_${index}_receiver`] = 'نام تحویل‌گیرنده الزامی است';
+              newErrors[`delivery_${index}_receiver`] = 'نام تحویل گیرنده الزامی است';
             }
             if (delivery.products.length === 0) {
               newErrors[`delivery_${index}_products`] = 'حداقل یک محصول باید در تحویل وجود داشته باشد';
             }
           });
-          
+
           const getDeliveryUnit = (product: ContractProduct | undefined): 'meter' | 'squareMeter' | 'count' => {
             if (product?.productType === 'longitudinal') return 'meter';
             if (product?.productType === 'slab') return 'squareMeter';
@@ -4106,101 +4105,91 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             return 'عدد';
           };
 
-          // Validate that all products are distributed across deliveries in their delivery unit
-          const totalProductQuantities = new Map<number, number>();
+          const remainingByProductIndex = new Map<number, number>();
           wizardData.products.forEach((product, index) => {
-            totalProductQuantities.set(index, getDeliveryTargetAmount(product));
+            remainingByProductIndex.set(index, getDeliveryTargetAmount(product));
           });
-          
+
           wizardData.deliveries.forEach(delivery => {
             delivery.products.forEach(dp => {
-              const current = totalProductQuantities.get(dp.productIndex) || 0;
-              totalProductQuantities.set(dp.productIndex, current - (dp.amount ?? dp.quantity ?? 0));
+              const current = remainingByProductIndex.get(dp.productIndex) || 0;
+              remainingByProductIndex.set(dp.productIndex, current - (dp.amount ?? dp.quantity ?? 0));
             });
           });
-          
-          // Check for over-delivery
-          totalProductQuantities.forEach((remaining, productIndex) => {
-            if (remaining < 0) {
+
+          remainingByProductIndex.forEach((remaining, productIndex) => {
+            if (remaining < -0.01) {
               const product = wizardData.products[productIndex];
               newErrors.deliveries = `مقدار تحویل برای محصول "${product.stoneName || product.product?.namePersian || 'نامشخص'}" بیشتر از مقدار کل است`;
             }
           });
-          
-          // Check that all products are fully distributed
+
           const undistributedProducts: string[] = [];
-          totalProductQuantities.forEach((remaining, productIndex) => {
-            if (remaining > 0) {
+          remainingByProductIndex.forEach((remaining, productIndex) => {
+            if (remaining > 0.01) {
               const product = wizardData.products[productIndex];
               undistributedProducts.push(
-                `"${product.stoneName || product.product?.namePersian || 'نامشخص'}" (${formatDisplayNumber(remaining)} واحد باقی‌مانده)`
+                `"${product.stoneName || product.product?.namePersian || 'نامشخص'}" (${formatDisplayNumber(remaining)} ${getDeliveryUnitLabel(getDeliveryUnit(product))} باقی مانده)`
               );
             }
           });
-          
+
           if (undistributedProducts.length > 0) {
-            newErrors.deliveries = `تمام محصولات باید در تحویل‌ها توزیع شوند. محصولات زیر هنوز به طور کامل توزیع نشده‌اند: ${undistributedProducts.join('، ')}`;
+            newErrors.deliveries = `تمام محصولات باید در تحویل ها توزیع شوند. این موارد هنوز کامل توزیع نشده اند: ${undistributedProducts.join('، ')}`;
           }
         }
         break;
-      case 6: // Payment Method
+      case 6:
         if (wizardData.payment.payments.length === 0) {
           newErrors.paymentMethod = 'حداقل یک پرداخت باید اضافه شود';
         } else {
           wizardData.payment.payments.forEach((payment, index) => {
             const method = (payment as { method?: string }).method;
             if (!method) {
-              newErrors.paymentMethod = `نوع پرداخت برای پرداخت #${index + 1} الزامی است`;
+              newErrors.paymentMethod = `نوع پرداخت برای پرداخت ${index + 1} الزامی است`;
               return;
             }
             if (!payment.amount || payment.amount <= 0) {
-              newErrors.paymentMethod = `مبلغ برای پرداخت #${index + 1} باید بیشتر از صفر باشد`;
+              newErrors.paymentMethod = `مبلغ پرداخت ${index + 1} باید بیشتر از صفر باشد`;
               return;
             }
-            if (method === 'CASH_CARD' || method === 'CASH_SHIBA') {
-              if (!payment.paymentDate || !String(payment.paymentDate).trim()) {
-                newErrors.paymentMethod = `تاریخ پرداخت برای پرداخت #${index + 1} الزامی است`;
-                return;
-              }
+            if ((method === 'CASH_CARD' || method === 'CASH_SHIBA') && !String(payment.paymentDate || '').trim()) {
+              newErrors.paymentMethod = `تاریخ پرداخت برای پرداخت ${index + 1} الزامی است`;
+              return;
             }
             if (method === 'CHECK') {
-              if (!payment.checkNumber || !String(payment.checkNumber).trim()) {
-                newErrors.paymentMethod = `شماره چک برای پرداخت #${index + 1} (چک) الزامی است`;
+              if (!String(payment.checkNumber || '').trim()) {
+                newErrors.paymentMethod = `شماره چک برای پرداخت ${index + 1} الزامی است`;
                 return;
               }
-              if (!payment.checkOwnerName || !String(payment.checkOwnerName).trim()) {
-                newErrors.paymentMethod = `نام صاحب چک برای پرداخت #${index + 1} (چک) الزامی است`;
+              if (!String(payment.checkOwnerName || '').trim()) {
+                newErrors.paymentMethod = `نام صاحب چک برای پرداخت ${index + 1} الزامی است`;
                 return;
               }
-              if (!payment.handoverDate || !String(payment.handoverDate).trim()) {
-                newErrors.paymentMethod = `تاریخ تحویل چک برای پرداخت #${index + 1} الزامی است`;
+              if (!String(payment.handoverDate || '').trim()) {
+                newErrors.paymentMethod = `تاریخ تحویل چک برای پرداخت ${index + 1} الزامی است`;
                 return;
               }
-              if (!payment.paymentDate || !String(payment.paymentDate).trim()) {
-                newErrors.paymentMethod = `تاریخ سررسید چک برای پرداخت #${index + 1} الزامی است`;
+              if (!String(payment.paymentDate || '').trim()) {
+                newErrors.paymentMethod = `تاریخ سررسید چک برای پرداخت ${index + 1} الزامی است`;
                 return;
               }
-            }
-            if (method === 'CASH' && !(payment as { cashType?: string }).cashType) {
-              newErrors.paymentMethod = `نوع پرداخت نقدی برای پرداخت #${index + 1} الزامی است`;
-              return;
             }
             if (payment.paymentDate && String(payment.paymentDate).trim() !== getCurrentPersianDate()) {
               const paymentNationalCode = String(payment.nationalCode || '').trim();
               if (!paymentNationalCode) {
-                newErrors.paymentMethod = `کد ملی برای پرداخت #${index + 1} با تاریخ غیر از امروز الزامی است`;
+                newErrors.paymentMethod = `کد ملی برای پرداخت ${index + 1} با تاریخ غیر از امروز الزامی است`;
                 return;
               }
               if (paymentNationalCode.length !== 10) {
-                newErrors.paymentMethod = `کد ملی پرداخت #${index + 1} باید ۱۰ رقم باشد`;
-                return;
+                newErrors.paymentMethod = `کد ملی پرداخت ${index + 1} باید 10 رقم باشد`;
               }
             }
           });
         }
         break;
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -10319,6 +10308,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             onSave={paymentHandlers.handleSavePaymentEntry}
             currency={wizardData.payment.currency}
             error={errors.paymentMethod}
+            fieldErrors={paymentHandlers.paymentEntryErrors}
             isEdit={!!paymentHandlers.editingPaymentEntryId}
             nationalCodeRequired={paymentHandlers.paymentEntryNationalCodeRequired}
           />

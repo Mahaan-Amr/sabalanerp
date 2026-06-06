@@ -277,7 +277,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                   </button>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 pb-28 sm:p-6 sm:pb-6">
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6">
 
                 {/* Error Display */}
                 {errors.products && (
@@ -2183,6 +2183,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                           </button>
                       </div>
                     </div>
+                  </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           تعداد
@@ -2224,8 +2225,6 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                         />
                       </div>
                         </div>
-                      )
-                    </div>
                   )}
                   
                   {/* Slab-specific sections */}
@@ -2902,71 +2901,6 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                         </div>
                       );
                     })()}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        تعداد
-                      </label>
-                      <FormattedNumberInput
-                        value={getQuantityDisplayValue()}
-                        onFocus={() => handleFieldFocus('quantity', getQuantityDisplayValue(), 0)}
-                        onChange={(value) => {
-                          // Check if quantity is being cleared/deleted (empty or 0)
-                          const isQuantityCleared = !value || value === 0;
-                          
-                          // Mark quantity as interacted
-                          if (!hasQuantityBeenInteracted) {
-                            setHasQuantityBeenInteracted(true);
-                            console.log('🎯 Quantity First Interaction');
-                          }
-                          
-                          // Handle mandatory pricing based on quantity state
-                          if (isQuantityCleared) {
-                            // If quantity is cleared, uncheck mandatory pricing and reset interaction state
-                            
-                            setHasQuantityBeenInteracted(false);
-                            console.log('🔄 Quantity Cleared - Deactivating mandatory pricing and resetting interaction state');
-                          } else {
-                            // If quantity has a value, activate mandatory pricing
-                            setIsMandatory(true);
-                            console.log('✅ Quantity Has Value - Activating mandatory pricing');
-                          }
-                          
-                          // Update the quantity
-                          setProductConfig((prev: any) => {
-                            const updatedConfig = { ...prev, quantity: value };
-                            // Use effective quantity for calculations
-                            const effectiveQuantity = value || 1;
-                            // Trigger smart calculation with effective quantity
-                            const smartResult = handleSmartCalculation('quantity', effectiveQuantity, updatedConfig, lengthUnit, widthUnit, effectiveQuantity);
-                            
-                            // Recalculate cutting cost automatically using helper function
-                            const updatedCuttingCost = calculateAutoCuttingCost(
-                              updatedConfig.length,
-                              lengthUnit,
-                              prev.cuttingCostPerMeter || null,
-                              effectiveQuantity
-                            );
-                            
-                            return {
-                              ...updatedConfig,
-                              squareMeters: smartResult.squareMeters,
-                              cuttingCost: updatedCuttingCost
-                            };
-                          });
-                          
-                          console.log('📊 Quantity Changed:', {
-                            displayValue: value,
-                            effectiveQuantity: value || 1,
-                            isQuantityCleared,
-                            hasBeenInteracted: !isQuantityCleared,
-                            mandatoryActivated: !isQuantityCleared
-                          });
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                        min={1}
-                        placeholder="تعداد"
-                      />
-                    </div>
                   </>)}
 
                   {(currentProductType === 'longitudinal' || currentProductType === 'slab') && (() => {
@@ -3531,7 +3465,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
             </div>
 
                 {/* Action Buttons */}
-                <div className="sticky bottom-0 -mx-4 mt-6 flex justify-end gap-3 border-t border-slate-200 bg-white/95 p-4 backdrop-blur dark:border-slate-700 dark:bg-gray-800/95 sm:-mx-6 sm:px-6">
+                <div className="mt-6 flex flex-col-reverse gap-3 border-t border-slate-200 bg-white pt-4 dark:border-slate-700 dark:bg-gray-800 sm:flex-row sm:justify-end">
                   <button
                     onClick={() => {
                       // Validate before closing if it's a stair system
@@ -3559,7 +3493,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       
                       
                     }}
-                    className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+                    className="w-full rounded-lg px-4 py-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 sm:w-auto"
                   >
                     انصراف
                   </button>
@@ -3569,7 +3503,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       onSave();
                     }}
                     disabled={!currentProductType}
-                    className="px-6 py-2 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-all duration-200 font-medium"
+                    className="w-full rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 px-6 py-2 font-medium text-white transition-all duration-200 hover:from-teal-600 hover:to-teal-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                   >
                     {isEditMode ? 'ذخیره تغییرات' : 'افزودن به قرارداد'}
                   </button>

@@ -19,6 +19,7 @@ import {
 import { crmAPI, dashboardAPI } from '@/lib/api';
 import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
 import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
+import { InlineFieldError, getBackendErrorMessage, mapBackendValidationErrors } from '@/lib/formErrors';
 import {
   normalizeIranianMobile,
   normalizePhoneDigits,
@@ -117,15 +118,6 @@ const normalizePhoneTypeValue = (value: unknown): PhoneType => {
   const normalized = String(value || '').toLowerCase();
   return ['mobile', 'home', 'work', 'other'].includes(normalized) ? normalized as PhoneType : 'mobile';
 };
-const formatApiValidationError = (errorData: any, fallback: string) => {
-  const details = Array.isArray(errorData?.details) ? errorData.details : [];
-  const detailMessage = details
-    .map((detail: any) => detail?.msg || detail?.message)
-    .filter(Boolean)
-    .join('، ');
-  return detailMessage || errorData?.error || fallback;
-};
-
 export default function EditCustomerPage() {
   const params = useParams();
   const router = useRouter();
@@ -434,7 +426,16 @@ export default function EditCustomerPage() {
       router.push(returnPath);
     } catch (err: any) {
       console.error('Error saving customer:', err);
-      setError(formatApiValidationError(err.response?.data, 'خطا در ذخیره اطلاعات مشتری'));
+      const errorData = err.response?.data;
+      const fieldErrors = mapBackendValidationErrors(errorData, {
+        number: 'phones',
+        mobile: 'contacts',
+        projectManagerNumber: 'projectManagerNumber'
+      });
+      if (Object.keys(fieldErrors).length > 0) {
+        setErrors((prev) => ({ ...prev, ...fieldErrors }));
+      }
+      setError(getBackendErrorMessage(errorData, 'خطا در ذخیره اطلاعات مشتری'));
     } finally {
       setSaving(false);
     }
@@ -589,6 +590,7 @@ export default function EditCustomerPage() {
           <div>
             <label className={labelClass}>شماره تماس مدیر پروژه</label>
             <input className={inputClass} value={formData.projectManagerNumber} onChange={(e) => updateField('projectManagerNumber', e.target.value)} />
+            <InlineFieldError message={errors.projectManagerNumber} />
           </div>
         </div>
       </section>

@@ -7,6 +7,7 @@ import type { ContractWizardData } from '../types/contract.types';
 import { salesAPI } from '@/lib/api';
 import { PersianCalendar } from '@/lib/persian-calendar';
 import { sumNumericValues } from '@/lib/numberFormat';
+import { mapAxiosFormErrors } from '@/lib/formErrors';
 import { CONTRACT_DRAFT_STORAGE_KEY } from '../utils/contractDraftStorage';
 
 interface UseContractSubmissionOptions {
@@ -236,13 +237,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       console.error('Error creating contract:', error);
       console.error('Error response:', error.response?.data);
       
-      if (error.response?.data?.details) {
-        // Show validation errors
-        const validationErrors = error.response.data.details.map((err: any) => err.msg).join(', ');
-        setErrors({ general: `خطاهای اعتبارسنجی: ${validationErrors}` });
-      } else {
-        setErrors({ general: error.response?.data?.error || 'خطا در ایجاد قرارداد' });
-      }
+      setErrors(mapAxiosFormErrors(error, 'خطا در ایجاد قرارداد'));
     } finally {
       setIsSubmitting(false);
       setLoading(false);

@@ -23,6 +23,7 @@ import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
+import { InlineFieldError, mapAxiosFormErrors } from '@/lib/formErrors';
 import {
   normalizeIranianMobile,
   normalizePhoneDigits,
@@ -462,7 +463,17 @@ export default function CreateCustomerPage() {
           submit: 'مشتری با این شماره تماس یا کد ملی قبلا ثبت شده است. از مشتری‌های پیشنهادی انتخاب کنید.'
         });
       } else {
-        setErrors({ submit: error.response?.data?.error || 'خطا در ایجاد مشتری' });
+        const mappedErrors = mapAxiosFormErrors(error, 'خطا در ایجاد مشتری', {
+          phoneNumbers: 'phoneNumber1',
+          'phoneNumbers.0.number': 'phoneNumber1',
+          'phoneNumbers[0].number': 'phoneNumber1',
+          'phoneNumbers.1.number': 'phoneNumber2',
+          'phoneNumbers[1].number': 'phoneNumber2',
+          'projectAddresses.0.projectManagerNumber': 'projectManagerNumber',
+          'projectAddresses[0].projectManagerNumber': 'projectManagerNumber'
+        });
+        const { general, ...fieldErrors } = mappedErrors;
+        setErrors({ ...fieldErrors, submit: general || error.response?.data?.error || 'خطا در ایجاد مشتری' });
       }
     } finally {
       setLoading(false);
@@ -584,6 +595,7 @@ export default function CreateCustomerPage() {
                   className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
                   placeholder="شماره تماس دوم"
                 />
+                <InlineFieldError message={errors.phoneNumber2} />
               </div>
 
               <div>
@@ -691,6 +703,7 @@ export default function CreateCustomerPage() {
                         className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
                         placeholder="شماره واتساپ"
                       />
+                      <InlineFieldError message={errors.whatsappNumber} />
                     </div>
 
                     <div>
@@ -813,6 +826,7 @@ export default function CreateCustomerPage() {
                         className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
                         placeholder="شماره تماس مدیر پروژه"
                       />
+                      <InlineFieldError message={errors.projectManagerNumber} />
                     </div>
                   </div>
                 </div>

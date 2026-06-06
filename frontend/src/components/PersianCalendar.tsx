@@ -41,6 +41,7 @@ export default function PersianCalendarComponent({
 
   const monthNames = PersianCalendar.getMonthNames();
   const dayNames = PersianCalendar.getDayNames();
+  const compactDayNames = ['ش', 'ی', 'د', 'س', 'چ', 'پ', 'ج'];
 
   useEffect(() => {
     // Only update if:
@@ -173,7 +174,9 @@ export default function PersianCalendarComponent({
       const viewportHeight = window.innerHeight;
       const viewportWidth = window.innerWidth;
       const calendarHeight = 400; // Approximate calendar height
-      const calendarWidth = Math.max(rect.width, 300); // Minimum calendar width
+      const maxViewportWidth = viewportWidth - 32;
+      const minimumCalendarWidth = Math.min(340, maxViewportWidth);
+      const calendarWidth = Math.min(Math.max(rect.width, minimumCalendarWidth), maxViewportWidth);
       
       // Calculate position
       let top = rect.bottom + 8;
@@ -290,7 +293,7 @@ export default function PersianCalendarComponent({
       {/* Calendar Dropdown Portal */}
       {isOpen && typeof window !== 'undefined' && createPortal(
         <div 
-          className="persian-calendar-portal fixed glass-liquid-card p-4 z-[99999] shadow-2xl border border-white/20" 
+          className="persian-calendar-portal fixed glass-liquid-card p-3 sm:p-4 z-[99999] shadow-2xl border border-slate-200 dark:border-white/20"
           style={{ 
             top: `${portalPosition.top}px`,
             left: `${portalPosition.left}px`,
@@ -374,16 +377,21 @@ export default function PersianCalendarComponent({
           )}
 
           {/* Day Names */}
-          <div className="grid grid-cols-7 gap-1 mb-2">
-            {dayNames.map((dayName) => (
-              <div key={dayName} className="text-center text-sm text-secondary py-2">
-                {dayName}
+          <div className="grid grid-cols-7 gap-0.5 sm:gap-1 mb-2" dir="rtl">
+            {dayNames.map((dayName, index) => (
+              <div
+                key={dayName}
+                className="min-w-0 text-center text-xs sm:text-sm font-medium text-secondary py-2 leading-5 whitespace-nowrap"
+                title={dayName}
+              >
+                <span className="sm:hidden">{compactDayNames[index]}</span>
+                <span className="hidden sm:inline">{dayName}</span>
               </div>
             ))}
           </div>
 
           {/* Calendar Grid */}
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-0.5 sm:gap-1">
             {/* Empty cells for days before month starts */}
             {Array.from({ length: firstDay }, (_, i) => (
               <div key={`empty-${i}`} className="h-8"></div>

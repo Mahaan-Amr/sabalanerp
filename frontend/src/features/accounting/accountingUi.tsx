@@ -18,6 +18,7 @@ import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { ErpBadge, ErpButton, ErpCard, type ErpTone } from '@/components/erp';
 import { formatDisplayNumber, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
+import { InlineFieldError } from '@/lib/formErrors';
 
 export type AccountingMetric = {
   count?: number;
@@ -264,20 +265,60 @@ export function FinancialInvoiceApprovalForm({
   const [systemInvoiceNumber, setSystemInvoiceNumber] = React.useState('');
   const [systemInvoiceDate, setSystemInvoiceDate] = React.useState(PersianCalendar.now());
   const [sepidarAmount, setSepidarAmount] = React.useState(0);
+  const [errors, setErrors] = React.useState<Partial<Record<'systemInvoiceNumber' | 'systemInvoiceDate' | 'sepidarAmount', string>>>({});
 
   React.useEffect(() => {
     if (!invoice) return;
     setSystemInvoiceNumber(invoice.systemInvoiceNumber || '');
     setSystemInvoiceDate(invoice.systemInvoiceDate ? PersianCalendar.toPersian(invoice.systemInvoiceDate) : PersianCalendar.now());
     setSepidarAmount(invoice.sepidarAmount != null ? toFiniteNumber(invoice.sepidarAmount) : 0);
+    setErrors({});
   }, [invoice?.id]);
 
   if (!invoice) return null;
 
   const expectedAmount = toFiniteNumber(invoice.amount);
   const hasMismatch = sepidarAmount > 0 && Math.round(sepidarAmount) !== Math.round(expectedAmount);
-  const isValid = systemInvoiceNumber.trim().length > 0 && systemInvoiceDate.trim().length > 0 && sepidarAmount > 0 && !hasMismatch;
   const locked = isInvoiceLocked(invoice);
+  const fieldClass = (field: keyof typeof errors) =>
+    `min-h-11 w-full rounded-lg border bg-slate-50 px-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:bg-slate-900 dark:text-white ${errors[field] ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'}`;
+
+  const clearError = (field: keyof typeof errors) => {
+    setErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const approve = () => {
+    const nextErrors: typeof errors = {};
+
+    if (!systemInvoiceNumber.trim()) {
+      nextErrors.systemInvoiceNumber = 'شماره فاکتور سیستمی الزامی است';
+    }
+    if (!systemInvoiceDate.trim()) {
+      nextErrors.systemInvoiceDate = 'تاریخ فاکتور سیستمی الزامی است';
+    }
+    if (sepidarAmount <= 0) {
+      nextErrors.sepidarAmount = 'مبلغ سپیدار باید بیشتر از صفر باشد';
+    } else if (Math.round(sepidarAmount) !== Math.round(expectedAmount)) {
+      nextErrors.sepidarAmount = 'مبلغ سپیدار باید با مبلغ صورتحساب برابر باشد';
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
+      return;
+    }
+
+    onApprove({
+      invoiceId: invoice.id,
+      systemInvoiceNumber: systemInvoiceNumber.trim(),
+      systemInvoiceDate: PersianCalendar.toGregorian(systemInvoiceDate).toISOString(),
+      sepidarAmount,
+    });
+  };
 
   if (locked) {
     return (
@@ -298,47 +339,55 @@ export function FinancialInvoiceApprovalForm({
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">شماره فاکتور سیستمی</span>
           <input
-            className="min-h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            className={fieldClass('systemInvoiceNumber')}
             value={systemInvoiceNumber}
-            onChange={(event) => setSystemInvoiceNumber(event.target.value)}
+            onChange={(event) => {
+              clearError('systemInvoiceNumber');
+              setSystemInvoiceNumber(event.target.value);
+            }}
           />
+          <InlineFieldError message={errors.systemInvoiceNumber} className="mt-1 text-xs text-red-600 dark:text-red-300" />
         </label>
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">تاریخ فاکتور سیستمی</span>
-          <PersianCalendarComponent
-            value={systemInvoiceDate}
-            onChange={setSystemInvoiceDate}
-            placeholder="انتخاب تاریخ"
-            className="min-h-11 w-full"
-          />
+          <div className={fieldClass('systemInvoiceDate')}>
+            <PersianCalendarComponent
+              value={systemInvoiceDate}
+              onChange={(value) => {
+                clearError('systemInvoiceDate');
+                setSystemInvoiceDate(value);
+              }}
+              placeholder="انتخاب تاریخ"
+              className="min-h-11 w-full"
+            />
+          </div>
+          <InlineFieldError message={errors.systemInvoiceDate} className="mt-1 text-xs text-red-600 dark:text-red-300" />
         </label>
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">مبلغ سپیدار (ریال)</span>
           <FormattedNumberInput
             value={sepidarAmount}
-            onChange={setSepidarAmount}
+            onChange={(value) => {
+              clearError('sepidarAmount');
+              setSepidarAmount(value);
+            }}
             min={0}
             placeholder="مبلغ سپیدار"
-            className="min-h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            className={fieldClass('sepidarAmount')}
           />
+          <InlineFieldError message={errors.sepidarAmount} className="mt-1 text-xs text-red-600 dark:text-red-300" />
         </label>
       </div>
       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className={`text-xs ${hasMismatch ? 'text-red-600 dark:text-red-300' : 'text-slate-500 dark:text-slate-400'}`}>
           مبلغ صورتحساب سبلان: {money(expectedAmount)}
-          {hasMismatch ? ' · مبلغ سپیدار باید با مبلغ صورتحساب برابر باشد.' : ''}
         </p>
         <ErpButton
           label="تایید مالی"
           icon={accountingIcons.ok}
           tone="success"
-          disabled={!isValid || busy}
-          onClick={() => onApprove({
-            invoiceId: invoice.id,
-            systemInvoiceNumber: systemInvoiceNumber.trim(),
-            systemInvoiceDate: PersianCalendar.toGregorian(systemInvoiceDate).toISOString(),
-            sepidarAmount,
-          })}
+          disabled={busy}
+          onClick={approve}
         />
       </div>
     </div>

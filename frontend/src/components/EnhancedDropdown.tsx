@@ -231,7 +231,7 @@ export default function EnhancedDropdown({
   const renderOptions = () => {
     if (loading) {
       return (
-        <div className="p-4 text-center text-gray-400">
+        <div className="p-4 text-center text-secondary">
           <div className="animate-spin w-6 h-6 border-2 border-teal-500 border-t-transparent rounded-full mx-auto mb-2" />
           Loading...
         </div>
@@ -239,7 +239,7 @@ export default function EnhancedDropdown({
     }
 
     if (filteredOptions.length === 0) {
-      return <div className="p-4 text-center text-gray-400">{noOptionsText}</div>;
+      return <div className="p-4 text-center text-secondary">{noOptionsText}</div>;
     }
 
     return (
@@ -253,10 +253,10 @@ export default function EnhancedDropdown({
             onClick={() => !option.disabled && handleOptionSelect(option.value)}
             className={`px-4 py-3 cursor-pointer transition-colors flex items-center justify-between ${
               option.disabled
-                ? 'text-gray-500 cursor-not-allowed'
+                ? 'text-secondary opacity-60 cursor-not-allowed'
                 : highlightedIndex === index
-                ? 'bg-teal-500/20 text-teal-400'
-                : 'hover:bg-white/10 text-white'
+                ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300'
+                : 'text-primary hover:bg-slate-100 dark:hover:bg-white/10'
             }`}
           >
             <span>{option.label}</span>
@@ -266,7 +266,7 @@ export default function EnhancedDropdown({
 
         {Object.entries(groupedOptions.groups).map(([groupName, groupOptions]) => (
           <div key={groupName}>
-            <div className="px-4 py-2 text-xs text-gray-400 bg-white/5 border-b border-white/10">{groupName}</div>
+            <div className="px-4 py-2 text-xs text-secondary bg-slate-50 border-b border-slate-200 dark:bg-white/5 dark:border-white/10">{groupName}</div>
             {groupOptions.map((option, index) => {
               const globalIndex =
                 groupedOptions.ungrouped.length +
@@ -284,10 +284,10 @@ export default function EnhancedDropdown({
                   onClick={() => !option.disabled && handleOptionSelect(option.value)}
                   className={`px-4 py-3 cursor-pointer transition-colors flex items-center justify-between ${
                     option.disabled
-                      ? 'text-gray-500 cursor-not-allowed'
+                      ? 'text-secondary opacity-60 cursor-not-allowed'
                       : highlightedIndex === globalIndex
-                      ? 'bg-teal-500/20 text-teal-400'
-                      : 'hover:bg-white/10 text-white'
+                      ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300'
+                      : 'text-primary hover:bg-slate-100 dark:hover:bg-white/10'
                   }`}
                 >
                   <span>{option.label}</span>
@@ -333,7 +333,7 @@ export default function EnhancedDropdown({
         aria-label={label || placeholder}
       >
         <div className="flex items-center space-x-2 space-x-reverse flex-1 min-w-0">
-          <span className={`truncate ${displayValue ? 'text-white' : 'text-gray-400'}`}>
+          <span className={`truncate ${displayValue ? 'text-primary' : 'text-secondary'}`}>
             {displayValue || placeholder}
           </span>
         </div>
@@ -342,13 +342,13 @@ export default function EnhancedDropdown({
           {clearable && value && (
             <button
               onClick={handleClear}
-              className="text-gray-400 hover:text-red-400 transition-colors p-1"
+              className="text-secondary hover:text-red-500 transition-colors p-1"
               type="button"
             >
               ×
             </button>
           )}
-          <FaChevronDown className={`text-gray-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+          <FaChevronDown className={`text-secondary transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
         </div>
       </div>
 
@@ -359,7 +359,7 @@ export default function EnhancedDropdown({
         createPortal(
           <div
             ref={portalRef}
-            className="enhanced-dropdown-portal fixed glass-liquid-card shadow-2xl border border-white/20 z-[99999] overflow-hidden"
+            className="enhanced-dropdown-portal fixed glass-liquid-card shadow-2xl border border-slate-200 dark:border-white/20 z-[99999] overflow-hidden"
             style={{
               top: `${portalPosition.top}px`,
               left: `${portalPosition.left}px`,
@@ -369,16 +369,16 @@ export default function EnhancedDropdown({
             }}
           >
             {searchable && (
-              <div className="p-3 border-b border-white/10">
+              <div className="p-3 border-b border-slate-200 dark:border-white/10">
                 <div className="relative">
-                  <FaSearch className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm" />
+                  <FaSearch className="absolute right-3 top-1/2 transform -translate-y-1/2 text-secondary text-sm" />
                   <input
                     ref={searchRef}
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder="Search..."
-                    className="w-full pr-10 pl-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 text-sm"
+                    className="w-full pr-10 pl-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-primary placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-teal-500 dark:bg-white/10 dark:border-white/20 text-sm"
                   />
                 </div>
               </div>

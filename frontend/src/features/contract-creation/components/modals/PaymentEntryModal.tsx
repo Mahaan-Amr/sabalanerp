@@ -14,6 +14,7 @@ interface PaymentEntryModalProps {
   onSave: () => void;
   currency: string;
   error?: string;
+  fieldErrors?: Partial<Record<'amount' | 'paymentDate' | 'checkNumber' | 'checkOwnerName' | 'handoverDate' | 'nationalCode', string>>;
   isEdit?: boolean;
   nationalCodeRequired?: boolean;
 }
@@ -36,6 +37,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
   onSave,
   currency: _currency,
   error,
+  fieldErrors = {},
   isEdit,
   nationalCodeRequired = false
 }) => {
@@ -110,18 +112,20 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
                     onChange={(v) => onFormChange({ amount: v })}
                     min={0}
                     formatWhileTyping
-                    className={inputClass}
+                    className={`${inputClass} ${fieldErrors.amount ? 'border-red-500 dark:border-red-400' : ''}`}
                   />
+                  {fieldErrors.amount && <p className="mt-1 text-xs text-red-500">{fieldErrors.amount}</p>}
                 </div>
                 <div>
                   <label className={labelClass}>تاریخ پرداخت</label>
-                  <div className={`${inputClass} flex items-center min-h-[38px]`}>
+                  <div className={`${inputClass} flex items-center min-h-[38px] ${fieldErrors.paymentDate ? 'border-red-500 dark:border-red-400' : ''}`}>
                     <PersianCalendarComponent
                       value={form.paymentDate ?? ''}
                       onChange={(d: string) => onFormChange({ paymentDate: d })}
                       className="w-full"
                     />
                   </div>
+                  {fieldErrors.paymentDate && <p className="mt-1 text-xs text-red-500">{fieldErrors.paymentDate}</p>}
                 </div>
               </>
             )}
@@ -134,9 +138,10 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
                     type="text"
                     value={form.checkNumber ?? ''}
                     onChange={(e) => onFormChange({ checkNumber: e.target.value })}
-                    className={inputClass}
+                    className={`${inputClass} ${fieldErrors.checkNumber ? 'border-red-500 dark:border-red-400' : ''}`}
                     placeholder="شماره چک"
                   />
+                  {fieldErrors.checkNumber && <p className="mt-1 text-xs text-red-500">{fieldErrors.checkNumber}</p>}
                 </div>
                 <div>
                   <label className={labelClass}>نام صاحب چک</label>
@@ -144,9 +149,10 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
                     type="text"
                     value={form.checkOwnerName ?? ''}
                     onChange={(e) => onFormChange({ checkOwnerName: e.target.value })}
-                    className={inputClass}
+                    className={`${inputClass} ${fieldErrors.checkOwnerName ? 'border-red-500 dark:border-red-400' : ''}`}
                     placeholder="نام صاحب چک"
                   />
+                  {fieldErrors.checkOwnerName && <p className="mt-1 text-xs text-red-500">{fieldErrors.checkOwnerName}</p>}
                 </div>
                 <div>
                   <label className={labelClass}>مبلغ چک (تومان)</label>
@@ -155,28 +161,31 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
                     onChange={(v) => onFormChange({ amount: v })}
                     min={0}
                     formatWhileTyping
-                    className={inputClass}
+                    className={`${inputClass} ${fieldErrors.amount ? 'border-red-500 dark:border-red-400' : ''}`}
                   />
+                  {fieldErrors.amount && <p className="mt-1 text-xs text-red-500">{fieldErrors.amount}</p>}
                 </div>
                 <div>
                   <label className={labelClass}>تاریخ تحویل چک</label>
-                  <div className={`${inputClass} flex items-center min-h-[38px]`}>
+                  <div className={`${inputClass} flex items-center min-h-[38px] ${fieldErrors.handoverDate ? 'border-red-500 dark:border-red-400' : ''}`}>
                     <PersianCalendarComponent
                       value={form.handoverDate ?? ''}
                       onChange={(d: string) => onFormChange({ handoverDate: d })}
                       className="w-full"
                     />
                   </div>
+                  {fieldErrors.handoverDate && <p className="mt-1 text-xs text-red-500">{fieldErrors.handoverDate}</p>}
                 </div>
                 <div>
                   <label className={labelClass}>تاریخ سررسید چک</label>
-                  <div className={`${inputClass} flex items-center min-h-[38px]`}>
+                  <div className={`${inputClass} flex items-center min-h-[38px] ${fieldErrors.paymentDate ? 'border-red-500 dark:border-red-400' : ''}`}>
                     <PersianCalendarComponent
                       value={form.paymentDate ?? ''}
                       onChange={(d: string) => onFormChange({ paymentDate: d })}
                       className="w-full"
                     />
                   </div>
+                  {fieldErrors.paymentDate && <p className="mt-1 text-xs text-red-500">{fieldErrors.paymentDate}</p>}
                 </div>
               </>
             )}
@@ -188,11 +197,12 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
                   type="text"
                   value={form.nationalCode ?? ''}
                   onChange={(e) => onFormChange({ nationalCode: e.target.value })}
-                  className={inputClass}
+                  className={`${inputClass} ${fieldErrors.nationalCode ? 'border-red-500 dark:border-red-400' : ''}`}
                   placeholder="کد ملی مشتری"
                   maxLength={10}
                   inputMode="numeric"
                 />
+                {fieldErrors.nationalCode && <p className="mt-1 text-xs text-red-500">{fieldErrors.nationalCode}</p>}
                 <p className="mt-1 text-[11px] leading-5 text-gray-500 dark:text-gray-400">
                   برای پرداخت با تاریخ غیر از امروز الزامی است.
                 </p>

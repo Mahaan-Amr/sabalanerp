@@ -25,11 +25,11 @@ export const normalizeOptionalIranianMobile = (value: string | number | null | u
 export const validateRequiredIranianMobile = (value: string | number | null | undefined): string | null => {
   const normalized = normalizeIranianMobile(value);
   if (!normalized) return 'شماره تماس الزامی است';
-  return /^09\d{9}$/.test(normalized) ? null : 'شماره تماس باید ۱۱ رقم و با 09 شروع شود';
+  return /^09\d{9}$/.test(normalized) ? null : 'شماره تماس باید 11 رقم و با 09 شروع شود';
 };
 
 export const validateOptionalIranianMobile = (value: string | number | null | undefined): string | null => {
   const normalized = normalizeIranianMobile(value);
   if (!normalized) return null;
-  return /^09\d{9}$/.test(normalized) ? null : 'شماره تماس باید ۱۱ رقم و با 09 شروع شود';
+  return /^09\d{9}$/.test(normalized) ? null : 'شماره تماس باید 11 رقم و با 09 شروع شود';
 };

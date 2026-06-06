@@ -61,7 +61,7 @@ interface User {
 }
 
 export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ className = '', collapsed: collapsedProp, onToggleCollapse, onNavigate }) => {
-  const { currentWorkspace, hasPermission } = useWorkspace();
+  const { currentWorkspace, hasPermission, accessibleWorkspaces } = useWorkspace();
   const [internalCollapsed, setInternalCollapsed] = useState(false);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -103,6 +103,27 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
 
   const getNavigationItems = (): NavigationItem[] => {
     if (!currentWorkspace) {
+      if (currentUser && currentUser.role !== 'ADMIN' && currentUser.role !== 'MANAGER') {
+        const workspaceIcons: Record<string, any> = {
+          FaFileContract,
+          FaUsers,
+          FaUserTie,
+          FaCalculator,
+          FaWarehouse,
+          FaShieldAlt,
+        };
+
+        return accessibleWorkspaces.map((workspace) => ({
+          name: workspace.name,
+          namePersian: workspace.namePersian,
+          href: workspace.path,
+          icon: workspaceIcons[workspace.icon] || FaChartLine,
+          show: true,
+        }));
+      }
+
+      if (!currentUser) return [];
+
       // Main dashboard navigation
       const baseItems: NavigationItem[] = [
         {

@@ -442,6 +442,8 @@ export const accountingAPI = {
   getContracts: (params?: any) => api.get('/accounting/contracts', { params }),
   getContract: (contractId: string) => api.get(`/accounting/contracts/${contractId}`),
   getContractPdf: (contractId: string) => api.get(`/accounting/contracts/${contractId}/pdf`),
+  getSalesContractPdf: (contractId: string, params?: { fresh?: boolean }) =>
+    api.get(`/accounting/contracts/${contractId}/sales-pdf`, { params }),
   getFinancialRecords: (params?: any) => api.get('/accounting/financial-records', { params }),
   getReceivables: (params?: any) => api.get('/accounting/receivables', { params }),
   getPayments: (params?: any) => api.get('/accounting/payments', { params }),

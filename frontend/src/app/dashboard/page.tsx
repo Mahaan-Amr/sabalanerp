@@ -103,13 +103,28 @@ export default function DashboardPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { accessibleWorkspaces, currentWorkspace } = useWorkspace();
+  const { accessibleWorkspaces, currentWorkspace, loading: workspaceLoading } = useWorkspace();
   const activeWorkspaceName = currentWorkspace ? WORKSPACE_CONFIG[currentWorkspace].namePersian : 'انتخاب نشده';
 
   useEffect(() => {
-    fetchDashboardData();
     loadCurrentUser();
   }, []);
+
+  useEffect(() => {
+    if (!currentUser || workspaceLoading) return;
+
+    if (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANAGER') {
+      const firstWorkspace = accessibleWorkspaces[0];
+      if (firstWorkspace) {
+        router.replace(firstWorkspace.path);
+        return;
+      }
+      setLoading(false);
+      return;
+    }
+
+    fetchDashboardData();
+  }, [currentUser, workspaceLoading, accessibleWorkspaces, router]);
 
   const fetchDashboardData = async () => {
     try {
@@ -137,13 +152,11 @@ export default function DashboardPage() {
       if (response.data.success) {
         const user = response.data.data;
         setCurrentUser(user);
-
-        if (user.role === 'SALES') {
-          router.push('/dashboard/sales');
-        }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading user profile:', error);
+      setError(error.response?.data?.error || 'خطا در دریافت اطلاعات کاربر');
+      setLoading(false);
     }
   };
 

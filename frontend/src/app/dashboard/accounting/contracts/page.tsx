@@ -6,6 +6,7 @@ import {
   FaClipboardCheck,
   FaExclamationTriangle,
   FaEye,
+  FaDownload,
   FaFileInvoice,
   FaFlag,
   FaPrint,
@@ -168,23 +169,44 @@ export default function AccountingContractsPage() {
     setApprovalTarget(null);
   };
 
-  const openAccountingPdf = async (contract: AccountingContractRow) => {
-    const actionKey = `${contract.contractId}:PRINT_PDF`;
-    setActionLoading(actionKey);
-    const pdfWindow = window.open('', '_blank', 'noopener,noreferrer');
-    try {
-      const response = await accountingAPI.getContractPdf(contract.contractId);
-      const url = response.data?.data?.url;
-      if (!response.data?.success || !url) throw new Error('PDF url was not returned');
-      if (pdfWindow) {
-        pdfWindow.location.href = toPdfViewerUrl(url);
-      } else {
-        window.open(toPdfViewerUrl(url), '_blank', 'noopener,noreferrer');
+  const openPdfUrl = (url: string, tryPrint: boolean) => {
+    const viewerUrl = toPdfViewerUrl(url);
+    const pdfWindow = window.open(viewerUrl, '_blank', 'noopener,noreferrer');
+    if (!pdfWindow) {
+      window.location.href = viewerUrl;
+      return;
+    }
+
+    if (!tryPrint) return;
+
+    const triggerPrint = () => {
+      try {
+        pdfWindow.focus();
+        pdfWindow.print();
+      } catch (error) {
+        console.error('Print trigger failed:', error);
       }
+    };
+
+    try {
+      pdfWindow.addEventListener('load', triggerPrint, { once: true });
+      setTimeout(triggerPrint, 1200);
     } catch (error) {
-      pdfWindow?.close();
-      console.error('Accounting PDF generation failed:', error);
-      window.alert('چاپ پرونده حسابداری انجام نشد');
+      console.error('Print setup failed:', error);
+    }
+  };
+
+  const openSalesContractPdf = async (contract: AccountingContractRow, tryPrint = false) => {
+    const actionKey = `${contract.contractId}:${tryPrint ? 'PRINT_SALES_PDF' : 'DOWNLOAD_SALES_PDF'}`;
+    setActionLoading(actionKey);
+    try {
+      const response = await accountingAPI.getSalesContractPdf(contract.contractId, { fresh: false });
+      const url = response.data?.data?.url;
+      if (!response.data?.success || !url) throw new Error('Sales contract PDF url was not returned');
+      openPdfUrl(url, tryPrint);
+    } catch (error) {
+      console.error('Sales contract PDF failed:', error);
+      window.alert(tryPrint ? 'پرینت قرارداد انجام نشد' : 'دانلود PDF قرارداد انجام نشد');
     } finally {
       setActionLoading(null);
     }
@@ -302,12 +324,20 @@ export default function AccountingContractsPage() {
   const rowActions = (contract: AccountingContractRow): ErpAction[] => [
     { label: 'مشاهده', href: `/dashboard/accounting/contracts/${contract.contractId}`, icon: FaEye, tone: 'primary' },
     {
-      label: 'چاپ پرونده',
+      label: 'دانلود PDF قرارداد',
+      icon: FaDownload,
+      tone: 'success',
+      title: 'دانلود PDF قرارداد فروش با جزئیات کامل',
+      disabled: actionLoading === `${contract.contractId}:DOWNLOAD_SALES_PDF`,
+      onClick: () => openSalesContractPdf(contract, false),
+    },
+    {
+      label: 'پرینت قرارداد',
       icon: FaPrint,
-      tone: 'purple',
-      title: 'چاپ کامل پرونده حسابداری قرارداد',
-      disabled: actionLoading === `${contract.contractId}:PRINT_PDF`,
-      onClick: () => openAccountingPdf(contract),
+      tone: 'neutral',
+      title: 'پرینت قرارداد فروش با جزئیات کامل',
+      disabled: actionLoading === `${contract.contractId}:PRINT_SALES_PDF`,
+      onClick: () => openSalesContractPdf(contract, true),
     },
     {
       label: 'پیش‌نویس صورتحساب',

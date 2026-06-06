@@ -7,6 +7,13 @@ import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess } from '../middlewa
 import { generatePdfFromHtml } from '../utils/pdf';
 import { renderAccountingContractHtml } from '../utils/accountingPrintTemplate';
 import {
+  ensureStoredSalesContractPdfExists,
+  generateSalesContractPdf,
+  resolveSalesContractPdfUrl,
+  salesContractPrintableInclude
+} from '../utils/salesContractPdf';
+import { PrismaClient } from '@prisma/client';
+import {
   executeAccountingAction,
   getAccountingSettings,
   getAccountingContractDetail,
@@ -22,6 +29,7 @@ import {
 } from '../services/accountingService';
 
 const router = express.Router();
+const prisma = new PrismaClient();
 const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
 
 const accountingView = [
@@ -126,6 +134,81 @@ router.get('/contracts/:contractId/pdf', accountingView, async (req: AuthRequest
       success: false,
       error: error.message === 'Contract not found' ? 'Contract not found' : 'Server error'
     });
+  }
+});
+
+router.get('/contracts/:contractId/sales-pdf', accountingView, async (req: AuthRequest, res: Response) => {
+  try {
+    const contract = await prisma.salesContract.findUnique({
+      where: { id: req.params.contractId },
+      include: salesContractPrintableInclude
+    });
+
+    if (!contract) {
+      res.status(404).json({ success: false, error: 'Contract not found' });
+      return;
+    }
+
+    const fresh = String(req.query.fresh || 'false').toLowerCase() === 'true';
+    const currentSignatures = (contract.signatures as any) || {};
+    const cachedPdfPath =
+      (currentSignatures?.print?.pdfPath as string | undefined) ||
+      (currentSignatures?.accountingSalesPdf?.pdfPath as string | undefined);
+
+    if (!fresh && cachedPdfPath && ensureStoredSalesContractPdfExists(cachedPdfPath)) {
+      const cachedUrl = resolveSalesContractPdfUrl(req, cachedPdfPath);
+      if (cachedUrl) {
+        res.json({
+          success: true,
+          data: {
+            url: cachedUrl,
+            generatedAt: currentSignatures?.print?.generatedAt ||
+              currentSignatures?.print?.at ||
+              currentSignatures?.accountingSalesPdf?.generatedAt ||
+              currentSignatures?.accountingSalesPdf?.at ||
+              null,
+            fromCache: true
+          }
+        });
+        return;
+      }
+    }
+
+    const pdfPath = await generateSalesContractPdf(contract);
+    const generatedAt = new Date().toISOString();
+
+    await prisma.salesContract.update({
+      where: { id: contract.id },
+      data: {
+        signatures: {
+          ...currentSignatures,
+          accountingSalesPdf: {
+            by: req.user!.id,
+            at: generatedAt,
+            generatedAt,
+            pdfPath
+          }
+        }
+      }
+    });
+
+    const url = resolveSalesContractPdfUrl(req, pdfPath);
+    if (!url) {
+      res.status(500).json({ success: false, error: 'Failed to build PDF url' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        url,
+        generatedAt,
+        fromCache: false
+      }
+    });
+  } catch (error) {
+    console.error('Accounting sales contract PDF error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
   }
 });
 

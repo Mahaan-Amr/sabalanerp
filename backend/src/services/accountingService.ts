@@ -125,8 +125,8 @@ const getContractDateValue = (contract: any): Date | null => {
   ].filter(Boolean);
 
   for (const value of candidates) {
-    const parsed = new Date(String(value));
-    if (!Number.isNaN(parsed.getTime())) return parsed;
+    const parsed = parseContractDateCandidate(value);
+    if (parsed) return parsed;
   }
 
   return null;
@@ -152,6 +152,88 @@ const normalizeDigits = (value: string) =>
   value
     .replace(/[\u06F0-\u06F9]/g, (digit) => String(digit.charCodeAt(0) - 0x06F0))
     .replace(/[\u0660-\u0669]/g, (digit) => String(digit.charCodeAt(0) - 0x0660));
+
+const jalaliToGregorianDate = (jy: number, jm: number, jd: number): Date | null => {
+  if (jm < 1 || jm > 12 || jd < 1 || jd > 31) return null;
+
+  let jalaliYear = jy;
+  let gregorianYear = 621;
+  if (jalaliYear > 979) {
+    gregorianYear = 1600;
+    jalaliYear -= 979;
+  }
+
+  let days = (365 * jalaliYear) +
+    Math.floor(jalaliYear / 33) * 8 +
+    Math.floor(((jalaliYear % 33) + 3) / 4) +
+    78 +
+    jd +
+    (jm < 7 ? (jm - 1) * 31 : ((jm - 7) * 30) + 186);
+
+  gregorianYear += 400 * Math.floor(days / 146097);
+  days %= 146097;
+
+  if (days > 36524) {
+    gregorianYear += 100 * Math.floor(--days / 36524);
+    days %= 36524;
+    if (days >= 365) days++;
+  }
+
+  gregorianYear += 4 * Math.floor(days / 1461);
+  days %= 1461;
+
+  if (days > 365) {
+    gregorianYear += Math.floor((days - 1) / 365);
+    days = (days - 1) % 365;
+  }
+
+  let dayOfYear = days + 1;
+  const monthLengths = [
+    0,
+    31,
+    (gregorianYear % 4 === 0 && gregorianYear % 100 !== 0) || gregorianYear % 400 === 0 ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31
+  ];
+
+  let gregorianMonth = 1;
+  while (gregorianMonth <= 12 && dayOfYear > monthLengths[gregorianMonth]) {
+    dayOfYear -= monthLengths[gregorianMonth];
+    gregorianMonth++;
+  }
+
+  if (gregorianMonth > 12) return null;
+  return new Date(Date.UTC(gregorianYear, gregorianMonth - 1, dayOfYear));
+};
+
+const parseContractDateCandidate = (value: unknown): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+
+  const raw = normalizeDigits(String(value).trim());
+  const dateMatch = raw.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+
+  if (dateMatch) {
+    const year = Number(dateMatch[1]);
+    const month = Number(dateMatch[2]);
+    const day = Number(dateMatch[3]);
+
+    if (year >= 1200 && year <= 1700) {
+      return jalaliToGregorianDate(year, month, day);
+    }
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
 
 const getTehranDateKey = (date: Date) => {
   const parts = new Intl.DateTimeFormat('en-US', {

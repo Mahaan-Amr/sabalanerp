@@ -1,13 +1,9 @@
 import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
-import fs from 'fs';
-import path from 'path';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
-import { generatePdfFromHtml } from '../utils/pdf';
-import { renderContractHtml } from '../utils/printTemplate';
 import { createContractItem } from '../services/contractItemService';
 import { createDelivery, getDeliveries } from '../services/deliveryService';
 import { createPayment, getPayments, validatePaymentData } from '../services/paymentService';
@@ -15,129 +11,15 @@ import { createContract, updateContract, getContract, validateContractAccess, ap
 import { getNextContractNumberPreview } from '../services/contractNumberService';
 import { contractConfirmationService } from '../services/contractConfirmationService';
 import { getRequestEvidence } from '../utils/requestEvidence';
+import {
+  ensureStoredSalesContractPdfExists,
+  generateSalesContractPdf,
+  resolveSalesContractPdfUrl,
+  salesContractPrintableInclude
+} from '../utils/salesContractPdf';
 
 const router = express.Router();
 const prisma = new PrismaClient();
-const salesContractPrintableInclude = {
-  customer: {
-    include: {
-      phoneNumbers: true,
-      primaryContact: true
-    }
-  },
-  department: true,
-  createdByUser: {
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      username: true
-    }
-  },
-  approvedByUser: {
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      username: true
-    }
-  },
-  signedByUser: {
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      username: true
-    }
-  },
-  items: {
-    include: {
-      product: true
-    }
-  },
-  deliveries: {
-    include: {
-      products: {
-        include: {
-          product: true
-        }
-      }
-    }
-  },
-  payments: {
-    include: {
-      installments: {
-        orderBy: {
-          installmentNumber: 'asc' as const
-        }
-      }
-    }
-  }
-};
-
-const resolvePdfUrl = (req: any, pdfPath: string): string | null => {
-  if (!pdfPath) return null;
-  if (pdfPath.startsWith('http://') || pdfPath.startsWith('https://')) {
-    return pdfPath;
-  }
-
-  const fileName = path.basename(pdfPath);
-  if (!fileName) return null;
-
-  const host = req.get('host');
-  const protocol = req.protocol || 'http';
-  const encodedFileName = encodeURIComponent(fileName);
-  return `${protocol}://${host}/files/contracts/${encodedFileName}`;
-};
-
-const ensureStoredPdfExists = (pdfPath: string): boolean => {
-  if (!pdfPath) return false;
-  if (pdfPath.startsWith('http://') || pdfPath.startsWith('https://')) return true;
-
-  const resolvedPath = path.isAbsolute(pdfPath)
-    ? pdfPath
-    : path.join(process.cwd(), 'storage', 'contracts', path.basename(pdfPath));
-
-  return fs.existsSync(resolvedPath);
-};
-
-const generateSalesContractPdf = async (contract: any) => {
-  const timestamp = Date.now();
-  const fileName = `sales_contract_${contract.contractNumber}_${timestamp}`;
-  const contractData = contract?.contractData || {};
-  const relationItemsCount = Array.isArray(contract?.items) ? contract.items.length : 0;
-  const relationDeliveriesCount = Array.isArray(contract?.deliveries) ? contract.deliveries.length : 0;
-  const relationPaymentsCount = Array.isArray(contract?.payments) ? contract.payments.length : 0;
-  const snapshotProductsCount = Array.isArray(contractData?.products) ? contractData.products.length : 0;
-  const snapshotDeliveriesCount = Array.isArray(contractData?.deliveries) ? contractData.deliveries.length : 0;
-  const snapshotPaymentsCount = Array.isArray(contractData?.payment?.payments) ? contractData.payment.payments.length : 0;
-
-  console.info('[sales-pdf] generating contract pdf', {
-    contractId: contract?.id,
-    contractNumber: contract?.contractNumber,
-    relationItemsCount,
-    relationDeliveriesCount,
-    relationPaymentsCount,
-    snapshotProductsCount,
-    snapshotDeliveriesCount,
-    snapshotPaymentsCount
-  });
-
-  const html = renderContractHtml({
-    ...contract,
-    contractData: contract.contractData
-  });
-
-  return generatePdfFromHtml({
-    htmlContent: html,
-    fileName,
-    landscape: false,
-    scale: 1,
-    widthMm: 210,
-    heightMm: 297
-  });
-};
-
 const userHasCancelAfterApprovalPermission = async (user: any): Promise<boolean> => {
   if (!user || user.role === 'ADMIN') {
     return true;
@@ -398,8 +280,8 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
     const currentSignatures = (contract.signatures as any) || {};
     const cachedPdfPath = currentSignatures?.print?.pdfPath as string | undefined;
 
-    if (!fresh && cachedPdfPath && ensureStoredPdfExists(cachedPdfPath)) {
-      const cachedUrl = resolvePdfUrl(req, cachedPdfPath);
+    if (!fresh && cachedPdfPath && ensureStoredSalesContractPdfExists(cachedPdfPath)) {
+      const cachedUrl = resolveSalesContractPdfUrl(req, cachedPdfPath);
       if (cachedUrl) {
         return res.json({
           success: true,
@@ -430,7 +312,7 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
       }
     });
 
-    const url = resolvePdfUrl(req, pdfPath);
+    const url = resolveSalesContractPdfUrl(req, pdfPath);
     if (!url) {
       return res.status(500).json({
         success: false,

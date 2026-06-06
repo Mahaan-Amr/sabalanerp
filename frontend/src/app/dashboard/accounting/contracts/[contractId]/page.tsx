@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import {
   FaBalanceScale,
+  FaDownload,
   FaExclamationTriangle,
   FaFileInvoice,
   FaFlag,
@@ -40,7 +41,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  const [printLoading, setPrintLoading] = useState(false);
+  const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
 
   const loadDetail = async () => {
     try {
@@ -81,32 +82,46 @@ export default function AccountingContractDetailPage({ params }: { params: { con
     });
   };
 
-  useEffect(() => {
-    const shouldAutoPrint = new URLSearchParams(window.location.search).get('print') === '1';
-    if (!loading && data?.contract && shouldAutoPrint) {
-      const timeoutId = window.setTimeout(() => window.print(), 400);
-      return () => window.clearTimeout(timeoutId);
+  const openPdfUrl = (url: string, tryPrint: boolean) => {
+    const viewerUrl = toPdfViewerUrl(url);
+    const pdfWindow = window.open(viewerUrl, '_blank', 'noopener,noreferrer');
+    if (!pdfWindow) {
+      window.location.href = viewerUrl;
+      return;
     }
-  }, [loading, data?.contract]);
 
-  const openAccountingPdf = async () => {
-    setPrintLoading(true);
-    const pdfWindow = window.open('', '_blank', 'noopener,noreferrer');
-    try {
-      const response = await accountingAPI.getContractPdf(params.contractId);
-      const url = response.data?.data?.url;
-      if (!response.data?.success || !url) throw new Error('PDF url was not returned');
-      if (pdfWindow) {
-        pdfWindow.location.href = toPdfViewerUrl(url);
-      } else {
-        window.open(toPdfViewerUrl(url), '_blank', 'noopener,noreferrer');
+    if (!tryPrint) return;
+
+    const triggerPrint = () => {
+      try {
+        pdfWindow.focus();
+        pdfWindow.print();
+      } catch (error) {
+        console.error('Print trigger failed:', error);
       }
+    };
+
+    try {
+      pdfWindow.addEventListener('load', triggerPrint, { once: true });
+      setTimeout(triggerPrint, 1200);
     } catch (error) {
-      pdfWindow?.close();
-      console.error('Accounting PDF generation failed:', error);
-      window.alert('چاپ پرونده حسابداری انجام نشد');
+      console.error('Print setup failed:', error);
+    }
+  };
+
+  const openSalesContractPdf = async (tryPrint = false) => {
+    const actionKey = tryPrint ? 'PRINT_SALES_PDF' : 'DOWNLOAD_SALES_PDF';
+    setPdfActionLoading(actionKey);
+    try {
+      const response = await accountingAPI.getSalesContractPdf(params.contractId, { fresh: false });
+      const url = response.data?.data?.url;
+      if (!response.data?.success || !url) throw new Error('Sales contract PDF url was not returned');
+      openPdfUrl(url, tryPrint);
+    } catch (error) {
+      console.error('Sales contract PDF failed:', error);
+      window.alert(tryPrint ? 'پرینت قرارداد انجام نشد' : 'دانلود PDF قرارداد انجام نشد');
     } finally {
-      setPrintLoading(false);
+      setPdfActionLoading(null);
     }
   };
 
@@ -130,7 +145,20 @@ export default function AccountingContractDetailPage({ params }: { params: { con
       description="نمای عملیاتی حسابداری از قرارداد، بدون تغییر دادن اصل قرارداد فروش."
       backHref="/dashboard/accounting/contracts"
       actions={[
-        { label: 'چاپ پرونده', icon: FaPrint, onClick: openAccountingPdf, tone: 'purple', disabled: printLoading },
+        {
+          label: 'دانلود PDF قرارداد',
+          icon: FaDownload,
+          onClick: () => openSalesContractPdf(false),
+          tone: 'success',
+          disabled: pdfActionLoading === 'DOWNLOAD_SALES_PDF'
+        },
+        {
+          label: 'پرینت قرارداد',
+          icon: FaPrint,
+          onClick: () => openSalesContractPdf(true),
+          tone: 'purple',
+          disabled: pdfActionLoading === 'PRINT_SALES_PDF'
+        },
         { label: 'به‌روزرسانی', icon: FaSync, onClick: loadDetail, tone: 'neutral' },
       ]}
       metrics={[

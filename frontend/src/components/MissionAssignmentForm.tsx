@@ -168,6 +168,7 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
               onChange={(date) => handleInputChange('startDate', date)}
               placeholder="انتخاب تاریخ شروع"
               className={errors.startDate ? 'border-red-500' : ''}
+              disablePastDates
             />
             {errors.startDate && (
               <p className="text-red-500 text-sm mt-1 text-right">{errors.startDate}</p>
@@ -181,6 +182,7 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
               value={formData.endDate}
               onChange={(date) => handleInputChange('endDate', date)}
               placeholder="انتخاب تاریخ پایان (اختیاری)"
+              disablePastDates
             />
           </div>
         </div>

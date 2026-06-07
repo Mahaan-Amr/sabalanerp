@@ -4,11 +4,17 @@
 import { useState, useCallback } from 'react';
 import type { ContractWizardData, PaymentEntry, PaymentEntryMethod } from '../types/contract.types';
 import { sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
+import { crmAPI } from '@/lib/api';
 
 export type PaymentEntryFieldErrors = Partial<Record<
   'amount' | 'paymentDate' | 'checkNumber' | 'checkOwnerName' | 'handoverDate' | 'nationalCode',
   string
 >>;
+
+type NationalCodeConflict = {
+  existing: string;
+  entered: string;
+};
 
 interface UsePaymentHandlersOptions {
   wizardData: ContractWizardData;
@@ -23,6 +29,7 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
   const [showPaymentEntryModal, setShowPaymentEntryModal] = useState(false);
   const [editingPaymentEntryId, setEditingPaymentEntryId] = useState<string | null>(null);
   const [paymentEntryErrors, setPaymentEntryErrors] = useState<PaymentEntryFieldErrors>({});
+  const [nationalCodeConflict, setNationalCodeConflict] = useState<NationalCodeConflict | null>(null);
 
   const [paymentEntryForm, setPaymentEntryForm] = useState<Partial<PaymentEntry>>({
     method: 'CASH_CARD',
@@ -30,9 +37,16 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     amount: 0
   });
 
+  const normalizeNationalCodeDigits = useCallback((value?: string | null): string => (
+    String(value || '')
+      .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+      .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+      .replace(/\D/g, '')
+  ), []);
+
   const getCustomerNationalCode = useCallback(() => (
-    wizardData.customer?.nationalCode?.trim() || ''
-  ), [wizardData.customer?.nationalCode]);
+    normalizeNationalCodeDigits(wizardData.customer?.nationalCode)
+  ), [normalizeNationalCodeDigits, wizardData.customer?.nationalCode]);
 
   const isPaymentNationalCodeRequired = useCallback((paymentDate?: string) => {
     const normalizedPaymentDate = paymentDate?.trim();
@@ -65,7 +79,16 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     };
   }, [getCustomerNationalCode, isPaymentNationalCodeRequired]);
 
+  const resetPaymentEntryForm = useCallback(() => {
+    setPaymentEntryForm({
+      method: 'CASH_CARD',
+      paymentDate: '',
+      amount: 0
+    });
+  }, []);
+
   const updatePaymentEntryForm = useCallback((updates: Partial<PaymentEntry>) => {
+    setNationalCodeConflict(null);
     setPaymentEntryErrors((prev) => {
       const next = { ...prev };
       Object.keys(updates).forEach((key) => {
@@ -90,6 +113,7 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       nationalCode: undefined
     }));
     setPaymentEntryErrors({});
+    setNationalCodeConflict(null);
     setShowPaymentEntryModal(true);
   }, [wizardData.payment, getCurrentPersianDate, normalizePaymentEntryForm]);
 
@@ -103,13 +127,17 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
         : (entry.method as PaymentEntryMethod);
       setPaymentEntryForm(normalizePaymentEntryForm({ ...entry, method }));
       setPaymentEntryErrors({});
+      setNationalCodeConflict(null);
       setShowPaymentEntryModal(true);
     }
   }, [wizardData.payment.payments, normalizePaymentEntryForm]);
 
-  const handleSavePaymentEntry = useCallback(() => {
+  const handleSavePaymentEntry = useCallback(async (saveOptions?: { allowNationalCodeConflict?: boolean }) => {
     const method = paymentEntryForm.method as PaymentEntryMethod | undefined;
     const nextErrors: PaymentEntryFieldErrors = {};
+    const nationalCodeRequired = isPaymentNationalCodeRequired(paymentEntryForm.paymentDate);
+    const normalizedNationalCode = normalizeNationalCodeDigits(paymentEntryForm.nationalCode);
+    const customerNationalCode = getCustomerNationalCode();
 
     if (!method) {
       setErrors({ paymentMethod: 'نوع پرداخت را انتخاب کنید' });
@@ -142,8 +170,7 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       }
     }
 
-    if (isPaymentNationalCodeRequired(paymentEntryForm.paymentDate)) {
-      const normalizedNationalCode = paymentEntryForm.nationalCode?.trim() || '';
+    if (nationalCodeRequired) {
       if (!normalizedNationalCode) {
         nextErrors.nationalCode = 'کد ملی برای پرداخت با تاریخ غیر از امروز الزامی است';
       } else if (normalizedNationalCode.length !== 10) {
@@ -157,15 +184,28 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       return;
     }
 
+    if (
+      nationalCodeRequired &&
+      customerNationalCode &&
+      normalizedNationalCode &&
+      customerNationalCode !== normalizedNationalCode &&
+      !saveOptions?.allowNationalCodeConflict
+    ) {
+      setNationalCodeConflict({
+        existing: customerNationalCode,
+        entered: normalizedNationalCode
+      });
+      setErrors({});
+      return;
+    }
+
     const entry: PaymentEntry = {
       id: editingPaymentEntryId || `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       method,
       amount: paymentAmount,
       paymentDate: paymentEntryForm.paymentDate!,
       description: paymentEntryForm.description,
-      nationalCode: isPaymentNationalCodeRequired(paymentEntryForm.paymentDate)
-        ? paymentEntryForm.nationalCode?.trim()
-        : undefined,
+      nationalCode: nationalCodeRequired ? normalizedNationalCode : undefined,
       checkNumber: paymentEntryForm.checkNumber,
       checkOwnerName: paymentEntryForm.checkOwnerName,
       handoverDate: paymentEntryForm.handoverDate,
@@ -186,14 +226,55 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
 
     setShowPaymentEntryModal(false);
     setEditingPaymentEntryId(null);
-    setPaymentEntryForm({
-      method: 'CASH_CARD',
-      paymentDate: '',
-      amount: 0
-    });
+    resetPaymentEntryForm();
     setPaymentEntryErrors({});
+    setNationalCodeConflict(null);
     setErrors({});
-  }, [paymentEntryForm, editingPaymentEntryId, wizardData.payment, updateWizardData, setErrors, isPaymentNationalCodeRequired]);
+
+    if (
+      nationalCodeRequired &&
+      normalizedNationalCode &&
+      !customerNationalCode &&
+      wizardData.customerId &&
+      !saveOptions?.allowNationalCodeConflict
+    ) {
+      try {
+        await crmAPI.updateCustomer(wizardData.customerId, {
+          nationalCode: normalizedNationalCode
+        });
+
+        if (wizardData.customer) {
+          updateWizardData({
+            customer: {
+              ...wizardData.customer,
+              nationalCode: normalizedNationalCode
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Failed to persist customer national code from payment entry:', error);
+        setErrors({
+          paymentWarning: 'پرداخت ذخیره شد، اما کد ملی در اطلاعات مشتری ثبت نشد.'
+        });
+      }
+    }
+  }, [
+    paymentEntryForm,
+    editingPaymentEntryId,
+    wizardData.payment,
+    wizardData.customerId,
+    wizardData.customer,
+    updateWizardData,
+    setErrors,
+    isPaymentNationalCodeRequired,
+    normalizeNationalCodeDigits,
+    getCustomerNationalCode,
+    resetPaymentEntryForm
+  ]);
+
+  const handleContinueNationalCodeConflict = useCallback(() => {
+    void handleSavePaymentEntry({ allowNationalCodeConflict: true });
+  }, [handleSavePaymentEntry]);
 
   const handleDeletePaymentEntry = useCallback((entryId: string) => {
     const updatedPayments = wizardData.payment.payments.filter(p => p.id !== entryId);
@@ -208,14 +289,11 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
   const handleClosePaymentEntryModal = useCallback(() => {
     setShowPaymentEntryModal(false);
     setEditingPaymentEntryId(null);
-    setPaymentEntryForm({
-      method: 'CASH_CARD',
-      paymentDate: '',
-      amount: 0
-    });
+    resetPaymentEntryForm();
     setPaymentEntryErrors({});
+    setNationalCodeConflict(null);
     setErrors({});
-  }, [setErrors]);
+  }, [setErrors, resetPaymentEntryForm]);
 
   return {
     showPaymentEntryModal,
@@ -228,9 +306,12 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     paymentEntryErrors,
     setPaymentEntryErrors,
     paymentEntryNationalCodeRequired,
+    nationalCodeConflict,
+    setNationalCodeConflict,
     handleAddPaymentEntry,
     handleEditPaymentEntry,
     handleSavePaymentEntry,
+    handleContinueNationalCodeConflict,
     handleDeletePaymentEntry,
     handleClosePaymentEntryModal
   };

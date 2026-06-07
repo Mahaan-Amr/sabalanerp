@@ -235,6 +235,12 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
         {(errors.paymentMethod || errors.payments) && (
           <p className="text-red-500 text-sm mt-2">{errors.paymentMethod || errors.payments}</p>
         )}
+
+        {errors.paymentWarning && (
+          <div className="mt-2 rounded border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-700 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
+            {errors.paymentWarning}
+          </div>
+        )}
       </div>
     </div>
   );

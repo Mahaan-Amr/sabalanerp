@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { formatInputNumber, formatInputNumberLatin, normalizeDigits, parseFormattedNumber } from '@/lib/numberFormat';
+import { normalizeDigits, parseFormattedNumber } from '@/lib/numberFormat';
 
 interface FormattedNumberInputProps {
   value: number | string | null | undefined;
@@ -16,6 +16,7 @@ interface FormattedNumberInputProps {
   name?: string;
   onFocus?: () => void;
   formatWhileTyping?: boolean;
+  decimalScale?: number;
 }
 
 const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
@@ -30,22 +31,48 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
   id,
   name,
   onFocus,
-  formatWhileTyping = true
+  formatWhileTyping = true,
+  decimalScale = 2
 }) => {
   const [displayValue, setDisplayValue] = useState<string>('');
   const [isFocused, setIsFocused] = useState(false);
 
-  const formatForInput = useCallback(
-    (input: number | string | null | undefined) =>
-      formatWhileTyping ? formatInputNumberLatin(input) : formatInputNumber(input),
-    [formatWhileTyping]
-  );
+  const roundToScale = useCallback((numValue: number): number => {
+    const factor = 10 ** decimalScale;
+    return Math.round(numValue * factor) / factor;
+  }, [decimalScale]);
+
+  const formatNumberForScale = useCallback((input: number | string | null | undefined): string => {
+    if (input === null || input === undefined || input === '') return '';
+    const num = typeof input === 'string' ? parseFormattedNumber(input) : input;
+    if (!Number.isFinite(num)) return '';
+
+    return roundToScale(num).toLocaleString(formatWhileTyping ? 'en-US' : 'fa-IR', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: decimalScale
+    });
+  }, [decimalScale, formatWhileTyping, roundToScale]);
+
+  const formatTypingValue = useCallback((input: string): string => {
+    if (!formatWhileTyping) return input;
+
+    const isNegative = input.startsWith('-');
+    const signlessInput = isNegative ? input.slice(1) : input;
+    const hasDecimal = signlessInput.includes('.');
+    const [rawIntegerPart, decimalPart = ''] = signlessInput.split('.');
+    const integerPart = rawIntegerPart.replace(/[^\d]/g, '');
+    const formattedInteger = integerPart
+      ? Number(integerPart).toLocaleString('en-US', { maximumFractionDigits: 0 })
+      : '';
+
+    return `${isNegative ? '-' : ''}${formattedInteger}${hasDecimal ? `.${decimalPart}` : ''}`;
+  }, [formatWhileTyping]);
 
   useEffect(() => {
     if (!isFocused) {
-      setDisplayValue(formatForInput(value));
+      setDisplayValue(formatNumberForScale(value));
     }
-  }, [value, isFocused, formatForInput]);
+  }, [value, isFocused, formatNumberForScale]);
 
   const clamp = (numValue: number): number => {
     let constrainedValue = numValue;
@@ -56,7 +83,7 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
 
   const handleFocus = () => {
     setIsFocused(true);
-    setDisplayValue(formatWhileTyping ? formatInputNumberLatin(value) : (value?.toString() || ''));
+    setDisplayValue(value?.toString() || '');
     onFocus?.();
   };
 
@@ -70,8 +97,8 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
       return;
     }
 
-    const roundedValue = Math.round(clamp(parseFormattedNumber(rawValue)) * 100) / 100;
-    setDisplayValue(formatForInput(roundedValue));
+    const roundedValue = roundToScale(clamp(parseFormattedNumber(rawValue)));
+    setDisplayValue(formatNumberForScale(roundedValue));
     onChange(roundedValue);
   };
 
@@ -79,12 +106,12 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
     const inputValue = normalizeDigits(e.target.value);
     const decimalIndex = inputValue.indexOf('.');
     const normalizedValue =
-      decimalIndex !== -1 && inputValue.length - decimalIndex - 1 > 2
-        ? inputValue.substring(0, decimalIndex + 3)
+      decimalIndex !== -1 && inputValue.length - decimalIndex - 1 > decimalScale
+        ? inputValue.substring(0, decimalIndex + decimalScale + 1)
         : inputValue;
     const numValue = clamp(parseFormattedNumber(normalizedValue));
 
-    setDisplayValue(formatWhileTyping ? formatInputNumberLatin(normalizedValue) : normalizedValue);
+    setDisplayValue(formatTypingValue(normalizedValue));
     onChange(numValue);
   };
 

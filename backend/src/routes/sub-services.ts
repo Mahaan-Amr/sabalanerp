@@ -3,15 +3,20 @@ import { body, query, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
-import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
+import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
 // @desc    Get all sub-services with filtering and search
 // @route   GET /api/sub-services
-// @access  Private/Inventory Workspace
-router.get('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.INVENTORY_SUB_SERVICES_VIEW, FEATURE_PERMISSIONS.VIEW), [
+// @access  Private/Inventory Workspace or Sales contract workflow read access
+router.get('/', protect, requireAnyFeatureAccess([
+  FEATURES.INVENTORY_SUB_SERVICES_VIEW,
+  FEATURES.SALES_CONTRACTS_VIEW,
+  FEATURES.SALES_CONTRACTS_CREATE,
+  FEATURES.SALES_CONTRACTS_EDIT
+], FEATURE_PERMISSIONS.VIEW), [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 1000 }).withMessage('Limit must be between 1 and 1000'),
   query('search').optional().isString().withMessage('Search must be a string'),
@@ -86,8 +91,13 @@ router.get('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_
 
 // @desc    Get sub-service by ID
 // @route   GET /api/sub-services/:id
-// @access  Private/Inventory Workspace
-router.get('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.INVENTORY_SUB_SERVICES_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: Request, res: Response) => {
+// @access  Private/Inventory Workspace or Sales contract workflow read access
+router.get('/:id', protect, requireAnyFeatureAccess([
+  FEATURES.INVENTORY_SUB_SERVICES_VIEW,
+  FEATURES.SALES_CONTRACTS_VIEW,
+  FEATURES.SALES_CONTRACTS_CREATE,
+  FEATURES.SALES_CONTRACTS_EDIT
+], FEATURE_PERMISSIONS.VIEW), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 

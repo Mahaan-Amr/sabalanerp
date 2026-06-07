@@ -16,6 +16,7 @@ interface PersianCalendarProps {
   enableYearSelection?: boolean; // New prop for year selection
   minYear?: number; // Minimum year for birth dates
   maxYear?: number; // Maximum year for birth dates
+  disablePastDates?: boolean;
 }
 
 export default function PersianCalendarComponent({
@@ -27,7 +28,8 @@ export default function PersianCalendarComponent({
   showTime = false,
   enableYearSelection = false,
   minYear = 1300, // Default minimum year (1921 CE)
-  maxYear = 1410  // Default maximum year (2031 CE)
+  maxYear = 1410, // Default maximum year (2031 CE)
+  disablePastDates = false
 }: PersianCalendarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(PersianCalendar.now('jYYYY/jMM'));
@@ -79,10 +81,15 @@ export default function PersianCalendarComponent({
     console.log('Current selectedDate:', selectedDate);
     console.log('Current currentMonth:', currentMonth);
     
-    isUserSelecting.current = true;
     const year = parseInt(currentMonth.split('/')[0]);
     const month = parseInt(currentMonth.split('/')[1]);
     const newDate = `${year}/${month.toString().padStart(2, '0')}/${day.toString().padStart(2, '0')}`;
+
+    if (disablePastDates && isDateBeforeToday(newDate)) {
+      return;
+    }
+
+    isUserSelecting.current = true;
     
     console.log('Calculated newDate:', newDate);
     setSelectedDate(newDate);
@@ -156,6 +163,10 @@ export default function PersianCalendarComponent({
       years.push(year);
     }
     return years;
+  };
+
+  const isDateBeforeToday = (persianDate: string): boolean => {
+    return moment(persianDate, 'jYYYY/jMM/jDD').isBefore(moment().startOf('day'), 'day');
   };
 
   const formatDisplayValue = useMemo((): string => {
@@ -401,16 +412,24 @@ export default function PersianCalendarComponent({
             {days.map((day) => {
               const dayDate = `${year}/${month.toString().padStart(2, '0')}/${day.toString().padStart(2, '0')}`;
               const isSelected = selectedDate === dayDate;
+              const isPastDate = disablePastDates && isDateBeforeToday(dayDate);
               // Remove isToday check to prevent infinite re-rendering
               
               return (
                 <button
                   key={day}
+                  type="button"
+                  disabled={isPastDate}
+                  aria-disabled={isPastDate}
                   onClick={() => {
+                    if (isPastDate) return;
                     console.log('Button clicked for day:', day);
                     handleDateSelect(day);
                   }}
                   className={`h-8 text-sm rounded-lg transition-colors ${
+                    isPastDate
+                      ? 'cursor-not-allowed text-gray-300 opacity-40 dark:text-gray-600'
+                      :
                     isSelected
                       ? 'bg-teal-500 text-white'
                       : 'hover:bg-white/10 text-primary'

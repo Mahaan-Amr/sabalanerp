@@ -168,6 +168,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                       value={delivery.deliveryDate}
                       onChange={(date: string) => handleUpdateDelivery(index, { deliveryDate: date })}
                       className="w-full"
+                      disablePastDates
                     />
                     {errors[`delivery_${index}_date`] && (
                       <p className="text-red-500 text-xs mt-1">{errors[`delivery_${index}_date`]}</p>

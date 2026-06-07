@@ -17,6 +17,11 @@ interface PaymentEntryModalProps {
   fieldErrors?: Partial<Record<'amount' | 'paymentDate' | 'checkNumber' | 'checkOwnerName' | 'handoverDate' | 'nationalCode', string>>;
   isEdit?: boolean;
   nationalCodeRequired?: boolean;
+  nationalCodeConflict?: {
+    existing: string;
+    entered: string;
+  } | null;
+  onContinueNationalCodeConflict?: () => void;
 }
 
 const METHOD_OPTIONS: { value: PaymentEntryMethod; label: string }[] = [
@@ -39,7 +44,9 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
   error,
   fieldErrors = {},
   isEdit,
-  nationalCodeRequired = false
+  nationalCodeRequired = false,
+  nationalCodeConflict = null,
+  onContinueNationalCodeConflict
 }) => {
   if (!isOpen) return null;
 
@@ -123,6 +130,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
                       value={form.paymentDate ?? ''}
                       onChange={(d: string) => onFormChange({ paymentDate: d })}
                       className="w-full"
+                      disablePastDates
                     />
                   </div>
                   {fieldErrors.paymentDate && <p className="mt-1 text-xs text-red-500">{fieldErrors.paymentDate}</p>}
@@ -172,6 +180,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
                       value={form.handoverDate ?? ''}
                       onChange={(d: string) => onFormChange({ handoverDate: d })}
                       className="w-full"
+                      disablePastDates
                     />
                   </div>
                   {fieldErrors.handoverDate && <p className="mt-1 text-xs text-red-500">{fieldErrors.handoverDate}</p>}
@@ -183,6 +192,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
                       value={form.paymentDate ?? ''}
                       onChange={(d: string) => onFormChange({ paymentDate: d })}
                       className="w-full"
+                      disablePastDates
                     />
                   </div>
                   {fieldErrors.paymentDate && <p className="mt-1 text-xs text-red-500">{fieldErrors.paymentDate}</p>}
@@ -210,6 +220,15 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
             )}
 
             {error && <p className="text-red-500 text-xs">{error}</p>}
+
+            {nationalCodeConflict && (
+              <div className="rounded-md border border-yellow-300 bg-yellow-50 p-3 text-xs leading-6 text-yellow-800 dark:border-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-200">
+                <p className="font-semibold">کد ملی واردشده با کد ملی ثبت‌شده مشتری متفاوت است.</p>
+                <p>کد ثبت‌شده: {nationalCodeConflict.existing}</p>
+                <p>کد واردشده: {nationalCodeConflict.entered}</p>
+                <p>این مقدار فقط برای پرداخت ثبت می‌شود و اطلاعات مشتری تغییر نمی‌کند.</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -224,10 +243,10 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
           </button>
           <button
             type="button"
-            onClick={onSave}
+            onClick={nationalCodeConflict && onContinueNationalCodeConflict ? onContinueNationalCodeConflict : onSave}
             className="px-3 py-2 text-sm font-medium text-white bg-teal-600 hover:bg-teal-700 rounded-md"
           >
-            ذخیره
+            {nationalCodeConflict ? 'ادامه بدون تغییر اطلاعات مشتری' : 'ذخیره'}
           </button>
         </div>
       </div>

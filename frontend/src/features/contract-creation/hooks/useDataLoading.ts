@@ -124,8 +124,11 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
       canLoadSubServices: hasAnyFeature(features, [
         'inventory_sub_services_view',
         'inventory_sub_services_edit',
-        'inventory_sub_services_create'
-      ]) || hasWorkspaceAccess(workspaces, ['inventory'], 'view'),
+        'inventory_sub_services_create',
+        'sales_contracts_view',
+        'sales_contracts_create',
+        'sales_contracts_edit'
+      ]) || hasWorkspaceAccess(workspaces, ['inventory', 'sales'], 'view'),
       canLoadStoneFinishings: hasAnyFeature(features, [
         'inventory_stone_finishings_view',
         'inventory_stone_finishings_edit',

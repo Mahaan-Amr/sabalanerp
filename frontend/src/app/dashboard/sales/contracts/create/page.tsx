@@ -7413,7 +7413,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                                           min={0}
                                           step={0.1}
-                                          placeholder="طول پله"
+                          decimalScale={4}
+                          placeholder="طول پله"
                                         />
                                         <div className="flex gap-1">
                                           <button
@@ -7467,7 +7468,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                                         min={0}
                                         step={0.1}
-                                        placeholder="30"
+                          decimalScale={4}
+                          placeholder="30"
                                       />
                                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                         معمولاً 28-32 سانتی‌متر
@@ -7782,7 +7784,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                                       min={0}
                                       step={0.1}
-                                      placeholder="17"
+                          decimalScale={4}
+                          placeholder="17"
                                     />
                                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                       معمولاً 15-19 سانتی‌متر
@@ -8079,7 +8082,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                                             min={0}
                                             step={0.1}
-                                            placeholder="عرض"
+                          decimalScale={4}
+                          placeholder="عرض"
                                           />
                                         </div>
                                         <div>
@@ -8094,7 +8098,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                                             min={0}
                                             step={0.1}
-                                            placeholder="عمق"
+                          decimalScale={4}
+                          placeholder="عمق"
                                           />
                                         </div>
                                       </>
@@ -8494,6 +8499,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                           className="w-full px-4 py-3 text-base border-2 border-blue-300 dark:border-blue-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
                           min={0}
                           step={0.1}
+                          decimalScale={4}
                           placeholder="مقدار طول"
                         />
                           <div className="flex gap-2 mt-3">
@@ -8633,6 +8639,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                           }`}
                           min={0}
                           step={0.1}
+                          decimalScale={4}
                           placeholder="مقدار عرض"
                         />
                           <div className="flex gap-2 mt-3">
@@ -8786,7 +8793,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                             min={0}
                             step={0.1}
-                            placeholder="مقدار طول"
+                          decimalScale={4}
+                          placeholder="مقدار طول"
                           />
                           <div className="flex gap-1">
                             <button
@@ -8836,6 +8844,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                           min={0}
                           step={0.1}
+                          decimalScale={4}
                           placeholder="مقدار عرض"
                         />
                         <div className="flex gap-1">
@@ -10010,6 +10019,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                         min={0}
                         step={0.01}
+                        decimalScale={4}
                         placeholder="محاسبه شده یا وارد کنید"
                       />
                     </div>
@@ -10320,6 +10330,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             fieldErrors={paymentHandlers.paymentEntryErrors}
             isEdit={!!paymentHandlers.editingPaymentEntryId}
             nationalCodeRequired={paymentHandlers.paymentEntryNationalCodeRequired}
+            nationalCodeConflict={paymentHandlers.nationalCodeConflict}
+            onContinueNationalCodeConflict={paymentHandlers.handleContinueNationalCodeConflict}
           />
         )}
       </div>

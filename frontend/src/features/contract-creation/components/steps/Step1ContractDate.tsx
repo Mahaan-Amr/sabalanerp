@@ -52,6 +52,7 @@ export const Step1ContractDate: React.FC<Step1ContractDateProps> = ({
           value={wizardData.contractDate}
           onChange={(date: string) => updateWizardData({ contractDate: date })}
           className="w-full"
+          disablePastDates
         />
         {errors.contractDate && (
           <p className="text-red-500 text-sm mt-1">{errors.contractDate}</p>

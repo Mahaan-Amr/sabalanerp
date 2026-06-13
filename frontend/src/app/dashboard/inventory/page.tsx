@@ -83,7 +83,7 @@ const InventoryDashboard: React.FC = () => {
             },
             { title: 'محصولات', description: 'مشاهده و مدیریت محصولات قابل استفاده در قراردادها', href: '/dashboard/sales/products', icon: FaBoxes, tone: 'primary', meta: 'کاتالوگ فروش' },
             { title: 'گردش موجودی', description: 'ثبت ورود، خروج و انتقال موجودی', icon: FaClipboardList, tone: 'info', disabled: true, meta: 'به‌زودی' },
-            { title: 'خدمات', description: 'مدیریت خدمات، ابزارها، ساب‌ها و هزینه‌های وابسته', href: '/dashboard/inventory/services', icon: FaTools, tone: 'success' },
+            { title: 'خدمات', description: 'مدیریت خدمات، ابزارها و هزینه‌های وابسته', href: '/dashboard/inventory/services', icon: FaTools, tone: 'success' },
             { title: 'گزارش‌ها', description: 'گزارش‌های موجودی، محصولات و خدمات', icon: FaChartLine, tone: 'purple', disabled: true, meta: 'به‌زودی' },
           ]}
         />

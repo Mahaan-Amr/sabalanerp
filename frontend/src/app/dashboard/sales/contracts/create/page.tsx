@@ -1080,7 +1080,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     stairSystemV2.setIsSearchingTools(true);
     const timeout = setTimeout(async () => {
       try {
-        const params: any = { limit: 20 };
+        const params: any = { isActive: true, limit: 1000 };
         if (term) params.search = term;
         const res = await servicesAPI.getSubServices(params);
         if (!active) return;
@@ -1105,7 +1105,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     }
     (async () => {
       try {
-        const res = await servicesAPI.getSubServices({ limit: 20 });
+        const res = await servicesAPI.getSubServices({ isActive: true, limit: 1000 });
         const items = res?.data?.items || res?.data?.data || [];
         stairSystemV2.setToolsResults(items);
       } catch (e) {

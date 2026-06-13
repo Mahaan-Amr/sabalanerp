@@ -31,7 +31,7 @@ const CreateSubServicePage: React.FC = () => {
         // Redirect back to services page
         router.push('/dashboard/inventory/services');
       } else {
-        setErrors({ general: 'خطا در ایجاد زیرخدمت' });
+        setErrors({ general: 'خطا در ایجاد ابزار' });
       }
     } catch (error: any) {
       console.error('Error creating sub-service:', error);
@@ -43,7 +43,7 @@ const CreateSubServicePage: React.FC = () => {
         });
         setErrors(newErrors);
       } else {
-        setErrors({ general: 'خطا در ایجاد زیرخدمت' });
+        setErrors({ general: 'خطا در ایجاد ابزار' });
       }
     } finally {
       setLoading(false);
@@ -62,10 +62,10 @@ const CreateSubServicePage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
-                ایجاد زیرخدمت جدید
+                ایجاد ابزار جدید
               </h1>
               <p className="text-slate-600 dark:text-slate-400">
-                تعریف زیرخدمت با قیمت و مبنای محاسبه مستقل
+                تعریف ابزار با قیمت و مبنای محاسبه مستقل
               </p>
             </div>
             <button
@@ -87,7 +87,7 @@ const CreateSubServicePage: React.FC = () => {
                   
                   
                   
-                  کد زیرخدمت *
+                  کد ابزار *
                 
                 
                 
@@ -112,7 +112,7 @@ const CreateSubServicePage: React.FC = () => {
                   
                   
                   
-                  نام فارسی زیرخدمت *
+                  نام فارسی ابزار *
                 
                 
                 
@@ -124,7 +124,7 @@ const CreateSubServicePage: React.FC = () => {
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
                     errors.namePersian ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
                   }`}
-                  placeholder="مثال: ساب لبه"
+                  placeholder="مثال: ابزار شیار"
                 />
                 {errors.namePersian && (
                   <p className="text-red-500 text-sm mt-1">{errors.namePersian}</p>
@@ -147,7 +147,7 @@ const CreateSubServicePage: React.FC = () => {
                   value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  placeholder="توضیحات زیرخدمت..."
+                  placeholder="توضیحات ابزار..."
                 />
               </div>
 
@@ -167,7 +167,7 @@ const CreateSubServicePage: React.FC = () => {
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   rows={3}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  placeholder="توضیحات زیرخدمت..."
+                  placeholder="توضیحات ابزار..."
                 />
               </div>
 
@@ -263,7 +263,7 @@ const CreateSubServicePage: React.FC = () => {
                   ) : (
                     <FaSave className="w-4 h-4" />
                   )}
-                  <span>{loading ? 'در حال ذخیره...' : 'ایجاد زیرخدمت'}</span>
+                  <span>{loading ? 'در حال ذخیره...' : 'ایجاد ابزار'}</span>
                 </button>
               </div>
             </form>

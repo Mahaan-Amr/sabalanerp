@@ -35,7 +35,7 @@ interface SubService {
   name?: string;
   namePersian: string;
   description?: string;
-  pricePerMeter: number; // هزینه هر متر ساب (تومان)
+  pricePerMeter: number; // هزینه پایه ابزار (تومان)
   calculationBase: 'length' | 'squareMeters'; // بر اساس طول یا متر مربع
   isActive: boolean;
   createdAt: string;
@@ -129,12 +129,12 @@ const ServicesPage: React.FC = () => {
         layerTypesResponse,
         finishingResponse
       ] = await Promise.all([
-        servicesAPI.getServices(),
-        servicesAPI.getCuttingTypes(),
-        servicesAPI.getSubServices(),
-        servicesAPI.getStairStandardLengths(),
-        servicesAPI.getLayerTypes(),
-        servicesAPI.getStoneFinishings()
+        servicesAPI.getServices({ limit: 1000 }),
+        servicesAPI.getCuttingTypes({ limit: 1000 }),
+        servicesAPI.getSubServices({ limit: 1000 }),
+        servicesAPI.getStairStandardLengths({ limit: 1000 }),
+        servicesAPI.getLayerTypes({ limit: 1000 }),
+        servicesAPI.getStoneFinishings({ limit: 1000 })
       ]);
 
       if (servicesResponse.data.success) {
@@ -396,7 +396,7 @@ const ServicesPage: React.FC = () => {
   const tabLabels: Record<ActiveTab, string> = {
     services: 'خدمات',
     'cutting-types': 'انواع ابزار',
-    'sub-services': 'ساب‌ها',
+    'sub-services': 'ابزارها',
     'stair-lengths': 'طول استاندارد پله',
     'layer-types': 'نوع لایه',
     'stone-finishings': 'فرآوری سنگ'
@@ -404,7 +404,7 @@ const ServicesPage: React.FC = () => {
   const tabOptions = [
     { id: 'services', label: 'خدمات', value: 'services', count: services.length, tone: 'primary' as const },
     { id: 'cutting-types', label: 'انواع ابزار', value: 'cutting-types', count: cuttingTypes.length, tone: 'info' as const },
-    { id: 'sub-services', label: 'ساب‌ها', value: 'sub-services', count: subServices.length, tone: 'success' as const },
+    { id: 'sub-services', label: 'ابزارها', value: 'sub-services', count: subServices.length, tone: 'success' as const },
     { id: 'stair-lengths', label: 'طول پله', value: 'stair-lengths', count: stairLengths.length, tone: 'warning' as const },
     { id: 'layer-types', label: 'نوع لایه', value: 'layer-types', count: layerTypes.length, tone: 'purple' as const },
     { id: 'stone-finishings', label: 'فرآوری سنگ', value: 'stone-finishings', count: stoneFinishings.length, tone: 'neutral' as const },
@@ -420,12 +420,12 @@ const ServicesPage: React.FC = () => {
     <ErpPage
       eyebrow="انبار"
       title="مدیریت خدمات"
-      description="مدیریت خدمات، ابزار، ساب، طول پله، نوع لایه و فرآوری سنگ برای محاسبات قرارداد."
+      description="مدیریت خدمات، ابزارها، طول پله، نوع لایه و فرآوری سنگ برای محاسبات قرارداد."
       backHref="/dashboard/inventory"
       metrics={[
         { label: 'خدمات', value: services.length.toLocaleString('fa-IR'), icon: FaTools, tone: 'primary' },
         { label: 'انواع ابزار', value: cuttingTypes.length.toLocaleString('fa-IR'), icon: FaCut, tone: 'info' },
-        { label: 'ساب‌ها', value: subServices.length.toLocaleString('fa-IR'), icon: FaLayerGroup, tone: 'success' },
+        { label: 'ابزارها', value: subServices.length.toLocaleString('fa-IR'), icon: FaLayerGroup, tone: 'success' },
         { label: 'فرآوری سنگ', value: stoneFinishings.length.toLocaleString('fa-IR'), icon: FaPaintBrush, tone: 'neutral' },
       ]}
     >
@@ -452,7 +452,7 @@ const ServicesPage: React.FC = () => {
                   : activeTab === 'cutting-types'
                   ? 'نوع ابزار'
                   : activeTab === 'sub-services'
-                  ? 'ساب'
+                  ? 'ابزار'
                   : 'فرآوری'
               }`}
               onClick={() => router.push(`/dashboard/inventory/services/${activeTab}/create`)}
@@ -644,14 +644,14 @@ const ServicesPage: React.FC = () => {
           ) : activeTab === 'sub-services' ? (
             <div className="p-6">
               <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mb-4">
-                فهرست ساب‌ها
+                فهرست ابزارها
               </h2>
               
               {filteredSubServices.length === 0 ? (
                 <div className="text-center py-8">
                   <FaLayerGroup className="w-12 h-12 text-slate-400 mx-auto mb-4" />
                   <p className="text-slate-500 dark:text-slate-400">
-                    {searchTerm ? 'نتیجه‌ای یافت نشد' : 'هنوز سابی ثبت نشده است'}
+                    {searchTerm ? 'نتیجه‌ای یافت نشد' : 'هنوز ابزاری ثبت نشده است'}
                   </p>
                 </div>
               ) : (
@@ -659,7 +659,7 @@ const ServicesPage: React.FC = () => {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-slate-700">
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">کد ساب</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">کد ابزار</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام فارسی</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام انگلیسی</th>
                     <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">توضیحات</th>

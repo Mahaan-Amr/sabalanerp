@@ -340,11 +340,32 @@ export default function ContractsPage() {
     },
   ];
 
+  const downloadPdfActionLabel = '\u062f\u0627\u0646\u0644\u0648\u062f PDF';
+  const printContractActionLabel = '\u067e\u0631\u06cc\u0646\u062a \u0642\u0631\u0627\u0631\u062f\u0627\u062f';
+
   const getRowActions = (contract: Contract): ErpAction[] => {
     const actions: ErpAction[] = [
       { label: 'مشاهده قرارداد', href: `/dashboard/sales/contracts/${contract.id}`, icon: FaEye, tone: 'primary' },
     ];
 
+    if (contractPermissions.canView) {
+      actions.push({
+        label: downloadPdfActionLabel,
+        onClick: () => handleDownloadPdf(contract.id),
+        icon: FaDownload,
+        tone: 'success',
+        disabled: pdfActionLoading === contract.id,
+      });
+    }
+    if (contractPermissions.canPrint) {
+      actions.push({
+        label: printContractActionLabel,
+        onClick: () => handleStatusAction(contract.id, 'print'),
+        icon: FaPrint,
+        tone: 'purple',
+        disabled: actionLoading === `${contract.id}:print`,
+      });
+    }
     if (contract.status === 'DRAFT') {
       actions.push({ label: 'ویرایش قرارداد', href: `/dashboard/sales/contracts/${contract.id}/edit`, icon: FaEdit, tone: 'info' });
     }
@@ -376,23 +397,6 @@ export default function ContractsPage() {
         icon: FaSignature,
         tone: 'success',
         disabled: actionLoading === `${contract.id}:sign`,
-      });
-    }
-
-    if ((contract.status === 'SIGNED' || contract.status === 'PRINTED') && contractPermissions.canPrint) {
-      actions.push({
-        label: 'دانلود PDF',
-        onClick: () => handleDownloadPdf(contract.id),
-        icon: FaDownload,
-        tone: 'success',
-        disabled: pdfActionLoading === contract.id,
-      });
-      actions.push({
-        label: 'پرینت قرارداد',
-        onClick: () => handleStatusAction(contract.id, 'print'),
-        icon: FaPrint,
-        tone: 'purple',
-        disabled: actionLoading === `${contract.id}:print`,
       });
     }
 

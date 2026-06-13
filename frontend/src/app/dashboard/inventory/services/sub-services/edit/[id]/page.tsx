@@ -44,11 +44,11 @@ const EditSubServicePage: React.FC = () => {
           isActive: subService.isActive
         });
       } else {
-        setErrors({ general: 'خطا در دریافت اطلاعات زیرخدمت' });
+        setErrors({ general: 'خطا در دریافت اطلاعات ابزار' });
       }
     } catch (error) {
       console.error('Error loading sub-service:', error);
-      setErrors({ general: 'خطا در دریافت اطلاعات زیرخدمت' });
+      setErrors({ general: 'خطا در دریافت اطلاعات ابزار' });
     } finally {
       setInitialLoading(false);
     }
@@ -66,7 +66,7 @@ const EditSubServicePage: React.FC = () => {
         // Redirect back to services page
         router.push('/dashboard/inventory/services');
       } else {
-        setErrors({ general: 'خطا در دریافت اطلاعات زیرخدمت' });
+        setErrors({ general: 'خطا در ذخیره ابزار' });
       }
     } catch (error: any) {
       console.error('Error updating sub-service:', error);
@@ -78,7 +78,7 @@ const EditSubServicePage: React.FC = () => {
         });
         setErrors(newErrors);
       } else {
-        setErrors({ general: 'خطا در دریافت اطلاعات زیرخدمت' });
+        setErrors({ general: 'خطا در ذخیره ابزار' });
       }
     } finally {
       setLoading(false);
@@ -105,10 +105,10 @@ const EditSubServicePage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
-                ویرایش زیرخدمت
+                ویرایش ابزار
               </h1>
               <p className="text-slate-600 dark:text-slate-400">
-                اطلاعات زیرخدمت، قیمت و مبنای محاسبه آن را به‌روزرسانی کنید
+                اطلاعات ابزار، قیمت و مبنای محاسبه آن را به‌روزرسانی کنید
               </p>
             </div>
             <button
@@ -130,7 +130,7 @@ const EditSubServicePage: React.FC = () => {
                   
                   
                   
-                  کد زیرخدمت *
+                  کد ابزار *
                 
                 
                 
@@ -155,7 +155,7 @@ const EditSubServicePage: React.FC = () => {
                   
                   
                   
-                  نام فارسی زیرخدمت *
+                  نام فارسی ابزار *
                 
                 
                 
@@ -167,7 +167,7 @@ const EditSubServicePage: React.FC = () => {
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
                     errors.namePersian ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
                   }`}
-                  placeholder="مثال: ساب لبه"
+                  placeholder="مثال: ابزار شیار"
                 />
                 {errors.namePersian && (
                   <p className="text-red-500 text-sm mt-1">{errors.namePersian}</p>
@@ -190,7 +190,7 @@ const EditSubServicePage: React.FC = () => {
                   value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  placeholder="توضیحات زیرخدمت..."
+                  placeholder="توضیحات ابزار..."
                 />
               </div>
 
@@ -210,7 +210,7 @@ const EditSubServicePage: React.FC = () => {
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   rows={3}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  placeholder="توضیحات زیرخدمت..."
+                  placeholder="توضیحات ابزار..."
                 />
               </div>
 
@@ -306,7 +306,7 @@ const EditSubServicePage: React.FC = () => {
                   ) : (
                     <FaSave className="w-4 h-4" />
                   )}
-                  <span>{loading ? 'در حال ذخیره...' : 'ذخیره زیرخدمت'}</span>
+                  <span>{loading ? 'در حال ذخیره...' : 'ذخیره ابزار'}</span>
                 </button>
               </div>
             </form>

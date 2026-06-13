@@ -691,13 +691,19 @@ export const servicesAPI = {
   deleteCuttingType: (id: string) => api.delete(`/cutting-types/${id}`),
   toggleCuttingTypeStatus: (id: string) => api.patch(`/cutting-types/${id}/toggle`),
   
-  // Sub Services (??)
+  // Contract tools. Backed by the legacy sub-services API for compatibility.
   getSubServices: (params?: any) => api.get('/sub-services', { params }),
   getSubService: (id: string) => api.get(`/sub-services/${id}`),
   createSubService: (data: any) => api.post('/sub-services', data),
   updateSubService: (id: string, data: any) => api.put(`/sub-services/${id}`, data),
   deleteSubService: (id: string) => api.delete(`/sub-services/${id}`),
   toggleSubServiceStatus: (id: string) => api.patch(`/sub-services/${id}/toggle`),
+  getTools: (params?: any) => api.get('/sub-services', { params }),
+  getTool: (id: string) => api.get(`/sub-services/${id}`),
+  createTool: (data: any) => api.post('/sub-services', data),
+  updateTool: (id: string, data: any) => api.put(`/sub-services/${id}`, data),
+  deleteTool: (id: string) => api.delete(`/sub-services/${id}`),
+  toggleToolStatus: (id: string) => api.patch(`/sub-services/${id}/toggle`),
 
   // Stair standard lengths
   getStairStandardLengths: (params?: any) => api.get('/stair-standard-lengths', { params }),
@@ -715,7 +721,7 @@ export const servicesAPI = {
   deleteLayerType: (id: string) => api.delete(`/layer-types/${id}`),
   toggleLayerTypeStatus: (id: string) => api.patch(`/layer-types/${id}/toggle`),
 
-  // Stone finishing services (ساب‌سرویس‌ها)
+  // Stone finishing services
   getStoneFinishings: (params?: any) => api.get('/stone-finishings', { params }),
   getStoneFinishing: (id: string) => api.get(`/stone-finishings/${id}`),
   createStoneFinishing: (data: any) => api.post('/stone-finishings', data),

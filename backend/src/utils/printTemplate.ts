@@ -132,7 +132,7 @@ const getFinishingBase = (product: any): 'length' | 'squareMeters' => {
 };
 
 const getFinishingUnitLabel = (base: 'length' | 'squareMeters') =>
-  base === 'length' ? 'متر' : 'متر مربع';
+  base === 'length' ? 'متر طول' : 'متر مربع';
 
 const getFinishingQuantity = (product: any, base: 'length' | 'squareMeters'): number => {
   const quantity =

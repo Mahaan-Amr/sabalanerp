@@ -13,8 +13,12 @@ A paid stone edge operation applied during contract pricing, calculated by lengt
 _Avoid_: ساب as a category, sub-service, tool, فرآوری سنگ
 
 **فرآوری سنگ**:
-A stone finishing or treatment option applied during contract pricing, separate from ابزار, calculated by length or square meter depending on the item.
+A stone finishing or treatment option applied during contract pricing, separate from ابزار, calculated by متر طول or متر مربع depending on the item.
 _Avoid_: ابزار, خدمات, پرداخت as the canonical catalog name
+
+**متر طول**:
+The canonical unit label for length-based فرآوری سنگ pricing.
+_Avoid_: متر when it can be confused with متر مربع
 
 **ساب**:
 A specific kind of ابزار, not a separate top-level category.

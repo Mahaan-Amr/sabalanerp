@@ -1072,7 +1072,7 @@ const ServicesPage: React.FC = () => {
                             {finishing.name || '-'}
                           </td>
                           <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
-                            {finishing.calculationBase === 'length' ? 'متر' : 'متر مربع'}
+                            {finishing.calculationBase === 'length' ? 'متر طول' : 'متر مربع'}
                           </td>
                           <td className="py-3 px-4 text-slate-900 dark:text-slate-100 font-mono">
                             {(finishing.unitPrice ?? finishing.pricePerSquareMeter).toLocaleString('fa-IR')} تومان

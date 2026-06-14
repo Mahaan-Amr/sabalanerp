@@ -4,7 +4,7 @@ Stone finishing (`فرآوری سنگ`) remains a separate catalog and contract 
 
 Existing finishing records are migrated as square-meter finishings, and old contracts or draft wizard state that only contain `finishingPricePerSquareMeter` / `finishingSquareMeters` are interpreted as square-meter finishings forever. We are deliberately not adding relational finishing rows to contract items in this change, because PDFs, summaries, public confirmation, and accounting can remain correct from the contract snapshot plus rolled-up totals; a relational service-line model would be a separate architecture change.
 
-Meter-based finishings use automatic defaults where safe, but keep an editable contract quantity because meter billing can mean one edge, multiple edges, perimeter, or custom work depending on the product and job. Contract creation must use searchable finishing selection for large catalogs and must be tested as a pricing migration across square-meter compatibility, meter-based longitudinal/slab/stair scenarios, PDFs, summaries, public confirmation, old drafts/contracts, and accounting totals.
+Meter-based finishings use automatic defaults where safe, but keep an editable contract quantity because meter billing can mean one edge, multiple edges, perimeter, or custom work depending on the product and job. Length-based finishing quantities are displayed as `متر طول` so they are visually distinct from `متر مربع`. Contract creation must use searchable finishing selection for large catalogs and must be tested as a pricing migration across square-meter compatibility, meter-based longitudinal/slab/stair scenarios, PDFs, summaries, public confirmation, old drafts/contracts, and accounting totals.
 
 ## Acceptance Gate
 

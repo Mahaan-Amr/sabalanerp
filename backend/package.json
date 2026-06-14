@@ -16,7 +16,9 @@
     "migrate:legacy-customers:dry": "tsx scripts/migrate-legacy-customers-to-crm.ts",
     "migrate:legacy-customers:apply": "tsx scripts/migrate-legacy-customers-to-crm.ts --apply",
     "backfill:crm-customer-owners:dry": "tsx scripts/backfill-crm-customer-owners.ts",
-    "backfill:crm-customer-owners:apply": "tsx scripts/backfill-crm-customer-owners.ts --apply"
+    "backfill:crm-customer-owners:apply": "tsx scripts/backfill-crm-customer-owners.ts --apply",
+    "sync:opc-products:dry": "node scripts/sync-products-from-opc.js",
+    "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"
   },
   "dependencies": {
     "@prisma/client": "^5.16.1",

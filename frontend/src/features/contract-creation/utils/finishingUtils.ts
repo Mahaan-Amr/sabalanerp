@@ -19,7 +19,7 @@ export const getFinishingCalculationBase = (value?: Partial<StoneFinishing> | nu
   value?.calculationBase === 'length' ? 'length' : 'squareMeters';
 
 export const getFinishingUnitLabel = (calculationBase?: FinishingCalculationBase | null) =>
-  calculationBase === 'length' ? 'متر' : 'متر مربع';
+  calculationBase === 'length' ? 'متر طول' : 'متر مربع';
 
 export const getFinishingUnitPrice = (value?: Partial<StoneFinishing> | null): number =>
   toFiniteNumber(value?.unitPrice) || toFiniteNumber(value?.pricePerSquareMeter);

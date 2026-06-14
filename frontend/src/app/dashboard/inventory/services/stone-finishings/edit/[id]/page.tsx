@@ -216,7 +216,7 @@ const EditStoneFinishingPage: React.FC = () => {
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  {formData.calculationBase === 'length' ? 'قیمت هر متر (تومان)' : 'قیمت هر متر مربع (تومان)'}
+                  {formData.calculationBase === 'length' ? 'قیمت هر متر طول (تومان)' : 'قیمت هر متر مربع (تومان)'}
                 </label>
                 <input
                   type="number"

@@ -3,6 +3,9 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000'),
   },
+  experimental: {
+    cpus: 1,
+  },
   // PWA Configuration
   async headers() {
     return [

@@ -33,8 +33,10 @@ interface NormalizedCut {
 interface NormalizedService {
   category: string;
   name: string;
+  amount: number;
   amountLabel: string;
   rateLabel: string;
+  rate: number;
   cost: number;
 }
 
@@ -120,6 +122,12 @@ const toFaNumber = (value: unknown, fractionDigits = 0): string => {
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits
   }).format(numeric);
+};
+
+const hasTextValue = (value: unknown): boolean => {
+  if (value === null || value === undefined) return false;
+  const text = String(value).trim();
+  return text.length > 0 && text !== EMPTY;
 };
 
 const formatAmount = (value: unknown, currency = 'تومان'): string => {
@@ -271,11 +279,15 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
 
       const services: NormalizedService[] = [];
       (product?.appliedSubServices || []).forEach((service: any) => {
+        const amount = toNumber(service?.meter);
+        const rate = toNumber(service?.subService?.pricePerMeter);
         services.push({
           category: 'خدمات',
           name: service?.subService?.namePersian || service?.subService?.name || EMPTY,
-          amountLabel: `${toFaNumber(service?.meter || 0, 2)} ${service?.calculationBase === 'squareMeters' ? 'متر مربع' : 'متر'}`,
-          rateLabel: service?.subService?.pricePerMeter ? `${toFaNumber(service.subService.pricePerMeter)} تومان` : EMPTY,
+          amount,
+          amountLabel: `${toFaNumber(amount, 2)} ${service?.calculationBase === 'squareMeters' ? 'متر مربع' : 'متر'}`,
+          rate,
+          rateLabel: rate ? `${toFaNumber(rate)} تومان` : EMPTY,
           cost: toNumber(service?.cost)
         });
       });
@@ -283,11 +295,14 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
       if (product?.finishingId || product?.finishingCost) {
         const finishingBase = getFinishingBase(product);
         const finishingUnitLabel = getFinishingUnitLabel(finishingBase);
+        const finishingQuantity = getFinishingQuantity(product, finishingBase);
         const finishingUnitPrice = getFinishingUnitPrice(product);
         services.push({
-          category: 'فینیشینگ',
+          category: 'فرآوری سنگ',
           name: product?.finishingName || EMPTY,
+          amount: finishingQuantity,
           amountLabel: getFinishingAmountLabel(product),
+          rate: finishingUnitPrice,
           rateLabel: finishingUnitPrice ? `${toFaNumber(finishingUnitPrice)} تومان / ${finishingUnitLabel}` : EMPTY,
           cost: toNumber(product?.finishingCost)
         });
@@ -325,7 +340,9 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
           ? `${product.layerTypeName}${product?.layerUseMandatory ? ` / حکمی ${toFaNumber(product?.layerMandatoryPercentage || 0)}%` : ''}`
           : EMPTY,
         finishingSummary: product?.finishingName ? `${product.finishingName} (${getFinishingAmountLabel(product)})` : EMPTY,
-        remainingSummary: `باقی‌مانده: ${toFaNumber(remainingCount)} | مصرف‌شده: ${toFaNumber(usedRemainingCount)}`
+        remainingSummary: remainingCount > 0 || usedRemainingCount > 0
+          ? `باقی‌مانده: ${toFaNumber(remainingCount)} | مصرف‌شده: ${toFaNumber(usedRemainingCount)}`
+          : EMPTY
       };
     });
   }
@@ -430,11 +447,16 @@ const normalizePayments = (contract: RenderableContract): NormalizedPayment[] =>
 const normalizeFinancials = (contract: RenderableContract, products: NormalizedProduct[]): NormalizedFinancials => {
   const currency = String(contract.currency || contract.contractData?.payment?.currency || 'تومان');
   const productsTotal = products.reduce((sum, product) => sum + toNumber(product.totalPrice), 0);
-  const servicesTotal = products.reduce((sum, product) => sum + product.services.reduce((serviceSum, service) => serviceSum + toNumber(service.cost), 0), 0);
+  const servicesTotal = products.reduce((sum, product) => {
+    const services = product.services
+      .filter((service) => service.category !== 'فرآوری سنگ')
+      .reduce((serviceSum, service) => serviceSum + toNumber(service.cost), 0);
+    return sum + services;
+  }, 0);
   const cutsTotal = products.reduce((sum, product) => sum + product.cuts.reduce((cutSum, cut) => cutSum + toNumber(cut.cost), 0), 0);
   const finishingTotal = products.reduce((sum, product) => {
     const finishing = product.services
-      .filter((service) => service.category === 'فینیشینگ')
+      .filter((service) => service.category === 'فرآوری سنگ')
       .reduce((serviceSum, service) => serviceSum + toNumber(service.cost), 0);
     return sum + finishing;
   }, 0);
@@ -455,41 +477,70 @@ const renderProductMainRows = (products: NormalizedProduct[], currency: string):
     return `<tr><td colspan="10" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
   }
 
-  return products.map((product, index) => `
-    <tr>
-      <td>${toFaNumber(index + 1)}</td>
-      <td>${escapeHtml(product.code)}</td>
-      <td>${escapeHtml(product.name)}</td>
-      <td>${escapeHtml(product.productType)}</td>
-      <td>${escapeHtml(product.stairPart)}</td>
-      <td>${escapeHtml(product.dimensions)}</td>
-      <td>${toFaNumber(product.quantity, 2)}</td>
-      <td>${toFaNumber(product.squareMeters, 3)}</td>
-      <td>${formatAmount(product.unitPrice, currency)}</td>
-      <td>${formatAmount(product.totalPrice, currency)}</td>
-    </tr>
-  `).join('');
-};
-
-const renderProductDetails = (products: NormalizedProduct[], currency: string): string => {
-  if (!products.length) {
-    return `<p class="empty">${escapeHtml(EMPTY)}</p>`;
-  }
-
   return products.map((product, index) => {
-    const cutRows = product.cuts.length > 0
-      ? product.cuts.map((cut) => `
+    const meaningfulCuts = product.cuts.filter((cut) =>
+      cut.meters > 0 || cut.rate > 0 || cut.cost > 0
+    );
+
+    const meaningfulServices = product.services.filter((service) =>
+      hasTextValue(service.name) ||
+      service.amount > 0 ||
+      service.rate > 0 ||
+      service.cost > 0
+    );
+
+    const summaryItems = [
+      hasTextValue(product.description) ? `<span><strong>شرح:</strong> ${escapeHtml(product.description)}</span>` : '',
+      product.mandatoryPercentage > 0 ? `<span><strong>اطلاعات حکمی:</strong> ${toFaNumber(product.mandatoryPercentage)}%</span>` : '',
+      product.originalTotalPrice > 0 ? `<span><strong>قیمت پایه:</strong> ${formatAmount(product.originalTotalPrice, currency)}</span>` : '',
+      hasTextValue(product.layerSummary) ? `<span><strong>لایه:</strong> ${escapeHtml(product.layerSummary)}</span>` : '',
+      hasTextValue(product.remainingSummary) ? `<span><strong>وضعیت باقی‌مانده سنگ:</strong> ${escapeHtml(product.remainingSummary)}</span>` : ''
+    ].filter(Boolean);
+
+    const cutsBlock = meaningfulCuts.length > 0
+      ? `
+        <div class="detail-block">
+          <h4>جزئیات برش</h4>
+          <table class="nested-table">
+            <thead>
+              <tr>
+                <th>نوع</th>
+                <th>طول/مقدار</th>
+                <th>نرخ</th>
+                <th>هزینه</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${meaningfulCuts.map((cut) => `
           <tr>
             <td>${escapeHtml(cut.type)}</td>
             <td>${toFaNumber(cut.meters, 2)} متر</td>
             <td>${cut.rate > 0 ? formatAmount(cut.rate, currency) : escapeHtml(EMPTY)}</td>
             <td>${formatAmount(cut.cost, currency)}</td>
           </tr>
-        `).join('')
-      : `<tr><td colspan="4" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
+        `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `
+      : '';
 
-    const serviceRows = product.services.length > 0
-      ? product.services.map((service) => `
+    const servicesBlock = meaningfulServices.length > 0
+      ? `
+        <div class="detail-block">
+          <h4>جزئیات خدمات و فرآوری</h4>
+          <table class="nested-table">
+            <thead>
+              <tr>
+                <th>دسته</th>
+                <th>شرح</th>
+                <th>مقدار</th>
+                <th>نرخ</th>
+                <th>هزینه</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${meaningfulServices.map((service) => `
           <tr>
             <td>${escapeHtml(service.category)}</td>
             <td>${escapeHtml(service.name)}</td>
@@ -497,53 +548,42 @@ const renderProductDetails = (products: NormalizedProduct[], currency: string): 
             <td>${escapeHtml(service.rateLabel || EMPTY)}</td>
             <td>${formatAmount(service.cost, currency)}</td>
           </tr>
-        `).join('')
-      : `<tr><td colspan="5" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
+        `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `
+      : '';
+
+    const detailRow = summaryItems.length || cutsBlock || servicesBlock
+      ? `
+        <tr class="product-detail-row">
+          <td colspan="10">
+            <div class="product-detail-inline">
+              <h3>جزئیات محصول</h3>
+              ${summaryItems.length ? `<div class="detail-strip">${summaryItems.join('')}</div>` : ''}
+              ${cutsBlock}
+              ${servicesBlock}
+            </div>
+          </td>
+        </tr>
+      `
+      : '';
 
     return `
-      <section class="section product-detail">
-        <h3>جزئیات فنی و خدمات - ${escapeHtml(product.name)}</h3>
-        <div class="grid two-col">
-          <div><strong>شرح:</strong> ${escapeHtml(product.description || EMPTY)}</div>
-          <div><strong>اطلاعات حکمی:</strong> ${product.mandatoryPercentage > 0 ? `${toFaNumber(product.mandatoryPercentage)}%` : escapeHtml(EMPTY)}</div>
-          <div><strong>قیمت پایه:</strong> ${product.originalTotalPrice > 0 ? formatAmount(product.originalTotalPrice, currency) : escapeHtml(EMPTY)}</div>
-          <div><strong>قیمت نهایی:</strong> ${formatAmount(product.totalPrice, currency)}</div>
-          <div><strong>لایه:</strong> ${escapeHtml(product.layerSummary || EMPTY)}</div>
-          <div><strong>فینیشینگ:</strong> ${escapeHtml(product.finishingSummary || EMPTY)}</div>
-          <div class="full"><strong>وضعیت باقی‌مانده سنگ:</strong> ${escapeHtml(product.remainingSummary || EMPTY)}</div>
-        </div>
-
-        <h4>جزئیات برش</h4>
-        <table>
-          <thead>
-            <tr>
-              <th>نوع</th>
-              <th>طول/مقدار</th>
-              <th>نرخ</th>
-              <th>هزینه</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${cutRows}
-          </tbody>
-        </table>
-
-        <h4>جزئیات خدمات</h4>
-        <table>
-          <thead>
-            <tr>
-              <th>دسته</th>
-              <th>شرح</th>
-              <th>مقدار</th>
-              <th>نرخ</th>
-              <th>هزینه</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${serviceRows}
-          </tbody>
-        </table>
-      </section>
+      <tr>
+        <td>${toFaNumber(index + 1)}</td>
+        <td>${escapeHtml(product.code)}</td>
+        <td>${escapeHtml(product.name)}</td>
+        <td>${escapeHtml(product.productType)}</td>
+        <td>${escapeHtml(product.stairPart)}</td>
+        <td>${escapeHtml(product.dimensions)}</td>
+        <td>${toFaNumber(product.quantity, 2)}</td>
+        <td>${toFaNumber(product.squareMeters, 3)}</td>
+        <td>${formatAmount(product.unitPrice, currency)}</td>
+        <td>${formatAmount(product.totalPrice, currency)}</td>
+      </tr>
+      ${detailRow}
     `;
   }).join('');
 };
@@ -609,6 +649,19 @@ const renderPaymentRows = (payments: NormalizedPayment[], currency: string): str
       `);
     });
   });
+
+  return rows.join('');
+};
+
+const renderFinancialSummary = (financials: NormalizedFinancials): string => {
+  const rows = [
+    `<div><strong>جمع محصولات:</strong> ${formatAmount(financials.productsTotal, financials.currency)}</div>`,
+    financials.servicesTotal > 0 ? `<div><strong>جمع خدمات:</strong> ${formatAmount(financials.servicesTotal, financials.currency)}</div>` : '',
+    financials.cutsTotal > 0 ? `<div><strong>جمع برش:</strong> ${formatAmount(financials.cutsTotal, financials.currency)}</div>` : '',
+    financials.finishingTotal > 0 ? `<div><strong>جمع فرآوری سنگ:</strong> ${formatAmount(financials.finishingTotal, financials.currency)}</div>` : '',
+    `<div><strong>مبلغ نهایی قرارداد:</strong> ${formatAmount(financials.grandTotal, financials.currency)}</div>`,
+    `<div><strong>واحد پول:</strong> ${escapeHtml(financials.currency)}</div>`
+  ].filter(Boolean);
 
   return rows.join('');
 };
@@ -699,8 +752,6 @@ export function renderContractHtml(contract: RenderableContract): string {
       </table>
     </section>
 
-    ${renderProductDetails(normalizedProducts, financials.currency)}
-
     <section class="section">
       <h2>برنامه تحویل</h2>
       <table>
@@ -746,12 +797,7 @@ export function renderContractHtml(contract: RenderableContract): string {
     <section class="section">
       <h2>جمع‌بندی مالی</h2>
       <div class="grid two-col">
-        <div><strong>جمع محصولات:</strong> ${formatAmount(financials.productsTotal, financials.currency)}</div>
-        <div><strong>جمع خدمات:</strong> ${formatAmount(financials.servicesTotal, financials.currency)}</div>
-        <div><strong>جمع برش:</strong> ${formatAmount(financials.cutsTotal, financials.currency)}</div>
-        <div><strong>جمع فینیشینگ:</strong> ${formatAmount(financials.finishingTotal, financials.currency)}</div>
-        <div><strong>مبلغ نهایی قرارداد:</strong> ${formatAmount(financials.grandTotal, financials.currency)}</div>
-        <div><strong>واحد پول:</strong> ${escapeHtml(financials.currency)}</div>
+        ${renderFinancialSummary(financials)}
       </div>
     </section>
 
@@ -870,6 +916,40 @@ export function renderContractHtml(contract: RenderableContract): string {
     .section h4 {
       margin: 8px 0 6px;
       font-size: 11px;
+    }
+
+    .product-detail-row td {
+      background: #fafafa;
+      padding: 6px 8px;
+    }
+
+    .product-detail-inline {
+      display: grid;
+      gap: 6px;
+    }
+
+    .product-detail-inline h3 {
+      margin: 0;
+      font-size: 11px;
+      color: #374151;
+    }
+
+    .detail-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 14px;
+      font-size: 9.5px;
+    }
+
+    .detail-block h4 {
+      margin: 0 0 4px;
+      font-size: 10px;
+      color: #374151;
+    }
+
+    .nested-table {
+      font-size: 9px;
+      background: #ffffff;
     }
 
     .grid {

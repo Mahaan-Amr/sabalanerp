@@ -27,3 +27,7 @@ _Avoid_: using ساب‌ها to mean all ابزارها
 **خدمات**:
 A non-tool service offered by the business. خدمات is separate from ابزار and should not be used for contract edge or finishing operations.
 _Avoid_: using خدمات as a catch-all for ابزار
+
+**جزئیات محصول قرارداد**:
+The price-bearing details attached to a contract product for customer-facing contract output, including cuts, services, tools, and stone finishing when they exist.
+_Avoid_: printing empty detail groups or using خدمات as the umbrella label for every add-on

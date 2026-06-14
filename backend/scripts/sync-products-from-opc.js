@@ -4,7 +4,7 @@ const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
 
-const DEFAULT_EXCEL_PATH = path.join(__dirname, '../../excel/opc code.xls');
+const DEFAULT_EXCEL_PATH = path.join(__dirname, '../excel/opc code.xls');
 const DEFAULT_SHEET_NAME = 'کد سنگ';
 const DEFAULT_COLOR_CODE = '00';
 const DEFAULT_COLOR_NAME = 'بدون رنگ';

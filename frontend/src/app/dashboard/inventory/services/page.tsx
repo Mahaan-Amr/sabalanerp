@@ -69,6 +69,8 @@ interface StoneFinishing {
   namePersian: string;
   description?: string;
   pricePerSquareMeter: number;
+  unitPrice?: number | null;
+  calculationBase?: 'length' | 'squareMeters';
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -1053,7 +1055,8 @@ const ServicesPage: React.FC = () => {
                       <tr className="border-b border-slate-200 dark:border-slate-700">
                         <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام فارسی</th>
                         <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام انگلیسی</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">قیمت هر متر مربع</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">واحد</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">قیمت واحد</th>
                         <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">توضیحات</th>
                         <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">وضعیت</th>
                         <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">عملیات</th>
@@ -1068,8 +1071,11 @@ const ServicesPage: React.FC = () => {
                           <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
                             {finishing.name || '-'}
                           </td>
+                          <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
+                            {finishing.calculationBase === 'length' ? 'متر' : 'متر مربع'}
+                          </td>
                           <td className="py-3 px-4 text-slate-900 dark:text-slate-100 font-mono">
-                            {finishing.pricePerSquareMeter.toLocaleString('fa-IR')} تومان
+                            {(finishing.unitPrice ?? finishing.pricePerSquareMeter).toLocaleString('fa-IR')} تومان
                           </td>
                           <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
                             {finishing.description || '-'}

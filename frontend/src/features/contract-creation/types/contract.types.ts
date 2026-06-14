@@ -144,6 +144,8 @@ export interface StoneFinishing {
   namePersian: string;
   description?: string;
   pricePerSquareMeter: number;
+  unitPrice?: number | null;
+  calculationBase?: 'length' | 'squareMeters';
   isActive: boolean;
 }
 
@@ -406,6 +408,10 @@ export interface ContractProduct {
   finishingId?: string | null;
   finishingName?: string | null;
   finishingPricePerSquareMeter?: number | null;
+  finishingUnitPrice?: number | null;
+  finishingCalculationBase?: 'length' | 'squareMeters' | null;
+  finishingQuantity?: number | null;
+  finishingSearchTerm?: string;
   finishingCost?: number | null;
   finishingSquareMeters?: number | null;
   // CAD Design (for visual design storage)
@@ -660,6 +666,10 @@ export interface StairPartDraftV2 {
   finishingId?: string | null;
   finishingLabel?: string | null;
   finishingPricePerSquareMeter?: number | null;
+  finishingUnitPrice?: number | null;
+  finishingCalculationBase?: 'length' | 'squareMeters' | null;
+  finishingQuantity?: number | null;
+  finishingSearchTerm?: string;
 }
 
 export interface StairDraftFieldErrors {

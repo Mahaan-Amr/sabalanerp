@@ -830,6 +830,8 @@ model StoneFinishing {
   namePersian         String
   description         String?
   pricePerSquareMeter Decimal  @db.Decimal(12, 2)
+  unitPrice           Decimal  @default(0) @db.Decimal(12, 2)
+  calculationBase     String   @default("squareMeters")
   isActive            Boolean  @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt

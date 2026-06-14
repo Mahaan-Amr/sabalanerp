@@ -13,6 +13,7 @@ const CreateStoneFinishingPage: React.FC = () => {
     name: '',
     description: '',
     pricePerSquareMeter: '',
+    calculationBase: 'squareMeters' as 'length' | 'squareMeters',
     isActive: true
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -25,6 +26,7 @@ const CreateStoneFinishingPage: React.FC = () => {
     try {
       const response = await servicesAPI.createStoneFinishing({
         ...formData,
+        unitPrice: parseFloat(formData.pricePerSquareMeter || '0'),
         pricePerSquareMeter: parseFloat(formData.pricePerSquareMeter || '0')
       });
 
@@ -143,13 +145,21 @@ const CreateStoneFinishingPage: React.FC = () => {
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  
-                  
-                  
-                  قیمت هر متر مربع (تومان)
-                
-                
-                
+                  واحد محاسبه
+                </label>
+                <select
+                  value={formData.calculationBase}
+                  onChange={(e) => setFormData(prev => ({ ...prev, calculationBase: e.target.value as 'length' | 'squareMeters' }))}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                >
+                  <option value="squareMeters">متر مربع</option>
+                  <option value="length">متر</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  {formData.calculationBase === 'length' ? 'قیمت هر متر (تومان)' : 'قیمت هر متر مربع (تومان)'}
                 </label>
                 <input
                   type="number"
@@ -165,8 +175,13 @@ const CreateStoneFinishingPage: React.FC = () => {
                 {errors.pricePerSquareMeter && (
                   <p className="text-red-500 text-sm mt-1">{errors.pricePerSquareMeter}</p>
                 )}
+                {errors.unitPrice && (
+                  <p className="text-red-500 text-sm mt-1">{errors.unitPrice}</p>
+                )}
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  قیمت پایه فرآوری برای هر متر مربع سنگ را وارد کنید.
+                  {formData.calculationBase === 'length'
+                    ? 'قیمت پایه فرآوری برای هر متر طول را وارد کنید.'
+                    : 'قیمت پایه فرآوری برای هر متر مربع سنگ را وارد کنید.'}
                 </p>
               </div>
 

@@ -20,6 +20,13 @@ import { isUsableRemainingStone, normalizeRemainingStoneCollection } from '../..
 import { PRODUCT_TYPES } from '../../constants/contract.constants';
 import { productSupportsContractType } from '../../utils/productUtils';
 import { resolveLongitudinalWidth } from '../../utils/productConfigurationController';
+import {
+  calculateDefaultFinishingQuantity,
+  calculateFinishingCost,
+  getFinishingCalculationBase,
+  getFinishingUnitLabel,
+  getFinishingUnitPrice
+} from '../../utils/finishingUtils';
 
 // Comprehensive props interface for Product Configuration Modal
 interface ProductConfigurationModalProps {
@@ -2908,11 +2915,11 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                     const selectedFinishing = productConfig.finishingId
                       ? stoneFinishings.find((option) => option.id === productConfig.finishingId)
                       : undefined;
+                    const quantityValue = Number(productConfig.quantity) || getEffectiveQuantity() || 0;
                     const fallbackSquareMeters =
                       (() => {
                         const lengthValue = Number(productConfig.length) || 0;
                         const widthValue = Number(productConfig.width) || 0;
-                        const quantityValue = Number(productConfig.quantity) || getEffectiveQuantity() || 0;
                         if (lengthValue <= 0 || widthValue <= 0 || quantityValue <= 0) return 0;
                         const lengthInMeters = lengthUnit === 'm' ? lengthValue : lengthValue / 100;
                         const widthInMeters = widthUnit === 'm' ? widthValue : widthValue / 100;
@@ -2920,13 +2927,28 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       })();
                     const pricingSquareMeters =
                       (Number(productConfig.squareMeters) > 0 ? Number(productConfig.squareMeters) : fallbackSquareMeters) || 0;
-                    const finishingPricePerSquareMeter =
+                    const finishingCalculationBase =
+                      productConfig.finishingCalculationBase ||
+                      getFinishingCalculationBase(selectedFinishing);
+                    const finishingUnitPrice =
+                      productConfig.finishingUnitPrice ??
                       productConfig.finishingPricePerSquareMeter ??
-                      selectedFinishing?.pricePerSquareMeter ??
-                      null;
+                      (getFinishingUnitPrice(selectedFinishing) || null);
+                    const finishingQuantity =
+                      productConfig.finishingQuantity ??
+                      calculateDefaultFinishingQuantity({
+                        calculationBase: finishingCalculationBase,
+                        productType: currentProductType as ContractProduct['productType'],
+                        length: productConfig.length,
+                        lengthUnit,
+                        quantity: quantityValue,
+                        squareMeters: pricingSquareMeters
+                      });
+                    const finishingPricePerSquareMeter = finishingUnitPrice;
+                    const unitLabel = getFinishingUnitLabel(finishingCalculationBase);
                     const finishingPreviewCost =
-                      productConfig.finishingEnabled && finishingPricePerSquareMeter
-                        ? pricingSquareMeters * finishingPricePerSquareMeter
+                      productConfig.finishingEnabled && finishingUnitPrice
+                        ? calculateFinishingCost(finishingQuantity, finishingUnitPrice)
                         : 0;
 
                     const controlsDisabled =
@@ -2935,12 +2957,20 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       finishingLoadState === 'idle' ||
                       finishingLoadState === 'error' ||
                       !hasFinishingOptions;
+                    const finishingSearchTerm = String(productConfig.finishingSearchTerm || '').trim().toLowerCase();
+                    const visibleStoneFinishings = finishingSearchTerm
+                      ? stoneFinishings.filter((option) =>
+                          `${option.namePersian || ''} ${option.name || ''} ${option.description || ''}`
+                            .toLowerCase()
+                            .includes(finishingSearchTerm)
+                        )
+                      : stoneFinishings;
 
                     return (
                       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3">
                         <div className="flex items-center justify-between">
                           <h5 className="text-sm font-semibold text-gray-800 dark:text-white">پرداخت سنگ</h5>
-                          <span className="text-xs text-teal-600 dark:text-teal-300">هزینه بر اساس متر مربع</span>
+                          <span className="text-xs text-teal-600 dark:text-teal-300">هزینه بر اساس {unitLabel}</span>
                         </div>
 
                         <label htmlFor="modal-finishing-enabled" className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
@@ -2961,7 +2991,10 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                                   finishingId: null,
                                   finishingName: null,
                                   finishingLabel: null,
-                                  finishingPricePerSquareMeter: null
+                                  finishingPricePerSquareMeter: null,
+                                  finishingUnitPrice: null,
+                                  finishingCalculationBase: null,
+                                  finishingQuantity: null
                                 }));
                                 return;
                               }
@@ -2981,8 +3014,24 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                                     ? (nextDefault.namePersian || nextDefault.name || '')
                                     : prev.finishingLabel || null,
                                   finishingPricePerSquareMeter: nextDefault
-                                    ? nextDefault.pricePerSquareMeter
-                                    : prev.finishingPricePerSquareMeter || null
+                                    ? getFinishingUnitPrice(nextDefault)
+                                    : prev.finishingPricePerSquareMeter || null,
+                                  finishingUnitPrice: nextDefault
+                                    ? getFinishingUnitPrice(nextDefault)
+                                    : prev.finishingUnitPrice || null,
+                                  finishingCalculationBase: nextDefault
+                                    ? getFinishingCalculationBase(nextDefault)
+                                    : prev.finishingCalculationBase || 'squareMeters',
+                                  finishingQuantity: nextDefault
+                                    ? calculateDefaultFinishingQuantity({
+                                        calculationBase: getFinishingCalculationBase(nextDefault),
+                                        productType: currentProductType as ContractProduct['productType'],
+                                        length: productConfig.length,
+                                        lengthUnit,
+                                        quantity: quantityValue,
+                                        squareMeters: pricingSquareMeters
+                                      })
+                                    : prev.finishingQuantity || null
                                 };
                               });
                             }}
@@ -2991,6 +3040,17 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                         </label>
 
                         <div>
+                          <label htmlFor="modal-stone-finishing-search" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            جستجو در پرداخت‌ها
+                          </label>
+                          <input
+                            id="modal-stone-finishing-search"
+                            value={productConfig.finishingSearchTerm || ''}
+                            disabled={controlsDisabled || !productConfig.finishingEnabled}
+                            onChange={(e) => setProductConfig((prev: any) => ({ ...prev, finishingSearchTerm: e.target.value }))}
+                            className="mb-3 w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all disabled:opacity-60"
+                            placeholder="نام فارسی، انگلیسی یا توضیحات"
+                          />
                           <label htmlFor="modal-stone-finishing-select" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
                             انتخاب نوع پرداخت
                           </label>
@@ -3008,7 +3068,10 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                                   finishingId: null,
                                   finishingName: null,
                                   finishingLabel: null,
-                                  finishingPricePerSquareMeter: null
+                                  finishingPricePerSquareMeter: null,
+                                  finishingUnitPrice: null,
+                                  finishingCalculationBase: null,
+                                  finishingQuantity: null
                                 }));
                                 return;
                               }
@@ -3022,29 +3085,60 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                                 finishingId: selected.id,
                                 finishingName: selected.namePersian || selected.name || '',
                                 finishingLabel: selected.namePersian || selected.name || '',
-                                finishingPricePerSquareMeter: selected.pricePerSquareMeter
+                                finishingPricePerSquareMeter: getFinishingUnitPrice(selected),
+                                finishingUnitPrice: getFinishingUnitPrice(selected),
+                                finishingCalculationBase: getFinishingCalculationBase(selected),
+                                finishingQuantity: calculateDefaultFinishingQuantity({
+                                  calculationBase: getFinishingCalculationBase(selected),
+                                  productType: currentProductType as ContractProduct['productType'],
+                                  length: productConfig.length,
+                                  lengthUnit,
+                                  quantity: quantityValue,
+                                  squareMeters: pricingSquareMeters
+                                })
                               }));
                             }}
                             className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all disabled:opacity-60"
                           >
                             <option value="">انتخاب پرداخت...</option>
-                            {stoneFinishings.map((option) => (
+                            {visibleStoneFinishings.map((option) => (
                               <option key={option.id} value={option.id}>
-                                {option.namePersian || option.name} ({formatPrice(option.pricePerSquareMeter)})
+                                {option.namePersian || option.name} ({formatPrice(getFinishingUnitPrice(option))}/{getFinishingUnitLabel(getFinishingCalculationBase(option))})
                               </option>
                             ))}
                           </select>
                         </div>
 
+                        {productConfig.finishingEnabled && finishingCalculationBase === 'length' && (
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              مقدار فرآوری (متر)
+                            </label>
+                            <FormattedNumberInput
+                              value={productConfig.finishingQuantity ?? finishingQuantity}
+                              onChange={(value) => setProductConfig((prev: any) => ({
+                                ...prev,
+                                finishingQuantity: value && value > 0 ? value : null
+                              }))}
+                              min={0}
+                              step={0.01}
+                              className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                              placeholder="مثال: 125"
+                            />
+                          </div>
+                        )}
+
                         {productConfig.finishingEnabled && finishingPricePerSquareMeter && (
                           <div className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-4 py-3 text-xs leading-5 text-teal-700 dark:text-teal-200 space-y-1">
                             <div className="flex justify-between">
-                              <span>نرخ هر متر مربع:</span>
-                              <span className="font-semibold">{formatPrice(finishingPricePerSquareMeter)}</span>
+                              <span>نرخ هر {unitLabel}:</span>
+                              <span className="font-semibold">{formatPrice(finishingUnitPrice)}</span>
                             </div>
                             <div className="flex justify-between">
-                              <span>مساحت محاسباتی:</span>
-                              <span className="font-semibold">{formatSquareMeters(pricingSquareMeters)}</span>
+                              <span>مقدار فرآوری:</span>
+                              <span className="font-semibold">
+                                {finishingCalculationBase === 'squareMeters' ? formatSquareMeters(finishingQuantity) : `${formatDisplayNumber(finishingQuantity)} ${unitLabel}`}
+                              </span>
                             </div>
                             <div className="flex justify-between">
                               <span>هزینه تقریبی پرداخت:</span>

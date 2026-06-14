@@ -122,6 +122,14 @@ import {
   getActualLengthMeters,
   getPricingLengthMeters
 } from '@/features/contract-creation/utils/stairCalculations';
+import {
+  calculateDefaultFinishingQuantity,
+  calculateFinishingCost,
+  getFinishingCalculationBase,
+  getFinishingUnitLabel,
+  getFinishingUnitPrice,
+  normalizeProductFinishing
+} from '@/features/contract-creation/utils/finishingUtils';
 
 // Import all types from types file
 import type {
@@ -979,11 +987,96 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     draft: StairPartDraftV2,
     pricingSquareMeters: number
   ): number => {
-    if (!draft.finishingEnabled || !draft.finishingId || !draft.finishingPricePerSquareMeter) {
+    if (!draft.finishingEnabled || !draft.finishingId) {
       return 0;
     }
-    if (pricingSquareMeters <= 0) return 0;
-    return pricingSquareMeters * draft.finishingPricePerSquareMeter;
+    const unitPrice = toFiniteNumber(draft.finishingUnitPrice) || toFiniteNumber(draft.finishingPricePerSquareMeter);
+    const calculationBase = draft.finishingCalculationBase === 'length' ? 'length' : 'squareMeters';
+    const quantity = toFiniteNumber(draft.finishingQuantity) || calculateDefaultFinishingQuantity({
+      calculationBase,
+      productType: 'stair',
+      length: draft.lengthValue,
+      lengthUnit: draft.lengthUnit || 'm',
+      quantity: draft.quantity,
+      squareMeters: pricingSquareMeters
+    });
+    if (quantity <= 0 || unitPrice <= 0) return 0;
+    return calculateFinishingCost(quantity, unitPrice);
+  };
+
+  const normalizeWizardFinishingProducts = (data: ContractWizardData): ContractWizardData => ({
+    ...data,
+    products: (data.products || []).map((product) => {
+      const finishing = normalizeProductFinishing(product);
+      if (!finishing) return product;
+      return {
+        ...product,
+        finishingCalculationBase: product.finishingCalculationBase || finishing.calculationBase,
+        finishingUnitPrice: product.finishingUnitPrice ?? finishing.unitPrice,
+        finishingQuantity: product.finishingQuantity ?? finishing.quantity,
+        finishingPricePerSquareMeter: product.finishingPricePerSquareMeter ?? finishing.unitPrice,
+        finishingSquareMeters:
+          product.finishingSquareMeters ??
+          (finishing.calculationBase === 'squareMeters' ? finishing.quantity : null),
+        finishingCost: product.finishingCost ?? finishing.cost
+      };
+    })
+  });
+
+  const resolveFinishingSnapshot = ({
+    enabled,
+    selectedFinishing,
+    config,
+    productType,
+    length,
+    lengthUnit,
+    quantity,
+    squareMeters
+  }: {
+    enabled: boolean;
+    selectedFinishing?: StoneFinishing;
+    config: any;
+    productType: ContractProduct['productType'];
+    length?: number | null;
+    lengthUnit?: 'cm' | 'm' | null;
+    quantity?: number | null;
+    squareMeters?: number | null;
+  }) => {
+    if (!enabled || !config?.finishingId) {
+      return {
+        calculationBase: null,
+        unitPrice: null,
+        quantity: null,
+        cost: 0
+      };
+    }
+
+    const calculationBase =
+      config.finishingCalculationBase ||
+      getFinishingCalculationBase(selectedFinishing);
+    const unitPrice =
+      toFiniteNumber(config.finishingUnitPrice) ||
+      toFiniteNumber(config.finishingPricePerSquareMeter) ||
+      getFinishingUnitPrice(selectedFinishing);
+    const defaultQuantity = calculateDefaultFinishingQuantity({
+      calculationBase,
+      productType,
+      length,
+      lengthUnit,
+      quantity,
+      squareMeters
+    });
+    const finishingQuantity = toFiniteNumber(config.finishingQuantity) || defaultQuantity;
+    const cost = unitPrice > 0 && finishingQuantity > 0
+      ? calculateFinishingCost(finishingQuantity, unitPrice)
+      : 0;
+
+    return {
+      calculationBase,
+      unitPrice,
+      quantity: finishingQuantity,
+      cost
+    };
   };
 
   // Debounced stone search using products endpoint (acts as master data + price source)
@@ -1484,7 +1577,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     }
 
     setCurrentStep(clampContractDraftStep(draft.currentStep, WIZARD_STEPS.length));
-    setWizardData(draft.wizardData);
+    setWizardData(normalizeWizardFinishingProducts(draft.wizardData));
     setCustomerSearchTerm(draft.searches?.customerSearchTerm || '');
     setProductSearchTerm(draft.searches?.productSearchTerm || '');
     setTreadProductSearchTerm(draft.searches?.treadProductSearchTerm || '');
@@ -1661,7 +1754,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
             // Use the saved step instead of URL step parameter
             setCurrentStep(normalizeWizardStep(savedStep));
-            setWizardData(savedWizardData);
+            setWizardData(normalizeWizardFinishingProducts(savedWizardData));
             setStateRestored(true);
             restorationAttempted.current = true;
 
@@ -2278,7 +2371,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             finishingEnabled: !!p.finishingId,
             finishingId: p.finishingId || null,
             finishingLabel: p.finishingName || null,
-            finishingPricePerSquareMeter: p.finishingPricePerSquareMeter || null
+            finishingPricePerSquareMeter: p.finishingPricePerSquareMeter || p.finishingUnitPrice || null,
+            finishingUnitPrice: p.finishingUnitPrice || p.finishingPricePerSquareMeter || null,
+            finishingCalculationBase: p.finishingCalculationBase || (p.meta as any)?.finishing?.calculationBase || 'squareMeters',
+            finishingQuantity: p.finishingQuantity || p.finishingSquareMeters || (p.meta as any)?.finishing?.quantity || null
           };
         };
         
@@ -3622,14 +3718,19 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       const selectedFinishing = finishingEnabled && productConfig.finishingId
         ? stoneFinishings.find(option => option.id === productConfig.finishingId)
         : undefined;
-      const finishingPricePerSquareMeter = finishingEnabled
-        ? (productConfig.finishingPricePerSquareMeter ?? selectedFinishing?.pricePerSquareMeter ?? null)
-        : null;
-      const finishingSquareMeters = finishingEnabled ? (calculated.squareMeters || 0) : 0;
-      const finishingCost =
-        finishingEnabled && finishingPricePerSquareMeter
-          ? finishingSquareMeters * finishingPricePerSquareMeter
-          : 0;
+      const finishingSnapshot = resolveFinishingSnapshot({
+        enabled: finishingEnabled,
+        selectedFinishing,
+        config: productConfig,
+        productType: 'slab',
+        length: calculated.length,
+        lengthUnit,
+        quantity: effectiveQuantity,
+        squareMeters: calculated.squareMeters
+      });
+      const finishingPricePerSquareMeter = finishingSnapshot.unitPrice;
+      const finishingSquareMeters = finishingSnapshot.calculationBase === 'squareMeters' ? finishingSnapshot.quantity || 0 : 0;
+      const finishingCost = finishingSnapshot.cost;
 
       const previousSlabProduct =
         isEditMode && editingProductIndex !== null ? wizardData.products[editingProductIndex] : null;
@@ -3675,6 +3776,9 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           ? (productConfig.finishingName || selectedFinishing?.namePersian || selectedFinishing?.name || null)
           : null,
         finishingPricePerSquareMeter: finishingEnabled ? finishingPricePerSquareMeter : null,
+        finishingUnitPrice: finishingEnabled ? finishingSnapshot.unitPrice : null,
+        finishingCalculationBase: finishingEnabled ? finishingSnapshot.calculationBase : null,
+        finishingQuantity: finishingEnabled ? finishingSnapshot.quantity : null,
         finishingCost: finishingEnabled ? finishingCost : null,
         finishingSquareMeters: finishingEnabled && finishingCost > 0 ? finishingSquareMeters : null,
         currency: 'تومان',
@@ -3724,6 +3828,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                 id: productConfig.finishingId || null,
                 name: productConfig.finishingName || selectedFinishing?.namePersian || selectedFinishing?.name || null,
                 pricePerSquareMeter: finishingPricePerSquareMeter,
+                unitPrice: finishingSnapshot.unitPrice,
+                calculationBase: finishingSnapshot.calculationBase,
+                quantity: finishingSnapshot.quantity,
+                unitLabel: getFinishingUnitLabel(finishingSnapshot.calculationBase),
                 squareMeters: finishingSquareMeters,
                 cost: finishingCost
               }
@@ -3876,14 +3984,19 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     const selectedFinishing = finishingEnabled && productConfig.finishingId
       ? stoneFinishings.find(option => option.id === productConfig.finishingId)
       : undefined;
-    const finishingPricePerSquareMeter = finishingEnabled
-      ? (productConfig.finishingPricePerSquareMeter ?? selectedFinishing?.pricePerSquareMeter ?? null)
-      : null;
-    const finishingSquareMeters = finishingEnabled ? (calculated.squareMeters || 0) : 0;
-    const finishingCost =
-      finishingEnabled && finishingPricePerSquareMeter
-        ? finishingSquareMeters * finishingPricePerSquareMeter
-        : 0;
+    const finishingSnapshot = resolveFinishingSnapshot({
+      enabled: finishingEnabled,
+      selectedFinishing,
+      config: productConfig,
+      productType: 'longitudinal',
+      length: calculated.length,
+      lengthUnit,
+      quantity: effectiveQuantity,
+      squareMeters: calculated.squareMeters
+    });
+    const finishingPricePerSquareMeter = finishingSnapshot.unitPrice;
+    const finishingSquareMeters = finishingSnapshot.calculationBase === 'squareMeters' ? finishingSnapshot.quantity || 0 : 0;
+    const finishingCost = finishingSnapshot.cost;
 
     // Use cutting cost from calculated result (which already includes the auto-fetched price if applicable)
     const finalCuttingCost = calculated.cuttingCost || 0;
@@ -3948,6 +4061,9 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         ? (productConfig.finishingName || selectedFinishing?.namePersian || selectedFinishing?.name || null)
         : null,
       finishingPricePerSquareMeter: finishingEnabled ? finishingPricePerSquareMeter : null,
+      finishingUnitPrice: finishingEnabled ? finishingSnapshot.unitPrice : null,
+      finishingCalculationBase: finishingEnabled ? finishingSnapshot.calculationBase : null,
+      finishingQuantity: finishingEnabled ? finishingSnapshot.quantity : null,
       finishingCost: finishingEnabled ? finishingCost : null,
       finishingSquareMeters: finishingEnabled && finishingCost > 0 ? finishingSquareMeters : null,
       currency: 'تومان', // Use Toman currency
@@ -3998,6 +4114,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
               id: productConfig.finishingId || null,
               name: productConfig.finishingName || selectedFinishing?.namePersian || selectedFinishing?.name || null,
               pricePerSquareMeter: finishingPricePerSquareMeter,
+              unitPrice: finishingSnapshot.unitPrice,
+              calculationBase: finishingSnapshot.calculationBase,
+              quantity: finishingSnapshot.quantity,
+              unitLabel: getFinishingUnitLabel(finishingSnapshot.calculationBase),
               squareMeters: finishingSquareMeters,
               cost: finishingCost
             }
@@ -4379,13 +4499,14 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           });
 
           if (product.finishingId && product.finishingCost) {
+            const finishing = normalizeProductFinishing(product);
             serviceDetails.push({
               id: `finishing-${productIndex}`,
               productName,
               category: 'فینیشینگ',
               name: product.finishingName || '—',
-              amountLabel: `${toFiniteNumber(product.finishingSquareMeters) || toFiniteNumber(product.squareMeters)} متر مربع`,
-              rateLabel: product.finishingPricePerSquareMeter ? `${product.finishingPricePerSquareMeter}` : '—',
+              amountLabel: finishing?.amountLabel || `${toFiniteNumber(product.finishingSquareMeters) || toFiniteNumber(product.squareMeters)} متر مربع`,
+              rateLabel: finishing?.rateLabel || (product.finishingPricePerSquareMeter ? `${product.finishingPricePerSquareMeter}` : '—'),
               cost: toFiniteNumber(product.finishingCost)
             });
           }
@@ -4711,14 +4832,36 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                   const draftErrors = stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart] || {};
                   const lengthMInfo = getActualLengthMeters(draft);
                   const selectedFinishing = stoneFinishings.find(option => option.id === draft.finishingId);
+                  const finishingCalculationBase =
+                    draft.finishingCalculationBase ||
+                    getFinishingCalculationBase(selectedFinishing);
                   const finishingPricePerSquareMeter =
+                    draft.finishingUnitPrice ??
                     draft.finishingPricePerSquareMeter ??
-                    selectedFinishing?.pricePerSquareMeter ??
-                    null;
+                    (getFinishingUnitPrice(selectedFinishing) || null);
+                  const finishingQuantity =
+                    draft.finishingQuantity ??
+                    calculateDefaultFinishingQuantity({
+                      calculationBase: finishingCalculationBase,
+                      productType: 'stair',
+                      length: draft.lengthValue,
+                      lengthUnit: draft.lengthUnit || 'm',
+                      quantity: draft.quantity,
+                      squareMeters: totals.pricingSquareMeters
+                    });
+                  const finishingUnitLabel = getFinishingUnitLabel(finishingCalculationBase);
                   const finishingPreviewCost =
                     draft.finishingEnabled && finishingPricePerSquareMeter
-                      ? totals.pricingSquareMeters * finishingPricePerSquareMeter
+                      ? calculateFinishingCost(finishingQuantity, finishingPricePerSquareMeter)
                       : 0;
+                  const finishingSearchTerm = String((draft as any).finishingSearchTerm || '').trim().toLowerCase();
+                  const visibleStoneFinishings = finishingSearchTerm
+                    ? stoneFinishings.filter((option) =>
+                        `${option.namePersian || ''} ${option.name || ''} ${option.description || ''}`
+                          .toLowerCase()
+                          .includes(finishingSearchTerm)
+                      )
+                    : stoneFinishings;
                   const defaultMandatoryEnabled = stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
                   const mandatoryEnabled = draft.useMandatory ?? defaultMandatoryEnabled;
                   const supportsMandatory = stairSystemV2.stairActivePart === 'tread' || stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
@@ -5984,7 +6127,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                               <h5 className="text-sm font-semibold text-gray-800 dark:text-white">پرداخت سنگ</h5>
                             </div>
                             <span className="text-xs text-teal-600 dark:text-teal-300 bg-teal-50 dark:bg-teal-900/30 px-2 py-1 rounded">
-                              هزینه به ازای متر مربع
+                              هزینه به ازای {finishingUnitLabel}
                             </span>
                           </div>
                           <div className="space-y-4">
@@ -6001,7 +6144,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                       finishingEnabled: false,
                                       finishingId: null,
                                       finishingLabel: null,
-                                      finishingPricePerSquareMeter: null
+                                      finishingPricePerSquareMeter: null,
+                                      finishingUnitPrice: null,
+                                      finishingCalculationBase: null,
+                                      finishingQuantity: null
                                     });
                                     return;
                                   }
@@ -6016,8 +6162,24 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                       ? (defaultFinishing.namePersian || defaultFinishing.name || '')
                                       : draft.finishingLabel || null,
                                     finishingPricePerSquareMeter: defaultFinishing
-                                      ? defaultFinishing.pricePerSquareMeter
-                                      : draft.finishingPricePerSquareMeter || null
+                                      ? getFinishingUnitPrice(defaultFinishing)
+                                      : draft.finishingPricePerSquareMeter || null,
+                                    finishingUnitPrice: defaultFinishing
+                                      ? getFinishingUnitPrice(defaultFinishing)
+                                      : draft.finishingUnitPrice || null,
+                                    finishingCalculationBase: defaultFinishing
+                                      ? getFinishingCalculationBase(defaultFinishing)
+                                      : draft.finishingCalculationBase || 'squareMeters',
+                                    finishingQuantity: defaultFinishing
+                                      ? calculateDefaultFinishingQuantity({
+                                          calculationBase: getFinishingCalculationBase(defaultFinishing),
+                                          productType: 'stair',
+                                          length: draft.lengthValue,
+                                          lengthUnit: draft.lengthUnit || 'm',
+                                          quantity: draft.quantity,
+                                          squareMeters: totals.pricingSquareMeters
+                                        })
+                                      : draft.finishingQuantity || null
                                   });
                                 }}
                               />
@@ -6027,6 +6189,19 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                             {draft.finishingEnabled && (
                               <>
                                 <div>
+                                  <label htmlFor="stone-finishing-search" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    جستجو در پرداخت‌ها
+                                  </label>
+                                  <input
+                                    id="stone-finishing-search"
+                                    value={(draft as any).finishingSearchTerm || ''}
+                                    onChange={(e) => setDraft({
+                                      ...draft,
+                                      finishingSearchTerm: e.target.value
+                                    } as any)}
+                                    className="mb-3 w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                                    placeholder="نام فارسی، انگلیسی یا توضیحات"
+                                  />
                                   <label htmlFor="stone-finishing-select" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
                                     انتخاب نوع پرداخت
                                   </label>
@@ -6041,7 +6216,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                           ...draft,
                                           finishingId: null,
                                           finishingLabel: null,
-                                          finishingPricePerSquareMeter: null
+                                          finishingPricePerSquareMeter: null,
+                                          finishingUnitPrice: null,
+                                          finishingCalculationBase: null,
+                                          finishingQuantity: null
                                         });
                                         return;
                                       }
@@ -6052,30 +6230,61 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                           finishingEnabled: true,
                                           finishingId: selected.id,
                                           finishingLabel: selected.namePersian || selected.name || '',
-                                          finishingPricePerSquareMeter: selected.pricePerSquareMeter
+                                          finishingPricePerSquareMeter: getFinishingUnitPrice(selected),
+                                          finishingUnitPrice: getFinishingUnitPrice(selected),
+                                          finishingCalculationBase: getFinishingCalculationBase(selected),
+                                          finishingQuantity: calculateDefaultFinishingQuantity({
+                                            calculationBase: getFinishingCalculationBase(selected),
+                                            productType: 'stair',
+                                            length: draft.lengthValue,
+                                            lengthUnit: draft.lengthUnit || 'm',
+                                            quantity: draft.quantity,
+                                            squareMeters: totals.pricingSquareMeters
+                                          })
                                         });
                                       }
                                     }}
                                     className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
                                   >
                                     <option value="">انتخاب پرداخت...</option>
-                                    {stoneFinishings.map(option => (
+                                    {visibleStoneFinishings.map(option => (
                                       <option key={option.id} value={option.id}>
-                                        {option.namePersian} - {formatPrice(option.pricePerSquareMeter)}
+                                        {option.namePersian} - {formatPrice(getFinishingUnitPrice(option))}/{getFinishingUnitLabel(getFinishingCalculationBase(option))}
                                       </option>
                                     ))}
                                   </select>
                                 </div>
 
+                                {finishingCalculationBase === 'length' && (
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                      مقدار فرآوری (متر)
+                                    </label>
+                                    <FormattedNumberInput
+                                      value={draft.finishingQuantity ?? finishingQuantity}
+                                      onChange={(value) => setDraft({
+                                        ...draft,
+                                        finishingQuantity: value && value > 0 ? value : null
+                                      })}
+                                      min={0}
+                                      step={0.01}
+                                      className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                                      placeholder="مثال: 125"
+                                    />
+                                  </div>
+                                )}
+
                                 {selectedFinishing && finishingPricePerSquareMeter && (
                                   <div className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-4 py-3 text-xs leading-5 text-teal-700 dark:text-teal-200 space-y-1.5">
                                     <div className="flex justify-between">
-                                      <span>قیمت هر متر مربع:</span>
+                                      <span>نرخ هر {finishingUnitLabel}:</span>
                                       <span className="font-semibold">{formatPrice(finishingPricePerSquareMeter)}</span>
                                     </div>
                                     <div className="flex justify-between">
-                                      <span>مساحت محاسباتی:</span>
-                                      <span className="font-semibold">{formatSquareMeters(totals.pricingSquareMeters)}</span>
+                                      <span>مقدار فرآوری:</span>
+                                      <span className="font-semibold">
+                                        {finishingCalculationBase === 'squareMeters' ? formatSquareMeters(finishingQuantity) : `${formatDisplayNumber(finishingQuantity)} ${finishingUnitLabel}`}
+                                      </span>
                                     </div>
                                     <div className="flex justify-between">
                                       <span>هزینه تقریبی پرداخت:</span>
@@ -6153,6 +6362,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                             const baseStoneQuantity = stairMeta.baseStoneQuantity || 0;
                             const piecesPerStoneMeta = stairMeta.piecesPerStone || 0;
                             const leftoverWidthMeta = stairMeta.leftoverWidthCmPerStone || 0;
+                            const finishing = normalizeProductFinishing(it);
                             
                             return (
                               <tr key={idx} className={`border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${idx % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50/50 dark:bg-gray-800/30'}`}>
@@ -6215,14 +6425,14 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                         </div>
                                       ))
                                     )}
-                                    {it.finishingId && it.finishingCost ? (
+                                    {finishing && finishing.cost ? (
                                       <div className="text-xs bg-teal-50 dark:bg-teal-900/20 px-2 py-1 rounded border border-teal-200 dark:border-teal-800">
                                         <span className="font-medium text-teal-700 dark:text-teal-300">پرداخت:</span>
                                         <span className="text-gray-600 dark:text-gray-400 mr-1">
-                                          {it.finishingName || 'پرداخت'} • {formatSquareMeters(it.finishingSquareMeters || it.squareMeters || 0)}
+                                          {it.finishingName || 'پرداخت'} • {finishing.amountLabel}
                                         </span>
                                         <span className="text-teal-600 dark:text-teal-300 font-semibold">
-                                          {formatPrice(it.finishingCost)}
+                                          {formatPrice(finishing.cost)}
                                         </span>
                                       </div>
                                     ) : null}
@@ -6305,6 +6515,22 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                     ? stoneFinishings.find(option => option.id === draft.finishingId)
                     : undefined;
                   const finishingCost = computeFinishingCost(draft, totals.pricingSquareMeters);
+                  const finishingCalculationBase = draft.finishingCalculationBase || getFinishingCalculationBase(selectedFinishing);
+                  const finishingUnitPrice =
+                    toFiniteNumber(draft.finishingUnitPrice) ||
+                    toFiniteNumber(draft.finishingPricePerSquareMeter) ||
+                    getFinishingUnitPrice(selectedFinishing) ||
+                    null;
+                  const finishingQuantity =
+                    toFiniteNumber(draft.finishingQuantity) ||
+                    calculateDefaultFinishingQuantity({
+                      calculationBase: finishingCalculationBase,
+                      productType: 'stair',
+                      length: draft.lengthValue,
+                      lengthUnit: draft.lengthUnit || 'm',
+                      quantity: draft.quantity,
+                      squareMeters: totals.pricingSquareMeters
+                    });
                   if (totals.cuttingCostLongitudinal > 0 && totals.shouldChargeCuttingCost) {
                     const cutMeters = actualLengthM * totals.baseStoneQuantity;
                     metaTools = [
@@ -6507,9 +6733,12 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                     actualLengthMeters: actualLengthM || null,
                     finishingId: draft.finishingEnabled ? draft.finishingId || null : null,
                     finishingName: draft.finishingEnabled ? (draft.finishingLabel || selectedFinishing?.namePersian || selectedFinishing?.name || null) : null,
-                    finishingPricePerSquareMeter: draft.finishingEnabled ? (draft.finishingPricePerSquareMeter ?? selectedFinishing?.pricePerSquareMeter ?? null) : null,
+                    finishingPricePerSquareMeter: draft.finishingEnabled ? finishingUnitPrice : null,
+                    finishingUnitPrice: draft.finishingEnabled ? finishingUnitPrice : null,
+                    finishingCalculationBase: draft.finishingEnabled ? finishingCalculationBase : null,
+                    finishingQuantity: draft.finishingEnabled ? finishingQuantity : null,
                     finishingCost: draft.finishingEnabled ? finishingCost : null,
-                    finishingSquareMeters: draft.finishingEnabled && finishingCost > 0 ? totals.pricingSquareMeters : null,
+                    finishingSquareMeters: draft.finishingEnabled && finishingCost > 0 && finishingCalculationBase === 'squareMeters' ? finishingQuantity : null,
                     meta: {
                       stairStepperV2: true,
                       meters: { lengthM: actualLengthM, widthM, toolsMeters },
@@ -6528,8 +6757,12 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                       finishing: draft.finishingEnabled && finishingCost > 0 ? {
                         id: draft.finishingId,
                         name: draft.finishingLabel || selectedFinishing?.namePersian || selectedFinishing?.name,
-                        pricePerSquareMeter: draft.finishingPricePerSquareMeter ?? selectedFinishing?.pricePerSquareMeter ?? null,
-                        squareMeters: totals.pricingSquareMeters,
+                        pricePerSquareMeter: finishingUnitPrice,
+                        unitPrice: finishingUnitPrice,
+                        calculationBase: finishingCalculationBase,
+                        quantity: finishingQuantity,
+                        unitLabel: getFinishingUnitLabel(finishingCalculationBase),
+                        squareMeters: finishingCalculationBase === 'squareMeters' ? finishingQuantity : 0,
                         cost: finishingCost
                         } : undefined
                     } as any
@@ -6843,7 +7076,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                     finishingEnabled: false,
                     finishingId: null,
                     finishingLabel: null,
-                    finishingPricePerSquareMeter: null
+                    finishingPricePerSquareMeter: null,
+                    finishingUnitPrice: null,
+                    finishingCalculationBase: null,
+                    finishingQuantity: null
                   });
                   stairSystemV2.setStoneSearchTerm('');
                   stairSystemV2.setToolsSearchTerm('');

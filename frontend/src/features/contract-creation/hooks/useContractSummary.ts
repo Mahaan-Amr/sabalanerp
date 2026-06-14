@@ -4,6 +4,7 @@
 import { useMemo } from 'react';
 import type { ContractProduct, StairStepperPart } from '../types/contract.types';
 import { formatDisplayNumber, formatSquareMeters, formatPrice, toFiniteNumber } from '@/lib/numberFormat';
+import { normalizeProductFinishing } from '../utils/finishingUtils';
 
 interface ServiceEntry {
   key: string;
@@ -100,14 +101,19 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
 
       // Finishing
       if (product.finishingId && product.finishingCost) {
+        const finishing = normalizeProductFinishing(product);
         entries.push({
           key: `finishing-${productIndex}`,
           type: 'finishing',
           productName: productLabel,
           description: product.finishingName || 'فینیشینگ',
-          amountLabel: `${formatSquareMeters(product.finishingSquareMeters || product.squareMeters || 0)}`,
+          amountLabel: finishing?.amountLabel || `${formatSquareMeters(product.finishingSquareMeters || product.squareMeters || 0)}`,
           cost: toFiniteNumber(product.finishingCost),
-          meta: product.finishingPricePerSquareMeter
+          meta: finishing?.rateLabel
+            ? {
+                rateLabel: finishing.rateLabel
+              }
+            : product.finishingPricePerSquareMeter
             ? {
                 rateLabel: `${formatPrice(product.finishingPricePerSquareMeter, 'تومان')}/متر مربع`
               }

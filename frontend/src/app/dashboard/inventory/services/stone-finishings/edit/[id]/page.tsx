@@ -17,6 +17,7 @@ const EditStoneFinishingPage: React.FC = () => {
     name: '',
     description: '',
     pricePerSquareMeter: '',
+    calculationBase: 'squareMeters' as 'length' | 'squareMeters',
     isActive: true
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -32,7 +33,8 @@ const EditStoneFinishingPage: React.FC = () => {
             namePersian: data.namePersian || '',
             name: data.name || '',
             description: data.description || '',
-            pricePerSquareMeter: data.pricePerSquareMeter?.toString() || '',
+            pricePerSquareMeter: (data.unitPrice ?? data.pricePerSquareMeter)?.toString() || '',
+            calculationBase: data.calculationBase === 'length' ? 'length' : 'squareMeters',
             isActive: data.isActive
           });
         } else {
@@ -58,6 +60,7 @@ const EditStoneFinishingPage: React.FC = () => {
     try {
       const response = await servicesAPI.updateStoneFinishing(finishingId, {
         ...formData,
+        unitPrice: parseFloat(formData.pricePerSquareMeter || '0'),
         pricePerSquareMeter: parseFloat(formData.pricePerSquareMeter || '0')
       });
 
@@ -196,13 +199,24 @@ const EditStoneFinishingPage: React.FC = () => {
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  
-                  
-                  
-                  قیمت هر متر مربع (تومان)
-                
-                
-                
+                  واحد محاسبه
+                </label>
+                <select
+                  value={formData.calculationBase}
+                  onChange={(e) => setFormData(prev => ({ ...prev, calculationBase: e.target.value as 'length' | 'squareMeters' }))}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                >
+                  <option value="squareMeters">متر مربع</option>
+                  <option value="length">متر</option>
+                </select>
+                <p className="text-xs text-amber-600 dark:text-amber-300 mt-1">
+                  در صورت تغییر واحد، قیمت را برای واحد جدید بررسی و تأیید کنید.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  {formData.calculationBase === 'length' ? 'قیمت هر متر (تومان)' : 'قیمت هر متر مربع (تومان)'}
                 </label>
                 <input
                   type="number"
@@ -218,8 +232,13 @@ const EditStoneFinishingPage: React.FC = () => {
                 {errors.pricePerSquareMeter && (
                   <p className="text-red-500 text-sm mt-1">{errors.pricePerSquareMeter}</p>
                 )}
+                {errors.unitPrice && (
+                  <p className="text-red-500 text-sm mt-1">{errors.unitPrice}</p>
+                )}
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  قیمت پایه فرآوری برای هر متر مربع سنگ را وارد کنید.
+                  {formData.calculationBase === 'length'
+                    ? 'قیمت پایه فرآوری برای هر متر طول را وارد کنید.'
+                    : 'قیمت پایه فرآوری برای هر متر مربع سنگ را وارد کنید.'}
                 </p>
               </div>
 

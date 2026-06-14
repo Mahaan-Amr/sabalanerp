@@ -9,6 +9,7 @@ import { PersianCalendar } from '@/lib/persian-calendar';
 import { sumNumericValues } from '@/lib/numberFormat';
 import { mapAxiosFormErrors } from '@/lib/formErrors';
 import { CONTRACT_DRAFT_STORAGE_KEY } from '../utils/contractDraftStorage';
+import { normalizeProductFinishing } from '../utils/finishingUtils';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
@@ -89,7 +90,22 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       }
 
       // Calculate total amount
-      const totalAmount = sumNumericValues(wizardData.products, (product) => product.totalPrice);
+      const normalizedProducts = wizardData.products.map((product) => {
+        const finishing = normalizeProductFinishing(product);
+        if (!finishing) return product;
+        return {
+          ...product,
+          finishingCalculationBase: product.finishingCalculationBase || finishing.calculationBase,
+          finishingUnitPrice: product.finishingUnitPrice ?? finishing.unitPrice,
+          finishingQuantity: product.finishingQuantity ?? finishing.quantity,
+          finishingPricePerSquareMeter: product.finishingPricePerSquareMeter ?? finishing.unitPrice,
+          finishingSquareMeters:
+            product.finishingSquareMeters ??
+            (finishing.calculationBase === 'squareMeters' ? finishing.quantity : null),
+          finishingCost: product.finishingCost ?? finishing.cost
+        };
+      });
+      const totalAmount = sumNumericValues(normalizedProducts, (product) => product.totalPrice);
       
       // Create contract
       const contractData = {
@@ -102,7 +118,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           contractDate: wizardData.contractDate,
           customer: wizardData.customer,
           project: wizardData.project,
-          products: wizardData.products,
+          products: normalizedProducts,
           deliveries: wizardData.deliveries,
           payment: wizardData.payment
         }),
@@ -111,7 +127,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           contractDate: wizardData.contractDate,
           customer: wizardData.customer,
           project: wizardData.project,
-          products: wizardData.products,
+          products: normalizedProducts,
           deliveries: wizardData.deliveries,
           payment: wizardData.payment
         },
@@ -154,7 +170,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         });
         
         // Create contract items
-        for (const product of wizardData.products) {
+        for (const product of normalizedProducts) {
           await salesAPI.createContractItem(contractId, {
             productId: product.productId,
             productType: product.productType,
@@ -180,7 +196,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             vehicle: delivery.receiverName || undefined,
             notes: delivery.notes,
             products: delivery.products.map(dp => {
-              const product = wizardData.products[dp.productIndex];
+              const product = normalizedProducts[dp.productIndex];
               return {
                 productId: dp.productId,
                 quantity: dp.quantity,

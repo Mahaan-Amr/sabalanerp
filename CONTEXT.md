@@ -9,8 +9,12 @@ _Avoid_: treating search as only an exact prefix lookup
 ## Language
 
 **ابزار**:
-A paid stone edge or finishing operation applied during contract pricing, calculated by length or square meter depending on the item.
-_Avoid_: ساب as a category, sub-service, tool
+A paid stone edge operation applied during contract pricing, calculated by length or square meter depending on the item.
+_Avoid_: ساب as a category, sub-service, tool, فرآوری سنگ
+
+**فرآوری سنگ**:
+A stone finishing or treatment option applied during contract pricing, separate from ابزار, calculated by length or square meter depending on the item.
+_Avoid_: ابزار, خدمات, پرداخت as the canonical catalog name
 
 **ساب**:
 A specific kind of ابزار, not a separate top-level category.

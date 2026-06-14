@@ -28,6 +28,36 @@ const decimalFromInput = (value: any): Prisma.Decimal => {
   throw new Error('Invalid decimal input');
 };
 
+const getUnitPriceInput = (body: any) => body.unitPrice ?? body.pricePerSquareMeter;
+
+const stoneFinishingValidators = [
+  body('namePersian').isString().notEmpty().withMessage('نام فارسی الزامی است'),
+  body('name').optional().isString(),
+  body('description').optional().isString(),
+  body('calculationBase')
+    .optional()
+    .isIn(['length', 'squareMeters'])
+    .withMessage('واحد محاسبه باید متر یا متر مربع باشد'),
+  body('unitPrice')
+    .optional()
+    .isFloat({ gt: 0 })
+    .withMessage('قیمت واحد باید بیشتر از صفر باشد'),
+  body('pricePerSquareMeter')
+    .optional()
+    .isFloat({ gt: 0 })
+    .withMessage('قیمت واحد باید بیشتر از صفر باشد'),
+  body().custom((value) => {
+    const unitPrice = getUnitPriceInput(value);
+    if (unitPrice === undefined || unitPrice === null || unitPrice === '') {
+      throw new Error('قیمت واحد الزامی است');
+    }
+    if (Number(unitPrice) <= 0) {
+      throw new Error('قیمت واحد باید بیشتر از صفر باشد');
+    }
+    return true;
+  })
+];
+
 router.get(
   '/',
   protect,
@@ -151,25 +181,21 @@ router.post(
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT),
   requireFeatureAccess(FEATURES.INVENTORY_STONE_FINISHINGS_CREATE, FEATURE_PERMISSIONS.EDIT),
-  [
-    body('namePersian').isString().notEmpty().withMessage('نام فارسی الزامی است'),
-    body('name').optional().isString(),
-    body('description').optional().isString(),
-    body('pricePerSquareMeter')
-      .isFloat({ gt: 0 })
-      .withMessage('قیمت هر متر مربع باید بیشتر از صفر باشد')
-  ],
+  stoneFinishingValidators,
   async (req: Request, res: Response) => {
     const validationError = handleValidationErrors(req, res);
     if (validationError) return validationError;
 
     try {
+      const unitPrice = decimalFromInput(getUnitPriceInput(req.body));
       const finishing = await prisma.stoneFinishing.create({
         data: {
           name: req.body.name || null,
           namePersian: req.body.namePersian,
           description: req.body.description || null,
-          pricePerSquareMeter: decimalFromInput(req.body.pricePerSquareMeter),
+          pricePerSquareMeter: unitPrice,
+          unitPrice,
+          calculationBase: req.body.calculationBase || 'squareMeters',
           isActive: true
         }
       });
@@ -195,12 +221,7 @@ router.put(
   requireFeatureAccess(FEATURES.INVENTORY_STONE_FINISHINGS_EDIT, FEATURE_PERMISSIONS.EDIT),
   [
     param('id').isString().notEmpty(),
-    body('namePersian').isString().notEmpty().withMessage('نام فارسی الزامی است'),
-    body('name').optional().isString(),
-    body('description').optional().isString(),
-    body('pricePerSquareMeter')
-      .isFloat({ gt: 0 })
-      .withMessage('قیمت هر متر مربع باید بیشتر از صفر باشد'),
+    ...stoneFinishingValidators,
     body('isActive').optional().isBoolean()
   ],
   async (req: Request, res: Response) => {
@@ -208,6 +229,7 @@ router.put(
     if (validationError) return validationError;
 
     try {
+      const unitPrice = decimalFromInput(getUnitPriceInput(req.body));
       const existing = await prisma.stoneFinishing.findUnique({
         where: { id: req.params.id }
       });
@@ -225,7 +247,9 @@ router.put(
           name: req.body.name || null,
           namePersian: req.body.namePersian,
           description: req.body.description || null,
-          pricePerSquareMeter: decimalFromInput(req.body.pricePerSquareMeter),
+          pricePerSquareMeter: unitPrice,
+          unitPrice,
+          calculationBase: req.body.calculationBase || existing.calculationBase || 'squareMeters',
           isActive:
             typeof req.body.isActive === 'boolean'
               ? req.body.isActive

@@ -1,6 +1,7 @@
 'use client';
 
 import { formatPriceWithRial, toFiniteNumber } from '@/lib/numberFormat';
+import { normalizeProductFinishing } from '@/features/contract-creation/utils/finishingUtils';
 
 export type ConfirmationData = {
   sessionId: string;
@@ -59,6 +60,9 @@ export default function ConfirmationContractView({
   const fullName = `${data.contract.customer.firstName || ''} ${data.contract.customer.lastName || ''}`.trim();
   const customerName = fullName || data.contract.customer.companyName || 'مشتری';
   const isApproved = data.contractStatus === 'APPROVED';
+  const displayItems = Array.isArray(data.contract.contractData?.products) && data.contract.contractData.products.length > 0
+    ? data.contract.contractData.products
+    : data.contract.items || [];
 
   return (
     <div className="min-h-screen px-4 py-10 text-primary">
@@ -77,12 +81,12 @@ export default function ConfirmationContractView({
             <p>مشتری: <span className="font-semibold">{customerName}</span></p>
             <p>شماره تماس: <span className="font-semibold">{data.contract.customer.phoneNumber || 'ثبت نشده'}</span></p>
             <p>مبلغ کل: <span className="font-semibold">{formatPriceWithRial(data.contract.totalAmount, data.contract.currency || 'تومان')}</span></p>
-            <p>تعداد اقلام: <span className="font-semibold">{data.contract.items?.length || 0}</span></p>
+            <p>تعداد اقلام: <span className="font-semibold">{displayItems.length}</span></p>
             <p>وضعیت: <span className="font-semibold">{statusLabel(data.contractStatus)}</span></p>
           </div>
         </section>
 
-        {data.contract.items?.length > 0 && (
+        {displayItems.length > 0 && (
           <section className="glass-liquid-card step-content-card p-6">
             <h2 className="mb-4 text-xl font-semibold">اقلام قرارداد</h2>
             <div className="overflow-x-auto">
@@ -95,13 +99,23 @@ export default function ConfirmationContractView({
                   </tr>
                 </thead>
                 <tbody>
-                  {data.contract.items.map((item: any) => (
-                    <tr key={item.id} className="border-b border-white/5">
-                      <td className="py-3">{item.product?.namePersian || item.product?.name || item.description || 'محصول'}</td>
-                      <td className="py-3">{item.quantity || 0}</td>
-                      <td className="py-3">{formatPriceWithRial(toFiniteNumber(item.totalPrice) || item.price, data.contract.currency || 'تومان')}</td>
-                    </tr>
-                  ))}
+                  {displayItems.map((item: any, index: number) => {
+                    const finishing = normalizeProductFinishing(item);
+                    return (
+                      <tr key={item.id || `${item.productId || 'item'}-${index}`} className="border-b border-white/5">
+                        <td className="py-3">
+                          <div>{item.product?.namePersian || item.product?.name || item.stoneName || item.description || 'محصول'}</div>
+                          {finishing && (
+                            <div className="mt-1 text-xs text-secondary">
+                              {finishing.name || item.finishingName || 'فینیشینگ'}: {finishing.amountLabel} × {finishing.rateLabel}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3">{item.quantity || 0}</td>
+                        <td className="py-3">{formatPriceWithRial(toFiniteNumber(item.totalPrice) || item.price, data.contract.currency || 'تومان')}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

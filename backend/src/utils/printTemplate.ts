@@ -126,6 +126,37 @@ const formatAmount = (value: unknown, currency = 'تومان'): string => {
   return `${toFaNumber(value)} ${escapeHtml(currency || 'تومان')}`;
 };
 
+const getFinishingBase = (product: any): 'length' | 'squareMeters' => {
+  const base = product?.finishingCalculationBase || product?.meta?.finishing?.calculationBase;
+  return base === 'length' ? 'length' : 'squareMeters';
+};
+
+const getFinishingUnitLabel = (base: 'length' | 'squareMeters') =>
+  base === 'length' ? 'متر' : 'متر مربع';
+
+const getFinishingQuantity = (product: any, base: 'length' | 'squareMeters'): number => {
+  const quantity =
+    toNumber(product?.finishingQuantity) ||
+    toNumber(product?.meta?.finishing?.quantity) ||
+    toNumber(product?.finishingSquareMeters) ||
+    toNumber(product?.meta?.finishing?.squareMeters);
+  if (quantity > 0) return quantity;
+  return base === 'squareMeters' ? toNumber(product?.squareMeters) : 0;
+};
+
+const getFinishingUnitPrice = (product: any): number =>
+  toNumber(product?.finishingUnitPrice) ||
+  toNumber(product?.meta?.finishing?.unitPrice) ||
+  toNumber(product?.finishingPricePerSquareMeter) ||
+  toNumber(product?.meta?.finishing?.pricePerSquareMeter);
+
+const getFinishingAmountLabel = (product: any): string => {
+  const base = getFinishingBase(product);
+  const unitLabel = getFinishingUnitLabel(base);
+  const quantity = getFinishingQuantity(product, base);
+  return `${toFaNumber(quantity, base === 'squareMeters' ? 3 : 2)} ${unitLabel}`;
+};
+
 const formatDate = (value: unknown): string => {
   if (!value) return EMPTY;
   const raw = String(value);
@@ -250,11 +281,14 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
       });
 
       if (product?.finishingId || product?.finishingCost) {
+        const finishingBase = getFinishingBase(product);
+        const finishingUnitLabel = getFinishingUnitLabel(finishingBase);
+        const finishingUnitPrice = getFinishingUnitPrice(product);
         services.push({
           category: 'فینیشینگ',
           name: product?.finishingName || EMPTY,
-          amountLabel: `${toFaNumber(product?.finishingSquareMeters || product?.squareMeters || 0, 3)} متر مربع`,
-          rateLabel: product?.finishingPricePerSquareMeter ? `${toFaNumber(product.finishingPricePerSquareMeter)} تومان` : EMPTY,
+          amountLabel: getFinishingAmountLabel(product),
+          rateLabel: finishingUnitPrice ? `${toFaNumber(finishingUnitPrice)} تومان / ${finishingUnitLabel}` : EMPTY,
           cost: toNumber(product?.finishingCost)
         });
       }
@@ -290,7 +324,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         layerSummary: product?.layerTypeName
           ? `${product.layerTypeName}${product?.layerUseMandatory ? ` / حکمی ${toFaNumber(product?.layerMandatoryPercentage || 0)}%` : ''}`
           : EMPTY,
-        finishingSummary: product?.finishingName ? `${product.finishingName} (${toFaNumber(product?.finishingSquareMeters || 0, 3)} متر مربع)` : EMPTY,
+        finishingSummary: product?.finishingName ? `${product.finishingName} (${getFinishingAmountLabel(product)})` : EMPTY,
         remainingSummary: `باقی‌مانده: ${toFaNumber(remainingCount)} | مصرف‌شده: ${toFaNumber(usedRemainingCount)}`
       };
     });

@@ -23,6 +23,10 @@ import {
   getPartDisplayLabel
 } from '../utils/stairUtils';
 import { formatDisplayNumber } from '../utils/formatUtils';
+import {
+  calculateDefaultFinishingQuantity,
+  calculateFinishingCost as calculateUnitFinishingCost
+} from '../utils/finishingUtils';
 
 const getRemainingStoneUsageKeys = (stone: RemainingStone): string[] => {
   const keys = [stone.id, stone.sourceCutId].filter(Boolean);
@@ -370,11 +374,21 @@ export const computeFinishingCost = (
   draft: StairPartDraftV2,
   pricingSquareMeters: number
 ): number => {
-  if (!draft.finishingEnabled || !draft.finishingId || !draft.finishingPricePerSquareMeter) {
+  if (!draft.finishingEnabled || !draft.finishingId) {
     return 0;
   }
-  if (pricingSquareMeters <= 0) return 0;
-  return pricingSquareMeters * draft.finishingPricePerSquareMeter;
+  const calculationBase = draft.finishingCalculationBase === 'length' ? 'length' : 'squareMeters';
+  const unitPrice = Number(draft.finishingUnitPrice || draft.finishingPricePerSquareMeter || 0);
+  const quantity = Number(draft.finishingQuantity || 0) || calculateDefaultFinishingQuantity({
+    calculationBase,
+    productType: 'stair',
+    length: draft.lengthValue,
+    lengthUnit: draft.lengthUnit || 'm',
+    quantity: draft.quantity,
+    squareMeters: pricingSquareMeters
+  });
+  if (quantity <= 0 || unitPrice <= 0) return 0;
+  return calculateUnitFinishingCost(quantity, unitPrice);
 };
 
 /**

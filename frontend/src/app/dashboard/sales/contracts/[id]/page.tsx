@@ -32,6 +32,7 @@ import { formatDisplayNumber, formatPrice, formatSquareMeters, sumNumericValues,
 import PersianCalendar from '@/lib/persian-calendar';
 import { getContractPermissions, hasFeatureAccess, User as PermissionUser } from '@/lib/permissions';
 import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
+import { normalizeProductFinishing } from '@/features/contract-creation/utils/finishingUtils';
 
 interface Contract {
   id: string;
@@ -284,7 +285,7 @@ export default function ContractDetailPage() {
 
   const products = useMemo(() => {
     if (!contract) return [];
-    return contract.items?.length ? contract.items : contract.contractData?.products || [];
+    return contract.contractData?.products?.length ? contract.contractData.products : contract.items || [];
   }, [contract]);
 
   const deliveries = useMemo(() => {
@@ -414,6 +415,7 @@ export default function ContractDetailPage() {
                     const squareMeters = item.squareMeters ?? product.squareMeter ?? 0;
                     const unitPrice = item.unitPrice ?? item.pricePerSquareMeter ?? 0;
                     const itemTotal = item.totalPrice ?? 0;
+                    const finishing = normalizeProductFinishing(item);
 
                     return (
                       <div key={`${productName}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
@@ -432,6 +434,21 @@ export default function ContractDetailPage() {
                           <ErpFieldView label="قیمت واحد" value={toFiniteNumber(unitPrice) > 0 ? formatPrice(unitPrice, sanitizeUiText(item.currency || contract.currency, 'تومان')) : 'نامشخص'} />
                           <ErpFieldView label="جمع" value={toFiniteNumber(itemTotal) > 0 ? formatPrice(itemTotal, sanitizeUiText(item.currency || contract.currency, 'تومان')) : 'نامشخص'} tone="primary" />
                         </div>
+                        {finishing && finishing.cost > 0 && (
+                          <div className="mt-3 rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs leading-5 text-teal-800 dark:border-teal-800 dark:bg-teal-900/20 dark:text-teal-200">
+                            <span className="font-semibold">{sanitizeUiText(item.finishingName || finishing.name || 'پرداخت سنگ')}</span>
+                            <span className="mx-1">•</span>
+                            <span>{finishing.amountLabel}</span>
+                            {finishing.rateLabel && (
+                              <>
+                                <span className="mx-1">×</span>
+                                <span>{finishing.rateLabel}</span>
+                              </>
+                            )}
+                            <span className="mx-1">=</span>
+                            <span className="font-semibold">{formatPrice(finishing.cost, sanitizeUiText(item.currency || contract.currency, 'تومان'))}</span>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

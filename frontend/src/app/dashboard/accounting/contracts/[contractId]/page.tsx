@@ -21,6 +21,7 @@ import {
   ErpTwoColumn,
 } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
+import { downloadBlobResponse } from '@/lib/downloadFile';
 import {
   CompactQueueItem,
   FinancialInvoiceApprovalForm,
@@ -113,6 +114,12 @@ export default function AccountingContractDetailPage({ params }: { params: { con
     const actionKey = tryPrint ? 'PRINT_SALES_PDF' : 'DOWNLOAD_SALES_PDF';
     setPdfActionLoading(actionKey);
     try {
+      if (!tryPrint) {
+        const response = await accountingAPI.downloadSalesContractPdf(params.contractId, { fresh: false });
+        downloadBlobResponse(response, `sales_contract_${params.contractId}.pdf`);
+        return;
+      }
+
       const response = await accountingAPI.getSalesContractPdf(params.contractId, { fresh: false });
       const url = response.data?.data?.url;
       if (!response.data?.success || !url) throw new Error('Sales contract PDF url was not returned');

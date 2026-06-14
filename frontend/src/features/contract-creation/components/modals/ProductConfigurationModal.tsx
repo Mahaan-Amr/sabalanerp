@@ -2910,255 +2910,6 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                     })()}
                   </>)}
 
-                  {(currentProductType === 'longitudinal' || currentProductType === 'slab') && (() => {
-                    const hasFinishingOptions = stoneFinishings.length > 0;
-                    const selectedFinishing = productConfig.finishingId
-                      ? stoneFinishings.find((option) => option.id === productConfig.finishingId)
-                      : undefined;
-                    const quantityValue = Number(productConfig.quantity) || getEffectiveQuantity() || 0;
-                    const fallbackSquareMeters =
-                      (() => {
-                        const lengthValue = Number(productConfig.length) || 0;
-                        const widthValue = Number(productConfig.width) || 0;
-                        if (lengthValue <= 0 || widthValue <= 0 || quantityValue <= 0) return 0;
-                        const lengthInMeters = lengthUnit === 'm' ? lengthValue : lengthValue / 100;
-                        const widthInMeters = widthUnit === 'm' ? widthValue : widthValue / 100;
-                        return lengthInMeters * widthInMeters * quantityValue;
-                      })();
-                    const pricingSquareMeters =
-                      (Number(productConfig.squareMeters) > 0 ? Number(productConfig.squareMeters) : fallbackSquareMeters) || 0;
-                    const finishingCalculationBase =
-                      productConfig.finishingCalculationBase ||
-                      getFinishingCalculationBase(selectedFinishing);
-                    const finishingUnitPrice =
-                      productConfig.finishingUnitPrice ??
-                      productConfig.finishingPricePerSquareMeter ??
-                      (getFinishingUnitPrice(selectedFinishing) || null);
-                    const finishingQuantity =
-                      productConfig.finishingQuantity ??
-                      calculateDefaultFinishingQuantity({
-                        calculationBase: finishingCalculationBase,
-                        productType: currentProductType as ContractProduct['productType'],
-                        length: productConfig.length,
-                        lengthUnit,
-                        quantity: quantityValue,
-                        squareMeters: pricingSquareMeters
-                      });
-                    const finishingPricePerSquareMeter = finishingUnitPrice;
-                    const unitLabel = getFinishingUnitLabel(finishingCalculationBase);
-                    const finishingPreviewCost =
-                      productConfig.finishingEnabled && finishingUnitPrice
-                        ? calculateFinishingCost(finishingQuantity, finishingUnitPrice)
-                        : 0;
-
-                    const controlsDisabled =
-                      finishingLoadState === 'forbidden' ||
-                      finishingLoadState === 'empty' ||
-                      finishingLoadState === 'idle' ||
-                      finishingLoadState === 'error' ||
-                      !hasFinishingOptions;
-                    const finishingSearchTerm = String(productConfig.finishingSearchTerm || '').trim().toLowerCase();
-                    const visibleStoneFinishings = finishingSearchTerm
-                      ? stoneFinishings.filter((option) =>
-                          `${option.namePersian || ''} ${option.name || ''} ${option.description || ''}`
-                            .toLowerCase()
-                            .includes(finishingSearchTerm)
-                        )
-                      : stoneFinishings;
-
-                    return (
-                      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h5 className="text-sm font-semibold text-gray-800 dark:text-white">پرداخت سنگ</h5>
-                          <span className="text-xs text-teal-600 dark:text-teal-300">هزینه بر اساس {unitLabel}</span>
-                        </div>
-
-                        <label htmlFor="modal-finishing-enabled" className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-                          <input
-                            id="modal-finishing-enabled"
-                            type="checkbox"
-                            className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
-                            checked={!!productConfig.finishingEnabled}
-                            disabled={controlsDisabled}
-                            aria-label="فعال‌سازی پرداخت سنگ"
-                            title="فعال‌سازی پرداخت سنگ"
-                            onChange={(e) => {
-                              const enabled = e.target.checked;
-                              if (!enabled) {
-                                setProductConfig((prev: any) => ({
-                                  ...prev,
-                                  finishingEnabled: false,
-                                  finishingId: null,
-                                  finishingName: null,
-                                  finishingLabel: null,
-                                  finishingPricePerSquareMeter: null,
-                                  finishingUnitPrice: null,
-                                  finishingCalculationBase: null,
-                                  finishingQuantity: null
-                                }));
-                                return;
-                              }
-
-                              setProductConfig((prev: any) => {
-                                const nextDefault = prev.finishingId
-                                  ? stoneFinishings.find((option) => option.id === prev.finishingId)
-                                  : stoneFinishings[0];
-                                return {
-                                  ...prev,
-                                  finishingEnabled: true,
-                                  finishingId: nextDefault?.id || prev.finishingId || null,
-                                  finishingName: nextDefault
-                                    ? (nextDefault.namePersian || nextDefault.name || '')
-                                    : prev.finishingName || null,
-                                  finishingLabel: nextDefault
-                                    ? (nextDefault.namePersian || nextDefault.name || '')
-                                    : prev.finishingLabel || null,
-                                  finishingPricePerSquareMeter: nextDefault
-                                    ? getFinishingUnitPrice(nextDefault)
-                                    : prev.finishingPricePerSquareMeter || null,
-                                  finishingUnitPrice: nextDefault
-                                    ? getFinishingUnitPrice(nextDefault)
-                                    : prev.finishingUnitPrice || null,
-                                  finishingCalculationBase: nextDefault
-                                    ? getFinishingCalculationBase(nextDefault)
-                                    : prev.finishingCalculationBase || 'squareMeters',
-                                  finishingQuantity: nextDefault
-                                    ? calculateDefaultFinishingQuantity({
-                                        calculationBase: getFinishingCalculationBase(nextDefault),
-                                        productType: currentProductType as ContractProduct['productType'],
-                                        length: productConfig.length,
-                                        lengthUnit,
-                                        quantity: quantityValue,
-                                        squareMeters: pricingSquareMeters
-                                      })
-                                    : prev.finishingQuantity || null
-                                };
-                              });
-                            }}
-                          />
-                          فعال‌سازی پرداخت برای این محصول
-                        </label>
-
-                        <div>
-                          <label htmlFor="modal-stone-finishing-search" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            جستجو در پرداخت‌ها
-                          </label>
-                          <input
-                            id="modal-stone-finishing-search"
-                            value={productConfig.finishingSearchTerm || ''}
-                            disabled={controlsDisabled || !productConfig.finishingEnabled}
-                            onChange={(e) => setProductConfig((prev: any) => ({ ...prev, finishingSearchTerm: e.target.value }))}
-                            className="mb-3 w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all disabled:opacity-60"
-                            placeholder="نام فارسی، انگلیسی یا توضیحات"
-                          />
-                          <label htmlFor="modal-stone-finishing-select" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            انتخاب نوع پرداخت
-                          </label>
-                          <select
-                            id="modal-stone-finishing-select"
-                            value={productConfig.finishingId || ''}
-                            disabled={controlsDisabled || !productConfig.finishingEnabled}
-                            aria-label="انتخاب نوع پرداخت سنگ"
-                            title="انتخاب نوع پرداخت سنگ"
-                            onChange={(e) => {
-                              const selectedId = e.target.value;
-                              if (!selectedId) {
-                                setProductConfig((prev: any) => ({
-                                  ...prev,
-                                  finishingId: null,
-                                  finishingName: null,
-                                  finishingLabel: null,
-                                  finishingPricePerSquareMeter: null,
-                                  finishingUnitPrice: null,
-                                  finishingCalculationBase: null,
-                                  finishingQuantity: null
-                                }));
-                                return;
-                              }
-
-                              const selected = stoneFinishings.find((option) => option.id === selectedId);
-                              if (!selected) return;
-
-                              setProductConfig((prev: any) => ({
-                                ...prev,
-                                finishingEnabled: true,
-                                finishingId: selected.id,
-                                finishingName: selected.namePersian || selected.name || '',
-                                finishingLabel: selected.namePersian || selected.name || '',
-                                finishingPricePerSquareMeter: getFinishingUnitPrice(selected),
-                                finishingUnitPrice: getFinishingUnitPrice(selected),
-                                finishingCalculationBase: getFinishingCalculationBase(selected),
-                                finishingQuantity: calculateDefaultFinishingQuantity({
-                                  calculationBase: getFinishingCalculationBase(selected),
-                                  productType: currentProductType as ContractProduct['productType'],
-                                  length: productConfig.length,
-                                  lengthUnit,
-                                  quantity: quantityValue,
-                                  squareMeters: pricingSquareMeters
-                                })
-                              }));
-                            }}
-                            className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all disabled:opacity-60"
-                          >
-                            <option value="">انتخاب پرداخت...</option>
-                            {visibleStoneFinishings.map((option) => (
-                              <option key={option.id} value={option.id}>
-                                {option.namePersian || option.name} ({formatPrice(getFinishingUnitPrice(option))}/{getFinishingUnitLabel(getFinishingCalculationBase(option))})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {productConfig.finishingEnabled && finishingCalculationBase === 'length' && (
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                              مقدار فرآوری (متر)
-                            </label>
-                            <FormattedNumberInput
-                              value={productConfig.finishingQuantity ?? finishingQuantity}
-                              onChange={(value) => setProductConfig((prev: any) => ({
-                                ...prev,
-                                finishingQuantity: value && value > 0 ? value : null
-                              }))}
-                              min={0}
-                              step={0.01}
-                              className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                              placeholder="مثال: 125"
-                            />
-                          </div>
-                        )}
-
-                        {productConfig.finishingEnabled && finishingPricePerSquareMeter && (
-                          <div className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-4 py-3 text-xs leading-5 text-teal-700 dark:text-teal-200 space-y-1">
-                            <div className="flex justify-between">
-                              <span>نرخ هر {unitLabel}:</span>
-                              <span className="font-semibold">{formatPrice(finishingUnitPrice)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>مقدار فرآوری:</span>
-                              <span className="font-semibold">
-                                {finishingCalculationBase === 'squareMeters' ? formatSquareMeters(finishingQuantity) : `${formatDisplayNumber(finishingQuantity)} ${unitLabel}`}
-                              </span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>هزینه تقریبی پرداخت:</span>
-                              <span className="font-semibold">{formatPrice(finishingPreviewCost)}</span>
-                            </div>
-                          </div>
-                        )}
-
-                        {(finishingLoadState === 'forbidden' || finishingLoadState === 'empty' || finishingLoadState === 'idle' || finishingLoadState === 'error') && (
-                          <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
-                            {finishingLoadState === 'forbidden' && 'برای فعال‌سازی، دسترسی قراردادهای فروش یا پرداخت سنگ را از ادمین دریافت کنید.'}
-                            {finishingLoadState === 'empty' && 'هیچ پرداخت فعالی برای انتخاب یافت نشد.'}
-                            {finishingLoadState === 'idle' && 'در حال بارگذاری لیست پرداخت‌ها...'}
-                            {finishingLoadState === 'error' && 'خطا در دریافت لیست پرداخت‌ها. لطفاً مجدد تلاش کنید.'}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
                   {/* Unit Selection Help Text - Only for slab/longitudinal */}
                   {(currentProductType === 'longitudinal' || currentProductType === 'slab') && (
                     <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
@@ -3447,6 +3198,285 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       />
                     </div>
                   </div>
+
+                  {(currentProductType === 'longitudinal' || currentProductType === 'slab') && (() => {
+                    const selectedFinishing = productConfig.finishingId
+                      ? stoneFinishings.find((option) => option.id === productConfig.finishingId) ||
+                        ({
+                          id: productConfig.finishingId,
+                          name: productConfig.finishingName || productConfig.finishingLabel || '',
+                          namePersian: productConfig.finishingName || productConfig.finishingLabel || '',
+                          description: '',
+                          calculationBase: productConfig.finishingCalculationBase || 'squareMeters',
+                          unitPrice: productConfig.finishingUnitPrice ?? productConfig.finishingPricePerSquareMeter ?? 0,
+                          pricePerSquareMeter: productConfig.finishingPricePerSquareMeter ?? productConfig.finishingUnitPrice ?? 0,
+                          isActive: false
+                        } as StoneFinishing)
+                      : undefined;
+                    const selectableStoneFinishings =
+                      selectedFinishing && !stoneFinishings.some((option) => option.id === selectedFinishing.id)
+                        ? [selectedFinishing, ...stoneFinishings]
+                        : stoneFinishings;
+                    const hasFinishingOptions = selectableStoneFinishings.length > 0;
+                    const quantityValue = Number(productConfig.quantity) || getEffectiveQuantity() || 0;
+                    const fallbackSquareMeters =
+                      (() => {
+                        const lengthValue = Number(productConfig.length) || 0;
+                        const widthValue = Number(productConfig.width) || 0;
+                        if (lengthValue <= 0 || widthValue <= 0 || quantityValue <= 0) return 0;
+                        const lengthInMeters = lengthUnit === 'm' ? lengthValue : lengthValue / 100;
+                        const widthInMeters = widthUnit === 'm' ? widthValue : widthValue / 100;
+                        return lengthInMeters * widthInMeters * quantityValue;
+                      })();
+                    const pricingSquareMeters =
+                      (Number(productConfig.squareMeters) > 0 ? Number(productConfig.squareMeters) : fallbackSquareMeters) || 0;
+                    const finishingCalculationBase =
+                      productConfig.finishingCalculationBase ||
+                      getFinishingCalculationBase(selectedFinishing);
+                    const finishingUnitPrice =
+                      productConfig.finishingUnitPrice ??
+                      productConfig.finishingPricePerSquareMeter ??
+                      (getFinishingUnitPrice(selectedFinishing) || null);
+                    const defaultFinishingQuantity = calculateDefaultFinishingQuantity({
+                      calculationBase: finishingCalculationBase,
+                      productType: currentProductType as ContractProduct['productType'],
+                      length: productConfig.length,
+                      lengthUnit,
+                      quantity: quantityValue,
+                      squareMeters: pricingSquareMeters
+                    });
+                    const finishingQuantity =
+                      productConfig.finishingQuantity ?? defaultFinishingQuantity;
+                    const maxLengthFinishingQuantity = finishingCalculationBase === 'length'
+                      ? defaultFinishingQuantity
+                      : null;
+                    const finishingPricePerSquareMeter = finishingUnitPrice;
+                    const unitLabel = getFinishingUnitLabel(finishingCalculationBase);
+                    const finishingPreviewCost =
+                      productConfig.finishingEnabled && finishingUnitPrice
+                        ? calculateFinishingCost(finishingQuantity, finishingUnitPrice)
+                        : 0;
+
+                    const controlsDisabled =
+                      finishingLoadState === 'forbidden' ||
+                      finishingLoadState === 'empty' ||
+                      finishingLoadState === 'idle' ||
+                      finishingLoadState === 'error' ||
+                      !hasFinishingOptions;
+                    const finishingSearchTerm = String(productConfig.finishingSearchTerm || '').trim().toLowerCase();
+                    const visibleStoneFinishings = finishingSearchTerm
+                      ? selectableStoneFinishings.filter((option) =>
+                          `${option.namePersian || ''} ${option.name || ''} ${option.description || ''}`
+                            .toLowerCase()
+                            .includes(finishingSearchTerm)
+                        )
+                      : selectableStoneFinishings;
+
+                    return (
+                      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h5 className="text-sm font-semibold text-gray-800 dark:text-white">پرداخت سنگ</h5>
+                          <span className="text-xs text-teal-600 dark:text-teal-300">هزینه بر اساس {unitLabel}</span>
+                        </div>
+
+                        <label htmlFor="modal-finishing-enabled" className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+                          <input
+                            id="modal-finishing-enabled"
+                            type="checkbox"
+                            className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                            checked={!!productConfig.finishingEnabled}
+                            disabled={controlsDisabled}
+                            aria-label="فعال‌سازی پرداخت سنگ"
+                            title="فعال‌سازی پرداخت سنگ"
+                            onChange={(e) => {
+                              const enabled = e.target.checked;
+                              if (!enabled) {
+                                setProductConfig((prev: any) => ({
+                                  ...prev,
+                                  finishingEnabled: false,
+                                  finishingId: null,
+                                  finishingName: null,
+                                  finishingLabel: null,
+                                  finishingPricePerSquareMeter: null,
+                                  finishingUnitPrice: null,
+                                  finishingCalculationBase: null,
+                                  finishingQuantity: null
+                                }));
+                                return;
+                              }
+
+                              setProductConfig((prev: any) => {
+                                const nextDefault = prev.finishingId
+                                  ? selectableStoneFinishings.find((option) => option.id === prev.finishingId)
+                                  : selectableStoneFinishings[0];
+                                return {
+                                  ...prev,
+                                  finishingEnabled: true,
+                                  finishingId: nextDefault?.id || prev.finishingId || null,
+                                  finishingName: nextDefault
+                                    ? (nextDefault.namePersian || nextDefault.name || '')
+                                    : prev.finishingName || null,
+                                  finishingLabel: nextDefault
+                                    ? (nextDefault.namePersian || nextDefault.name || '')
+                                    : prev.finishingLabel || null,
+                                  finishingPricePerSquareMeter: nextDefault
+                                    ? getFinishingUnitPrice(nextDefault)
+                                    : prev.finishingPricePerSquareMeter || null,
+                                  finishingUnitPrice: nextDefault
+                                    ? getFinishingUnitPrice(nextDefault)
+                                    : prev.finishingUnitPrice || null,
+                                  finishingCalculationBase: nextDefault
+                                    ? getFinishingCalculationBase(nextDefault)
+                                    : prev.finishingCalculationBase || 'squareMeters',
+                                  finishingQuantity: nextDefault
+                                    ? calculateDefaultFinishingQuantity({
+                                        calculationBase: getFinishingCalculationBase(nextDefault),
+                                        productType: currentProductType as ContractProduct['productType'],
+                                        length: productConfig.length,
+                                        lengthUnit,
+                                        quantity: quantityValue,
+                                        squareMeters: pricingSquareMeters
+                                      })
+                                    : prev.finishingQuantity || null
+                                };
+                              });
+                            }}
+                          />
+                          فعال‌سازی پرداخت برای این محصول
+                        </label>
+
+                        <div>
+                          <label htmlFor="modal-stone-finishing-search" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            جستجو در پرداخت‌ها
+                          </label>
+                          <input
+                            id="modal-stone-finishing-search"
+                            value={productConfig.finishingSearchTerm || ''}
+                            disabled={controlsDisabled || !productConfig.finishingEnabled}
+                            onChange={(e) => setProductConfig((prev: any) => ({ ...prev, finishingSearchTerm: e.target.value }))}
+                            className="mb-3 w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all disabled:opacity-60"
+                            placeholder="نام فارسی، انگلیسی یا توضیحات"
+                          />
+                          <label htmlFor="modal-stone-finishing-select" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            انتخاب نوع پرداخت
+                          </label>
+                          <select
+                            id="modal-stone-finishing-select"
+                            value={productConfig.finishingId || ''}
+                            disabled={controlsDisabled || !productConfig.finishingEnabled}
+                            aria-label="انتخاب نوع پرداخت سنگ"
+                            title="انتخاب نوع پرداخت سنگ"
+                            onChange={(e) => {
+                              const selectedId = e.target.value;
+                              if (!selectedId) {
+                                setProductConfig((prev: any) => ({
+                                  ...prev,
+                                  finishingId: null,
+                                  finishingName: null,
+                                  finishingLabel: null,
+                                  finishingPricePerSquareMeter: null,
+                                  finishingUnitPrice: null,
+                                  finishingCalculationBase: null,
+                                  finishingQuantity: null
+                                }));
+                                return;
+                              }
+
+                              const selected = selectableStoneFinishings.find((option) => option.id === selectedId);
+                              if (!selected) return;
+
+                              setProductConfig((prev: any) => ({
+                                ...prev,
+                                finishingEnabled: true,
+                                finishingId: selected.id,
+                                finishingName: selected.namePersian || selected.name || '',
+                                finishingLabel: selected.namePersian || selected.name || '',
+                                finishingPricePerSquareMeter: getFinishingUnitPrice(selected),
+                                finishingUnitPrice: getFinishingUnitPrice(selected),
+                                finishingCalculationBase: getFinishingCalculationBase(selected),
+                                finishingQuantity: calculateDefaultFinishingQuantity({
+                                  calculationBase: getFinishingCalculationBase(selected),
+                                  productType: currentProductType as ContractProduct['productType'],
+                                  length: productConfig.length,
+                                  lengthUnit,
+                                  quantity: quantityValue,
+                                  squareMeters: pricingSquareMeters
+                                })
+                              }));
+                            }}
+                            className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all disabled:opacity-60"
+                          >
+                            <option value="">انتخاب پرداخت...</option>
+                            {visibleStoneFinishings.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.namePersian || option.name} ({formatPrice(getFinishingUnitPrice(option))}/{getFinishingUnitLabel(getFinishingCalculationBase(option))})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {productConfig.finishingEnabled && finishingCalculationBase === 'length' && (
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              مقدار فرآوری (متر)
+                            </label>
+                            <FormattedNumberInput
+                              value={productConfig.finishingQuantity ?? finishingQuantity}
+                              onChange={(value) => {
+                                const nextValue = value && value > 0 ? value : null;
+                                const clampedValue =
+                                  nextValue && maxLengthFinishingQuantity && maxLengthFinishingQuantity > 0
+                                    ? Math.min(nextValue, maxLengthFinishingQuantity)
+                                    : nextValue;
+                                setProductConfig((prev: any) => ({
+                                  ...prev,
+                                  finishingQuantity: clampedValue
+                                }));
+                              }}
+                              min={0}
+                              max={maxLengthFinishingQuantity || undefined}
+                              step={0.01}
+                              className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                              placeholder="مثال: 125"
+                            />
+                            {maxLengthFinishingQuantity !== null && maxLengthFinishingQuantity > 0 && (
+                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                حداکثر قابل استفاده: {formatDisplayNumber(maxLengthFinishingQuantity)} {unitLabel}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {productConfig.finishingEnabled && finishingPricePerSquareMeter && (
+                          <div className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-4 py-3 text-xs leading-5 text-teal-700 dark:text-teal-200 space-y-1">
+                            <div className="flex justify-between">
+                              <span>نرخ هر {unitLabel}:</span>
+                              <span className="font-semibold">{formatPrice(finishingUnitPrice)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>مقدار فرآوری:</span>
+                              <span className="font-semibold">
+                                {finishingCalculationBase === 'squareMeters' ? formatSquareMeters(finishingQuantity) : `${formatDisplayNumber(finishingQuantity)} ${unitLabel}`}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>هزینه تقریبی پرداخت:</span>
+                              <span className="font-semibold">{formatPrice(finishingPreviewCost)}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {(finishingLoadState === 'forbidden' || finishingLoadState === 'empty' || finishingLoadState === 'idle' || finishingLoadState === 'error') && (
+                          <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
+                            {finishingLoadState === 'forbidden' && 'برای فعال‌سازی، دسترسی قراردادهای فروش یا پرداخت سنگ را از ادمین دریافت کنید.'}
+                            {finishingLoadState === 'empty' && 'هیچ پرداخت فعالی برای انتخاب یافت نشد.'}
+                            {finishingLoadState === 'idle' && 'در حال بارگذاری لیست پرداخت‌ها...'}
+                            {finishingLoadState === 'error' && 'خطا در دریافت لیست پرداخت‌ها. لطفاً مجدد تلاش کنید.'}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">

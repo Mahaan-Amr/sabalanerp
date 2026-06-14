@@ -80,11 +80,21 @@ export const ensureStoredSalesContractPdfExists = (pdfPath: string): boolean => 
   if (!pdfPath) return false;
   if (pdfPath.startsWith('http://') || pdfPath.startsWith('https://')) return true;
 
-  const resolvedPath = path.isAbsolute(pdfPath)
-    ? pdfPath
-    : path.join(process.cwd(), 'storage', 'contracts', path.basename(pdfPath));
+  const resolvedPath = resolveStoredSalesContractPdfPath(pdfPath);
 
   return fs.existsSync(resolvedPath);
+};
+
+export const resolveStoredSalesContractPdfPath = (pdfPath: string): string => {
+  return path.isAbsolute(pdfPath)
+    ? pdfPath
+    : path.join(process.cwd(), 'storage', 'contracts', path.basename(pdfPath));
+};
+
+export const buildSalesContractPdfDownloadName = (contract: any): string => {
+  const safeNumber = String(contract?.contractNumber || contract?.id || 'contract')
+    .replace(/[^\w.-]+/g, '_');
+  return `sales_contract_${safeNumber}.pdf`;
 };
 
 export const generateSalesContractPdf = async (contract: any) => {

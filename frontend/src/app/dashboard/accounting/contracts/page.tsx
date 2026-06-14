@@ -25,6 +25,7 @@ import {
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
 import { accountingAPI } from '@/lib/api';
+import { downloadBlobResponse } from '@/lib/downloadFile';
 import {
   AccountingContractRow,
   FinancialInvoiceApprovalForm,
@@ -200,6 +201,12 @@ export default function AccountingContractsPage() {
     const actionKey = `${contract.contractId}:${tryPrint ? 'PRINT_SALES_PDF' : 'DOWNLOAD_SALES_PDF'}`;
     setActionLoading(actionKey);
     try {
+      if (!tryPrint) {
+        const response = await accountingAPI.downloadSalesContractPdf(contract.contractId, { fresh: false });
+        downloadBlobResponse(response, `sales_contract_${contract.contractNumber || contract.contractId}.pdf`);
+        return;
+      }
+
       const response = await accountingAPI.getSalesContractPdf(contract.contractId, { fresh: false });
       const url = response.data?.data?.url;
       if (!response.data?.success || !url) throw new Error('Sales contract PDF url was not returned');

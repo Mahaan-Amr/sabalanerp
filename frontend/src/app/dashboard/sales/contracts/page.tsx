@@ -28,6 +28,7 @@ import { useWorkspace } from '@/contexts/WorkspaceContext';
 import PersianCalendar from '@/lib/persian-calendar';
 import { getContractPermissions, User } from '@/lib/permissions';
 import { formatPrice, sumNumericValues } from '@/lib/numberFormat';
+import { downloadBlobResponse } from '@/lib/downloadFile';
 import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
 
 interface Contract {
@@ -218,10 +219,8 @@ export default function ContractsPage() {
   const handleDownloadPdf = async (contractId: string) => {
     setPdfActionLoading(contractId);
     try {
-      const response = await salesAPI.getContractPdf(contractId, { fresh: false });
-      if (response.data?.success && response.data?.data?.url) {
-        openPdfUrl(response.data.data.url, false);
-      }
+      const response = await salesAPI.downloadContractPdf(contractId, { fresh: false });
+      downloadBlobResponse(response, `sales_contract_${contractId}.pdf`);
     } catch (error) {
       console.error('Error downloading contract PDF:', error);
     } finally {

@@ -214,6 +214,9 @@ export default function CreateCustomerPage() {
       if (phone1Error) newErrors.phoneNumber1 = phone1Error;
       const phone2Error = validateOptionalIranianMobile(formData.phoneNumber2);
       if (phone2Error) newErrors.phoneNumber2 = phone2Error;
+      if (duplicateCustomers.length > 0) {
+        newErrors.phoneNumber1 = 'مشتری با این شماره تماس قبلا ثبت شده است.';
+      }
       
       // Optional fields with validation if provided
       if (formData.nationalCode && formData.nationalCode.length !== 10) {
@@ -251,6 +254,50 @@ export default function CreateCustomerPage() {
       setErrors(prev => ({ ...prev, [field]: '' }));
     }
   };
+
+  useEffect(() => {
+    const phoneNumber1 = normalizeIranianMobile(formData.phoneNumber1);
+    const phoneNumber2 = normalizeIranianMobile(formData.phoneNumber2);
+    const validPhoneNumbers = [phoneNumber1, phoneNumber2]
+      .filter((phone, index, phones) => phone && /^09\d{9}$/.test(phone) && phones.indexOf(phone) === index)
+      .map((phone) => ({ number: phone }));
+
+    if (validPhoneNumbers.length === 0) {
+      setDuplicateCustomers([]);
+      setErrors((prev) => {
+        if (!prev.phoneNumber1?.includes('قبلا ثبت شده') && !prev.phoneNumber2?.includes('قبلا ثبت شده')) return prev;
+        const next = { ...prev };
+        if (next.phoneNumber1?.includes('قبلا ثبت شده')) delete next.phoneNumber1;
+        if (next.phoneNumber2?.includes('قبلا ثبت شده')) delete next.phoneNumber2;
+        return next;
+      });
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const response = await crmAPI.checkDuplicateCustomer({
+          nationalCode: null,
+          phoneNumbers: validPhoneNumbers
+        });
+        const matches = response.data?.data?.matches || [];
+        setDuplicateCustomers(matches);
+        setErrors((prev) => {
+          const next = { ...prev };
+          if (next.phoneNumber1?.includes('قبلا ثبت شده')) delete next.phoneNumber1;
+          if (next.phoneNumber2?.includes('قبلا ثبت شده')) delete next.phoneNumber2;
+          if (matches.length > 0) {
+            next.phoneNumber1 = 'مشتری با این شماره تماس قبلا ثبت شده است.';
+          }
+          return next;
+        });
+      } catch (error) {
+        console.error('Duplicate customer check failed:', error);
+      }
+    }, 450);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [formData.phoneNumber1, formData.phoneNumber2]);
 
   const handleNext = () => {
     if (validateStep(step) && step < steps.length - 1) {
@@ -375,6 +422,10 @@ export default function CreateCustomerPage() {
     if (phone1Error) submitErrors.phoneNumber1 = phone1Error;
     if (phone2Error) submitErrors.phoneNumber2 = phone2Error;
     if (projectManagerNumberError) submitErrors.projectManagerNumber = projectManagerNumberError;
+    if (duplicateCustomers.length > 0) {
+      submitErrors.phoneNumber1 = 'مشتری با این شماره تماس قبلا ثبت شده است.';
+      submitErrors.submit = 'مشتری با این شماره تماس قبلا ثبت شده است. از مشتری‌های پیشنهادی انتخاب کنید یا شماره را اصلاح کنید.';
+    }
     if (Object.keys(submitErrors).length > 0) {
       setErrors(submitErrors);
       return;

@@ -30,6 +30,7 @@ import {
 import { salesAPI, crmAPI, dashboardAPI, servicesAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
+import { downloadBlobResponse } from '@/lib/downloadFile';
 import { formatDisplayNumber, formatPrice, formatPriceWithRial, formatDimensions, formatSquareMeters, formatQuantity, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import StoneCanvas from '@/components/StoneCanvas';
@@ -2923,12 +2924,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
     setPdfActionLoading(true);
     try {
-      const url = await getPrintablePdfUrl(signatureContractId, false);
-      if (!url) {
-        setErrors(prev => ({ ...prev, signature: 'امکان دریافت فایل PDF وجود ندارد' }));
-        return;
-      }
-      openPdfUrl(url, false);
+      const response = await salesAPI.downloadContractPdf(signatureContractId, { fresh: false });
+      downloadBlobResponse(response, `sales_contract_${signatureContractId}.pdf`);
     } catch (error: any) {
       setErrors(prev => ({ ...prev, signature: error.response?.data?.error || 'خطا در دانلود PDF قرارداد' }));
     } finally {
@@ -4831,37 +4828,57 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                   const chargeableCuttingCostCross = totals.billableCuttingCostCross;
                   const draftErrors = stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart] || {};
                   const lengthMInfo = getActualLengthMeters(draft);
-                  const selectedFinishing = stoneFinishings.find(option => option.id === draft.finishingId);
+                  const selectedFinishing =
+                    stoneFinishings.find(option => option.id === draft.finishingId) ||
+                    (draft.finishingId
+                      ? ({
+                          id: draft.finishingId,
+                          name: draft.finishingLabel || '',
+                          namePersian: draft.finishingLabel || '',
+                          description: '',
+                          calculationBase: draft.finishingCalculationBase || 'squareMeters',
+                          unitPrice: draft.finishingUnitPrice ?? draft.finishingPricePerSquareMeter ?? 0,
+                          pricePerSquareMeter: draft.finishingPricePerSquareMeter ?? draft.finishingUnitPrice ?? 0,
+                          isActive: false
+                        } as StoneFinishing)
+                      : undefined);
                   const finishingCalculationBase =
                     draft.finishingCalculationBase ||
                     getFinishingCalculationBase(selectedFinishing);
+                  const defaultFinishingQuantity = calculateDefaultFinishingQuantity({
+                    calculationBase: finishingCalculationBase,
+                    productType: 'stair',
+                    length: draft.lengthValue,
+                    lengthUnit: draft.lengthUnit || 'm',
+                    quantity: draft.quantity,
+                    squareMeters: totals.pricingSquareMeters
+                  });
                   const finishingPricePerSquareMeter =
                     draft.finishingUnitPrice ??
                     draft.finishingPricePerSquareMeter ??
                     (getFinishingUnitPrice(selectedFinishing) || null);
                   const finishingQuantity =
-                    draft.finishingQuantity ??
-                    calculateDefaultFinishingQuantity({
-                      calculationBase: finishingCalculationBase,
-                      productType: 'stair',
-                      length: draft.lengthValue,
-                      lengthUnit: draft.lengthUnit || 'm',
-                      quantity: draft.quantity,
-                      squareMeters: totals.pricingSquareMeters
-                    });
+                    draft.finishingQuantity ?? defaultFinishingQuantity;
+                  const maxLengthFinishingQuantity = finishingCalculationBase === 'length'
+                    ? defaultFinishingQuantity
+                    : null;
                   const finishingUnitLabel = getFinishingUnitLabel(finishingCalculationBase);
                   const finishingPreviewCost =
                     draft.finishingEnabled && finishingPricePerSquareMeter
                       ? calculateFinishingCost(finishingQuantity, finishingPricePerSquareMeter)
                       : 0;
                   const finishingSearchTerm = String((draft as any).finishingSearchTerm || '').trim().toLowerCase();
+                  const selectableStoneFinishings =
+                    selectedFinishing && !stoneFinishings.some(option => option.id === selectedFinishing.id)
+                      ? [selectedFinishing, ...stoneFinishings]
+                      : stoneFinishings;
                   const visibleStoneFinishings = finishingSearchTerm
-                    ? stoneFinishings.filter((option) =>
+                    ? selectableStoneFinishings.filter((option) =>
                         `${option.namePersian || ''} ${option.name || ''} ${option.description || ''}`
                           .toLowerCase()
                           .includes(finishingSearchTerm)
                       )
-                    : stoneFinishings;
+                    : selectableStoneFinishings;
                   const defaultMandatoryEnabled = stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
                   const mandatoryEnabled = draft.useMandatory ?? defaultMandatoryEnabled;
                   const supportsMandatory = stairSystemV2.stairActivePart === 'tread' || stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
@@ -6262,15 +6279,28 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                     </label>
                                     <FormattedNumberInput
                                       value={draft.finishingQuantity ?? finishingQuantity}
-                                      onChange={(value) => setDraft({
-                                        ...draft,
-                                        finishingQuantity: value && value > 0 ? value : null
-                                      })}
+                                      onChange={(value) => {
+                                        const nextValue = value && value > 0 ? value : null;
+                                        const clampedValue =
+                                          nextValue && maxLengthFinishingQuantity && maxLengthFinishingQuantity > 0
+                                            ? Math.min(nextValue, maxLengthFinishingQuantity)
+                                            : nextValue;
+                                        setDraft({
+                                          ...draft,
+                                          finishingQuantity: clampedValue
+                                        });
+                                      }}
                                       min={0}
+                                      max={maxLengthFinishingQuantity || undefined}
                                       step={0.01}
                                       className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
                                       placeholder="مثال: 125"
                                     />
+                                    {maxLengthFinishingQuantity !== null && maxLengthFinishingQuantity > 0 && (
+                                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                        حداکثر قابل استفاده: {formatDisplayNumber(maxLengthFinishingQuantity)} {finishingUnitLabel}
+                                      </p>
+                                    )}
                                   </div>
                                 )}
 

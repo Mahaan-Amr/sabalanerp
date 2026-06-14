@@ -191,6 +191,12 @@ export const salesAPI = {
 
   getContractPdf: (contractId: string, params?: { fresh?: boolean }) =>
     api.get(`/sales/contracts/${contractId}/pdf`, { params }),
+
+  downloadContractPdf: (contractId: string, params?: { fresh?: boolean }) =>
+    api.get(`/sales/contracts/${contractId}/pdf`, {
+      params: { ...params, download: true },
+      responseType: 'blob'
+    }),
   
   deleteContract: (id: string) => api.delete(`/sales/contracts/${id}`),
   
@@ -264,6 +270,9 @@ export const crmAPI = {
   getCustomerOwners: () => api.get('/crm/customer-owners'),
   
   getCustomer: (id: string) => api.get(`/crm/customers/${id}`),
+
+  checkDuplicateCustomer: (payload: { nationalCode?: string | null; phoneNumbers?: Array<{ number?: string | null }> }) =>
+    api.post('/crm/customers/duplicate-check', payload),
   
   createCustomer: (customerData: any) => api.post('/crm/customers', customerData),
   
@@ -442,8 +451,18 @@ export const accountingAPI = {
   getContracts: (params?: any) => api.get('/accounting/contracts', { params }),
   getContract: (contractId: string) => api.get(`/accounting/contracts/${contractId}`),
   getContractPdf: (contractId: string) => api.get(`/accounting/contracts/${contractId}/pdf`),
+  downloadContractPdf: (contractId: string) =>
+    api.get(`/accounting/contracts/${contractId}/pdf`, {
+      params: { download: true },
+      responseType: 'blob'
+    }),
   getSalesContractPdf: (contractId: string, params?: { fresh?: boolean }) =>
     api.get(`/accounting/contracts/${contractId}/sales-pdf`, { params }),
+  downloadSalesContractPdf: (contractId: string, params?: { fresh?: boolean }) =>
+    api.get(`/accounting/contracts/${contractId}/sales-pdf`, {
+      params: { ...params, download: true },
+      responseType: 'blob'
+    }),
   getFinancialRecords: (params?: any) => api.get('/accounting/financial-records', { params }),
   getReceivables: (params?: any) => api.get('/accounting/receivables', { params }),
   getPayments: (params?: any) => api.get('/accounting/payments', { params }),

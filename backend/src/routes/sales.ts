@@ -12,8 +12,10 @@ import { getNextContractNumberPreview } from '../services/contractNumberService'
 import { contractConfirmationService } from '../services/contractConfirmationService';
 import { getRequestEvidence } from '../utils/requestEvidence';
 import {
+  buildSalesContractPdfDownloadName,
   ensureStoredSalesContractPdfExists,
   generateSalesContractPdf,
+  resolveStoredSalesContractPdfPath,
   resolveSalesContractPdfUrl,
   salesContractPrintableInclude
 } from '../utils/salesContractPdf';
@@ -279,10 +281,18 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
     }
 
     const fresh = String(req.query.fresh || 'false').toLowerCase() === 'true';
+    const shouldDownload = String(req.query.download || 'false').toLowerCase() === 'true';
     const currentSignatures = (contract.signatures as any) || {};
     const cachedPdfPath = currentSignatures?.print?.pdfPath as string | undefined;
 
     if (!fresh && cachedPdfPath && ensureStoredSalesContractPdfExists(cachedPdfPath)) {
+      if (shouldDownload) {
+        return res.download(
+          resolveStoredSalesContractPdfPath(cachedPdfPath),
+          buildSalesContractPdfDownloadName(contract)
+        );
+      }
+
       const cachedUrl = resolveSalesContractPdfUrl(req, cachedPdfPath);
       if (cachedUrl) {
         return res.json({
@@ -313,6 +323,13 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
         }
       }
     });
+
+    if (shouldDownload) {
+      return res.download(
+        resolveStoredSalesContractPdfPath(pdfPath),
+        buildSalesContractPdfDownloadName(contract)
+      );
+    }
 
     const url = resolveSalesContractPdfUrl(req, pdfPath);
     if (!url) {

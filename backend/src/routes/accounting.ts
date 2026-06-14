@@ -7,8 +7,10 @@ import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess } from '../middlewa
 import { generatePdfFromHtml } from '../utils/pdf';
 import { renderAccountingContractHtml } from '../utils/accountingPrintTemplate';
 import {
+  buildSalesContractPdfDownloadName,
   ensureStoredSalesContractPdfExists,
   generateSalesContractPdf,
+  resolveStoredSalesContractPdfPath,
   resolveSalesContractPdfUrl,
   salesContractPrintableInclude
 } from '../utils/salesContractPdf';
@@ -114,6 +116,12 @@ router.get('/contracts/:contractId/pdf', accountingView, async (req: AuthRequest
       margin: { top: '6mm', right: '6mm', bottom: '6mm', left: '6mm' }
     });
     const url = resolveAccountingPdfUrl(req, pdfPath);
+    const shouldDownload = String(req.query.download || 'false').toLowerCase() === 'true';
+
+    if (shouldDownload) {
+      res.download(pdfPath, `accounting_contract_${contractNumber}.pdf`);
+      return;
+    }
 
     if (!url) {
       res.status(500).json({ success: false, error: 'Failed to build PDF url' });
@@ -150,12 +158,21 @@ router.get('/contracts/:contractId/sales-pdf', accountingView, async (req: AuthR
     }
 
     const fresh = String(req.query.fresh || 'false').toLowerCase() === 'true';
+    const shouldDownload = String(req.query.download || 'false').toLowerCase() === 'true';
     const currentSignatures = (contract.signatures as any) || {};
     const cachedPdfPath =
       (currentSignatures?.print?.pdfPath as string | undefined) ||
       (currentSignatures?.accountingSalesPdf?.pdfPath as string | undefined);
 
     if (!fresh && cachedPdfPath && ensureStoredSalesContractPdfExists(cachedPdfPath)) {
+      if (shouldDownload) {
+        res.download(
+          resolveStoredSalesContractPdfPath(cachedPdfPath),
+          buildSalesContractPdfDownloadName(contract)
+        );
+        return;
+      }
+
       const cachedUrl = resolveSalesContractPdfUrl(req, cachedPdfPath);
       if (cachedUrl) {
         res.json({
@@ -191,6 +208,14 @@ router.get('/contracts/:contractId/sales-pdf', accountingView, async (req: AuthR
         }
       }
     });
+
+    if (shouldDownload) {
+      res.download(
+        resolveStoredSalesContractPdfPath(pdfPath),
+        buildSalesContractPdfDownloadName(contract)
+      );
+      return;
+    }
 
     const url = resolveSalesContractPdfUrl(req, pdfPath);
     if (!url) {

@@ -28,6 +28,7 @@ import {
   type ErpTone,
 } from '@/components/erp';
 import { dashboardAPI, salesAPI } from '@/lib/api';
+import { downloadBlobResponse } from '@/lib/downloadFile';
 import { formatDisplayNumber, formatPrice, formatSquareMeters, sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
 import { getContractPermissions, hasFeatureAccess, User as PermissionUser } from '@/lib/permissions';
@@ -231,12 +232,8 @@ export default function ContractDetailPage() {
     if (!contract) return;
     setActionLoading('download');
     try {
-      const response = await salesAPI.getContractPdf(contract.id, { fresh: false });
-      if (response.data?.success && response.data?.data?.url) {
-        openPdfUrl(response.data.data.url, false);
-      } else {
-        setError(response.data?.error || 'فایل PDF قرارداد در دسترس نیست');
-      }
+      const response = await salesAPI.downloadContractPdf(contract.id, { fresh: false });
+      downloadBlobResponse(response, `sales_contract_${contract.contractNumber || contract.id}.pdf`);
     } catch (error: any) {
       setError(error.response?.data?.error || 'خطا در دانلود PDF قرارداد');
     } finally {

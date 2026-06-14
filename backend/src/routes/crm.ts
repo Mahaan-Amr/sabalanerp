@@ -214,6 +214,34 @@ const findDuplicateCustomers = async (params: {
   });
 };
 
+router.post(
+  '/customers/duplicate-check',
+  protect,
+  requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW),
+  async (req: any, res: Response): Promise<void> => {
+    try {
+      const duplicateCustomers = await findDuplicateCustomers({
+        nationalCode: req.body?.nationalCode,
+        phoneNumbers: req.body?.phoneNumbers
+      });
+
+      res.json({
+        success: true,
+        data: {
+          hasDuplicate: duplicateCustomers.length > 0,
+          matches: duplicateCustomers
+        }
+      });
+    } catch (error) {
+      console.error('Duplicate customer check error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Server error'
+      });
+    }
+  }
+);
+
 // ==================== CRM CUSTOMERS ====================
 
 // @desc    Get assignable CRM customer owners

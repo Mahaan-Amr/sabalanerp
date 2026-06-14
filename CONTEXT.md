@@ -2,6 +2,10 @@
 
 Sabalan ERP manages stone inventory, sales contracts, and related pricing data for Sabalan Stone. This glossary defines project-specific business terms so the product and code use the same language.
 
+**Product Search**:
+A product lookup in the price inquiry surface that matches product identity and price-facing product details, regardless of Persian or Arabic character variants.
+_Avoid_: treating search as only an exact prefix lookup
+
 ## Language
 
 **ابزار**:

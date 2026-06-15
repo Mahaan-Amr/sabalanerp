@@ -1,4 +1,8 @@
-﻿interface RenderableContract {
+import fs from 'fs';
+import path from 'path';
+import { pathToFileURL } from 'url';
+
+interface RenderableContract {
   id?: string;
   contractNumber?: string;
   title?: string;
@@ -40,6 +44,15 @@ interface NormalizedService {
   cost: number;
 }
 
+interface NormalizedProductTool {
+  name: string;
+  amount: number;
+  amountLabel: string;
+  rate: number;
+  rateLabel: string;
+  cost: number;
+}
+
 interface NormalizedProduct {
   id: string;
   code: string;
@@ -51,14 +64,28 @@ interface NormalizedProduct {
   squareMeters: number;
   unitPrice: number;
   originalTotalPrice: number;
+  isMandatory: boolean;
   mandatoryPercentage: number;
   totalPrice: number;
   description: string;
   cuts: NormalizedCut[];
   services: NormalizedService[];
+  tools: NormalizedProductTool[];
   layerSummary: string;
   finishingSummary: string;
   remainingSummary: string;
+}
+
+interface FlatProductRow {
+  indexLabel: string;
+  code: string;
+  description: string;
+  category: string;
+  dimensionsOrAmount: string;
+  quantityOrArea: string;
+  rate: string;
+  total: string;
+  className?: string;
 }
 
 interface NormalizedDelivery {
@@ -100,6 +127,37 @@ interface NormalizedFinancials {
 }
 
 const EMPTY = '—';
+const SELLER_ADDRESS = 'شیراز، بزرگراه دکتر حسابی، بعد از کوچه 46';
+const COMPANY_PHONE = '071-91010900';
+const DELIVERY_NOTE = 'برنامه تحویل با توجه به شرایط اجرایی و با هماهنگی خریدار، ممکن است تغییر یابد';
+const PAYMENT_NOTE = 'در صورت عدم پرداخت، تأمین کالا به میزان وجوه پرداختی و مانده سفارش با نرخ روز خواهد بود';
+
+const publicAssetUrl = (...segments: string[]): string => {
+  const candidates = [
+    path.resolve(process.cwd(), '..', 'frontend', 'public', ...segments),
+    path.resolve(process.cwd(), 'frontend', 'public', ...segments)
+  ];
+  const assetPath = candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
+  return pathToFileURL(assetPath).href;
+};
+
+const publicAssetPath = (...segments: string[]): string => {
+  const candidates = [
+    path.resolve(process.cwd(), '..', 'frontend', 'public', ...segments),
+    path.resolve(process.cwd(), 'frontend', 'public', ...segments)
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
+};
+
+const fileToDataUri = (filePath: string, mimeType: string): string => {
+  if (!fs.existsSync(filePath)) return '';
+  return `data:${mimeType};base64,${fs.readFileSync(filePath).toString('base64')}`;
+};
+
+const logoUrl = fileToDataUri(publicAssetPath('brand', 'sabalan-logo.jpg'), 'image/jpeg');
+const yekanRegularUrl = publicAssetUrl('yekan-bakh', 'YekanBakh-Regular.woff2');
+const yekanSemiBoldUrl = publicAssetUrl('yekan-bakh', 'YekanBakh-SemiBold.woff2');
+const yekanBoldUrl = publicAssetUrl('yekan-bakh', 'YekanBakh-Bold.woff2');
 
 const escapeHtml = (value: unknown): string => {
   const input = value === null || value === undefined ? '' : String(value);
@@ -174,6 +232,43 @@ const formatDate = (value: unknown): string => {
   return date.toLocaleDateString('fa-IR');
 };
 
+const latinDigits = (value: string): string => value
+  .replace(/[۰-۹]/g, (char) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(char)))
+  .replace(/[٠-٩]/g, (char) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(char)));
+
+const toFaDigits = (value: string): string => value.replace(/\d/g, (char) => '۰۱۲۳۴۵۶۷۸۹'[Number(char)]);
+
+const formatPersianDate = (value: unknown): string => {
+  if (!value) return EMPTY;
+  const raw = String(value).trim();
+  if (!raw) return EMPTY;
+
+  const persianDateLike = latinDigits(raw).match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
+  if (persianDateLike) {
+    const parts = persianDateLike.slice(1).map((part) => Number(part.trim()));
+    if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return EMPTY;
+    const [year, month, day] = parts;
+    if (year < 1000 || month < 1 || month > 12 || day < 1 || day > 31) return EMPTY;
+    return toFaDigits(`${String(year).padStart(4, '0')}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`);
+  }
+
+  const date = value instanceof Date ? value : new Date(raw);
+  if (Number.isNaN(date.getTime())) return EMPTY;
+  const storedYear = date.getFullYear();
+  if (storedYear >= 1300 && storedYear <= 1600) {
+    return toFaDigits(`${String(storedYear).padStart(4, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`);
+  }
+  const parts = new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+  return year && month && day ? `${year}/${month}/${day}` : EMPTY;
+};
+
 const formatDateTime = (value: unknown): string => {
   if (!value) return EMPTY;
   const date = value instanceof Date ? value : new Date(String(value));
@@ -246,6 +341,14 @@ const getCustomerPhone = (customer: any, contractData: any): string => {
   return phone ? String(phone).trim() : EMPTY;
 };
 
+const getSellerPhone = (createdByUser: any): string => {
+  const phone = createdByUser?.profile?.phone;
+  return typeof phone === 'string' && phone.trim() ? phone.trim() : EMPTY;
+};
+
+const getUserName = (user: any): string =>
+  [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || EMPTY;
+
 const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] => {
   const contractDataProducts = Array.isArray(contract.contractData?.products) ? contract.contractData.products : [];
   const relationItems = Array.isArray(contract.items) ? contract.items : [];
@@ -308,6 +411,23 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         });
       }
 
+      const tools: NormalizedProductTool[] = [
+        ...(Array.isArray(product?.tools) ? product.tools : []),
+        ...(Array.isArray(product?.meta?.tools) ? product.meta.tools : [])
+      ].map((tool: any) => {
+        const amount = toNumber(tool?.computedMeters || tool?.meters || tool?.amount);
+        const rate = toNumber(tool?.pricePerMeter || tool?.rate || tool?.unitPrice);
+        const cost = toNumber(tool?.totalPrice || tool?.cost);
+        return {
+          name: tool?.namePersian || tool?.name || EMPTY,
+          amount,
+          amountLabel: amount > 0 ? `${toFaNumber(amount, 2)} متر طول` : EMPTY,
+          rate,
+          rateLabel: rate > 0 ? `${toFaNumber(rate)} تومان / متر طول` : EMPTY,
+          cost
+        };
+      });
+
       const width = product?.width ? `${product.width}${product?.widthUnit || ''}` : null;
       const length = product?.length ? `${product.length}${product?.lengthUnit || ''}` : null;
       const thickness = product?.thicknessCm ? `${product.thicknessCm}cm` : null;
@@ -331,11 +451,13 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         squareMeters: toNumber(product?.squareMeters),
         unitPrice: toNumber(product?.pricePerSquareMeter || product?.unitPrice || relationItem?.unitPrice),
         originalTotalPrice: toNumber(product?.originalTotalPrice),
+        isMandatory: Boolean(product?.isMandatory ?? relationItem?.isMandatory),
         mandatoryPercentage: toNumber(product?.mandatoryPercentage),
         totalPrice: toNumber(product?.totalPrice || relationItem?.totalPrice),
         description: product?.description || relationItem?.description || EMPTY,
         cuts: [...cutsFromBreakdown, ...cutsFromDetails],
         services,
+        tools,
         layerSummary: product?.layerTypeName
           ? `${product.layerTypeName}${product?.layerUseMandatory ? ` / حکمی ${toFaNumber(product?.layerMandatoryPercentage || 0)}%` : ''}`
           : EMPTY,
@@ -358,11 +480,13 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
     squareMeters: 0,
     unitPrice: toNumber(item?.unitPrice),
     originalTotalPrice: toNumber(item?.originalTotalPrice),
+    isMandatory: Boolean(item?.isMandatory),
     mandatoryPercentage: toNumber(item?.mandatoryPercentage),
     totalPrice: toNumber(item?.totalPrice),
     description: item?.description || EMPTY,
     cuts: [],
     services: [],
+    tools: [],
     layerSummary: EMPTY,
     finishingSummary: EMPTY,
     remainingSummary: EMPTY
@@ -372,6 +496,31 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
 const normalizeDeliveries = (contract: RenderableContract, products: NormalizedProduct[]): NormalizedDelivery[] => {
   const relationDeliveries = Array.isArray(contract.deliveries) ? contract.deliveries : [];
   const contractDataDeliveries = Array.isArray(contract.contractData?.deliveries) ? contract.contractData.deliveries : [];
+  if (contractDataDeliveries.length > 0) {
+    return contractDataDeliveries.map((snapshot: any, index: number) => {
+      const snapshotProducts = Array.isArray(snapshot?.products)
+        ? snapshot.products.map((deliveryProduct: any) => {
+            const productIndex = toNumber(deliveryProduct?.productIndex);
+            const product = products[productIndex] ||
+              products.find((candidate) => candidate.id.startsWith(`${deliveryProduct?.productId || ''}-`));
+            return {
+              name: product?.name || EMPTY,
+              quantity: toNumber(deliveryProduct?.quantity)
+            };
+          })
+        : [];
+
+      return {
+        index: index + 1,
+        date: formatPersianDate(snapshot?.deliveryDate),
+        address: String(snapshot?.deliveryAddress || contract.contractData?.project?.address || EMPTY),
+        manager: String(snapshot?.projectManagerName || EMPTY),
+        receiver: String(snapshot?.receiverName || EMPTY),
+        notes: String(snapshot?.notes || EMPTY),
+        products: snapshotProducts
+      };
+    });
+  }
   const length = Math.max(relationDeliveries.length, contractDataDeliveries.length);
 
   const rows: NormalizedDelivery[] = [];
@@ -395,7 +544,7 @@ const normalizeDeliveries = (contract: RenderableContract, products: NormalizedP
 
     rows.push({
       index: index + 1,
-      date: formatDate(relation?.deliveryDate || snapshot?.deliveryDate),
+      date: formatPersianDate(snapshot?.deliveryDate || relation?.deliveryDate),
       address: String(relation?.deliveryAddress || snapshot?.deliveryAddress || contract.contractData?.project?.address || EMPTY),
       manager: String(snapshot?.projectManagerName || relation?.driver || EMPTY),
       receiver: String(snapshot?.receiverName || relation?.vehicle || EMPTY),
@@ -409,7 +558,23 @@ const normalizeDeliveries = (contract: RenderableContract, products: NormalizedP
 
 const normalizePayments = (contract: RenderableContract): NormalizedPayment[] => {
   const relationPayments = Array.isArray(contract.payments) ? contract.payments : [];
-  const snapshotPayments = Array.isArray(contract.contractData?.payment?.payments) ? contract.contractData.payment.payments : [];
+  const snapshotPayments = Array.isArray(contract.contractData?.payment?.payments)
+    ? contract.contractData.payment.payments
+    : (Array.isArray(contract.contractData?.payment?.installments) ? contract.contractData.payment.installments : []);
+  if (snapshotPayments.length > 0) {
+    return snapshotPayments.map((snapshot: any, index: number) => ({
+      index: index + 1,
+      methodLabel: paymentMethodLabel(snapshot?.method, snapshot?.cashType),
+      amount: toNumber(snapshot?.amount),
+      statusLabel: paymentStatusLabel(snapshot?.status),
+      paymentDate: formatDate(snapshot?.paymentDate),
+      checkNumber: String(snapshot?.checkNumber || EMPTY),
+      checkOwnerName: String(snapshot?.checkOwnerName || EMPTY),
+      handoverDate: formatDate(snapshot?.handoverDate),
+      notes: String(snapshot?.description || EMPTY),
+      installments: []
+    }));
+  }
   const length = Math.max(relationPayments.length, snapshotPayments.length);
 
   const rows: NormalizedPayment[] = [];
@@ -472,118 +637,124 @@ const normalizeFinancials = (contract: RenderableContract, products: NormalizedP
   };
 };
 
-const renderProductMainRows = (products: NormalizedProduct[], currency: string): string => {
+const isMeaningfulCut = (cut: NormalizedCut): boolean =>
+  cut.meters > 0 || cut.rate > 0 || cut.cost > 0;
+
+const isMeaningfulService = (service: NormalizedService): boolean =>
+  hasTextValue(service.name) || service.amount > 0 || service.rate > 0 || service.cost > 0;
+
+const isMeaningfulTool = (tool: NormalizedProductTool): boolean =>
+  hasTextValue(tool.name) || tool.amount > 0 || tool.rate > 0 || tool.cost > 0;
+
+const buildFlatProductRows = (products: NormalizedProduct[], currency: string, grandTotal: number): FlatProductRow[] => {
+  const rows: FlatProductRow[] = [];
+
+  products.forEach((product, productIndex) => {
+    const addOnsTotal =
+      product.cuts.reduce((sum, cut) => sum + toNumber(cut.cost), 0) +
+      product.tools.reduce((sum, tool) => sum + toNumber(tool.cost), 0) +
+      product.services.reduce((sum, service) => sum + toNumber(service.cost), 0);
+    const baseAmount = product.originalTotalPrice > 0
+      ? product.originalTotalPrice
+      : Math.max(product.totalPrice - addOnsTotal, 0) || product.totalPrice;
+    rows.push({
+      indexLabel: toFaNumber(productIndex + 1),
+      code: product.code,
+      description: product.name,
+      category: 'محصول',
+      dimensionsOrAmount: product.dimensions,
+      quantityOrArea: `${toFaNumber(product.quantity, 2)} عدد / ${toFaNumber(product.squareMeters, 3)} متر مربع`,
+      rate: product.unitPrice > 0 ? formatAmount(product.unitPrice, currency) : EMPTY,
+      total: formatAmount(baseAmount, currency)
+    });
+
+    if (product.isMandatory && product.mandatoryPercentage > 0 && product.originalTotalPrice > 0) {
+      const mandatoryAmount = product.originalTotalPrice * (product.mandatoryPercentage / 100);
+      rows.push({
+        indexLabel: '',
+        code: '',
+        description: `حکمی ${toFaNumber(product.mandatoryPercentage)}٪`,
+        category: 'حکمی',
+        dimensionsOrAmount: formatAmount(product.originalTotalPrice, currency),
+        quantityOrArea: '',
+        rate: `${toFaNumber(product.mandatoryPercentage)}٪`,
+        total: formatAmount(mandatoryAmount, currency)
+      });
+    }
+
+    product.cuts.filter(isMeaningfulCut).forEach((cut) => {
+      rows.push({
+        indexLabel: '',
+        code: '',
+        description: cut.type,
+        category: 'برش',
+        dimensionsOrAmount: `${toFaNumber(cut.meters, 2)} متر`,
+        quantityOrArea: '',
+        rate: cut.rate > 0 ? formatAmount(cut.rate, currency) : EMPTY,
+        total: formatAmount(cut.cost, currency)
+      });
+    });
+
+    product.tools.filter(isMeaningfulTool).forEach((tool) => {
+      rows.push({
+        indexLabel: '',
+        code: '',
+        description: tool.name,
+        category: 'ابزار',
+        dimensionsOrAmount: tool.amountLabel,
+        quantityOrArea: '',
+        rate: tool.rateLabel,
+        total: formatAmount(tool.cost, currency)
+      });
+    });
+
+    product.services.filter(isMeaningfulService).forEach((service) => {
+      rows.push({
+        indexLabel: '',
+        code: '',
+        description: service.name,
+        category: service.category,
+        dimensionsOrAmount: service.amountLabel,
+        quantityOrArea: '',
+        rate: service.rateLabel || EMPTY,
+        total: formatAmount(service.cost, currency)
+      });
+    });
+  });
+
+  rows.push({
+    indexLabel: '',
+    code: '',
+    description: 'جمع کل فاکتور',
+    category: '',
+    dimensionsOrAmount: '',
+    quantityOrArea: '',
+    rate: '',
+    total: formatAmount(grandTotal, currency),
+    className: 'total-row'
+  });
+
+  return rows;
+};
+
+const renderProductMainRows = (products: NormalizedProduct[], currency: string, grandTotal: number): string => {
   if (!products.length) {
-    return `<tr><td colspan="10" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
+    return `<tr><td colspan="8" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
   }
 
-  return products.map((product, index) => {
-    const meaningfulCuts = product.cuts.filter((cut) =>
-      cut.meters > 0 || cut.rate > 0 || cut.cost > 0
-    );
-
-    const meaningfulServices = product.services.filter((service) =>
-      hasTextValue(service.name) ||
-      service.amount > 0 ||
-      service.rate > 0 ||
-      service.cost > 0
-    );
-
-    const summaryItems = [
-      hasTextValue(product.description) ? `<span><strong>شرح:</strong> ${escapeHtml(product.description)}</span>` : '',
-      product.mandatoryPercentage > 0 ? `<span><strong>اطلاعات حکمی:</strong> ${toFaNumber(product.mandatoryPercentage)}%</span>` : '',
-      product.originalTotalPrice > 0 ? `<span><strong>قیمت پایه:</strong> ${formatAmount(product.originalTotalPrice, currency)}</span>` : '',
-      hasTextValue(product.layerSummary) ? `<span><strong>لایه:</strong> ${escapeHtml(product.layerSummary)}</span>` : '',
-      hasTextValue(product.remainingSummary) ? `<span><strong>وضعیت باقی‌مانده سنگ:</strong> ${escapeHtml(product.remainingSummary)}</span>` : ''
-    ].filter(Boolean);
-
-    const cutsBlock = meaningfulCuts.length > 0
-      ? `
-        <div class="detail-block">
-          <h4>جزئیات برش</h4>
-          <table class="nested-table">
-            <thead>
-              <tr>
-                <th>نوع</th>
-                <th>طول/مقدار</th>
-                <th>نرخ</th>
-                <th>هزینه</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${meaningfulCuts.map((cut) => `
-          <tr>
-            <td>${escapeHtml(cut.type)}</td>
-            <td>${toFaNumber(cut.meters, 2)} متر</td>
-            <td>${cut.rate > 0 ? formatAmount(cut.rate, currency) : escapeHtml(EMPTY)}</td>
-            <td>${formatAmount(cut.cost, currency)}</td>
-          </tr>
-        `).join('')}
-            </tbody>
-          </table>
-        </div>
-      `
-      : '';
-
-    const servicesBlock = meaningfulServices.length > 0
-      ? `
-        <div class="detail-block">
-          <h4>جزئیات خدمات و فرآوری</h4>
-          <table class="nested-table">
-            <thead>
-              <tr>
-                <th>دسته</th>
-                <th>شرح</th>
-                <th>مقدار</th>
-                <th>نرخ</th>
-                <th>هزینه</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${meaningfulServices.map((service) => `
-          <tr>
-            <td>${escapeHtml(service.category)}</td>
-            <td>${escapeHtml(service.name)}</td>
-            <td>${escapeHtml(service.amountLabel)}</td>
-            <td>${escapeHtml(service.rateLabel || EMPTY)}</td>
-            <td>${formatAmount(service.cost, currency)}</td>
-          </tr>
-        `).join('')}
-            </tbody>
-          </table>
-        </div>
-      `
-      : '';
-
-    const detailRow = summaryItems.length || cutsBlock || servicesBlock
-      ? `
-        <tr class="product-detail-row">
-          <td colspan="10">
-            <div class="product-detail-inline">
-              <h3>جزئیات محصول</h3>
-              ${summaryItems.length ? `<div class="detail-strip">${summaryItems.join('')}</div>` : ''}
-              ${cutsBlock}
-              ${servicesBlock}
-            </div>
-          </td>
-        </tr>
-      `
-      : '';
-
+  return buildFlatProductRows(products, currency, grandTotal).map((row) => {
+    const classAttribute = row.className ? ` class="${row.className}"` : '';
     return `
-      <tr>
-        <td>${toFaNumber(index + 1)}</td>
-        <td>${escapeHtml(product.code)}</td>
-        <td>${escapeHtml(product.name)}</td>
-        <td>${escapeHtml(product.productType)}</td>
-        <td>${escapeHtml(product.stairPart)}</td>
-        <td>${escapeHtml(product.dimensions)}</td>
-        <td>${toFaNumber(product.quantity, 2)}</td>
-        <td>${toFaNumber(product.squareMeters, 3)}</td>
-        <td>${formatAmount(product.unitPrice, currency)}</td>
-        <td>${formatAmount(product.totalPrice, currency)}</td>
+      <tr${classAttribute}>
+        <td>${escapeHtml(row.indexLabel)}</td>
+        <td>${escapeHtml(row.code || EMPTY)}</td>
+        <td>${escapeHtml(row.description || EMPTY)}</td>
+        <td>${escapeHtml(row.category || EMPTY)}</td>
+        <td>${escapeHtml(row.dimensionsOrAmount || EMPTY)}</td>
+        <td>${escapeHtml(row.quantityOrArea || EMPTY)}</td>
+        <td>${escapeHtml(row.rate || EMPTY)}</td>
+        <td>${escapeHtml(row.total || EMPTY)}</td>
       </tr>
-      ${detailRow}
     `;
   }).join('');
 };
@@ -676,10 +847,11 @@ export function renderContractHtml(contract: RenderableContract): string {
   const normalizedPayments = normalizePayments(contract);
   const financials = normalizeFinancials(contract, normalizedProducts);
 
-  const title = contract.titlePersian || contract.title || 'قرارداد فروش';
   const contractNumber = contract.contractNumber || contractData.contractNumber || EMPTY;
   const contractDate = contractData.contractDate || formatDate(contract.createdAt);
   const statusLabel = statusLabelMap[String(contract.status || '')] || String(contract.status || 'DRAFT');
+  const sellerName = getUserName(contract.createdByUser);
+  const sellerPhone = getSellerPhone(contract.createdByUser);
 
   const customerName = `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || customer.companyName || EMPTY;
   const customerPhone = getCustomerPhone(customer, contractData);
@@ -693,26 +865,23 @@ export function renderContractHtml(contract: RenderableContract): string {
   return `
   <div class="sheet">
     <header class="contract-header">
-      <div class="company">
-        <h1>مجموعه سنگ طبیعی سبلان</h1>
-        <p>قرارداد رسمی فروش و اجرای خدمات سنگ</p>
+      <div class="brand-logo">
+        ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="Sabalan" />` : ''}
       </div>
       <div class="meta">
         <div><strong>شماره قرارداد:</strong> ${escapeHtml(contractNumber)}</div>
         <div><strong>تاریخ تنظیم:</strong> ${escapeHtml(contractDate)}</div>
-        <div><strong>وضعیت:</strong> ${escapeHtml(statusLabel)}</div>
+        <div><strong>وضعیت هنگام چاپ:</strong> ${escapeHtml(statusLabel)}</div>
       </div>
     </header>
 
     <section class="section">
-      <h2>مشخصات قرارداد</h2>
-      <div class="grid two-col">
-        <div><strong>عنوان قرارداد:</strong> ${escapeHtml(title)}</div>
-        <div><strong>بخش:</strong> ${escapeHtml(contract.department?.namePersian || contract.department?.name || EMPTY)}</div>
-        <div><strong>ایجاد کننده:</strong> ${escapeHtml([contract.createdByUser?.firstName, contract.createdByUser?.lastName].filter(Boolean).join(' ') || EMPTY)}</div>
-        <div><strong>تایید کننده:</strong> ${escapeHtml([contract.approvedByUser?.firstName, contract.approvedByUser?.lastName].filter(Boolean).join(' ') || EMPTY)}</div>
-        <div><strong>امضا کننده:</strong> ${escapeHtml([contract.signedByUser?.firstName, contract.signedByUser?.lastName].filter(Boolean).join(' ') || EMPTY)}</div>
-        <div><strong>آخرین بروزرسانی:</strong> ${escapeHtml(formatDateTime(contract.updatedAt || contract.createdAt))}</div>
+      <h2>قرارداد رسمی فروش و اجرای خدمات سنگ</h2>
+      <div class="grid two-col balanced-info">
+        <div><strong>آدرس مجموعه:</strong> ${escapeHtml(SELLER_ADDRESS)}</div>
+        <div><strong>شماره تماس فروشنده:</strong> <span class="ltr-value">${escapeHtml(sellerPhone)}</span></div>
+        <div><strong>شماره تماس مجموعه:</strong> <span class="ltr-value">${escapeHtml(COMPANY_PHONE)}</span></div>
+        <div><strong>ایجاد کننده:</strong> ${escapeHtml(sellerName)}</div>
       </div>
     </section>
 
@@ -736,18 +905,16 @@ export function renderContractHtml(contract: RenderableContract): string {
           <tr>
             <th>ردیف</th>
             <th>کد</th>
-            <th>نام</th>
-            <th>نوع محصول</th>
-            <th>بخش</th>
-            <th>ابعاد</th>
-            <th>تعداد</th>
-            <th>متراژ</th>
-            <th>فی</th>
+            <th>شرح</th>
+            <th>دسته</th>
+            <th>ابعاد/مقدار</th>
+            <th>تعداد/متراژ</th>
+            <th>نرخ</th>
             <th>مبلغ کل</th>
           </tr>
         </thead>
         <tbody>
-          ${renderProductMainRows(normalizedProducts, financials.currency)}
+          ${renderProductMainRows(normalizedProducts, financials.currency, financials.grandTotal)}
         </tbody>
       </table>
     </section>
@@ -770,6 +937,7 @@ export function renderContractHtml(contract: RenderableContract): string {
           ${renderDeliveryRows(normalizedDeliveries)}
         </tbody>
       </table>
+      <p class="section-note">${escapeHtml(DELIVERY_NOTE)}</p>
     </section>
 
     <section class="section">
@@ -792,13 +960,7 @@ export function renderContractHtml(contract: RenderableContract): string {
           ${renderPaymentRows(normalizedPayments, financials.currency)}
         </tbody>
       </table>
-    </section>
-
-    <section class="section">
-      <h2>جمع‌بندی مالی</h2>
-      <div class="grid two-col">
-        ${renderFinancialSummary(financials)}
-      </div>
+      <p class="section-note">${escapeHtml(PAYMENT_NOTE)}</p>
     </section>
 
     <section class="section">
@@ -812,7 +974,7 @@ export function renderContractHtml(contract: RenderableContract): string {
     </section>
 
     <section class="section">
-      <h2>توضیحات و بند حقوقی</h2>
+      <h2>توضیحات</h2>
       ${contract.notes ? `<p class="notes">${escapeHtml(contract.notes)}</p>` : ''}
       <ol class="legal-list">
         <li>خریدار با امضای این قرارداد، نوع سنگ، ابعاد، ضخامت، متراژ، تعداد، کیفیت، فرآوری، قیمت و سایر مشخصات مندرج در قرارداد را تأیید می‌نماید.</li>
@@ -841,6 +1003,30 @@ export function renderContractHtml(contract: RenderableContract): string {
   </div>
 
   <style>
+    @font-face {
+      font-family: 'Yekan Bakh';
+      src: url('${escapeHtml(yekanRegularUrl)}') format('woff2');
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: 'Yekan Bakh';
+      src: url('${escapeHtml(yekanSemiBoldUrl)}') format('woff2');
+      font-weight: 600;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: 'Yekan Bakh';
+      src: url('${escapeHtml(yekanBoldUrl)}') format('woff2');
+      font-weight: 700;
+      font-style: normal;
+      font-display: swap;
+    }
+
     @page {
       size: A4 portrait;
       margin: 10mm;
@@ -856,7 +1042,7 @@ export function renderContractHtml(contract: RenderableContract): string {
       direction: rtl;
       font-size: 11px;
       line-height: 1.7;
-      font-family: Vazirmatn, Vazir, Tahoma, Arial, sans-serif;
+      font-family: 'Yekan Bakh', Tahoma, Arial, sans-serif;
       background: #ffffff;
     }
 
@@ -871,26 +1057,40 @@ export function renderContractHtml(contract: RenderableContract): string {
       margin-bottom: 10px;
       display: flex;
       justify-content: space-between;
+      align-items: center;
       gap: 12px;
+      direction: ltr;
     }
 
-    .contract-header h1 {
-      margin: 0 0 4px;
-      font-size: 20px;
+    .brand-logo {
+      flex: 1;
+      display: flex;
+      justify-content: flex-start;
+      align-items: center;
+      min-height: 58px;
+      direction: ltr;
     }
 
-    .contract-header p {
-      margin: 0;
-      color: #4b5563;
-      font-size: 11px;
+    .brand-logo img {
+      max-width: 190px;
+      max-height: 58px;
+      object-fit: contain;
     }
 
     .meta {
-      text-align: left;
-      direction: ltr;
+      min-width: 190px;
+      text-align: right;
+      direction: rtl;
       font-size: 10px;
       color: #374151;
       line-height: 1.7;
+    }
+
+    .ltr-value {
+      direction: ltr;
+      unicode-bidi: isolate;
+      display: inline-block;
+      white-space: nowrap;
     }
 
     .section {
@@ -918,40 +1118,6 @@ export function renderContractHtml(contract: RenderableContract): string {
       font-size: 11px;
     }
 
-    .product-detail-row td {
-      background: #fafafa;
-      padding: 6px 8px;
-    }
-
-    .product-detail-inline {
-      display: grid;
-      gap: 6px;
-    }
-
-    .product-detail-inline h3 {
-      margin: 0;
-      font-size: 11px;
-      color: #374151;
-    }
-
-    .detail-strip {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px 14px;
-      font-size: 9.5px;
-    }
-
-    .detail-block h4 {
-      margin: 0 0 4px;
-      font-size: 10px;
-      color: #374151;
-    }
-
-    .nested-table {
-      font-size: 9px;
-      background: #ffffff;
-    }
-
     .grid {
       display: grid;
       gap: 5px 12px;
@@ -959,6 +1125,12 @@ export function renderContractHtml(contract: RenderableContract): string {
 
     .two-col {
       grid-template-columns: 1fr 1fr;
+    }
+
+    .balanced-info > div {
+      min-width: 0;
+      line-height: 1.8;
+      overflow-wrap: anywhere;
     }
 
     .full {
@@ -1003,6 +1175,17 @@ export function renderContractHtml(contract: RenderableContract): string {
     .sub-row td {
       background: #fafafa;
       color: #374151;
+    }
+
+    .total-row td {
+      background: #f3f4f6;
+      font-weight: 700;
+    }
+
+    .section-note {
+      margin: 6px 0 0;
+      color: #4b5563;
+      font-size: 9.5px;
     }
 
     .notes,

@@ -13,8 +13,10 @@ import { contractConfirmationService } from '../services/contractConfirmationSer
 import { getRequestEvidence } from '../utils/requestEvidence';
 import {
   buildSalesContractPdfDownloadName,
+  buildSalesContractPdfFingerprint,
   ensureStoredSalesContractPdfExists,
   generateSalesContractPdf,
+  isSalesContractPdfCacheFresh,
   resolveStoredSalesContractPdfPath,
   resolveSalesContractPdfUrl,
   salesContractPrintableInclude
@@ -284,8 +286,14 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
     const shouldDownload = String(req.query.download || 'false').toLowerCase() === 'true';
     const currentSignatures = (contract.signatures as any) || {};
     const cachedPdfPath = currentSignatures?.print?.pdfPath as string | undefined;
+    const pdfFingerprint = buildSalesContractPdfFingerprint(contract);
 
-    if (!fresh && cachedPdfPath && ensureStoredSalesContractPdfExists(cachedPdfPath)) {
+    if (
+      !fresh &&
+      cachedPdfPath &&
+      isSalesContractPdfCacheFresh(contract, currentSignatures?.print?.fingerprint, pdfFingerprint) &&
+      ensureStoredSalesContractPdfExists(cachedPdfPath)
+    ) {
       if (shouldDownload) {
         return res.download(
           resolveStoredSalesContractPdfPath(cachedPdfPath),
@@ -311,7 +319,8 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
     const updatedPrintSignature = {
       ...(currentSignatures?.print || {}),
       pdfPath,
-      generatedAt: new Date().toISOString()
+      generatedAt: new Date().toISOString(),
+      fingerprint: pdfFingerprint
     };
 
     await prisma.salesContract.update({

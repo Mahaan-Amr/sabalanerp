@@ -2894,6 +2894,22 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     return response.data?.data?.url || null;
   };
 
+  const persistPrintableContractSnapshot = async (contractId: string) => {
+    const contractStatus = wizardData.signature?.contractStatus;
+    if (contractStatus && contractStatus !== 'DRAFT') {
+      return;
+    }
+
+    const totalAmount = sumNumericValues(wizardData.products, (product) => product.totalPrice);
+
+    await salesAPI.updateContract(contractId, {
+      content: generateContractHTML(wizardData),
+      totalAmount,
+      currency: wizardData.payment.currency || 'تومان',
+      contractData: wizardData
+    });
+  };
+
   const openPdfUrl = (url: string, tryPrint: boolean) => {
     const win = window.open(url, '_blank', 'noopener,noreferrer');
     if (!win || !tryPrint) return;
@@ -2924,6 +2940,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
     setPdfActionLoading(true);
     try {
+      await persistPrintableContractSnapshot(signatureContractId);
       const response = await salesAPI.downloadContractPdf(signatureContractId, { fresh: false });
       downloadBlobResponse(response, `sales_contract_${signatureContractId}.pdf`);
     } catch (error: any) {
@@ -2942,6 +2959,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
     setPrintActionLoading(true);
     try {
+      await persistPrintableContractSnapshot(signatureContractId);
       const printResponse = await salesAPI.printContract(signatureContractId);
       if (!printResponse.data?.success) {
         setErrors(prev => ({ ...prev, signature: printResponse.data?.error || 'پرینت قرارداد ناموفق بود' }));
@@ -2973,6 +2991,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     digitalSignature.setSendingCode(true);
     setErrors(prev => ({ ...prev, signature: '' }));
     try {
+      await persistPrintableContractSnapshot(signatureContractId);
       const response = await salesAPI.sendForConfirmation(signatureContractId);
       if (!response.data.success) {
         setErrors(prev => ({ ...prev, signature: response.data.error || 'ارسال تایید ناموفق بود' }));

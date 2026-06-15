@@ -7,6 +7,7 @@ export type ConfirmationData = {
   sessionId: string;
   status: string;
   contractStatus: string;
+  verifiedAt?: string | null;
   otpExpiresAt: string;
   linkExpiresAt: string;
   contract: {
@@ -47,6 +48,17 @@ const statusLabel = (status: string) => {
   return status || 'نامشخص';
 };
 
+const formatPersianDate = (value?: string | null) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('fa-IR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+};
+
 export default function ConfirmationContractView({
   data,
   code,
@@ -60,6 +72,7 @@ export default function ConfirmationContractView({
   const fullName = `${data.contract.customer.firstName || ''} ${data.contract.customer.lastName || ''}`.trim();
   const customerName = fullName || data.contract.customer.companyName || 'مشتری';
   const isApproved = data.contractStatus === 'APPROVED';
+  const verifiedDate = formatPersianDate(data.verifiedAt);
   const displayItems = Array.isArray(data.contract.contractData?.products) && data.contract.contractData.products.length > 0
     ? data.contract.contractData.products
     : data.contract.items || [];
@@ -149,7 +162,7 @@ export default function ConfirmationContractView({
           </section>
         ) : (
           <section className="glass-liquid-card step-content-card border-emerald-500/40 p-6 text-emerald-300">
-            قرارداد قبلا تایید شده است.
+            {verifiedDate ? `تایید شده در تاریخ ${verifiedDate}` : 'تایید شده'}
           </section>
         )}
       </div>

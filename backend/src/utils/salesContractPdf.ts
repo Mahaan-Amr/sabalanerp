@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { Request } from 'express';
 import { generatePdfFromHtml } from './pdf';
 import { renderContractHtml } from './printTemplate';
@@ -17,7 +18,12 @@ export const salesContractPrintableInclude = {
       id: true,
       firstName: true,
       lastName: true,
-      username: true
+      username: true,
+      profile: {
+        select: {
+          phone: true
+        }
+      }
     }
   },
   approvedByUser: {
@@ -95,6 +101,82 @@ export const buildSalesContractPdfDownloadName = (contract: any): string => {
   const safeNumber = String(contract?.contractNumber || contract?.id || 'contract')
     .replace(/[^\w.-]+/g, '_');
   return `sales_contract_${safeNumber}.pdf`;
+};
+
+const normalizeForFingerprint = (value: any): any => {
+  if (value === null || value === undefined) return null;
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  if (typeof value !== 'object') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(normalizeForFingerprint);
+  }
+
+  if (typeof value.toJSON === 'function') {
+    return normalizeForFingerprint(value.toJSON());
+  }
+
+  return Object.keys(value)
+    .sort()
+    .reduce<Record<string, any>>((normalized, key) => {
+      normalized[key] = normalizeForFingerprint(value[key]);
+      return normalized;
+    }, {});
+};
+
+const removePdfCacheSignatures = (signatures: any): any => {
+  if (!signatures || typeof signatures !== 'object' || Array.isArray(signatures)) {
+    return signatures || null;
+  }
+
+  const { print, accountingSalesPdf, ...printableSignatures } = signatures;
+  return printableSignatures;
+};
+
+export const buildSalesContractPdfFingerprint = (contract: any): string => {
+  const printableContract = {
+    id: contract?.id,
+    contractNumber: contract?.contractNumber,
+    title: contract?.title,
+    titlePersian: contract?.titlePersian,
+    status: contract?.status,
+    type: contract?.type,
+    totalAmount: contract?.totalAmount,
+    currency: contract?.currency,
+    contractData: contract?.contractData,
+    customer: contract?.customer,
+    department: contract?.department,
+    createdByUser: contract?.createdByUser,
+    approvedByUser: contract?.approvedByUser,
+    signedByUser: contract?.signedByUser,
+    items: contract?.items,
+    deliveries: contract?.deliveries,
+    payments: contract?.payments,
+    signatures: removePdfCacheSignatures(contract?.signatures)
+  };
+
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(normalizeForFingerprint(printableContract)))
+    .digest('hex');
+};
+
+export const isSalesContractPdfCacheFresh = (
+  contract: any,
+  cachedFingerprint: unknown,
+  currentFingerprint = buildSalesContractPdfFingerprint(contract)
+): boolean => {
+  return typeof cachedFingerprint === 'string' && cachedFingerprint === currentFingerprint;
 };
 
 export const generateSalesContractPdf = async (contract: any) => {

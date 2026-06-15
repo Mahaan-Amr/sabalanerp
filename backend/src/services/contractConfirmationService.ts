@@ -106,6 +106,7 @@ function serializePublicContract(session: any) {
     sessionId: session.id,
     status: session.status,
     contractStatus: contract.status,
+    verifiedAt: session.verifiedAt,
     otpExpiresAt: session.otpExpiresAt,
     linkExpiresAt: session.linkExpiresAt,
     contract: {

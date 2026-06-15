@@ -8,8 +8,10 @@ import { generatePdfFromHtml } from '../utils/pdf';
 import { renderAccountingContractHtml } from '../utils/accountingPrintTemplate';
 import {
   buildSalesContractPdfDownloadName,
+  buildSalesContractPdfFingerprint,
   ensureStoredSalesContractPdfExists,
   generateSalesContractPdf,
+  isSalesContractPdfCacheFresh,
   resolveStoredSalesContractPdfPath,
   resolveSalesContractPdfUrl,
   salesContractPrintableInclude
@@ -160,30 +162,45 @@ router.get('/contracts/:contractId/sales-pdf', accountingView, async (req: AuthR
     const fresh = String(req.query.fresh || 'false').toLowerCase() === 'true';
     const shouldDownload = String(req.query.download || 'false').toLowerCase() === 'true';
     const currentSignatures = (contract.signatures as any) || {};
-    const cachedPdfPath =
-      (currentSignatures?.print?.pdfPath as string | undefined) ||
-      (currentSignatures?.accountingSalesPdf?.pdfPath as string | undefined);
+    const pdfFingerprint = buildSalesContractPdfFingerprint(contract);
+    const cachedPdfCandidates = [
+      {
+        pdfPath: currentSignatures?.print?.pdfPath as string | undefined,
+        generatedAt: currentSignatures?.print?.generatedAt || currentSignatures?.print?.at || null,
+        fingerprint: currentSignatures?.print?.fingerprint
+      },
+      {
+        pdfPath: currentSignatures?.accountingSalesPdf?.pdfPath as string | undefined,
+        generatedAt: currentSignatures?.accountingSalesPdf?.generatedAt ||
+          currentSignatures?.accountingSalesPdf?.at ||
+          null,
+        fingerprint: currentSignatures?.accountingSalesPdf?.fingerprint
+      }
+    ];
+    const cachedPdf = fresh
+      ? null
+      : cachedPdfCandidates.find((candidate) =>
+          candidate.pdfPath &&
+          isSalesContractPdfCacheFresh(contract, candidate.fingerprint, pdfFingerprint) &&
+          ensureStoredSalesContractPdfExists(candidate.pdfPath)
+        );
 
-    if (!fresh && cachedPdfPath && ensureStoredSalesContractPdfExists(cachedPdfPath)) {
+    if (cachedPdf?.pdfPath) {
       if (shouldDownload) {
         res.download(
-          resolveStoredSalesContractPdfPath(cachedPdfPath),
+          resolveStoredSalesContractPdfPath(cachedPdf.pdfPath),
           buildSalesContractPdfDownloadName(contract)
         );
         return;
       }
 
-      const cachedUrl = resolveSalesContractPdfUrl(req, cachedPdfPath);
+      const cachedUrl = resolveSalesContractPdfUrl(req, cachedPdf.pdfPath);
       if (cachedUrl) {
         res.json({
           success: true,
           data: {
             url: cachedUrl,
-            generatedAt: currentSignatures?.print?.generatedAt ||
-              currentSignatures?.print?.at ||
-              currentSignatures?.accountingSalesPdf?.generatedAt ||
-              currentSignatures?.accountingSalesPdf?.at ||
-              null,
+            generatedAt: cachedPdf.generatedAt,
             fromCache: true
           }
         });
@@ -203,7 +220,8 @@ router.get('/contracts/:contractId/sales-pdf', accountingView, async (req: AuthR
             by: req.user!.id,
             at: generatedAt,
             generatedAt,
-            pdfPath
+            pdfPath,
+            fingerprint: pdfFingerprint
           }
         }
       }

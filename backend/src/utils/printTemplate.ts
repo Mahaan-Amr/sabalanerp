@@ -902,7 +902,7 @@ const getContractHeaderMeta = (contract: RenderableContract) => {
 export function renderContractPdfHeaderTemplate(contract: RenderableContract): string {
   const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
   const logoMarkup = logoUrl
-    ? `<img src="${escapeHtml(logoUrl)}" style="width:210px;height:48px;object-fit:contain;display:block;" />`
+    ? `<img src="${escapeHtml(logoUrl)}" style="width:242px;height:55px;object-fit:contain;display:block;" />`
     : '';
 
   return `
@@ -954,9 +954,9 @@ export function renderContractHtml(contract: RenderableContract, options: Render
       <h2>قرارداد رسمی فروش و اجرای خدمات سنگ</h2>
       <div class="grid two-col balanced-info">
         <div><strong>آدرس مجموعه:</strong> ${escapeHtml(SELLER_ADDRESS)}</div>
-        <div><strong>شماره تماس فروشنده:</strong> <span class="ltr-value">${escapeHtml(sellerPhone)}</span></div>
         <div><strong>شماره تماس مجموعه:</strong> <span class="ltr-value">${escapeHtml(COMPANY_PHONE)}</span></div>
         <div><strong>ایجاد کننده:</strong> ${escapeHtml(sellerName)}</div>
+        <div><strong>شماره تماس فروشنده:</strong> <span class="ltr-value">${escapeHtml(sellerPhone)}</span></div>
       </div>
     </section>
 

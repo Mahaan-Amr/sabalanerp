@@ -153,6 +153,32 @@ const yekanRegularUrl = fileToDataUri(publicAssetPath('yekan-bakh', 'YekanBakh-R
 const yekanSemiBoldUrl = fileToDataUri(publicAssetPath('yekan-bakh', 'YekanBakh-SemiBold.woff2'), 'font/woff2');
 const yekanBoldUrl = fileToDataUri(publicAssetPath('yekan-bakh', 'YekanBakh-Bold.woff2'), 'font/woff2');
 
+const renderYekanFontFaces = (): string => `
+  @font-face {
+    font-family: 'Yekan Bakh';
+    src: url('${escapeHtml(yekanRegularUrl)}') format('woff2');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+  }
+
+  @font-face {
+    font-family: 'Yekan Bakh';
+    src: url('${escapeHtml(yekanSemiBoldUrl)}') format('woff2');
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+  }
+
+  @font-face {
+    font-family: 'Yekan Bakh';
+    src: url('${escapeHtml(yekanBoldUrl)}') format('woff2');
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+  }
+`;
+
 const escapeHtml = (value: unknown): string => {
   const input = value === null || value === undefined ? '' : String(value);
   return input
@@ -880,6 +906,7 @@ export function renderContractPdfHeaderTemplate(contract: RenderableContract): s
     : '';
 
   return `
+    <style>${renderYekanFontFaces()}</style>
     <div style="width:100%;height:30mm;padding:4mm 5mm 0;box-sizing:border-box;font-family:'Yekan Bakh',Tahoma,Arial,sans-serif;font-size:9px;color:#1f2937;direction:rtl;">
       <div style="height:24mm;border:1px solid #d1d5db;border-radius:8px;padding:4px 10px;display:flex;align-items:center;justify-content:space-between;gap:12px;direction:ltr;background:#fff;box-sizing:border-box;overflow:hidden;">
         <div style="flex:1;display:flex;align-items:center;justify-content:flex-start;height:100%;direction:ltr;">${logoMarkup}</div>
@@ -1058,29 +1085,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   </div>
 
   <style>
-    @font-face {
-      font-family: 'Yekan Bakh';
-      src: url('${escapeHtml(yekanRegularUrl)}') format('woff2');
-      font-weight: 400;
-      font-style: normal;
-      font-display: swap;
-    }
-
-    @font-face {
-      font-family: 'Yekan Bakh';
-      src: url('${escapeHtml(yekanSemiBoldUrl)}') format('woff2');
-      font-weight: 600;
-      font-style: normal;
-      font-display: swap;
-    }
-
-    @font-face {
-      font-family: 'Yekan Bakh';
-      src: url('${escapeHtml(yekanBoldUrl)}') format('woff2');
-      font-weight: 700;
-      font-style: normal;
-      font-display: swap;
-    }
+    ${renderYekanFontFaces()}
 
     @page {
       size: A4 portrait;

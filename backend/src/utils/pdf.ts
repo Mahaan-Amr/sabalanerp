@@ -16,6 +16,9 @@ export interface GeneratePdfOptions {
     bottom?: string;
     left?: string;
   };
+  displayHeaderFooter?: boolean;
+  headerTemplate?: string;
+  footerTemplate?: string;
 }
 
 // Ensure a directory exists
@@ -59,7 +62,11 @@ export async function generatePdfFromHtml(options: GeneratePdfOptions): Promise<
       height,
       printBackground: true,
       margin: options.margin || { top: '3mm', right: '5px', bottom: '3mm', left: '3mm' },
-      scale: options.scale ?? 1.0
+      scale: options.scale ?? 1.0,
+      displayHeaderFooter: options.displayHeaderFooter,
+      headerTemplate: options.headerTemplate,
+      footerTemplate: options.footerTemplate,
+      preferCSSPageSize: false
     });
   } finally {
     await browser.close();

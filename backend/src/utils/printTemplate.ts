@@ -95,7 +95,7 @@ interface NormalizedDelivery {
   manager: string;
   receiver: string;
   notes: string;
-  products: Array<{ name: string; quantity: number }>;
+  products: Array<{ name: string; quantity: number; amountLabel: string }>;
 }
 
 interface NormalizedPayment {
@@ -143,9 +143,13 @@ const publicAssetUrl = (...segments: string[]): string => {
 
 const publicAssetPath = (...segments: string[]): string => {
   const candidates = [
+    process.env.SABALAN_LOGO_PATH || '',
+    path.resolve(process.cwd(), 'public', ...segments),
+    path.resolve(process.cwd(), 'backend', 'public', ...segments),
+    path.resolve(process.cwd(), '..', 'backend', 'public', ...segments),
     path.resolve(process.cwd(), '..', 'frontend', 'public', ...segments),
     path.resolve(process.cwd(), 'frontend', 'public', ...segments)
-  ];
+  ].filter(Boolean);
   return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
 };
 
@@ -349,6 +353,30 @@ const getSellerPhone = (createdByUser: any): string => {
 const getUserName = (user: any): string =>
   [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || EMPTY;
 
+const deliveryUnitLabel = (unit: unknown): string => {
+  if (unit === 'meter') return 'متر طول';
+  if (unit === 'squareMeter') return 'متر مربع';
+  return 'عدد';
+};
+
+const inferDeliveryUnit = (product: NormalizedProduct | undefined, deliveryProduct: any): string => {
+  if (deliveryProduct?.unit) return String(deliveryProduct.unit);
+  if (product?.productType === 'طولی') return 'meter';
+  if (product?.productType === 'اسلب') return 'squareMeter';
+  return 'count';
+};
+
+const formatDeliveryAmount = (
+  deliveryProduct: any,
+  product: NormalizedProduct | undefined,
+  fallbackQuantity: unknown
+): string => {
+  const unit = inferDeliveryUnit(product, deliveryProduct);
+  const amount = toNumber(deliveryProduct?.amount || deliveryProduct?.quantity || fallbackQuantity);
+  const fractionDigits = unit === 'count' ? 0 : 2;
+  return `${toFaNumber(amount, fractionDigits)} ${deliveryUnitLabel(unit)}`;
+};
+
 const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] => {
   const contractDataProducts = Array.isArray(contract.contractData?.products) ? contract.contractData.products : [];
   const relationItems = Array.isArray(contract.items) ? contract.items : [];
@@ -505,7 +533,8 @@ const normalizeDeliveries = (contract: RenderableContract, products: NormalizedP
               products.find((candidate) => candidate.id.startsWith(`${deliveryProduct?.productId || ''}-`));
             return {
               name: product?.name || EMPTY,
-              quantity: toNumber(deliveryProduct?.quantity)
+              quantity: toNumber(deliveryProduct?.quantity),
+              amountLabel: formatDeliveryAmount(deliveryProduct, product, deliveryProduct?.quantity)
             };
           })
         : [];
@@ -531,14 +560,20 @@ const normalizeDeliveries = (contract: RenderableContract, products: NormalizedP
     const relationProducts = Array.isArray(relation?.products)
       ? relation.products.map((deliveryProduct: any) => ({
           name: deliveryProduct?.product?.namePersian || deliveryProduct?.product?.name || EMPTY,
-          quantity: toNumber(deliveryProduct?.quantity)
+          quantity: toNumber(deliveryProduct?.quantity),
+          amountLabel: formatDeliveryAmount(deliveryProduct, undefined, deliveryProduct?.quantity)
         }))
       : [];
 
     const snapshotProducts = Array.isArray(snapshot?.products)
       ? snapshot.products.map((deliveryProduct: any) => ({
           name: products.find((product) => product.id.startsWith(`${deliveryProduct?.productId || ''}-`))?.name || `محصول ${toNumber(deliveryProduct?.productIndex) + 1}`,
-          quantity: toNumber(deliveryProduct?.quantity)
+          quantity: toNumber(deliveryProduct?.quantity),
+          amountLabel: formatDeliveryAmount(
+            deliveryProduct,
+            products.find((product) => product.id.startsWith(`${deliveryProduct?.productId || ''}-`)),
+            deliveryProduct?.quantity
+          )
         }))
       : [];
 
@@ -761,23 +796,25 @@ const renderProductMainRows = (products: NormalizedProduct[], currency: string, 
 
 const renderDeliveryRows = (deliveries: NormalizedDelivery[]): string => {
   if (!deliveries.length) {
-    return `<tr><td colspan="7" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
+    return `<tr><td colspan="6" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
   }
 
   return deliveries.map((delivery) => {
     const productsLabel = delivery.products.length > 0
-      ? delivery.products.map((product) => `${product.name} (${toFaNumber(product.quantity, 2)})`).join('، ')
+      ? delivery.products.map((product) => product.name).join('، ')
+      : EMPTY;
+    const amountLabel = delivery.products.length > 0
+      ? delivery.products.map((product) => product.amountLabel).join('، ')
       : EMPTY;
 
     return `
-      <tr>
+      <tr class="delivery-row">
         <td>${toFaNumber(delivery.index)}</td>
+        <td>${escapeHtml(productsLabel)}</td>
+        <td>${escapeHtml(amountLabel)}</td>
         <td>${escapeHtml(delivery.date)}</td>
-        <td>${escapeHtml(delivery.address)}</td>
-        <td>${escapeHtml(delivery.manager)}</td>
         <td>${escapeHtml(delivery.receiver)}</td>
         <td>${escapeHtml(delivery.notes)}</td>
-        <td>${escapeHtml(productsLabel)}</td>
       </tr>
     `;
   }).join('');
@@ -837,7 +874,41 @@ const renderFinancialSummary = (financials: NormalizedFinancials): string => {
   return rows.join('');
 };
 
-export function renderContractHtml(contract: RenderableContract): string {
+const getContractHeaderMeta = (contract: RenderableContract) => {
+  const contractData = contract.contractData || {};
+  return {
+    contractNumber: contract.contractNumber || contractData.contractNumber || EMPTY,
+    contractDate: contractData.contractDate || formatDate(contract.createdAt),
+    statusLabel: statusLabelMap[String(contract.status || '')] || String(contract.status || 'DRAFT')
+  };
+};
+
+export function renderContractPdfHeaderTemplate(contract: RenderableContract): string {
+  const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
+  const logoMarkup = logoUrl
+    ? `<img src="${escapeHtml(logoUrl)}" style="max-width:170px;max-height:38px;object-fit:contain;" />`
+    : '';
+
+  return `
+    <div style="width:100%;height:30mm;padding:4mm 5mm 0;box-sizing:border-box;font-family:'Yekan Bakh',Tahoma,Arial,sans-serif;font-size:9px;color:#1f2937;direction:rtl;">
+      <div style="height:24mm;border:1px solid #d1d5db;border-radius:8px;padding:4px 10px;display:flex;align-items:center;justify-content:space-between;gap:12px;direction:ltr;background:#fff;box-sizing:border-box;overflow:hidden;">
+        <div style="flex:1;display:flex;align-items:center;justify-content:flex-start;height:100%;direction:ltr;">${logoMarkup}</div>
+        <div style="min-width:210px;text-align:right;direction:rtl;line-height:1.55;">
+          <div><strong>شماره قرارداد:</strong> ${escapeHtml(contractNumber)}</div>
+          <div><strong>تاریخ تنظیم:</strong> ${escapeHtml(contractDate)}</div>
+          <div><strong>وضعیت هنگام چاپ:</strong> ${escapeHtml(statusLabel)}</div>
+          <div><strong>صفحه:</strong> <span class="pageNumber"></span></div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+type RenderContractHtmlOptions = {
+  reservePdfHeaderSpace?: boolean;
+};
+
+export function renderContractHtml(contract: RenderableContract, options: RenderContractHtmlOptions = {}): string {
   const contractData = contract.contractData || {};
   const customer = contract.customer || contractData.customer || {};
   const project = contractData.project || {};
@@ -847,9 +918,7 @@ export function renderContractHtml(contract: RenderableContract): string {
   const normalizedPayments = normalizePayments(contract);
   const financials = normalizeFinancials(contract, normalizedProducts);
 
-  const contractNumber = contract.contractNumber || contractData.contractNumber || EMPTY;
-  const contractDate = contractData.contractDate || formatDate(contract.createdAt);
-  const statusLabel = statusLabelMap[String(contract.status || '')] || String(contract.status || 'DRAFT');
+  const { contractNumber } = getContractHeaderMeta(contract);
   const sellerName = getUserName(contract.createdByUser);
   const sellerPhone = getSellerPhone(contract.createdByUser);
 
@@ -864,17 +933,6 @@ export function renderContractHtml(contract: RenderableContract): string {
 
   return `
   <div class="sheet">
-    <header class="contract-header">
-      <div class="brand-logo">
-        ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="Sabalan" />` : ''}
-      </div>
-      <div class="meta">
-        <div><strong>شماره قرارداد:</strong> ${escapeHtml(contractNumber)}</div>
-        <div><strong>تاریخ تنظیم:</strong> ${escapeHtml(contractDate)}</div>
-        <div><strong>وضعیت هنگام چاپ:</strong> ${escapeHtml(statusLabel)}</div>
-      </div>
-    </header>
-
     <section class="section">
       <h2>قرارداد رسمی فروش و اجرای خدمات سنگ</h2>
       <div class="grid two-col balanced-info">
@@ -921,16 +979,23 @@ export function renderContractHtml(contract: RenderableContract): string {
 
     <section class="section">
       <h2>برنامه تحویل</h2>
-      <table>
+      <table class="delivery-table">
+        <colgroup>
+          <col class="delivery-index-col" />
+          <col class="delivery-items-col" />
+          <col class="delivery-amount-col" />
+          <col class="delivery-date-col" />
+          <col class="delivery-receiver-col" />
+          <col class="delivery-notes-col" />
+        </colgroup>
         <thead>
           <tr>
             <th>ردیف</th>
+            <th>اقلام</th>
+            <th>متراژ</th>
             <th>تاریخ تحویل</th>
-            <th>آدرس</th>
-            <th>مدیر پروژه</th>
             <th>تحویل‌گیرنده</th>
             <th>توضیحات</th>
-            <th>اقلام</th>
           </tr>
         </thead>
         <tbody>
@@ -1029,7 +1094,7 @@ export function renderContractHtml(contract: RenderableContract): string {
 
     @page {
       size: A4 portrait;
-      margin: 10mm;
+      margin: ${options.reservePdfHeaderSpace ? '50mm 5mm 5mm 5mm' : '0'};
     }
 
     * {
@@ -1164,6 +1229,46 @@ export function renderContractHtml(contract: RenderableContract): string {
     th {
       background: #f3f4f6;
       font-weight: 700;
+    }
+
+    .delivery-index-col {
+      width: 6%;
+    }
+
+    .delivery-items-col {
+      width: 38%;
+    }
+
+    .delivery-amount-col {
+      width: 13%;
+    }
+
+    .delivery-date-col {
+      width: 15%;
+    }
+
+    .delivery-receiver-col {
+      width: 14%;
+    }
+
+    .delivery-notes-col {
+      width: 14%;
+    }
+
+    .delivery-table th,
+    .delivery-table td {
+      vertical-align: middle;
+    }
+
+    .delivery-row td:nth-child(2) {
+      text-align: right;
+      line-height: 1.7;
+    }
+
+    .delivery-row td:nth-child(3),
+    .delivery-row td:nth-child(4) {
+      white-space: normal;
+      text-align: center;
     }
 
     .empty,

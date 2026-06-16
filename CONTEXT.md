@@ -59,3 +59,11 @@ _Avoid_: wording like `قرارداد قبلا تایید شده است` when th
 **خروجی جاری قرارداد**:
 The customer-facing contract output in PDF, print, and confirmation views should reflect the current saved contract details, including edited delivery plans and payment plans.
 _Avoid_: generating customer-facing output from an older creation snapshot when the contract has since been edited
+
+**برنامه تحویل چاپی**:
+The delivery schedule shown in customer-facing PDF and print output. It should prioritize readable delivered item names and a separate delivered amount/metrage column over operational fields that make the table wrap.
+_Avoid_: combining item name and delivered amount in one cramped cell when several delivery rows are present
+
+**سربرگ چاپی قرارداد**:
+The repeated customer-facing header on every PDF/print page, containing the Sabalan logo, contract number, contract date, print-time status, and page number.
+_Avoid_: showing the contract header only on the first page of a multi-page contract output, or letting page content overlap the repeated header

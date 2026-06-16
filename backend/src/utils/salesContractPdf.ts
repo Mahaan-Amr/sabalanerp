@@ -3,7 +3,9 @@ import path from 'path';
 import crypto from 'crypto';
 import { Request } from 'express';
 import { generatePdfFromHtml } from './pdf';
-import { renderContractHtml } from './printTemplate';
+import { renderContractHtml, renderContractPdfHeaderTemplate } from './printTemplate';
+
+export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-print-header-v5-2026-06-16';
 
 export const salesContractPrintableInclude = {
   customer: {
@@ -145,6 +147,7 @@ const removePdfCacheSignatures = (signatures: any): any => {
 
 export const buildSalesContractPdfFingerprint = (contract: any): string => {
   const printableContract = {
+    templateVersion: SALES_CONTRACT_PDF_TEMPLATE_VERSION,
     id: contract?.id,
     contractNumber: contract?.contractNumber,
     title: contract?.title,
@@ -204,14 +207,18 @@ export const generateSalesContractPdf = async (contract: any) => {
   const html = renderContractHtml({
     ...contract,
     contractData: contract.contractData
-  });
+  }, { reservePdfHeaderSpace: true });
 
   return generatePdfFromHtml({
     htmlContent: html,
+    headerTemplate: renderContractPdfHeaderTemplate(contract),
+    footerTemplate: '<div></div>',
+    displayHeaderFooter: true,
     fileName,
     landscape: false,
     scale: 1,
     widthMm: 210,
-    heightMm: 297
+    heightMm: 297,
+    margin: { top: '50mm', right: '5mm', bottom: '5mm', left: '5mm' }
   });
 };

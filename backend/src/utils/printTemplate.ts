@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { pathToFileURL } from 'url';
 
 interface RenderableContract {
   id?: string;
@@ -132,15 +131,6 @@ const COMPANY_PHONE = '071-91010900';
 const DELIVERY_NOTE = 'برنامه تحویل با توجه به شرایط اجرایی و با هماهنگی خریدار، ممکن است تغییر یابد';
 const PAYMENT_NOTE = 'در صورت عدم پرداخت، تأمین کالا به میزان وجوه پرداختی و مانده سفارش با نرخ روز خواهد بود';
 
-const publicAssetUrl = (...segments: string[]): string => {
-  const candidates = [
-    path.resolve(process.cwd(), '..', 'frontend', 'public', ...segments),
-    path.resolve(process.cwd(), 'frontend', 'public', ...segments)
-  ];
-  const assetPath = candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
-  return pathToFileURL(assetPath).href;
-};
-
 const publicAssetPath = (...segments: string[]): string => {
   const candidates = [
     process.env.SABALAN_LOGO_PATH || '',
@@ -159,9 +149,9 @@ const fileToDataUri = (filePath: string, mimeType: string): string => {
 };
 
 const logoUrl = fileToDataUri(publicAssetPath('brand', 'sabalan-logo.jpg'), 'image/jpeg');
-const yekanRegularUrl = publicAssetUrl('yekan-bakh', 'YekanBakh-Regular.woff2');
-const yekanSemiBoldUrl = publicAssetUrl('yekan-bakh', 'YekanBakh-SemiBold.woff2');
-const yekanBoldUrl = publicAssetUrl('yekan-bakh', 'YekanBakh-Bold.woff2');
+const yekanRegularUrl = fileToDataUri(publicAssetPath('yekan-bakh', 'YekanBakh-Regular.woff2'), 'font/woff2');
+const yekanSemiBoldUrl = fileToDataUri(publicAssetPath('yekan-bakh', 'YekanBakh-SemiBold.woff2'), 'font/woff2');
+const yekanBoldUrl = fileToDataUri(publicAssetPath('yekan-bakh', 'YekanBakh-Bold.woff2'), 'font/woff2');
 
 const escapeHtml = (value: unknown): string => {
   const input = value === null || value === undefined ? '' : String(value);
@@ -886,7 +876,7 @@ const getContractHeaderMeta = (contract: RenderableContract) => {
 export function renderContractPdfHeaderTemplate(contract: RenderableContract): string {
   const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
   const logoMarkup = logoUrl
-    ? `<img src="${escapeHtml(logoUrl)}" style="max-width:170px;max-height:38px;object-fit:contain;" />`
+    ? `<img src="${escapeHtml(logoUrl)}" style="width:170px;height:38px;object-fit:contain;display:block;" />`
     : '';
 
   return `

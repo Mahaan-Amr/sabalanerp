@@ -5,7 +5,7 @@ import { Request } from 'express';
 import { generatePdfFromHtml } from './pdf';
 import { renderContractHtml, renderContractPdfHeaderTemplate } from './printTemplate';
 
-export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-print-header-v5-2026-06-16';
+export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-print-header-v6-2026-06-16';
 
 export const salesContractPrintableInclude = {
   customer: {

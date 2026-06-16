@@ -697,6 +697,13 @@ const isMeaningfulService = (service: NormalizedService): boolean =>
 const isMeaningfulTool = (tool: NormalizedProductTool): boolean =>
   hasTextValue(tool.name) || tool.amount > 0 || tool.rate > 0 || tool.cost > 0;
 
+const formatProductQuantityOrArea = (product: NormalizedProduct): string => {
+  const quantityLabel = product.productType === 'طولی' && product.quantity <= 1
+    ? EMPTY
+    : `${toFaNumber(product.quantity, 2)} عدد`;
+  return `${quantityLabel} / ${toFaNumber(product.squareMeters, 3)} متر مربع`;
+};
+
 const buildFlatProductRows = (products: NormalizedProduct[], currency: string, grandTotal: number): FlatProductRow[] => {
   const rows: FlatProductRow[] = [];
 
@@ -714,7 +721,7 @@ const buildFlatProductRows = (products: NormalizedProduct[], currency: string, g
       description: product.name,
       category: 'محصول',
       dimensionsOrAmount: product.dimensions,
-      quantityOrArea: `${toFaNumber(product.quantity, 2)} عدد / ${toFaNumber(product.squareMeters, 3)} متر مربع`,
+      quantityOrArea: formatProductQuantityOrArea(product),
       rate: product.unitPrice > 0 ? formatAmount(product.unitPrice, currency) : EMPTY,
       total: formatAmount(baseAmount, currency)
     });
@@ -902,13 +909,13 @@ const getContractHeaderMeta = (contract: RenderableContract) => {
 export function renderContractPdfHeaderTemplate(contract: RenderableContract): string {
   const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
   const logoMarkup = logoUrl
-    ? `<img src="${escapeHtml(logoUrl)}" style="width:242px;height:55px;object-fit:contain;display:block;" />`
+    ? `<img src="${escapeHtml(logoUrl)}" style="width:290px;height:66px;object-fit:contain;display:block;" />`
     : '';
 
   return `
     <style>${renderYekanFontFaces()}</style>
     <div style="width:100%;height:30mm;padding:4mm 5mm 0;box-sizing:border-box;font-family:'Yekan Bakh',Tahoma,Arial,sans-serif;font-size:9px;color:#1f2937;direction:rtl;">
-      <div style="height:24mm;border:1px solid #d1d5db;border-radius:8px;padding:4px 10px;display:flex;align-items:center;justify-content:space-between;gap:12px;direction:ltr;background:#fff;box-sizing:border-box;overflow:hidden;">
+      <div style="height:24mm;border:1px solid #d1d5db;border-radius:8px;padding:4px 10px 4px 5px;display:flex;align-items:center;justify-content:space-between;gap:12px;direction:ltr;background:#fff;box-sizing:border-box;overflow:hidden;">
         <div style="flex:1;display:flex;align-items:center;justify-content:flex-start;height:100%;direction:ltr;">${logoMarkup}</div>
         <div style="min-width:210px;text-align:right;direction:rtl;line-height:1.55;">
           <div><strong>شماره قرارداد:</strong> ${escapeHtml(contractNumber)}</div>

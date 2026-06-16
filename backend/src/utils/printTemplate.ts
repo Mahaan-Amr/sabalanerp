@@ -902,7 +902,7 @@ const getContractHeaderMeta = (contract: RenderableContract) => {
 export function renderContractPdfHeaderTemplate(contract: RenderableContract): string {
   const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
   const logoMarkup = logoUrl
-    ? `<img src="${escapeHtml(logoUrl)}" style="width:170px;height:38px;object-fit:contain;display:block;" />`
+    ? `<img src="${escapeHtml(logoUrl)}" style="width:210px;height:48px;object-fit:contain;display:block;" />`
     : '';
 
   return `

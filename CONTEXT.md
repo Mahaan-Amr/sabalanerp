@@ -36,6 +36,10 @@ _Avoid_: printing empty detail groups or using خدمات as the umbrella label 
 The per-part note attached to a stair contract product row, such as کف پله, خیز, or پاگرد. Each selected stair part carries its own توضیحات so contract output can show the note beside the exact row it describes.
 _Avoid_: using one shared stair-system note for all stair parts
 
+**مصرف باقی‌مانده برای سنگ لایه**:
+When سنگ لایه uses سنگ اصلی, compatible remaining pieces from the same stair part are consumed before charging any additional سنگ اصلی. Only the layer demand that cannot be supplied from those remaining pieces should count as new main-stone material.
+_Avoid_: charging all same-stone لایه as fresh stone while usable same-part remaining pieces exist
+
 **وضعیت هنگام چاپ**:
 The contract status shown on customer-facing printed or PDF contract output at the moment the document is generated.
 _Avoid_: labeling printed status as the general contract status when the timing matters

@@ -6193,20 +6193,66 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                   : 0;
                                 
                                 const edgeDemandsPreview = getLayerEdgeDemands(stairSystemV2.stairActivePart, draft);
-                                const needsNewStone = edgeDemandsPreview.filter(edge =>
-                                  !(edge.edge === 'front' || edge.edge === 'back' || edge.edge === 'perimeter')
-                                );
+                                const previewMainRemainingStones: RemainingStone[] = (() => {
+                                  const usagePreview = computeTotalsV2(stairSystemV2.stairActivePart, draft);
+                                  const leftoverWidthCm = usagePreview.leftoverWidthCm || 0;
+                                  const quantity = usagePreview.baseStoneQuantity || 0;
+                                  if (draft.layerUseDifferentStone || leftoverWidthCm <= 0 || stairLengthM <= 0 || quantity <= 0) {
+                                    return [];
+                                  }
+                                  return [{
+                                    id: `preview_layer_source_${draft.stoneId || 'main'}`,
+                                    width: leftoverWidthCm,
+                                    length: stairLengthM,
+                                    squareMeters: (leftoverWidthCm / 100) * stairLengthM * quantity,
+                                    isAvailable: true,
+                                    sourceCutId: `preview_layer_source_${draft.stoneId || 'main'}`,
+                                    quantity
+                                  }];
+                                })();
+                                const previewAvailableRemainingStones = draft.layerUseDifferentStone
+                                  ? []
+                                  : collectAvailableRemainingStones(stairSystemV2.stairSessionItems, previewMainRemainingStones);
+                                const layerMetricsPreview = draft.layerUseDifferentStone
+                                  ? {
+                                      layersFromRemainingStones: 0,
+                                      layersFromNewStones: edgeDemandsPreview.length
+                                        ? edgeDemandsPreview.reduce((sum, demand) => sum + demand.layersNeeded, 0)
+                                        : totalLayers,
+                                      squareMetersFromNew: totalLayerSqm,
+                                      totalLayerDemand: edgeDemandsPreview.length
+                                        ? edgeDemandsPreview.reduce((sum, demand) => sum + demand.layersNeeded, 0)
+                                        : totalLayers,
+                                      unfulfilledDemands: edgeDemandsPreview.map(demand => ({
+                                        edge: demand.edge,
+                                        lengthM: demand.lengthM,
+                                        quantity: demand.layersNeeded
+                                      }))
+                                    }
+                                  : calculateLayerMetrics({
+                                      totalLayers: edgeDemandsPreview.length
+                                        ? edgeDemandsPreview.reduce((sum, demand) => sum + demand.layersNeeded, 0)
+                                        : totalLayers,
+                                      layerWidthCm,
+                                      layerLengthM: layerManagement.getMaxLayerLengthM(stairSystemV2.stairActivePart, draft) || stairLengthM,
+                                      availableRemainingStones: previewAvailableRemainingStones,
+                                      cuttingCostPerMeter: 0,
+                                      edgeDemands: edgeDemandsPreview
+                                    });
                                 
                                 const stoneAreaUsedSqm = (() => {
-                                  if (!needsNewStone.length || !columnsPerStone || !stairLengthM || !stoneWidthM) {
+                                  const unfulfilledDemands = (layerMetricsPreview.unfulfilledDemands && layerMetricsPreview.unfulfilledDemands.length)
+                                    ? layerMetricsPreview.unfulfilledDemands
+                                    : [];
+                                  if (!unfulfilledDemands.length || !columnsPerStone || !stairLengthM || !stoneWidthM) {
                                     return 0;
                                   }
                                   let stonesNeeded = 0;
-                                  needsNewStone.forEach(edge => {
+                                  unfulfilledDemands.forEach(edge => {
                                     if (edge.lengthM <= 0) return;
                                     const stripsPerColumn = Math.max(1, Math.floor(stairLengthM / edge.lengthM));
                                     const stripsPerStone = Math.max(1, stripsPerColumn * columnsPerStone);
-                                    stonesNeeded += Math.ceil(edge.layersNeeded / stripsPerStone);
+                                    stonesNeeded += Math.ceil(edge.quantity / stripsPerStone);
                                   });
                                   if (!stonesNeeded) return 0;
                                   return stonesNeeded * stairLengthM * stoneWidthM;
@@ -6224,7 +6270,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                 
                                 // 🎯 FIX: Calculate layer stone price based on stone area used, NOT layer square meters
                                 // Use stone area used for pricing (includes waste/remaining pieces)
-                                const pricingStoneAreaSqm = stoneAreaUsedSqm > 0 ? stoneAreaUsedSqm : totalLayerSqm;
+                                const pricingStoneAreaSqm = stoneAreaUsedSqm > 0 ? stoneAreaUsedSqm : (layerMetricsPreview.squareMetersFromNew || 0);
                                 const baseLayerCost = pricingStoneAreaSqm * pricePerSqm;
                                 const layerTotalPrice = baseLayerCost + layerTypeCostPreview;
                                 
@@ -6248,6 +6294,12 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                         )}
                                       </div>
                                       <div>متر مربع استفاده شده: {formatSquareMeters(totalLayerSqm)}</div>
+                                      {!draft.layerUseDifferentStone && (
+                                        <div className="text-teal-700 dark:text-teal-300">
+                                          از باقی‌مانده سنگ اصلی: {formatDisplayNumber(layerMetricsPreview.layersFromRemainingStones || 0)} لایه
+                                          {` | نیاز به سنگ اصلی جدید: ${formatDisplayNumber(layerMetricsPreview.layersFromNewStones || 0)} لایه`}
+                                        </div>
+                                      )}
                                       {stoneAreaUsedSqm > 0 && (
                                         <div>متر مربع سنگ: {formatSquareMeters(stoneAreaUsedSqm)}</div>
                                       )}
@@ -6256,7 +6308,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                       </div>
                                       <div className="mt-1 pt-1 border-t border-orange-200 dark:border-orange-700">
                                         <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">
-                                            قیمت سنگ لایه: {formatPrice((stoneAreaUsedSqm > 0 ? stoneAreaUsedSqm : totalLayerSqm) * pricePerSqm)}
+                                            قیمت سنگ لایه: {formatPrice(pricingStoneAreaSqm * pricePerSqm)}
                                             {stoneAreaUsedSqm > 0 && (
                                             <span className="text-xs text-gray-500 dark:text-gray-500 mr-1">
                                                 (بر اساس متر مربع سنگ: {formatSquareMeters(stoneAreaUsedSqm)})
@@ -7063,7 +7115,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                       // 🎯 STEP 3: Collect all available remaining stones
                       const allAvailableRemainingStones = usingAlternateLayerStone
                         ? []
-                        : collectAvailableRemainingStones(updatedItems, remainingStones);
+                        : collectAvailableRemainingStones(updatedItems, []);
                       
                       // 🎯 STEP 4: Calculate layer metrics (remaining stone usage, cutting costs, etc.)
                       const totalLayerDemand = layerEdgeDemands.length

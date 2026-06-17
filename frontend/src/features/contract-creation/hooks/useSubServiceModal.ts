@@ -2,7 +2,7 @@
 // Manages sub-service modal state and handlers
 
 import { useState, useCallback } from 'react';
-import type { SubService } from '../types/contract.types';
+import type { AppliedSubService, ContractProduct, SubService } from '../types/contract.types';
 
 interface UseSubServiceModalOptions {
   setErrors: (errors: Record<string, string>) => void;
@@ -21,13 +21,27 @@ export const useSubServiceModal = (options: UseSubServiceModalOptions) => {
   const [subServiceCalculationBases, setSubServiceCalculationBases] = useState<Record<string, 'length' | 'squareMeters'>>({});
 
   // Handler to open modal for a specific product
-  const openModal = useCallback((productIndex: number) => {
+  const openModal = useCallback((productIndex: number, product?: ContractProduct) => {
+    const appliedSubServices = product?.appliedSubServices || [];
+    const selectedFromProduct = appliedSubServices
+      .map((applied: AppliedSubService) => applied.subService)
+      .filter((subService): subService is SubService => Boolean(subService?.id));
+    const meterValues = appliedSubServices.reduce<Record<string, number>>((values, applied) => {
+      if (applied.subServiceId) values[applied.subServiceId] = applied.meter || 0;
+      return values;
+    }, {});
+    const calculationBases = appliedSubServices.reduce<Record<string, 'length' | 'squareMeters'>>((values, applied) => {
+      if (applied.subServiceId) {
+        values[applied.subServiceId] = applied.calculationBase || applied.subService?.calculationBase || 'length';
+      }
+      return values;
+    }, {});
+
     setSelectedSubServiceProductIndex(productIndex);
     setShowSubServiceModal(true);
-    // Reset state when opening
-    setSelectedSubServices([]);
-    setSubServiceMeterValues({});
-    setSubServiceCalculationBases({});
+    setSelectedSubServices(selectedFromProduct);
+    setSubServiceMeterValues(meterValues);
+    setSubServiceCalculationBases(calculationBases);
     setErrors({});
   }, [setErrors]);
 

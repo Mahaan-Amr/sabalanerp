@@ -156,9 +156,6 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     }
 
     if (method === 'CHECK') {
-      if (!paymentEntryForm.checkNumber || !paymentEntryForm.checkNumber.trim()) {
-        nextErrors.checkNumber = 'شماره چک الزامی است';
-      }
       if (!paymentEntryForm.checkOwnerName || !paymentEntryForm.checkOwnerName.trim()) {
         nextErrors.checkOwnerName = 'نام صاحب چک الزامی است';
       }

@@ -460,6 +460,19 @@ export interface PaymentMethod {
   totalContractAmount: number; // Sum of all products (for validation)
 }
 
+export interface ContractDiscountSnapshot {
+  enabled: boolean;
+  rangeId?: string | null;
+  rangeMinAmount?: number | null;
+  rangeMaxAmount?: number | null;
+  maxDiscountPercent?: number | null;
+  baseSubtotal: number;
+  percent: number;
+  amount: number;
+  currency: string;
+  appliedAt?: string;
+}
+
 // Keep PaymentInstallment for backward compatibility if needed elsewhere
 export interface PaymentInstallment {
   installmentNumber: number;
@@ -493,6 +506,7 @@ export interface ContractWizardData {
   
   // Step 7: Payment (was Step 6)
   payment: PaymentMethod;
+  discount?: ContractDiscountSnapshot | null;
   
   // Step 8: Signature (Digital Signature with SMS Verification)
   signature: {
@@ -565,6 +579,9 @@ export interface ContractStep8FinancialSummary {
   servicesTotal: number;
   cutsTotal: number;
   finishingTotal: number;
+  discountAmount?: number;
+  discountPercent?: number;
+  discountBaseSubtotal?: number;
   grandTotal: number;
   paymentTotal: number;
   remainingAmount: number;
@@ -670,6 +687,7 @@ export interface StairPartDraftV2 {
   finishingCalculationBase?: 'length' | 'squareMeters' | null;
   finishingQuantity?: number | null;
   finishingSearchTerm?: string;
+  description?: string | null;
 }
 
 export interface StairDraftFieldErrors {

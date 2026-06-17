@@ -37,7 +37,8 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
     tools: [],
     finishingEnabled: false,
     useMandatory: false,
-    mandatoryPercentage: null
+    mandatoryPercentage: null,
+    description: ''
   });
   
   const [draftRiser, setDraftRiser] = useState<StairPartDraftV2>({
@@ -45,7 +46,8 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
     tools: [],
     finishingEnabled: false,
     useMandatory: true,
-    mandatoryPercentage: 20
+    mandatoryPercentage: 20,
+    description: ''
   });
   
   const [draftLanding, setDraftLanding] = useState<StairPartDraftV2>({
@@ -53,7 +55,8 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
     tools: [],
     finishingEnabled: false,
     useMandatory: true,
-    mandatoryPercentage: 20
+    mandatoryPercentage: 20,
+    description: ''
   });
 
   // Active part selector
@@ -416,9 +419,9 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
 
   // Reset all state
   const reset = useCallback(() => {
-    setDraftTread({ lengthUnit: 'm', tools: [], finishingEnabled: false, useMandatory: false, mandatoryPercentage: null });
-    setDraftRiser({ lengthUnit: 'm', tools: [], finishingEnabled: false, useMandatory: true, mandatoryPercentage: 20 });
-    setDraftLanding({ lengthUnit: 'm', tools: [], finishingEnabled: false, useMandatory: true, mandatoryPercentage: 20 });
+    setDraftTread({ lengthUnit: 'm', tools: [], finishingEnabled: false, useMandatory: false, mandatoryPercentage: null, description: '' });
+    setDraftRiser({ lengthUnit: 'm', tools: [], finishingEnabled: false, useMandatory: true, mandatoryPercentage: 20, description: '' });
+    setDraftLanding({ lengthUnit: 'm', tools: [], finishingEnabled: false, useMandatory: true, mandatoryPercentage: 20, description: '' });
     setStairActivePart('tread');
     setStoneSearchTerm('');
     setStoneSearchResults([]);

@@ -12,6 +12,10 @@ interface ContractHTMLData {
   products: ContractProduct[];
   deliveries: DeliverySchedule[];
   payment: PaymentMethod;
+  discount?: {
+    percent?: number | null;
+    amount?: number | null;
+  } | null;
 }
 
 /**
@@ -33,7 +37,7 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
       <tbody>
         ${data.products.map((product: ContractProduct) => `
           <tr>
-            <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.namePersian || product.product?.name || product.stoneName || 'نامشخص'}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.namePersian || product.product?.name || product.stoneName || 'نامشخص'}${product.description ? ` - ${product.description}` : ''}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.widthValue && product.product?.thicknessValue ? `${product.product.widthValue} × ${product.product.thicknessValue}` : product.length && product.width ? `${product.length} × ${product.width}` : 'نامشخص'}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatQuantity(product.quantity || 0)}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatSquareMeters(product.squareMeters || 0)}</td>
@@ -56,6 +60,8 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
 
   const totalAmount = toFiniteNumber(data.payment?.totalContractAmount) || 
     sumNumericValues(data.products, (product) => product.totalPrice);
+  const discountAmount = toFiniteNumber(data.discount?.amount);
+  const discountPercent = toFiniteNumber(data.discount?.percent);
 
   return `
     <div style="font-family: 'Tahoma', sans-serif; direction: rtl; text-align: right;">
@@ -90,6 +96,7 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
         <div style="margin: 20px 0;">
           <h3>اطلاعات پرداخت:</h3>
           <p><strong>مبلغ کل:</strong> ${formatPrice(totalAmount, data.payment.currency || 'تومان')}</p>
+          ${discountAmount > 0 ? `<p><strong>تخفیف قرارداد${discountPercent > 0 ? ` (${discountPercent}٪)` : ''}:</strong> -${formatPrice(discountAmount, data.payment.currency || 'تومان')}</p>` : ''}
           ${data.payment.payments && data.payment.payments.length > 0 ? `
             <h4>روش‌های پرداخت:</h4>
             <ul>

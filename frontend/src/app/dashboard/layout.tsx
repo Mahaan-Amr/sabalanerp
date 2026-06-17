@@ -17,6 +17,7 @@ import {
   FaUser,
   FaBell,
   FaFileAlt,
+  FaPercent,
   FaShieldAlt
 } from 'react-icons/fa';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -224,6 +225,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           name: 'دپارتمان‌ها',
           href: '/dashboard/departments',
           icon: FaBuilding,
+          show: true
+        },
+        {
+          name: 'تنظیمات تخفیف',
+          href: '/dashboard/admin/discount-settings',
+          icon: FaPercent,
           show: true
         }
       );

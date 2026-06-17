@@ -141,13 +141,13 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
             {isCheck && (
               <>
                 <div>
-                  <label className={labelClass}>شماره چک</label>
+                  <label className={labelClass}>شماره چک (اختیاری)</label>
                   <input
                     type="text"
                     value={form.checkNumber ?? ''}
                     onChange={(e) => onFormChange({ checkNumber: e.target.value })}
                     className={`${inputClass} ${fieldErrors.checkNumber ? 'border-red-500 dark:border-red-400' : ''}`}
-                    placeholder="شماره چک"
+                    placeholder="در صورت موجود بودن وارد کنید"
                   />
                   {fieldErrors.checkNumber && <p className="mt-1 text-xs text-red-500">{fieldErrors.checkNumber}</p>}
                 </div>

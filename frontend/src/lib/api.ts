@@ -259,6 +259,12 @@ export const salesAPI = {
   
   // Contract Number Generation
   getNextContractNumber: () => api.get('/sales/contracts/next-number'),
+
+  // Contract discount ranges
+  getDiscountRanges: (params?: { activeOnly?: boolean }) => api.get('/sales/discount-ranges', { params }),
+  createDiscountRange: (data: any) => api.post('/sales/discount-ranges', data),
+  updateDiscountRange: (id: string, data: any) => api.put(`/sales/discount-ranges/${id}`, data),
+  deleteDiscountRange: (id: string) => api.delete(`/sales/discount-ranges/${id}`),
 };
 
 // CRM Workspace API

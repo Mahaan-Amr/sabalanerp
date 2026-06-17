@@ -350,10 +350,9 @@ export const SubServiceModal: React.FC<SubServiceModalProps> = ({
                         };
                       });
                       
-                      // Calculate totals - ADD to existing sub-services (incremental addition)
-                      const existingSubServices = currentProduct.appliedSubServices || [];
-                      const allAppliedSubServices = [...existingSubServices, ...appliedSubServices];
-                      
+                      // Replace the managed tool set so edit mode can load, change, and remove tools without duplicating them.
+                      const allAppliedSubServices = appliedSubServices;
+
                       const totalSubServiceCost = sumNumericValues(allAppliedSubServices, (applied) => applied.cost);
                       const usedLength = allAppliedSubServices
                         .filter(applied => applied.calculationBase === 'length')

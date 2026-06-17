@@ -50,9 +50,6 @@ export interface UpdatePaymentData {
 export function validatePaymentData(data: CreatePaymentData | UpdatePaymentData): { isValid: boolean; error?: string } {
   // Validate check fields for check payments
   if (data.paymentMethod === 'CHECK') {
-    if (!data.checkNumber) {
-      return { isValid: false, error: 'Check number is required for check payments' };
-    }
     if (!data.checkOwnerName || !String(data.checkOwnerName).trim()) {
       return { isValid: false, error: 'Check owner name is required for check payments' };
     }

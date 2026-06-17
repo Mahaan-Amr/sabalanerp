@@ -839,6 +839,21 @@ model StoneFinishing {
   @@map("stone_finishings")
 }
 
+model ContractDiscountRange {
+  id                 String   @id @default(cuid())
+  minAmount          Decimal  @db.Decimal(15, 2)
+  maxAmount          Decimal? @db.Decimal(15, 2)
+  maxDiscountPercent Decimal  @db.Decimal(5, 2)
+  isActive           Boolean  @default(true)
+  createdBy          String?
+  updatedBy          String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([isActive, minAmount])
+  @@map("contract_discount_ranges")
+}
+
 model Payment {
   id             String               @id @default(cuid())
   contractId     String

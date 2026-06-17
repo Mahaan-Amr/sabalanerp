@@ -61,6 +61,218 @@ const userHasCancelAfterApprovalPermission = async (user: any): Promise<boolean>
 
 // ==================== SALES CONTRACTS ====================
 
+const canManageDiscountRanges = (user: any) => ['ADMIN', 'MANAGER'].includes(user?.role);
+
+const toDiscountRangeDto = (range: any) => ({
+  id: range.id,
+  minAmount: Number(range.minAmount),
+  maxAmount: range.maxAmount === null || range.maxAmount === undefined ? null : Number(range.maxAmount),
+  maxDiscountPercent: Number(range.maxDiscountPercent),
+  isActive: range.isActive,
+  createdAt: range.createdAt,
+  updatedAt: range.updatedAt
+});
+
+const parseOptionalBoolean = (value: unknown, fallback: boolean): boolean => {
+  if (value === undefined) return fallback;
+  if (value === true || value === 'true') return true;
+  if (value === false || value === 'false') return false;
+  return fallback;
+};
+
+const validateDiscountRangeBounds = async ({
+  minAmount,
+  maxAmount,
+  excludeId
+}: {
+  minAmount: number;
+  maxAmount?: number | null;
+  excludeId?: string;
+}) => {
+  if (!Number.isFinite(minAmount) || minAmount < 0) {
+    return 'Minimum amount must be zero or greater';
+  }
+  if (maxAmount !== null && maxAmount !== undefined && (!Number.isFinite(maxAmount) || maxAmount <= minAmount)) {
+    return 'Maximum amount must be greater than minimum amount';
+  }
+
+  const ranges = await prisma.contractDiscountRange.findMany({
+    where: {
+      isActive: true,
+      ...(excludeId ? { id: { not: excludeId } } : {})
+    }
+  });
+
+  const nextMax = maxAmount ?? Number.POSITIVE_INFINITY;
+  const overlaps = ranges.some((range) => {
+    const existingMin = Number(range.minAmount);
+    const existingMax = range.maxAmount === null ? Number.POSITIVE_INFINITY : Number(range.maxAmount);
+    return minAmount < existingMax && existingMin < nextMax;
+  });
+
+  return overlaps ? 'Discount ranges cannot overlap' : null;
+};
+
+// @desc    Get contract discount ranges
+// @route   GET /api/sales/discount-ranges
+// @access  Private for active rules, Admin or Manager for full settings
+router.get('/discount-ranges', protect, async (req: any, res: Response) => {
+  try {
+    const activeOnly = req.query.activeOnly === 'true';
+    if (!activeOnly && !canManageDiscountRanges(req.user)) {
+      return res.status(403).json({ success: false, error: 'Access denied' });
+    }
+
+    const ranges = await prisma.contractDiscountRange.findMany({
+      where: activeOnly ? { isActive: true } : undefined,
+      orderBy: [{ minAmount: 'asc' }, { createdAt: 'asc' }]
+    });
+
+    res.json({
+      success: true,
+      data: ranges.map(toDiscountRangeDto)
+    });
+    return;
+  } catch (error) {
+    console.error('Get discount ranges error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+    return;
+  }
+});
+
+// @desc    Create contract discount range
+// @route   POST /api/sales/discount-ranges
+// @access  Private/Admin or Manager
+router.post('/discount-ranges', protect, [
+  body('minAmount').isFloat({ min: 0 }).withMessage('Minimum amount is required'),
+  body('maxAmount').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('Maximum amount must be a number'),
+  body('maxDiscountPercent').isFloat({ min: 0, max: 100 }).withMessage('Discount percent must be between 0 and 100'),
+  body('isActive').optional().isBoolean().withMessage('Active flag must be boolean')
+], async (req: any, res: Response) => {
+  try {
+    if (!canManageDiscountRanges(req.user)) {
+      return res.status(403).json({ success: false, error: 'Access denied' });
+    }
+
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    }
+
+    const minAmount = Number(req.body.minAmount);
+    const maxAmount = req.body.maxAmount === null || req.body.maxAmount === '' || req.body.maxAmount === undefined
+      ? null
+      : Number(req.body.maxAmount);
+    const isActive = parseOptionalBoolean(req.body.isActive, true);
+
+    if (isActive) {
+      const rangeError = await validateDiscountRangeBounds({ minAmount, maxAmount });
+      if (rangeError) {
+        return res.status(400).json({ success: false, error: rangeError });
+      }
+    }
+
+    const range = await prisma.contractDiscountRange.create({
+      data: {
+        minAmount,
+        maxAmount,
+        maxDiscountPercent: Number(req.body.maxDiscountPercent),
+        isActive,
+        createdBy: req.user.id,
+        updatedBy: req.user.id
+      }
+    });
+
+    res.status(201).json({ success: true, data: toDiscountRangeDto(range) });
+    return;
+  } catch (error) {
+    console.error('Create discount range error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+    return;
+  }
+});
+
+// @desc    Update contract discount range
+// @route   PUT /api/sales/discount-ranges/:id
+// @access  Private/Admin or Manager
+router.put('/discount-ranges/:id', protect, [
+  body('minAmount').optional().isFloat({ min: 0 }).withMessage('Minimum amount must be a number'),
+  body('maxAmount').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('Maximum amount must be a number'),
+  body('maxDiscountPercent').optional().isFloat({ min: 0, max: 100 }).withMessage('Discount percent must be between 0 and 100'),
+  body('isActive').optional().isBoolean().withMessage('Active flag must be boolean')
+], async (req: any, res: Response) => {
+  try {
+    if (!canManageDiscountRanges(req.user)) {
+      return res.status(403).json({ success: false, error: 'Access denied' });
+    }
+
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    }
+
+    const existing = await prisma.contractDiscountRange.findUnique({ where: { id: req.params.id } });
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Discount range not found' });
+    }
+
+    const minAmount = req.body.minAmount !== undefined ? Number(req.body.minAmount) : Number(existing.minAmount);
+    const maxAmount = req.body.maxAmount !== undefined
+      ? (req.body.maxAmount === null || req.body.maxAmount === '' ? null : Number(req.body.maxAmount))
+      : (existing.maxAmount === null ? null : Number(existing.maxAmount));
+    const isActive = parseOptionalBoolean(req.body.isActive, existing.isActive);
+
+    if (isActive) {
+      const rangeError = await validateDiscountRangeBounds({ minAmount, maxAmount, excludeId: req.params.id });
+      if (rangeError) {
+        return res.status(400).json({ success: false, error: rangeError });
+      }
+    }
+
+    const range = await prisma.contractDiscountRange.update({
+      where: { id: req.params.id },
+      data: {
+        minAmount,
+        maxAmount,
+        maxDiscountPercent: req.body.maxDiscountPercent !== undefined
+          ? Number(req.body.maxDiscountPercent)
+          : existing.maxDiscountPercent,
+        isActive,
+        updatedBy: req.user.id
+      }
+    });
+
+    res.json({ success: true, data: toDiscountRangeDto(range) });
+    return;
+  } catch (error) {
+    console.error('Update discount range error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+    return;
+  }
+});
+
+// @desc    Delete contract discount range
+// @route   DELETE /api/sales/discount-ranges/:id
+// @access  Private/Admin or Manager
+router.delete('/discount-ranges/:id', protect, async (req: any, res: Response) => {
+  try {
+    if (!canManageDiscountRanges(req.user)) {
+      return res.status(403).json({ success: false, error: 'Access denied' });
+    }
+
+    await prisma.contractDiscountRange.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+    return;
+  } catch (error: any) {
+    console.error('Delete discount range error:', error);
+    if (error?.code === 'P2025') {
+      return res.status(404).json({ success: false, error: 'Discount range not found' });
+    }
+    res.status(500).json({ success: false, error: 'Server error' });
+    return;
+  }
+});
+
 
 // @desc    Get next contract number with gap-filling logic
 // @route   GET /api/sales/contracts/next-number

@@ -105,7 +105,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           finishingCost: product.finishingCost ?? finishing.cost
         };
       });
-      const totalAmount = sumNumericValues(normalizedProducts, (product) => product.totalPrice);
+      const productsTotal = sumNumericValues(normalizedProducts, (product) => product.totalPrice);
+      const totalAmount = wizardData.payment.totalContractAmount || productsTotal;
       
       // Create contract
       const contractData = {
@@ -120,7 +121,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           project: wizardData.project,
           products: normalizedProducts,
           deliveries: wizardData.deliveries,
-          payment: wizardData.payment
+          payment: wizardData.payment,
+          discount: wizardData.discount || null
         }),
         contractData: {
           contractNumber: wizardData.contractNumber,
@@ -129,7 +131,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           project: wizardData.project,
           products: normalizedProducts,
           deliveries: wizardData.deliveries,
-          payment: wizardData.payment
+          payment: wizardData.payment,
+          discount: wizardData.discount || null
         },
         totalAmount,
         currency: 'تومان'

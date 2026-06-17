@@ -121,6 +121,9 @@ interface NormalizedFinancials {
   servicesTotal: number;
   cutsTotal: number;
   finishingTotal: number;
+  discountAmount: number;
+  discountPercent: number;
+  discountBaseSubtotal: number;
   grandTotal: number;
   currency: string;
 }
@@ -445,7 +448,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         const finishingQuantity = getFinishingQuantity(product, finishingBase);
         const finishingUnitPrice = getFinishingUnitPrice(product);
         services.push({
-          category: 'فرآوری سنگ',
+          category: 'پرداخت سنگ',
           name: product?.finishingName || EMPTY,
           amount: finishingQuantity,
           amountLabel: getFinishingAmountLabel(product),
@@ -665,25 +668,32 @@ const normalizeFinancials = (contract: RenderableContract, products: NormalizedP
   const productsTotal = products.reduce((sum, product) => sum + toNumber(product.totalPrice), 0);
   const servicesTotal = products.reduce((sum, product) => {
     const services = product.services
-      .filter((service) => service.category !== 'فرآوری سنگ')
+      .filter((service) => service.category !== 'پرداخت سنگ')
       .reduce((serviceSum, service) => serviceSum + toNumber(service.cost), 0);
     return sum + services;
   }, 0);
   const cutsTotal = products.reduce((sum, product) => sum + product.cuts.reduce((cutSum, cut) => cutSum + toNumber(cut.cost), 0), 0);
   const finishingTotal = products.reduce((sum, product) => {
     const finishing = product.services
-      .filter((service) => service.category === 'فرآوری سنگ')
+      .filter((service) => service.category === 'پرداخت سنگ')
       .reduce((serviceSum, service) => serviceSum + toNumber(service.cost), 0);
     return sum + finishing;
   }, 0);
 
   const relationGrandTotal = toNumber(contract.totalAmount);
+  const discount = contract.contractData?.discount || {};
+  const discountAmount = toNumber(discount.amount);
+  const discountPercent = toNumber(discount.percent);
+  const discountBaseSubtotal = toNumber(discount.baseSubtotal);
   return {
     productsTotal,
     servicesTotal,
     cutsTotal,
     finishingTotal,
-    grandTotal: relationGrandTotal > 0 ? relationGrandTotal : productsTotal,
+    discountAmount,
+    discountPercent,
+    discountBaseSubtotal,
+    grandTotal: relationGrandTotal > 0 ? relationGrandTotal : Math.max(productsTotal - discountAmount, 0),
     currency
   };
 };
@@ -704,7 +714,7 @@ const formatProductQuantityOrArea = (product: NormalizedProduct): string => {
   return `${quantityLabel} / ${toFaNumber(product.squareMeters, 3)} متر مربع`;
 };
 
-const buildFlatProductRows = (products: NormalizedProduct[], currency: string, grandTotal: number): FlatProductRow[] => {
+const buildFlatProductRows = (products: NormalizedProduct[], currency: string, grandTotal: number, financials?: NormalizedFinancials): FlatProductRow[] => {
   const rows: FlatProductRow[] = [];
 
   products.forEach((product, productIndex) => {
@@ -718,7 +728,9 @@ const buildFlatProductRows = (products: NormalizedProduct[], currency: string, g
     rows.push({
       indexLabel: toFaNumber(productIndex + 1),
       code: product.code,
-      description: product.name,
+      description: product.description && product.description !== EMPTY
+        ? `${product.name} - ${product.description}`
+        : product.name,
       category: 'محصول',
       dimensionsOrAmount: product.dimensions,
       quantityOrArea: formatProductQuantityOrArea(product),
@@ -780,6 +792,24 @@ const buildFlatProductRows = (products: NormalizedProduct[], currency: string, g
     });
   });
 
+  if (financials && financials.discountAmount > 0) {
+    rows.push({
+      indexLabel: '',
+      code: '',
+      description: financials.discountPercent > 0
+        ? `تخفیف قرارداد ${toFaNumber(financials.discountPercent)}٪`
+        : 'تخفیف قرارداد',
+      category: 'تخفیف',
+      dimensionsOrAmount: financials.discountBaseSubtotal > 0
+        ? formatAmount(financials.discountBaseSubtotal, currency)
+        : '',
+      quantityOrArea: '',
+      rate: financials.discountPercent > 0 ? `${toFaNumber(financials.discountPercent)}٪` : '',
+      total: `-${formatAmount(financials.discountAmount, currency)}`,
+      className: 'discount-row'
+    });
+  }
+
   rows.push({
     indexLabel: '',
     code: '',
@@ -795,12 +825,12 @@ const buildFlatProductRows = (products: NormalizedProduct[], currency: string, g
   return rows;
 };
 
-const renderProductMainRows = (products: NormalizedProduct[], currency: string, grandTotal: number): string => {
+const renderProductMainRows = (products: NormalizedProduct[], currency: string, grandTotal: number, financials?: NormalizedFinancials): string => {
   if (!products.length) {
     return `<tr><td colspan="8" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
   }
 
-  return buildFlatProductRows(products, currency, grandTotal).map((row) => {
+  return buildFlatProductRows(products, currency, grandTotal, financials).map((row) => {
     const classAttribute = row.className ? ` class="${row.className}"` : '';
     return `
       <tr${classAttribute}>
@@ -889,7 +919,8 @@ const renderFinancialSummary = (financials: NormalizedFinancials): string => {
     `<div><strong>جمع محصولات:</strong> ${formatAmount(financials.productsTotal, financials.currency)}</div>`,
     financials.servicesTotal > 0 ? `<div><strong>جمع خدمات:</strong> ${formatAmount(financials.servicesTotal, financials.currency)}</div>` : '',
     financials.cutsTotal > 0 ? `<div><strong>جمع برش:</strong> ${formatAmount(financials.cutsTotal, financials.currency)}</div>` : '',
-    financials.finishingTotal > 0 ? `<div><strong>جمع فرآوری سنگ:</strong> ${formatAmount(financials.finishingTotal, financials.currency)}</div>` : '',
+    financials.finishingTotal > 0 ? `<div><strong>جمع پرداخت سنگ:</strong> ${formatAmount(financials.finishingTotal, financials.currency)}</div>` : '',
+    financials.discountAmount > 0 ? `<div><strong>تخفیف قرارداد${financials.discountPercent > 0 ? ` (${toFaNumber(financials.discountPercent)}٪)` : ''}:</strong> -${formatAmount(financials.discountAmount, financials.currency)}</div>` : '',
     `<div><strong>مبلغ نهایی قرارداد:</strong> ${formatAmount(financials.grandTotal, financials.currency)}</div>`,
     `<div><strong>واحد پول:</strong> ${escapeHtml(financials.currency)}</div>`
   ].filter(Boolean);
@@ -996,7 +1027,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           </tr>
         </thead>
         <tbody>
-          ${renderProductMainRows(normalizedProducts, financials.currency, financials.grandTotal)}
+          ${renderProductMainRows(normalizedProducts, financials.currency, financials.grandTotal, financials)}
         </tbody>
       </table>
     </section>
@@ -1287,6 +1318,12 @@ export function renderContractHtml(contract: RenderableContract, options: Render
     .total-row td {
       background: #f3f4f6;
       font-weight: 700;
+    }
+
+    .discount-row td {
+      background: #fff7ed;
+      color: #9a3412;
+      font-weight: 600;
     }
 
     .section-note {

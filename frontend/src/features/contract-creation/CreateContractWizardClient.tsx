@@ -175,6 +175,33 @@ import type {
   LayerEdgeDemand
 } from '@/features/contract-creation/types/contract.types';
 
+interface DiscountRange {
+  id: string;
+  minAmount: number;
+  maxAmount: number | null;
+  maxDiscountPercent: number;
+  isActive: boolean;
+}
+
+const getContractBaseSubtotal = (products: ContractProduct[]) =>
+  sumNumericValues(products, (product) => {
+    if ((product.meta as any)?.isLayer) return 0;
+    const originalTotal = toFiniteNumber(product.originalTotalPrice);
+    if (originalTotal > 0) return originalTotal;
+    return toFiniteNumber(product.squareMeters) * toFiniteNumber(product.pricePerSquareMeter);
+  });
+
+const findMatchingDiscountRange = (ranges: DiscountRange[], baseSubtotal: number) =>
+  ranges
+    .filter((range) => range.isActive)
+    .find((range) => {
+      const min = toFiniteNumber(range.minAmount);
+      const max = range.maxAmount === null || range.maxAmount === undefined
+        ? Number.POSITIVE_INFINITY
+        : toFiniteNumber(range.maxAmount);
+      return baseSubtotal >= min && baseSubtotal < max;
+    }) || null;
+
 export default function CreateContractWizard() {
   const router = useRouter();
 
@@ -202,8 +229,7 @@ export default function CreateContractWizard() {
     setProductSearchTerm,
     stateRestored,
     setStateRestored,
-    restorationAttempted,
-    updatePaymentTotal
+    restorationAttempted
   } = useContractWizard();
   
   // Use wizard state, but allow local overrides if needed
@@ -211,6 +237,8 @@ export default function CreateContractWizard() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [draftRestoredNotice, setDraftRestoredNotice] = useState(false);
   const [autosaveHydrated, setAutosaveHydrated] = useState(false);
+  const [discountRanges, setDiscountRanges] = useState<DiscountRange[]>([]);
+  const [discountPercentInput, setDiscountPercentInput] = useState<number>(0);
   // Stair stepper v2 states are now provided by useStairSystemV2 hook
   const [useStairFlowV2, setUseStairFlowV2] = useState(true); // Feature flag - stays local
   const stairSystemV2 = useStairSystemV2({
@@ -255,6 +283,83 @@ export default function CreateContractWizard() {
     loadInitialData: loadData,
     getCuttingTypePricePerMeter
   } = dataLoading;
+
+  const contractProductsTotal = useMemo(
+    () => sumNumericValues(wizardData.products, (product) => product.totalPrice),
+    [wizardData.products]
+  );
+  const discountBaseSubtotal = useMemo(
+    () => getContractBaseSubtotal(wizardData.products),
+    [wizardData.products]
+  );
+  const matchingDiscountRange = useMemo(
+    () => findMatchingDiscountRange(discountRanges, discountBaseSubtotal),
+    [discountRanges, discountBaseSubtotal]
+  );
+  const maxDiscountPercent = matchingDiscountRange
+    ? toFiniteNumber(matchingDiscountRange.maxDiscountPercent)
+    : 0;
+  const appliedDiscountPercent = Math.min(Math.max(toFiniteNumber(discountPercentInput), 0), maxDiscountPercent);
+  const appliedDiscountAmount = discountBaseSubtotal > 0
+    ? discountBaseSubtotal * (appliedDiscountPercent / 100)
+    : 0;
+  const payableContractTotal = Math.max(contractProductsTotal - appliedDiscountAmount, 0);
+
+  useEffect(() => {
+    let isMounted = true;
+    salesAPI.getDiscountRanges({ activeOnly: true })
+      .then((response) => {
+        if (isMounted && response.data.success) {
+          setDiscountRanges(response.data.data || []);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load discount ranges:', error);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (discountPercentInput > maxDiscountPercent) {
+      setDiscountPercentInput(maxDiscountPercent);
+    }
+  }, [discountPercentInput, maxDiscountPercent]);
+
+  useEffect(() => {
+    const discountSnapshot = appliedDiscountPercent > 0 && matchingDiscountRange
+      ? {
+          enabled: true,
+          rangeId: matchingDiscountRange.id,
+          rangeMinAmount: matchingDiscountRange.minAmount,
+          rangeMaxAmount: matchingDiscountRange.maxAmount,
+          maxDiscountPercent,
+          baseSubtotal: discountBaseSubtotal,
+          percent: appliedDiscountPercent,
+          amount: appliedDiscountAmount,
+          currency: 'تومان',
+          appliedAt: new Date().toISOString()
+        }
+      : null;
+
+    setWizardData(prev => ({
+      ...prev,
+      discount: discountSnapshot,
+      payment: {
+        ...prev.payment,
+        totalContractAmount: payableContractTotal
+      }
+    }));
+  }, [
+    appliedDiscountAmount,
+    appliedDiscountPercent,
+    discountBaseSubtotal,
+    matchingDiscountRange,
+    maxDiscountPercent,
+    payableContractTotal,
+    setWizardData
+  ]);
 
   useEffect(() => {
     if (!capabilities.canLoadCustomers) return;
@@ -2325,7 +2430,17 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         
         // Helper function to convert ContractProduct to StairPartDraftV2
         const productToDraft = (p: ContractProduct, partType: StairStepperPart): StairPartDraftV2 => {
-          const tools = (p.meta as any)?.tools || [];
+          const metaTools = (p.meta as any)?.tools || [];
+          const appliedTools = (p.appliedSubServices || []).map((applied: AppliedSubService) => ({
+            toolId: applied.subServiceId,
+            name: applied.subService?.namePersian || applied.subService?.name || '',
+            pricePerMeter: applied.subService?.pricePerMeter || 0,
+            edges: (applied as any).edges || {},
+            computedMeters: applied.meter || 0,
+            totalPrice: applied.cost || 0
+          }));
+          const tools = metaTools.length > 0 ? metaTools : appliedTools;
+          const metaFinishing = (p.meta as any)?.finishing || {};
           const layerInfo = (p.meta as any)?.layerInfo || null;
           // For layer products, extract layer info from meta
           // For regular products, layer info should be null
@@ -2369,13 +2484,14 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             standardLengthUnit: partType === 'riser'
               ? (p.lengthUnit || 'm')
               : ((p.standardLengthUnit as UnitType) ?? (p.meta as any)?.stair?.standardLength?.unit ?? (p.lengthUnit || 'm')),
-            finishingEnabled: !!p.finishingId,
-            finishingId: p.finishingId || null,
-            finishingLabel: p.finishingName || null,
-            finishingPricePerSquareMeter: p.finishingPricePerSquareMeter || p.finishingUnitPrice || null,
-            finishingUnitPrice: p.finishingUnitPrice || p.finishingPricePerSquareMeter || null,
-            finishingCalculationBase: p.finishingCalculationBase || (p.meta as any)?.finishing?.calculationBase || 'squareMeters',
-            finishingQuantity: p.finishingQuantity || p.finishingSquareMeters || (p.meta as any)?.finishing?.quantity || null
+            finishingEnabled: !!(p.finishingId || p.finishingCost || metaFinishing.id || metaFinishing.cost),
+            finishingId: p.finishingId || metaFinishing.id || null,
+            finishingLabel: p.finishingName || metaFinishing.name || null,
+            finishingPricePerSquareMeter: p.finishingPricePerSquareMeter || p.finishingUnitPrice || metaFinishing.unitPrice || null,
+            finishingUnitPrice: p.finishingUnitPrice || p.finishingPricePerSquareMeter || metaFinishing.unitPrice || null,
+            finishingCalculationBase: p.finishingCalculationBase || metaFinishing.calculationBase || 'squareMeters',
+            finishingQuantity: p.finishingQuantity || p.finishingSquareMeters || metaFinishing.quantity || null,
+            description: p.description || ''
           };
         };
         
@@ -2900,7 +3016,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       return;
     }
 
-    const totalAmount = sumNumericValues(wizardData.products, (product) => product.totalPrice);
+    const totalAmount = wizardData.payment.totalContractAmount ||
+      sumNumericValues(wizardData.products, (product) => product.totalPrice);
 
     await salesAPI.updateContract(contractId, {
       content: generateContractHTML(wizardData),
@@ -4303,10 +4420,6 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
               return;
             }
             if (method === 'CHECK') {
-              if (!String(payment.checkNumber || '').trim()) {
-                newErrors.paymentMethod = `شماره چک برای پرداخت ${index + 1} الزامی است`;
-                return;
-              }
               if (!String(payment.checkOwnerName || '').trim()) {
                 newErrors.paymentMethod = `نام صاحب چک برای پرداخت ${index + 1} الزامی است`;
                 return;
@@ -4345,13 +4458,6 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       deliverySchedule.setSelectedProductIndices(new Set());
     }
   }, [currentStep]);
-
-  // Sync payment total when entering Step 7 so مبلغ کل قرارداد shows correct sum of products
-  useEffect(() => {
-    if (currentStep === 6) {
-      updatePaymentTotal();
-    }
-  }, [currentStep, updatePaymentTotal]);
 
   const goToNextStep = () => {
     if (validateCurrentStep()) {
@@ -4431,6 +4537,13 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             wizardData={wizardData}
             updateWizardData={updateWizardData}
             errors={errors}
+            baseSubtotal={discountBaseSubtotal}
+            productsTotal={contractProductsTotal}
+            discountPercent={appliedDiscountPercent}
+            maxDiscountPercent={maxDiscountPercent}
+            discountAmount={appliedDiscountAmount}
+            hasMatchingDiscountRange={!!matchingDiscountRange}
+            onDiscountPercentChange={setDiscountPercentInput}
             showPaymentEntryModal={paymentHandlers.showPaymentEntryModal}
             setShowPaymentEntryModal={paymentHandlers.setShowPaymentEntryModal}
             onAddPaymentEntry={paymentHandlers.handleAddPaymentEntry}
@@ -4564,12 +4677,16 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           .reduce((sum, service) => sum + toFiniteNumber(service.cost), 0);
         const servicesTotal = serviceDetails.reduce((sum, service) => sum + toFiniteNumber(service.cost), 0);
         const paymentTotal = paymentDetails.reduce((sum, payment) => sum + toFiniteNumber(payment.amount), 0);
-        const grandTotal = toFiniteNumber(wizardData.payment.totalContractAmount) || productsTotal;
+        const discountAmount = toFiniteNumber(wizardData.discount?.amount);
+        const grandTotal = toFiniteNumber(wizardData.payment.totalContractAmount) || Math.max(productsTotal - discountAmount, 0);
         const financialSummary: ContractStep8FinancialSummary = {
           productsTotal,
           servicesTotal,
           cutsTotal,
           finishingTotal,
+          discountAmount,
+          discountPercent: toFiniteNumber(wizardData.discount?.percent),
+          discountBaseSubtotal: toFiniteNumber(wizardData.discount?.baseSubtotal),
           grandTotal,
           paymentTotal,
           remainingAmount: grandTotal - paymentTotal,
@@ -5286,6 +5403,19 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                         </div>
                       </div>
 
+                      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          توضیحات
+                        </label>
+                        <textarea
+                          value={draft.description || ''}
+                          onChange={(event) => setDraft({ ...draft, description: event.target.value })}
+                          rows={3}
+                          className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                          placeholder="توضیحات این بخش از سنگ پله..."
+                        />
+                      </div>
+
                       {/* Tools Section - Enhanced */}
                       {stairSystemV2.stairActivePart !== 'riser' && (
                       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
@@ -5531,10 +5661,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                               step={1}
                               max={10}
                               className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
-                              placeholder="مثال: 2 (برای دوبل)"
+                              placeholder="مثال: 1 (برای دوبل)"
                             />
                             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                              تعداد لایه‌هایی که برای هر پله نیاز است (مثال: 2 برای دوبل)
+                              تعداد لایه‌هایی که برای هر پله نیاز است (مثال: 1 برای دوبل)
                             </p>
                           </div>
                           
@@ -6224,71 +6354,97 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
                             {draft.finishingEnabled && (
                               <>
-                                <div>
-                                  <label htmlFor="stone-finishing-search" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                    جستجو در پرداخت‌ها
+                                <div className="space-y-3">
+                                  {draft.finishingId && (
+                                    <div className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-3 py-2 text-xs text-teal-800 dark:text-teal-100">
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div>
+                                          <div className="font-semibold">
+                                            {selectedFinishing?.namePersian || selectedFinishing?.name || draft.finishingLabel || 'پرداخت ذخیره‌شده'}
+                                          </div>
+                                          <div className="mt-1 text-teal-700 dark:text-teal-200">
+                                            {formatPrice(finishingPricePerSquareMeter || 0)} / {finishingUnitLabel}
+                                            {!selectedFinishing && draft.finishingLabel ? ' - خارج از کاتالوگ فعلی' : ''}
+                                          </div>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => setDraft({
+                                            ...draft,
+                                            finishingId: null,
+                                            finishingLabel: null,
+                                            finishingPricePerSquareMeter: null,
+                                            finishingUnitPrice: null,
+                                            finishingCalculationBase: null,
+                                            finishingQuantity: null
+                                          })}
+                                          className="rounded-md px-2 py-1 text-[11px] font-medium text-teal-700 hover:bg-teal-100 dark:text-teal-100 dark:hover:bg-teal-800"
+                                        >
+                                          حذف
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                  <label htmlFor="stone-finishing-picker" className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                                    جستجو و انتخاب پرداخت سنگ
                                   </label>
                                   <input
-                                    id="stone-finishing-search"
+                                    id="stone-finishing-picker"
                                     value={(draft as any).finishingSearchTerm || ''}
                                     onChange={(e) => setDraft({
                                       ...draft,
                                       finishingSearchTerm: e.target.value
                                     } as any)}
-                                    className="mb-3 w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                                    placeholder="نام فارسی، انگلیسی یا توضیحات"
-                                  />
-                                  <label htmlFor="stone-finishing-select" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                    انتخاب نوع پرداخت
-                                  </label>
-                                  <select
-                                    id="stone-finishing-select"
-                                    value={draft.finishingId || ''}
-                                    aria-label="انتخاب نوع پرداخت سنگ"
-                                    onChange={(e) => {
-                                      const selectedId = e.target.value;
-                                      if (!selectedId) {
-                                        setDraft({
-                                          ...draft,
-                                          finishingId: null,
-                                          finishingLabel: null,
-                                          finishingPricePerSquareMeter: null,
-                                          finishingUnitPrice: null,
-                                          finishingCalculationBase: null,
-                                          finishingQuantity: null
-                                        });
-                                        return;
-                                      }
-                                      const selected = stoneFinishings.find(option => option.id === selectedId);
-                                      if (selected) {
-                                        setDraft({
-                                          ...draft,
-                                          finishingEnabled: true,
-                                          finishingId: selected.id,
-                                          finishingLabel: selected.namePersian || selected.name || '',
-                                          finishingPricePerSquareMeter: getFinishingUnitPrice(selected),
-                                          finishingUnitPrice: getFinishingUnitPrice(selected),
-                                          finishingCalculationBase: getFinishingCalculationBase(selected),
-                                          finishingQuantity: calculateDefaultFinishingQuantity({
-                                            calculationBase: getFinishingCalculationBase(selected),
-                                            productType: 'stair',
-                                            length: draft.lengthValue,
-                                            lengthUnit: draft.lengthUnit || 'm',
-                                            quantity: draft.quantity,
-                                            squareMeters: totals.pricingSquareMeters
-                                          })
-                                        });
-                                      }
-                                    }}
                                     className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                                  >
-                                    <option value="">انتخاب پرداخت...</option>
-                                    {visibleStoneFinishings.map(option => (
-                                      <option key={option.id} value={option.id}>
-                                        {option.namePersian} - {formatPrice(getFinishingUnitPrice(option))}/{getFinishingUnitLabel(getFinishingCalculationBase(option))}
-                                      </option>
-                                    ))}
-                                  </select>
+                                    placeholder="نام پرداخت سنگ را جستجو کنید..."
+                                  />
+                                  <div className="max-h-44 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 divide-y divide-gray-200 dark:divide-gray-700">
+                                    {visibleStoneFinishings.length > 0 ? visibleStoneFinishings.map(option => {
+                                      const unitPrice = getFinishingUnitPrice(option);
+                                      const calculationBase = getFinishingCalculationBase(option);
+                                      const isSelected = draft.finishingId === option.id;
+                                      return (
+                                        <button
+                                          key={option.id}
+                                          type="button"
+                                          onClick={() => setDraft({
+                                            ...draft,
+                                            finishingEnabled: true,
+                                            finishingId: option.id,
+                                            finishingLabel: option.namePersian || option.name || '',
+                                            finishingPricePerSquareMeter: unitPrice,
+                                            finishingUnitPrice: unitPrice,
+                                            finishingCalculationBase: calculationBase,
+                                            finishingQuantity: calculateDefaultFinishingQuantity({
+                                              calculationBase,
+                                              productType: 'stair',
+                                              length: draft.lengthValue,
+                                              lengthUnit: draft.lengthUnit || 'm',
+                                              quantity: draft.quantity,
+                                              squareMeters: totals.pricingSquareMeters
+                                            })
+                                          })}
+                                          className={`w-full px-3 py-2.5 text-right transition-colors ${isSelected ? 'bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-100' : 'hover:bg-white dark:hover:bg-gray-800 text-gray-800 dark:text-gray-100'}`}
+                                        >
+                                          <div className="flex items-center justify-between gap-3">
+                                            <span className="font-medium">{option.namePersian || option.name}</span>
+                                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                                              {formatPrice(unitPrice)} / {getFinishingUnitLabel(calculationBase)}
+                                            </span>
+                                          </div>
+                                          {option.description && (
+                                            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
+                                              {option.description}
+                                            </div>
+                                          )}
+                                        </button>
+                                      );
+                                    }) : (
+                                      <div className="px-3 py-3 text-xs text-gray-500 dark:text-gray-400">
+                                        پرداختی با این جستجو پیدا نشد.
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
 
                                 {finishingCalculationBase === 'length' && (
@@ -6612,6 +6768,28 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                     ];
                   }
                   const toolsTotal = sumNumericValues(metaTools, (tool) => tool.totalPrice);
+                  const appliedSubServices: AppliedSubService[] = (draft.tools || []).map((tool) => {
+                    const selectedSubService = subServices.find((subService) => subService.id === tool.toolId);
+                    const meters = computeToolMetersForTool(stairSystemV2.stairActivePart, draft, tool);
+                    const fallbackSubService: SubService = {
+                      id: tool.toolId,
+                      code: tool.toolId,
+                      name: tool.name,
+                      namePersian: tool.name,
+                      pricePerMeter: tool.pricePerMeter || 0,
+                      calculationBase: 'length',
+                      isActive: true
+                    };
+
+                    return {
+                      id: `applied_${tool.toolId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                      subServiceId: tool.toolId,
+                      subService: selectedSubService || fallbackSubService,
+                      meter: meters,
+                      cost: meters * (tool.pricePerMeter || 0),
+                      calculationBase: selectedSubService?.calculationBase || 'length'
+                    };
+                  });
                   
                   // 🎯 Use original width for pricing (like long stone products)
                   const originalWidthCm = stoneProduct.widthValue || 0;
@@ -6747,7 +6925,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                     squareMeters: totals.sqm,
                     pricePerSquareMeter: draft.pricePerSquareMeter!,
                     totalPrice: totalPrice,
-                    description: '',
+                    description: draft.description || '',
                     currency: 'تومان',
                     isMandatory: isDraftMandatory && mandatoryPercentageValue > 0,
                     mandatoryPercentage: isDraftMandatory && mandatoryPercentageValue > 0 ? mandatoryPercentageValue : 0,
@@ -6770,10 +6948,16 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                     usedRemainingStones: [],
                     totalUsedRemainingWidth: 0,
                     totalUsedRemainingLength: 0,
-                    appliedSubServices: [],
-                    totalSubServiceCost: toolsTotal,
-                    usedLengthForSubServices: 0,
-                    usedSquareMetersForSubServices: 0,
+                    appliedSubServices,
+                    totalSubServiceCost: sumNumericValues(appliedSubServices, (applied) => applied.cost),
+                    usedLengthForSubServices: sumNumericValues(
+                      appliedSubServices.filter((applied) => applied.calculationBase === 'length'),
+                      (applied) => applied.meter
+                    ),
+                    usedSquareMetersForSubServices: sumNumericValues(
+                      appliedSubServices.filter((applied) => applied.calculationBase === 'squareMeters'),
+                      (applied) => applied.meter
+                    ),
                     cuttingBreakdown: cuttingBreakdown.length ? cuttingBreakdown : undefined,
                     standardLengthValue: stairSystemV2.stairActivePart === 'riser' ? null : (draft.standardLengthValue ?? null),
                     standardLengthUnit: stairSystemV2.stairActivePart === 'riser'

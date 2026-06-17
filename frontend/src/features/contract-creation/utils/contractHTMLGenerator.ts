@@ -9,6 +9,7 @@ import { formatQuantity, formatSquareMeters, formatPrice } from '@/lib/numberFor
  * @returns HTML string for contract printing
  */
 export const generateContractHTML = (data: any): string => {
+  const discount = data.discount || data.contractData?.discount || null;
   const productsTable = data.products && data.products.length > 0 ? `
     <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
       <thead>
@@ -24,7 +25,7 @@ export const generateContractHTML = (data: any): string => {
       <tbody>
         ${data.products.map((product: any) => `
           <tr>
-            <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.namePersian || product.product?.name || product.namePersian || product.name || 'نامشخص'}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.namePersian || product.product?.name || product.namePersian || product.name || 'نامشخص'}${product.description ? ` - ${product.description}` : ''}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.widthValue && product.product?.thicknessValue ? `${product.product.widthValue} × ${product.product.thicknessValue}` : product.length && product.width ? `${product.length} × ${product.width}` : 'نامشخص'}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatQuantity(product.quantity || 0)}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatSquareMeters(product.product?.squareMeter || product.squareMeter || 0)}</td>
@@ -79,6 +80,7 @@ export const generateContractHTML = (data: any): string => {
           <h3>روش پرداخت:</h3>
           <p><strong>روش پرداخت:</strong> ${data.payment.method}</p>
           <p><strong>مبلغ کل:</strong> ${data.payment.totalAmount ? formatPrice(data.payment.totalAmount, data.payment.currency || 'تومان') : 'نامشخص'}</p>
+          ${discount?.amount > 0 ? `<p><strong>تخفیف قرارداد${discount.percent ? ` (${discount.percent}٪)` : ''}:</strong> -${formatPrice(discount.amount, data.payment.currency || 'تومان')}</p>` : ''}
         </div>
       ` : ''}
 

@@ -13,6 +13,7 @@ import {
   FaExclamationTriangle,
   FaFileContract,
   FaPlus,
+  FaPercent,
   FaPrint,
   FaShieldAlt,
   FaSignature,
@@ -243,6 +244,7 @@ export default function DashboardPage() {
                     { title: 'مدیریت دسترسی‌ها', description: 'تنظیم مجوزها و نقش‌های سیستمی', href: '/dashboard/admin/permissions', icon: FaShieldAlt, tone: 'purple' },
                     { title: 'مدیریت بخش‌ها', description: 'واحدهای سازمانی و ارتباط آنها با کاربران', href: '/dashboard/departments', icon: FaBuilding, tone: 'success' },
                     { title: 'تنظیمات سیستم', description: 'پیکربندی عمومی ERP', href: '/dashboard/admin/settings', icon: FaCog, tone: 'warning' },
+                    { title: 'تنظیمات تخفیف قرارداد', description: 'تعریف بازه‌ها و سقف درصد تخفیف فروش', href: '/dashboard/admin/discount-settings', icon: FaPercent, tone: 'success' },
                     { title: 'امنیت سیستم', description: 'نظارت بر امنیت و فعالیت‌ها', href: '/dashboard/admin/security', icon: FaUserShield, tone: 'danger' },
                     { title: 'گزارشات مدیریتی', description: 'گزارش‌های جامع و تحلیل‌های سیستم', href: '/dashboard/admin/reports', icon: FaChartLine, tone: 'primary' },
                   ]}

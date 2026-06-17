@@ -3345,74 +3345,99 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                           فعال‌سازی پرداخت برای این محصول
                         </label>
 
-                        <div>
-                          <label htmlFor="modal-stone-finishing-search" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            جستجو در پرداخت‌ها
+                        <div className="space-y-3">
+                          {productConfig.finishingId && (
+                            <div className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-3 py-2 text-xs text-teal-800 dark:text-teal-100">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="font-semibold">
+                                    {selectedFinishing?.namePersian || selectedFinishing?.name || productConfig.finishingName || productConfig.finishingLabel || 'پرداخت ذخیره‌شده'}
+                                  </div>
+                                  <div className="mt-1 text-teal-700 dark:text-teal-200">
+                                    {formatPrice(finishingUnitPrice || 0)} / {unitLabel}
+                                    {!selectedFinishing?.isActive ? ' - خارج از کاتالوگ فعلی' : ''}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={controlsDisabled || !productConfig.finishingEnabled}
+                                  onClick={() => setProductConfig((prev: any) => ({
+                                    ...prev,
+                                    finishingId: null,
+                                    finishingName: null,
+                                    finishingLabel: null,
+                                    finishingPricePerSquareMeter: null,
+                                    finishingUnitPrice: null,
+                                    finishingCalculationBase: null,
+                                    finishingQuantity: null
+                                  }))}
+                                  className="rounded-md px-2 py-1 text-[11px] font-medium text-teal-700 hover:bg-teal-100 disabled:opacity-50 dark:text-teal-100 dark:hover:bg-teal-800"
+                                >
+                                  حذف
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          <label htmlFor="modal-stone-finishing-picker" className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                            جستجو و انتخاب پرداخت سنگ
                           </label>
                           <input
-                            id="modal-stone-finishing-search"
+                            id="modal-stone-finishing-picker"
                             value={productConfig.finishingSearchTerm || ''}
                             disabled={controlsDisabled || !productConfig.finishingEnabled}
                             onChange={(e) => setProductConfig((prev: any) => ({ ...prev, finishingSearchTerm: e.target.value }))}
-                            className="mb-3 w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all disabled:opacity-60"
-                            placeholder="نام فارسی، انگلیسی یا توضیحات"
-                          />
-                          <label htmlFor="modal-stone-finishing-select" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            انتخاب نوع پرداخت
-                          </label>
-                          <select
-                            id="modal-stone-finishing-select"
-                            value={productConfig.finishingId || ''}
-                            disabled={controlsDisabled || !productConfig.finishingEnabled}
-                            aria-label="انتخاب نوع پرداخت سنگ"
-                            title="انتخاب نوع پرداخت سنگ"
-                            onChange={(e) => {
-                              const selectedId = e.target.value;
-                              if (!selectedId) {
-                                setProductConfig((prev: any) => ({
-                                  ...prev,
-                                  finishingId: null,
-                                  finishingName: null,
-                                  finishingLabel: null,
-                                  finishingPricePerSquareMeter: null,
-                                  finishingUnitPrice: null,
-                                  finishingCalculationBase: null,
-                                  finishingQuantity: null
-                                }));
-                                return;
-                              }
-
-                              const selected = selectableStoneFinishings.find((option) => option.id === selectedId);
-                              if (!selected) return;
-
-                              setProductConfig((prev: any) => ({
-                                ...prev,
-                                finishingEnabled: true,
-                                finishingId: selected.id,
-                                finishingName: selected.namePersian || selected.name || '',
-                                finishingLabel: selected.namePersian || selected.name || '',
-                                finishingPricePerSquareMeter: getFinishingUnitPrice(selected),
-                                finishingUnitPrice: getFinishingUnitPrice(selected),
-                                finishingCalculationBase: getFinishingCalculationBase(selected),
-                                finishingQuantity: calculateDefaultFinishingQuantity({
-                                  calculationBase: getFinishingCalculationBase(selected),
-                                  productType: currentProductType as ContractProduct['productType'],
-                                  length: productConfig.length,
-                                  lengthUnit,
-                                  quantity: quantityValue,
-                                  squareMeters: pricingSquareMeters
-                                })
-                              }));
-                            }}
                             className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all disabled:opacity-60"
-                          >
-                            <option value="">انتخاب پرداخت...</option>
-                            {visibleStoneFinishings.map((option) => (
-                              <option key={option.id} value={option.id}>
-                                {option.namePersian || option.name} ({formatPrice(getFinishingUnitPrice(option))}/{getFinishingUnitLabel(getFinishingCalculationBase(option))})
-                              </option>
-                            ))}
-                          </select>
+                            placeholder="نام پرداخت سنگ را جستجو کنید..."
+                          />
+                          <div className="max-h-44 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 divide-y divide-gray-200 dark:divide-gray-700">
+                            {visibleStoneFinishings.length > 0 ? visibleStoneFinishings.map((option) => {
+                              const unitPrice = getFinishingUnitPrice(option);
+                              const calculationBase = getFinishingCalculationBase(option);
+                              const isSelected = productConfig.finishingId === option.id;
+                              return (
+                                <button
+                                  key={option.id}
+                                  type="button"
+                                  disabled={controlsDisabled || !productConfig.finishingEnabled}
+                                  onClick={() => setProductConfig((prev: any) => ({
+                                    ...prev,
+                                    finishingEnabled: true,
+                                    finishingId: option.id,
+                                    finishingName: option.namePersian || option.name || '',
+                                    finishingLabel: option.namePersian || option.name || '',
+                                    finishingPricePerSquareMeter: unitPrice,
+                                    finishingUnitPrice: unitPrice,
+                                    finishingCalculationBase: calculationBase,
+                                    finishingQuantity: calculateDefaultFinishingQuantity({
+                                      calculationBase,
+                                      productType: currentProductType as ContractProduct['productType'],
+                                      length: productConfig.length,
+                                      lengthUnit,
+                                      quantity: quantityValue,
+                                      squareMeters: pricingSquareMeters
+                                    })
+                                  }))}
+                                  className={`w-full px-3 py-2.5 text-right transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${isSelected ? 'bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-100' : 'hover:bg-white dark:hover:bg-gray-800 text-gray-800 dark:text-gray-100'}`}
+                                >
+                                  <div className="flex items-center justify-between gap-3">
+                                    <span className="font-medium">{option.namePersian || option.name}</span>
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                      {formatPrice(unitPrice)} / {getFinishingUnitLabel(calculationBase)}
+                                    </span>
+                                  </div>
+                                  {option.description && (
+                                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
+                                      {option.description}
+                                    </div>
+                                  )}
+                                </button>
+                              );
+                            }) : (
+                              <div className="px-3 py-3 text-xs text-gray-500 dark:text-gray-400">
+                                پرداختی با این جستجو پیدا نشد.
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         {productConfig.finishingEnabled && finishingCalculationBase === 'length' && (

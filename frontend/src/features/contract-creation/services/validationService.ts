@@ -113,9 +113,6 @@ export const validatePayment = (
         }
       }
       if (method === 'CHECK') {
-        if (!paymentEntry.checkNumber || !String(paymentEntry.checkNumber).trim()) {
-          errors.push('شماره چک الزامی است');
-        }
         if (!paymentEntry.checkOwnerName || !String(paymentEntry.checkOwnerName).trim()) {
           errors.push('نام صاحب چک الزامی است');
         }
@@ -223,7 +220,8 @@ export const validateWizardStep = (
       break;
       
     case 6: // Payment Method
-      const contractTotal = sumNumericValues(wizardData.products, (product) => product.totalPrice);
+      const contractTotal = toFiniteNumber(wizardData.payment.totalContractAmount) ||
+        sumNumericValues(wizardData.products, (product) => product.totalPrice);
       const paymentValidation = validatePayment(wizardData.payment, contractTotal);
       if (!paymentValidation.isValid) {
         errors.payment = paymentValidation.errors.join(', ');

@@ -231,6 +231,16 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                       {formatPriceWithRial(financialSummary.servicesTotal, financialSummary.currency)}
                     </span>
                   </div>
+                  {financialSummary.discountAmount && financialSummary.discountAmount > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">
+                        تخفیف ({financialSummary.discountPercent || 0}٪):
+                      </span>
+                      <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                        {formatPriceWithRial(financialSummary.discountAmount, financialSummary.currency)}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="text-gray-600 dark:text-gray-400">جمع پرداختی:</span>
                     <span className="font-medium text-gray-800 dark:text-white">

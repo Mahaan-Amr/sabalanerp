@@ -4,6 +4,7 @@
 import React from 'react';
 import { FaPlus, FaTrash, FaEdit, FaCheck } from 'react-icons/fa';
 import { formatPrice, formatDisplayNumber, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
+import FormattedNumberInput from '@/components/FormattedNumberInput';
 import type { ContractWizardData, PaymentEntry, PaymentEntryMethod } from '../../types/contract.types';
 
 function getPaymentMethodLabel(payment: PaymentEntry): string {
@@ -19,6 +20,13 @@ interface Step7PaymentMethodProps {
   wizardData: ContractWizardData;
   updateWizardData: (updates: Partial<ContractWizardData>) => void;
   errors: Record<string, string>;
+  baseSubtotal: number;
+  productsTotal: number;
+  discountPercent: number;
+  maxDiscountPercent: number;
+  discountAmount: number;
+  hasMatchingDiscountRange: boolean;
+  onDiscountPercentChange: (value: number) => void;
   showPaymentEntryModal: boolean;
   setShowPaymentEntryModal: (show: boolean) => void;
   onAddPaymentEntry?: () => void;
@@ -29,6 +37,13 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
   wizardData,
   updateWizardData,
   errors,
+  baseSubtotal,
+  productsTotal,
+  discountPercent,
+  maxDiscountPercent,
+  discountAmount,
+  hasMatchingDiscountRange,
+  onDiscountPercentChange,
   showPaymentEntryModal,
   setShowPaymentEntryModal,
   onAddPaymentEntry,
@@ -69,6 +84,44 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
       </div>
       
       <div className="max-w-4xl mx-auto space-y-4">
+        <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div className="space-y-1">
+              <h4 className="text-lg font-medium text-gray-800 dark:text-white">تخفیف</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                تخفیف فقط روی جمع پایه محصولات سنگی اعمال می‌شود.
+              </p>
+              <div className="grid grid-cols-1 gap-2 text-sm text-gray-600 dark:text-gray-300 sm:grid-cols-3">
+                <span>جمع پایه: {formatPrice(baseSubtotal, wizardData.payment.currency)}</span>
+                <span>جمع قبل از تخفیف: {formatPrice(productsTotal, wizardData.payment.currency)}</span>
+                <span>سقف مجاز: {formatDisplayNumber(maxDiscountPercent)}٪</span>
+              </div>
+            </div>
+            <div className="w-full md:w-44">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">درصد تخفیف</label>
+              <FormattedNumberInput
+                value={discountPercent}
+                onChange={(value) => onDiscountPercentChange(Math.min(Math.max(value || 0, 0), maxDiscountPercent))}
+                min={0}
+                max={maxDiscountPercent}
+                step={0.1}
+                disabled={!hasMatchingDiscountRange || baseSubtotal <= 0}
+                className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2.5 text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700/50 dark:text-white"
+              />
+            </div>
+          </div>
+          {!hasMatchingDiscountRange && baseSubtotal > 0 && (
+            <p className="mt-3 rounded border border-yellow-200 bg-yellow-50 p-2 text-sm text-yellow-700 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
+              برای این مبلغ پایه، بازه تخفیف فعالی تعریف نشده است.
+            </p>
+          )}
+          {discountAmount > 0 && (
+            <div className="mt-3 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
+              مبلغ تخفیف: {formatPrice(discountAmount, wizardData.payment.currency)}
+            </div>
+          )}
+        </div>
+
         {/* Summary Section */}
         <div className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

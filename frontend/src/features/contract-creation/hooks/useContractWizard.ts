@@ -82,6 +82,7 @@ const getInitialWizardData = (): ContractWizardData => ({
     currency: 'تومان',
     totalContractAmount: 0
   },
+  discount: null,
   signature: null
 });
 

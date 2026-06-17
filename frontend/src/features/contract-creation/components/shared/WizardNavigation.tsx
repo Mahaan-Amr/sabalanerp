@@ -13,6 +13,7 @@ interface WizardNavigationProps {
   loading?: boolean;
   canGoNext?: boolean;
   canGoPrevious?: boolean;
+  showSubmitOnEveryStep?: boolean;
   labels?: {
     previous?: string;
     next?: string;
@@ -30,10 +31,12 @@ export const WizardNavigation: React.FC<WizardNavigationProps> = ({
   loading = false,
   canGoNext = true,
   canGoPrevious = true,
-  labels
+  labels,
+  showSubmitOnEveryStep = false
 }) => {
   const isFirstStep = currentStep === 1;
   const isLastStep = currentStep === totalSteps;
+  const shouldShowSubmit = isLastStep || showSubmitOnEveryStep;
   const previousLabel = labels?.previous ?? 'قبلی';
   const nextLabel = labels?.next ?? 'بعدی';
   const submitLabel = labels?.submit ?? 'ثبت قرارداد';
@@ -41,7 +44,7 @@ export const WizardNavigation: React.FC<WizardNavigationProps> = ({
 
   return (
     <div className="flex justify-between items-center relative z-0">
-      {!isLastStep ? (
+      {!shouldShowSubmit ? (
         <button
           onClick={onNext}
           disabled={!canGoNext}

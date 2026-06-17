@@ -41,6 +41,7 @@ interface Contract {
   totalAmount: number | string | null;
   currency: string;
   createdAt: string;
+  accountingEditLocked?: boolean;
   customer: {
     id: string;
     firstName: string;
@@ -365,7 +366,7 @@ export default function ContractsPage() {
         disabled: actionLoading === `${contract.id}:print`,
       });
     }
-    if (contract.status === 'DRAFT') {
+    if (contractPermissions.canEdit && !contract.accountingEditLocked) {
       actions.push({ label: 'ویرایش قرارداد', href: `/dashboard/sales/contracts/${contract.id}/edit`, icon: FaEdit, tone: 'info' });
     }
 

@@ -379,7 +379,7 @@ export const computeFinishingCost = (
   }
   const calculationBase = draft.finishingCalculationBase === 'length' ? 'length' : 'squareMeters';
   const unitPrice = Number(draft.finishingUnitPrice || draft.finishingPricePerSquareMeter || 0);
-  const quantity = Number(draft.finishingQuantity || 0) || calculateDefaultFinishingQuantity({
+  const defaultQuantity = calculateDefaultFinishingQuantity({
     calculationBase,
     productType: 'stair',
     length: draft.lengthValue,
@@ -387,6 +387,10 @@ export const computeFinishingCost = (
     quantity: draft.quantity,
     squareMeters: pricingSquareMeters
   });
+  const rawQuantity = Number(draft.finishingQuantity || 0) || defaultQuantity;
+  const quantity = calculationBase === 'squareMeters' && defaultQuantity > 0
+    ? Math.min(rawQuantity, defaultQuantity)
+    : rawQuantity;
   if (quantity <= 0 || unitPrice <= 0) return 0;
   return calculateUnitFinishingCost(quantity, unitPrice);
 };

@@ -15,9 +15,11 @@ export interface WizardStep {
 interface WizardProgressBarProps {
   currentStep: number;
   steps: WizardStep[];
+  onStepClick?: (step: number) => void;
+  clickable?: boolean;
 }
 
-export const WizardProgressBar: React.FC<WizardProgressBarProps> = ({ currentStep, steps }) => {
+export const WizardProgressBar: React.FC<WizardProgressBarProps> = ({ currentStep, steps, onStepClick, clickable = false }) => {
   if (!steps.length) return null;
 
   const currentStepInfo = steps.find((step) => step.id === currentStep) || steps[0];
@@ -54,10 +56,13 @@ export const WizardProgressBar: React.FC<WizardProgressBarProps> = ({ currentSte
               const isCompleted = currentStep > step.id;
 
               return (
-                <div
+                <button
+                  type="button"
                   key={step.id}
                   aria-current={isActive ? 'step' : undefined}
-                  className={`flex w-20 flex-shrink-0 flex-col items-center rounded-lg border px-2 py-3 text-center transition ${
+                  onClick={() => clickable && onStepClick?.(step.id)}
+                  disabled={!clickable}
+                  className={`flex w-20 flex-shrink-0 flex-col items-center rounded-lg border px-2 py-3 text-center transition disabled:cursor-default ${
                     isActive
                       ? 'border-teal-500 bg-teal-500/15 text-teal-200'
                       : isCompleted
@@ -71,7 +76,7 @@ export const WizardProgressBar: React.FC<WizardProgressBarProps> = ({ currentSte
                     {isCompleted ? <FaCheck className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
                   </span>
                   <span className="line-clamp-2 text-[11px] font-semibold leading-4">{step.title}</span>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -94,7 +99,14 @@ export const WizardProgressBar: React.FC<WizardProgressBarProps> = ({ currentSte
           const isUpcoming = currentStep < step.id;
           
           return (
-            <div key={step.id} className="flex flex-col items-center relative z-0">
+            <button
+              key={step.id}
+              type="button"
+              onClick={() => clickable && onStepClick?.(step.id)}
+              disabled={!clickable}
+              className="flex flex-col items-center relative z-0 disabled:cursor-default"
+              aria-current={isActive ? 'step' : undefined}
+            >
               <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-3 transition-all duration-300 transform ${
                 isCompleted 
                   ? 'bg-gradient-to-br from-teal-500 to-teal-600 text-white shadow-lg shadow-teal-500/25 scale-105' 
@@ -117,7 +129,7 @@ export const WizardProgressBar: React.FC<WizardProgressBarProps> = ({ currentSte
               }`}>
                 {step.title}
               </span>
-            </div>
+            </button>
           );
         })}
       </div>

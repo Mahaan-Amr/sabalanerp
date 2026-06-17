@@ -3247,7 +3247,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                     });
                     const finishingQuantity =
                       productConfig.finishingQuantity ?? defaultFinishingQuantity;
-                    const maxLengthFinishingQuantity = finishingCalculationBase === 'length'
+                    const maxFinishingQuantity = defaultFinishingQuantity > 0
                       ? defaultFinishingQuantity
                       : null;
                     const finishingPricePerSquareMeter = finishingUnitPrice;
@@ -3440,18 +3440,18 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                           </div>
                         </div>
 
-                        {productConfig.finishingEnabled && finishingCalculationBase === 'length' && (
+                        {productConfig.finishingEnabled && (
                           <div>
                             <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                              مقدار فرآوری (متر)
+                              مقدار فرآوری ({unitLabel})
                             </label>
                             <FormattedNumberInput
                               value={productConfig.finishingQuantity ?? finishingQuantity}
                               onChange={(value) => {
                                 const nextValue = value && value > 0 ? value : null;
                                 const clampedValue =
-                                  nextValue && maxLengthFinishingQuantity && maxLengthFinishingQuantity > 0
-                                    ? Math.min(nextValue, maxLengthFinishingQuantity)
+                                  nextValue && maxFinishingQuantity && maxFinishingQuantity > 0
+                                    ? Math.min(nextValue, maxFinishingQuantity)
                                     : nextValue;
                                 setProductConfig((prev: any) => ({
                                   ...prev,
@@ -3459,14 +3459,14 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                                 }));
                               }}
                               min={0}
-                              max={maxLengthFinishingQuantity || undefined}
+                              max={maxFinishingQuantity || undefined}
                               step={0.01}
                               className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                              placeholder="مثال: 125"
+                              placeholder={finishingCalculationBase === 'squareMeters' ? 'مثال: 28.8' : 'مثال: 125'}
                             />
-                            {maxLengthFinishingQuantity !== null && maxLengthFinishingQuantity > 0 && (
+                            {maxFinishingQuantity !== null && maxFinishingQuantity > 0 && (
                               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                حداکثر قابل استفاده: {formatDisplayNumber(maxLengthFinishingQuantity)} {unitLabel}
+                                حداکثر قابل استفاده: {formatDisplayNumber(maxFinishingQuantity)} {unitLabel}
                               </p>
                             )}
                           </div>

@@ -27,7 +27,64 @@ export interface UpdateContractData {
   currency?: string;
   notes?: string;
   contractData?: any;
+  _relations?: {
+    items?: Array<{
+      productId: string;
+      productType?: string | null;
+      quantity: number;
+      unitPrice: number;
+      totalPrice: number;
+      description?: string | null;
+      isMandatory?: boolean;
+      mandatoryPercentage?: number | null;
+      originalTotalPrice?: number | null;
+      stairSystemId?: string | null;
+      stairPartType?: string | null;
+    }>;
+    deliveries?: Array<{
+      deliveryDate: string;
+      deliveryAddress: string;
+      driver?: string | null;
+      vehicle?: string | null;
+      notes?: string | null;
+      products: Array<{
+        productId: string;
+        quantity: number;
+        notes?: string | null;
+      }>;
+    }>;
+    payments?: Array<{
+      paymentMethod: 'CASH' | 'RECEIPT' | 'CHECK';
+      totalAmount: number;
+      currency?: string;
+      status?: 'PENDING' | 'PARTIAL' | 'COMPLETED' | 'CANCELLED';
+      paymentDate?: string | null;
+      checkNumber?: string | null;
+      checkOwnerName?: string | null;
+      handoverDate?: string | null;
+      cashType?: string | null;
+      nationalCode?: string | null;
+      notes?: string | null;
+    }>;
+  };
 }
+
+const toDecimalNumber = (value: unknown, fallback = 0): number => {
+  const parsed = parseFloat(String(value ?? ''));
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const toNullableDecimalNumber = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const toNullableDate = (value: unknown): Date | null => {
+  if (!value) return null;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
+};
 
 /**
  * Create a new sales contract
@@ -109,47 +166,159 @@ export async function updateContract(
 ) {
   // Get existing contract
   const contract = await prisma.salesContract.findUnique({
-    where: { id: contractId }
+    where: { id: contractId },
+    include: { department: true }
   });
 
   if (!contract) {
     throw new Error('Contract not found');
   }
 
-  // Only allow updates if contract is in DRAFT status
-  if (contract.status !== 'DRAFT') {
-    throw new Error('Contract cannot be modified in current status');
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { role: true, departmentId: true }
+  });
+
+  if (!user) {
+    throw new Error('User not found');
   }
 
-  // Update contract
-  const updatedContract = await prisma.salesContract.update({
-    where: { id: contractId },
-    data: {
-      title: data.title,
-      titlePersian: data.titlePersian,
-      content: data.content,
-      totalAmount: data.totalAmount ? parseFloat(String(data.totalAmount)) : contract.totalAmount,
-      currency: data.currency,
-      notes: data.notes,
-      contractData: data.contractData,
+  if (!validateContractAccess(contract, user)) {
+    throw new Error('Access denied');
+  }
+
+  const financiallyApprovedRecord = await prisma.accountingFinancialRecord.findFirst({
+    where: {
+      contractId,
+      financiallyApprovedAt: { not: null }
     },
-    include: {
-      customer: {
-        include: {
-          primaryContact: true
+    select: { id: true }
+  });
+
+  if (financiallyApprovedRecord) {
+    throw new Error('Contract cannot be modified after accounting financial approval');
+  }
+
+  const relations = data._relations;
+
+  // Update contract and relation snapshots atomically.
+  const updatedContract = await prisma.$transaction(async (tx) => {
+    if (relations) {
+      await tx.deliveryProduct.deleteMany({
+        where: {
+          delivery: { contractId }
         }
-      },
-      department: true,
-      template: true,
-      createdByUser: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          username: true,
+      });
+      await tx.delivery.deleteMany({ where: { contractId } });
+      await tx.paymentInstallment.deleteMany({
+        where: {
+          payment: { contractId }
+        }
+      });
+      await tx.payment.deleteMany({ where: { contractId } });
+      await tx.contractItem.deleteMany({ where: { contractId } });
+
+      if (relations.items?.length) {
+        await tx.contractItem.createMany({
+          data: relations.items.map((item) => ({
+            contractId,
+            productId: item.productId,
+            productType: item.productType || null,
+            quantity: toDecimalNumber(item.quantity),
+            unitPrice: toDecimalNumber(item.unitPrice),
+            totalPrice: toDecimalNumber(item.totalPrice),
+            description: item.description || null,
+            isMandatory: item.isMandatory || false,
+            mandatoryPercentage: toNullableDecimalNumber(item.mandatoryPercentage),
+            originalTotalPrice: toNullableDecimalNumber(item.originalTotalPrice),
+            stairSystemId: item.stairSystemId || null,
+            stairPartType: item.stairPartType || null
+          }))
+        });
+      }
+
+      for (const delivery of relations.deliveries || []) {
+        await tx.delivery.create({
+          data: {
+            contractId,
+            deliveryDate: toNullableDate(delivery.deliveryDate) || new Date(),
+            deliveryAddress: delivery.deliveryAddress || '',
+            driver: delivery.driver || null,
+            vehicle: delivery.vehicle || null,
+            notes: delivery.notes || null,
+            products: {
+              create: (delivery.products || []).map((product) => ({
+                productId: product.productId,
+                quantity: toDecimalNumber(product.quantity),
+                notes: product.notes || null
+              }))
+            }
+          }
+        });
+      }
+
+      if (relations.payments?.length) {
+        for (const payment of relations.payments) {
+          await tx.payment.create({
+            data: {
+              contractId,
+              paymentMethod: payment.paymentMethod,
+              totalAmount: toDecimalNumber(payment.totalAmount),
+              currency: payment.currency || 'تومان',
+              status: payment.status || 'PENDING',
+              paymentDate: toNullableDate(payment.paymentDate),
+              checkNumber: payment.checkNumber || null,
+              checkOwnerName: payment.checkOwnerName || null,
+              handoverDate: toNullableDate(payment.handoverDate),
+              cashType: payment.cashType || null,
+              nationalCode: payment.nationalCode || null,
+              notes: payment.notes || null
+            }
+          });
         }
       }
     }
+
+    return tx.salesContract.update({
+      where: { id: contractId },
+      data: {
+        title: data.title,
+        titlePersian: data.titlePersian,
+        content: data.content,
+        totalAmount: data.totalAmount ? parseFloat(String(data.totalAmount)) : contract.totalAmount,
+        currency: data.currency,
+        notes: data.notes,
+        contractData: data.contractData,
+      },
+      include: {
+        customer: {
+          include: {
+            primaryContact: true
+          }
+        },
+        department: true,
+        template: true,
+        createdByUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            username: true,
+          }
+        },
+        items: {
+          include: {
+            product: true
+          }
+        },
+        deliveries: {
+          include: {
+            products: true
+          }
+        },
+        payments: true
+      }
+    });
   });
 
   return updatedContract;
@@ -202,7 +371,21 @@ export async function getContract(contractId: string) {
     }
   });
 
-  return contract;
+  if (!contract) return contract;
+
+  const financiallyApprovedRecord = await prisma.accountingFinancialRecord.findFirst({
+    where: {
+      contractId,
+      financiallyApprovedAt: { not: null }
+    },
+    select: { id: true, financiallyApprovedAt: true }
+  });
+
+  return {
+    ...contract,
+    accountingEditLocked: Boolean(financiallyApprovedRecord),
+    accountingFinanciallyApprovedAt: financiallyApprovedRecord?.financiallyApprovedAt || null
+  };
 }
 
 /**

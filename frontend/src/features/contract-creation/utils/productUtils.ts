@@ -3,7 +3,7 @@
 
 import type { Product, ContractUsageType, StairSystemConfig } from '../types/contract.types';
 import { CONTRACT_VISIBILITY_FIELD_MAP } from '../constants/contract.constants';
-import { generateFullProductName } from './formatUtils';
+import { generateCompactProductName, generateFullProductName } from './formatUtils';
 
 /**
  * Check if a product supports a specific contract type
@@ -25,6 +25,8 @@ export const productSupportsContractType = (
  * Generate full product name (re-export from formatUtils for convenience)
  */
 export { generateFullProductName };
+
+export { generateCompactProductName };
 
 /**
  * Initialize stair system configuration with default values

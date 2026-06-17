@@ -76,7 +76,7 @@ import { useContractProductCartController } from '@/features/contract-creation/h
 import { NOSING_TYPES, PRODUCT_TYPES, WIZARD_STEPS } from '@/features/contract-creation/constants/contract.constants';
 
 // Import utilities
-import { generateFullProductName, productSupportsContractType } from '@/features/contract-creation/utils/productUtils';
+import { generateCompactProductName, generateFullProductName, productSupportsContractType } from '@/features/contract-creation/utils/productUtils';
 import { determineSlabLineCutPlan } from '@/features/contract-creation/utils/productCalculations';
 import {
   hasLayerEdgeSelection,
@@ -202,8 +202,21 @@ const findMatchingDiscountRange = (ranges: DiscountRange[], baseSubtotal: number
       return baseSubtotal >= min && baseSubtotal < max;
     }) || null;
 
-export default function CreateContractWizard() {
+interface CreateContractWizardProps {
+  mode?: 'create' | 'edit';
+  contractId?: string;
+  initialWizardData?: ContractWizardData | null;
+  initialContractStatus?: string | null;
+}
+
+export default function CreateContractWizard({
+  mode = 'create',
+  contractId,
+  initialWizardData,
+  initialContractStatus = null
+}: CreateContractWizardProps = {}) {
   const router = useRouter();
+  const isContractEditMode = mode === 'edit';
 
   const normalizeWizardStep = (step: number): number => {
     if (Number.isNaN(step)) return 1;
@@ -1098,7 +1111,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     }
     const unitPrice = toFiniteNumber(draft.finishingUnitPrice) || toFiniteNumber(draft.finishingPricePerSquareMeter);
     const calculationBase = draft.finishingCalculationBase === 'length' ? 'length' : 'squareMeters';
-    const quantity = toFiniteNumber(draft.finishingQuantity) || calculateDefaultFinishingQuantity({
+    const defaultQuantity = calculateDefaultFinishingQuantity({
       calculationBase,
       productType: 'stair',
       length: draft.lengthValue,
@@ -1106,6 +1119,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       quantity: draft.quantity,
       squareMeters: pricingSquareMeters
     });
+    const rawQuantity = toFiniteNumber(draft.finishingQuantity) || defaultQuantity;
+    const quantity = calculationBase === 'squareMeters' && defaultQuantity > 0
+      ? Math.min(rawQuantity, defaultQuantity)
+      : rawQuantity;
     if (quantity <= 0 || unitPrice <= 0) return 0;
     return calculateFinishingCost(quantity, unitPrice);
   };
@@ -1128,6 +1145,42 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       };
     })
   });
+
+  useEffect(() => {
+    if (!isContractEditMode || !initialWizardData) return;
+    setWizardData(normalizeWizardFinishingProducts({
+      ...initialWizardData,
+      customerId: initialWizardData.customerId || initialWizardData.customer?.id || '',
+      projectId: initialWizardData.projectId || initialWizardData.project?.id || '',
+      selectedProductTypeForAddition: initialWizardData.selectedProductTypeForAddition || null,
+      signature: {
+        ...(initialWizardData.signature || {
+          phoneNumber: null,
+          contractId: contractId || null,
+          contractStatus: initialContractStatus || null,
+          confirmationSent: false,
+          confirmationStatus: null,
+          linkExpiresAt: null,
+          otpExpiresAt: null,
+          attemptsUsed: 0,
+          maxAttempts: 5,
+          resendCount: 0,
+          lastSentAt: null,
+          lastOpenedAt: null
+        }),
+        contractId: contractId || initialWizardData.signature?.contractId || null,
+        contractStatus: initialContractStatus || initialWizardData.signature?.contractStatus || null
+      }
+    }));
+    setCurrentStep(1);
+    setStateRestored(true);
+    setAutosaveHydrated(true);
+    setDraftRestoredNotice(false);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+      localStorage.removeItem('contractWizardState');
+    }
+  }, [isContractEditMode, initialWizardData, contractId, initialContractStatus]);
 
   const resolveFinishingSnapshot = ({
     enabled,
@@ -1172,7 +1225,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       quantity,
       squareMeters
     });
-    const finishingQuantity = toFiniteNumber(config.finishingQuantity) || defaultQuantity;
+    const rawFinishingQuantity = toFiniteNumber(config.finishingQuantity) || defaultQuantity;
+    const finishingQuantity = calculationBase === 'squareMeters' && defaultQuantity > 0
+      ? Math.min(rawFinishingQuantity, defaultQuantity)
+      : rawFinishingQuantity;
     const cost = unitPrice > 0 && finishingQuantity > 0
       ? calculateFinishingCost(finishingQuantity, unitPrice)
       : 0;
@@ -1667,6 +1723,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
   } = productFiltering;
 
   useEffect(() => {
+    if (isContractEditMode) {
+      setAutosaveHydrated(true);
+      return;
+    }
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('returnTo') === 'contract') {
       if (!urlParams.get('step')) {
@@ -1734,6 +1794,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (isContractEditMode) return;
     if (!autosaveHydrated) return;
     if (wizardData.signature?.contractId) {
       localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
@@ -1826,9 +1887,18 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
   useEffect(() => {
     const initializeData = async () => {
       await loadData();
-      await generateContractNumber();
+      if (!isContractEditMode) {
+        await generateContractNumber();
+      }
     };
     initializeData();
+
+    if (isContractEditMode) {
+      setStateRestored(true);
+      restorationAttempted.current = true;
+      setAutosaveHydrated(true);
+      return;
+    }
 
     // Check for return from quick create
     const urlParams = new URLSearchParams(window.location.search);
@@ -3326,7 +3396,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           stairSystemId: stairSystemId,
           stairPartType: 'tread',
           stoneCode: tread.product.code,
-          stoneName: tread.product.namePersian,
+          stoneName: generateCompactProductName(tread.product) || tread.product.namePersian,
           diameterOrWidth: tread.product.widthValue,
           length: 0,
           width: 0,
@@ -3435,7 +3505,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           stairSystemId: stairSystemId,
           stairPartType: 'riser',
           stoneCode: riser.product.code,
-          stoneName: riser.product.namePersian,
+          stoneName: generateCompactProductName(riser.product) || riser.product.namePersian,
           diameterOrWidth: riser.product.widthValue,
           length: 0,
           width: 0,
@@ -3525,7 +3595,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           stairSystemId: stairSystemId,
           stairPartType: 'landing',
           stoneCode: landing.product.code,
-          stoneName: landing.product.namePersian,
+          stoneName: generateCompactProductName(landing.product) || landing.product.namePersian,
           diameterOrWidth: landing.product.widthValue,
           length: 0,
           width: 0,
@@ -4304,10 +4374,11 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
   // Partition handlers are now provided by useRemainingStoneModal hook
   // The handleAddRemainingStoneToContract function is now provided by remainingStoneModal.handleAddRemainingStoneToContract
 
-  const validateCurrentStep = (): boolean => {
+  const validateCurrentStep = (stepOverride?: number): boolean => {
     const newErrors: Record<string, string> = {};
+    const stepToValidate = stepOverride ?? currentStep;
 
-    switch (currentStep) {
+    switch (stepToValidate) {
       case 1:
         if (!wizardData.contractDate) {
           newErrors.contractDate = 'تاریخ قرارداد الزامی است';
@@ -4450,6 +4521,17 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  const validateAllSteps = (): boolean => {
+    for (let step = 1; step <= 6; step += 1) {
+      if (!validateCurrentStep(step)) {
+        setCurrentStep(step);
+        return false;
+      }
+    }
+    setErrors({});
+    return true;
   };
 
   // Reset delivery step selection when leaving the step
@@ -4738,9 +4820,12 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     setErrors,
     setLoading: setWizardLoading,
     validateCurrentStep,
+    validateAllSteps,
     generateContractHTML,
     userDepartment: userDepartment || undefined,
-    departments
+    departments,
+    mode,
+    contractId
   });
   
   return (
@@ -4800,7 +4885,15 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         )}
 
         {/* Progress Bar */}
-        <WizardProgressBar currentStep={currentStep} steps={WIZARD_STEPS as WizardStep[]} />
+        <WizardProgressBar
+          currentStep={currentStep}
+          steps={WIZARD_STEPS as WizardStep[]}
+          clickable={isContractEditMode}
+          onStepClick={(step) => {
+            setCurrentStep(step);
+            setErrors({});
+          }}
+        />
 
         {/* Step Content */}
         <div className="glass-liquid-card step-content-card p-4 sm:p-6 lg:p-8 mb-6 sm:mb-8 relative z-0">
@@ -4814,9 +4907,14 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           onPrevious={goToPreviousStep}
           onNext={goToNextStep}
           onSubmit={contractSubmission.handleCreateContract}
-          loading={loading}
+          loading={loading || wizardLoading || contractSubmission.isSubmitting}
           canGoNext={true}
           canGoPrevious={currentStep > 1}
+          showSubmitOnEveryStep={isContractEditMode}
+          labels={{
+            submit: isContractEditMode ? 'ذخیره تغییرات' : 'ثبت قرارداد',
+            submitting: isContractEditMode ? 'در حال ذخیره...' : 'در حال ثبت...'
+          }}
         />
 
         {/* Error Display */}
@@ -4995,7 +5093,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                     (getFinishingUnitPrice(selectedFinishing) || null);
                   const finishingQuantity =
                     draft.finishingQuantity ?? defaultFinishingQuantity;
-                  const maxLengthFinishingQuantity = finishingCalculationBase === 'length'
+                  const maxFinishingQuantity = defaultFinishingQuantity > 0
                     ? defaultFinishingQuantity
                     : null;
                   const finishingUnitLabel = getFinishingUnitLabel(finishingCalculationBase);
@@ -6499,18 +6597,18 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                   </div>
                                 </div>
 
-                                {finishingCalculationBase === 'length' && (
+                                {draft.finishingEnabled && (
                                   <div>
                                     <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                      مقدار فرآوری (متر)
+                                      مقدار فرآوری ({finishingUnitLabel})
                                     </label>
                                     <FormattedNumberInput
                                       value={draft.finishingQuantity ?? finishingQuantity}
                                       onChange={(value) => {
                                         const nextValue = value && value > 0 ? value : null;
                                         const clampedValue =
-                                          nextValue && maxLengthFinishingQuantity && maxLengthFinishingQuantity > 0
-                                            ? Math.min(nextValue, maxLengthFinishingQuantity)
+                                          nextValue && maxFinishingQuantity && maxFinishingQuantity > 0
+                                            ? Math.min(nextValue, maxFinishingQuantity)
                                             : nextValue;
                                         setDraft({
                                           ...draft,
@@ -6518,14 +6616,14 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                         });
                                       }}
                                       min={0}
-                                      max={maxLengthFinishingQuantity || undefined}
+                                      max={maxFinishingQuantity || undefined}
                                       step={0.01}
                                       className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                                      placeholder="مثال: 125"
+                                      placeholder={finishingCalculationBase === 'squareMeters' ? 'مثال: 28.8' : 'مثال: 125'}
                                     />
-                                    {maxLengthFinishingQuantity !== null && maxLengthFinishingQuantity > 0 && (
+                                    {maxFinishingQuantity !== null && maxFinishingQuantity > 0 && (
                                       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                        حداکثر قابل استفاده: {formatDisplayNumber(maxLengthFinishingQuantity)} {finishingUnitLabel}
+                                        حداکثر قابل استفاده: {formatDisplayNumber(maxFinishingQuantity)} {finishingUnitLabel}
                                       </p>
                                     )}
                                   </div>
@@ -6967,7 +7065,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                     stairSystemId: sid,
                     stairPartType: stairSystemV2.stairActivePart,
                     stoneCode: stoneProduct.code,
-                    stoneName: draft.stoneLabel || stoneProduct.namePersian || stoneProduct.name || '',
+                    stoneName: generateCompactProductName(stoneProduct) || draft.stoneLabel || stoneProduct.namePersian || stoneProduct.name || '',
                     diameterOrWidth: draft.thicknessCm || stoneProduct.thicknessValue || 0, // قطر = ضخامت (thickness)
                     length: storedLengthValue,
                     lengthUnit: draft.lengthUnit || 'cm',

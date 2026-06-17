@@ -18,9 +18,12 @@ interface UseContractSubmissionOptions {
   setErrors: (errors: Record<string, string>) => void;
   setLoading: (loading: boolean) => void;
   validateCurrentStep: () => boolean;
+  validateAllSteps?: () => boolean;
   generateContractHTML: (data: any) => string;
   userDepartment?: string;
   departments?: Array<{ id: string }>;
+  mode?: 'create' | 'edit';
+  contractId?: string;
 }
 
 const normalizeIranMobileNumber = (value?: string | null) => {
@@ -61,6 +64,19 @@ const getCustomerSmsPhoneNumber = (customer: ContractWizardData['customer']) => 
   return null;
 };
 
+const toIsoDate = (value?: string | null): string | undefined => {
+  if (!value) return undefined;
+  try {
+    if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(value)) {
+      return PersianCalendar.toGregorian(value, 'jYYYY/jMM/jDD').toISOString();
+    }
+  } catch (error) {
+    console.error('Error converting Persian date:', error);
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+};
+
 export const useContractSubmission = (options: UseContractSubmissionOptions) => {
   const {
     wizardData,
@@ -69,16 +85,29 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     setErrors,
     setLoading,
     validateCurrentStep,
+    validateAllSteps,
     generateContractHTML,
     userDepartment,
-    departments
+    departments,
+    mode = 'create',
+    contractId
   } = options;
 
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleCreateContract = useCallback(async () => {
-    if (!validateCurrentStep()) return;
+    const isEditMode = mode === 'edit';
+    const editContractId = contractId;
+    if (isEditMode) {
+      if (!editContractId) {
+        setErrors({ general: 'شناسه قرارداد برای ویرایش مشخص نیست.' });
+        return;
+      }
+      if (validateAllSteps && !validateAllSteps()) return;
+    } else if (!validateCurrentStep()) {
+      return;
+    }
     
     setIsSubmitting(true);
     setLoading(true);
@@ -108,7 +137,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       const productsTotal = sumNumericValues(normalizedProducts, (product) => product.totalPrice);
       const totalAmount = wizardData.payment.totalContractAmount || productsTotal;
       
-      // Create contract
+      // Create/update contract
       const contractData = {
         title: 'قرارداد فروش سنگ',
         titlePersian: 'قرارداد فروش سنگ',
@@ -125,8 +154,11 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           discount: wizardData.discount || null
         }),
         contractData: {
+          ...wizardData,
           contractNumber: wizardData.contractNumber,
           contractDate: wizardData.contractDate,
+          customerId: wizardData.customerId || wizardData.customer?.id || '',
+          projectId: wizardData.projectId || wizardData.project?.id || '',
           customer: wizardData.customer,
           project: wizardData.project,
           products: normalizedProducts,
@@ -135,15 +167,69 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           discount: wizardData.discount || null
         },
         totalAmount,
-        currency: 'تومان'
+        currency: 'تومان',
+        _relations: {
+          items: normalizedProducts.map((product) => ({
+            productId: product.productId,
+            productType: product.productType,
+            quantity: product.quantity,
+            unitPrice: product.pricePerSquareMeter,
+            totalPrice: product.totalPrice,
+            description: product.description || null,
+            isMandatory: product.isMandatory || false,
+            mandatoryPercentage: product.mandatoryPercentage || null,
+            originalTotalPrice: product.originalTotalPrice || null,
+            stairSystemId: product.stairSystemId || null,
+            stairPartType: product.stairPartType || null
+          })),
+          deliveries: wizardData.deliveries.map((delivery) => ({
+            deliveryDate: toIsoDate(delivery.deliveryDate) || new Date().toISOString(),
+            deliveryAddress: delivery.deliveryAddress || wizardData.project?.address || '',
+            driver: delivery.projectManagerName || null,
+            vehicle: delivery.receiverName || null,
+            notes: delivery.notes || null,
+            products: delivery.products.map((dp) => {
+              const product = normalizedProducts[dp.productIndex];
+              return {
+                productId: dp.productId,
+                quantity: dp.amount ?? dp.quantity,
+                notes: product?.description || null
+              };
+            })
+          })),
+          payments: wizardData.payment.payments.map((paymentEntry) => {
+            const method = paymentEntry.method as string;
+            const paymentMethod = method === 'CHECK' ? 'CHECK' : 'CASH';
+            const cashType = method === 'CASH_SHIBA' ? 'SHIBA' : method === 'CASH_CARD' ? 'CARD' : undefined;
+            return {
+              paymentMethod,
+              totalAmount: paymentEntry.amount,
+              currency: wizardData.payment.currency,
+              status: paymentEntry.status === 'PAID' ? 'COMPLETED' : 'PENDING',
+              paymentDate: toIsoDate(paymentEntry.paymentDate),
+              checkNumber: paymentEntry.checkNumber || null,
+              checkOwnerName: paymentEntry.checkOwnerName || null,
+              handoverDate: toIsoDate(paymentEntry.handoverDate),
+              cashType: cashType ?? paymentEntry.cashType ?? null,
+              nationalCode: paymentEntry.nationalCode || null,
+              notes: paymentEntry.description || null
+            };
+          })
+        }
       };
       
       console.log('Sending contract data:', contractData);
-      const response = await salesAPI.createContract(contractData);
-      console.log('Contract creation response:', response.data);
+      const response = isEditMode
+        ? await salesAPI.updateContract(editContractId as string, contractData)
+        : await salesAPI.createContract(contractData);
+      console.log('Contract submission response:', response.data);
       
       if (response.data.success) {
-        const contractId = response.data.data.id;
+        if (isEditMode) {
+          router.push(`/dashboard/sales/contracts/${editContractId}`);
+          return;
+        }
+        const createdContractId = response.data.data.id;
         const savedContractNumber = response.data.data.contractNumber || wizardData.contractNumber;
         const creatorSequenceNumber = response.data.data.creatorSequenceNumber ?? wizardData.creatorSequenceNumber ?? null;
         
@@ -166,7 +252,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
               lastSentAt: null,
               lastOpenedAt: null
             }),
-            contractId: contractId,
+            contractId: createdContractId,
             contractStatus: response.data.data.status || null,
             phoneNumber: getCustomerSmsPhoneNumber(wizardData.customer)
           }
@@ -174,7 +260,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         
         // Create contract items
         for (const product of normalizedProducts) {
-          await salesAPI.createContractItem(contractId, {
+          await salesAPI.createContractItem(createdContractId, {
             productId: product.productId,
             productType: product.productType,
             quantity: product.quantity,
@@ -192,7 +278,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         
         // Create deliveries
         for (const delivery of wizardData.deliveries) {
-          await salesAPI.createDelivery(contractId, {
+          await salesAPI.createDelivery(createdContractId, {
             deliveryDate: delivery.deliveryDate,
             deliveryAddress: wizardData.project?.address || '',
             driver: delivery.projectManagerName || undefined,
@@ -235,7 +321,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
 
           const paymentStatus = paymentEntry.status === 'PAID' ? 'COMPLETED' : 'PENDING';
 
-          await salesAPI.createPayment(contractId, {
+          await salesAPI.createPayment(createdContractId, {
             paymentMethod,
             totalAmount: paymentEntry.amount,
             currency: wizardData.payment.currency,
@@ -274,9 +360,13 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     setErrors,
     setLoading,
     validateCurrentStep,
+    validateAllSteps,
     generateContractHTML,
     userDepartment,
-    departments
+    departments,
+    mode,
+    contractId,
+    router
   ]);
 
   return {

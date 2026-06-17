@@ -51,6 +51,7 @@ interface Contract {
   signedAt?: string;
   printedAt?: string;
   isSigned?: boolean;
+  accountingEditLocked?: boolean;
   customer: {
     id: string;
     firstName: string;
@@ -315,7 +316,7 @@ export default function ContractDetailPage() {
     sumNumericValues(products, (item: any) => item.totalPrice) ||
     toFiniteNumber(contract.contractData?.payment?.totalAmount);
 
-  const canEdit = contract.status === 'DRAFT' && (contractPermissions.canEdit || contract.createdByUser.id === currentUser?.id);
+  const canEdit = !contract.accountingEditLocked && (contractPermissions.canEdit || contract.createdByUser.id === currentUser?.id);
   const canApprove = (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canApprove;
   const canReject = (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canReject;
   const canSign = contract.status === 'APPROVED' && contractPermissions.canSign;

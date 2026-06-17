@@ -383,11 +383,33 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
       }
     });
 
+    const contractIds = contracts.map((contract) => contract.id);
+    const financiallyApprovedRecords = contractIds.length
+      ? await prisma.accountingFinancialRecord.findMany({
+          where: {
+            contractId: { in: contractIds },
+            financiallyApprovedAt: { not: null }
+          },
+          select: {
+            contractId: true,
+            financiallyApprovedAt: true
+          }
+        })
+      : [];
+    const financiallyApprovedByContractId = new Map(
+      financiallyApprovedRecords.map((record) => [record.contractId, record.financiallyApprovedAt])
+    );
+    const contractsWithAccountingLock = contracts.map((contract) => ({
+      ...contract,
+      accountingEditLocked: financiallyApprovedByContractId.has(contract.id),
+      accountingFinanciallyApprovedAt: financiallyApprovedByContractId.get(contract.id) || null
+    }));
+
     const total = await prisma.salesContract.count({ where: whereClause });
 
     res.json({
       success: true,
-      data: contracts,
+      data: contractsWithAccountingLock,
       pagination: {
         page,
         limit,
@@ -686,7 +708,11 @@ router.put('/contracts/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, W
         error: error.message
       });
     }
-    if (error.message === 'Access denied' || error.message === 'Contract cannot be modified in current status') {
+    if (
+      error.message === 'Access denied' ||
+      error.message === 'Contract cannot be modified in current status' ||
+      error.message === 'Contract cannot be modified after accounting financial approval'
+    ) {
       return res.status(400).json({
         success: false,
         error: error.message

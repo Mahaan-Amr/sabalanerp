@@ -37,3 +37,30 @@ export const generateFullProductName = (product: {
   return parts.join(' - ');
 };
 
+/**
+ * Generate compact product name for saved contract rows.
+ */
+export const generateCompactProductName = (product: {
+  stoneTypeNamePersian?: string;
+  cuttingDimensionNamePersian?: string;
+  widthValue?: number;
+  thicknessValue?: number;
+  mineNamePersian?: string;
+  finishNamePersian?: string;
+  namePersian?: string;
+  name?: string;
+}): string => {
+  const width = product.widthValue ? String(product.widthValue) : '';
+  const thickness = product.thicknessValue ? `ض ${product.thicknessValue}` : '';
+  const parts = [
+    product.cuttingDimensionNamePersian,
+    product.stoneTypeNamePersian,
+    width,
+    thickness,
+    product.mineNamePersian,
+    product.finishNamePersian
+  ].filter((part) => part && String(part).trim() !== '');
+
+  return parts.join(' ') || product.namePersian || product.name || '';
+};
+

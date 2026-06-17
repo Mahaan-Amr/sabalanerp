@@ -84,9 +84,25 @@ _Avoid_: wording like `قرارداد قبلا تایید شده است` when th
 The customer-facing contract output in PDF, print, and confirmation views should reflect the current saved contract details, including edited delivery plans and payment plans.
 _Avoid_: generating customer-facing output from an older creation snapshot when the contract has since been edited
 
+**قفل حسابداری قرارداد فروش**:
+A sales contract becomes immutable for sales edits only after accounting financially approves an accounting financial record for that contract.
+_Avoid_: locking sales edits merely because the contract was sales-approved, digitally signed, or printed
+
+**ویرایش مرحله‌ای قرارداد فروش**:
+Editing a sales contract uses the same step-based contract workflow as creation, with prefilled saved contract details and direct access to any step that may need correction.
+_Avoid_: a separate simplified edit form, or forcing linear navigation during edit
+
+**اعتبارسنجی ویرایش قرارداد فروش**:
+During sales contract editing, users may jump directly to any step, but saving changes requires the complete contract to be valid; validation should point the user to the first invalid step.
+_Avoid_: blocking step jumps in edit mode, or saving partially invalid edited contracts
+
 **ویرایش جزئیات محصول قرارداد**:
 Editing a saved contract product should preserve previously selected ابزار and پرداخت سنگ details from the contract snapshot, even when the current catalog record is missing or inactive. Saved labels, units, prices, and amounts should remain visible instead of being silently dropped.
 _Avoid_: resetting selected contract product details only because catalog lookup fails
+
+**نام نمایشی سنگ پله**:
+Stair contract product rows use the same compact stone identity style as longitudinal product rows, while stair part, layer, dimensions, and other stair-specific details remain separate row details.
+_Avoid_: saving or printing the full catalog product name as the stair product row name
 
 **شماره چک ناقص**:
 A check payment saved during sales contract creation without a check number. It remains valid for contract creation and output, while preserving the missing value for later accounting follow-up.

@@ -202,6 +202,7 @@ export default function CustomersPage() {
       case 'Individual': return 'حقیقی';
       case 'Company': return 'حقوقی';
       case 'Government': return 'دولتی';
+      case 'Collaborative': return 'همکاری';
       default: return type;
     }
   };
@@ -358,6 +359,7 @@ export default function CustomersPage() {
             { label: 'حقیقی', value: 'Individual' },
             { label: 'حقوقی', value: 'Company' },
             { label: 'دولتی', value: 'Government' },
+            { label: 'همکاری', value: 'Collaborative' },
           ],
         },
         {

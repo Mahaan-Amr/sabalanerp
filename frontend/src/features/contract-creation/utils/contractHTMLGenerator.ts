@@ -2,6 +2,7 @@
 // Generates HTML representation of contract for printing/PDF
 
 import { formatQuantity, formatSquareMeters, formatPrice } from '@/lib/numberFormat';
+import { getServiceRowSourceLabel, getServiceRowUnitLabel } from './contractServiceRows';
 
 /**
  * Generate HTML representation of contract data
@@ -31,6 +32,31 @@ export const generateContractHTML = (data: any): string => {
             <td style="border: 1px solid #ddd; padding: 8px;">${formatSquareMeters(product.product?.squareMeter || product.squareMeter || 0)}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${product.unitPrice ? formatPrice(product.unitPrice, product.currency || 'تومان') : 'نامشخص'}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${product.totalPrice ? formatPrice(product.totalPrice, product.currency || 'تومان') : 'نامشخص'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  ` : '';
+
+  const serviceRowsTable = data.serviceRows && data.serviceRows.length > 0 ? `
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+      <thead>
+        <tr style="background-color: #f5f5f5;">
+          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">نوع خدمت</th>
+          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">عنوان</th>
+          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">مقدار</th>
+          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">قیمت واحد</th>
+          <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">قیمت کل</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${data.serviceRows.map((row: any) => `
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 8px;">${getServiceRowSourceLabel(row.sourceType)}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${row.title || 'نامشخص'}${row.description ? ` - ${row.description}` : ''}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${formatQuantity(row.quantity || 0)} ${getServiceRowUnitLabel(row.unit)}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${formatPrice(row.unitPrice || 0, row.currency || 'تومان')}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${formatPrice(row.totalPrice || 0, row.currency || 'تومان')}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -73,6 +99,7 @@ export const generateContractHTML = (data: any): string => {
       <div style="margin: 20px 0;">
         <h3>اقلام قرارداد:</h3>
         ${productsTable}
+        ${serviceRowsTable}
       </div>
 
       ${data.payment ? `

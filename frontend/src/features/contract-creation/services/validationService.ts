@@ -167,8 +167,8 @@ export const validateWizardStep = (
       break;
       
     case 4: // Product Selection
-      if (!wizardData.products || wizardData.products.length === 0) {
-        errors.products = 'حداقل یک محصول به قرارداد اضافه کنید';
+      if ((!wizardData.products || wizardData.products.length === 0) && (!wizardData.serviceRows || wizardData.serviceRows.length === 0)) {
+        errors.products = 'حداقل یک محصول یا خدمت به قرارداد اضافه کنید';
       } else {
         // Validate each product
         wizardData.products.forEach((product, index) => {
@@ -221,7 +221,8 @@ export const validateWizardStep = (
       
     case 6: // Payment Method
       const contractTotal = toFiniteNumber(wizardData.payment.totalContractAmount) ||
-        sumNumericValues(wizardData.products, (product) => product.totalPrice);
+        sumNumericValues(wizardData.products, (product) => product.totalPrice) +
+        sumNumericValues(wizardData.serviceRows || [], (row) => row.totalPrice);
       const paymentValidation = validatePayment(wizardData.payment, contractTotal);
       if (!paymentValidation.isValid) {
         errors.payment = paymentValidation.errors.join(', ');

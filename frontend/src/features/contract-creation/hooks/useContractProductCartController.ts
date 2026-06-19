@@ -2,10 +2,15 @@ import { useCallback, useMemo } from 'react';
 import { PRODUCT_TYPES } from '../constants/contract.constants';
 import type {
   ContractProduct,
+  ContractServiceRow,
+  ContractServiceRowSourceType,
   ContractUsageType,
   ContractWizardData,
+  CuttingType,
   Product,
-  RemainingStone
+  RemainingStone,
+  StoneFinishing,
+  SubService
 } from '../types/contract.types';
 import { productSupportsContractType } from '../utils/productUtils';
 
@@ -44,7 +49,9 @@ export interface ProductCatalogController {
 
 export interface ProductCartController {
   items: ContractProduct[];
+  serviceRows: ContractServiceRow[];
   hasItems: boolean;
+  hasServiceRows: boolean;
   summary: {
     totalPrice: number;
     totalSquareMeters: number;
@@ -52,11 +59,24 @@ export interface ProductCartController {
   };
   editItem: (index: number) => void;
   removeItem: (index: number) => void;
+  updateServiceRow: (rowId: string, updates: Partial<Pick<ContractServiceRow, 'quantity' | 'unitPrice' | 'description'>>) => void;
+  removeServiceRow: (rowId: string) => void;
   useRemainingStone?: (remainingStone: RemainingStone, sourceProduct: ContractProduct) => void;
+}
+
+export interface ServiceCatalogController {
+  sourceType: ContractServiceRowSourceType;
+  setSourceType: (sourceType: ContractServiceRowSourceType) => void;
+  query: string;
+  setQuery: (term: string) => void;
+  rows: Array<SubService | CuttingType | StoneFinishing>;
+  counts: Record<ContractServiceRowSourceType, number>;
+  addRow: (sourceType: ContractServiceRowSourceType, item: SubService | CuttingType | StoneFinishing) => void;
 }
 
 export interface ContractProductCartController {
   catalog: ProductCatalogController;
+  services: ServiceCatalogController;
   cart: ProductCartController;
   draft: ContractProductDraft;
 }
@@ -65,13 +85,23 @@ interface UseContractProductCartControllerOptions {
   wizardData: ContractWizardData;
   updateWizardData: (updates: Partial<ContractWizardData>) => void;
   products: Product[];
+  subServices: SubService[];
+  cuttingTypes: CuttingType[];
+  stoneFinishings: StoneFinishing[];
   filteredProducts: Product[];
   productSearchTerm: string;
   setProductSearchTerm: (term: string) => void;
+  serviceSearchTerm: string;
+  setServiceSearchTerm: (term: string) => void;
+  serviceSourceType: ContractServiceRowSourceType;
+  setServiceSourceType: (sourceType: ContractServiceRowSourceType) => void;
   productsSummary: ProductCartController['summary'];
   selectProduct: (product: Product) => void;
   editProduct: (index: number) => void;
   removeProduct: (index: number) => void;
+  addServiceRow: (sourceType: ContractServiceRowSourceType, item: SubService | CuttingType | StoneFinishing) => void;
+  updateServiceRow: ProductCartController['updateServiceRow'];
+  removeServiceRow: (rowId: string) => void;
   useRemainingStone?: (remainingStone: RemainingStone, sourceProduct: ContractProduct) => void;
   createProduct: () => void;
 }
@@ -84,13 +114,23 @@ export const useContractProductCartController = ({
   wizardData,
   updateWizardData,
   products,
+  subServices,
+  cuttingTypes,
+  stoneFinishings,
   filteredProducts,
   productSearchTerm,
   setProductSearchTerm,
+  serviceSearchTerm,
+  setServiceSearchTerm,
+  serviceSourceType,
+  setServiceSourceType,
   productsSummary,
   selectProduct,
   editProduct,
   removeProduct,
+  addServiceRow,
+  updateServiceRow,
+  removeServiceRow,
   useRemainingStone,
   createProduct
 }: UseContractProductCartControllerOptions): ContractProductCartController => {
@@ -116,6 +156,33 @@ export const useContractProductCartController = ({
     source: null
   }), []);
 
+  const serviceCounts = useMemo(() => ({
+    tool: subServices.length,
+    cutting: cuttingTypes.length,
+    finishing: stoneFinishings.length
+  }), [cuttingTypes.length, stoneFinishings.length, subServices.length]);
+
+  const serviceRows = useMemo(() => {
+    const query = serviceSearchTerm.trim().toLowerCase();
+    const sourceRows =
+      serviceSourceType === 'tool'
+        ? subServices
+        : serviceSourceType === 'cutting'
+          ? cuttingTypes
+          : stoneFinishings;
+
+    if (!query) return sourceRows;
+    return sourceRows.filter((row) => {
+      const searchable = [
+        row.namePersian,
+        row.name,
+        'code' in row ? row.code : '',
+        row.description || ''
+      ].join(' ').toLowerCase();
+      return searchable.includes(query);
+    });
+  }, [cuttingTypes, serviceSearchTerm, serviceSourceType, stoneFinishings, subServices]);
+
   return {
     catalog: {
       query: productSearchTerm,
@@ -132,12 +199,25 @@ export const useContractProductCartController = ({
       selectProduct,
       createProduct
     },
+    services: {
+      sourceType: serviceSourceType,
+      setSourceType: setServiceSourceType,
+      query: serviceSearchTerm,
+      setQuery: setServiceSearchTerm,
+      rows: serviceRows,
+      counts: serviceCounts,
+      addRow: addServiceRow
+    },
     cart: {
       items: wizardData.products,
-      hasItems: wizardData.products.length > 0,
+      serviceRows: wizardData.serviceRows || [],
+      hasItems: wizardData.products.length > 0 || (wizardData.serviceRows || []).length > 0,
+      hasServiceRows: (wizardData.serviceRows || []).length > 0,
       summary: productsSummary,
       editItem: editProduct,
       removeItem: removeProduct,
+      updateServiceRow,
+      removeServiceRow,
       useRemainingStone
     },
     draft

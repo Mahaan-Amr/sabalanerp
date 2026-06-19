@@ -439,6 +439,7 @@ export default function CustomerDetailPage() {
       case 'Individual': return 'شخصی';
       case 'Company': return 'شرکتی';
       case 'Government': return 'دولتی';
+      case 'Collaborative': return 'همکاری';
       default: return type;
     }
   };

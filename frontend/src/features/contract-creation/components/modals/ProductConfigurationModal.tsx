@@ -348,6 +348,8 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                   )}
                 </div>
 
+                {!requiresTypeSelection && (
+                <>
                 {/* Product Info - Show for longitudinal and slab products */}
                 {selectedProduct && (currentProductType === 'longitudinal' || currentProductType === 'slab') && (
                   <div className={`mb-6 p-4 rounded-lg ${
@@ -3612,6 +3614,8 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                 </div>
               )}
             </div>
+                </>
+                )}
 
                 {/* Action Buttons */}
                 <div className="mt-6 flex flex-col-reverse gap-3 border-t border-slate-200 bg-white pt-4 dark:border-slate-700 dark:bg-gray-800 sm:flex-row sm:justify-end">

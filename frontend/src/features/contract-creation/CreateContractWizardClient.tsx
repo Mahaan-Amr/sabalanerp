@@ -116,6 +116,11 @@ import {
   createContractAutosaveDraft,
   parseContractAutosaveDraft
 } from '@/features/contract-creation/utils/contractDraftStorage';
+import { getDeliverableProductEntries } from '@/features/contract-creation/utils/deliveryScheduleController';
+import {
+  createContractServiceRow,
+  recalculateContractServiceRow
+} from '@/features/contract-creation/utils/contractServiceRows';
 import {
   toMeters,
   convertMetersToUnit,
@@ -150,6 +155,9 @@ import type {
   StairPart,
   StairSystemConfig,
   ContractProduct,
+  ContractServiceRow,
+  ContractServiceRowSourceType,
+  CuttingType,
   DeliveryProductItem,
   DeliverySchedule,
   PaymentEntry,
@@ -161,6 +169,7 @@ import type {
   ContractStep8PaymentDetail,
   ContractStep8FinancialSummary,
   ContractWizardData,
+  ContractKind,
   ContractUsageType,
   SlabLineCutPlan,
   WidthSlice,
@@ -204,6 +213,7 @@ const findMatchingDiscountRange = (ranges: DiscountRange[], baseSubtotal: number
 
 interface CreateContractWizardProps {
   mode?: 'create' | 'edit';
+  contractKind?: ContractKind;
   contractId?: string;
   initialWizardData?: ContractWizardData | null;
   initialContractStatus?: string | null;
@@ -211,6 +221,7 @@ interface CreateContractWizardProps {
 
 export default function CreateContractWizard({
   mode = 'create',
+  contractKind = 'standard',
   contractId,
   initialWizardData,
   initialContractStatus = null
@@ -252,6 +263,27 @@ export default function CreateContractWizard({
   const [autosaveHydrated, setAutosaveHydrated] = useState(false);
   const [discountRanges, setDiscountRanges] = useState<DiscountRange[]>([]);
   const [discountPercentInput, setDiscountPercentInput] = useState<number>(0);
+  const [serviceSearchTerm, setServiceSearchTerm] = useState('');
+  const [serviceSourceType, setServiceSourceType] = useState<ContractServiceRowSourceType>('tool');
+  const effectiveContractKind = wizardData.contractKind || contractKind;
+  const isCollaborationContract = effectiveContractKind === 'collaboration';
+  const baseVisibleWizardSteps = useMemo(
+    () => WIZARD_STEPS.filter((step) => !isCollaborationContract || step.id !== 3),
+    [isCollaborationContract]
+  );
+
+  useEffect(() => {
+    if (isContractEditMode) return;
+    if (wizardData.contractKind === contractKind) return;
+    updateWizardData({ contractKind });
+  }, [contractKind, isContractEditMode, updateWizardData, wizardData.contractKind]);
+
+  useEffect(() => {
+    if (isCollaborationContract && currentStep === 3) {
+      setCurrentStep(4);
+    }
+  }, [currentStep, isCollaborationContract, setCurrentStep]);
+
   // Stair stepper v2 states are now provided by useStairSystemV2 hook
   const [useStairFlowV2, setUseStairFlowV2] = useState(true); // Feature flag - stays local
   const stairSystemV2 = useStairSystemV2({
@@ -297,9 +329,20 @@ export default function CreateContractWizard({
     getCuttingTypePricePerMeter
   } = dataLoading;
 
+  const customerOptions = useMemo(
+    () => isCollaborationContract
+      ? customers.filter((customer) => customer.customerType === 'Collaborative')
+      : customers,
+    [customers, isCollaborationContract]
+  );
+
   const contractProductsTotal = useMemo(
     () => sumNumericValues(wizardData.products, (product) => product.totalPrice),
     [wizardData.products]
+  );
+  const standaloneServicesTotal = useMemo(
+    () => sumNumericValues(wizardData.serviceRows || [], (row) => row.totalPrice),
+    [wizardData.serviceRows]
   );
   const discountBaseSubtotal = useMemo(
     () => getContractBaseSubtotal(wizardData.products),
@@ -316,7 +359,30 @@ export default function CreateContractWizard({
   const appliedDiscountAmount = discountBaseSubtotal > 0
     ? discountBaseSubtotal * (appliedDiscountPercent / 100)
     : 0;
-  const payableContractTotal = Math.max(contractProductsTotal - appliedDiscountAmount, 0);
+  const deliverableProductEntries = useMemo(
+    () => getDeliverableProductEntries(wizardData.products),
+    [wizardData.products]
+  );
+  const hasAnyContractRows = wizardData.products.length > 0 || (wizardData.serviceRows || []).length > 0;
+  const shouldSkipDeliveryStep = hasAnyContractRows && deliverableProductEntries.length === 0;
+  const visibleWizardSteps = useMemo(
+    () => baseVisibleWizardSteps.filter((step) => !shouldSkipDeliveryStep || step.id !== 5),
+    [baseVisibleWizardSteps, shouldSkipDeliveryStep]
+  );
+  const visibleCurrentStep = Math.max(
+    1,
+    (visibleWizardSteps.findIndex((step) => step.id === currentStep) >= 0
+      ? visibleWizardSteps.findIndex((step) => step.id === currentStep)
+      : 0) + 1
+  );
+
+  useEffect(() => {
+    if (shouldSkipDeliveryStep && currentStep === 5) {
+      setCurrentStep(6);
+    }
+  }, [currentStep, setCurrentStep, shouldSkipDeliveryStep]);
+  const grossContractTotal = contractProductsTotal + standaloneServicesTotal;
+  const payableContractTotal = Math.max(grossContractTotal - appliedDiscountAmount, 0);
 
   useEffect(() => {
     let isMounted = true;
@@ -371,6 +437,7 @@ export default function CreateContractWizard({
     matchingDiscountRange,
     maxDiscountPercent,
     payableContractTotal,
+    standaloneServicesTotal,
     setWizardData
   ]);
 
@@ -1129,6 +1196,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
   const normalizeWizardFinishingProducts = (data: ContractWizardData): ContractWizardData => ({
     ...data,
+    serviceRows: data.serviceRows || [],
     products: (data.products || []).map((product) => {
       const finishing = normalizeProductFinishing(product);
       if (!finishing) return product;
@@ -1150,6 +1218,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     if (!isContractEditMode || !initialWizardData) return;
     setWizardData(normalizeWizardFinishingProducts({
       ...initialWizardData,
+      contractKind: initialWizardData.contractKind || 'standard',
       customerId: initialWizardData.customerId || initialWizardData.customer?.id || '',
       projectId: initialWizardData.projectId || initialWizardData.project?.id || '',
       selectedProductTypeForAddition: initialWizardData.selectedProductTypeForAddition || null,
@@ -1467,7 +1536,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
   // Wizard data is now provided by useContractWizard hook
 
   // Contract summary hook provides all computed values
-  const contractSummary = useContractSummary(wizardData.products);
+  const contractSummary = useContractSummary(wizardData.products, wizardData.serviceRows || []);
   const {
     productsSummary,
     serviceEntries,
@@ -1475,6 +1544,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     productPriceEntries,
     contractGrandTotal
   } = contractSummary;
+  const contractCartSummary = useMemo(() => ({
+    ...productsSummary,
+    totalPrice: contractGrandTotal
+  }), [contractGrandTotal, productsSummary]);
 
 
   const serviceTypeMeta: Record<'tool' | 'layer' | 'cut' | 'finishing', { label: string; badgeClass: string; chipClass: string }> = {
@@ -1705,7 +1778,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
   // Product filtering hook provides all filtered lists
   const productFiltering = useProductFiltering({
-    customers,
+    customers: customerOptions,
     products,
     customerSearchTerm,
     productSearchTerm,
@@ -3006,17 +3079,58 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     router.push(`/dashboard/sales/products/create?returnTo=contract&step=${currentStep}`);
   };
 
+  const handleAddServiceRow = (
+    sourceType: ContractServiceRowSourceType,
+    item: SubService | CuttingType | StoneFinishing
+  ) => {
+    const row = createContractServiceRow(sourceType, item);
+    updateWizardData({
+      serviceRows: [...(wizardData.serviceRows || []), row]
+    });
+    setErrors(prev => {
+      const { products: _productsError, ...rest } = prev;
+      return rest;
+    });
+  };
+
+  const handleUpdateServiceRow = (
+    rowId: string,
+    updates: Partial<Pick<ContractServiceRow, 'quantity' | 'unitPrice' | 'description'>>
+  ) => {
+    updateWizardData({
+      serviceRows: (wizardData.serviceRows || []).map((row) =>
+        row.id === rowId ? recalculateContractServiceRow(row, updates) : row
+      )
+    });
+  };
+
+  const handleRemoveServiceRow = (rowId: string) => {
+    updateWizardData({
+      serviceRows: (wizardData.serviceRows || []).filter((row) => row.id !== rowId)
+    });
+  };
+
   const productCartController = useContractProductCartController({
     wizardData,
     updateWizardData,
     products,
+    subServices,
+    cuttingTypes,
+    stoneFinishings,
     filteredProducts,
     productSearchTerm,
     setProductSearchTerm,
-    productsSummary,
+    serviceSearchTerm,
+    setServiceSearchTerm,
+    serviceSourceType,
+    setServiceSourceType,
+    productsSummary: contractCartSummary,
     selectProduct: handleProductSelection,
     editProduct: handleEditProduct,
     removeProduct: handleRemoveProductFromContract,
+    addServiceRow: handleAddServiceRow,
+    updateServiceRow: handleUpdateServiceRow,
+    removeServiceRow: handleRemoveServiceRow,
     useRemainingStone: handleCreateFromRemainingStone,
     createProduct: handleCreateProductFromContractFlow
   });
@@ -3087,7 +3201,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     }
 
     const totalAmount = wizardData.payment.totalContractAmount ||
-      sumNumericValues(wizardData.products, (product) => product.totalPrice);
+      sumNumericValues(wizardData.products, (product) => product.totalPrice) +
+      sumNumericValues(wizardData.serviceRows || [], (row) => row.totalPrice);
 
     await salesAPI.updateContract(contractId, {
       content: generateContractHTML(wizardData),
@@ -4390,16 +4505,22 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         }
         break;
       case 3:
+        if (isCollaborationContract) {
+          break;
+        }
         if (!wizardData.projectId) {
           newErrors.projectId = 'انتخاب پروژه الزامی است';
         }
         break;
       case 4:
-        if (wizardData.products.length === 0) {
-          newErrors.products = 'انتخاب حداقل یک محصول الزامی است';
+        if (wizardData.products.length === 0 && (wizardData.serviceRows || []).length === 0) {
+          newErrors.products = 'انتخاب حداقل یک محصول یا خدمت الزامی است';
         }
         break;
       case 5:
+        if (shouldSkipDeliveryStep) {
+          break;
+        }
         if (wizardData.deliveries.length === 0) {
           newErrors.deliveries = 'تعیین حداقل یک تحویل الزامی است';
         } else {
@@ -4439,8 +4560,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           };
 
           const remainingByProductIndex = new Map<number, number>();
-          wizardData.products.forEach((product, index) => {
-            remainingByProductIndex.set(index, getDeliveryTargetAmount(product));
+          deliverableProductEntries.forEach(({ product, productIndex }) => {
+            remainingByProductIndex.set(productIndex, getDeliveryTargetAmount(product));
           });
 
           wizardData.deliveries.forEach(delivery => {
@@ -4504,7 +4625,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                 return;
               }
             }
-            if (payment.paymentDate && String(payment.paymentDate).trim() !== getCurrentPersianDate()) {
+            if (!isContractEditMode && payment.paymentDate && String(payment.paymentDate).trim() !== getCurrentPersianDate()) {
               const paymentNationalCode = String(payment.nationalCode || '').trim();
               if (!paymentNationalCode) {
                 newErrors.paymentMethod = `کد ملی برای پرداخت ${index + 1} با تاریخ غیر از امروز الزامی است`;
@@ -4524,7 +4645,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
   };
 
   const validateAllSteps = (): boolean => {
-    for (let step = 1; step <= 6; step += 1) {
+    for (const step of visibleWizardSteps.map((wizardStep) => wizardStep.id).filter((step) => step <= 6)) {
       if (!validateCurrentStep(step)) {
         setCurrentStep(step);
         return false;
@@ -4543,13 +4664,21 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
   const goToNextStep = () => {
     if (validateCurrentStep()) {
-      setCurrentStep(prev => Math.min(prev + 1, WIZARD_STEPS.length));
+      setCurrentStep(prev => {
+        const currentIndex = visibleWizardSteps.findIndex((step) => step.id === prev);
+        const nextStep = visibleWizardSteps[currentIndex + 1];
+        return nextStep?.id ?? prev;
+      });
       setErrors({});
     }
   };
 
   const goToPreviousStep = () => {
-    setCurrentStep(prev => Math.max(prev - 1, 1));
+    setCurrentStep(prev => {
+      const currentIndex = visibleWizardSteps.findIndex((step) => step.id === prev);
+      const previousStep = visibleWizardSteps[currentIndex - 1];
+      return previousStep?.id ?? prev;
+    });
     setErrors({});
   };
 
@@ -4579,7 +4708,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             errors={errors}
             customerSearchTerm={customerSearchTerm}
             setCustomerSearchTerm={setCustomerSearchTerm}
-            customers={customers}
+            customers={customerOptions}
             filteredCustomers={filteredCustomers}
             currentStep={currentStep}
             isOwnerScopedUser={currentUser?.role !== 'ADMIN'}
@@ -4620,7 +4749,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             updateWizardData={updateWizardData}
             errors={errors}
             baseSubtotal={discountBaseSubtotal}
-            productsTotal={contractProductsTotal}
+            productsTotal={grossContractTotal}
             discountPercent={appliedDiscountPercent}
             maxDiscountPercent={maxDiscountPercent}
             discountAmount={appliedDiscountAmount}
@@ -4861,6 +4990,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                     setDraftRestoredNotice(false);
                     setCurrentStep(1);
                     setWizardData({
+                      contractKind,
                       contractDate: getCurrentPersianDate(),
                       contractNumber: '',
                       creatorSequenceNumber: null,
@@ -4870,6 +5000,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                       project: null,
                       selectedProductTypeForAddition: null,
                       products: [],
+                      serviceRows: [],
                       deliveries: [],
                       payment: { payments: [], currency: 'تومان', totalContractAmount: 0 },
                       signature: null
@@ -4887,7 +5018,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         {/* Progress Bar */}
         <WizardProgressBar
           currentStep={currentStep}
-          steps={WIZARD_STEPS as WizardStep[]}
+          steps={visibleWizardSteps as WizardStep[]}
           clickable={isContractEditMode}
           onStepClick={(step) => {
             setCurrentStep(step);
@@ -4902,14 +5033,14 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
         {/* Navigation */}
         <WizardNavigation
-          currentStep={currentStep}
-          totalSteps={WIZARD_STEPS.length}
+          currentStep={visibleCurrentStep}
+          totalSteps={visibleWizardSteps.length}
           onPrevious={goToPreviousStep}
           onNext={goToNextStep}
           onSubmit={contractSubmission.handleCreateContract}
           loading={loading || wizardLoading || contractSubmission.isSubmitting}
           canGoNext={true}
-          canGoPrevious={currentStep > 1}
+          canGoPrevious={visibleCurrentStep > 1}
           showSubmitOnEveryStep={isContractEditMode}
           labels={{
             submit: isContractEditMode ? 'ذخیره تغییرات' : 'ثبت قرارداد',

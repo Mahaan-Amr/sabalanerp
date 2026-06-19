@@ -6,10 +6,15 @@ import { FaSearch, FaPlus, FaCheck, FaEdit, FaTrash } from 'react-icons/fa';
 import { formatPrice, formatSquareMeters, formatQuantity, formatDisplayNumber } from '@/lib/numberFormat';
 import { generateFullProductName } from '../../utils/productUtils';
 import {
+  getServiceRowSourceLabel,
+  getServiceRowUnitLabel,
+  getServiceRowUnitPriceFromCatalog
+} from '../../utils/contractServiceRows';
+import {
   isUsableRemainingStone,
   normalizeRemainingStoneCollection
 } from '../../utils/remainingStoneGuards';
-import type { ContractProduct } from '../../types/contract.types';
+import type { ContractProduct, ContractServiceRowSourceType } from '../../types/contract.types';
 import type { RemainingStone } from '../../types/contract.types';
 import type { ContractProductCartController } from '../../hooks/useContractProductCartController';
 
@@ -55,14 +60,17 @@ const getRemainingStoneUsageKeys = (stone: RemainingStone): string[] => {
   return keys;
 };
 
+const SERVICE_SOURCE_OPTIONS: ContractServiceRowSourceType[] = ['tool', 'cutting', 'finishing'];
+
 export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   controller,
   errors,
 }) => {
-  const { catalog, cart } = controller;
+  const { catalog, services, cart } = controller;
   const hasSelectedProducts = cart.hasItems;
   const hasSearch = catalog.hasSearch;
   const productsSummary = cart.summary;
+  const selectedRowCount = cart.items.length + cart.serviceRows.length;
 
   return (
     <div className="space-y-5">
@@ -266,6 +274,92 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
               ))}
             </div>
           )}
+
+          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900/60 sm:p-4">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  خدمات مستقل
+                </p>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  ابزار، برش و پرداخت سنگ از کاتالوگ‌های جدا انتخاب می‌شوند اما به یک شکل ردیف قرارداد اضافه می‌شوند.
+                </p>
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {SERVICE_SOURCE_OPTIONS.map((sourceType) => {
+                  const isActive = services.sourceType === sourceType;
+                  return (
+                    <button
+                      key={sourceType}
+                      type="button"
+                      onClick={() => services.setSourceType(sourceType)}
+                      className={`inline-flex min-h-10 flex-shrink-0 items-center justify-center rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                        isActive
+                          ? 'border-emerald-400 bg-emerald-500 text-white shadow-sm'
+                          : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+                      }`}
+                    >
+                      {getServiceRowSourceLabel(sourceType)}
+                      <span className={`mr-2 rounded-full px-2 py-0.5 text-xs ${
+                        isActive
+                          ? 'bg-white/20 text-white'
+                          : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                      }`}>
+                        {services.counts[sourceType]}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <label className="sr-only" htmlFor="contract-service-search">
+              جستجوی خدمت
+            </label>
+            <div className="relative">
+              <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                id="contract-service-search"
+                type="text"
+                placeholder="جستجو در خدمات"
+                value={services.query}
+                onChange={(event) => services.setQuery(event.target.value)}
+                className="min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 py-3 pl-4 pr-10 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder-slate-400 dark:focus:border-emerald-400 dark:focus:bg-slate-900"
+              />
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-2 xl:grid-cols-2">
+              {services.rows.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400 xl:col-span-2">
+                  خدمتی برای این جستجو پیدا نشد
+                </div>
+              ) : services.rows.slice(0, 8).map((service) => {
+                const unitPrice = getServiceRowUnitPriceFromCatalog(services.sourceType, service);
+                return (
+                  <button
+                    key={`${services.sourceType}-${service.id}`}
+                    type="button"
+                    onClick={() => services.addRow(services.sourceType, service)}
+                    className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-right transition hover:border-emerald-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:hover:border-emerald-700 dark:hover:bg-slate-900"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-semibold text-slate-900 dark:text-white">
+                          {service.namePersian || service.name || getServiceRowSourceLabel(services.sourceType)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          {formatPrice(unitPrice, 'تومان')} / {getServiceRowUnitLabel(services.sourceType === 'cutting' ? 'meter' : ('calculationBase' in service && service.calculationBase === 'squareMeters' ? 'squareMeter' : 'meter'))}
+                        </p>
+                      </div>
+                      <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200">
+                        <FaPlus className="h-3.5 w-3.5" />
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </section>
 
         <aside className="space-y-3 lg:sticky lg:top-4 lg:self-start">
@@ -276,11 +370,11 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                   لیست قرارداد
                 </h4>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  {hasSelectedProducts ? `${cart.items.length} محصول انتخاب شده` : 'محصولات انتخاب شده اینجا نمایش داده می‌شوند'}
+                  {hasSelectedProducts ? `${selectedRowCount} ردیف انتخاب شده` : 'محصولات و خدمات انتخاب شده اینجا نمایش داده می‌شوند'}
                 </p>
               </div>
               <span className="inline-flex h-10 min-w-10 items-center justify-center rounded-full bg-teal-600 px-3 text-sm font-bold text-white">
-                {cart.items.length}
+                {selectedRowCount}
               </span>
             </div>
           </div>
@@ -291,10 +385,10 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                 <FaCheck className="h-4 w-4" />
               </div>
               <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">
-                هنوز محصولی در قرارداد نیست
+                هنوز ردیفی در قرارداد نیست
               </p>
               <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                بعد از افزودن محصول، خلاصه قیمت، متراژ، و عملیات ویرایش اینجا قرار می‌گیرد.
+                بعد از افزودن محصول یا خدمت، خلاصه قیمت و عملیات ویرایش اینجا قرار می‌گیرد.
               </p>
             </div>
           ) : (
@@ -451,6 +545,71 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                   </article>
                 );
               })}
+              {cart.serviceRows.map((row) => (
+                <article
+                  key={row.id}
+                  className="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm dark:border-emerald-800 dark:bg-slate-900/60"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
+                        {getServiceRowSourceLabel(row.sourceType)}
+                      </span>
+                      <h5 className="mt-2 break-words text-base font-semibold leading-7 text-slate-900 dark:text-white">
+                        {row.title}
+                      </h5>
+                      {row.description && (
+                        <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                          {row.description}
+                        </p>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => cart.removeServiceRow(row.id)}
+                      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20"
+                      title="حذف"
+                      aria-label="حذف خدمت"
+                    >
+                      <FaTrash className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+                    <label className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        مقدار ({getServiceRowUnitLabel(row.unit)})
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={row.quantity}
+                        onChange={(event) => cart.updateServiceRow(row.id, { quantity: Number(event.target.value) || 0 })}
+                        className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-left font-semibold text-slate-800 outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </label>
+                    <label className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
+                      <span className="text-xs text-slate-500 dark:text-slate-400">قیمت واحد</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1000"
+                        value={row.unitPrice}
+                        onChange={(event) => cart.updateServiceRow(row.id, { unitPrice: Number(event.target.value) || 0 })}
+                        className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-left font-semibold text-slate-800 outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </label>
+                    <div className="col-span-2 rounded-lg bg-emerald-50 p-2 dark:bg-emerald-900/20">
+                      <p className="text-xs text-emerald-700 dark:text-emerald-300">قیمت کل</p>
+                      <p className="mt-1 font-semibold text-emerald-800 dark:text-emerald-100">
+                        {formatPrice(row.totalPrice || 0, row.currency || 'تومان')}
+                      </p>
+                    </div>
+                  </div>
+                </article>
+              ))}
             </div>
           )}
         </aside>
@@ -464,7 +623,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                 لیست قرارداد
               </p>
               <p className="truncate text-sm font-semibold text-white">
-                {cart.items.length} محصول | {formatPrice(productsSummary.totalPrice, 'تومان')}
+                {selectedRowCount} ردیف | {formatPrice(productsSummary.totalPrice, 'تومان')}
               </p>
             </div>
             <div className="flex flex-shrink-0 items-center gap-2">
@@ -472,7 +631,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                 {formatSquareMeters(productsSummary.totalSquareMeters)}
               </span>
               <span className="inline-flex h-9 min-w-9 items-center justify-center rounded-full bg-teal-500 px-2 text-sm font-bold text-white">
-                {cart.items.length}
+                {selectedRowCount}
               </span>
             </div>
           </div>

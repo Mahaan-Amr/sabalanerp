@@ -2,9 +2,10 @@
 // Provides contract summary computations including products, services, and totals
 
 import { useMemo } from 'react';
-import type { ContractProduct, StairStepperPart } from '../types/contract.types';
-import { formatDisplayNumber, formatSquareMeters, formatPrice, toFiniteNumber } from '@/lib/numberFormat';
+import type { ContractProduct, ContractServiceRow, StairStepperPart } from '../types/contract.types';
+import { formatDisplayNumber, formatSquareMeters, formatPrice, sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 import { normalizeProductFinishing } from '../utils/finishingUtils';
+import { getServiceRowUnitLabel } from '../utils/contractServiceRows';
 
 interface ServiceEntry {
   key: string;
@@ -59,7 +60,10 @@ const getPartDisplayLabel = (part: StairStepperPart): string => {
   return labels[part] || part;
 };
 
-export const useContractSummary = (products: ContractProduct[]): UseContractSummaryReturn => {
+export const useContractSummary = (
+  products: ContractProduct[],
+  standaloneServiceRows: ContractServiceRow[] = []
+): UseContractSummaryReturn => {
   // Calculate products summary (total price, square meters, quantity)
   const productsSummary = useMemo<ProductsSummary>(() => {
     const summary = products.reduce((acc, product) => {
@@ -208,8 +212,22 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
         });
       });
     });
+    standaloneServiceRows.forEach((row, rowIndex) => {
+      const type = row.sourceType === 'cutting' ? 'cut' : row.sourceType;
+      entries.push({
+        key: `standalone-service-${rowIndex}-${row.id}`,
+        type,
+        productName: 'خدمات مستقل',
+        description: row.title,
+        amountLabel: `${formatDisplayNumber(row.quantity || 0)} ${getServiceRowUnitLabel(row.unit)}`,
+        cost: toFiniteNumber(row.totalPrice),
+        meta: {
+          rateLabel: `${formatPrice(row.unitPrice || 0, row.currency || 'تومان')}/${getServiceRowUnitLabel(row.unit)}`
+        }
+      });
+    });
     return entries;
-  }, [products]);
+  }, [products, standaloneServiceRows]);
 
   // Calculate service totals
   const serviceTotals = useMemo<ServiceTotals>(() => {
@@ -264,7 +282,8 @@ export const useContractSummary = (products: ContractProduct[]): UseContractSumm
   }, [products]);
 
   // Calculate grand total
-  const contractGrandTotal = productsSummary.totalPrice;
+  const standaloneServicesTotal = sumNumericValues(standaloneServiceRows, (row) => row.totalPrice);
+  const contractGrandTotal = productsSummary.totalPrice + standaloneServicesTotal;
 
   return {
     productsSummary,

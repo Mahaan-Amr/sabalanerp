@@ -67,6 +67,7 @@ export const WIZARD_STEPS = [
 ] as const;
 
 const getInitialWizardData = (): ContractWizardData => ({
+  contractKind: 'standard',
   contractDate: getCurrentPersianDate(),
   contractNumber: '',
   creatorSequenceNumber: null,
@@ -76,6 +77,7 @@ const getInitialWizardData = (): ContractWizardData => ({
   project: null,
   selectedProductTypeForAddition: null,
   products: [],
+  serviceRows: [],
   deliveries: [],
   payment: {
     payments: [],
@@ -178,8 +180,9 @@ export const useContractWizard = () => {
 
   // Calculate contract total
   const contractTotal = useMemo(() => {
-    return sumNumericValues(wizardData.products, (product) => product.totalPrice);
-  }, [wizardData.products]);
+    return sumNumericValues(wizardData.products, (product) => product.totalPrice) +
+      sumNumericValues(wizardData.serviceRows || [], (row) => row.totalPrice);
+  }, [wizardData.products, wizardData.serviceRows]);
 
   // Update payment total
   const updatePaymentTotal = useCallback(() => {

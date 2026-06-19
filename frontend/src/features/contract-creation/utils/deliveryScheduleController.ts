@@ -38,6 +38,16 @@ export const syncDeliveryDefaults = (
   }));
 };
 
+export const isDeliverableContractProduct = (product: ContractProduct | undefined): product is ContractProduct => {
+  if (!product) return false;
+  return !['service', 'standalone-service'].includes(String(product.productType));
+};
+
+export const getDeliverableProductEntries = (products: ContractProduct[]): Array<{ product: ContractProduct; productIndex: number }> =>
+  products
+    .map((product, productIndex) => ({ product, productIndex }))
+    .filter(({ product }) => isDeliverableContractProduct(product));
+
 export const getDeliveryUnit = (product: ContractProduct | undefined): DeliveryUnit => {
   if (product?.productType === 'longitudinal') return 'meter';
   if (product?.productType === 'slab') return 'squareMeter';
@@ -65,4 +75,3 @@ export const getDeliveryTargetAmount = (product: ContractProduct): number => {
   if (unit === 'squareMeter') return product.squareMeters || 0;
   return product.quantity || 0;
 };
-

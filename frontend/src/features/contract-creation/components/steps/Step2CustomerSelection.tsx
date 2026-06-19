@@ -45,7 +45,15 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
       currentStep,
       wizardData
     }));
-    router.push(`/dashboard/crm/customers/create?returnTo=contract&step=${currentStep}`);
+    const params = new URLSearchParams({
+      returnTo: 'contract',
+      step: String(currentStep)
+    });
+    if (wizardData.contractKind === 'collaboration') {
+      params.set('contractKind', 'collaboration');
+      params.set('customerType', 'Collaborative');
+    }
+    router.push(`/dashboard/crm/customers/create?${params.toString()}`);
   };
 
   const handleSelectCustomer = async (customer: CrmCustomer) => {

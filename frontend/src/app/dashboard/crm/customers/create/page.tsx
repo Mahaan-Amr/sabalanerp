@@ -75,7 +75,7 @@ interface CustomerFormData {
   // Basic Information
   firstName: string;
   lastName: string;
-  customerType: 'Individual' | 'Company' | 'Government';
+  customerType: 'Individual' | 'Company' | 'Government' | 'Collaborative';
   status: 'Active' | 'Inactive' | 'Prospect' | 'Lead';
   
   // Contact Information (Step 2)
@@ -190,12 +190,26 @@ export default function CreateCustomerPage() {
     phoneNumbers: []
   });
 
+  useEffect(() => {
+    const requestedCustomerType = new URLSearchParams(window.location.search).get('customerType');
+    if (requestedCustomerType === 'Collaborative') {
+      setFormData(prev => ({ ...prev, customerType: 'Collaborative' }));
+    }
+  }, []);
+
   // Step configuration - New structure
+  const isCollaborativeCustomer = formData.customerType === 'Collaborative';
   const steps = [
     { key: 'customerType', label: 'نوع مشتری', fields: ['customerType'] },
     { key: 'basic', label: 'اطلاعات پایه', fields: ['firstName', 'lastName', 'phoneNumber1', 'phoneNumber2', 'nationalCode'] },
-    { key: 'project', label: 'اطلاعات پروژه', fields: ['projectName', 'projectAddress', 'projectCity', 'projectType'] }
+    ...(isCollaborativeCustomer ? [] : [{ key: 'project', label: 'اطلاعات پروژه', fields: ['projectName', 'projectAddress', 'projectCity', 'projectType'] }])
   ];
+
+  useEffect(() => {
+    if (step >= steps.length) {
+      setStep(Math.max(0, steps.length - 1));
+    }
+  }, [step, steps.length]);
 
   const validateStep = (stepIndex: number): boolean => {
     const currentStep = steps[stepIndex];
@@ -384,6 +398,22 @@ export default function CreateCustomerPage() {
     return ownerName || customer.ownerUser?.username || 'بدون مسئول فروش';
   };
 
+  const getContractReturnUrl = (stepParam: string | number = '2') => {
+    const urlParams = new URLSearchParams(window.location.search);
+    let contractKind = urlParams.get('contractKind');
+    try {
+      const savedStateRaw = localStorage.getItem('contractWizardState');
+      const savedState = savedStateRaw ? JSON.parse(savedStateRaw) : null;
+      contractKind = contractKind || savedState?.wizardData?.contractKind || null;
+    } catch {
+      // Fall back to the standard contract route.
+    }
+    const route = contractKind === 'collaboration'
+      ? '/dashboard/sales/contracts/collaboration/create'
+      : '/dashboard/sales/contracts/create';
+    return `${route}?returnTo=contract&step=${stepParam}`;
+  };
+
   const selectDuplicateForContract = (customer: DuplicateCustomerSuggestion) => {
     const urlParams = new URLSearchParams(window.location.search);
     const returnTo = urlParams.get('returnTo');
@@ -410,7 +440,7 @@ export default function CreateCustomerPage() {
       console.error('Error preparing duplicate customer selection:', error);
     }
 
-    router.push(`/dashboard/sales/contracts/create?returnTo=contract&step=${stepParam}`);
+    router.push(getContractReturnUrl(stepParam));
   };
 
   const handleSubmit = async () => {
@@ -497,7 +527,7 @@ export default function CreateCustomerPage() {
         
         if (returnTo === 'contract' && step) {
           // Redirect back to contract wizard
-          router.push(`/dashboard/sales/contracts/create?returnTo=contract&step=${step}`);
+          router.push(getContractReturnUrl(step));
         } else {
           // Default redirect to customers list
           router.push('/dashboard/crm/customers');
@@ -543,7 +573,7 @@ export default function CreateCustomerPage() {
               <p className="text-gray-300 mb-8">در این مرحله نوع مشتری را مشخص کنید تا فرم مناسب نمایش داده شود.</p>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
               <button
                 type="button"
                 onClick={() => handleInputChange('customerType', 'Individual')}
@@ -589,6 +619,22 @@ export default function CreateCustomerPage() {
                   <FaBuilding className="mx-auto text-3xl mb-4" />
                   <h4 className="text-lg font-semibold mb-2">دولتی</h4>
                   <p className="text-sm text-gray-300">مشتری دولتی یا عمومی</p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleInputChange('customerType', 'Collaborative')}
+                className={`p-6 rounded-lg border-2 transition-all duration-200 ${
+                  formData.customerType === 'Collaborative'
+                    ? 'border-teal-500 bg-teal-500/20 text-white'
+                    : 'border-white/20 bg-white/5 text-white hover:border-white/40 hover:bg-white/10'
+                }`}
+              >
+                <div className="text-center">
+                  <FaUser className="mx-auto text-3xl mb-4" />
+                  <h4 className="text-lg font-semibold mb-2">همکاری</h4>
+                  <p className="text-sm text-gray-300">فرد یا گروه همکار بدون پروژه</p>
                 </div>
               </button>
             </div>
@@ -930,12 +976,12 @@ export default function CreateCustomerPage() {
                     // Restore contract wizard state from localStorage
                     const savedState = localStorage.getItem('contractWizardState');
                     if (savedState) {
-                      const { currentStep, wizardData } = JSON.parse(savedState);
+                      const { currentStep } = JSON.parse(savedState);
                       // Navigate back to contract wizard with restored state
-                      router.push(`/dashboard/sales/contracts/create?returnTo=contract&step=${currentStep}`);
+                      router.push(getContractReturnUrl(currentStep));
                     } else {
                       // Fallback to contract creation
-                      router.push('/dashboard/sales/contracts/create');
+                      router.push(getContractReturnUrl(step));
                     }
                   }}
                   className="glass-liquid-btn px-6 py-3 bg-red-500/20 hover:bg-red-500/30 border-red-500/50 text-red-300 hover:text-red-200"

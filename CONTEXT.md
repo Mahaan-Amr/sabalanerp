@@ -8,6 +8,38 @@ _Avoid_: treating search as only an exact prefix lookup
 
 ## Language
 
+**فروش همکاری**:
+A sales contract kind for selling products or services to a collaborative individual or group, reusing contract pricing and payment behavior while not requiring a normal project/address selection.
+_Avoid_: treating it as a normal customer contract with an empty project
+
+**ورود فروش همکاری**:
+A dedicated contract-creation entry path that opens the shared sales contract wizard in collaboration mode. The mode is chosen before the wizard starts rather than switched inside a normal contract draft.
+_Avoid_: adding a normal-vs-collaboration choice as a required step in every contract
+
+**مشتری همکاری**:
+A CRM customer whose relationship to a sales contract is collaborative rather than a normal project customer. A مشتری همکاری can be selected for فروش همکاری without requiring project-address selection.
+_Avoid_: creating a separate non-CRM buyer record for collaborators
+
+**ردیف خدمات قرارداد**:
+A standalone price-bearing contract row for services such as ابزار, برش, پرداخت سنگ, or فرآوری when no stone product is being sold.
+_Avoid_: representing a service-only sale as a hidden or fake product
+
+**منبع خدمات قرارداد**:
+The catalog a standalone service row is selected from, such as ابزار, برش, or پرداخت سنگ. These catalogs remain separate for management and search, but once selected they become the same ردیف خدمات قرارداد shape for pricing, payment, and print output.
+_Avoid_: merging the source catalogs just because contract rows share one shape
+
+**جستجوی عددی محصول**:
+A product catalog search that treats Persian, Arabic, and Latin digits as the same value when matching numeric product details such as عرض, ضخامت, کد, and قیمت.
+_Avoid_: making users switch keyboard language to find numeric product values
+
+**سنگ مصرفی**:
+An informational customer-facing row that shows the full base stone consumed to create a sold cut product. It explains material usage and dimensions but is not a second charged product row.
+_Avoid_: adding سنگ مصرفی to contract totals, delivery quantities, or inventory as a separate sale row
+
+**ردیف قابل تحویل**:
+A contract row that must be distributed in the delivery schedule because it represents a physical stone product. Standalone service rows are price-bearing but are not قابل تحویل.
+_Avoid_: requiring delivery scheduling for service-only rows
+
 **ابزار**:
 A paid stone edge operation applied during contract pricing, calculated by length or square meter depending on the item.
 _Avoid_: ساب as a category, sub-service, tool, پرداخت سنگ

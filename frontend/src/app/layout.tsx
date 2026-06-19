@@ -4,8 +4,26 @@ import { ThemeProvider } from '@/contexts/ThemeContext'
 import { WorkspaceProvider } from '@/contexts/WorkspaceContext'
 
 export const metadata: Metadata = {
-  title: 'Sablan ERP - سیستم برنامه‌ریزی منابع سازمانی',
+  metadataBase: new URL('https://sabalanerp.com'),
+  title: 'Sabalan ERP - سیستم برنامه‌ریزی منابع سازمانی',
   description: 'سامانه یکپارچه مدیریت فرایندهای سازمانی سبلان',
+  icons: {
+    icon: '/brand/sabalan-logo.jpg',
+    shortcut: '/brand/sabalan-logo.jpg',
+    apple: '/brand/sabalan-logo.jpg',
+  },
+  openGraph: {
+    title: 'Sabalan ERP - سیستم برنامه‌ریزی منابع سازمانی',
+    description: 'سامانه یکپارچه مدیریت فرایندهای سازمانی سبلان',
+    images: ['/brand/sabalan-logo.jpg'],
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Sabalan ERP - سیستم برنامه‌ریزی منابع سازمانی',
+    description: 'سامانه یکپارچه مدیریت فرایندهای سازمانی سبلان',
+    images: ['/brand/sabalan-logo.jpg'],
+  },
 }
 
 export default function RootLayout({
@@ -17,6 +35,8 @@ export default function RootLayout({
     <html lang="fa" dir="rtl">
       <head>
         <link rel="manifest" href="/manifest.json" />
+        <link rel="icon" href="/brand/sabalan-logo.jpg" />
+        <link rel="apple-touch-icon" href="/brand/sabalan-logo.jpg" />
         <meta name="theme-color" content="#14b8a6" />
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
         <meta name="mobile-web-app-capable" content="yes" />

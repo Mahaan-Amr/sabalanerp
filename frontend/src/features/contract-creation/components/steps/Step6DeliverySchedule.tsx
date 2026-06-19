@@ -11,6 +11,7 @@ import {
   createDeliveryDraft,
   getDefaultDeliveryAddress,
   getDefaultProjectManagerName,
+  getDeliverableProductEntries,
   getDeliveryTargetAmount,
   getDeliveryUnit,
   getDeliveryUnitLabel,
@@ -36,6 +37,10 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
   const defaultDeliveryAddress = useMemo(
     () => getDefaultDeliveryAddress(wizardData),
     [wizardData]
+  );
+  const deliverableProductEntries = useMemo(
+    () => getDeliverableProductEntries(wizardData.products),
+    [wizardData.products]
   );
 
   useEffect(() => {
@@ -234,7 +239,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                   />
                 </div>
 
-                {wizardData.products.length > 0 && (
+                {deliverableProductEntries.length > 0 && (
                   <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
                     <h6 className="text-sm font-semibold text-gray-800 dark:text-white mb-1">
                       محصولات این تحویل
@@ -243,7 +248,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                       مقدار تحویل هر محصول را با واحد خودش مشخص کنید. مجموع تحویل‌ها نباید از مقدار کل قرارداد بیشتر شود.
                     </p>
                     <div className="space-y-4">
-                      {wizardData.products.map((product, productIndex) => {
+                      {deliverableProductEntries.map(({ product, productIndex }) => {
                         const deliveryUnit = getDeliveryUnit(product);
                         const contractQty = getDeliveryTargetAmount(product);
                         const alreadyAssigned = getTotalDeliveredForProduct(productIndex, index);

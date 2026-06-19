@@ -769,7 +769,7 @@ router.put('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
   }),
   body('customerType').optional({ values: 'null' }).custom((value) => {
     if (!value) return true;
-    if (!['Individual', 'Company', 'Government'].includes(String(value))) {
+    if (!['Individual', 'Company', 'Government', 'Collaborative'].includes(String(value))) {
       throw new Error('Invalid customer type');
     }
     return true;

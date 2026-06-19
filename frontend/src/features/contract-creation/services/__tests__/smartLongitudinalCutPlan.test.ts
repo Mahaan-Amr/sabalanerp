@@ -18,14 +18,14 @@ const approx = (actual: number, expected: number) => {
     seed: 1
   });
 
-  assert.equal(plan.mode, 'optimized');
-  assert.deepEqual(plan.productionPieces, [{ widthCm: 15, lengthM: 5, quantity: 2 }]);
+  assert.equal(plan.mode, 'single-strip');
+  assert.deepEqual(plan.productionPieces, [{ widthCm: 15, lengthM: 10, quantity: 1 }]);
   assert.equal(plan.remainingStones.length, 1);
-  approx(plan.remainingStones[0].width, 10);
-  approx(plan.remainingStones[0].length, 5);
-  approx(plan.consumedAreaSqm, 2);
+  approx(plan.remainingStones[0].width, 25);
+  approx(plan.remainingStones[0].length, 10);
+  approx(plan.consumedAreaSqm, 4);
   approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 10);
-  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'cross')?.meters || 0, 0.4);
+  assert.equal(plan.cuttingBreakdown.some((cut) => cut.type === 'cross'), false);
 }
 
 {
@@ -81,9 +81,37 @@ const approx = (actual: number, expected: number) => {
     seed: 4
   });
 
+  assert.equal(plan.mode, 'single-strip');
+  assert.deepEqual(plan.productionPieces, [{ widthCm: 20, lengthM: 10, quantity: 1 }]);
+  assert.equal(plan.remainingStones.length, 1);
+  approx(plan.remainingStones[0].width, 20);
+  approx(plan.remainingStones[0].length, 10);
+}
+
+{
+  const plan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 13,
+    enteredWidthUnit: 'cm',
+    enteredLength: 2,
+    enteredLengthUnit: 'm',
+    quantity: 2,
+    longitudinalRatePerMeter: 20000,
+    crossRatePerMeter: 0,
+    seed: 5
+  });
+
   assert.equal(plan.mode, 'optimized');
-  assert.equal(plan.remainingStones.length, 0);
-  assert.deepEqual(plan.productionPieces, [{ widthCm: 20, lengthM: 5, quantity: 2 }]);
+  assert.deepEqual(plan.productionPieces, [{ widthCm: 13, lengthM: 2, quantity: 2 }]);
+  assert.equal(plan.stripsPerSource, 2);
+  approx(plan.sourceLengthConsumedM, 2);
+  approx(plan.consumedAreaSqm, 0.8);
+  assert.equal(plan.remainingStones.length, 1);
+  approx(plan.remainingStones[0].width, 14);
+  approx(plan.remainingStones[0].length, 2);
+  approx(plan.remainingStones[0].squareMeters, 0.28);
+  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 4);
+  assert.equal(plan.cuttingBreakdown.some((cut) => cut.type === 'cross'), false);
 }
 
 {

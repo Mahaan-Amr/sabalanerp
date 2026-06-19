@@ -10,6 +10,7 @@ import { sumNumericValues } from '@/lib/numberFormat';
 import { mapAxiosFormErrors } from '@/lib/formErrors';
 import { CONTRACT_DRAFT_STORAGE_KEY } from '../utils/contractDraftStorage';
 import { normalizeProductFinishing } from '../utils/finishingUtils';
+import { getDeliverableProductEntries } from '../utils/deliveryScheduleController';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
@@ -135,7 +136,15 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         };
       });
       const productsTotal = sumNumericValues(normalizedProducts, (product) => product.totalPrice);
-      const totalAmount = wizardData.payment.totalContractAmount || productsTotal;
+      const serviceRowsTotal = sumNumericValues(wizardData.serviceRows || [], (row) => row.totalPrice);
+      const totalAmount = wizardData.payment.totalContractAmount || (productsTotal + serviceRowsTotal);
+      const deliverableProductIndices = new Set(getDeliverableProductEntries(normalizedProducts).map(({ productIndex }) => productIndex));
+      const contractDeliveries = deliverableProductIndices.size === 0
+        ? []
+        : wizardData.deliveries.map((delivery) => ({
+          ...delivery,
+          products: delivery.products.filter((product) => deliverableProductIndices.has(product.productIndex))
+        })).filter((delivery) => delivery.products.length > 0);
       
       // Create/update contract
       const contractData = {
@@ -149,7 +158,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           customer: wizardData.customer,
           project: wizardData.project,
           products: normalizedProducts,
-          deliveries: wizardData.deliveries,
+          serviceRows: wizardData.serviceRows || [],
+          deliveries: contractDeliveries,
           payment: wizardData.payment,
           discount: wizardData.discount || null
         }),
@@ -162,7 +172,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           customer: wizardData.customer,
           project: wizardData.project,
           products: normalizedProducts,
-          deliveries: wizardData.deliveries,
+          serviceRows: wizardData.serviceRows || [],
+          deliveries: contractDeliveries,
           payment: wizardData.payment,
           discount: wizardData.discount || null
         },
@@ -182,7 +193,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             stairSystemId: product.stairSystemId || null,
             stairPartType: product.stairPartType || null
           })),
-          deliveries: wizardData.deliveries.map((delivery) => ({
+          deliveries: contractDeliveries.map((delivery) => ({
             deliveryDate: toIsoDate(delivery.deliveryDate) || new Date().toISOString(),
             deliveryAddress: delivery.deliveryAddress || wizardData.project?.address || '',
             driver: delivery.projectManagerName || null,
@@ -277,7 +288,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         }
         
         // Create deliveries
-        for (const delivery of wizardData.deliveries) {
+        for (const delivery of contractDeliveries) {
           await salesAPI.createDelivery(createdContractId, {
             deliveryDate: delivery.deliveryDate,
             deliveryAddress: wizardData.project?.address || '',

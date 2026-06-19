@@ -7,7 +7,10 @@ export function PublicFooter() {
         <div className="grid gap-8 lg:grid-cols-[1.4fr_1fr_1fr]">
           <div>
             <div className="mb-4 flex items-center gap-3">
-              <span className="public-brand-mark">س</span>
+              <span className="h-11 w-11 overflow-hidden rounded-full border border-stone-200 bg-white shadow-sm">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/brand/sabalan-logo.jpg" alt="" className="h-full w-full object-cover" />
+              </span>
               <div>
                 <p className="font-extrabold text-stone-950">سبلان ERP</p>
                 <p className="text-sm text-stone-500">پلتفرم رسمی عملیات دیجیتال سنگ سبلان</p>

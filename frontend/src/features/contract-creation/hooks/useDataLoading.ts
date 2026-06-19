@@ -2,18 +2,13 @@
 // Manages data fetching for contract creation wizard
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import type { CrmCustomer, Product, SubService, StoneFinishing } from '../types/contract.types';
+import type { CrmCustomer, CuttingType, Product, SubService, StoneFinishing } from '../types/contract.types';
 import { crmAPI, salesAPI, servicesAPI, dashboardAPI } from '@/lib/api';
 
 interface UseDataLoadingOptions {
   autoLoad?: boolean;
   onError?: (error: string) => void;
   onDataLoaded?: () => void;
-}
-
-interface CuttingType {
-  code: string;
-  pricePerMeter: number | null;
 }
 
 interface Department {

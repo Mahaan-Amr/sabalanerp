@@ -27,7 +27,7 @@ import {
   validateRequiredIranianMobile
 } from '@/lib/phoneFormat';
 
-type CustomerType = 'Individual' | 'Company' | 'Government';
+type CustomerType = 'Individual' | 'Company' | 'Government' | 'Collaborative';
 type CustomerStatus = 'Active' | 'Inactive' | 'Prospect' | 'Lead';
 type PhoneType = 'mobile' | 'home' | 'work' | 'other';
 
@@ -526,6 +526,7 @@ export default function EditCustomerPage() {
               <option value="Individual">حقیقی</option>
               <option value="Company">حقوقی</option>
               <option value="Government">دولتی</option>
+              <option value="Collaborative">همکاری</option>
             </select>
           </div>
           <div>

@@ -138,6 +138,16 @@ export interface SubService {
   isActive: boolean;
 }
 
+export interface CuttingType {
+  id: string;
+  code: string;
+  name?: string;
+  namePersian: string;
+  description?: string;
+  pricePerMeter: number | null;
+  isActive?: boolean;
+}
+
 export interface StoneFinishing {
   id: string;
   name?: string;
@@ -200,6 +210,23 @@ export interface ServiceEntry {
   meta?: {
     rateLabel?: string;
   };
+}
+
+export type ContractServiceRowSourceType = 'tool' | 'cutting' | 'finishing';
+export type ContractServiceRowUnit = 'meter' | 'squareMeter' | 'count';
+
+export interface ContractServiceRow {
+  id: string;
+  sourceType: ContractServiceRowSourceType;
+  sourceId: string;
+  sourceCode?: string | null;
+  title: string;
+  description?: string;
+  unit: ContractServiceRowUnit;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  currency: string;
 }
 
 // Stair Part interface for individual parts of a stair system
@@ -481,7 +508,11 @@ export interface PaymentInstallment {
   notes?: string;
 }
 
+export type ContractKind = 'standard' | 'collaboration';
+
 export interface ContractWizardData {
+  contractKind?: ContractKind;
+
   // Step 1: Contract Date
   contractDate: string;
   contractNumber: string;
@@ -500,6 +531,7 @@ export interface ContractWizardData {
   
   // Step 5: Products (was Step 4)
   products: ContractProduct[];
+  serviceRows: ContractServiceRow[];
   
   // Step 6: Delivery (was Step 5)
   deliveries: DeliverySchedule[];

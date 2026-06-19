@@ -408,7 +408,10 @@ export default function ContractsPage() {
       eyebrow="فروش"
       title="قراردادهای فروش"
       description="مرور، جستجو، تایید، امضا و چاپ قراردادهای فروش با نمای موبایل‌فرست."
-      actions={[{ label: 'ثبت قرارداد', href: '/dashboard/sales/contracts/create', icon: FaPlus, tone: 'primary', variant: 'solid' }]}
+      actions={[
+        { label: 'ثبت قرارداد', href: '/dashboard/sales/contracts/create', icon: FaPlus, tone: 'primary', variant: 'solid' },
+        { label: 'ایجاد قرارداد همکاری', href: '/dashboard/sales/contracts/collaboration/create', icon: FaPlus, tone: 'info', variant: 'outline' }
+      ]}
       metrics={metrics}
       filters={[
         {

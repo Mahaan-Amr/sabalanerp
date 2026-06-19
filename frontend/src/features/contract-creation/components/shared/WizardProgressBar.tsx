@@ -23,6 +23,8 @@ export const WizardProgressBar: React.FC<WizardProgressBarProps> = ({ currentSte
   if (!steps.length) return null;
 
   const currentStepInfo = steps.find((step) => step.id === currentStep) || steps[0];
+  const currentStepIndex = Math.max(0, steps.findIndex((step) => step.id === currentStep));
+  const visibleStepNumber = currentStepIndex + 1;
   const CurrentIcon = currentStepInfo.icon;
 
   return (
@@ -35,7 +37,7 @@ export const WizardProgressBar: React.FC<WizardProgressBarProps> = ({ currentSte
             </span>
             <div className="min-w-0">
               <p className="text-xs font-semibold text-teal-300">
-                مرحله {currentStep.toLocaleString('fa-IR')} از {steps.length.toLocaleString('fa-IR')}
+                مرحله {visibleStepNumber.toLocaleString('fa-IR')} از {steps.length.toLocaleString('fa-IR')}
               </p>
               <h2 className="mt-1 text-base font-bold text-white">{currentStepInfo.title}</h2>
             </div>
@@ -43,17 +45,17 @@ export const WizardProgressBar: React.FC<WizardProgressBarProps> = ({ currentSte
           <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-800">
             <div
               className="h-full rounded-full bg-gradient-to-r from-teal-500 to-teal-300 transition-all duration-500 ease-out"
-              style={{ width: `${(currentStep / steps.length) * 100}%` }}
+              style={{ width: `${(visibleStepNumber / steps.length) * 100}%` }}
             />
           </div>
         </div>
 
         <div className="-mx-4 overflow-x-auto px-4 pb-2">
           <div className="flex min-w-max items-stretch gap-2">
-            {steps.map((step) => {
+            {steps.map((step, index) => {
               const Icon = step.icon;
               const isActive = currentStep === step.id;
-              const isCompleted = currentStep > step.id;
+              const isCompleted = currentStepIndex > index;
 
               return (
                 <button
@@ -88,15 +90,16 @@ export const WizardProgressBar: React.FC<WizardProgressBarProps> = ({ currentSte
         <div className="absolute top-6 left-6 right-6 h-0.5 bg-gray-200 dark:bg-gray-700 -z-10">
           <div 
             className="h-full bg-gradient-to-r from-teal-500 to-teal-400 transition-all duration-500 ease-out"
-            style={{ width: `${((currentStep - 1) / (steps.length - 1)) * 100}%` }}
+            style={{ width: `${steps.length > 1 ? (currentStepIndex / (steps.length - 1)) * 100 : 100}%` }}
           />
         </div>
         
         {steps.map((step) => {
           const Icon = step.icon;
           const isActive = currentStep === step.id;
-          const isCompleted = currentStep > step.id;
-          const isUpcoming = currentStep < step.id;
+          const stepIndex = steps.findIndex((candidate) => candidate.id === step.id);
+          const isCompleted = currentStepIndex > stepIndex;
+          const isUpcoming = currentStepIndex < stepIndex;
           
           return (
             <button

@@ -275,8 +275,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           {/* Sidebar Header */}
           <div className={`flex items-center border-b border-slate-200 p-4 dark:border-slate-800 lg:p-6 ${sidebarCollapsed ? 'lg:justify-center lg:p-4' : 'justify-between'}`}>
             <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-3'}`}>
-              <div className="rounded-lg border border-[#074747]/20 bg-[#074747]/10 p-2 text-[#074747] dark:border-teal-800 dark:bg-teal-900/30 dark:text-teal-100">
-                <FaFileContract className="h-6 w-6" />
+              <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-lg border border-[#074747]/20 bg-white shadow-sm dark:border-teal-800 dark:bg-slate-900">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/brand/sabalan-logo.jpg" alt="Sabalan ERP" className="h-full w-full object-cover" />
               </div>
               {!sidebarCollapsed && (
                 <h1 className="text-xl font-bold text-slate-950 dark:text-white">Sabalan ERP</h1>

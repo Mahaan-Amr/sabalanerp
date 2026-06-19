@@ -4,6 +4,7 @@
 import { useMemo } from 'react';
 import type { CrmCustomer, Product, ContractUsageType } from '../types/contract.types';
 import { productSupportsContractType } from '../utils/productUtils';
+import { normalizeDigits } from '@/lib/numberFormat';
 
 const CUSTOMER_PREVIEW_COUNT = 3;
 
@@ -25,6 +26,20 @@ interface UseProductFilteringReturn {
   filteredRiserProducts: Product[];
   filteredLandingProducts: Product[];
 }
+
+const normalizeSearchText = (value: unknown): string =>
+  normalizeDigits(String(value ?? '')).toLowerCase();
+
+const compareProductsByWidthAsc = (a: Product, b: Product): number => {
+  const widthDiff = (Number(a.widthValue) || 0) - (Number(b.widthValue) || 0);
+  if (widthDiff !== 0) return widthDiff;
+  const thicknessDiff = (Number(a.thicknessValue) || 0) - (Number(b.thicknessValue) || 0);
+  if (thicknessDiff !== 0) return thicknessDiff;
+  return normalizeSearchText(a.namePersian || a.name || a.code).localeCompare(
+    normalizeSearchText(b.namePersian || b.name || b.code),
+    'fa'
+  );
+};
 
 export const useProductFiltering = (options: UseProductFilteringOptions): UseProductFilteringReturn => {
   const {
@@ -73,7 +88,7 @@ export const useProductFiltering = (options: UseProductFilteringOptions): UsePro
       ? products.filter(product => productSupportsContractType(product, selectedType))
       : products;
 
-    const searchLower = productSearchTerm.toLowerCase().trim();
+    const searchLower = normalizeSearchText(productSearchTerm).trim();
     const searchTerms = searchLower.split(/\s+/).filter(term => term.length > 0);
 
     return eligibleProducts.filter(product => {
@@ -104,7 +119,7 @@ export const useProductFiltering = (options: UseProductFilteringOptions): UsePro
       ].filter(Boolean);
 
       // Create a single searchable text
-      const searchableText = searchableFields.join(' ').toLowerCase();
+      const searchableText = normalizeSearchText(searchableFields.join(' '));
 
       // If only one search term, use simple includes
       if (searchTerms.length === 1) {
@@ -113,7 +128,7 @@ export const useProductFiltering = (options: UseProductFilteringOptions): UsePro
 
       // If multiple search terms, all must be found (AND logic)
       return searchTerms.every(term => searchableText.includes(term));
-    });
+    }).sort(compareProductsByWidthAsc);
   }, [products, productSearchTerm, selectedProductTypeForAddition]);
 
   // Helper function to filter stair products
@@ -122,7 +137,7 @@ export const useProductFiltering = (options: UseProductFilteringOptions): UsePro
     if (!searchTerm.trim()) {
       return stairEligibleProducts.slice(-3);
     }
-    const searchLower = searchTerm.toLowerCase().trim();
+    const searchLower = normalizeSearchText(searchTerm).trim();
     const searchTerms = searchLower.split(/\s+/).filter(term => term.length > 0);
     return stairEligibleProducts.filter(product => {
       const searchableFields = [
@@ -133,11 +148,11 @@ export const useProductFiltering = (options: UseProductFilteringOptions): UsePro
         product.widthValue?.toString(), product.thicknessValue?.toString(),
         product.basePrice?.toString()
       ].filter(Boolean);
-      const searchableText = searchableFields.join(' ').toLowerCase();
+      const searchableText = normalizeSearchText(searchableFields.join(' '));
       return searchTerms.length === 1
         ? searchableText.includes(searchTerms[0])
         : searchTerms.every(term => searchableText.includes(term));
-    });
+    }).sort(compareProductsByWidthAsc);
   };
 
   // Filtered products for each stair part (independent product selection)

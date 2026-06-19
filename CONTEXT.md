@@ -28,6 +28,14 @@ _Avoid_: representing a service-only sale as a hidden or fake product
 The catalog a standalone service row is selected from, such as ابزار, برش, or پرداخت سنگ. These catalogs remain separate for management and search, but once selected they become the same ردیف خدمات قرارداد shape for pricing, payment, and print output.
 _Avoid_: merging the source catalogs just because contract rows share one shape
 
+**جستجوی عددی محصول**:
+A product catalog search that treats Persian, Arabic, and Latin digits as the same value when matching numeric product details such as عرض, ضخامت, کد, and قیمت.
+_Avoid_: making users switch keyboard language to find numeric product values
+
+**سنگ مصرفی**:
+An informational customer-facing row that shows the full base stone consumed to create a sold cut product. It explains material usage and dimensions but is not a second charged product row.
+_Avoid_: adding سنگ مصرفی to contract totals, delivery quantities, or inventory as a separate sale row
+
 **ردیف قابل تحویل**:
 A contract row that must be distributed in the delivery schedule because it represents a physical stone product. Standalone service rows are price-bearing but are not قابل تحویل.
 _Avoid_: requiring delivery scheduling for service-only rows

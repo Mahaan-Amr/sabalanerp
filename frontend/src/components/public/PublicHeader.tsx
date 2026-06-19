@@ -13,7 +13,10 @@ export function PublicHeader() {
     <header className="public-header">
       <div className="public-container flex items-center justify-between gap-5 py-5">
         <Link href="/" className="flex min-w-0 items-center gap-3" aria-label="سبلان ERP">
-          <span className="public-brand-mark">س</span>
+          <span className="h-11 w-11 overflow-hidden rounded-full border border-stone-200 bg-white shadow-sm">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/sabalan-logo.jpg" alt="" className="h-full w-full object-cover" />
+          </span>
           <span className="min-w-0">
             <span className="block text-base font-extrabold text-stone-950">سبلان ERP</span>
             <span className="block text-xs font-medium text-stone-500">سامانه عملیات دیجیتال سنگ سبلان</span>

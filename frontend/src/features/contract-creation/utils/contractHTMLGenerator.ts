@@ -11,6 +11,19 @@ import { getServiceRowSourceLabel, getServiceRowUnitLabel } from './contractServ
  */
 export const generateContractHTML = (data: any): string => {
   const discount = data.discount || data.contractData?.discount || null;
+  const getSourceMaterialSummary = (product: any): string => {
+    const smartCutPlan = product?.smartCutPlan || {};
+    const sourceWidthCm = Number(smartCutPlan.sourceWidthCm || product?.originalWidth || 0);
+    const sourceLengthM = Number(smartCutPlan.sourceLengthConsumedM || product?.originalLength || product?.actualLengthMeters || 0);
+    const sourceAreaSqm = Number(smartCutPlan.consumedAreaSqm || (sourceWidthCm > 0 && sourceLengthM > 0 ? (sourceWidthCm / 100) * sourceLengthM : 0));
+    const productWidthCm = Number(product?.width || 0);
+    const hasSourceMaterial =
+      sourceWidthCm > 0 &&
+      sourceLengthM > 0 &&
+      (Boolean(smartCutPlan.enabled) || Boolean(product?.isCut) || (productWidthCm > 0 && sourceWidthCm > productWidthCm));
+    if (!hasSourceMaterial) return '';
+    return `عرض ${sourceWidthCm} cm × طول ${sourceLengthM} m${sourceAreaSqm > 0 ? ` / ${formatSquareMeters(sourceAreaSqm)}` : ''}`;
+  };
   const productsTable = data.products && data.products.length > 0 ? `
     <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
       <thead>
@@ -24,16 +37,30 @@ export const generateContractHTML = (data: any): string => {
         </tr>
       </thead>
       <tbody>
-        ${data.products.map((product: any) => `
+        ${data.products.map((product: any) => {
+          const sourceMaterialSummary = getSourceMaterialSummary(product);
+          const productName = product.product?.namePersian || product.product?.name || product.namePersian || product.name || 'نامشخص';
+          return `
           <tr>
-            <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.namePersian || product.product?.name || product.namePersian || product.name || 'نامشخص'}${product.description ? ` - ${product.description}` : ''}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${productName}${product.description ? ` - ${product.description}` : ''}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.widthValue && product.product?.thicknessValue ? `${product.product.widthValue} × ${product.product.thicknessValue}` : product.length && product.width ? `${product.length} × ${product.width}` : 'نامشخص'}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatQuantity(product.quantity || 0)}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatSquareMeters(product.product?.squareMeter || product.squareMeter || 0)}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${product.unitPrice ? formatPrice(product.unitPrice, product.currency || 'تومان') : 'نامشخص'}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${product.totalPrice ? formatPrice(product.totalPrice, product.currency || 'تومان') : 'نامشخص'}</td>
           </tr>
-        `).join('')}
+          ${sourceMaterialSummary ? `
+            <tr>
+              <td style="border: 1px solid #ddd; padding: 8px;">سنگ مصرفی برای ${productName}</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">${sourceMaterialSummary}</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">-</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">-</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">-</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">-</td>
+            </tr>
+          ` : ''}
+        `;
+        }).join('')}
       </tbody>
     </table>
   ` : '';

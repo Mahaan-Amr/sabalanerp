@@ -97,7 +97,6 @@ export const calculateSmartLongitudinalCutPlan = ({
   enteredLengthUnit,
   quantity,
   longitudinalRatePerMeter = 0,
-  crossRatePerMeter = 0,
   optimizationEnabled = true,
   seed
 }: LongitudinalRemainingInput & {
@@ -156,59 +155,61 @@ export const calculateSmartLongitudinalCutPlan = ({
   }
 
   const possibleStrips = Math.max(1, Math.floor(sourceWidthCm / requestedWidthCm));
-  const stripsPerSource = optimizationEnabled ? possibleStrips : 1;
-  const sourceLengthConsumedM = totalRequestedLengthM / stripsPerSource;
+  const stripsPerSource = optimizationEnabled ? Math.min(possibleStrips, requestedQuantity) : 1;
+  const sourceBandsNeeded = Math.ceil(requestedQuantity / stripsPerSource);
+  const sourceLengthConsumedM = requestedLengthM * sourceBandsNeeded;
   const consumedAreaSqm = (sourceWidthCm / 100) * sourceLengthConsumedM;
   const requestedAreaSqm = (requestedWidthCm / 100) * totalRequestedLengthM;
-  const remainingWidthCm = sourceWidthCm - requestedWidthCm * stripsPerSource;
-  const mode: SmartLongitudinalCutPlan['mode'] = stripsPerSource > 1 ? 'optimized' : 'single-strip';
+  const mode: SmartLongitudinalCutPlan['mode'] = optimizationEnabled && stripsPerSource > 1 ? 'optimized' : 'single-strip';
 
   if (!longitudinalRatePerMeter) {
     warnings.push('نرخ برش طولی پیدا نشد؛ هزینه برش طولی صفر محاسبه شد.');
   }
-  if (mode === 'optimized' && !crossRatePerMeter) {
-    warnings.push('نرخ برش عرضی پیدا نشد؛ هزینه برش عرضی صفر محاسبه شد.');
-  }
-
   const productionPieces = [{
     widthCm: requestedWidthCm,
-    lengthM: sourceLengthConsumedM,
-    quantity: stripsPerSource
+    lengthM: requestedLengthM,
+    quantity: requestedQuantity
   }];
 
-  const remainingStones: RemainingStone[] = remainingWidthCm > 0
-    ? [{
-        id: `remaining_smart_${baseSeed}_0`,
-        width: remainingWidthCm,
-        length: sourceLengthConsumedM,
-        squareMeters: (remainingWidthCm / 100) * sourceLengthConsumedM,
-        isAvailable: true,
-        sourceCutId: `cut_smart_${baseSeed}_0`,
-        quantity: 1
-      }]
-    : [];
+  const remainingByDimension = new Map<string, RemainingStone>();
+  let remainingQuantityToPlan = requestedQuantity;
+  let longitudinalMeters = 0;
+  for (let bandIndex = 0; bandIndex < sourceBandsNeeded; bandIndex += 1) {
+    const piecesInBand = Math.min(stripsPerSource, remainingQuantityToPlan);
+    remainingQuantityToPlan -= piecesInBand;
+    const remainingWidthCm = sourceWidthCm - requestedWidthCm * piecesInBand;
+    const cutCount = remainingWidthCm > 0 ? piecesInBand : Math.max(piecesInBand - 1, 0);
+    longitudinalMeters += cutCount * requestedLengthM;
+
+    if (remainingWidthCm > 0) {
+      const key = `${remainingWidthCm}:${requestedLengthM}`;
+      const existing = remainingByDimension.get(key);
+      if (existing) {
+        existing.quantity = (existing.quantity || 1) + 1;
+        existing.squareMeters += (remainingWidthCm / 100) * requestedLengthM;
+      } else {
+        remainingByDimension.set(key, {
+          id: `remaining_smart_${baseSeed}_${bandIndex}`,
+          width: remainingWidthCm,
+          length: requestedLengthM,
+          squareMeters: (remainingWidthCm / 100) * requestedLengthM,
+          isAvailable: true,
+          sourceCutId: `cut_smart_${baseSeed}_${bandIndex}`,
+          quantity: 1
+        });
+      }
+    }
+  }
+  const remainingStones: RemainingStone[] = Array.from(remainingByDimension.values());
 
   const cuttingBreakdown: CuttingBreakdownEntry[] = [];
-  const longitudinalMeters = stripsPerSource * sourceLengthConsumedM;
   const longitudinalCost = longitudinalMeters * longitudinalRatePerMeter;
-  if (requestedWidthCm < sourceWidthCm) {
+  if (longitudinalMeters > 0) {
     cuttingBreakdown.push({
       type: 'longitudinal',
       meters: longitudinalMeters,
       rate: longitudinalRatePerMeter,
       cost: longitudinalCost
-    });
-  }
-
-  const needsCrossSplit = mode === 'optimized' && stripsPerSource > 1;
-  const crossMeters = needsCrossSplit ? sourceWidthCm / 100 : 0;
-  const crossCost = crossMeters * crossRatePerMeter;
-  if (needsCrossSplit) {
-    cuttingBreakdown.push({
-      type: 'cross',
-      meters: crossMeters,
-      rate: crossRatePerMeter,
-      cost: crossCost
     });
   }
 

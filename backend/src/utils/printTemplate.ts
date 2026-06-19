@@ -73,6 +73,7 @@ interface NormalizedProduct {
   layerSummary: string;
   finishingSummary: string;
   remainingSummary: string;
+  sourceMaterialSummary: string;
 }
 
 interface FlatProductRow {
@@ -486,6 +487,21 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
 
       const remainingCount = Array.isArray(product?.remainingStones) ? product.remainingStones.length : 0;
       const usedRemainingCount = Array.isArray(product?.usedRemainingStones) ? product.usedRemainingStones.length : 0;
+      const smartCutPlan = product?.smartCutPlan || {};
+      const sourceWidthCm = toNumber(smartCutPlan?.sourceWidthCm || product?.originalWidth);
+      const sourceLengthM = toNumber(smartCutPlan?.sourceLengthConsumedM || product?.originalLength || product?.actualLengthMeters);
+      const sourceAreaSqm = toNumber(
+        smartCutPlan?.consumedAreaSqm ||
+        (sourceWidthCm > 0 && sourceLengthM > 0 ? (sourceWidthCm / 100) * sourceLengthM : 0)
+      );
+      const productWidthCm = toNumber(product?.width);
+      const hasSourceMaterial =
+        sourceWidthCm > 0 &&
+        sourceLengthM > 0 &&
+        (Boolean(smartCutPlan?.enabled) || Boolean(product?.isCut) || (productWidthCm > 0 && sourceWidthCm > productWidthCm));
+      const sourceMaterialSummary = hasSourceMaterial
+        ? `عرض ${toFaNumber(sourceWidthCm, 2)} cm × طول ${toFaNumber(sourceLengthM, 2)} m${sourceAreaSqm > 0 ? ` / ${toFaNumber(sourceAreaSqm, 3)} متر مربع` : ''}`
+        : EMPTY;
 
       return {
         id: `${product?.productId || 'product'}-${index}`,
@@ -511,7 +527,8 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         finishingSummary: product?.finishingName ? `${product.finishingName} (${getFinishingAmountLabel(product)})` : EMPTY,
         remainingSummary: remainingCount > 0 || usedRemainingCount > 0
           ? `باقی‌مانده: ${toFaNumber(remainingCount)} | مصرف‌شده: ${toFaNumber(usedRemainingCount)}`
-          : EMPTY
+          : EMPTY,
+        sourceMaterialSummary
       };
     });
   }
@@ -536,7 +553,8 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
     tools: [],
     layerSummary: EMPTY,
     finishingSummary: EMPTY,
-    remainingSummary: EMPTY
+    remainingSummary: EMPTY,
+    sourceMaterialSummary: EMPTY
   }));
 };
 
@@ -737,6 +755,19 @@ const buildFlatProductRows = (products: NormalizedProduct[], currency: string, g
       rate: product.unitPrice > 0 ? formatAmount(product.unitPrice, currency) : EMPTY,
       total: formatAmount(baseAmount, currency)
     });
+
+    if (product.sourceMaterialSummary && product.sourceMaterialSummary !== EMPTY) {
+      rows.push({
+        indexLabel: '',
+        code: product.code,
+        description: `سنگ مصرفی برای ${product.name}`,
+        category: 'سنگ مصرفی',
+        dimensionsOrAmount: product.sourceMaterialSummary,
+        quantityOrArea: '',
+        rate: '',
+        total: ''
+      });
+    }
 
     if (product.isMandatory && product.mandatoryPercentage > 0 && product.originalTotalPrice > 0) {
       const mandatoryAmount = product.originalTotalPrice * (product.mandatoryPercentage / 100);

@@ -27,13 +27,19 @@ import {
   type ErpMetric,
   type ErpTone,
 } from '@/components/erp';
-import { dashboardAPI, salesAPI } from '@/lib/api';
+import { API_ORIGIN, dashboardAPI, salesAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { formatDisplayNumber, formatPrice, formatSquareMeters, sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
 import { getContractPermissions, hasFeatureAccess, User as PermissionUser } from '@/lib/permissions';
 import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
 import { normalizeProductFinishing } from '@/features/contract-creation/utils/finishingUtils';
+
+const resolveImageUrl = (url: string) => {
+  if (!url) return '';
+  if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url;
+  return `${API_ORIGIN}${url.startsWith('/') ? url : `/${url}`}`;
+};
 
 interface Contract {
   id: string;
@@ -286,6 +292,11 @@ export default function ContractDetailPage() {
     return contract.contractData?.products?.length ? contract.contractData.products : contract.items || [];
   }, [contract]);
 
+  const serviceRows = useMemo(() => {
+    if (!contract) return [];
+    return contract.contractData?.serviceRows || [];
+  }, [contract]);
+
   const deliveries = useMemo(() => {
     if (!contract) return [];
     return contract.deliveries?.length ? contract.deliveries : contract.contractData?.deliveries || [];
@@ -414,6 +425,7 @@ export default function ContractDetailPage() {
                     const unitPrice = item.unitPrice ?? item.pricePerSquareMeter ?? 0;
                     const itemTotal = item.totalPrice ?? 0;
                     const finishing = normalizeProductFinishing(item);
+                    const rowImages = Array.isArray(item.images) ? item.images : [];
 
                     return (
                       <div key={`${productName}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
@@ -426,6 +438,23 @@ export default function ContractDetailPage() {
                           </div>
                           <ErpBadge tone="primary">{formatCurrency(itemTotal, sanitizeUiText(item.currency || contract.currency, 'تومان'))}</ErpBadge>
                         </div>
+                        {rowImages.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {rowImages.slice(0, 3).map((image: string, imageIndex: number) => (
+                              <img
+                                key={`${image}-${imageIndex}`}
+                                src={resolveImageUrl(image)}
+                                alt={productName}
+                                className="h-14 w-14 rounded-md border border-slate-200 object-cover dark:border-slate-700"
+                              />
+                            ))}
+                            {rowImages.length > 3 && (
+                              <span className="inline-flex h-14 min-w-14 items-center justify-center rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                                +{rowImages.length - 3}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
                           <ErpFieldView label="تعداد" value={formatDisplayNumber(quantity)} />
                           <ErpFieldView label="متراژ" value={formatSquareMeters(squareMeters)} />
@@ -453,6 +482,52 @@ export default function ContractDetailPage() {
                 </div>
               )}
             </ErpSection>
+
+            {serviceRows.length > 0 && (
+              <ErpSection title="خدمات مستقل" description="خدمات انتخاب‌شده و توضیحات داخلی ثبت‌شده برای قرارداد.">
+                <div className="space-y-3">
+                  {serviceRows.map((row: any, index: number) => {
+                    const rowImages = Array.isArray(row.images) ? row.images : [];
+                    return (
+                      <div key={`${row.id || row.title}-${index}`} className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-800 dark:bg-emerald-900/10">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="font-semibold text-slate-900 dark:text-white">{sanitizeUiText(row.title, `خدمت ${index + 1}`)}</p>
+                            {row.description && (
+                              <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">{sanitizeUiText(row.description)}</p>
+                            )}
+                          </div>
+                          <ErpBadge tone="success">{formatCurrency(row.totalPrice || 0, sanitizeUiText(row.currency || contract.currency, 'تومان'))}</ErpBadge>
+                        </div>
+                        {rowImages.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {rowImages.slice(0, 3).map((image: string, imageIndex: number) => (
+                              <img
+                                key={`${image}-${imageIndex}`}
+                                src={resolveImageUrl(image)}
+                                alt={sanitizeUiText(row.title, 'تصویر خدمت')}
+                                className="h-14 w-14 rounded-md border border-emerald-200 object-cover dark:border-emerald-800"
+                              />
+                            ))}
+                            {rowImages.length > 3 && (
+                              <span className="inline-flex h-14 min-w-14 items-center justify-center rounded-md border border-emerald-200 bg-white px-2 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-slate-900 dark:text-emerald-200">
+                                +{rowImages.length - 3}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                          <ErpFieldView label="مقدار" value={formatDisplayNumber(row.quantity || 0)} />
+                          <ErpFieldView label="واحد" value={sanitizeUiText(row.unit, 'ثبت نشده')} />
+                          <ErpFieldView label="قیمت واحد" value={formatPrice(row.unitPrice || 0, sanitizeUiText(row.currency || contract.currency, 'تومان'))} />
+                          <ErpFieldView label="جمع" value={formatPrice(row.totalPrice || 0, sanitizeUiText(row.currency || contract.currency, 'تومان'))} tone="success" />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </ErpSection>
+            )}
 
             <ErpSection title="تحویل و پرداخت" description="برنامه‌های تحویل و اطلاعات پرداخت مرتبط با قرارداد.">
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

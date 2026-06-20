@@ -143,7 +143,11 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         ? []
         : wizardData.deliveries.map((delivery) => ({
           ...delivery,
-          products: delivery.products.filter((product) => deliverableProductIndices.has(product.productIndex))
+          products: delivery.products.filter((product) =>
+            product.rowType !== 'service' &&
+            typeof product.productIndex === 'number' &&
+            deliverableProductIndices.has(product.productIndex)
+          )
         })).filter((delivery) => delivery.products.length > 0);
       
       // Create/update contract
@@ -199,8 +203,10 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             driver: delivery.projectManagerName || null,
             vehicle: delivery.receiverName || null,
             notes: delivery.notes || null,
-            products: delivery.products.map((dp) => {
-              const product = normalizedProducts[dp.productIndex];
+            products: delivery.products
+              .filter((dp) => dp.rowType !== 'service' && typeof dp.productIndex === 'number')
+              .map((dp) => {
+              const product = normalizedProducts[dp.productIndex as number];
               return {
                 productId: dp.productId,
                 quantity: dp.amount ?? dp.quantity,
@@ -295,8 +301,10 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             driver: delivery.projectManagerName || undefined,
             vehicle: delivery.receiverName || undefined,
             notes: delivery.notes,
-            products: delivery.products.map(dp => {
-              const product = normalizedProducts[dp.productIndex];
+            products: delivery.products
+              .filter((dp) => dp.rowType !== 'service' && typeof dp.productIndex === 'number')
+              .map(dp => {
+              const product = normalizedProducts[dp.productIndex as number];
               return {
                 productId: dp.productId,
                 quantity: dp.quantity,
@@ -385,5 +393,4 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     isSubmitting
   };
 };
-
 

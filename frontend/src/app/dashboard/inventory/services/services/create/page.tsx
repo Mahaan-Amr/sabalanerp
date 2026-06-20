@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaSave, FaArrowRight, FaTimes } from 'react-icons/fa';
 import { servicesAPI } from '@/lib/api';
+import CatalogImagePicker from '@/components/CatalogImagePicker';
 
 const CreateServicePage: React.FC = () => {
   const router = useRouter();
@@ -13,6 +14,7 @@ const CreateServicePage: React.FC = () => {
     name: '',
     namePersian: '',
     description: '',
+    images: [] as string[],
     isActive: true
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -168,6 +170,11 @@ const CreateServicePage: React.FC = () => {
                   placeholder="توضیحات خدمت..."
                 />
               </div>
+
+              <CatalogImagePicker
+                images={formData.images}
+                onChange={(images) => setFormData(prev => ({ ...prev, images }))}
+              />
 
               {/* Status */}
               <div>

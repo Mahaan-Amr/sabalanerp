@@ -59,9 +59,13 @@ export interface ProductCartController {
     totalQuantity: number;
   };
   editItem: (index: number) => void;
+  duplicateItem: (index: number) => void;
   removeItem: (index: number) => void;
-  updateServiceRow: (rowId: string, updates: Partial<Pick<ContractServiceRow, 'quantity' | 'unitPrice' | 'description'>>) => void;
+  updateItemImages: (index: number, images: string[]) => void;
+  updateServiceRow: (rowId: string, updates: Partial<Pick<ContractServiceRow, 'quantity' | 'unitPrice' | 'description' | 'images'>>) => void;
+  duplicateServiceRow: (rowId: string) => void;
   removeServiceRow: (rowId: string) => void;
+  uploadImage: (file: File) => Promise<string>;
   useRemainingStone?: (remainingStone: RemainingStone, sourceProduct: ContractProduct) => void;
 }
 
@@ -100,10 +104,14 @@ interface UseContractProductCartControllerOptions {
   productsSummary: ProductCartController['summary'];
   selectProduct: (product: Product) => void;
   editProduct: (index: number) => void;
+  duplicateProduct: (index: number) => void;
   removeProduct: (index: number) => void;
+  updateProductImages: (index: number, images: string[]) => void;
   addServiceRow: (sourceType: ContractServiceRowSourceType, item: SubService | CuttingType | StoneFinishing) => void;
   updateServiceRow: ProductCartController['updateServiceRow'];
+  duplicateServiceRow: (rowId: string) => void;
   removeServiceRow: (rowId: string) => void;
+  uploadImage: (file: File) => Promise<string>;
   useRemainingStone?: (remainingStone: RemainingStone, sourceProduct: ContractProduct) => void;
   createProduct: () => void;
 }
@@ -132,10 +140,14 @@ export const useContractProductCartController = ({
   productsSummary,
   selectProduct,
   editProduct,
+  duplicateProduct,
   removeProduct,
+  updateProductImages,
   addServiceRow,
   updateServiceRow,
+  duplicateServiceRow,
   removeServiceRow,
+  uploadImage,
   useRemainingStone,
   createProduct
 }: UseContractProductCartControllerOptions): ContractProductCartController => {
@@ -222,9 +234,13 @@ export const useContractProductCartController = ({
       hasServiceRows: (wizardData.serviceRows || []).length > 0,
       summary: productsSummary,
       editItem: editProduct,
+      duplicateItem: duplicateProduct,
       removeItem: removeProduct,
+      updateItemImages: updateProductImages,
       updateServiceRow,
+      duplicateServiceRow,
       removeServiceRow,
+      uploadImage,
       useRemainingStone
     },
     draft

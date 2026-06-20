@@ -6,6 +6,7 @@ import { Product } from '@/types/product';
 import { salesAPI } from '@/lib/api';
 import { formatPrice } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
+import CatalogImagePicker from '@/components/CatalogImagePicker';
 
 // Product name generation utilities
 const generateFullProductName = (product: Product): string => {
@@ -35,6 +36,7 @@ const ProductDetailPage: React.FC = () => {
     isAvailable: true,
     leadTime: '',
     description: '',
+    images: [] as string[],
   });
 
   useEffect(() => {
@@ -56,6 +58,7 @@ const ProductDetailPage: React.FC = () => {
           isAvailable: data.data.isAvailable,
           leadTime: data.data.leadTime?.toString() || '',
           description: data.data.description || '',
+          images: data.data.images || [],
         });
       } else {
         console.error('Failed to fetch product');
@@ -76,6 +79,7 @@ const ProductDetailPage: React.FC = () => {
         isAvailable: formData.isAvailable,
         leadTime: formData.leadTime ? parseInt(formData.leadTime) : null,
         description: formData.description || null,
+        images: formData.images,
       });
 
       if (response.data.success) {
@@ -403,6 +407,28 @@ const ProductDetailPage: React.FC = () => {
                 <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg min-h-[100px]">
                   {product.description || 'توضیحی وارد نشده است'}
                 </div>
+              )}
+            </div>
+
+            <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-6 border border-white/20 dark:border-slate-700/50">
+              {editing ? (
+                <CatalogImagePicker
+                  images={formData.images}
+                  onChange={(images) => setFormData({ ...formData, images })}
+                />
+              ) : (
+                <>
+                  <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-4">تصاویر</h3>
+                  {product.images && product.images.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {product.images.slice(0, 3).map((image, index) => (
+                        <img key={`${image}-${index}`} src={image.startsWith('/') ? `${window.location.origin}${image}` : image} alt={product.namePersian} className="h-16 w-16 rounded-lg object-cover" />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">تصویری ثبت نشده است</div>
+                  )}
+                </>
               )}
             </div>
 

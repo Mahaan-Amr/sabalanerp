@@ -123,6 +123,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
   body('namePersian').notEmpty().withMessage('Persian name is required'),
   body('name').optional().isString(),
   body('description').optional().isString(),
+  body('images').optional().isArray(),
   body('isActive').optional().isBoolean()
 ], async (req: any, res: Response) => {
   try {
@@ -135,7 +136,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
       });
     }
 
-    const { code, name, namePersian, description, isActive = true } = req.body;
+    const { code, name, namePersian, description, images = [], isActive = true } = req.body;
 
     // Check if code already exists
     const existingService = await prisma.service.findUnique({
@@ -155,6 +156,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
         name,
         namePersian,
         description,
+        images,
         isActive
       }
     });
@@ -180,6 +182,7 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPA
   body('name').optional().isString(),
   body('namePersian').optional().isString(),
   body('description').optional().isString(),
+  body('images').optional().isArray(),
   body('isActive').optional().isBoolean()
 ], async (req: any, res: Response) => {
   try {

@@ -1,8 +1,9 @@
 ﻿// Validation service
 // Handles validation for products, deliveries, payments, and wizard steps
 
-import type { ContractProduct, DeliverySchedule, PaymentMethod, ContractWizardData } from '../types/contract.types';
+import type { ContractProduct, ContractServiceRow, DeliverySchedule, PaymentMethod, ContractWizardData } from '../types/contract.types';
 import { sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
+import { getDeliveryTargetAmount } from '../utils/deliveryScheduleController';
 
 /**
  * Validate a product configuration
@@ -42,7 +43,8 @@ export const validateProduct = (product: Partial<ContractProduct>): { isValid: b
  */
 export const validateDelivery = (
   delivery: DeliverySchedule,
-  products: ContractProduct[]
+  products: ContractProduct[],
+  serviceRows: ContractServiceRow[] = []
 ): { isValid: boolean; errors: string[] } => {
   const errors: string[] = [];
   
@@ -55,19 +57,33 @@ export const validateDelivery = (
   }
   
   if (!delivery.products || delivery.products.length === 0) {
-    errors.push('حداقل یک محصول برای تحویل انتخاب کنید');
+    errors.push('حداقل یک ردیف برای تحویل یا اجرا انتخاب کنید');
   }
   
   // Validate product quantities don't exceed available quantities
   if (delivery.products && delivery.products.length > 0) {
     for (const deliveryProduct of delivery.products) {
-      const product = products[deliveryProduct.productIndex];
-      if (product) {
+      if (deliveryProduct.rowType === 'service') {
+        const serviceRow = serviceRows.find(row => row.id === deliveryProduct.serviceRowId);
+        if (serviceRow) {
+          const totalDelivered = delivery.products
+            .filter(p => p.rowType === 'service' && p.serviceRowId === deliveryProduct.serviceRowId)
+            .reduce((sum, p) => sum + toFiniteNumber(p.amount ?? p.quantity), 0);
+
+          if (totalDelivered > toFiniteNumber(serviceRow.quantity)) {
+            errors.push(`مقدار زمان‌بندی برای ${serviceRow.title} بیشتر از مقدار خدمت است`);
+          }
+        }
+        continue;
+      }
+
+      const product = typeof deliveryProduct.productIndex === 'number' ? products[deliveryProduct.productIndex] : undefined;
+      if (product && typeof deliveryProduct.productIndex === 'number') {
         const totalDelivered = delivery.products
           .filter(p => p.productIndex === deliveryProduct.productIndex)
-          .reduce((sum, p) => sum + toFiniteNumber(p.quantity), 0);
+          .reduce((sum, p) => sum + toFiniteNumber(p.amount ?? p.quantity), 0);
         
-        if (totalDelivered > toFiniteNumber(product.quantity)) {
+        if (totalDelivered > getDeliveryTargetAmount(product)) {
           errors.push(`تعداد تحویل برای ${product.stoneName} بیشتر از تعداد محصول است`);
         }
       }
@@ -185,33 +201,40 @@ export const validateWizardStep = (
         errors.deliveries = 'حداقل یک برنامه تحویل تعریف کنید';
       } else {
         // Validate all products are distributed
-        const totalProductQuantities = wizardData.products.reduce((acc, p) => {
-          acc[p.productId] = toFiniteNumber(p.quantity);
+        const totalProductQuantities = wizardData.products.reduce((acc, p, index) => {
+          acc[`product-${index}`] = getDeliveryTargetAmount(p);
+          return acc;
+        }, {} as Record<string, number>);
+        const totalServiceQuantities = (wizardData.serviceRows || []).reduce((acc, row) => {
+          acc[`service-${row.id}`] = toFiniteNumber(row.quantity);
           return acc;
         }, {} as Record<string, number>);
         
         const deliveredQuantities: Record<string, number> = {};
         wizardData.deliveries.forEach(delivery => {
           delivery.products.forEach(dp => {
-            if (!deliveredQuantities[dp.productId]) {
-              deliveredQuantities[dp.productId] = 0;
+            const key = dp.rowType === 'service'
+              ? `service-${dp.serviceRowId}`
+              : `product-${dp.productIndex}`;
+            if (!deliveredQuantities[key]) {
+              deliveredQuantities[key] = 0;
             }
-            deliveredQuantities[dp.productId] += toFiniteNumber(dp.quantity);
+            deliveredQuantities[key] += toFiniteNumber(dp.amount ?? dp.quantity);
           });
         });
         
-        // Check if all products are fully distributed
-        for (const [productId, totalQuantity] of Object.entries(totalProductQuantities)) {
-          const delivered = deliveredQuantities[productId] || 0;
+        // Check if all rows are fully distributed
+        for (const [rowKey, totalQuantity] of Object.entries({ ...totalProductQuantities, ...totalServiceQuantities })) {
+          const delivered = deliveredQuantities[rowKey] || 0;
           if (delivered < totalQuantity) {
-            errors.deliveries = `همه محصولات باید در برنامه‌های تحویل توزیع شوند`;
+            errors.deliveries = `همه محصولات و خدمات باید در برنامه‌های تحویل/اجرا توزیع شوند`;
             break;
           }
         }
         
         // Validate each delivery
         wizardData.deliveries.forEach((delivery, index) => {
-          const deliveryValidation = validateDelivery(delivery, wizardData.products);
+          const deliveryValidation = validateDelivery(delivery, wizardData.products, wizardData.serviceRows || []);
           if (!deliveryValidation.isValid) {
             errors[`delivery_${index}`] = deliveryValidation.errors.join(', ');
           }
@@ -244,5 +267,4 @@ export const validateWizardStep = (
     errors
   };
 };
-
 

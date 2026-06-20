@@ -1,4 +1,4 @@
-import type { ContractProduct, ContractWizardData, DeliveryProductItem, DeliverySchedule } from '../types/contract.types';
+import type { ContractProduct, ContractServiceRow, ContractWizardData, DeliveryProductItem, DeliverySchedule } from '../types/contract.types';
 
 export type DeliveryUnit = NonNullable<DeliveryProductItem['unit']>;
 
@@ -48,6 +48,9 @@ export const getDeliverableProductEntries = (products: ContractProduct[]): Array
     .map((product, productIndex) => ({ product, productIndex }))
     .filter(({ product }) => isDeliverableContractProduct(product));
 
+export const getSchedulableServiceEntries = (serviceRows: ContractServiceRow[] = []): Array<{ serviceRow: ContractServiceRow; serviceIndex: number }> =>
+  serviceRows.map((serviceRow, serviceIndex) => ({ serviceRow, serviceIndex }));
+
 export const getDeliveryUnit = (product: ContractProduct | undefined): DeliveryUnit => {
   if (product?.productType === 'longitudinal') return 'meter';
   if (product?.productType === 'slab') return 'squareMeter';
@@ -75,3 +78,6 @@ export const getDeliveryTargetAmount = (product: ContractProduct): number => {
   if (unit === 'squareMeter') return product.squareMeters || 0;
   return product.quantity || 0;
 };
+
+export const getServiceDeliveryTargetAmount = (serviceRow: ContractServiceRow): number =>
+  serviceRow.quantity || 0;

@@ -15,8 +15,11 @@ import {
   getDeliveryTargetAmount,
   getDeliveryUnit,
   getDeliveryUnitLabel,
+  getSchedulableServiceEntries,
+  getServiceDeliveryTargetAmount,
   syncDeliveryDefaults
 } from '../../utils/deliveryScheduleController';
+import { getServiceRowUnitLabel } from '../../utils/contractServiceRows';
 
 interface Step6DeliveryScheduleProps {
   wizardData: ContractWizardData;
@@ -41,6 +44,10 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
   const deliverableProductEntries = useMemo(
     () => getDeliverableProductEntries(wizardData.products),
     [wizardData.products]
+  );
+  const schedulableServiceEntries = useMemo(
+    () => getSchedulableServiceEntries(wizardData.serviceRows || []),
+    [wizardData.serviceRows]
   );
 
   useEffect(() => {
@@ -87,6 +94,14 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
     }, 0);
   }, [wizardData.deliveries]);
 
+  const getTotalDeliveredForService = useCallback((serviceRowId: string, excludeDeliveryIndex?: number): number => {
+    return wizardData.deliveries.reduce((sum, d, i) => {
+      if (excludeDeliveryIndex !== undefined && i === excludeDeliveryIndex) return sum;
+      const dp = d.products?.find(p => p.rowType === 'service' && p.serviceRowId === serviceRowId);
+      return sum + (dp?.amount ?? dp?.quantity ?? 0);
+    }, 0);
+  }, [wizardData.deliveries]);
+
   const handleDeliveryProductQuantityChange = (deliveryIndex: number, productIndex: number, quantity: number, productId: string) => {
     const delivery = wizardData.deliveries[deliveryIndex];
     const current = delivery.products ?? [];
@@ -102,6 +117,27 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
     } else {
       const unit = getDeliveryUnit(wizardData.products[productIndex]);
       newProducts = [...current, { productIndex, productId, quantity, amount: quantity, unit }];
+    }
+    handleUpdateDelivery(deliveryIndex, { products: newProducts });
+  };
+
+  const handleDeliveryServiceQuantityChange = (deliveryIndex: number, serviceRowId: string, quantity: number) => {
+    const delivery = wizardData.deliveries[deliveryIndex];
+    const current = delivery.products ?? [];
+    const existing = current.find(p => p.rowType === 'service' && p.serviceRowId === serviceRowId);
+    const serviceRow = (wizardData.serviceRows || []).find(row => row.id === serviceRowId);
+    const unit = serviceRow?.unit || 'count';
+    let newProducts: DeliveryProductItem[];
+    if (quantity <= 0) {
+      newProducts = current.filter(p => !(p.rowType === 'service' && p.serviceRowId === serviceRowId));
+    } else if (existing) {
+      newProducts = current.map(p =>
+        p.rowType === 'service' && p.serviceRowId === serviceRowId
+          ? { ...p, productId: serviceRowId, quantity, amount: quantity, unit }
+          : p
+      );
+    } else {
+      newProducts = [...current, { rowType: 'service', serviceRowId, productId: serviceRowId, quantity, amount: quantity, unit }];
     }
     handleUpdateDelivery(deliveryIndex, { products: newProducts });
   };
@@ -239,7 +275,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                   />
                 </div>
 
-                {deliverableProductEntries.length > 0 && (
+                {(deliverableProductEntries.length > 0 || schedulableServiceEntries.length > 0) && (
                   <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
                     <h6 className="text-sm font-semibold text-gray-800 dark:text-white mb-1">
                       محصولات این تحویل
@@ -279,7 +315,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                                 </button>
                                 <FormattedNumberInput
                                   value={currentQty}
-                                  onChange={(value) => handleDeliveryProductQuantityChange(index, productIndex, value, product.productId)}
+                                  onChange={(value) => setQty(value)}
                                   min={0}
                                   max={maxForThisDelivery}
                                   step={deliveryUnit === 'count' ? 1 : 0.01}
@@ -305,6 +341,75 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                               </span>
                               <span className="text-teal-600 dark:text-teal-400 font-medium">
                                 مانده: <strong>{formatAmount(remaining)} {getDeliveryUnitLabel(deliveryUnit)}</strong>
+                              </span>
+                              {remaining > 0 && currentQty < remaining && (
+                                <button
+                                  type="button"
+                                  onClick={() => setQty(remaining)}
+                                  className="text-teal-600 dark:text-teal-400 hover:underline font-medium"
+                                >
+                                  پر کردن ({formatAmount(remaining)})
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {schedulableServiceEntries.map(({ serviceRow }) => {
+                        const contractQty = getServiceDeliveryTargetAmount(serviceRow);
+                        const alreadyAssigned = getTotalDeliveredForService(serviceRow.id, index);
+                        const maxForThisDelivery = Math.max(0, contractQty - alreadyAssigned);
+                        const currentDeliveryService = delivery.products?.find(p => p.rowType === 'service' && p.serviceRowId === serviceRow.id);
+                        const currentQty = currentDeliveryService?.amount ?? currentDeliveryService?.quantity ?? 0;
+                        const remaining = maxForThisDelivery;
+                        const setQty = (value: number) => handleDeliveryServiceQuantityChange(index, serviceRow.id, Math.max(0, Math.min(maxForThisDelivery, value)));
+                        return (
+                          <div
+                            key={serviceRow.id}
+                            className="p-3 rounded-lg border border-emerald-200 dark:border-emerald-700 bg-white dark:bg-gray-800/50 space-y-2"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-sm font-medium text-gray-800 dark:text-white">
+                                {serviceRow.title}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setQty(currentQty - 1)}
+                                  disabled={currentQty <= 0}
+                                  className="p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  aria-label="کم کردن"
+                                >
+                                  <FaChevronDown className="w-3.5 h-3.5" />
+                                </button>
+                                <FormattedNumberInput
+                                  value={currentQty}
+                                  onChange={(value) => setQty(value)}
+                                  min={0}
+                                  max={maxForThisDelivery}
+                                  step={serviceRow.unit === 'count' ? 1 : 0.01}
+                                  className="w-20 px-2 py-1.5 text-sm text-center border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setQty(currentQty + 1)}
+                                  disabled={currentQty >= maxForThisDelivery}
+                                  className="p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  aria-label="زیاد کردن"
+                                >
+                                  <FaChevronUp className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3 text-xs">
+                              <span className="text-gray-500 dark:text-gray-400">
+                                کل قرارداد: <strong className="text-gray-700 dark:text-gray-300">{formatAmount(contractQty)} {getServiceRowUnitLabel(serviceRow.unit)}</strong>
+                              </span>
+                              <span className="text-gray-500 dark:text-gray-400">
+                                زمان‌بندی‌شده در تحویل‌های دیگر: <strong className="text-gray-700 dark:text-gray-300">{formatAmount(alreadyAssigned)} {getServiceRowUnitLabel(serviceRow.unit)}</strong>
+                              </span>
+                              <span className="text-teal-600 dark:text-teal-400 font-medium">
+                                مانده: <strong>{formatAmount(remaining)} {getServiceRowUnitLabel(serviceRow.unit)}</strong>
                               </span>
                               {remaining > 0 && currentQty < remaining && (
                                 <button

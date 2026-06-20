@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { FaSave, FaArrowRight, FaTimes } from 'react-icons/fa';
 import { servicesAPI } from '@/lib/api';
+import CatalogImagePicker from '@/components/CatalogImagePicker';
 
 const EditSubServicePage: React.FC = () => {
   const router = useRouter();
@@ -19,6 +20,7 @@ const EditSubServicePage: React.FC = () => {
     description: '',
     pricePerMeter: '',
     calculationBase: 'length' as 'length' | 'squareMeters',
+    images: [] as string[],
     isActive: true
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -41,6 +43,7 @@ const EditSubServicePage: React.FC = () => {
           description: subService.description || '',
           pricePerMeter: subService.pricePerMeter.toString(),
           calculationBase: subService.calculationBase || 'length',
+          images: subService.images || [],
           isActive: subService.isActive
         });
       } else {
@@ -268,6 +271,11 @@ const EditSubServicePage: React.FC = () => {
                   مشخص کنید قیمت بر اساس طول یا متر مربع محاسبه شود.
                 </p>
               </div>
+
+              <CatalogImagePicker
+                images={formData.images}
+                onChange={(images) => setFormData(prev => ({ ...prev, images }))}
+              />
 
               {/* Status */}
               <div>

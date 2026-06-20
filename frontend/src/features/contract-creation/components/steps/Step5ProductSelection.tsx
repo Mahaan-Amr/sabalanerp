@@ -2,8 +2,9 @@
 // Mobile-first catalog-to-cart product selection for contract creation.
 
 import React from 'react';
-import { FaSearch, FaPlus, FaCheck, FaEdit, FaTrash } from 'react-icons/fa';
+import { FaSearch, FaPlus, FaCheck, FaEdit, FaTrash, FaTimes } from 'react-icons/fa';
 import { formatPrice, formatSquareMeters, formatQuantity, formatDisplayNumber } from '@/lib/numberFormat';
+import { API_ORIGIN } from '@/lib/api';
 import { generateFullProductName } from '../../utils/productUtils';
 import {
   getServiceRowSourceLabel,
@@ -61,6 +62,60 @@ const getRemainingStoneUsageKeys = (stone: RemainingStone): string[] => {
 };
 
 const SERVICE_SOURCE_OPTIONS: ContractServiceRowSourceType[] = ['tool', 'cutting', 'finishing'];
+
+const resolveImageUrl = (url: string) => {
+  if (!url) return '';
+  if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url;
+  return `${API_ORIGIN}${url.startsWith('/') ? url : `/${url}`}`;
+};
+
+interface RowImageStripProps {
+  images?: string[];
+  label: string;
+  onChange: (images: string[]) => void;
+  onUpload: (file: File) => Promise<string>;
+}
+
+const RowImageStrip: React.FC<RowImageStripProps> = ({ images = [], label, onChange, onUpload }) => {
+  const visibleImages = images.slice(0, 3);
+  const overflow = Math.max(0, images.length - visibleImages.length);
+
+  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const url = await onUpload(file);
+    onChange([...images, url]);
+  };
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2">
+      {visibleImages.map((image, imageIndex) => (
+        <div key={`${image}-${imageIndex}`} className="relative h-12 w-12 overflow-hidden rounded-md border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
+          <img src={resolveImageUrl(image)} alt={label} className="h-full w-full object-cover" />
+          <button
+            type="button"
+            onClick={() => onChange(images.filter((_, index) => index !== imageIndex))}
+            className="absolute left-0.5 top-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-950/70 text-white"
+            aria-label="حذف تصویر"
+            title="حذف تصویر"
+          >
+            <FaTimes className="h-3 w-3" />
+          </button>
+        </div>
+      ))}
+      {overflow > 0 && (
+        <span className="inline-flex h-12 min-w-12 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+          +{overflow}
+        </span>
+      )}
+      <label className="inline-flex h-12 w-12 cursor-pointer items-center justify-center rounded-md border border-dashed border-teal-300 bg-teal-50 text-teal-700 transition hover:bg-teal-100 dark:border-teal-700 dark:bg-teal-900/20 dark:text-teal-200">
+        <FaPlus className="h-4 w-4" />
+        <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={handleUpload} />
+      </label>
+    </div>
+  );
+};
 
 export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   controller,
@@ -439,9 +494,24 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                           {product.stoneCode ? `کد: ${product.stoneCode}` : 'بدون کد'}
                           {catalogProduct?.mineNamePersian ? ` | معدن: ${catalogProduct.mineNamePersian}` : ''}
                         </p>
+                        <RowImageStrip
+                          images={product.images || []}
+                          label={product.stoneName || catalogProduct?.namePersian || 'تصویر محصول'}
+                          onChange={(images) => cart.updateItemImages(index, images)}
+                          onUpload={cart.uploadImage}
+                        />
                       </div>
 
                       <div className="flex flex-shrink-0 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => cart.duplicateItem(index)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
+                          title="تکثیر"
+                          aria-label="تکثیر محصول"
+                        >
+                          <FaPlus className="h-4 w-4" />
+                        </button>
                         <button
                           type="button"
                           onClick={() => cart.editItem(index)}
@@ -569,15 +639,26 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                       )}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => cart.removeServiceRow(row.id)}
-                      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20"
-                      title="حذف"
-                      aria-label="حذف خدمت"
-                    >
-                      <FaTrash className="h-4 w-4" />
-                    </button>
+                    <div className="flex flex-shrink-0 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => cart.duplicateServiceRow(row.id)}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
+                        title="تکثیر"
+                        aria-label="تکثیر خدمت"
+                      >
+                        <FaPlus className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => cart.removeServiceRow(row.id)}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20"
+                        title="حذف"
+                        aria-label="حذف خدمت"
+                      >
+                        <FaTrash className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
@@ -611,7 +692,22 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                         {formatPrice(row.totalPrice || 0, row.currency || 'تومان')}
                       </p>
                     </div>
+                    <label className="col-span-2 rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
+                      <span className="text-xs text-slate-500 dark:text-slate-400">توضیحات</span>
+                      <textarea
+                        value={row.description || ''}
+                        onChange={(event) => cart.updateServiceRow(row.id, { description: event.target.value })}
+                        rows={2}
+                        className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-800 outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </label>
                   </div>
+                  <RowImageStrip
+                    images={row.images || []}
+                    label={row.title || 'تصویر خدمت'}
+                    onChange={(images) => cart.updateServiceRow(row.id, { images })}
+                    onUpload={cart.uploadImage}
+                  />
                 </article>
               ))}
             </div>

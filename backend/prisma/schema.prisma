@@ -776,6 +776,7 @@ model Service {
   name        String?
   namePersian String
   description String?
+  images      String[] @default([])
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -790,6 +791,7 @@ model CuttingType {
   namePersian   String
   description   String?
   pricePerMeter Decimal? @db.Decimal(10, 2) // قیمت به ازای هر متر (تومان)
+  images        String[] @default([])
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -805,6 +807,7 @@ model SubService {
   description     String?
   pricePerMeter   Decimal  @db.Decimal(10, 2) // هزینه هر متر ساب (تومان)
   calculationBase String   @default("length") // "length" | "squareMeters" - بر اساس طول یا متر مربع
+  images          String[] @default([])
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -832,6 +835,7 @@ model StoneFinishing {
   pricePerSquareMeter Decimal  @db.Decimal(12, 2)
   unitPrice           Decimal  @default(0) @db.Decimal(12, 2)
   calculationBase     String   @default("squareMeters")
+  images              String[] @default([])
   isActive            Boolean  @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt

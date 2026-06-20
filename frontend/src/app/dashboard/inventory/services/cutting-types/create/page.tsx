@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaSave, FaArrowRight, FaTimes } from 'react-icons/fa';
 import { servicesAPI } from '@/lib/api';
+import CatalogImagePicker from '@/components/CatalogImagePicker';
 
 const CreateCuttingTypePage: React.FC = () => {
   const router = useRouter();
@@ -14,6 +15,7 @@ const CreateCuttingTypePage: React.FC = () => {
     namePersian: '',
     description: '',
     pricePerMeter: '',
+    images: [] as string[],
     isActive: true
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -199,6 +201,11 @@ const CreateCuttingTypePage: React.FC = () => {
                   قیمت پایه برای هر متر طول ابزارکاری سنگ را وارد کنید.
                 </p>
               </div>
+
+              <CatalogImagePicker
+                images={formData.images}
+                onChange={(images) => setFormData(prev => ({ ...prev, images }))}
+              />
 
               {/* Status */}
               <div>

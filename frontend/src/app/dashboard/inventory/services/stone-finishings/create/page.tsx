@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaSave, FaTimes } from 'react-icons/fa';
 import { servicesAPI } from '@/lib/api';
+import CatalogImagePicker from '@/components/CatalogImagePicker';
 
 const CreateStoneFinishingPage: React.FC = () => {
   const router = useRouter();
@@ -14,6 +15,7 @@ const CreateStoneFinishingPage: React.FC = () => {
     description: '',
     pricePerSquareMeter: '',
     calculationBase: 'squareMeters' as 'length' | 'squareMeters',
+    images: [] as string[],
     isActive: true
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -156,6 +158,11 @@ const CreateStoneFinishingPage: React.FC = () => {
                   <option value="length">متر</option>
                 </select>
               </div>
+
+              <CatalogImagePicker
+                images={formData.images}
+                onChange={(images) => setFormData(prev => ({ ...prev, images }))}
+              />
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">

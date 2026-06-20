@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { FaSave, FaTimes, FaTrash } from 'react-icons/fa';
 import { servicesAPI } from '@/lib/api';
+import CatalogImagePicker from '@/components/CatalogImagePicker';
 
 const EditStoneFinishingPage: React.FC = () => {
   const router = useRouter();
@@ -18,6 +19,7 @@ const EditStoneFinishingPage: React.FC = () => {
     description: '',
     pricePerSquareMeter: '',
     calculationBase: 'squareMeters' as 'length' | 'squareMeters',
+    images: [] as string[],
     isActive: true
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -35,6 +37,7 @@ const EditStoneFinishingPage: React.FC = () => {
             description: data.description || '',
             pricePerSquareMeter: (data.unitPrice ?? data.pricePerSquareMeter)?.toString() || '',
             calculationBase: data.calculationBase === 'length' ? 'length' : 'squareMeters',
+            images: data.images || [],
             isActive: data.isActive
           });
         } else {
@@ -213,6 +216,11 @@ const EditStoneFinishingPage: React.FC = () => {
                   در صورت تغییر واحد، قیمت را برای واحد جدید بررسی و تأیید کنید.
                 </p>
               </div>
+
+              <CatalogImagePicker
+                images={formData.images}
+                onChange={(images) => setFormData(prev => ({ ...prev, images }))}
+              />
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">

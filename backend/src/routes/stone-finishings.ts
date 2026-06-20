@@ -46,6 +46,7 @@ const stoneFinishingValidators = [
     .optional()
     .isFloat({ gt: 0 })
     .withMessage('قیمت واحد باید بیشتر از صفر باشد'),
+  body('images').optional().isArray(),
   body().custom((value) => {
     const unitPrice = getUnitPriceInput(value);
     if (unitPrice === undefined || unitPrice === null || unitPrice === '') {
@@ -196,6 +197,7 @@ router.post(
           pricePerSquareMeter: unitPrice,
           unitPrice,
           calculationBase: req.body.calculationBase || 'squareMeters',
+          images: req.body.images || [],
           isActive: true
         }
       });
@@ -250,6 +252,7 @@ router.put(
           pricePerSquareMeter: unitPrice,
           unitPrice,
           calculationBase: req.body.calculationBase || existing.calculationBase || 'squareMeters',
+          images: req.body.images !== undefined ? req.body.images : existing.images,
           isActive:
             typeof req.body.isActive === 'boolean'
               ? req.body.isActive

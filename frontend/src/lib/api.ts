@@ -2,6 +2,7 @@
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
 const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
+export const API_ORIGIN = API_BASE.endsWith('/api') ? API_BASE.slice(0, -4) : API_BASE;
 
 // Create axios instance
 const api = axios.create({
@@ -253,6 +254,14 @@ export const salesAPI = {
     params, 
     responseType: 'blob' 
   }),
+
+  uploadImage: (file: File) => {
+    const formData = new FormData();
+    formData.append('image', file);
+    return api.post('/uploads/images', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
   
   // Departments
   getDepartments: () => api.get('/departments'),

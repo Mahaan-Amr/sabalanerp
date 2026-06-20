@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { FaSave, FaArrowRight, FaTimes } from 'react-icons/fa';
 import { servicesAPI } from '@/lib/api';
+import CatalogImagePicker from '@/components/CatalogImagePicker';
 
 const EditCuttingTypePage: React.FC = () => {
   const router = useRouter();
@@ -18,6 +19,7 @@ const EditCuttingTypePage: React.FC = () => {
     namePersian: '',
     description: '',
     pricePerMeter: '',
+    images: [] as string[],
     isActive: true
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -39,6 +41,7 @@ const EditCuttingTypePage: React.FC = () => {
           namePersian: cuttingType.namePersian,
           description: cuttingType.description || '',
           pricePerMeter: cuttingType.pricePerMeter ? cuttingType.pricePerMeter.toString() : '',
+          images: cuttingType.images || [],
           isActive: cuttingType.isActive
         });
       } else {
@@ -241,6 +244,11 @@ const EditCuttingTypePage: React.FC = () => {
                   قیمت پایه برای هر متر طول ابزارکاری سنگ را وارد کنید.
                 </p>
               </div>
+
+              <CatalogImagePicker
+                images={formData.images}
+                onChange={(images) => setFormData(prev => ({ ...prev, images }))}
+              />
 
               {/* Status */}
               <div>

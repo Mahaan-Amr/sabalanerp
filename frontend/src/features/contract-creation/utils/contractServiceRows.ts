@@ -64,13 +64,14 @@ export const createContractServiceRow = (
     quantity: normalizedQuantity,
     unitPrice: normalizedUnitPrice,
     totalPrice: normalizedQuantity * normalizedUnitPrice,
-    currency: 'تومان'
+    currency: 'تومان',
+    images: Array.isArray((item as any).images) ? [...(item as any).images] : []
   };
 };
 
 export const recalculateContractServiceRow = (
   row: ContractServiceRow,
-  updates: Partial<Pick<ContractServiceRow, 'quantity' | 'unitPrice' | 'description'>>
+  updates: Partial<Pick<ContractServiceRow, 'quantity' | 'unitPrice' | 'description' | 'images'>>
 ): ContractServiceRow => {
   const quantity = updates.quantity ?? row.quantity;
   const unitPrice = updates.unitPrice ?? row.unitPrice;
@@ -82,4 +83,3 @@ export const recalculateContractServiceRow = (
     totalPrice: Math.max(quantity, 0) * Math.max(unitPrice, 0)
   };
 };
-

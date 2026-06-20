@@ -135,6 +135,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
   body('description').optional().isString(),
   body('pricePerMeter').notEmpty().withMessage('Price per meter is required').isNumeric().withMessage('Price per meter must be a number'),
   body('calculationBase').optional().isIn(['length', 'squareMeters']).withMessage('Calculation base must be either "length" or "squareMeters"'),
+  body('images').optional().isArray(),
   body('isActive').optional().isBoolean()
 ], async (req: any, res: Response) => {
   try {
@@ -147,7 +148,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
       });
     }
 
-    const { code, name, namePersian, description, pricePerMeter, calculationBase = 'length', isActive = true } = req.body;
+    const { code, name, namePersian, description, pricePerMeter, calculationBase = 'length', images = [], isActive = true } = req.body;
 
     // Check if code already exists
     const existingSubService = await prisma.subService.findUnique({
@@ -169,6 +170,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
         description,
         pricePerMeter: parseFloat(pricePerMeter),
         calculationBase,
+        images,
         isActive
       }
     });
@@ -196,6 +198,7 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPA
   body('description').optional().isString(),
   body('pricePerMeter').optional().isNumeric().withMessage('Price per meter must be a number'),
   body('calculationBase').optional().isIn(['length', 'squareMeters']).withMessage('Calculation base must be either "length" or "squareMeters"'),
+  body('images').optional().isArray(),
   body('isActive').optional().isBoolean()
 ], async (req: any, res: Response) => {
   try {

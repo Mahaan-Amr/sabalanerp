@@ -132,6 +132,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
   body('name').optional().isString(),
   body('description').optional().isString(),
   body('pricePerMeter').optional().isNumeric().withMessage('Price per meter must be a number'),
+  body('images').optional().isArray(),
   body('isActive').optional().isBoolean()
 ], async (req: any, res: Response) => {
   try {
@@ -144,7 +145,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
       });
     }
 
-    const { code, name, namePersian, description, pricePerMeter, isActive = true } = req.body;
+    const { code, name, namePersian, description, pricePerMeter, images = [], isActive = true } = req.body;
 
     // Check if code already exists
     const existingCuttingType = await prisma.cuttingType.findUnique({
@@ -165,6 +166,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
         namePersian,
         description,
         pricePerMeter: pricePerMeter ? parseFloat(pricePerMeter) : null,
+        images,
         isActive
       }
     });
@@ -191,6 +193,7 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPA
   body('namePersian').optional().isString(),
   body('description').optional().isString(),
   body('pricePerMeter').optional().isNumeric().withMessage('Price per meter must be a number'),
+  body('images').optional().isArray(),
   body('isActive').optional().isBoolean()
 ], async (req: any, res: Response) => {
   try {

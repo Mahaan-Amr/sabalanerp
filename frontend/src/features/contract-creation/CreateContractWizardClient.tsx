@@ -3026,13 +3026,65 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     remainingStoneModal.setShowRemainingStoneModal(true);
   };
 
+  const removeProductFromDeliveries = (deliveries: DeliverySchedule[], removedIndex: number): DeliverySchedule[] =>
+    deliveries.map((delivery) => ({
+      ...delivery,
+      products: (delivery.products || [])
+        .filter((item) => item.rowType === 'service' || item.productIndex !== removedIndex)
+        .map((item) => (
+          item.rowType !== 'service' && typeof item.productIndex === 'number' && item.productIndex > removedIndex
+            ? { ...item, productIndex: item.productIndex - 1 }
+            : item
+        ))
+    }));
+
+  const handleDuplicateProduct = (index: number) => {
+    const source = wizardData.products[index];
+    if (!source) return;
+
+    const duplicate = JSON.parse(JSON.stringify(source)) as ContractProduct;
+    delete duplicate.stairSystemId;
+    delete duplicate.parentProductIndex;
+    if (duplicate.meta) {
+      duplicate.meta = {
+        ...duplicate.meta,
+        duplicatedFromProductIndex: index,
+        remainingSource: undefined
+      };
+    }
+
+    updateWizardData({
+      products: [...wizardData.products, duplicate]
+    });
+  };
+
+  const handleUpdateProductImages = (index: number, images: string[]) => {
+    updateWizardData({
+      products: wizardData.products.map((product, productIndex) =>
+        productIndex === index ? { ...product, images } : product
+      )
+    });
+  };
+
+  const uploadContractRowImage = async (file: File): Promise<string> => {
+    const response = await salesAPI.uploadImage(file);
+    const url = response.data?.data?.url;
+    if (!url) {
+      throw new Error('Image upload failed');
+    }
+    return url;
+  };
+
   const handleRemoveProductFromContract = (index: number) => {
     const productToRemove = wizardData.products[index];
     const remainingSourceMeta = productToRemove?.meta?.remainingSource;
 
     if (!remainingSourceMeta) {
       const newProducts = wizardData.products.filter((_, i) => i !== index);
-      updateWizardData({ products: newProducts });
+      updateWizardData({
+        products: newProducts,
+        deliveries: removeProductFromDeliveries(wizardData.deliveries || [], index)
+      });
       return;
     }
 
@@ -3040,10 +3092,11 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     const partitionId = remainingSourceMeta.partitionId as string | undefined;
     const sourceRemainingStoneId = remainingSourceMeta.sourceRemainingStoneId as string | undefined;
     const productsAfterRemoval = wizardData.products.filter((_, i) => i !== index);
+    const deliveriesAfterRemoval = removeProductFromDeliveries(wizardData.deliveries || [], index);
 
     const normalizedSourceIndex = index < sourceProductIndex ? sourceProductIndex - 1 : sourceProductIndex;
     if (normalizedSourceIndex < 0 || normalizedSourceIndex >= productsAfterRemoval.length) {
-      updateWizardData({ products: productsAfterRemoval });
+      updateWizardData({ products: productsAfterRemoval, deliveries: deliveriesAfterRemoval });
       return;
     }
 
@@ -3077,7 +3130,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     };
 
     productsAfterRemoval[normalizedSourceIndex] = updatedSourceProduct;
-    updateWizardData({ products: productsAfterRemoval });
+    updateWizardData({ products: productsAfterRemoval, deliveries: deliveriesAfterRemoval });
   };
 
   const handleCreateProductFromContractFlow = () => {
@@ -3104,7 +3157,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
   const handleUpdateServiceRow = (
     rowId: string,
-    updates: Partial<Pick<ContractServiceRow, 'quantity' | 'unitPrice' | 'description'>>
+    updates: Partial<Pick<ContractServiceRow, 'quantity' | 'unitPrice' | 'description' | 'images'>>
   ) => {
     updateWizardData({
       serviceRows: (wizardData.serviceRows || []).map((row) =>
@@ -3113,9 +3166,28 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     });
   };
 
+  const handleDuplicateServiceRow = (rowId: string) => {
+    const source = (wizardData.serviceRows || []).find((row) => row.id === rowId);
+    if (!source) return;
+
+    const duplicate = {
+      ...source,
+      id: `${source.sourceType}-${source.sourceId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      images: [...(source.images || [])]
+    };
+
+    updateWizardData({
+      serviceRows: [...(wizardData.serviceRows || []), duplicate]
+    });
+  };
+
   const handleRemoveServiceRow = (rowId: string) => {
     updateWizardData({
-      serviceRows: (wizardData.serviceRows || []).filter((row) => row.id !== rowId)
+      serviceRows: (wizardData.serviceRows || []).filter((row) => row.id !== rowId),
+      deliveries: (wizardData.deliveries || []).map((delivery) => ({
+        ...delivery,
+        products: (delivery.products || []).filter((item) => !(item.rowType === 'service' && item.serviceRowId === rowId))
+      }))
     });
   };
 
@@ -3136,10 +3208,14 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     productsSummary: contractCartSummary,
     selectProduct: handleProductSelection,
     editProduct: handleEditProduct,
+    duplicateProduct: handleDuplicateProduct,
     removeProduct: handleRemoveProductFromContract,
+    updateProductImages: handleUpdateProductImages,
     addServiceRow: handleAddServiceRow,
     updateServiceRow: handleUpdateServiceRow,
+    duplicateServiceRow: handleDuplicateServiceRow,
     removeServiceRow: handleRemoveServiceRow,
+    uploadImage: uploadContractRowImage,
     useRemainingStone: handleCreateFromRemainingStone,
     createProduct: handleCreateProductFromContractFlow
   });
@@ -4112,6 +4188,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         pricePerSquareMeter: productConfig.pricePerSquareMeter || 0,
         totalPrice: sawKerfEnabled ? slabMaterialTotalPrice : calculated.totalPrice,
         description: productConfig.description || '',
+        images: Array.isArray(productConfig.images) ? [...productConfig.images] : [...(selectedProduct.images || [])],
         sawKerfEnabled,
         sawKerfCm,
         finishingId: finishingEnabled ? (productConfig.finishingId || null) : null,
@@ -4412,6 +4489,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         ? smartCutPlan.consumedAreaSqm * (productConfig.pricePerSquareMeter || 0) * (isMandatory && mandatoryPercentage > 0 ? (1 + mandatoryPercentage / 100) : 1)
         : calculated.totalPrice,
       description: productConfig.description || '',
+      images: Array.isArray(productConfig.images) ? [...productConfig.images] : [...(selectedProduct.images || [])],
       sawKerfEnabled,
       sawKerfCm,
       finishingId: finishingEnabled ? (productConfig.finishingId || null) : null,
@@ -4619,6 +4697,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
 
           wizardData.deliveries.forEach(delivery => {
             delivery.products.forEach(dp => {
+              if (dp.rowType === 'service' || typeof dp.productIndex !== 'number') return;
               const current = remainingByProductIndex.get(dp.productIndex) || 0;
               remainingByProductIndex.set(dp.productIndex, current - (dp.amount ?? dp.quantity ?? 0));
             });
@@ -4912,12 +4991,22 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           projectManagerName: delivery.projectManagerName || '—',
           receiverName: delivery.receiverName || '—',
           notes: delivery.notes || '—',
-          products: (delivery.products || []).map((deliveryProduct) => ({
-            productName: wizardData.products[deliveryProduct.productIndex]?.stoneName ||
-              wizardData.products[deliveryProduct.productIndex]?.product?.namePersian ||
-              `محصول ${deliveryProduct.productIndex + 1}`,
-            quantity: toFiniteNumber(deliveryProduct.quantity)
-          }))
+          products: (delivery.products || []).map((deliveryProduct) => {
+            if (deliveryProduct.rowType === 'service') {
+              const serviceRow = (wizardData.serviceRows || []).find((row) => row.id === deliveryProduct.serviceRowId);
+              return {
+                productName: serviceRow?.title || 'خدمت',
+                quantity: toFiniteNumber(deliveryProduct.amount ?? deliveryProduct.quantity)
+              };
+            }
+            const productIndex = deliveryProduct.productIndex ?? -1;
+            return {
+              productName: wizardData.products[productIndex]?.stoneName ||
+                wizardData.products[productIndex]?.product?.namePersian ||
+                `محصول ${productIndex + 1}`,
+              quantity: toFiniteNumber(deliveryProduct.amount ?? deliveryProduct.quantity)
+            };
+          })
         }));
 
         const paymentDetails: ContractStep8PaymentDetail[] = wizardData.payment.payments.map((payment, index) => ({
@@ -7260,6 +7349,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                     pricePerSquareMeter: draft.pricePerSquareMeter!,
                     totalPrice: totalPrice,
                     description: draft.description || '',
+                    images: [...(stoneProduct.images || [])],
                     currency: 'تومان',
                     isMandatory: isDraftMandatory && mandatoryPercentageValue > 0,
                     mandatoryPercentage: isDraftMandatory && mandatoryPercentageValue > 0 ? mandatoryPercentageValue : 0,

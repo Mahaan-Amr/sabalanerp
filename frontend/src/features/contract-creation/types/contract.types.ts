@@ -61,6 +61,7 @@ export interface Product {
   isAvailable: boolean;
   leadTime?: number;
   description?: string;
+  images?: string[];
   // Product attributes
   cuttingDimensionNamePersian: string;
   stoneTypeNamePersian: string;
@@ -135,6 +136,7 @@ export interface SubService {
   description?: string;
   pricePerMeter: number; // price per meter
   calculationBase: 'length' | 'squareMeters'; // ? ?? ?? ? ?? ??
+  images?: string[];
   isActive: boolean;
 }
 
@@ -145,6 +147,7 @@ export interface CuttingType {
   namePersian: string;
   description?: string;
   pricePerMeter: number | null;
+  images?: string[];
   isActive?: boolean;
 }
 
@@ -156,6 +159,7 @@ export interface StoneFinishing {
   pricePerSquareMeter: number;
   unitPrice?: number | null;
   calculationBase?: 'length' | 'squareMeters';
+  images?: string[];
   isActive: boolean;
 }
 
@@ -231,6 +235,7 @@ export interface ContractServiceRow {
   unitPrice: number;
   totalPrice: number;
   currency: string;
+  images?: string[];
 }
 
 // Stair Part interface for individual parts of a stair system
@@ -357,6 +362,7 @@ export interface ContractProduct {
   unitPrice?: number; // ?? ?? (used in some calculations)
   totalPrice: number; // ?? ?
   description: string; // ??
+  images?: string[];
   currency: string;
   sawKerfEnabled?: boolean;
   sawKerfCm?: number | null;
@@ -452,7 +458,9 @@ export interface ContractProduct {
 }
 
 export interface DeliveryProductItem {
-  productIndex: number; // Index in wizardData.products array
+  rowType?: 'product' | 'service';
+  productIndex?: number; // Index in wizardData.products array
+  serviceRowId?: string;
   productId: string;
   quantity: number; // Quantity for this specific delivery
   unit?: 'meter' | 'squareMeter' | 'count';
@@ -754,5 +762,4 @@ export type LayerEdgeDemand = {
   layersNeeded: number;
   lengthM: number;
 };
-
 

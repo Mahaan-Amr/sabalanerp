@@ -35,6 +35,7 @@ import stairStandardLengthRoutes from './routes/stair-standard-lengths';
 import layerTypesRoutes from './routes/layer-types';
 import stoneFinishingRoutes from './routes/stone-finishings';
 import publicContractsRoutes from './routes/public-contracts';
+import uploadsRoutes from './routes/uploads';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -136,6 +137,7 @@ if (!isProduction) console.log('? Registering layer type routes...');
 app.use('/api/layer-types', layerTypesRoutes);
 if (!isProduction) console.log('? Registering stone finishing routes...');
 app.use('/api/stone-finishings', stoneFinishingRoutes);
+app.use('/api/uploads', uploadsRoutes);
 app.use('/api/public', publicContractsRoutes);
 if (!isProduction) console.log('? All routes registered successfully');
 
@@ -160,6 +162,11 @@ app.use('/files/accounting-contracts', express.static(path.join(process.cwd(), '
     res.setHeader('Expires', '0');
     res.setHeader('Surrogate-Control', 'no-store');
   }
+}));
+
+app.use('/files/uploads/images', express.static(path.join(process.cwd(), 'uploads', 'images'), {
+  etag: false,
+  maxAge: '1h'
 }));
 
 app.get('/favicon.ico', (_req, res) => {

@@ -32,6 +32,10 @@ _Avoid_: representing a service-only sale as a hidden or fake product
 The catalog a standalone service row is selected from, such as ابزار, برش, or پرداخت سنگ. These catalogs remain separate for management and search, but once selected they become the same ردیف خدمات قرارداد shape for pricing, payment, and print output.
 _Avoid_: merging the source catalogs just because contract rows share one shape
 
+**توضیحات ردیف خدمات قرارداد**:
+A per-contract note attached to a selected standalone service row, prefilled from the catalog description when available but editable without changing the catalog.
+_Avoid_: editing the catalog service description when the user only means the current contract row
+
 **جستجوی عددی محصول**:
 A product catalog search that treats Persian, Arabic, and Latin digits as the same value when matching numeric product details such as عرض, ضخامت, کد, and قیمت.
 _Avoid_: making users switch keyboard language to find numeric product values
@@ -40,9 +44,13 @@ _Avoid_: making users switch keyboard language to find numeric product values
 An informational customer-facing row that shows the full base stone consumed to create a sold cut product. It explains material usage and dimensions but is not a second charged product row.
 _Avoid_: adding سنگ مصرفی to contract totals, delivery quantities, or inventory as a separate sale row
 
-**ردیف قابل تحویل**:
-A contract row that must be distributed in the delivery schedule because it represents a physical stone product. Standalone service rows are price-bearing but are not قابل تحویل.
-_Avoid_: requiring delivery scheduling for service-only rows
+**ردیف زمان‌بندی تحویل/اجرا**:
+A contract row that can be assigned to the delivery schedule because it represents either a physical stone product to deliver or a standalone service row to execute for the customer.
+_Avoid_: representing service execution as a fake stone product, or assuming every scheduled row is physical inventory
+
+**مقدار زمان‌بندی خدمات قرارداد**:
+The amount of a standalone service row assigned to delivery/execution dates, using the same unit and total quantity as the selected service row.
+_Avoid_: scheduling a service in a different unit than its contract row, or allowing scheduled service amounts to exceed the selected service quantity
 
 **ابزار**:
 A paid stone edge operation applied during contract pricing, calculated by length or square meter depending on the item.
@@ -67,6 +75,14 @@ _Avoid_: using خدمات as a catch-all for ابزار
 **جزئیات محصول قرارداد**:
 The price-bearing details attached to a contract product for customer-facing contract output, including cuts, services, tools, and stone finishing when they exist.
 _Avoid_: printing empty detail groups or using خدمات as the umbrella label for every add-on
+
+**تصویر کاتالوگ**:
+An image attached to a product, tool, cutting, finishing, or standalone service catalog item so future contracts can reuse the same visual reference.
+_Avoid_: treating catalog images as immutable evidence of what a past contract meant
+
+**تصویر ردیف قرارداد**:
+An internal image snapshot attached to a selected contract row so other workspaces can see the exact product or service reference intended for that contract, even if the catalog image changes later. A new row starts with the catalog image URLs and can then be changed independently for that contract.
+_Avoid_: relying only on the current catalog image for saved contract interpretation, or showing row images in customer-facing PDF/print output unless explicitly requested
 
 **توضیحات سنگ پله**:
 The per-part note attached to a stair contract product row, such as کف پله, خیز, or پاگرد. Each selected stair part carries its own توضیحات so contract output can show the note beside the exact row it describes.
@@ -139,6 +155,14 @@ _Avoid_: blocking step jumps in edit mode, or saving partially invalid edited co
 **ویرایش جزئیات محصول قرارداد**:
 Editing a saved contract product should preserve previously selected ابزار and پرداخت سنگ details from the contract snapshot, even when the current catalog record is missing or inactive. Saved labels, units, prices, and amounts should remain visible instead of being silently dropped.
 _Avoid_: resetting selected contract product details only because catalog lookup fails
+
+**تکثیر ردیف محصول قرارداد**:
+Creating a new editable contract product row from an existing row by copying its product selection, dimensions, quantities, pricing, mandatory settings, cutting details, tools, finishing, notes, images, and remaining-stone usage settings while giving it independent row identity.
+_Avoid_: copying delivery assignments, stair-system grouping, parent-child indexes, or other links that make the duplicate depend on the original row
+
+**تکثیر ردیف خدمات قرارداد**:
+Creating a new editable standalone service row by copying its catalog source, quantity, unit price, note, and row images while giving it independent scheduling and row identity.
+_Avoid_: copying delivery/execution assignments from the original service row
 
 **نام نمایشی سنگ پله**:
 Stair contract product rows use the same compact stone identity style as longitudinal product rows, while stair part, layer, dimensions, and other stair-specific details remain separate row details.

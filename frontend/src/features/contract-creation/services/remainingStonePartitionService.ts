@@ -5,6 +5,7 @@ import {
   isUsableRemainingStone,
   sanitizeRemainingStoneEntry
 } from '../utils/remainingStoneGuards';
+import { resolveSawKerfCm } from '../utils/sawKerf';
 
 type ExpandedPartition = StonePartition & {
   sourceRowId: string;
@@ -25,7 +26,32 @@ export interface RemainingPartitionAllocation {
   remainingAreas: RemainingStone[];
 }
 
+interface RemainingPartitionAllocationOptions {
+  sawKerfEnabled?: boolean;
+  sawKerfCm?: number | null;
+}
+
 const getQuantity = (quantity: number): number => Math.max(1, Math.floor(Number(quantity) || 1));
+
+const getConsumedPartition = (
+  row: StonePartition,
+  stockWidth: number,
+  stockLength: number,
+  options: RemainingPartitionAllocationOptions
+): StonePartition => {
+  const kerfCm = resolveSawKerfCm(options.sawKerfEnabled, options.sawKerfCm);
+  const widthCut = options.sawKerfEnabled && row.width > 0 && row.width < stockWidth;
+  const lengthCut = options.sawKerfEnabled && row.length > 0 && row.length < stockLength;
+  const consumedWidth = widthCut ? row.width + kerfCm : row.width;
+  const consumedLength = lengthCut ? row.length + kerfCm / 100 : row.length;
+
+  return {
+    ...row,
+    width: consumedWidth,
+    length: consumedLength,
+    squareMeters: (consumedWidth * consumedLength * getQuantity(row.quantity)) / 100
+  };
+};
 
 export const normalizeRemainingStock = (remainingStone: RemainingStone): RemainingStockInfo => {
   const sanitized = sanitizeRemainingStoneEntry(remainingStone);
@@ -66,7 +92,8 @@ const sheetFits = (sheet: ExpandedPartition[], piece: ExpandedPartition, width: 
 
 export const allocateRemainingStonePartitions = (
   rows: StonePartition[],
-  remainingStone: RemainingStone
+  remainingStone: RemainingStone,
+  options: RemainingPartitionAllocationOptions = {}
 ): RemainingPartitionAllocation => {
   const stockInfo = normalizeRemainingStock(remainingStone);
   const rowErrors = new Map<string, string>();
@@ -86,8 +113,11 @@ export const allocateRemainingStonePartitions = (
   }
 
   const validRows = rows.filter((row) => row.width > 0 && row.length > 0);
+  const consumedRows = validRows.map((row) =>
+    getConsumedPartition(row, stockInfo.sanitized.width, stockInfo.sanitized.length, options)
+  );
 
-  validRows.forEach((row) => {
+  consumedRows.forEach((row) => {
     if (row.width > stockInfo.sanitized.width) {
       rowErrors.set(row.id, `عرض (${row.width}) از عرض باقی‌مانده (${stockInfo.sanitized.width}) بیشتر است.`);
     } else if (row.length > stockInfo.sanitized.length) {
@@ -95,7 +125,7 @@ export const allocateRemainingStonePartitions = (
     }
   });
 
-  const totalRequestedSquareMeters = validRows.reduce((sum, row) => sum + row.squareMeters, 0);
+  const totalRequestedSquareMeters = consumedRows.reduce((sum, row) => sum + row.squareMeters, 0);
   if (totalRequestedSquareMeters > stockInfo.totalSquareMeters + 0.0001) {
     validRows.forEach((row) => {
       if (!rowErrors.has(row.id)) {
@@ -118,7 +148,7 @@ export const allocateRemainingStonePartitions = (
   }
 
   const sheets: ExpandedPartition[][] = [];
-  const expandedRows = expandPartitionRows(validRows);
+  const expandedRows = expandPartitionRows(consumedRows);
 
   for (const piece of expandedRows) {
     let placed = false;

@@ -1,5 +1,6 @@
 import type { CuttingBreakdownEntry, RemainingStone, SlabStandardDimensionEntry, SmartLongitudinalCutPlan } from '../types/contract.types';
 import { sumNumericValues } from '@/lib/numberFormat';
+import { resolveSawKerfCm } from '../utils/sawKerf';
 
 type UnitType = 'cm' | 'm';
 
@@ -15,6 +16,8 @@ interface LongitudinalRemainingInput {
   enteredLength: number;
   enteredLengthUnit: UnitType;
   quantity: number;
+  sawKerfEnabled?: boolean;
+  sawKerfCm?: number | null;
   seed?: number;
 }
 
@@ -30,6 +33,8 @@ interface SlabRemainingInput {
   requestedWidthCm: number;
   requestedLengthCm: number;
   standardDimensions: SlabStandardDimensionEntry[];
+  sawKerfEnabled?: boolean;
+  sawKerfCm?: number | null;
   seed?: number;
 }
 
@@ -96,6 +101,8 @@ export const calculateSmartLongitudinalCutPlan = ({
   enteredLength,
   enteredLengthUnit,
   quantity,
+  sawKerfEnabled = false,
+  sawKerfCm = null,
   longitudinalRatePerMeter = 0,
   optimizationEnabled = true,
   seed
@@ -108,6 +115,9 @@ export const calculateSmartLongitudinalCutPlan = ({
   const requestedWidthCm = toCentimeters(Number(enteredWidth) || 0, enteredWidthUnit);
   const requestedLengthM = toMeters(Number(enteredLength) || 0, enteredLengthUnit);
   const requestedQuantity = Math.max(0, Number(quantity) || 0);
+  const kerfCm = resolveSawKerfCm(sawKerfEnabled, sawKerfCm);
+  const shouldApplyKerfToWidth = sawKerfEnabled && requestedWidthCm > 0 && requestedWidthCm < sourceWidthCm;
+  const consumedWidthCm = shouldApplyKerfToWidth ? requestedWidthCm + kerfCm : requestedWidthCm;
   const totalRequestedLengthM = requestedLengthM * requestedQuantity;
   const warnings: string[] = [];
   const baseSeed = seed ?? Date.now();
@@ -118,13 +128,17 @@ export const calculateSmartLongitudinalCutPlan = ({
       mode: 'none',
       sourceWidthCm,
       requestedWidthCm,
+      consumedWidthCm,
       requestedLengthM,
       requestedQuantity,
       totalRequestedLengthM,
+      sourceBandsNeeded: 0,
       stripsPerSource: 0,
       sourceLengthConsumedM: 0,
       consumedAreaSqm: 0,
       requestedAreaSqm: 0,
+      sawKerfEnabled,
+      sawKerfCm: sawKerfEnabled ? kerfCm : null,
       productionPieces: [],
       remainingStones: [],
       cuttingBreakdown: [],
@@ -133,19 +147,26 @@ export const calculateSmartLongitudinalCutPlan = ({
     };
   }
 
-  if (requestedWidthCm > sourceWidthCm) {
+  if (consumedWidthCm > sourceWidthCm) {
+    const warning = sawKerfEnabled && shouldApplyKerfToWidth
+      ? `با خوراک اره، عرض مصرفی هر قطعه ${consumedWidthCm.toFixed(1)}cm است و از عرض سنگ اصلی بیشتر می‌شود.`
+      : 'عرض درخواستی از عرض سنگ اصلی بیشتر است.';
     return {
       enabled: false,
       mode: 'none',
       sourceWidthCm,
       requestedWidthCm,
+      consumedWidthCm,
       requestedLengthM,
       requestedQuantity,
       totalRequestedLengthM,
+      sourceBandsNeeded: 0,
       stripsPerSource: 0,
       sourceLengthConsumedM: 0,
       consumedAreaSqm: 0,
       requestedAreaSqm: 0,
+      sawKerfEnabled,
+      sawKerfCm: sawKerfEnabled ? kerfCm : null,
       productionPieces: [],
       remainingStones: [],
       cuttingBreakdown: [],
@@ -154,7 +175,7 @@ export const calculateSmartLongitudinalCutPlan = ({
     };
   }
 
-  const possibleStrips = Math.max(1, Math.floor(sourceWidthCm / requestedWidthCm));
+  const possibleStrips = Math.max(1, Math.floor(sourceWidthCm / consumedWidthCm));
   const stripsPerSource = optimizationEnabled ? Math.min(possibleStrips, requestedQuantity) : 1;
   const sourceBandsNeeded = Math.ceil(requestedQuantity / stripsPerSource);
   const sourceLengthConsumedM = requestedLengthM * sourceBandsNeeded;
@@ -165,6 +186,12 @@ export const calculateSmartLongitudinalCutPlan = ({
   if (!longitudinalRatePerMeter) {
     warnings.push('نرخ برش طولی پیدا نشد؛ هزینه برش طولی صفر محاسبه شد.');
   }
+  if (sawKerfEnabled && shouldApplyKerfToWidth && sourceBandsNeeded > 1) {
+    warnings.push(
+      `با خوراک اره، عرض مصرفی هر قطعه ${consumedWidthCm.toFixed(1)}cm است و برای این تعداد ${sourceBandsNeeded} منبع از طول سنگ مصرف می‌شود.`
+    );
+  }
+
   const productionPieces = [{
     widthCm: requestedWidthCm,
     lengthM: requestedLengthM,
@@ -177,7 +204,7 @@ export const calculateSmartLongitudinalCutPlan = ({
   for (let bandIndex = 0; bandIndex < sourceBandsNeeded; bandIndex += 1) {
     const piecesInBand = Math.min(stripsPerSource, remainingQuantityToPlan);
     remainingQuantityToPlan -= piecesInBand;
-    const remainingWidthCm = sourceWidthCm - requestedWidthCm * piecesInBand;
+    const remainingWidthCm = sourceWidthCm - consumedWidthCm * piecesInBand;
     const cutCount = remainingWidthCm > 0 ? piecesInBand : Math.max(piecesInBand - 1, 0);
     longitudinalMeters += cutCount * requestedLengthM;
 
@@ -218,13 +245,17 @@ export const calculateSmartLongitudinalCutPlan = ({
     mode,
     sourceWidthCm,
     requestedWidthCm,
+    consumedWidthCm,
     requestedLengthM,
     requestedQuantity,
     totalRequestedLengthM,
+    sourceBandsNeeded,
     stripsPerSource,
     sourceLengthConsumedM,
     consumedAreaSqm,
     requestedAreaSqm,
+    sawKerfEnabled,
+    sawKerfCm: sawKerfEnabled ? kerfCm : null,
     productionPieces,
     remainingStones,
     cuttingBreakdown,
@@ -237,6 +268,8 @@ export const calculateSlabRemainingStones = ({
   requestedWidthCm,
   requestedLengthCm,
   standardDimensions,
+  sawKerfEnabled = false,
+  sawKerfCm = null,
   seed
 }: SlabRemainingInput): SlabRemainingOutput => {
   const baseSeed = seed ?? Date.now();
@@ -256,14 +289,17 @@ export const calculateSlabRemainingStones = ({
 
     const needsLongitudinalCut = requestedWidthCm > 0 && requestedWidthCm < standardWidthCm;
     const needsCrossCut = requestedLengthCm > 0 && requestedLengthCm < standardLengthCm;
+    const kerfCm = resolveSawKerfCm(sawKerfEnabled, sawKerfCm);
+    const consumedWidthCm = needsLongitudinalCut ? requestedWidthCm + kerfCm : requestedWidthCm;
+    const consumedLengthCm = needsCrossCut ? requestedLengthCm + kerfCm : requestedLengthCm;
 
     if (!needsLongitudinalCut && !needsCrossCut) continue;
 
     hasLongitudinal = hasLongitudinal || needsLongitudinalCut;
     hasCross = hasCross || needsCrossCut;
 
-    const remainingWidthCm = standardWidthCm - requestedWidthCm;
-    const remainingLengthCm = standardLengthCm - requestedLengthCm;
+    const remainingWidthCm = standardWidthCm - consumedWidthCm;
+    const remainingLengthCm = standardLengthCm - consumedLengthCm;
 
     if (needsLongitudinalCut && remainingWidthCm > 0 && requestedLengthCm > 0) {
       const pieceLengthM = requestedLengthCm / 100;

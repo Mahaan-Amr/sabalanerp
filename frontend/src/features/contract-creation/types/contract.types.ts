@@ -186,13 +186,17 @@ export interface SmartLongitudinalCutPlan {
   mode: 'optimized' | 'single-strip' | 'none';
   sourceWidthCm: number;
   requestedWidthCm: number;
+  consumedWidthCm: number;
   requestedLengthM: number;
   requestedQuantity: number;
   totalRequestedLengthM: number;
+  sourceBandsNeeded?: number;
   stripsPerSource: number;
   sourceLengthConsumedM: number;
   consumedAreaSqm: number;
   requestedAreaSqm: number;
+  sawKerfEnabled?: boolean;
+  sawKerfCm?: number | null;
   productionPieces: SmartCutProductionPiece[];
   remainingStones: RemainingStone[];
   cuttingBreakdown: CuttingBreakdownEntry[];
@@ -354,6 +358,8 @@ export interface ContractProduct {
   totalPrice: number; // ?? ?
   description: string; // ??
   currency: string;
+  sawKerfEnabled?: boolean;
+  sawKerfCm?: number | null;
   // Unit information for proper display
   lengthUnit: 'cm' | 'm'; // ?? ??
   widthUnit: 'cm' | 'm'; // ?? ??
@@ -748,6 +754,5 @@ export type LayerEdgeDemand = {
   layersNeeded: number;
   lengthM: number;
 };
-
 
 

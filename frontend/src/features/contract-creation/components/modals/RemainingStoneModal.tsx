@@ -31,6 +31,8 @@ interface RemainingStoneModalProps {
   setRemainingStoneIsMandatory: React.Dispatch<React.SetStateAction<boolean>>;
   remainingStoneMandatoryPercentage: number;
   setRemainingStoneMandatoryPercentage: React.Dispatch<React.SetStateAction<number>>;
+  remainingStoneSawKerfEnabled: boolean;
+  setRemainingStoneSawKerfEnabled: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 const createEmptyPartition = (): StonePartition => ({
@@ -60,7 +62,9 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
   handleUpdatePartition,
   handleRemovePartition,
   partitionValidationErrors,
-  errors
+  errors,
+  remainingStoneSawKerfEnabled,
+  setRemainingStoneSawKerfEnabled
 }) => {
   if (!isOpen || !remainingStone) return null;
 
@@ -181,6 +185,21 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                 </div>
               </div>
             </div>
+
+            <label className="mb-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-right dark:border-amber-800 dark:bg-amber-900/20">
+              <input
+                type="checkbox"
+                checked={remainingStoneSawKerfEnabled}
+                onChange={(event) => setRemainingStoneSawKerfEnabled(event.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-slate-900 dark:text-white">خوراک اره</span>
+                <span className="block text-xs leading-5 text-amber-700 dark:text-amber-200">
+                  هر محور برش‌خورده ۳mm از سنگ باقی‌مانده مصرف می‌کند.
+                </span>
+              </span>
+            </label>
 
             <div className="grid gap-3 lg:grid-cols-2">
               {partitions.map((partition, index) => {

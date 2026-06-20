@@ -15,6 +15,7 @@ import {
   normalizeRemainingStoneCollection,
   sanitizeRemainingStoneEntry
 } from '../utils/remainingStoneGuards';
+import { SAW_KERF_CM } from '../utils/sawKerf';
 import {
   allocateRemainingStonePartitions,
   normalizeRemainingStock
@@ -74,6 +75,7 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
   const [remainingStoneWidthUnit, setRemainingStoneWidthUnit] = useState<'cm' | 'm'>('cm');
   const [remainingStoneIsMandatory, setRemainingStoneIsMandatory] = useState(false);
   const [remainingStoneMandatoryPercentage, setRemainingStoneMandatoryPercentage] = useState(20);
+  const [remainingStoneSawKerfEnabled, setRemainingStoneSawKerfEnabled] = useState(false);
 
   // Partition state
   const [partitions, setPartitions] = useState<StonePartition[]>([]);
@@ -94,8 +96,11 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     quantity: number;
     squareMeters: number;
   }>, remainingStone: RemainingStone) => {
-    return allocateRemainingStonePartitions(rows, remainingStone);
-  }, []);
+    return allocateRemainingStonePartitions(rows, remainingStone, {
+      sawKerfEnabled: remainingStoneSawKerfEnabled,
+      sawKerfCm: SAW_KERF_CM
+    });
+  }, [remainingStoneSawKerfEnabled]);
 
   // Handle unit conversion for remaining stone length
   const handleRemainingStoneLengthUnitChange = useCallback((newUnit: 'cm' | 'm') => {
@@ -319,6 +324,8 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
         totalPrice: cuttingCost,
         description: `ایجاد شده از سنگ باقی‌مانده • پارتیشن ${index + 1}`,
         currency: sourceProduct.currency,
+        sawKerfEnabled: remainingStoneSawKerfEnabled,
+        sawKerfCm: remainingStoneSawKerfEnabled ? SAW_KERF_CM : null,
         lengthUnit: 'm',
         widthUnit: 'cm',
         isMandatory: false,
@@ -355,7 +362,13 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
             materialCost: 0,
             cuttingCost,
             totalPrice: cuttingCost
-          }
+          },
+          sawKerf: remainingStoneSawKerfEnabled
+            ? {
+                enabled: true,
+                cm: SAW_KERF_CM
+              }
+            : undefined
         }
       };
     });
@@ -439,6 +452,7 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     setPartitionWidthUnit('cm');
     setRemainingStoneIsMandatory(false);
     setRemainingStoneMandatoryPercentage(20);
+    setRemainingStoneSawKerfEnabled(false);
   }, [
     selectedRemainingStone,
     partitions,
@@ -448,7 +462,8 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     getCuttingTypePricePerMeter,
     setErrors,
     validateRowsAgainstStock,
-    resolveSourceProduct
+    resolveSourceProduct,
+    remainingStoneSawKerfEnabled
   ]);
 
   return {
@@ -475,6 +490,8 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     setRemainingStoneIsMandatory,
     remainingStoneMandatoryPercentage,
     setRemainingStoneMandatoryPercentage,
+    remainingStoneSawKerfEnabled,
+    setRemainingStoneSawKerfEnabled,
 
     // Partition state
     partitions,

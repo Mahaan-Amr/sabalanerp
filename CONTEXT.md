@@ -6,6 +6,10 @@ Sabalan ERP manages stone inventory, sales contracts, and related pricing data f
 A product lookup in the price inquiry surface that matches product identity and price-facing product details, regardless of Persian or Arabic character variants.
 _Avoid_: treating search as only an exact prefix lookup
 
+**خوراک اره**:
+A per-contract-product material-consumption adjustment for physical cuttable stone. When enabled, the saved row carries `sawKerfEnabled: true` and `sawKerfCm: 0.3`; each actually cut axis consumes the finished requested dimension plus 3mm for source-material charge, smart packing, and remaining-stone geometry. Finished dimensions, delivery, standalone services, tools, and finishing calculations stay based on the customer-requested size.
+_Avoid_: applying kerf to service rows, applying it to a full-width/full-length axis with no cut, or changing printed finished dimensions.
+
 ## Language
 
 **فروش همکاری**:

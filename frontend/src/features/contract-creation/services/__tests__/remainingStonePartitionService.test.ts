@@ -32,6 +32,28 @@ const partition = (width: number, length: number, quantity: number): StonePartit
 }
 
 {
+  const result = allocateRemainingStonePartitions([partition(4, 2, 2)], remaining(1), {
+    sawKerfEnabled: true,
+    sawKerfCm: 0.3
+  });
+
+  assert.equal(result.rowErrors.size, 0);
+  assert.equal(result.consumedSourcePieces, 1);
+  assert.equal(result.remainingAreas.length, 1);
+  assert.equal(Number(result.remainingAreas[0].width.toFixed(6)), 0.4);
+  assert.equal(Number(result.remainingAreas[0].length.toFixed(6)), 2);
+}
+
+{
+  const result = allocateRemainingStonePartitions([partition(4.5, 2, 2)], remaining(1), {
+    sawKerfEnabled: true,
+    sawKerfCm: 0.3
+  });
+
+  assert.equal(result.rowErrors.size, 1);
+}
+
+{
   const result = allocateRemainingStonePartitions([partition(5, 2, 2)], remaining(1));
 
   assert.equal(result.rowErrors.size, 1);

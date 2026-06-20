@@ -31,6 +31,48 @@ const approx = (actual: number, expected: number) => {
 {
   const plan = calculateSmartLongitudinalCutPlan({
     originalWidthCm: 40,
+    enteredWidth: 13,
+    enteredWidthUnit: 'cm',
+    enteredLength: 2,
+    enteredLengthUnit: 'm',
+    quantity: 2,
+    longitudinalRatePerMeter: 20000,
+    crossRatePerMeter: 0,
+    sawKerfEnabled: true,
+    sawKerfCm: 0.3,
+    seed: 6
+  });
+
+  assert.equal(plan.mode, 'optimized');
+  assert.equal(plan.sawKerfEnabled, true);
+  approx(plan.consumedWidthCm, 13.3);
+  approx(plan.sourceLengthConsumedM, 2);
+  approx(plan.consumedAreaSqm, 0.8);
+  approx(plan.requestedAreaSqm, 0.52);
+  approx(plan.remainingStones[0].width, 13.4);
+}
+
+{
+  const plan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 13.3,
+    enteredWidthUnit: 'cm',
+    enteredLength: 2,
+    enteredLengthUnit: 'm',
+    quantity: 3,
+    longitudinalRatePerMeter: 20000,
+    sawKerfEnabled: true,
+    sawKerfCm: 0.3,
+    seed: 7
+  });
+
+  assert.equal(plan.sourceBandsNeeded, 2);
+  assert.ok(plan.warnings.some((warning) => warning.includes('خوراک اره')));
+}
+
+{
+  const plan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
     enteredWidth: 25,
     enteredWidthUnit: 'cm',
     enteredLength: 10,

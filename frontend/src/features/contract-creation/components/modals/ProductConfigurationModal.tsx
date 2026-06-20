@@ -27,6 +27,7 @@ import {
   getFinishingUnitLabel,
   getFinishingUnitPrice
 } from '../../utils/finishingUtils';
+import { SAW_KERF_CM } from '../../utils/sawKerf';
 
 // Comprehensive props interface for Product Configuration Modal
 interface ProductConfigurationModalProps {
@@ -3518,6 +3519,27 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       placeholder="توضیحات اضافی..."
                     />
                   </div>
+                  <label className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+                    <input
+                      type="checkbox"
+                      checked={!!productConfig.sawKerfEnabled}
+                      onChange={(event) => {
+                        const enabled = event.target.checked;
+                        setProductConfig((prev: any) => ({
+                          ...prev,
+                          sawKerfEnabled: enabled,
+                          sawKerfCm: enabled ? (prev.sawKerfCm || SAW_KERF_CM) : null
+                        }));
+                      }}
+                      className="mt-1 h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                    />
+                    <span>
+                      <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">خوراک اره</span>
+                      <span className="mt-1 block text-xs leading-5 text-amber-700 dark:text-amber-200">
+                        هر محور برش‌خورده ۳mm مصرف اضافه در سنگ اصلی و باقیمانده‌ها دارد.
+                      </span>
+                    </span>
+                  </label>
                   {/* Mandatory Pricing Section - Only for longitudinal stones, not for slab */}
                   {currentProductType !== 'slab' && (
                   <div className="border-t border-gray-200 dark:border-gray-600 pt-4">

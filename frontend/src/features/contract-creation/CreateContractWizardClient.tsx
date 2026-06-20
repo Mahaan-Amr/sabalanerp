@@ -136,6 +136,7 @@ import {
   getFinishingUnitPrice,
   normalizeProductFinishing
 } from '@/features/contract-creation/utils/finishingUtils';
+import { SAW_KERF_CM } from '@/features/contract-creation/utils/sawKerf';
 
 // Import all types from types file
 import type {
@@ -2258,6 +2259,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           totalPrice: 0,
           description: '',
           currency: 'تومان',
+          sawKerfEnabled: false,
+          sawKerfCm: null,
           lengthUnit: 'm',
           widthUnit: 'cm',
           isMandatory: false,
@@ -2314,6 +2317,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         totalPrice: 0,
         description: '',
         currency: 'تومان',
+        sawKerfEnabled: false,
+        sawKerfCm: null,
         isCut: false,
         originalWidth: defaultStandardWidthCm,
         originalLength: defaultOriginalLength,
@@ -2367,6 +2372,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       totalPrice: 0,
       description: '',
       currency: 'تومان',
+      sawKerfEnabled: false,
+      sawKerfCm: null,
       isCut: false,
       originalWidth: product.widthValue,
       originalLength: 0,
@@ -2967,6 +2974,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       totalPrice: 0,
       description: `ساخته شده از سنگ باقی‌مانده (${sanitizedRemainingStone.width}cm عرض)`,
       currency: sourceProduct.currency,
+      sawKerfEnabled: false,
+      sawKerfCm: null,
       // Unit information for proper display
       lengthUnit: sourceProduct.lengthUnit || 'm',
       widthUnit: sourceProduct.widthUnit || 'cm',
@@ -3884,6 +3893,14 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       
       const needsLongitudinalCut = userWidthInCm > 0 && userWidthInCm < originalWidthCm && originalWidthCm > 0;
       const needsCrossCut = userLengthInCm > 0 && userLengthInCm < originalLengthCm && originalLengthCm > 0;
+      const sawKerfEnabled = !!productConfig.sawKerfEnabled;
+      const sawKerfCm = sawKerfEnabled ? (productConfig.sawKerfCm || SAW_KERF_CM) : null;
+      const consumedWidthForPricingCm = sawKerfEnabled && needsLongitudinalCut
+        ? userWidthInCm + (sawKerfCm || 0)
+        : userWidthInCm;
+      const consumedLengthForPricingCm = sawKerfEnabled && needsCrossCut
+        ? userLengthInCm + (sawKerfCm || 0)
+        : userLengthInCm;
       
       // Automatically fetch cutting costs if cuts should be applied
       let cuttingCostPerMeterLongitudinal = 0;
@@ -4010,7 +4027,9 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       const slabRemaining = calculateSlabRemainingStones({
         requestedWidthCm: userWidthInCm,
         requestedLengthCm: userLengthInCm,
-        standardDimensions
+        standardDimensions,
+        sawKerfEnabled,
+        sawKerfCm
       });
 
       const slabCutting = {
@@ -4073,6 +4092,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           ? (productConfig.remainingStones || previousSlabProduct?.remainingStones || [])
           : slabCutting.remainingPieces;
       const resetSlabRemainingUsage = isEditMode && slabGeometryChanged;
+      const slabConsumedAreaSqm = sawKerfEnabled && (needsLongitudinalCut || needsCrossCut)
+        ? (consumedWidthForPricingCm * consumedLengthForPricingCm * effectiveQuantity) / 10000
+        : calculated.squareMeters;
+      const slabMaterialTotalPrice = slabConsumedAreaSqm * (productConfig.pricePerSquareMeter || 0);
 
       // Create final product configuration for slab stone
       const finalProduct: ContractProduct = {
@@ -4087,8 +4110,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         quantity: effectiveQuantity,
         squareMeters: calculated.squareMeters,
         pricePerSquareMeter: productConfig.pricePerSquareMeter || 0,
-        totalPrice: calculated.totalPrice,
+        totalPrice: sawKerfEnabled ? slabMaterialTotalPrice : calculated.totalPrice,
         description: productConfig.description || '',
+        sawKerfEnabled,
+        sawKerfCm,
         finishingId: finishingEnabled ? (productConfig.finishingId || null) : null,
         finishingName: finishingEnabled
           ? (productConfig.finishingName || selectedFinishing?.namePersian || selectedFinishing?.name || null)
@@ -4104,7 +4129,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         widthUnit: widthUnit,
         isMandatory: false, // Slab stones don't use mandatory pricing
         mandatoryPercentage: 0, // Slab stones don't use mandatory pricing
-        originalTotalPrice: calculated.originalTotalPrice,
+        originalTotalPrice: sawKerfEnabled ? slabMaterialTotalPrice : calculated.originalTotalPrice,
         // Slab cutting fields (2D)
         isCut: slabCutting.needsLongitudinalCut || slabCutting.needsCrossCut,
         cutType: slabCutting.needsLongitudinalCut && slabCutting.needsCrossCut ? 'cross' : (slabCutting.needsLongitudinalCut ? 'longitudinal' : null),
@@ -4141,6 +4166,15 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         // CAD Design (if available)
         cadDesign: productConfig.cadDesign || null,
         meta: {
+          sawKerf: sawKerfEnabled
+            ? {
+                enabled: true,
+                cm: sawKerfCm,
+                consumedWidthCm: consumedWidthForPricingCm,
+                consumedLengthCm: consumedLengthForPricingCm,
+                consumedAreaSqm: slabConsumedAreaSqm
+              }
+            : undefined,
           finishing: finishingEnabled && finishingCost > 0
             ? {
                 id: productConfig.finishingId || null,
@@ -4159,7 +4193,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       
       // Add SubService costs to totalPrice if they exist
       const existingSubServiceCost = (isEditMode && productConfig.totalSubServiceCost) ? productConfig.totalSubServiceCost : 0;
-      finalProduct.totalPrice = calculated.totalPrice + existingSubServiceCost + finishingCost;
+      finalProduct.totalPrice = (sawKerfEnabled ? slabMaterialTotalPrice : calculated.totalPrice) + existingSubServiceCost + finishingCost;
       
       // Add to contract or update existing product
       if (isEditMode && editingProductIndex !== null) {
@@ -4319,6 +4353,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     // Use cutting cost from calculated result (which already includes the auto-fetched price if applicable)
     const finalCuttingCost = calculated.cuttingCost || 0;
     const finalCuttingCostPerMeter = cuttingCostPerMeterForCalc;
+    const sawKerfEnabled = !!productConfig.sawKerfEnabled;
+    const sawKerfCm = sawKerfEnabled ? (productConfig.sawKerfCm || SAW_KERF_CM) : null;
     const smartCutPlan = calculateSmartLongitudinalCutPlan({
       originalWidthCm: originalWidth,
       enteredWidth: userEnteredWidth,
@@ -4327,7 +4363,9 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       enteredLengthUnit: lengthUnit as 'cm' | 'm',
       quantity: effectiveQuantity,
       longitudinalRatePerMeter: finalCuttingCostPerMeter,
-      crossRatePerMeter: getCuttingTypePricePerMeter('CROSS') || 0
+      crossRatePerMeter: getCuttingTypePricePerMeter('CROSS') || 0,
+      sawKerfEnabled,
+      sawKerfCm
     });
     const shouldCutByGeometry = smartCutPlan.enabled;
     const previousLongitudinalProduct =
@@ -4374,6 +4412,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         ? smartCutPlan.consumedAreaSqm * (productConfig.pricePerSquareMeter || 0) * (isMandatory && mandatoryPercentage > 0 ? (1 + mandatoryPercentage / 100) : 1)
         : calculated.totalPrice,
       description: productConfig.description || '',
+      sawKerfEnabled,
+      sawKerfCm,
       finishingId: finishingEnabled ? (productConfig.finishingId || null) : null,
       finishingName: finishingEnabled
         ? (productConfig.finishingName || selectedFinishing?.namePersian || selectedFinishing?.name || null)
@@ -4427,6 +4467,14 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       usedLengthForSubServices: (isEditMode && productConfig.usedLengthForSubServices !== undefined) ? productConfig.usedLengthForSubServices : 0,
       usedSquareMetersForSubServices: (isEditMode && productConfig.usedSquareMetersForSubServices !== undefined) ? productConfig.usedSquareMetersForSubServices : 0,
       meta: {
+        sawKerf: sawKerfEnabled
+          ? {
+              enabled: true,
+              cm: sawKerfCm,
+              consumedWidthCm: smartCutPlan.consumedWidthCm,
+              sourceBandsNeeded: smartCutPlan.sourceBandsNeeded || 1
+            }
+          : undefined,
         finishing: finishingEnabled && finishingCost > 0
           ? {
               id: productConfig.finishingId || null,
@@ -4483,7 +4531,12 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     setEditingProductIndex(null);
     setTouchedFields(new Set()); // Reset touched fields
     clearProductAdditionSearches();
-    setErrors(remainingStoneEditState.warning ? { products: remainingStoneEditState.warning } : {});
+    const smartCutWarning = smartCutPlan.warnings.find((warning) => warning.includes('خوراک اره')) || '';
+    setErrors(
+      remainingStoneEditState.warning || smartCutWarning
+        ? { products: remainingStoneEditState.warning || smartCutWarning }
+        : {}
+    );
   };
 
   // Partition handlers are now provided by useRemainingStoneModal hook
@@ -10589,10 +10642,12 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                         quantity: getEffectiveQuantity(),
                         longitudinalRatePerMeter: getCuttingTypePricePerMeter('LONG') || 0,
                         crossRatePerMeter: getCuttingTypePricePerMeter('CROSS') || 0,
-                        optimizationEnabled: true
+                        optimizationEnabled: true,
+                        sawKerfEnabled: !!productConfig.sawKerfEnabled,
+                        sawKerfCm: productConfig.sawKerfEnabled ? (productConfig.sawKerfCm || SAW_KERF_CM) : null
                       });
 
-                      if (!plan.enabled || plan.warnings.length > 0) return null;
+                      if (!plan.enabled) return null;
 
                       return (
                         <div className="bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-lg p-4">
@@ -10626,12 +10681,20 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                             <div className="space-y-1">
                               <p>سطح مصرفی: {formatSquareMeters(plan.consumedAreaSqm)}</p>
                               <p>سطح درخواستی: {formatSquareMeters(plan.requestedAreaSqm)}</p>
+                              {plan.sawKerfEnabled && (
+                                <p>خوراک اره: عرض مصرفی هر قطعه {formatDisplayNumber(plan.consumedWidthCm)}cm</p>
+                              )}
                               {plan.remainingStones.map((stone, stoneIndex) => (
                                 <p key={stoneIndex}>
                                   باقی‌مانده: عرض {formatDisplayNumber(stone.width)}cm × طول {formatDisplayNumber(stone.length)}m
                                 </p>
                               ))}
                             </div>
+                            {plan.warnings.filter((warning) => warning.includes('خوراک اره')).map((warning, warningIndex) => (
+                              <p key={`kerf-warning-${warningIndex}`} className="md:col-span-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                                {warning}
+                              </p>
+                            ))}
                             {plan.cuttingBreakdown.length > 0 && (
                               <div className="md:col-span-2 pt-2 border-t border-teal-200 dark:border-teal-700 space-y-1">
                                 {plan.cuttingBreakdown.map((cut, cutIndex) => (
@@ -11045,6 +11108,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           setRemainingStoneIsMandatory={remainingStoneModal.setRemainingStoneIsMandatory}
           remainingStoneMandatoryPercentage={remainingStoneModal.remainingStoneMandatoryPercentage}
           setRemainingStoneMandatoryPercentage={remainingStoneModal.setRemainingStoneMandatoryPercentage}
+          remainingStoneSawKerfEnabled={remainingStoneModal.remainingStoneSawKerfEnabled}
+          setRemainingStoneSawKerfEnabled={remainingStoneModal.setRemainingStoneSawKerfEnabled}
         />
 
         <SubServiceModal

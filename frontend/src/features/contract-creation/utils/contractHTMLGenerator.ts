@@ -17,12 +17,13 @@ export const generateContractHTML = (data: any): string => {
     const sourceLengthM = Number(smartCutPlan.sourceLengthConsumedM || product?.originalLength || product?.actualLengthMeters || 0);
     const sourceAreaSqm = Number(smartCutPlan.consumedAreaSqm || (sourceWidthCm > 0 && sourceLengthM > 0 ? (sourceWidthCm / 100) * sourceLengthM : 0));
     const productWidthCm = Number(product?.width || 0);
+    const kerfNote = product?.sawKerfEnabled ? ` / خوراک اره ${product?.sawKerfCm || 0.3}cm` : '';
     const hasSourceMaterial =
       sourceWidthCm > 0 &&
       sourceLengthM > 0 &&
       (Boolean(smartCutPlan.enabled) || Boolean(product?.isCut) || (productWidthCm > 0 && sourceWidthCm > productWidthCm));
     if (!hasSourceMaterial) return '';
-    return `عرض ${sourceWidthCm} cm × طول ${sourceLengthM} m${sourceAreaSqm > 0 ? ` / ${formatSquareMeters(sourceAreaSqm)}` : ''}`;
+    return `عرض ${sourceWidthCm} cm × طول ${sourceLengthM} m${sourceAreaSqm > 0 ? ` / ${formatSquareMeters(sourceAreaSqm)}` : ''}${kerfNote}`;
   };
   const productsTable = data.products && data.products.length > 0 ? `
     <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
@@ -40,9 +41,10 @@ export const generateContractHTML = (data: any): string => {
         ${data.products.map((product: any) => {
           const sourceMaterialSummary = getSourceMaterialSummary(product);
           const productName = product.product?.namePersian || product.product?.name || product.namePersian || product.name || 'نامشخص';
+          const kerfNote = product.sawKerfEnabled ? ' - خوراک اره لحاظ شده' : '';
           return `
           <tr>
-            <td style="border: 1px solid #ddd; padding: 8px;">${productName}${product.description ? ` - ${product.description}` : ''}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${productName}${product.description ? ` - ${product.description}` : ''}${kerfNote}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.widthValue && product.product?.thicknessValue ? `${product.product.widthValue} × ${product.product.thicknessValue}` : product.length && product.width ? `${product.length} × ${product.width}` : 'نامشخص'}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatQuantity(product.quantity || 0)}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatSquareMeters(product.product?.squareMeter || product.squareMeter || 0)}</td>
@@ -146,4 +148,3 @@ export const generateContractHTML = (data: any): string => {
     </div>
   `;
 };
-

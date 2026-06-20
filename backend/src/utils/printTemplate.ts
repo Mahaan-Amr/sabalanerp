@@ -495,6 +495,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         (sourceWidthCm > 0 && sourceLengthM > 0 ? (sourceWidthCm / 100) * sourceLengthM : 0)
       );
       const productWidthCm = toNumber(product?.width);
+      const kerfNote = product?.sawKerfEnabled ? ` / خوراک اره ${toFaNumber(product?.sawKerfCm || 0.3, 1)}cm` : '';
       const hasSourceMaterial =
         sourceWidthCm > 0 &&
         sourceLengthM > 0 &&
@@ -517,7 +518,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         isMandatory: Boolean(product?.isMandatory ?? relationItem?.isMandatory),
         mandatoryPercentage: toNumber(product?.mandatoryPercentage),
         totalPrice: toNumber(product?.totalPrice || relationItem?.totalPrice),
-        description: product?.description || relationItem?.description || EMPTY,
+        description: `${product?.description || relationItem?.description || EMPTY}${product?.sawKerfEnabled ? ' / خوراک اره لحاظ شده' : ''}`,
         cuts: [...cutsFromBreakdown, ...cutsFromDetails],
         services,
         tools,
@@ -528,7 +529,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         remainingSummary: remainingCount > 0 || usedRemainingCount > 0
           ? `باقی‌مانده: ${toFaNumber(remainingCount)} | مصرف‌شده: ${toFaNumber(usedRemainingCount)}`
           : EMPTY,
-        sourceMaterialSummary
+        sourceMaterialSummary: sourceMaterialSummary ? `${sourceMaterialSummary}${kerfNote}` : EMPTY
       };
     });
   }

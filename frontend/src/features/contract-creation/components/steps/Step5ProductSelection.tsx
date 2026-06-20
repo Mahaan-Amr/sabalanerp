@@ -327,13 +327,17 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                 className="min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 py-3 pl-4 pr-10 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder-slate-400 dark:focus:border-emerald-400 dark:focus:bg-slate-900"
               />
             </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <span>{services.hasSearch ? `${services.rows.length} نتیجه پیدا شد` : 'برای نمایش خدمات، جستجو را شروع کنید'}</span>
+              <span>{cart.hasServiceRows ? 'ردیف‌های خدمات آماده مرور هستند' : 'هنوز خدمتی اضافه نشده است'}</span>
+            </div>
 
             <div className="mt-3 grid grid-cols-1 gap-2 xl:grid-cols-2">
               {services.rows.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400 xl:col-span-2">
-                  خدمتی برای این جستجو پیدا نشد
+                  {services.hasSearch ? 'خدمتی برای این جستجو پیدا نشد' : 'برای شروع، نام خدمت را جستجو کنید'}
                 </div>
-              ) : services.rows.slice(0, 8).map((service) => {
+              ) : services.rows.map((service) => {
                 const unitPrice = getServiceRowUnitPriceFromCatalog(services.sourceType, service);
                 return (
                   <button

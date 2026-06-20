@@ -13,6 +13,7 @@ import type {
   SubService
 } from '../types/contract.types';
 import { productSupportsContractType } from '../utils/productUtils';
+import { normalizeDigits } from '@/lib/numberFormat';
 
 type ProductCartType = Extract<ContractUsageType, 'longitudinal' | 'stair' | 'slab'>;
 
@@ -71,6 +72,7 @@ export interface ServiceCatalogController {
   setQuery: (term: string) => void;
   rows: Array<SubService | CuttingType | StoneFinishing>;
   counts: Record<ContractServiceRowSourceType, number>;
+  hasSearch: boolean;
   addRow: (sourceType: ContractServiceRowSourceType, item: SubService | CuttingType | StoneFinishing) => void;
 }
 
@@ -109,6 +111,9 @@ interface UseContractProductCartControllerOptions {
 const CATALOG_PRODUCT_TYPES = PRODUCT_TYPES.filter((type): type is typeof PRODUCT_TYPES[number] & { id: ProductCartType } =>
   type.id === 'longitudinal' || type.id === 'stair' || type.id === 'slab'
 );
+
+const normalizeSearchText = (value: unknown): string =>
+  normalizeDigits(String(value ?? '')).toLowerCase();
 
 export const useContractProductCartController = ({
   wizardData,
@@ -163,7 +168,7 @@ export const useContractProductCartController = ({
   }), [cuttingTypes.length, stoneFinishings.length, subServices.length]);
 
   const serviceRows = useMemo(() => {
-    const query = serviceSearchTerm.trim().toLowerCase();
+    const query = normalizeSearchText(serviceSearchTerm).trim();
     const sourceRows =
       serviceSourceType === 'tool'
         ? subServices
@@ -171,15 +176,16 @@ export const useContractProductCartController = ({
           ? cuttingTypes
           : stoneFinishings;
 
-    if (!query) return sourceRows;
+    if (!query) return [];
     return sourceRows.filter((row) => {
       const searchable = [
         row.namePersian,
         row.name,
         'code' in row ? row.code : '',
         row.description || ''
-      ].join(' ').toLowerCase();
-      return searchable.includes(query);
+      ].join(' ');
+      const normalizedSearchable = normalizeSearchText(searchable);
+      return normalizedSearchable.includes(query);
     });
   }, [cuttingTypes, serviceSearchTerm, serviceSourceType, stoneFinishings, subServices]);
 
@@ -206,6 +212,7 @@ export const useContractProductCartController = ({
       setQuery: setServiceSearchTerm,
       rows: serviceRows,
       counts: serviceCounts,
+      hasSearch: serviceSearchTerm.trim().length > 0,
       addRow: addServiceRow
     },
     cart: {

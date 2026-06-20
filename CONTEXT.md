@@ -72,6 +72,10 @@ _Avoid_: using one shared stair-system note for all stair parts
 When سنگ لایه uses سنگ اصلی, compatible remaining pieces from the same stair part are consumed before charging any additional سنگ اصلی. Only the layer demand that cannot be supplied from those remaining pieces should count as new main-stone material.
 _Avoid_: charging all same-stone لایه as fresh stone while usable same-part remaining pieces exist
 
+**تعداد پارتیشن باقی‌مانده**:
+The number of child pieces cut from the selected remaining stone geometry. It is validated by whether those pieces fit inside the remaining stone area, not by requiring one source remaining stone per child piece.
+_Avoid_: treating partition quantity as the count of source remaining stones consumed
+
 **وضعیت هنگام چاپ**:
 The contract status shown on customer-facing printed or PDF contract output at the moment the document is generated.
 _Avoid_: labeling printed status as the general contract status when the timing matters

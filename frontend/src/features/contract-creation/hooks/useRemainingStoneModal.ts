@@ -8,7 +8,6 @@ import type {
   StonePartition,
   ContractWizardData
 } from '../types/contract.types';
-import { calculateRemainingAreasAfterPartitions } from '../services/stoneCuttingService';
 import { recalculateUsedRemainingDimensions } from '../utils/dimensionUtils';
 import {
   isUsableRemainingStone,
@@ -16,6 +15,10 @@ import {
   normalizeRemainingStoneCollection,
   sanitizeRemainingStoneEntry
 } from '../utils/remainingStoneGuards';
+import {
+  allocateRemainingStonePartitions,
+  normalizeRemainingStock
+} from '../services/remainingStonePartitionService';
 
 interface UseRemainingStoneModalOptions {
   wizardData: ContractWizardData;
@@ -78,22 +81,6 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
   const [partitionWidthUnit, setPartitionWidthUnit] = useState<'cm' | 'm'>('cm');
   const [partitionValidationErrors, setPartitionValidationErrors] = useState<Map<string, string>>(new Map());
 
-  const normalizeRemainingStock = useCallback((remainingStone: RemainingStone) => {
-    const sanitized = sanitizeRemainingStoneEntry(remainingStone);
-    const pieceArea = (sanitized.width * sanitized.length) / 100;
-    const quantity = isUsableRemainingStone(sanitized) ? Math.max(1, Math.floor(Number(sanitized.quantity) || 1)) : 0;
-    const totalSquareMeters =
-      quantity > 0
-        ? pieceArea * quantity
-        : 0;
-    return {
-      sanitized,
-      quantity,
-      pieceArea,
-      totalSquareMeters
-    };
-  }, []);
-
   const resolveSourceProduct = useCallback((remainingStone: RemainingStone): ContractProduct | null => {
     return selectedRemainingStoneSourceProduct ||
       wizardData.products.find(p => (p.remainingStones || []).some(rs => rs.id === remainingStone.id)) ||
@@ -107,61 +94,8 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     quantity: number;
     squareMeters: number;
   }>, remainingStone: RemainingStone) => {
-    const stockInfo = normalizeRemainingStock(remainingStone);
-    const rowErrors = new Map<string, string>();
-
-    if (!isUsableRemainingStone(stockInfo.sanitized)) {
-      rows.forEach(row => {
-        rowErrors.set(row.id, 'این سنگ باقی‌مانده قابل استفاده نیست یا موجودی آن به پایان رسیده است.');
-      });
-      return {
-        stockInfo,
-        rowErrors,
-        summaryError: 'سنگ باقی‌مانده انتخاب‌شده قابل استفاده نیست.'
-      };
-    }
-
-    rows.forEach(row => {
-      if (row.width > stockInfo.sanitized.width) {
-        rowErrors.set(row.id, `عرض (${row.width}) از عرض باقی‌مانده (${stockInfo.sanitized.width}) بیشتر است.`);
-      } else if (row.length > stockInfo.sanitized.length) {
-        rowErrors.set(row.id, `طول (${row.length}) از طول باقی‌مانده (${stockInfo.sanitized.length}) بیشتر است.`);
-      }
-    });
-
-    const totalRequestedPieces = rows.reduce((sum, row) => sum + row.quantity, 0);
-    const totalRequestedSquareMeters = rows.reduce((sum, row) => sum + row.squareMeters, 0);
-
-    if (totalRequestedPieces > stockInfo.quantity) {
-      rows.forEach(row => {
-        if (!rowErrors.has(row.id)) {
-          rowErrors.set(
-            row.id,
-            `تعداد درخواستی از موجودی سنگ باقی‌مانده بیشتر است (درخواست: ${totalRequestedPieces}، موجودی: ${stockInfo.quantity}).`
-          );
-        }
-      });
-    }
-
-    if (totalRequestedSquareMeters > stockInfo.totalSquareMeters + 0.0001) {
-      rows.forEach(row => {
-        if (!rowErrors.has(row.id)) {
-          rowErrors.set(
-            row.id,
-            `مجموع متر مربع پارتیشن‌ها (${totalRequestedSquareMeters.toFixed(3)}) از ظرفیت باقی‌مانده (${stockInfo.totalSquareMeters.toFixed(3)}) بیشتر است.`
-          );
-        }
-      });
-    }
-
-    return {
-      stockInfo,
-      rowErrors,
-      summaryError: rowErrors.size > 0
-        ? `${rowErrors.size} پارتیشن دارای مشکل است. لطفاً ابعاد را بررسی و اصلاح کنید.`
-        : ''
-    };
-  }, [normalizeRemainingStock]);
+    return allocateRemainingStonePartitions(rows, remainingStone);
+  }, []);
 
   // Handle unit conversion for remaining stone length
   const handleRemainingStoneLengthUnitChange = useCallback((newUnit: 'cm' | 'm') => {
@@ -337,7 +271,6 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     const validation = validateRowsAgainstStock(normalizedRows, selectedRemainingStone);
     const rowErrors = validation.rowErrors;
     const stockInfo = validation.stockInfo;
-    const totalRequestedPieces = normalizedRows.reduce((sum, row) => sum + row.quantity, 0);
 
     if (rowErrors.size > 0) {
       setPartitionValidationErrors(rowErrors);
@@ -352,29 +285,8 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     setPartitionValidationErrors(new Map());
     setPartitions(prev => prev.map(row => ({ ...row, validationError: undefined })));
 
-    const remainingAreasRaw: RemainingStone[] = normalizedRows.flatMap((row, index) => {
-      const perPieceRemaining = calculateRemainingAreasAfterPartitions(
-        [{
-          id: `${row.id}_single`,
-          width: row.width,
-            length: row.length,
-            quantity: 1,
-            squareMeters: row.perPieceSquareMeters
-          }],
-        stockInfo.sanitized.width,
-        stockInfo.sanitized.length
-      );
-
-      return perPieceRemaining.map((piece, pieceIndex) => ({
-        ...piece,
-        id: `remaining_child_${Date.now()}_${index}_${pieceIndex}`,
-        quantity: row.quantity,
-        squareMeters: piece.squareMeters * row.quantity
-      }));
-    });
-
     const remainingAreas = mergeRemainingStoneCollection(
-      remainingAreasRaw.filter(piece => piece.width > 0 && piece.length > 0 && (piece.quantity || 0) > 0)
+      validation.remainingAreas.filter(piece => piece.width > 0 && piece.length > 0 && (piece.quantity || 0) > 0)
     );
 
     const cuttingCostPerMeter = sourceProduct.cuttingCostPerMeter || getCuttingTypePricePerMeter('LONG') || 0;
@@ -469,7 +381,7 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
       if (idx !== sourceProductIndex) return product;
 
       const currentRemaining = (product.remainingStones || []).filter(rs => rs.id !== selectedRemainingStone.id);
-      const remainingQuantityAfterUse = Math.max(0, stockInfo.quantity - totalRequestedPieces);
+      const remainingQuantityAfterUse = Math.max(0, stockInfo.quantity - validation.consumedSourcePieces);
       const retainedSourceStone: RemainingStone[] = remainingQuantityAfterUse > 0
         ? [{
             ...stockInfo.sanitized,

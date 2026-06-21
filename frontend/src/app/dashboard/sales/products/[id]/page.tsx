@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Product } from '@/types/product';
-import { salesAPI } from '@/lib/api';
+import { resolveBackendAssetUrl, salesAPI } from '@/lib/api';
 import { formatPrice } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import CatalogImagePicker from '@/components/CatalogImagePicker';
@@ -422,7 +422,7 @@ const ProductDetailPage: React.FC = () => {
                   {product.images && product.images.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
                       {product.images.slice(0, 3).map((image, index) => (
-                        <img key={`${image}-${index}`} src={image.startsWith('/') ? `${window.location.origin}${image}` : image} alt={product.namePersian} className="h-16 w-16 rounded-lg object-cover" />
+                        <img key={`${image}-${index}`} src={resolveBackendAssetUrl(image)} alt={product.namePersian} className="h-16 w-16 rounded-lg object-cover" />
                       ))}
                     </div>
                   ) : (

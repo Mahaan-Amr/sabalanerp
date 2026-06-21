@@ -75,6 +75,10 @@ server {
     proxy_pass http://backend:5000/files/accounting-contracts/;
   }
 
+  location /files/uploads/images/ {
+    proxy_pass http://backend:5000/files/uploads/images/;
+  }
+
   location / {
     proxy_pass http://frontend:3000/;
   }

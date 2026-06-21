@@ -2,13 +2,7 @@
 
 import React from 'react';
 import { FaPlus, FaTimes } from 'react-icons/fa';
-import { API_ORIGIN, salesAPI } from '@/lib/api';
-
-const resolveImageUrl = (url: string) => {
-  if (!url) return '';
-  if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url;
-  return `${API_ORIGIN}${url.startsWith('/') ? url : `/${url}`}`;
-};
+import { resolveBackendAssetUrl, salesAPI } from '@/lib/api';
 
 interface CatalogImagePickerProps {
   images?: string[];
@@ -44,7 +38,7 @@ const CatalogImagePicker: React.FC<CatalogImagePickerProps> = ({
       <div className="flex flex-wrap items-center gap-2">
         {visibleImages.map((image, index) => (
           <div key={`${image}-${index}`} className="relative h-16 w-16 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
-            <img src={resolveImageUrl(image)} alt={label} className="h-full w-full object-cover" />
+            <img src={resolveBackendAssetUrl(image)} alt={label} className="h-full w-full object-cover" />
             <button
               type="button"
               onClick={() => onChange(images.filter((_, imageIndex) => imageIndex !== index))}

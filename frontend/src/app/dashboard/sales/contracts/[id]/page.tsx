@@ -27,19 +27,13 @@ import {
   type ErpMetric,
   type ErpTone,
 } from '@/components/erp';
-import { API_ORIGIN, dashboardAPI, salesAPI } from '@/lib/api';
+import { dashboardAPI, resolveBackendAssetUrl, salesAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { formatDisplayNumber, formatPrice, formatSquareMeters, sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
 import { getContractPermissions, hasFeatureAccess, User as PermissionUser } from '@/lib/permissions';
 import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
 import { normalizeProductFinishing } from '@/features/contract-creation/utils/finishingUtils';
-
-const resolveImageUrl = (url: string) => {
-  if (!url) return '';
-  if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url;
-  return `${API_ORIGIN}${url.startsWith('/') ? url : `/${url}`}`;
-};
 
 interface Contract {
   id: string;
@@ -443,7 +437,7 @@ export default function ContractDetailPage() {
                             {rowImages.slice(0, 3).map((image: string, imageIndex: number) => (
                               <img
                                 key={`${image}-${imageIndex}`}
-                                src={resolveImageUrl(image)}
+                                src={resolveBackendAssetUrl(image)}
                                 alt={productName}
                                 className="h-14 w-14 rounded-md border border-slate-200 object-cover dark:border-slate-700"
                               />
@@ -504,7 +498,7 @@ export default function ContractDetailPage() {
                             {rowImages.slice(0, 3).map((image: string, imageIndex: number) => (
                               <img
                                 key={`${image}-${imageIndex}`}
-                                src={resolveImageUrl(image)}
+                                src={resolveBackendAssetUrl(image)}
                                 alt={sanitizeUiText(row.title, 'تصویر خدمت')}
                                 className="h-14 w-14 rounded-md border border-emerald-200 object-cover dark:border-emerald-800"
                               />

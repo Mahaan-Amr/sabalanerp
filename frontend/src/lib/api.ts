@@ -4,6 +4,12 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'pr
 const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
 export const API_ORIGIN = API_BASE.endsWith('/api') ? API_BASE.slice(0, -4) : API_BASE;
 
+export const resolveBackendAssetUrl = (url?: string | null) => {
+  if (!url) return '';
+  if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url;
+  return url.startsWith('/') ? url : `/${url}`;
+};
+
 // Create axios instance
 const api = axios.create({
   baseURL: API_BASE,

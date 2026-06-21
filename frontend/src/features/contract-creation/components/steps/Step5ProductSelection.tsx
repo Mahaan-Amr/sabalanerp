@@ -4,7 +4,7 @@
 import React from 'react';
 import { FaSearch, FaPlus, FaCheck, FaEdit, FaTrash, FaTimes } from 'react-icons/fa';
 import { formatPrice, formatSquareMeters, formatQuantity, formatDisplayNumber } from '@/lib/numberFormat';
-import { API_ORIGIN } from '@/lib/api';
+import { resolveBackendAssetUrl } from '@/lib/api';
 import { generateFullProductName } from '../../utils/productUtils';
 import {
   getServiceRowSourceLabel,
@@ -63,12 +63,6 @@ const getRemainingStoneUsageKeys = (stone: RemainingStone): string[] => {
 
 const SERVICE_SOURCE_OPTIONS: ContractServiceRowSourceType[] = ['tool', 'cutting', 'finishing'];
 
-const resolveImageUrl = (url: string) => {
-  if (!url) return '';
-  if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url;
-  return `${API_ORIGIN}${url.startsWith('/') ? url : `/${url}`}`;
-};
-
 interface RowImageStripProps {
   images?: string[];
   label: string;
@@ -92,7 +86,7 @@ const RowImageStrip: React.FC<RowImageStripProps> = ({ images = [], label, onCha
     <div className="mt-3 flex flex-wrap items-center gap-2">
       {visibleImages.map((image, imageIndex) => (
         <div key={`${image}-${imageIndex}`} className="relative h-12 w-12 overflow-hidden rounded-md border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
-          <img src={resolveImageUrl(image)} alt={label} className="h-full w-full object-cover" />
+          <img src={resolveBackendAssetUrl(image)} alt={label} className="h-full w-full object-cover" />
           <button
             type="button"
             onClick={() => onChange(images.filter((_, index) => index !== imageIndex))}

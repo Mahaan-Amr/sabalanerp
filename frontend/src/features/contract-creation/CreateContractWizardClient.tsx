@@ -31,7 +31,7 @@ import { salesAPI, crmAPI, dashboardAPI, servicesAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { downloadBlobResponse } from '@/lib/downloadFile';
-import { formatDisplayNumber, formatPrice, formatPriceWithRial, formatDimensions, formatSquareMeters, formatQuantity, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
+import { formatDisplayNumber, formatPrice, formatPriceWithRial, formatDimensions, formatSquareMeters, formatQuantity, normalizeDigits, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import StoneCanvas from '@/components/StoneCanvas';
 import { StoneCADDesigner } from '@/components/stone-cad/StoneCADDesigner';
@@ -224,6 +224,86 @@ interface CreateContractWizardProps {
   initialWizardData?: ContractWizardData | null;
   initialContractStatus?: string | null;
 }
+
+const normalizeProductSearchText = (value: unknown): string =>
+  normalizeDigits(String(value ?? ''))
+    .replace(/ي/g, 'ی')
+    .replace(/ك/g, 'ک')
+    .replace(/\u200c/g, ' ')
+    .toLowerCase();
+
+const productMatchesSearch = (
+  product: Product,
+  term: string,
+  generatedName?: string
+): boolean => {
+  const searchTerms = normalizeProductSearchText(term).trim().split(/\s+/).filter(Boolean);
+  if (searchTerms.length === 0) return true;
+
+  const searchableFields = [
+    product.code,
+    product.namePersian,
+    product.name,
+    product.fullName,
+    generatedName,
+    product.cuttingDimensionNamePersian,
+    product.stoneTypeNamePersian,
+    product.widthName,
+    product.thicknessName,
+    product.mineNamePersian,
+    product.finishNamePersian,
+    product.colorNamePersian,
+    product.qualityNamePersian,
+    product.description,
+    product.widthValue?.toString(),
+    product.thicknessValue?.toString(),
+    product.basePrice?.toString(),
+    `${product.widthValue}×${product.thicknessValue}`,
+    `عرض ${product.widthValue}×ضخامت ${product.thicknessValue}`
+  ].filter(Boolean);
+
+  const searchableText = normalizeProductSearchText(searchableFields.join(' '));
+  return searchTerms.every((searchTerm) => searchableText.includes(searchTerm));
+};
+
+const uniqueProductsByIdentity = (items: Product[]): Product[] => {
+  const seenIds = new Set<string>();
+  const seenCodes = new Set<string>();
+
+  return items.filter((item) => {
+    if (item.id) {
+      if (seenIds.has(item.id)) return false;
+      seenIds.add(item.id);
+      return true;
+    }
+    if (item.code) {
+      if (seenCodes.has(item.code)) return false;
+      seenCodes.add(item.code);
+      return true;
+    }
+    return true;
+  });
+};
+
+const sumRemainingStoneArea = (stones: RemainingStone[] | undefined): number =>
+  (stones || []).reduce((sum, stone) => sum + toFiniteNumber(stone.squareMeters), 0);
+
+const findRemainingStoneBalanceError = (products: ContractProduct[]): string | null => {
+  for (const product of products) {
+    const generatedCapacity = sumRemainingStoneArea(product.smartCutPlan?.remainingStones || []);
+    const consumedArea = sumRemainingStoneArea(product.usedRemainingStones || []);
+    if (generatedCapacity <= 0 || consumedArea <= 0) continue;
+
+    const availableArea = sumRemainingStoneArea(product.remainingStones || []);
+    const trackedArea = availableArea + consumedArea;
+    if (trackedArea > generatedCapacity + 0.01) {
+      const productName = product.stoneName || product.product?.namePersian || 'محصول';
+      return `باقی‌مانده‌های "${productName}" با مصرف ثبت‌شده متعادل نیست. لطفاً ردیف‌های ساخته‌شده از باقی‌مانده را بررسی یا دوباره تنظیم کنید.`;
+    }
+  }
+
+  return null;
+};
 
 export default function CreateContractWizard({
   mode = 'create',
@@ -1336,27 +1416,11 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
         if (!active) return;
         const rawItems: Product[] = (res?.data?.items || res?.data?.data || []) as Product[];
         
-        // Deduplicate products by ID first, then by code if IDs are missing/duplicate
-        const seenIds = new Set<string>();
-        const seenCodes = new Set<string>();
-        const uniqueProducts = rawItems.filter((item) => {
-          if (item.id) {
-            if (seenIds.has(item.id)) {
-              return false;
-            }
-            seenIds.add(item.id);
-            return true;
-          }
-          if (item.code) {
-            if (seenCodes.has(item.code)) {
-              return false;
-            }
-            seenCodes.add(item.code);
-            return true;
-          }
-          return true;
-        });
-        
+        const localFallbackProducts = products.filter(product =>
+          productSupportsContractType(product, 'stair') &&
+          productMatchesSearch(product, term, generateFullProductName(product))
+        );
+        const uniqueProducts = uniqueProductsByIdentity([...rawItems, ...localFallbackProducts]);
         const stairEligibleProducts = uniqueProducts.filter(product =>
           productSupportsContractType(product, 'stair')
         );
@@ -1369,7 +1433,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       }
     }, 300);
     return () => { active = false; clearTimeout(timeout); };
-  }, [stairSystemV2.stoneSearchTerm, useStairFlowV2]);
+  }, [stairSystemV2.stoneSearchTerm, useStairFlowV2, products]);
 
   useEffect(() => {
     let active = true;
@@ -1384,8 +1448,13 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       try {
         const res = await salesAPI.getProducts({ search: term, limit: 10, contractType: 'stair' });
         if (!active) return;
-        const items: Product[] = (res?.data?.items || res?.data?.data || []) as Product[];
-        const stairEligible = items.filter(product => productSupportsContractType(product, 'stair'));
+        const rawItems: Product[] = (res?.data?.items || res?.data?.data || []) as Product[];
+        const localFallbackProducts = products.filter(product =>
+          productSupportsContractType(product, 'stair') &&
+          productMatchesSearch(product, term, generateFullProductName(product))
+        );
+        const stairEligible = uniqueProductsByIdentity([...rawItems, ...localFallbackProducts])
+          .filter(product => productSupportsContractType(product, 'stair'));
         stairSystemV2.setLayerStoneSearchResults(stairEligible);
       } catch (e) {
         console.error('Layer stone search failed', e);
@@ -1398,7 +1467,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       active = false;
       clearTimeout(timeout);
     };
-  }, [stairSystemV2.layerStoneSearchTerm, useStairFlowV2]);
+  }, [stairSystemV2.layerStoneSearchTerm, useStairFlowV2, products]);
 
   // Debounced tools search
   useEffect(() => {
@@ -3052,7 +3121,11 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     if (!source) return;
 
     const duplicate = JSON.parse(JSON.stringify(source)) as ContractProduct;
-    delete duplicate.stairSystemId;
+    if (source.productType === 'stair') {
+      duplicate.stairSystemId = `stair_duplicate_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    } else {
+      delete duplicate.stairSystemId;
+    }
     delete duplicate.parentProductIndex;
     if (duplicate.meta) {
       duplicate.meta = {
@@ -4439,7 +4512,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     // Use cutting cost from calculated result (which already includes the auto-fetched price if applicable)
     const finalCuttingCost = calculated.cuttingCost || 0;
     const finalCuttingCostPerMeter = cuttingCostPerMeterForCalc;
-    const sawKerfEnabled = !!productConfig.sawKerfEnabled;
+    const sawKerfEnabled = !!productConfig.sawKerfEnabled && userEnteredWidthInCm > 0 && userEnteredWidthInCm < originalWidth;
     const sawKerfCm = sawKerfEnabled ? (productConfig.sawKerfCm || SAW_KERF_CM) : null;
     const smartCutPlan = calculateSmartLongitudinalCutPlan({
       originalWidthCm: originalWidth,
@@ -4655,6 +4728,12 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       case 4:
         if (wizardData.products.length === 0 && (wizardData.serviceRows || []).length === 0) {
           newErrors.products = 'انتخاب حداقل یک محصول یا خدمت الزامی است';
+        }
+        if (!newErrors.products) {
+          const remainingStoneBalanceError = findRemainingStoneBalanceError(wizardData.products);
+          if (remainingStoneBalanceError) {
+            newErrors.products = remainingStoneBalanceError;
+          }
         }
         break;
       case 5:

@@ -172,7 +172,7 @@ const yekanBoldUrl = fileToDataUri(publicAssetPath('yekan-bakh', 'YekanBakh-Bold
 const renderYekanFontFaces = (): string => `
   @font-face {
     font-family: 'Yekan Bakh';
-    src: url('${escapeHtml(yekanRegularUrl)}') format('woff2');
+    src: url('${escapeHtml(yekanRegularUrl, { localizeDigits: false })}') format('woff2');
     font-weight: 400;
     font-style: normal;
     font-display: swap;
@@ -180,7 +180,7 @@ const renderYekanFontFaces = (): string => `
 
   @font-face {
     font-family: 'Yekan Bakh';
-    src: url('${escapeHtml(yekanSemiBoldUrl)}') format('woff2');
+    src: url('${escapeHtml(yekanSemiBoldUrl, { localizeDigits: false })}') format('woff2');
     font-weight: 600;
     font-style: normal;
     font-display: swap;
@@ -188,16 +188,23 @@ const renderYekanFontFaces = (): string => `
 
   @font-face {
     font-family: 'Yekan Bakh';
-    src: url('${escapeHtml(yekanBoldUrl)}') format('woff2');
+    src: url('${escapeHtml(yekanBoldUrl, { localizeDigits: false })}') format('woff2');
     font-weight: 700;
     font-style: normal;
     font-display: swap;
   }
 `;
 
-const escapeHtml = (value: unknown): string => {
+const toFaDigits = (value: string): string =>
+  value.replace(/\d/g, (char) => '۰۱۲۳۴۵۶۷۸۹'[Number(char)]);
+
+const escapeHtml = (
+  value: unknown,
+  options: { localizeDigits?: boolean } = {}
+): string => {
   const input = value === null || value === undefined ? '' : String(value);
-  return input
+  const localizedInput = options.localizeDigits === false ? input : toFaDigits(input);
+  return localizedInput
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -221,7 +228,7 @@ const toNumber = (value: unknown): number => {
 const toFaNumber = (value: unknown, fractionDigits = 0): string => {
   const numeric = toNumber(value);
   return new Intl.NumberFormat('fa-IR', {
-    minimumFractionDigits: fractionDigits,
+    minimumFractionDigits: 0,
     maximumFractionDigits: fractionDigits
   }).format(numeric);
 };
@@ -279,8 +286,6 @@ const formatDate = (value: unknown): string => {
 const latinDigits = (value: string): string => value
   .replace(/[۰-۹]/g, (char) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(char)))
   .replace(/[٠-٩]/g, (char) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(char)));
-
-const toFaDigits = (value: string): string => value.replace(/\d/g, (char) => '۰۱۲۳۴۵۶۷۸۹'[Number(char)]);
 
 const formatPersianDate = (value: unknown): string => {
   if (!value) return EMPTY;
@@ -1068,7 +1073,7 @@ const getContractHeaderMeta = (contract: RenderableContract) => {
 export function renderContractPdfHeaderTemplate(contract: RenderableContract): string {
   const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
   const logoMarkup = logoUrl
-    ? `<img src="${escapeHtml(logoUrl)}" style="width:290px;height:66px;object-fit:contain;display:block;" />`
+    ? `<img src="${escapeHtml(logoUrl, { localizeDigits: false })}" style="width:290px;height:66px;object-fit:contain;display:block;" />`
     : '';
 
   return `

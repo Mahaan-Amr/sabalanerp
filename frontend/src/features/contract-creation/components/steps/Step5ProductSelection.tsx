@@ -588,13 +588,33 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                             {availableRemainingStones.map((remainingStone) => (
                               <div
                                 key={remainingStone.id}
-                                className="rounded-lg border border-orange-200 bg-white p-2 dark:border-orange-800 dark:bg-slate-900/50"
+                                className="rounded-lg border border-orange-200 bg-white p-3 dark:border-orange-800 dark:bg-slate-900/50"
                               >
-                                <p className="text-xs leading-5 text-slate-700 dark:text-slate-200">
-                                  عرض {formatDisplayNumber(remainingStone.width)} cm × طول {formatDisplayNumber(remainingStone.length)} m
-                                  {' | '}
-                                  {formatSquareMeters(remainingStone.squareMeters)}
-                                </p>
+                                <div className="grid grid-cols-3 gap-2 text-xs">
+                                  <div className="rounded-md bg-orange-50 px-2 py-1.5 dark:bg-orange-900/20">
+                                    <p className="text-orange-700 dark:text-orange-200">عرض</p>
+                                    <p className="mt-1 font-semibold text-slate-900 dark:text-white">
+                                      {formatDisplayNumber(remainingStone.width)} cm
+                                    </p>
+                                  </div>
+                                  <div className="rounded-md bg-orange-50 px-2 py-1.5 dark:bg-orange-900/20">
+                                    <p className="text-orange-700 dark:text-orange-200">طول</p>
+                                    <p className="mt-1 font-semibold text-slate-900 dark:text-white">
+                                      {formatDisplayNumber(remainingStone.length)} m
+                                    </p>
+                                  </div>
+                                  <div className="rounded-md bg-orange-50 px-2 py-1.5 dark:bg-orange-900/20">
+                                    <p className="text-orange-700 dark:text-orange-200">مساحت</p>
+                                    <p className="mt-1 font-semibold text-slate-900 dark:text-white">
+                                      {formatSquareMeters(remainingStone.squareMeters)}
+                                    </p>
+                                  </div>
+                                </div>
+                                {remainingStone.quantity && remainingStone.quantity > 1 && (
+                                  <p className="mt-2 text-xs text-orange-700 dark:text-orange-200">
+                                    تعداد قطعه: {formatDisplayNumber(remainingStone.quantity)}
+                                  </p>
+                                )}
                                 {cart.useRemainingStone && (
                                   <button
                                     type="button"

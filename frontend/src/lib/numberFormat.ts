@@ -83,12 +83,11 @@ export const formatDisplayNumber = (value: number | string | null | undefined): 
   }
   const num = toFiniteNumber(value);
   if (!Number.isFinite(num)) return '0';
-  const roundedValue = Math.round(num * 100) / 100;
 
-  return formatNumber(roundedValue, {
+  return formatNumber(num, {
     locale: 'fa-IR',
     minimumFractionDigits: 0,
-    maximumFractionDigits: 2
+    maximumFractionDigits: 3
   });
 };
 
@@ -98,11 +97,10 @@ export const formatDisplayNumberLatin = (value: number | string | null | undefin
   }
   const num = toFiniteNumber(value);
   if (!Number.isFinite(num)) return '0';
-  const roundedValue = Math.round(num * 100) / 100;
 
-  return roundedValue.toLocaleString('en-US', {
+  return num.toLocaleString('en-US', {
     minimumFractionDigits: 0,
-    maximumFractionDigits: 2
+    maximumFractionDigits: 3
   });
 };
 
@@ -160,8 +158,7 @@ export const formatInputNumber = (value: number | string | null | undefined): st
     return '';
   }
 
-  const roundedValue = Math.round(num * 100) / 100;
-  return formatDisplayNumber(roundedValue);
+  return formatDisplayNumber(num);
 };
 
 export const formatInputNumberLatin = (value: number | string | null | undefined): string => {
@@ -175,8 +172,7 @@ export const formatInputNumberLatin = (value: number | string | null | undefined
     return '';
   }
 
-  const roundedValue = Math.round(num * 100) / 100;
-  return formatDisplayNumberLatin(roundedValue);
+  return formatDisplayNumberLatin(num);
 };
 
 export const formatDimensions = (

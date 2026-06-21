@@ -28,7 +28,11 @@ interface UseProductFilteringReturn {
 }
 
 const normalizeSearchText = (value: unknown): string =>
-  normalizeDigits(String(value ?? '')).toLowerCase();
+  normalizeDigits(String(value ?? ''))
+    .replace(/ي/g, 'ی')
+    .replace(/ك/g, 'ک')
+    .replace(/\u200c/g, ' ')
+    .toLowerCase();
 
 const compareProductsByWidthAsc = (a: Product, b: Product): number => {
   const widthDiff = (Number(a.widthValue) || 0) - (Number(b.widthValue) || 0);
@@ -146,7 +150,9 @@ export const useProductFiltering = (options: UseProductFilteringOptions): UsePro
         product.widthName, product.thicknessName, product.mineNamePersian,
         product.finishNamePersian, product.colorNamePersian, product.qualityNamePersian,
         product.widthValue?.toString(), product.thicknessValue?.toString(),
-        product.basePrice?.toString()
+        product.basePrice?.toString(),
+        product.fullName,
+        `${product.stoneTypeNamePersian} ${product.cuttingDimensionNamePersian} عرض ${product.widthValue}×ضخامت ${product.thicknessValue}cm ${product.mineNamePersian} ${product.finishNamePersian} ${product.colorNamePersian} ${product.qualityNamePersian}`
       ].filter(Boolean);
       const searchableText = normalizeSearchText(searchableFields.join(' '));
       return searchTerms.length === 1

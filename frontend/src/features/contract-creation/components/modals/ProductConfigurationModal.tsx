@@ -218,8 +218,28 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
       ? rememberedType
       : null
   );
+  const originalWidthCm = (isEditMode && productConfig.originalWidth)
+    ? Number(productConfig.originalWidth) || 0
+    : Number(selectedProduct?.widthValue) || 0;
+  const requestedWidthCm = widthUnit === 'm'
+    ? (Number(productConfig.width) || 0) * 100
+    : Number(productConfig.width) || 0;
+  const isFullWidthRequest =
+    currentProductType !== 'slab' &&
+    originalWidthCm > 0 &&
+    requestedWidthCm > 0 &&
+    Math.abs(requestedWidthCm - originalWidthCm) < 0.0001;
   const availableProductTypes = ['longitudinal', 'stair', 'slab'] as const;
   const requiresTypeSelection = !isEditMode && !currentProductType;
+
+  React.useEffect(() => {
+    if (!isFullWidthRequest || !productConfig.sawKerfEnabled) return;
+    setProductConfig((prev: any) => ({
+      ...prev,
+      sawKerfEnabled: false,
+      sawKerfCm: null
+    }));
+  }, [isFullWidthRequest, productConfig.sawKerfEnabled, setProductConfig]);
   
   // Debug logging
   console.log('🔍 ProductConfigurationModal Render Check:', {
@@ -3523,7 +3543,9 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                     <input
                       type="checkbox"
                       checked={!!productConfig.sawKerfEnabled}
+                      disabled={isFullWidthRequest}
                       onChange={(event) => {
+                        if (isFullWidthRequest) return;
                         const enabled = event.target.checked;
                         setProductConfig((prev: any) => ({
                           ...prev,
@@ -3531,12 +3553,14 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                           sawKerfCm: enabled ? (prev.sawKerfCm || SAW_KERF_CM) : null
                         }));
                       }}
-                      className="mt-1 h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                      className="mt-1 h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
                     />
                     <span>
                       <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">خوراک اره</span>
                       <span className="mt-1 block text-xs leading-5 text-amber-700 dark:text-amber-200">
-                        هر محور برش‌خورده ۳mm مصرف اضافه در سنگ اصلی و باقیمانده‌ها دارد.
+                        {isFullWidthRequest
+                          ? 'عرض درخواستی با عرض اصلی برابر است؛ خوراک اره برای این محور اعمال نمی‌شود.'
+                          : 'هر محور برش‌خورده ۳mm مصرف اضافه در سنگ اصلی و باقیمانده‌ها دارد.'}
                       </span>
                     </span>
                   </label>

@@ -4857,6 +4857,17 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             }
           });
         }
+        if (wizardData.payment.payments.length > 0 && !newErrors.paymentMethod) {
+          const paymentTotal = sumNumericValues(wizardData.payment.payments, (payment) => payment.amount);
+          const payableTotal = toFiniteNumber(wizardData.payment.totalContractAmount) ||
+            sumNumericValues(wizardData.products, (product) => product.totalPrice) +
+            sumNumericValues(wizardData.serviceRows || [], (row) => row.totalPrice);
+          const remainingPaymentAmount = payableTotal - paymentTotal;
+
+          if (Math.abs(remainingPaymentAmount) > 0.01) {
+            newErrors.paymentMethod = `مجموع پرداخت‌ها (${formatPrice(paymentTotal, wizardData.payment.currency)}) باید با مبلغ قرارداد (${formatPrice(payableTotal, wizardData.payment.currency)}) برابر باشد. مانده: ${formatPrice(remainingPaymentAmount, wizardData.payment.currency)}`;
+          }
+        }
         break;
     }
 

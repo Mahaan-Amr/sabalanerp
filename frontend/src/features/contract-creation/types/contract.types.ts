@@ -605,6 +605,7 @@ export interface ContractStep8DeliveryDetail {
   products: Array<{
     productName: string;
     quantity: number;
+    amountLabel?: string;
   }>;
 }
 
@@ -762,4 +763,3 @@ export type LayerEdgeDemand = {
   layersNeeded: number;
   lengthM: number;
 };
-

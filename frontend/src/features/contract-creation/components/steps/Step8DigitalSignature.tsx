@@ -40,6 +40,7 @@ interface Step8DigitalSignatureProps {
   printActionLoading: boolean;
   productDetails: ContractStep8ProductDetail[];
   serviceDetails: ContractStep8ServiceDetail[];
+  standaloneServiceDetails: ContractStep8ServiceDetail[];
   deliveryDetails: ContractStep8DeliveryDetail[];
   paymentDetails: ContractStep8PaymentDetail[];
   financialSummary: ContractStep8FinancialSummary;
@@ -142,6 +143,7 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
   printActionLoading,
   productDetails,
   serviceDetails,
+  standaloneServiceDetails,
   deliveryDetails,
   paymentDetails,
   financialSummary
@@ -355,6 +357,41 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
             </div>
           </details>
 
+          <details open className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+            <summary className="px-4 py-3 cursor-pointer font-semibold text-gray-800 dark:text-white flex items-center gap-2">
+              <FaTools className="text-teal-500" />
+              خدمات مستقل ({standaloneServiceDetails.length})
+            </summary>
+            <div className="px-4 pb-4 overflow-x-auto">
+              {standaloneServiceDetails.length === 0 ? (
+                <p className="text-sm text-gray-500">—</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-right text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">
+                      <th className="py-2">دسته</th>
+                      <th className="py-2">شرح</th>
+                      <th className="py-2">مقدار</th>
+                      <th className="py-2">نرخ</th>
+                      <th className="py-2">هزینه</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {standaloneServiceDetails.map((s) => (
+                      <tr key={s.id} className="border-b border-gray-100 dark:border-gray-700/60">
+                        <td className="py-2 text-gray-700 dark:text-gray-300">{s.category}</td>
+                        <td className="py-2 text-gray-700 dark:text-gray-300">{s.name}</td>
+                        <td className="py-2 text-gray-700 dark:text-gray-300">{s.amountLabel}</td>
+                        <td className="py-2 text-gray-700 dark:text-gray-300">{s.rateLabel || '—'}</td>
+                        <td className="py-2 text-gray-700 dark:text-gray-300">{formatPriceWithRial(s.cost, financialSummary.currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </details>
+
           <details className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
             <summary className="px-4 py-3 cursor-pointer font-semibold text-gray-800 dark:text-white flex items-center gap-2">
               <FaTruck className="text-teal-500" />
@@ -376,7 +413,7 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                     <p className="text-gray-500 mb-1">اقلام:</p>
                     <ul className="list-disc pr-5 space-y-1">
                       {delivery.products.length === 0 ? <li>—</li> : delivery.products.map((product, index) => (
-                        <li key={`${delivery.id}-product-${index}`}>{product.productName} ({product.quantity})</li>
+                        <li key={`${delivery.id}-product-${index}`}>{product.productName} ({product.amountLabel || product.quantity})</li>
                       ))}
                     </ul>
                   </div>

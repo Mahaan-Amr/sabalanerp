@@ -8,21 +8,21 @@ export const metadata: Metadata = {
   title: 'Sabalan ERP - سیستم برنامه‌ریزی منابع سازمانی',
   description: 'سامانه یکپارچه مدیریت فرایندهای سازمانی سبلان',
   icons: {
-    icon: '/brand/sabalan-logo.jpg',
-    shortcut: '/brand/sabalan-logo.jpg',
-    apple: '/brand/sabalan-logo.jpg',
+    icon: '/brand/logo-project.png',
+    shortcut: '/brand/logo-project.png',
+    apple: '/brand/logo-project.png',
   },
   openGraph: {
     title: 'Sabalan ERP - سیستم برنامه‌ریزی منابع سازمانی',
     description: 'سامانه یکپارچه مدیریت فرایندهای سازمانی سبلان',
-    images: ['/brand/sabalan-logo.jpg'],
+    images: ['/brand/logo-project.png'],
     type: 'website',
   },
   twitter: {
     card: 'summary',
     title: 'Sabalan ERP - سیستم برنامه‌ریزی منابع سازمانی',
     description: 'سامانه یکپارچه مدیریت فرایندهای سازمانی سبلان',
-    images: ['/brand/sabalan-logo.jpg'],
+    images: ['/brand/logo-project.png'],
   },
 }
 
@@ -35,9 +35,9 @@ export default function RootLayout({
     <html lang="fa" dir="rtl">
       <head>
         <link rel="manifest" href="/manifest.json" />
-        <link rel="icon" href="/brand/sabalan-logo.jpg" />
-        <link rel="apple-touch-icon" href="/brand/sabalan-logo.jpg" />
-        <meta name="theme-color" content="#14b8a6" />
+        <link rel="icon" href="/brand/logo-project.png" />
+        <link rel="apple-touch-icon" href="/brand/logo-project.png" />
+        <meta name="theme-color" content="#074747" />
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -55,4 +55,3 @@ export default function RootLayout({
     </html>
   )
 }
-

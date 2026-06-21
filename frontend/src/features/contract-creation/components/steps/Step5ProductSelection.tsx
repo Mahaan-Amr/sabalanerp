@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { FaSearch, FaPlus, FaCheck, FaEdit, FaTrash, FaTimes } from 'react-icons/fa';
-import { formatPrice, formatSquareMeters, formatQuantity, formatDisplayNumber } from '@/lib/numberFormat';
+import { formatPrice, formatSquareMeters, formatQuantity, formatDisplayNumber, parseFormattedNumber } from '@/lib/numberFormat';
 import { resolveBackendAssetUrl } from '@/lib/api';
 import { generateFullProductName } from '../../utils/productUtils';
 import {
@@ -661,22 +661,24 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                         مقدار ({getServiceRowUnitLabel(row.unit)})
                       </span>
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="decimal"
                         min="0"
                         step="0.01"
                         value={row.quantity}
-                        onChange={(event) => cart.updateServiceRow(row.id, { quantity: Number(event.target.value) || 0 })}
+                        onChange={(event) => cart.updateServiceRow(row.id, { quantity: parseFormattedNumber(event.target.value) })}
                         className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-left font-semibold text-slate-800 outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                       />
                     </label>
                     <label className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
                       <span className="text-xs text-slate-500 dark:text-slate-400">قیمت واحد</span>
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="decimal"
                         min="0"
                         step="1000"
                         value={row.unitPrice}
-                        onChange={(event) => cart.updateServiceRow(row.id, { unitPrice: Number(event.target.value) || 0 })}
+                        onChange={(event) => cart.updateServiceRow(row.id, { unitPrice: parseFormattedNumber(event.target.value) })}
                         className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-left font-semibold text-slate-800 outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                       />
                     </label>

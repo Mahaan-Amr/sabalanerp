@@ -76,6 +76,18 @@ interface NormalizedProduct {
   sourceMaterialSummary: string;
 }
 
+interface NormalizedStandaloneService {
+  id: string;
+  code: string;
+  sourceType: string;
+  title: string;
+  description: string;
+  unit: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+}
+
 interface FlatProductRow {
   indexLabel: string;
   code: string;
@@ -193,8 +205,16 @@ const escapeHtml = (value: unknown): string => {
     .replace(/'/g, '&#39;');
 };
 
+const normalizeDigits = (value: string): string => value
+  .replace(/[\u06F0-\u06F9]/g, (digit) => String(digit.charCodeAt(0) - 0x06F0))
+  .replace(/[\u0660-\u0669]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
+  .replace(/\u066B/g, '.')
+  .replace(/[\u066C،]/g, ',');
+
 const toNumber = (value: unknown): number => {
-  const numeric = Number(value);
+  const numeric = typeof value === 'string'
+    ? Number(normalizeDigits(value).replace(/[,\s]/g, ''))
+    : Number(value);
   return Number.isFinite(numeric) ? numeric : 0;
 };
 
@@ -559,13 +579,57 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
   }));
 };
 
-const normalizeDeliveries = (contract: RenderableContract, products: NormalizedProduct[]): NormalizedDelivery[] => {
+const standaloneServiceSourceLabel = (sourceType: unknown): string => {
+  if (sourceType === 'tool') return 'ابزار';
+  if (sourceType === 'cutting') return 'برش';
+  if (sourceType === 'finishing') return 'پرداخت سنگ';
+  return 'خدمات مستقل';
+};
+
+const standaloneServiceUnitLabel = (unit: unknown): string => {
+  if (unit === 'squareMeter') return 'متر مربع';
+  if (unit === 'meter') return 'متر';
+  if (unit === 'count') return 'عدد';
+  return String(unit || 'عدد');
+};
+
+const normalizeStandaloneServices = (contract: RenderableContract): NormalizedStandaloneService[] => {
+  const serviceRows = Array.isArray(contract.contractData?.serviceRows) ? contract.contractData.serviceRows : [];
+  return serviceRows.map((row: any, index: number) => ({
+    id: String(row?.id || `service-row-${index}`),
+    code: String(row?.sourceCode || EMPTY),
+    sourceType: standaloneServiceSourceLabel(row?.sourceType),
+    title: String(row?.title || EMPTY),
+    description: String(row?.description || EMPTY),
+    unit: standaloneServiceUnitLabel(row?.unit),
+    quantity: toNumber(row?.quantity),
+    unitPrice: toNumber(row?.unitPrice),
+    totalPrice: toNumber(row?.totalPrice)
+  }));
+};
+
+const normalizeDeliveries = (
+  contract: RenderableContract,
+  products: NormalizedProduct[],
+  standaloneServices: NormalizedStandaloneService[] = []
+): NormalizedDelivery[] => {
   const relationDeliveries = Array.isArray(contract.deliveries) ? contract.deliveries : [];
   const contractDataDeliveries = Array.isArray(contract.contractData?.deliveries) ? contract.contractData.deliveries : [];
   if (contractDataDeliveries.length > 0) {
     return contractDataDeliveries.map((snapshot: any, index: number) => {
       const snapshotProducts = Array.isArray(snapshot?.products)
         ? snapshot.products.map((deliveryProduct: any) => {
+            if (deliveryProduct?.rowType === 'service') {
+              const service = standaloneServices.find((candidate) => candidate.id === deliveryProduct?.serviceRowId);
+              const amount = toNumber(deliveryProduct?.amount || deliveryProduct?.quantity);
+              const unit = deliveryProduct?.unit || service?.unit;
+              const fractionDigits = unit === 'count' || unit === 'عدد' ? 0 : 2;
+              return {
+                name: service?.title || EMPTY,
+                quantity: amount,
+                amountLabel: `${toFaNumber(amount, fractionDigits)} ${standaloneServiceUnitLabel(unit)}`
+              };
+            }
             const productIndex = toNumber(deliveryProduct?.productIndex);
             const product = products[productIndex] ||
               products.find((candidate) => candidate.id.startsWith(`${deliveryProduct?.productId || ''}-`));
@@ -682,15 +746,20 @@ const normalizePayments = (contract: RenderableContract): NormalizedPayment[] =>
   return rows;
 };
 
-const normalizeFinancials = (contract: RenderableContract, products: NormalizedProduct[]): NormalizedFinancials => {
+const normalizeFinancials = (
+  contract: RenderableContract,
+  products: NormalizedProduct[],
+  standaloneServices: NormalizedStandaloneService[] = []
+): NormalizedFinancials => {
   const currency = String(contract.currency || contract.contractData?.payment?.currency || 'تومان');
   const productsTotal = products.reduce((sum, product) => sum + toNumber(product.totalPrice), 0);
-  const servicesTotal = products.reduce((sum, product) => {
+  const productServicesTotal = products.reduce((sum, product) => {
     const services = product.services
       .filter((service) => service.category !== 'پرداخت سنگ')
       .reduce((serviceSum, service) => serviceSum + toNumber(service.cost), 0);
     return sum + services;
   }, 0);
+  const standaloneServicesTotal = standaloneServices.reduce((sum, row) => sum + toNumber(row.totalPrice), 0);
   const cutsTotal = products.reduce((sum, product) => sum + product.cuts.reduce((cutSum, cut) => cutSum + toNumber(cut.cost), 0), 0);
   const finishingTotal = products.reduce((sum, product) => {
     const finishing = product.services
@@ -706,13 +775,13 @@ const normalizeFinancials = (contract: RenderableContract, products: NormalizedP
   const discountBaseSubtotal = toNumber(discount.baseSubtotal);
   return {
     productsTotal,
-    servicesTotal,
+    servicesTotal: productServicesTotal + standaloneServicesTotal,
     cutsTotal,
     finishingTotal,
     discountAmount,
     discountPercent,
     discountBaseSubtotal,
-    grandTotal: relationGrandTotal > 0 ? relationGrandTotal : Math.max(productsTotal - discountAmount, 0),
+    grandTotal: relationGrandTotal > 0 ? relationGrandTotal : Math.max(productsTotal + standaloneServicesTotal - discountAmount, 0),
     currency
   };
 };
@@ -733,7 +802,13 @@ const formatProductQuantityOrArea = (product: NormalizedProduct): string => {
   return `${quantityLabel} / ${toFaNumber(product.squareMeters, 3)} متر مربع`;
 };
 
-const buildFlatProductRows = (products: NormalizedProduct[], currency: string, grandTotal: number, financials?: NormalizedFinancials): FlatProductRow[] => {
+const buildFlatProductRows = (
+  products: NormalizedProduct[],
+  standaloneServices: NormalizedStandaloneService[],
+  currency: string,
+  grandTotal: number,
+  financials?: NormalizedFinancials
+): FlatProductRow[] => {
   const rows: FlatProductRow[] = [];
 
   products.forEach((product, productIndex) => {
@@ -824,6 +899,21 @@ const buildFlatProductRows = (products: NormalizedProduct[], currency: string, g
     });
   });
 
+  standaloneServices.forEach((service, serviceIndex) => {
+    rows.push({
+      indexLabel: toFaNumber(products.length + serviceIndex + 1),
+      code: service.code,
+      description: service.description && service.description !== EMPTY
+        ? `${service.title} - ${service.description}`
+        : service.title,
+      category: service.sourceType,
+      dimensionsOrAmount: `${toFaNumber(service.quantity, 2)} ${service.unit}`,
+      quantityOrArea: `${toFaNumber(service.quantity, 2)} ${service.unit}`,
+      rate: service.unitPrice > 0 ? formatAmount(service.unitPrice, currency) : EMPTY,
+      total: formatAmount(service.totalPrice, currency)
+    });
+  });
+
   if (financials && financials.discountAmount > 0) {
     rows.push({
       indexLabel: '',
@@ -857,12 +947,18 @@ const buildFlatProductRows = (products: NormalizedProduct[], currency: string, g
   return rows;
 };
 
-const renderProductMainRows = (products: NormalizedProduct[], currency: string, grandTotal: number, financials?: NormalizedFinancials): string => {
-  if (!products.length) {
+const renderProductMainRows = (
+  products: NormalizedProduct[],
+  standaloneServices: NormalizedStandaloneService[],
+  currency: string,
+  grandTotal: number,
+  financials?: NormalizedFinancials
+): string => {
+  if (!products.length && !standaloneServices.length) {
     return `<tr><td colspan="8" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
   }
 
-  return buildFlatProductRows(products, currency, grandTotal, financials).map((row) => {
+  return buildFlatProductRows(products, standaloneServices, currency, grandTotal, financials).map((row) => {
     const classAttribute = row.className ? ` class="${row.className}"` : '';
     return `
       <tr${classAttribute}>
@@ -1001,9 +1097,10 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   const project = contractData.project || {};
 
   const normalizedProducts = normalizeProducts(contract);
-  const normalizedDeliveries = normalizeDeliveries(contract, normalizedProducts);
+  const normalizedStandaloneServices = normalizeStandaloneServices(contract);
+  const normalizedDeliveries = normalizeDeliveries(contract, normalizedProducts, normalizedStandaloneServices);
   const normalizedPayments = normalizePayments(contract);
-  const financials = normalizeFinancials(contract, normalizedProducts);
+  const financials = normalizeFinancials(contract, normalizedProducts, normalizedStandaloneServices);
 
   const { contractNumber } = getContractHeaderMeta(contract);
   const sellerName = getUserName(contract.createdByUser);
@@ -1059,7 +1156,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           </tr>
         </thead>
         <tbody>
-          ${renderProductMainRows(normalizedProducts, financials.currency, financials.grandTotal, financials)}
+          ${renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials)}
         </tbody>
       </table>
     </section>

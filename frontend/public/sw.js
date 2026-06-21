@@ -12,8 +12,7 @@ const STATIC_ASSETS = [
   '/',
   '/dashboard/security',
   '/manifest.json',
-  '/icons/icon-192x192.png',
-  '/icons/icon-512x512.png'
+  '/brand/logo-project.png'
 ];
 
 // API endpoints to cache
@@ -225,8 +224,8 @@ self.addEventListener('push', (event) => {
     
     const options = {
       body: data.body,
-      icon: '/icons/icon-192x192.png',
-      badge: '/icons/badge-72x72.png',
+      icon: '/brand/logo-project.png',
+      badge: '/brand/logo-project.png',
       vibrate: [100, 50, 100],
       data: {
         dateOfArrival: Date.now(),

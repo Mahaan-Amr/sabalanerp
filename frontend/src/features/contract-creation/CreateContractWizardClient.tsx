@@ -116,9 +116,14 @@ import {
   createContractAutosaveDraft,
   parseContractAutosaveDraft
 } from '@/features/contract-creation/utils/contractDraftStorage';
-import { getDeliverableProductEntries } from '@/features/contract-creation/utils/deliveryScheduleController';
+import {
+  getDeliverableProductEntries,
+  getSchedulableServiceEntries
+} from '@/features/contract-creation/utils/deliveryScheduleController';
 import {
   createContractServiceRow,
+  getServiceRowSourceLabel,
+  getServiceRowUnitLabel,
   recalculateContractServiceRow
 } from '@/features/contract-creation/utils/contractServiceRows';
 import {
@@ -364,8 +369,12 @@ export default function CreateContractWizard({
     () => getDeliverableProductEntries(wizardData.products),
     [wizardData.products]
   );
+  const schedulableServiceEntries = useMemo(
+    () => getSchedulableServiceEntries(wizardData.serviceRows || []),
+    [wizardData.serviceRows]
+  );
   const hasAnyContractRows = wizardData.products.length > 0 || (wizardData.serviceRows || []).length > 0;
-  const shouldSkipDeliveryStep = hasAnyContractRows && deliverableProductEntries.length === 0;
+  const shouldSkipDeliveryStep = hasAnyContractRows && deliverableProductEntries.length === 0 && schedulableServiceEntries.length === 0;
   const visibleWizardSteps = useMemo(
     () => baseVisibleWizardSteps.filter((step) => !shouldSkipDeliveryStep || step.id !== 5),
     [baseVisibleWizardSteps, shouldSkipDeliveryStep]
@@ -4984,6 +4993,16 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           }
         });
 
+        const standaloneServiceDetails: ContractStep8ServiceDetail[] = (wizardData.serviceRows || []).map((row, rowIndex) => ({
+          id: row.id || `standalone-service-${rowIndex}`,
+          productName: 'خدمات مستقل',
+          category: getServiceRowSourceLabel(row.sourceType),
+          name: row.title || '—',
+          amountLabel: `${formatDisplayNumber(row.quantity || 0)} ${getServiceRowUnitLabel(row.unit)}`,
+          rateLabel: formatPrice(row.unitPrice || 0, row.currency || wizardData.payment.currency || 'تومان'),
+          cost: toFiniteNumber(row.totalPrice)
+        }));
+
         const deliveryDetails: ContractStep8DeliveryDetail[] = wizardData.deliveries.map((delivery, index) => ({
           id: `delivery-${index}`,
           deliveryDate: delivery.deliveryDate || '—',
@@ -4994,17 +5013,26 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           products: (delivery.products || []).map((deliveryProduct) => {
             if (deliveryProduct.rowType === 'service') {
               const serviceRow = (wizardData.serviceRows || []).find((row) => row.id === deliveryProduct.serviceRowId);
+              const quantity = toFiniteNumber(deliveryProduct.amount ?? deliveryProduct.quantity);
               return {
                 productName: serviceRow?.title || 'خدمت',
-                quantity: toFiniteNumber(deliveryProduct.amount ?? deliveryProduct.quantity)
+                quantity,
+                amountLabel: `${formatDisplayNumber(quantity)} ${serviceRow ? getServiceRowUnitLabel(serviceRow.unit) : ''}`.trim()
               };
             }
             const productIndex = deliveryProduct.productIndex ?? -1;
+            const quantity = toFiniteNumber(deliveryProduct.amount ?? deliveryProduct.quantity);
+            const unitLabel = deliveryProduct.unit === 'meter'
+              ? 'متر'
+              : deliveryProduct.unit === 'squareMeter'
+                ? 'متر مربع'
+                : 'عدد';
             return {
               productName: wizardData.products[productIndex]?.stoneName ||
                 wizardData.products[productIndex]?.product?.namePersian ||
                 `محصول ${productIndex + 1}`,
-              quantity: toFiniteNumber(deliveryProduct.amount ?? deliveryProduct.quantity)
+              quantity,
+              amountLabel: `${formatDisplayNumber(quantity)} ${unitLabel}`
             };
           })
         }));
@@ -5029,12 +5057,13 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           .filter((service) => service.category === 'فینیشینگ')
           .reduce((sum, service) => sum + toFiniteNumber(service.cost), 0);
         const servicesTotal = serviceDetails.reduce((sum, service) => sum + toFiniteNumber(service.cost), 0);
+        const standaloneServicesTotal = standaloneServiceDetails.reduce((sum, service) => sum + toFiniteNumber(service.cost), 0);
         const paymentTotal = paymentDetails.reduce((sum, payment) => sum + toFiniteNumber(payment.amount), 0);
         const discountAmount = toFiniteNumber(wizardData.discount?.amount);
-        const grandTotal = toFiniteNumber(wizardData.payment.totalContractAmount) || Math.max(productsTotal - discountAmount, 0);
+        const grandTotal = toFiniteNumber(wizardData.payment.totalContractAmount) || Math.max(productsTotal + standaloneServicesTotal - discountAmount, 0);
         const financialSummary: ContractStep8FinancialSummary = {
           productsTotal,
-          servicesTotal,
+          servicesTotal: servicesTotal + standaloneServicesTotal,
           cutsTotal,
           finishingTotal,
           discountAmount,
@@ -5066,6 +5095,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             printActionLoading={printActionLoading}
             productDetails={productDetails}
             serviceDetails={serviceDetails}
+            standaloneServiceDetails={standaloneServiceDetails}
             deliveryDetails={deliveryDetails}
             paymentDetails={paymentDetails}
             financialSummary={financialSummary}

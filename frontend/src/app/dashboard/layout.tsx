@@ -277,7 +277,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-3'}`}>
               <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-lg border border-[#074747]/20 bg-white shadow-sm dark:border-teal-800 dark:bg-slate-900">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/brand/sabalan-logo.jpg" alt="Sabalan ERP" className="h-full w-full object-cover" />
+                <img src="/brand/logo-project.png" alt="Sabalan ERP" className="h-full w-full object-cover" />
               </div>
               {!sidebarCollapsed && (
                 <h1 className="text-xl font-bold text-slate-950 dark:text-white">Sabalan ERP</h1>
@@ -426,4 +426,3 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     </div>
   );
 }
-

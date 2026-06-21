@@ -9,7 +9,7 @@ export function PublicFooter() {
             <div className="mb-4 flex items-center gap-3">
               <span className="h-11 w-11 overflow-hidden rounded-full border border-stone-200 bg-white shadow-sm">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/brand/sabalan-logo.jpg" alt="" className="h-full w-full object-cover" />
+                <img src="/brand/logo-project.png" alt="" className="h-full w-full object-cover" />
               </span>
               <div>
                 <p className="font-extrabold text-stone-950">سبلان ERP</p>

@@ -3702,8 +3702,8 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       </span>
                     </span>
                   </label>
-                  {/* Mandatory Pricing Section - Only for longitudinal stones, not for slab */}
-                  {currentProductType !== 'slab' && (
+                  {/* Mandatory Pricing Section - Only for longitudinal stones */}
+                  {currentProductType === 'longitudinal' && (
                   <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
                     <div className="flex items-center space-x-3 space-x-reverse mb-4">
                       <input

@@ -83,6 +83,56 @@ const quarantineUpload = (filePath: string): void => {
   }
 };
 
+const normalizePersianText = (input: unknown): string => String(input || '')
+  .replace(/ي/g, 'ی')
+  .replace(/ك/g, 'ک')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const resolveContractVisibilityFromCutType = (cutTypeInput: unknown) => {
+  const cutType = normalizePersianText(cutTypeInput);
+  const isLongitudinalFamily = cutType.includes('طولی') || cutType.includes('تایل');
+  const isSlab = cutType.includes('اسلب');
+  const isPrepared =
+    cutType.includes('کیوبیک') ||
+    cutType.includes('قطعات آماده') ||
+    cutType.includes('حجمی');
+
+  if (isSlab) {
+    return {
+      availableInLongitudinalContracts: false,
+      availableInStairContracts: false,
+      availableInSlabContracts: true,
+      availableInVolumetricContracts: false
+    };
+  }
+
+  if (isPrepared) {
+    return {
+      availableInLongitudinalContracts: false,
+      availableInStairContracts: false,
+      availableInSlabContracts: false,
+      availableInVolumetricContracts: true
+    };
+  }
+
+  if (isLongitudinalFamily) {
+    return {
+      availableInLongitudinalContracts: true,
+      availableInStairContracts: true,
+      availableInSlabContracts: false,
+      availableInVolumetricContracts: false
+    };
+  }
+
+  return {
+    availableInLongitudinalContracts: false,
+    availableInStairContracts: false,
+    availableInSlabContracts: false,
+    availableInVolumetricContracts: false
+  };
+};
+
 // ==================== PRODUCT CATALOG ====================
 
 // @desc    Get all products with filtering and search
@@ -576,6 +626,10 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
       });
     }
 
+    const defaultContractVisibility = resolveContractVisibilityFromCutType(
+      req.body.cuttingDimensionNamePersian || req.body.cuttingDimensionName
+    );
+
     const product = await prisma.product.create({
       data: {
         code: req.body.code,
@@ -612,10 +666,10 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
         description: req.body.description || null,
         images: req.body.images || [],
         isActive: req.body.isActive !== undefined ? req.body.isActive : true,
-        availableInLongitudinalContracts: req.body.availableInLongitudinalContracts !== undefined ? req.body.availableInLongitudinalContracts : true,
-        availableInStairContracts: req.body.availableInStairContracts !== undefined ? req.body.availableInStairContracts : true,
-        availableInSlabContracts: req.body.availableInSlabContracts !== undefined ? req.body.availableInSlabContracts : true,
-        availableInVolumetricContracts: req.body.availableInVolumetricContracts !== undefined ? req.body.availableInVolumetricContracts : true,
+        availableInLongitudinalContracts: req.body.availableInLongitudinalContracts !== undefined ? req.body.availableInLongitudinalContracts : defaultContractVisibility.availableInLongitudinalContracts,
+        availableInStairContracts: req.body.availableInStairContracts !== undefined ? req.body.availableInStairContracts : defaultContractVisibility.availableInStairContracts,
+        availableInSlabContracts: req.body.availableInSlabContracts !== undefined ? req.body.availableInSlabContracts : defaultContractVisibility.availableInSlabContracts,
+        availableInVolumetricContracts: req.body.availableInVolumetricContracts !== undefined ? req.body.availableInVolumetricContracts : defaultContractVisibility.availableInVolumetricContracts,
       }
     });
 
@@ -1041,6 +1095,10 @@ router.post('/import', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPA
           continue;
         }
 
+        const defaultContractVisibility = resolveContractVisibilityFromCutType(
+          cuttingDimensionNamePersian || cuttingDimensionName || cutType.namePersian || cutType.name
+        );
+
         // Create product
         await prisma.product.create({
           data: {
@@ -1078,10 +1136,7 @@ router.post('/import', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPA
             description: description || null,
             images: [],
             isActive: isActive !== undefined ? Boolean(isActive) : true,
-            availableInLongitudinalContracts: true,
-            availableInStairContracts: true,
-            availableInSlabContracts: true,
-            availableInVolumetricContracts: true
+            ...defaultContractVisibility
           }
         });
 

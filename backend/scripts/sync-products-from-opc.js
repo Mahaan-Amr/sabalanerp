@@ -47,6 +47,93 @@ function productName(product) {
   ].filter(Boolean).join(' ');
 }
 
+function normalizePersianText(input) {
+  return String(input || '')
+    .replace(/ي/g, 'ی')
+    .replace(/ك/g, 'ک')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function resolveContractVisibility(product) {
+  const cutType = normalizePersianText(product.cutType);
+  const isLongitudinalFamily = cutType.includes('طولی') || cutType.includes('تایل');
+  const isSlab = cutType.includes('اسلب');
+  const isPrepared =
+    cutType.includes('کیوبیک') ||
+    cutType.includes('قطعات آماده') ||
+    cutType.includes('حجمی');
+
+  if (isSlab) {
+    return {
+      availableInLongitudinalContracts: false,
+      availableInStairContracts: false,
+      availableInSlabContracts: true,
+      availableInVolumetricContracts: false
+    };
+  }
+
+  if (isPrepared) {
+    return {
+      availableInLongitudinalContracts: false,
+      availableInStairContracts: false,
+      availableInSlabContracts: false,
+      availableInVolumetricContracts: true
+    };
+  }
+
+  if (isLongitudinalFamily) {
+    return {
+      availableInLongitudinalContracts: true,
+      availableInStairContracts: true,
+      availableInSlabContracts: false,
+      availableInVolumetricContracts: false
+    };
+  }
+
+  return {
+    availableInLongitudinalContracts: false,
+    availableInStairContracts: false,
+    availableInSlabContracts: false,
+    availableInVolumetricContracts: false
+  };
+}
+
+function summarizeContractVisibility(products) {
+  const summary = {
+    longitudinal: 0,
+    stair: 0,
+    slab: 0,
+    prepared: 0,
+    hidden: 0,
+    unknownCutTypes: new Map()
+  };
+
+  for (const product of products) {
+    const visibility = resolveContractVisibility(product);
+    if (visibility.availableInLongitudinalContracts) summary.longitudinal += 1;
+    if (visibility.availableInStairContracts) summary.stair += 1;
+    if (visibility.availableInSlabContracts) summary.slab += 1;
+    if (visibility.availableInVolumetricContracts) summary.prepared += 1;
+
+    const isHidden = !visibility.availableInLongitudinalContracts &&
+      !visibility.availableInStairContracts &&
+      !visibility.availableInSlabContracts &&
+      !visibility.availableInVolumetricContracts;
+
+    if (isHidden) {
+      summary.hidden += 1;
+      const cutType = product.cutType || '(blank)';
+      summary.unknownCutTypes.set(cutType, (summary.unknownCutTypes.get(cutType) || 0) + 1);
+    }
+  }
+
+  return {
+    ...summary,
+    unknownCutTypes: Array.from(summary.unknownCutTypes.entries())
+  };
+}
+
 function parseProducts(workbook) {
   const sheetName = process.env.OPC_PRODUCTS_SHEET || DEFAULT_SHEET_NAME;
   const worksheet = workbook.Sheets[sheetName];
@@ -153,6 +240,7 @@ async function upsertReferences(model, items) {
 
 function buildProductData(product) {
   const name = productName(product);
+  const contractVisibility = resolveContractVisibility(product);
 
   return {
     code: product.code,
@@ -189,10 +277,7 @@ function buildProductData(product) {
     description: `کاتالوگ OPC - ردیف ${product.rowNumber}`,
     images: [],
     isActive: true,
-    availableInLongitudinalContracts: true,
-    availableInStairContracts: true,
-    availableInSlabContracts: true,
-    availableInVolumetricContracts: true,
+    ...contractVisibility,
     deletedAt: null
   };
 }
@@ -271,6 +356,7 @@ async function run() {
   console.log(`Valid unique product codes: ${parsed.products.length}`);
   console.log(`Skipped rows with missing required codes: ${parsed.skippedRows.length}`);
   console.log(`Duplicate valid rows replaced by later rows: ${parsed.duplicateRows.length}`);
+  console.log('Contract visibility summary:', summarizeContractVisibility(parsed.products));
 
   if (parsed.skippedRows.length > 0) {
     console.log('Skipped row sample:', parsed.skippedRows.slice(0, 10));

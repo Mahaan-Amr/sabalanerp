@@ -98,8 +98,39 @@ const CONTRACT_VISIBILITY_OPTIONS: Array<{
   { id: 'longitudinal', label: 'طولی', description: 'نمایش در قراردادهای سنگ طولی' },
   { id: 'stair', label: 'سنگ پله', description: 'نمایش در قراردادهای پله' },
   { id: 'slab', label: 'اسلب', description: 'نمایش در قراردادهای اسلب' },
-  { id: 'volumetric', label: 'حجمی', description: 'نمایش در قراردادهای حجمی' }
+  { id: 'volumetric', label: 'کیوبیک و قطعات آماده', description: 'نمایش در قراردادهای کیوبیک و قطعات آماده' }
 ];
+
+const EMPTY_CONTRACT_VISIBILITY: Record<ContractVisibilityOption, boolean> = {
+  longitudinal: false,
+  stair: false,
+  slab: false,
+  volumetric: false
+};
+
+const normalizePersianText = (input?: string | null) => (input || '')
+  .replace(/ي/g, 'ی')
+  .replace(/ك/g, 'ک')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const getDefaultContractVisibilityForCutType = (cutType?: MasterDataItem | null): Record<ContractVisibilityOption, boolean> => {
+  const label = normalizePersianText(`${cutType?.namePersian || ''} ${cutType?.name || ''}`);
+
+  if (label.includes('اسلب')) {
+    return { ...EMPTY_CONTRACT_VISIBILITY, slab: true };
+  }
+
+  if (label.includes('کیوبیک') || label.includes('قطعات آماده') || label.includes('حجمی')) {
+    return { ...EMPTY_CONTRACT_VISIBILITY, volumetric: true };
+  }
+
+  if (label.includes('طولی') || label.includes('تایل')) {
+    return { ...EMPTY_CONTRACT_VISIBILITY, longitudinal: true, stair: true };
+  }
+
+  return { ...EMPTY_CONTRACT_VISIBILITY };
+};
 
 interface MasterDataItem {
   id: string;
@@ -195,12 +226,7 @@ export default function CreateStoneProductWizard() {
     finishType: null,
     colorId: '',
   color: null,
-  contractVisibility: {
-    longitudinal: true,
-    stair: true,
-    slab: true,
-    volumetric: true
-  }
+  contractVisibility: { ...EMPTY_CONTRACT_VISIBILITY }
   });
 
   // Load master data
@@ -270,7 +296,10 @@ export default function CreateStoneProductWizard() {
       setWizardData(prev => ({
         ...prev,
         [mapping.idField]: item.id,
-        [mapping.itemField]: item
+        [mapping.itemField]: item,
+        ...(type === 'cutTypes'
+          ? { contractVisibility: getDefaultContractVisibilityForCutType(item) }
+          : {})
       }));
     }
   };

@@ -11080,6 +11080,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                     })()
                   )}
 
+                  {productConfig.productType !== 'prepared' && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -11204,7 +11205,9 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                       />
                     </div>
                   </div>
+                  )}
 
+                  {productConfig.productType !== 'prepared' && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       توضیحات
@@ -11218,6 +11221,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                       placeholder="توضیحات اضافی..."
                     />
                   </div>
+                  )}
                   {/* Mandatory Pricing Section - Only for longitudinal stones */}
                   {productConfig.productType === 'longitudinal' && (
                   <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
@@ -11309,9 +11313,9 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                           }
                           return null;
                         })()}
-                      </div>
-                    )}
-                </div>
+                  </div>
+                )}
+            </div>
               )}
             </div>
 

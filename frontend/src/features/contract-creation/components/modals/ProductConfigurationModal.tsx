@@ -3236,6 +3236,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                     );
                   })()}
 
+                  {currentProductType !== 'prepared' && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -3359,6 +3360,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       />
                     </div>
                   </div>
+                  )}
 
                   {(currentProductType === 'longitudinal' || currentProductType === 'slab') && (() => {
                     const selectedFinishing = productConfig.finishingId
@@ -3664,6 +3666,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                     );
                   })()}
 
+                  {currentProductType !== 'prepared' && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       توضیحات
@@ -3677,6 +3680,8 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       placeholder="توضیحات اضافی..."
                     />
                   </div>
+                  )}
+                  {currentProductType !== 'prepared' && (
                   <label className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
                     <input
                       type="checkbox"
@@ -3702,6 +3707,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       </span>
                     </span>
                   </label>
+                  )}
                   {/* Mandatory Pricing Section - Only for longitudinal stones */}
                   {currentProductType === 'longitudinal' && (
                   <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
@@ -3793,9 +3799,9 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                           }
                           return null;
                         })()}
-                      </div>
-                    )}
-                </div>
+                  </div>
+                )}
+            </div>
               )}
             </div>
                 </>

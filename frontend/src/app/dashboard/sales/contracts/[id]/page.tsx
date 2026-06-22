@@ -33,6 +33,7 @@ import { formatDisplayNumber, formatPrice, formatSquareMeters, sumNumericValues,
 import PersianCalendar from '@/lib/persian-calendar';
 import { getContractPermissions, hasFeatureAccess, User as PermissionUser } from '@/lib/permissions';
 import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
+import { getPreparedKindLabel, getPreparedQuantity, getPreparedUnit, getPreparedUnitLabel, isPreparedProductType } from '@/features/contract-creation/utils/preparedProductUtils';
 import { normalizeProductFinishing } from '@/features/contract-creation/utils/finishingUtils';
 
 interface Contract {
@@ -420,6 +421,9 @@ export default function ContractDetailPage() {
                     const itemTotal = item.totalPrice ?? 0;
                     const finishing = normalizeProductFinishing(item);
                     const rowImages = Array.isArray(item.images) ? item.images : [];
+                    const isPreparedRow = isPreparedProductType(item.productType);
+                    const preparedUnit = isPreparedRow ? getPreparedUnit(item) : 'count';
+                    const preparedQuantity = isPreparedRow ? getPreparedQuantity(item) : quantity;
 
                     return (
                       <div key={`${productName}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
@@ -450,8 +454,8 @@ export default function ContractDetailPage() {
                           </div>
                         )}
                         <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-                          <ErpFieldView label="تعداد" value={formatDisplayNumber(quantity)} />
-                          <ErpFieldView label="متراژ" value={formatSquareMeters(squareMeters)} />
+                          <ErpFieldView label="تعداد" value={formatDisplayNumber(preparedQuantity)} />
+                          <ErpFieldView label={isPreparedRow ? 'واحد' : 'متراژ'} value={isPreparedRow ? `${getPreparedKindLabel(item.preparedKind)} / ${getPreparedUnitLabel(preparedUnit)}` : formatSquareMeters(squareMeters)} />
                           <ErpFieldView label="قیمت واحد" value={toFiniteNumber(unitPrice) > 0 ? formatPrice(unitPrice, sanitizeUiText(item.currency || contract.currency, 'تومان')) : 'نامشخص'} />
                           <ErpFieldView label="جمع" value={toFiniteNumber(itemTotal) > 0 ? formatPrice(itemTotal, sanitizeUiText(item.currency || contract.currency, 'تومان')) : 'نامشخص'} tone="primary" />
                         </div>

@@ -127,6 +127,13 @@ import {
   recalculateContractServiceRow
 } from '@/features/contract-creation/utils/contractServiceRows';
 import {
+  getPreparedQuantity,
+  getPreparedUnit,
+  inferPreparedKindFromProduct,
+  isPreparedProductType,
+  normalizeContractProductType
+} from '@/features/contract-creation/utils/preparedProductUtils';
+import {
   toMeters,
   convertMetersToUnit,
   getDraftStandardLengthMeters,
@@ -203,6 +210,7 @@ const getContractBaseSubtotal = (products: ContractProduct[]) =>
     if ((product.meta as any)?.isLayer) return 0;
     const originalTotal = toFiniteNumber(product.originalTotalPrice);
     if (originalTotal > 0) return originalTotal;
+    if (isPreparedProductType(product.productType)) return toFiniteNumber(product.totalPrice);
     return toFiniteNumber(product.squareMeters) * toFiniteNumber(product.pricePerSquareMeter);
   });
 
@@ -2298,6 +2306,59 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       return;
     }
 
+    if (selectedProductType === 'prepared' || selectedProductType === 'volumetric') {
+      const preparedKind = inferPreparedKindFromProduct(product);
+      const defaultConfig: Partial<ContractProduct> = {
+        productId: product.id,
+        product,
+        productType: 'prepared',
+        preparedKind,
+        preparedUnit: 'count',
+        preparedQuantity: 1,
+        stoneCode: product.code,
+        stoneName: product.namePersian,
+        diameterOrWidth: product.widthValue,
+        length: 0,
+        width: 0,
+        quantity: 1,
+        squareMeters: 0,
+        pricePerSquareMeter: product.basePrice || 0,
+        unitPrice: product.basePrice || 0,
+        totalPrice: product.basePrice || 0,
+        description: '',
+        images: [...(product.images || [])],
+        currency: 'تومان',
+        sawKerfEnabled: false,
+        sawKerfCm: null,
+        lengthUnit: 'm',
+        widthUnit: 'cm',
+        isMandatory: false,
+        mandatoryPercentage: 0,
+        originalTotalPrice: product.basePrice || 0,
+        isCut: false,
+        cutType: null,
+        originalWidth: product.widthValue,
+        originalLength: 0,
+        cuttingCost: 0,
+        cuttingCostPerMeter: 0,
+        cutDescription: '',
+        remainingStones: [],
+        cutDetails: [],
+        usedRemainingStones: [],
+        totalUsedRemainingWidth: 0,
+        totalUsedRemainingLength: 0,
+        appliedSubServices: [],
+        totalSubServiceCost: 0,
+        usedLengthForSubServices: 0,
+        usedSquareMetersForSubServices: 0
+      };
+      setStairSystemConfig(null);
+      setProductConfig(defaultConfig);
+      setLengthUnit('m');
+      setWidthUnit('cm');
+      return;
+    }
+
     if (selectedProductType === 'stair') {
       if (useStairFlowV2) {
         const [currentDraft, setCurrentDraft] = getActiveDraft();
@@ -2971,6 +3032,13 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     
     setProductConfig({
       ...product,
+      productType: normalizeContractProductType(product.productType) || product.productType,
+      ...(isPreparedProductType(product.productType) && {
+        preparedKind: product.preparedKind || inferPreparedKindFromProduct(product.product),
+        preparedUnit: getPreparedUnit(product),
+        preparedQuantity: getPreparedQuantity(product),
+        unitPrice: product.unitPrice ?? product.pricePerSquareMeter ?? 0
+      }),
       // For slab products, ensure slabStandardDimensions is set
       ...(product.productType === 'slab' && { slabStandardDimensions }),
       // For slab products, ensure slabVerticalCutSides is set (default to all 4 sides active if not present)
@@ -2999,7 +3067,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     });
     
     // Set product type for wizard
-    updateWizardData({ selectedProductTypeForAddition: product.productType || 'longitudinal' });
+    updateWizardData({ selectedProductTypeForAddition: normalizeContractProductType(product.productType) || 'longitudinal' });
     
     setIsEditMode(true);
     setEditingProductIndex(index);
@@ -3566,13 +3634,94 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     }
     
     // Resolve product type from modal selection (fallback to remembered type)
-    const productType = productConfig.productType || wizardData.selectedProductTypeForAddition;
+    const productType = normalizeContractProductType(productConfig.productType || wizardData.selectedProductTypeForAddition);
     if (!productType) {
       console.error('❌ Product type not selected');
       setErrors({ products: 'لطفاً ابتدا نوع محصول را انتخاب کنید' });
       return;
     }
     
+    if (productType === 'prepared') {
+      const preparedKind = productConfig.preparedKind || inferPreparedKindFromProduct(selectedProduct);
+      const preparedUnit = getPreparedUnit(productConfig as ContractProduct);
+      const preparedQuantity = Number(productConfig.preparedQuantity ?? productConfig.quantity ?? 0) || 0;
+      const unitPrice = Number(productConfig.unitPrice ?? productConfig.pricePerSquareMeter ?? 0) || 0;
+
+      if (!preparedKind || !preparedUnit || preparedQuantity <= 0 || unitPrice < 0) {
+        setErrors({ products: 'لطفاً نوع، واحد، مقدار و قیمت واحد ردیف کیوبیک و قطعات آماده را کامل کنید' });
+        return;
+      }
+
+      const squareMeters = preparedUnit === 'squareMeter' ? preparedQuantity : 0;
+      const totalPrice = preparedQuantity * unitPrice;
+      const finalProduct: ContractProduct = {
+        productId: selectedProduct.id,
+        product: selectedProduct,
+        productType: 'prepared',
+        preparedKind,
+        preparedUnit,
+        preparedQuantity,
+        stoneCode: productConfig.stoneCode || selectedProduct.code,
+        stoneName: productConfig.stoneName || selectedProduct.namePersian,
+        diameterOrWidth: productConfig.diameterOrWidth || selectedProduct.widthValue || 0,
+        length: 0,
+        width: 0,
+        quantity: preparedQuantity,
+        squareMeters,
+        pricePerSquareMeter: unitPrice,
+        unitPrice,
+        totalPrice,
+        description: productConfig.description || '',
+        images: Array.isArray(productConfig.images) ? [...productConfig.images] : [...(selectedProduct.images || [])],
+        currency: 'تومان',
+        sawKerfEnabled: false,
+        sawKerfCm: null,
+        lengthUnit: 'm',
+        widthUnit: 'cm',
+        isMandatory: false,
+        mandatoryPercentage: 0,
+        originalTotalPrice: totalPrice,
+        isCut: false,
+        cutType: null,
+        originalWidth: selectedProduct.widthValue || 0,
+        originalLength: 0,
+        cuttingCost: 0,
+        cuttingCostPerMeter: 0,
+        cutDescription: '',
+        remainingStones: [],
+        cutDetails: [],
+        usedRemainingStones: [],
+        totalUsedRemainingWidth: 0,
+        totalUsedRemainingLength: 0,
+        appliedSubServices: [],
+        totalSubServiceCost: 0,
+        usedLengthForSubServices: 0,
+        usedSquareMetersForSubServices: 0
+      };
+
+      if (isEditMode && editingProductIndex !== null) {
+        const updatedProducts = [...wizardData.products];
+        updatedProducts[editingProductIndex] = finalProduct;
+        updateWizardData({ products: updatedProducts, selectedProductTypeForAddition: 'prepared' });
+      } else {
+        updateWizardData({ products: [...wizardData.products, finalProduct], selectedProductTypeForAddition: 'prepared' });
+      }
+
+      setShowProductModal(false);
+      setSelectedProduct(null);
+      setProductConfig({});
+      setLengthUnit('m');
+      setWidthUnit('cm');
+      setIsMandatory(false);
+      setMandatoryPercentage(20);
+      setIsEditMode(false);
+      setEditingProductIndex(null);
+      setTouchedFields(new Set());
+      clearProductAdditionSearches();
+      setErrors({});
+      return;
+    }
+
     // Handle different product types
     if (productType === 'stair') {
       // STAIR SYSTEM (دستگاه پله) VALIDATION AND CREATION
@@ -4758,13 +4907,18 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             }
           });
 
-          const getDeliveryUnit = (product: ContractProduct | undefined): 'meter' | 'squareMeter' | 'count' => {
+          const getDeliveryUnit = (product: ContractProduct | undefined): 'meter' | 'squareMeter' | 'ton' | 'count' => {
+            if (isPreparedProductType(product?.productType)) {
+              const unit = getPreparedUnit(product as ContractProduct);
+              return unit === 'ton' ? 'ton' : unit === 'squareMeter' ? 'squareMeter' : 'count';
+            }
             if (product?.productType === 'longitudinal') return 'meter';
             if (product?.productType === 'slab') return 'squareMeter';
             return 'count';
           };
           const getDeliveryTargetAmount = (product: ContractProduct): number => {
             const unit = getDeliveryUnit(product);
+            if (isPreparedProductType(product.productType)) return getPreparedQuantity(product);
             if (unit === 'meter') {
               const lengthM = product.lengthUnit === 'm' ? product.length : (product.length || 0) / 100;
               return lengthM * (product.quantity || 0);
@@ -4772,9 +4926,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             if (unit === 'squareMeter') return product.squareMeters || 0;
             return product.quantity || 0;
           };
-          const getDeliveryUnitLabel = (unit: 'meter' | 'squareMeter' | 'count') => {
+          const getDeliveryUnitLabel = (unit: 'meter' | 'squareMeter' | 'ton' | 'count') => {
             if (unit === 'meter') return 'متر';
             if (unit === 'squareMeter') return 'متر مربع';
+            if (unit === 'ton') return 'تن';
             return 'عدد';
           };
 
@@ -5116,6 +5271,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
               ? 'متر'
               : deliveryProduct.unit === 'squareMeter'
                 ? 'متر مربع'
+                : deliveryProduct.unit === 'ton'
+                  ? 'تن'
                 : 'عدد';
             return {
               productName: wizardData.products[productIndex]?.stoneName ||

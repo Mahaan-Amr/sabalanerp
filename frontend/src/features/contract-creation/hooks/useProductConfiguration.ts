@@ -9,7 +9,7 @@ import { calculateLongitudinalCut, calculateSlabCut } from '../services/stoneCut
 
 export const useProductConfiguration = () => {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [productType, setProductType] = useState<'longitudinal' | 'stair' | 'slab' | null>(null);
+  const [productType, setProductType] = useState<'longitudinal' | 'stair' | 'slab' | 'prepared' | null>(null);
   const [dimensions, setDimensions] = useState({
     length: 0,
     width: 0,

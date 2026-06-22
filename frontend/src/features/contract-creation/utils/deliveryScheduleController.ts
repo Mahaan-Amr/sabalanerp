@@ -1,4 +1,5 @@
 import type { ContractProduct, ContractServiceRow, ContractWizardData, DeliveryProductItem, DeliverySchedule } from '../types/contract.types';
+import { getPreparedQuantity, getPreparedUnitDeliveryValue, isPreparedProductType } from './preparedProductUtils';
 
 export type DeliveryUnit = NonNullable<DeliveryProductItem['unit']>;
 
@@ -52,6 +53,7 @@ export const getSchedulableServiceEntries = (serviceRows: ContractServiceRow[] =
   serviceRows.map((serviceRow, serviceIndex) => ({ serviceRow, serviceIndex }));
 
 export const getDeliveryUnit = (product: ContractProduct | undefined): DeliveryUnit => {
+  if (isPreparedProductType(product?.productType)) return getPreparedUnitDeliveryValue(product?.preparedUnit);
   if (product?.productType === 'longitudinal') return 'meter';
   if (product?.productType === 'slab') return 'squareMeter';
   return 'count';
@@ -60,17 +62,20 @@ export const getDeliveryUnit = (product: ContractProduct | undefined): DeliveryU
 export const getDeliveryUnitLabel = (unit: DeliveryUnit): string => {
   if (unit === 'meter') return 'متر طول';
   if (unit === 'squareMeter') return 'متر مربع';
+  if (unit === 'ton') return 'تن';
   return 'عدد';
 };
 
 export const getStoredDeliveryUnitLabel = (unit: DeliveryUnit): string => {
   if (unit === 'meter') return 'meter';
   if (unit === 'squareMeter') return 'squareMeter';
+  if (unit === 'ton') return 'ton';
   return 'count';
 };
 
 export const getDeliveryTargetAmount = (product: ContractProduct): number => {
   const unit = getDeliveryUnit(product);
+  if (isPreparedProductType(product.productType)) return getPreparedQuantity(product);
   if (unit === 'meter') {
     const lengthM = product.lengthUnit === 'm' ? product.length : (product.length || 0) / 100;
     return lengthM * (product.quantity || 0);

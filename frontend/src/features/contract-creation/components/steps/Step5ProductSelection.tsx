@@ -15,6 +15,7 @@ import {
   isUsableRemainingStone,
   normalizeRemainingStoneCollection
 } from '../../utils/remainingStoneGuards';
+import { getPreparedKindLabel, getPreparedQuantity, getPreparedUnit, getPreparedUnitLabel, isPreparedProductType } from '../../utils/preparedProductUtils';
 import type { ContractProduct, ContractServiceRowSourceType } from '../../types/contract.types';
 import type { RemainingStone } from '../../types/contract.types';
 import type { ContractProductCartController } from '../../hooks/useContractProductCartController';
@@ -35,6 +36,11 @@ const PRODUCT_TYPES = [
     name: 'سنگ اسلب',
     nameEn: 'Slab Stone',
   },
+  {
+    id: 'prepared',
+    name: 'کیوبیک و قطعات آماده',
+    nameEn: 'Cubic and Ready Pieces',
+  },
 ] as const;
 
 interface Step5ProductSelectionProps {
@@ -49,6 +55,7 @@ const getProductTypeLabel = (type: ContractProduct['productType']) => (
 const getProductTypeClasses = (type: ContractProduct['productType']) => {
   if (type === 'longitudinal') return 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/20 dark:text-teal-200 dark:border-teal-800';
   if (type === 'slab') return 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-200 dark:border-indigo-800';
+  if (type === 'prepared' || type === 'volumetric') return 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-200 dark:border-emerald-800';
   return 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-200 dark:border-purple-800';
 };
 
@@ -463,6 +470,9 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                   product.productType === 'longitudinal' &&
                   !!product.isCut &&
                   (!product.cuttingCostPerMeter || product.cuttingCostPerMeter <= 0);
+                const isPreparedRow = isPreparedProductType(product.productType);
+                const preparedQuantity = isPreparedRow ? getPreparedQuantity(product) : 0;
+                const preparedUnit = isPreparedRow ? getPreparedUnit(product) : 'count';
 
                 return (
                   <article
@@ -488,6 +498,11 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                           {product.stoneCode ? `کد: ${product.stoneCode}` : 'بدون کد'}
                           {catalogProduct?.mineNamePersian ? ` | معدن: ${catalogProduct.mineNamePersian}` : ''}
                         </p>
+                        {isPreparedRow && (
+                          <p className="mt-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                            {getPreparedKindLabel(product.preparedKind)} | {getPreparedUnitLabel(preparedUnit)}
+                          </p>
+                        )}
                         <RowImageStrip
                           images={product.images || []}
                           label={product.stoneName || catalogProduct?.namePersian || 'تصویر محصول'}
@@ -531,13 +546,13 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                       <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
                         <p className="text-xs text-slate-500 dark:text-slate-400">تعداد</p>
                         <p className="mt-1 font-semibold text-slate-800 dark:text-slate-100">
-                          {formatDisplayNumber(product.quantity || 0)}
+                          {formatDisplayNumber(isPreparedRow ? preparedQuantity : product.quantity || 0)}
                         </p>
                       </div>
                       <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
-                        <p className="text-xs text-slate-500 dark:text-slate-400">متراژ</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{isPreparedRow ? 'واحد' : 'متراژ'}</p>
                         <p className="mt-1 font-semibold text-slate-800 dark:text-slate-100">
-                          {formatSquareMeters(product.squareMeters || 0)}
+                          {isPreparedRow ? getPreparedUnitLabel(preparedUnit) : formatSquareMeters(product.squareMeters || 0)}
                         </p>
                       </div>
                       <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">

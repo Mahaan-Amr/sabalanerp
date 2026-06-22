@@ -6,6 +6,7 @@ import type { ContractProduct, ContractServiceRow, StairStepperPart } from '../t
 import { formatDisplayNumber, formatSquareMeters, formatPrice, sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 import { normalizeProductFinishing } from '../utils/finishingUtils';
 import { getServiceRowUnitLabel } from '../utils/contractServiceRows';
+import { getPreparedKindLabel, getPreparedQuantity, getPreparedUnit, isPreparedProductType } from '../utils/preparedProductUtils';
 
 interface ServiceEntry {
   key: string;
@@ -68,7 +69,9 @@ export const useContractSummary = (
   const productsSummary = useMemo<ProductsSummary>(() => {
     const summary = products.reduce((acc, product) => {
       acc.totalPrice += toFiniteNumber(product.totalPrice);
-      acc.totalSquareMeters += toFiniteNumber(product.squareMeters);
+      acc.totalSquareMeters += isPreparedProductType(product.productType) && getPreparedUnit(product) !== 'squareMeter'
+        ? 0
+        : toFiniteNumber(product.squareMeters);
       acc.totalQuantity += toFiniteNumber(product.quantity);
       return acc;
     }, { totalPrice: 0, totalSquareMeters: 0, totalQuantity: 0 });
@@ -248,7 +251,9 @@ export const useContractSummary = (
     return products.map((product, index) => {
       const isLayer = Boolean((product.meta as any)?.isLayer);
       let partLabel =
-        product.productType === 'stair'
+        isPreparedProductType(product.productType)
+          ? getPreparedKindLabel(product.preparedKind)
+          : product.productType === 'stair'
           ? (isLayer
               ? `لایه ${getPartDisplayLabel(product.stairPartType as StairStepperPart)}`
               : getPartDisplayLabel(product.stairPartType as StairStepperPart))
@@ -262,7 +267,7 @@ export const useContractSummary = (
       if (product.isMandatory && product.mandatoryPercentage && product.mandatoryPercentage > 0) {
         partLabel = `${partLabel}/حکمی`;
       }
-      const pricePerSqmValue = toFiniteNumber(product.pricePerSquareMeter) || null;
+      const pricePerSqmValue = toFiniteNumber(product.unitPrice ?? product.pricePerSquareMeter) || null;
       const totalPriceValue = toFiniteNumber(product.totalPrice);
       // For layer products, get stone area used from meta
       const layerMeta = isLayer ? (product.meta as any) : null;
@@ -271,8 +276,8 @@ export const useContractSummary = (
         key: `product-price-${index}-${product.productId}`,
         name: product.stoneName || product.product?.namePersian || product.product?.name || `محصول ${index + 1}`,
         partLabel,
-        quantity: toFiniteNumber(product.quantity),
-        squareMeters: toFiniteNumber(product.squareMeters),
+        quantity: isPreparedProductType(product.productType) ? getPreparedQuantity(product) : toFiniteNumber(product.quantity),
+        squareMeters: isPreparedProductType(product.productType) && getPreparedUnit(product) !== 'squareMeter' ? 0 : toFiniteNumber(product.squareMeters),
         stoneAreaUsedSqm: toFiniteNumber(stoneAreaUsedSqm) || null,
         isLayer,
         pricePerSquareMeter: pricePerSqmValue,
@@ -293,4 +298,3 @@ export const useContractSummary = (
     contractGrandTotal
   };
 };
-

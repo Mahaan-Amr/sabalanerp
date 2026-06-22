@@ -15,7 +15,7 @@ import type {
 import { productSupportsContractType } from '../utils/productUtils';
 import { normalizeDigits } from '@/lib/numberFormat';
 
-type ProductCartType = Extract<ContractUsageType, 'longitudinal' | 'stair' | 'slab'>;
+type ProductCartType = Extract<ContractUsageType, 'longitudinal' | 'stair' | 'slab' | 'prepared'>;
 
 export interface ContractProductDraft {
   mode: 'idle' | 'catalog-product' | 'remaining-stone' | 'editing-cart-item';
@@ -117,7 +117,7 @@ interface UseContractProductCartControllerOptions {
 }
 
 const CATALOG_PRODUCT_TYPES = PRODUCT_TYPES.filter((type): type is typeof PRODUCT_TYPES[number] & { id: ProductCartType } =>
-  type.id === 'longitudinal' || type.id === 'stair' || type.id === 'slab'
+  type.id === 'longitudinal' || type.id === 'stair' || type.id === 'slab' || type.id === 'prepared'
 );
 
 const normalizeSearchText = (value: unknown): string =>

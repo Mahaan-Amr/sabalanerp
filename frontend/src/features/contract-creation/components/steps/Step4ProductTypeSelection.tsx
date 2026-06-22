@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { FaCheck } from 'react-icons/fa';
-import { FaRuler, FaSquare, FaThLarge } from 'react-icons/fa';
+import { FaCubes, FaRuler, FaSquare, FaThLarge } from 'react-icons/fa';
 import type { ContractWizardData } from '../../types/contract.types';
 
 const PRODUCT_TYPES = [
@@ -29,6 +29,14 @@ const PRODUCT_TYPES = [
     nameEn: 'Slab Stone',
     icon: FaThLarge,
     description: 'سنگ اسلب با برش دو بعدی (طول و عرض)',
+    available: true
+  },
+  {
+    id: 'prepared',
+    name: 'کیوبیک و قطعات آماده',
+    nameEn: 'Cubic and Ready Pieces',
+    icon: FaCubes,
+    description: 'فروش بر اساس متر مربع، تن یا تعداد',
     available: true
   }
 ] as const;
@@ -68,7 +76,7 @@ export const Step4ProductTypeSelection: React.FC<Step4ProductTypeSelectionProps>
                 type="button"
                 onClick={() => {
                   if (isComingSoon) return;
-                  updateWizardData({ selectedProductTypeForAddition: type.id as 'longitudinal' | 'stair' | 'slab' | null });
+                  updateWizardData({ selectedProductTypeForAddition: type.id });
                 }}
                 disabled={isComingSoon}
                 className={`relative p-6 rounded-xl border-2 transition-all duration-200 transform ${

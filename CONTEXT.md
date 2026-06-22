@@ -28,6 +28,34 @@ _Avoid_: creating a separate non-CRM buyer record for collaborators
 A standalone price-bearing contract row for services such as ابزار, برش, پرداخت سنگ, or فرآوری when no stone product is being sold.
 _Avoid_: representing a service-only sale as a hidden or fake product
 
+**ردیف کیوبیک و قطعات آماده قرارداد**:
+A price-bearing contract product row for cubic stone or ready-made stone pieces selected from the product catalog and sold by the row's chosen unit, such as متر مربع, تن, or تعداد. The row carries a subtype of کیوبیک or قطعات آماده while remaining one product-row family in contract selection, delivery, payment, and output.
+_Avoid_: modeling کیوبیک and قطعات آماده as unrelated contract product families, or forcing them through طولی, پله, or اسلب configuration
+
+**زیرنوع ردیف کیوبیک و قطعات آماده**:
+The per-contract-row classification that says whether a prepared-product row is کیوبیک or قطعات آماده. It may be inferred from the catalog product's cutting-dimension label when selected, but the saved contract row remains explicit so old contracts do not depend on later catalog wording.
+_Avoid_: relying only on a product name search term to decide how a saved contract row behaves
+
+**قیمت واحد ردیف کیوبیک و قطعات آماده**:
+The contract-row price for the selected unit of a کیوبیک و قطعات آماده row. The catalog product's base price may prefill it, but the saved contract row owns the selected unit, quantity, unit price, and total price snapshot.
+_Avoid_: recalculating an old prepared-product row from later catalog prices, or assuming one catalog price always means متر مربع
+
+**مقدار زمان‌بندی کیوبیک و قطعات آماده**:
+The amount of a کیوبیک و قطعات آماده row assigned to delivery dates, using the same unit and total quantity selected on that contract row.
+_Avoid_: scheduling a ton-based or count-based prepared-product row as متر مربع, or allowing scheduled amounts to exceed the selected row quantity
+
+**مرز ردیف کیوبیک و قطعات آماده**:
+کیوبیک و قطعات آماده rows are main catalog stone product rows for pricing, delivery, discount, and output, but they are not cutting-workflow rows.
+_Avoid_: applying smart cutting, saw kerf, remaining-stone usage, stair grouping, slab cutting modes, tools, or stone finishing to prepared-product rows
+
+**خروجی ردیف کیوبیک و قطعات آماده**:
+کیوبیک و قطعات آماده rows appear in the main customer-facing product table with their product name, subtype, selected unit, quantity, unit price, total price, and row note when present.
+_Avoid_: hiding prepared-product rows in a separate shadow section, or printing row images in PDF/print output
+
+**تکثیر ردیف کیوبیک و قطعات آماده**:
+Creating a new editable کیوبیک و قطعات آماده row from an existing row by copying its catalog product, subtype, selected unit, quantity, unit price, total price snapshot, note, and internal row images while giving it independent row identity.
+_Avoid_: copying delivery assignments, internal row IDs, or links that make the duplicate depend on the original row
+
 **منبع خدمات قرارداد**:
 The catalog a standalone service row is selected from, such as ابزار, برش, or پرداخت سنگ. These catalogs remain separate for management and search, but once selected they become the same ردیف خدمات قرارداد shape for pricing, payment, and print output.
 _Avoid_: merging the source catalogs just because contract rows share one shape
@@ -113,7 +141,7 @@ An explicit percentage-based price increase applied to a contract product when t
 _Avoid_: printing or charging حکمی from a default percentage when the product is not explicitly marked mandatory
 
 **تخفیف قرارداد**:
-A percentage reduction applied only to the sum of base stone product subtotals in a sales contract, before payments are compared to the payable total. It does not reduce ابزار, لایه، پرداخت سنگ, cutting, or حکمی add-on amounts.
+A percentage reduction applied only to the sum of base stone product subtotals in a sales contract, including کیوبیک و قطعات آماده rows when they are sold as main catalog stone products, before payments are compared to the payable total. It does not reduce ابزار, لایه، پرداخت سنگ, cutting, standalone service rows, or حکمی add-on amounts.
 _Avoid_: applying تخفیف to the full contract total including add-ons, or selecting discount limits per individual product row
 
 **خروجی تخفیف قرارداد**:

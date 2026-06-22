@@ -57,6 +57,9 @@ interface NormalizedProduct {
   code: string;
   name: string;
   productType: string;
+  preparedKind: string;
+  preparedUnit: string;
+  preparedQuantity: number;
   stairPart: string;
   dimensions: string;
   quantity: number;
@@ -339,8 +342,23 @@ const productTypeLabel = (value: unknown): string => {
   if (value === 'longitudinal') return 'طولی';
   if (value === 'stair') return 'پله';
   if (value === 'slab') return 'اسلب';
+  if (value === 'prepared' || value === 'volumetric') return 'کیوبیک و قطعات آماده';
   return EMPTY;
 };
+
+const preparedKindLabel = (value: unknown): string => {
+  if (value === 'readyPiece') return 'قطعات آماده';
+  return 'کیوبیک';
+};
+
+const preparedUnitLabel = (value: unknown): string => {
+  if (value === 'ton') return 'تن';
+  if (value === 'squareMeter') return 'متر مربع';
+  return 'تعداد';
+};
+
+const isPreparedProductType = (value: unknown): boolean =>
+  value === 'prepared' || value === 'volumetric' || value === 'کیوبیک و قطعات آماده';
 
 const stairPartLabel = (value: unknown): string => {
   if (value === 'tread') return 'کف پله';
@@ -401,11 +419,17 @@ const getUserName = (user: any): string =>
 const deliveryUnitLabel = (unit: unknown): string => {
   if (unit === 'meter') return 'متر طول';
   if (unit === 'squareMeter') return 'متر مربع';
+  if (unit === 'ton') return 'تن';
   return 'عدد';
 };
 
 const inferDeliveryUnit = (product: NormalizedProduct | undefined, deliveryProduct: any): string => {
   if (deliveryProduct?.unit) return String(deliveryProduct.unit);
+  if (isPreparedProductType(product?.productType)) {
+    if (product?.preparedUnit === 'تن') return 'ton';
+    if (product?.preparedUnit === 'متر مربع') return 'squareMeter';
+    return 'count';
+  }
   if (product?.productType === 'طولی') return 'meter';
   if (product?.productType === 'اسلب') return 'squareMeter';
   return 'count';
@@ -534,6 +558,9 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         code: product?.stoneCode || product?.product?.code || relationItem?.product?.code || EMPTY,
         name: product?.stoneName || product?.product?.namePersian || product?.product?.name || relationItem?.product?.namePersian || relationItem?.product?.name || EMPTY,
         productType: productTypeLabel(product?.productType || relationItem?.productType),
+        preparedKind: preparedKindLabel(product?.preparedKind),
+        preparedUnit: preparedUnitLabel(product?.preparedUnit),
+        preparedQuantity: toNumber(product?.preparedQuantity || product?.quantity || relationItem?.quantity),
         stairPart: stairPartLabel(product?.stairPartType || relationItem?.stairPartType),
         dimensions,
         quantity: toNumber(product?.quantity || relationItem?.quantity),
@@ -564,6 +591,9 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
     code: item?.product?.code || EMPTY,
     name: item?.product?.namePersian || item?.product?.name || EMPTY,
     productType: productTypeLabel(item?.productType),
+    preparedKind: preparedKindLabel(item?.preparedKind),
+    preparedUnit: preparedUnitLabel(item?.preparedUnit),
+    preparedQuantity: toNumber(item?.preparedQuantity || item?.quantity),
     stairPart: stairPartLabel(item?.stairPartType),
     dimensions: EMPTY,
     quantity: toNumber(item?.quantity),
@@ -801,6 +831,9 @@ const isMeaningfulTool = (tool: NormalizedProductTool): boolean =>
   hasTextValue(tool.name) || tool.amount > 0 || tool.rate > 0 || tool.cost > 0;
 
 const formatProductQuantityOrArea = (product: NormalizedProduct): string => {
+  if (isPreparedProductType(product.productType)) {
+    return `${toFaNumber(product.preparedQuantity || product.quantity, product.preparedUnit === 'تعداد' ? 0 : 2)} ${product.preparedUnit}`;
+  }
   const quantityLabel = product.productType === 'طولی' && product.quantity <= 1
     ? EMPTY
     : `${toFaNumber(product.quantity, 2)} عدد`;
@@ -824,12 +857,18 @@ const buildFlatProductRows = (
     const baseAmount = product.originalTotalPrice > 0
       ? product.originalTotalPrice
       : Math.max(product.totalPrice - addOnsTotal, 0) || product.totalPrice;
+    const preparedSummary = isPreparedProductType(product.productType)
+      ? `نوع: ${product.preparedKind} | واحد: ${product.preparedUnit}`
+      : EMPTY;
+    const productDescription = [
+      product.name,
+      preparedSummary,
+      product.description && product.description !== EMPTY ? product.description : null
+    ].filter(Boolean).join(' - ');
     rows.push({
       indexLabel: toFaNumber(productIndex + 1),
       code: product.code,
-      description: product.description && product.description !== EMPTY
-        ? `${product.name} - ${product.description}`
-        : product.name,
+      description: productDescription,
       category: 'محصول',
       dimensionsOrAmount: product.dimensions,
       quantityOrArea: formatProductQuantityOrArea(product),

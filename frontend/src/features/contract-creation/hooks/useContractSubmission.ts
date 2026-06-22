@@ -10,6 +10,7 @@ import { sumNumericValues } from '@/lib/numberFormat';
 import { mapAxiosFormErrors } from '@/lib/formErrors';
 import { CONTRACT_DRAFT_STORAGE_KEY } from '../utils/contractDraftStorage';
 import { normalizeProductFinishing } from '../utils/finishingUtils';
+import { getPreparedQuantity, getPreparedUnit, isPreparedProductType, normalizeContractProductType } from '../utils/preparedProductUtils';
 import { getDeliverableProductEntries } from '../utils/deliveryScheduleController';
 
 interface UseContractSubmissionOptions {
@@ -120,7 +121,21 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       }
 
       // Calculate total amount
-      const normalizedProducts = wizardData.products.map((product) => {
+      const normalizedProducts = wizardData.products.map((originalProduct) => {
+        const normalizedProductType = normalizeContractProductType(originalProduct.productType) || originalProduct.productType;
+        const productWithType = {
+          ...originalProduct,
+          productType: normalizedProductType,
+          ...(isPreparedProductType(normalizedProductType) && {
+            preparedUnit: getPreparedUnit(originalProduct),
+            preparedQuantity: getPreparedQuantity(originalProduct),
+            quantity: getPreparedQuantity(originalProduct),
+            squareMeters: getPreparedUnit(originalProduct) === 'squareMeter' ? getPreparedQuantity(originalProduct) : 0,
+            unitPrice: originalProduct.unitPrice ?? originalProduct.pricePerSquareMeter ?? 0,
+            pricePerSquareMeter: originalProduct.unitPrice ?? originalProduct.pricePerSquareMeter ?? 0
+          })
+        };
+        const product = productWithType;
         const finishing = normalizeProductFinishing(product);
         if (!finishing) return product;
         return {
@@ -188,7 +203,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             productId: product.productId,
             productType: product.productType,
             quantity: product.quantity,
-            unitPrice: product.pricePerSquareMeter,
+            unitPrice: product.unitPrice ?? product.pricePerSquareMeter,
             totalPrice: product.totalPrice,
             description: product.description || null,
             isMandatory: product.isMandatory || false,
@@ -281,7 +296,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             productId: product.productId,
             productType: product.productType,
             quantity: product.quantity,
-            unitPrice: product.pricePerSquareMeter,
+            unitPrice: product.unitPrice ?? product.pricePerSquareMeter,
             totalPrice: product.totalPrice,
             description: product.description || null,
             isMandatory: product.isMandatory || false,
@@ -393,4 +408,3 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     isSubmitting
   };
 };
-

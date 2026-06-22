@@ -19,6 +19,7 @@ import { formatDisplayNumber, formatPrice, formatSquareMeters } from '@/lib/numb
 import { isUsableRemainingStone, normalizeRemainingStoneCollection } from '../../utils/remainingStoneGuards';
 import { PRODUCT_TYPES } from '../../constants/contract.constants';
 import { productSupportsContractType } from '../../utils/productUtils';
+import { getPreparedKindLabel, getPreparedUnitLabel, inferPreparedKindFromProduct } from '../../utils/preparedProductUtils';
 import { resolveLongitudinalWidth } from '../../utils/productConfigurationController';
 import {
   calculateDefaultFinishingQuantity,
@@ -229,7 +230,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
     originalWidthCm > 0 &&
     requestedWidthCm > 0 &&
     Math.abs(requestedWidthCm - originalWidthCm) < 0.0001;
-  const availableProductTypes = ['longitudinal', 'stair', 'slab'] as const;
+  const availableProductTypes = ['longitudinal', 'stair', 'slab', 'prepared'] as const;
   const requiresTypeSelection = !isEditMode && !currentProductType;
 
   React.useEffect(() => {
@@ -324,7 +325,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                       </span>
                     )}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                     {availableProductTypes.map((type) => {
                       const typeLabel = PRODUCT_TYPES.find((item) => item.id === type)?.name ?? type;
                       const isSelected = currentProductType === type;
@@ -1701,6 +1702,143 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                     </>
                   ) : null}
                   
+                  {currentProductType === 'prepared' && selectedProduct && (() => {
+                    const kind = productConfig.preparedKind || inferPreparedKindFromProduct(selectedProduct);
+                    const allowedUnits = kind === 'cubic'
+                      ? (['squareMeter', 'ton', 'count'] as const)
+                      : (['squareMeter', 'count'] as const);
+                    const unit = allowedUnits.includes(productConfig.preparedUnit)
+                      ? productConfig.preparedUnit
+                      : 'count';
+                    const quantity = Number(productConfig.preparedQuantity ?? productConfig.quantity ?? 1) || 0;
+                    const unitPrice = Number(productConfig.unitPrice ?? productConfig.pricePerSquareMeter ?? selectedProduct.basePrice ?? 0) || 0;
+                    const total = quantity * unitPrice;
+
+                    return (
+                      <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 dark:border-emerald-800 dark:bg-emerald-900/10">
+                        <div>
+                          <h4 className="text-base font-bold text-emerald-900 dark:text-emerald-100">کیوبیک و قطعات آماده</h4>
+                          <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">
+                            واحد، مقدار و قیمت این ردیف فقط برای همین قرارداد ذخیره می‌شود.
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">محصول</label>
+                            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-white">
+                              {generateFullProductName(selectedProduct)}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">نام نمایشی</label>
+                            <input
+                              type="text"
+                              value={productConfig.stoneName || selectedProduct.namePersian || ''}
+                              onChange={(event) => setProductConfig((prev: any) => ({ ...prev, stoneName: event.target.value }))}
+                              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">زیرنوع</label>
+                            <div className="grid grid-cols-2 gap-2">
+                              {(['cubic', 'readyPiece'] as const).map((option) => (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  onClick={() => setProductConfig((prev: any) => ({
+                                    ...prev,
+                                    preparedKind: option,
+                                    preparedUnit: option === 'readyPiece' && prev.preparedUnit === 'ton' ? 'count' : (prev.preparedUnit || 'count')
+                                  }))}
+                                  className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                                    kind === option
+                                      ? 'border-emerald-500 bg-emerald-600 text-white'
+                                      : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+                                  }`}
+                                >
+                                  {getPreparedKindLabel(option)}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">واحد</label>
+                            <div className="grid grid-cols-3 gap-2">
+                              {allowedUnits.map((option) => (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  onClick={() => setProductConfig((prev: any) => ({
+                                    ...prev,
+                                    preparedUnit: option,
+                                    squareMeters: option === 'squareMeter' ? (Number(prev.preparedQuantity ?? prev.quantity ?? 0) || 0) : 0
+                                  }))}
+                                  className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                                    unit === option
+                                      ? 'border-teal-500 bg-teal-600 text-white'
+                                      : 'border-slate-200 bg-white text-slate-700 hover:border-teal-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+                                  }`}
+                                >
+                                  {getPreparedUnitLabel(option)}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">مقدار</label>
+                            <FormattedNumberInput
+                              value={quantity}
+                              onChange={(value) => setProductConfig((prev: any) => ({
+                                ...prev,
+                                preparedQuantity: value || 0,
+                                quantity: value || 0,
+                                squareMeters: (prev.preparedUnit || unit) === 'squareMeter' ? (value || 0) : 0
+                              }))}
+                              min={0}
+                              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">قیمت واحد</label>
+                            <FormattedNumberInput
+                              value={unitPrice}
+                              onChange={(value) => setProductConfig((prev: any) => ({
+                                ...prev,
+                                unitPrice: value || 0,
+                                pricePerSquareMeter: value || 0
+                              }))}
+                              min={0}
+                              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border border-emerald-200 bg-white p-3 dark:border-emerald-800 dark:bg-slate-800">
+                          <p className="text-xs text-emerald-700 dark:text-emerald-300">قیمت کل</p>
+                          <p className="mt-1 text-lg font-bold text-emerald-900 dark:text-emerald-100">{formatPrice(total, 'تومان')}</p>
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">توضیحات</label>
+                          <textarea
+                            value={productConfig.description || ''}
+                            onChange={(event) => setProductConfig((prev: any) => ({ ...prev, description: event.target.value }))}
+                            rows={3}
+                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* Conditional for longitudinal and slab stones (only shown if not stair) */}
                   {(currentProductType === 'longitudinal' || currentProductType === 'slab') && (
                     <>

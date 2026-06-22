@@ -79,6 +79,10 @@ export interface Product {
   availableInVolumetricContracts?: boolean;
 }
 
+export type PreparedProductKind = 'cubic' | 'readyPiece';
+export type PreparedProductUnit = 'squareMeter' | 'ton' | 'count';
+export type ContractProductType = 'longitudinal' | 'stair' | 'slab' | 'prepared' | 'volumetric';
+
 export interface StoneCut {
   id: string;
   originalWidth: number; // ?? ?? ??
@@ -346,7 +350,10 @@ export interface ContractProduct {
   productId: string;
   product: Product;
   // Product type
-  productType: 'longitudinal' | 'stair' | 'slab'; // product type
+  productType: ContractProductType; // product type
+  preparedKind?: PreparedProductKind | null;
+  preparedUnit?: PreparedProductUnit | null;
+  preparedQuantity?: number | null;
   // Stair system linking (only for stair parts)
   stairSystemId?: string; // ID to link multiple items belonging to same stair system
   stairPartType?: 'tread' | 'riser' | 'landing'; // ?? ?? ??
@@ -463,7 +470,7 @@ export interface DeliveryProductItem {
   serviceRowId?: string;
   productId: string;
   quantity: number; // Quantity for this specific delivery
-  unit?: 'meter' | 'squareMeter' | 'count';
+  unit?: 'meter' | 'squareMeter' | 'ton' | 'count';
   amount?: number;
 }
 
@@ -541,7 +548,7 @@ export interface ContractWizardData {
   project: ProjectAddress | null;
   
   // Last-used product type preference for modal default (not a required wizard step)
-  selectedProductTypeForAddition: 'longitudinal' | 'stair' | 'slab' | null;
+  selectedProductTypeForAddition: Exclude<ContractProductType, 'volumetric'> | null;
   
   // Step 5: Products (was Step 4)
   products: ContractProduct[];
@@ -635,7 +642,7 @@ export interface ContractStep8FinancialSummary {
   currency: string;
 }
 
-export type ContractUsageType = 'longitudinal' | 'stair' | 'slab' | 'volumetric';
+export type ContractUsageType = ContractProductType;
 
 export type ContractVisibilityField =
   | 'availableInLongitudinalContracts'

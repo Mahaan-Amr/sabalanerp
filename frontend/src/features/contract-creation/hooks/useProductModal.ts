@@ -68,7 +68,7 @@ export const useProductModal = (options: UseProductModalOptions = {}) => {
   const [landingProductSearchTerm, setLandingProductSearchTerm] = useState('');
 
   // Open modal with product
-  const openModal = useCallback((product: Product, productType: 'longitudinal' | 'stair' | 'slab', editIndex?: number | null) => {
+  const openModal = useCallback((product: Product, productType: 'longitudinal' | 'stair' | 'slab' | 'prepared', editIndex?: number | null) => {
     setSelectedProduct(product);
     setProductConfig({
       productId: product.id,

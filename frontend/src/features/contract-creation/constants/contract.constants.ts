@@ -78,20 +78,21 @@ export const PRODUCT_TYPES = [
     available: true
   },
   {
-    id: 'volumetric',
-    name: 'سنگ حجمی',
-    nameEn: 'Volumetric Stone',
+    id: 'prepared',
+    name: 'کیوبیک و قطعات آماده',
+    nameEn: 'Cubic and Ready Pieces',
     icon: FaCubes,
-    description: 'به‌زودی: در نسخه‌های بعدی',
-    available: false
+    description: 'کیوبیک و قطعات آماده با واحد متر مربع، تن یا تعداد',
+    available: true
   }
 ] as const;
 
 // Contract visibility field mapping
-export const CONTRACT_VISIBILITY_FIELD_MAP: Record<'longitudinal' | 'stair' | 'slab' | 'volumetric', 'availableInLongitudinalContracts' | 'availableInStairContracts' | 'availableInSlabContracts' | 'availableInVolumetricContracts'> = {
+export const CONTRACT_VISIBILITY_FIELD_MAP: Record<'longitudinal' | 'stair' | 'slab' | 'prepared' | 'volumetric', 'availableInLongitudinalContracts' | 'availableInStairContracts' | 'availableInSlabContracts' | 'availableInVolumetricContracts'> = {
   longitudinal: 'availableInLongitudinalContracts',
   stair: 'availableInStairContracts',
   slab: 'availableInSlabContracts',
+  prepared: 'availableInVolumetricContracts',
   volumetric: 'availableInVolumetricContracts'
 };
 

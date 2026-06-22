@@ -95,6 +95,7 @@ interface FlatProductRow {
   indexLabel: string;
   code: string;
   description: string;
+  note?: string;
   category: string;
   dimensionsOrAmount: string;
   quantityOrArea: string;
@@ -862,13 +863,13 @@ const buildFlatProductRows = (
       : EMPTY;
     const productDescription = [
       product.name,
-      preparedSummary,
-      product.description && product.description !== EMPTY ? product.description : null
+      preparedSummary
     ].filter(Boolean).join(' - ');
     rows.push({
       indexLabel: toFaNumber(productIndex + 1),
       code: product.code,
       description: productDescription,
+      note: product.description && product.description !== EMPTY ? product.description : undefined,
       category: 'محصول',
       dimensionsOrAmount: product.dimensions,
       quantityOrArea: formatProductQuantityOrArea(product),
@@ -947,9 +948,8 @@ const buildFlatProductRows = (
     rows.push({
       indexLabel: toFaNumber(products.length + serviceIndex + 1),
       code: service.code,
-      description: service.description && service.description !== EMPTY
-        ? `${service.title} - ${service.description}`
-        : service.title,
+      description: service.title,
+      note: service.description && service.description !== EMPTY ? service.description : undefined,
       category: service.sourceType,
       dimensionsOrAmount: `${toFaNumber(service.quantity, 2)} ${service.unit}`,
       quantityOrArea: `${toFaNumber(service.quantity, 2)} ${service.unit}`,
@@ -1004,6 +1004,14 @@ const renderProductMainRows = (
 
   return buildFlatProductRows(products, standaloneServices, currency, grandTotal, financials).map((row) => {
     const classAttribute = row.className ? ` class="${row.className}"` : '';
+    const noteRow = row.note && row.note !== EMPTY
+      ? `
+      <tr class="description-detail-row">
+        <td>توضیحات</td>
+        <td colspan="7">${escapeHtml(row.note)}</td>
+      </tr>
+    `
+      : '';
     return `
       <tr${classAttribute}>
         <td>${escapeHtml(row.indexLabel)}</td>
@@ -1015,6 +1023,7 @@ const renderProductMainRows = (
         <td>${escapeHtml(row.rate || EMPTY)}</td>
         <td>${escapeHtml(row.total || EMPTY)}</td>
       </tr>
+      ${noteRow}
     `;
   }).join('');
 };
@@ -1186,7 +1195,17 @@ export function renderContractHtml(contract: RenderableContract, options: Render
 
     <section class="section">
       <h2>جدول اصلی محصولات</h2>
-      <table>
+      <table class="main-products-table">
+        <colgroup>
+          <col class="main-index-col" />
+          <col class="main-code-col" />
+          <col class="main-description-col" />
+          <col class="main-category-col" />
+          <col class="main-dimensions-col" />
+          <col class="main-quantity-col" />
+          <col class="main-rate-col" />
+          <col class="main-total-col" />
+        </colgroup>
         <thead>
           <tr>
             <th>ردیف</th>
@@ -1434,6 +1453,63 @@ export function renderContractHtml(contract: RenderableContract, options: Render
 
     th {
       background: #f3f4f6;
+      font-weight: 700;
+    }
+
+    .main-index-col {
+      width: 4%;
+    }
+
+    .main-code-col {
+      width: 12%;
+    }
+
+    .main-description-col {
+      width: 28%;
+    }
+
+    .main-category-col {
+      width: 9%;
+    }
+
+    .main-dimensions-col {
+      width: 13%;
+    }
+
+    .main-quantity-col {
+      width: 12%;
+    }
+
+    .main-rate-col {
+      width: 11%;
+    }
+
+    .main-total-col {
+      width: 11%;
+    }
+
+    .main-products-table th:first-child,
+    .main-products-table td:first-child {
+      padding-left: 2px;
+      padding-right: 2px;
+      text-align: center;
+    }
+
+    .main-products-table td:nth-child(3) {
+      line-height: 1.65;
+    }
+
+    .description-detail-row td {
+      background: #f8fafc;
+      color: #4b5563;
+      font-size: 9.25px;
+      line-height: 1.7;
+      padding-top: 5px;
+      padding-bottom: 5px;
+    }
+
+    .description-detail-row td:first-child {
+      background: #f1f5f9;
       font-weight: 700;
     }
 

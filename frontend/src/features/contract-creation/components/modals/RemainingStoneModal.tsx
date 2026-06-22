@@ -206,7 +206,8 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                 const widthInCm = partitionWidthUnit === 'm' ? partition.width * 100 : partition.width;
                 const lengthInCm = partitionLengthUnit === 'm' ? partition.length * 100 : partition.length;
                 const isValidWidth = widthInCm <= remainingStone.width && widthInCm > 0;
-                const isValidLength = lengthInCm <= remainingStone.length * 100 && lengthInCm > 0;
+                const isValidLength = lengthInCm > 0;
+                const needsPhysicalSplit = lengthInCm > remainingStone.length * 100 && isValidWidth;
                 const partitionError = partition.validationError || partitionValidationErrors.get(partition.id);
                 const hasError = !!partitionError || (!isValidWidth && partition.width > 0) || (!isValidLength && partition.length > 0);
                 const maxWidth = partitionWidthUnit === 'm' ? remainingStone.width / 100 : remainingStone.width;
@@ -278,6 +279,11 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                         {!isValidLength && partition.length > 0 && (
                           <span className="mt-1 block text-xs text-red-500 dark:text-red-300">
                             حداکثر: {formatDisplayNumber(maxLength)} {unitLabel(partitionLengthUnit)}
+                          </span>
+                        )}
+                        {needsPhysicalSplit && (
+                          <span className="mt-1 block text-xs text-teal-600 dark:text-teal-300">
+                            این درخواست به چند قطعه فیزیکی از همین سنگ تقسیم می‌شود.
                           </span>
                         )}
                       </label>

@@ -24,6 +24,7 @@ export interface RemainingPartitionAllocation {
   summaryError: string;
   consumedSourcePieces: number;
   remainingAreas: RemainingStone[];
+  physicalPiecesByRow: Map<string, StonePartition[]>;
 }
 
 interface RemainingPartitionAllocationOptions {
@@ -68,22 +69,6 @@ export const normalizeRemainingStock = (remainingStone: RemainingStone): Remaini
   };
 };
 
-const expandPartitionRows = (rows: StonePartition[]): ExpandedPartition[] =>
-  rows.flatMap((row) => {
-    const quantity = getQuantity(row.quantity);
-    const perPieceSquareMeters = (row.width * row.length) / 100;
-
-    return Array.from({ length: quantity }, (_, index) => ({
-      ...row,
-      id: `${row.id}__piece_${index}`,
-      sourceRowId: row.id,
-      quantity: 1,
-      squareMeters: perPieceSquareMeters,
-      validationError: undefined,
-      position: undefined
-    }));
-  });
-
 const sheetFits = (sheet: ExpandedPartition[], piece: ExpandedPartition, width: number, length: number): ExpandedPartition[] | null => {
   const positioned = calculatePartitionPositions([...sheet, piece], width, length) as ExpandedPartition[];
   const hasErrors = positioned.some((partition) => partition.validationError || !partition.position);
@@ -108,7 +93,8 @@ export const allocateRemainingStonePartitions = (
       rowErrors,
       summaryError: 'سنگ باقی‌مانده انتخاب‌شده قابل استفاده نیست.',
       consumedSourcePieces: 0,
-      remainingAreas: []
+      remainingAreas: [],
+      physicalPiecesByRow: new Map()
     };
   }
 
@@ -120,8 +106,6 @@ export const allocateRemainingStonePartitions = (
   consumedRows.forEach((row) => {
     if (row.width > stockInfo.sanitized.width) {
       rowErrors.set(row.id, `عرض (${row.width}) از عرض باقی‌مانده (${stockInfo.sanitized.width}) بیشتر است.`);
-    } else if (row.length > stockInfo.sanitized.length) {
-      rowErrors.set(row.id, `طول (${row.length}) از طول باقی‌مانده (${stockInfo.sanitized.length}) بیشتر است.`);
     }
   });
 
@@ -143,12 +127,52 @@ export const allocateRemainingStonePartitions = (
       rowErrors,
       summaryError: `${rowErrors.size} پارتیشن دارای مشکل است. لطفاً ابعاد را بررسی و اصلاح کنید.`,
       consumedSourcePieces: 0,
-      remainingAreas: []
+      remainingAreas: [],
+      physicalPiecesByRow: new Map()
     };
   }
 
   const sheets: ExpandedPartition[][] = [];
-  const expandedRows = expandPartitionRows(consumedRows);
+  const physicalPiecesByRow = new Map<string, StonePartition[]>();
+  const expandedRows = consumedRows.flatMap((row) => {
+    const quantity = getQuantity(row.quantity);
+    const pieces: ExpandedPartition[] = [];
+
+    for (let quantityIndex = 0; quantityIndex < quantity; quantityIndex += 1) {
+      let remainingLength = row.length;
+      let segmentIndex = 0;
+
+      while (remainingLength > 0.000001) {
+        const segmentLength = Math.min(stockInfo.sanitized.length, remainingLength);
+        pieces.push({
+          ...row,
+          id: `${row.id}__piece_${quantityIndex}_${segmentIndex}`,
+          sourceRowId: row.id,
+          quantity: 1,
+          length: segmentLength,
+          squareMeters: (row.width * segmentLength) / 100,
+          validationError: undefined,
+          position: undefined
+        });
+        remainingLength = Math.max(0, remainingLength - segmentLength);
+        segmentIndex += 1;
+      }
+    }
+
+    physicalPiecesByRow.set(
+      row.id,
+      pieces.map((piece) => ({
+        id: piece.id,
+        width: piece.width,
+        length: piece.length,
+        quantity: 1,
+        squareMeters: piece.squareMeters,
+        position: piece.position
+      }))
+    );
+
+    return pieces;
+  });
 
   for (const piece of expandedRows) {
     let placed = false;
@@ -181,7 +205,8 @@ export const allocateRemainingStonePartitions = (
       rowErrors,
       summaryError: `${rowErrors.size} پارتیشن دارای مشکل است. لطفاً ابعاد را بررسی و اصلاح کنید.`,
       consumedSourcePieces: sheets.length,
-      remainingAreas: []
+      remainingAreas: [],
+      physicalPiecesByRow
     };
   }
 
@@ -199,6 +224,7 @@ export const allocateRemainingStonePartitions = (
     rowErrors,
     summaryError: '',
     consumedSourcePieces: sheets.length,
-    remainingAreas
+    remainingAreas,
+    physicalPiecesByRow
   };
 };

@@ -110,6 +110,12 @@ export interface RemainingStone {
   cuttingCostPerMeter?: number; // cutting cost per meter
   cutType?: 'longitudinal' | 'cross' | null; // ?? ??
   quantity?: number; // quantity
+  physicalPieces?: Array<{
+    width: number;
+    length: number;
+    quantity: number;
+    squareMeters: number;
+  }>;
 }
 
 export interface SlabStandardDimensionEntry {
@@ -125,6 +131,12 @@ export interface StonePartition {
   length: number; // ?? ?? (in meters)
   quantity: number; // partition piece count
   squareMeters: number; // area in square meters
+  physicalPieces?: Array<{
+    width: number;
+    length: number;
+    quantity: number;
+    squareMeters: number;
+  }>;
   position?: { // placement position on stone/canvas
     startWidth: number; // ?? ?? (in cm)
     startLength: number; // ?? ?? (in meters)
@@ -730,6 +742,10 @@ export interface StairPartDraftV2 {
   layerPricePerSquareMeter?: number | null;
   layerUseMandatory?: boolean;
   layerMandatoryPercentage?: number | null;
+  layerShortageSource?: 'fullOrigin' | 'manualWarehouse' | 'autoSuggested' | null;
+  layerManualSourceWidthCm?: number | null;
+  layerManualSourceLengthM?: number | null;
+  layerManualSourceQuantity?: number | null;
   standardLengthValue?: number | null;
   standardLengthUnit?: UnitType;
   // Finishing fields

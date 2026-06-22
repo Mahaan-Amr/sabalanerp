@@ -64,6 +64,10 @@ interface CreateLayerProductParams {
   layerStoneBasePricePerSquareMeter?: number | null;
   layerUseMandatory?: boolean;
   layerMandatoryPercentage?: number | null;
+  layerShortageSource?: 'fullOrigin' | 'manualWarehouse' | 'autoSuggested' | null;
+  layerManualSourceWidthCm?: number | null;
+  layerManualSourceLengthM?: number | null;
+  layerManualSourceQuantity?: number | null;
   stoneAreaUsedSqm?: number;
 }
 
@@ -86,6 +90,10 @@ interface MergeLayerProductParams {
   layerStoneBasePricePerSquareMeter?: number | null;
   layerUseMandatory?: boolean;
   layerMandatoryPercentage?: number | null;
+  layerShortageSource?: 'fullOrigin' | 'manualWarehouse' | 'autoSuggested' | null;
+  layerManualSourceWidthCm?: number | null;
+  layerManualSourceLengthM?: number | null;
+  layerManualSourceQuantity?: number | null;
   stoneAreaUsedSqm?: number;
 }
 
@@ -443,6 +451,10 @@ export const useStairLayerManagement = ({
       layerStoneBasePricePerSquareMeter,
       layerUseMandatory,
       layerMandatoryPercentage,
+      layerShortageSource,
+      layerManualSourceWidthCm,
+      layerManualSourceLengthM,
+      layerManualSourceQuantity,
       stoneAreaUsedSqm
     } = params;
 
@@ -588,7 +600,15 @@ export const useStairLayerManagement = ({
           parentQuantity: draft.quantity,
           layersFromRemainingStones,
           layersFromNewStones,
-          parentProductIndexInSession
+          parentProductIndexInSession,
+          shortageSource: layerShortageSource || (layersFromNewStones > 0 ? 'autoSuggested' : null),
+          manualSource: layerShortageSource === 'manualWarehouse'
+            ? {
+                widthCm: layerManualSourceWidthCm || 0,
+                lengthM: layerManualSourceLengthM || 0,
+                quantity: layerManualSourceQuantity || 0
+              }
+            : undefined
         },
         standardLength: draft.standardLengthValue ? {
           value: draft.standardLengthValue,
@@ -640,6 +660,10 @@ export const useStairLayerManagement = ({
       layerStoneBasePricePerSquareMeter,
       layerUseMandatory,
       layerMandatoryPercentage,
+      layerShortageSource,
+      layerManualSourceWidthCm,
+      layerManualSourceLengthM,
+      layerManualSourceQuantity,
       stoneAreaUsedSqm
     } = newData;
 
@@ -709,7 +733,15 @@ export const useStairLayerManagement = ({
           ...existingLayerInfo,
           layersFromRemainingStones: updatedLayersFromRemaining,
           layersFromNewStones: updatedLayersFromNew,
-          parentQuantity: (existingLayerInfo?.parentQuantity || 0) + draft.quantity
+          parentQuantity: (existingLayerInfo?.parentQuantity || 0) + draft.quantity,
+          shortageSource: layerShortageSource || existingLayerInfo?.shortageSource || (updatedLayersFromNew > 0 ? 'autoSuggested' : null),
+          manualSource: layerShortageSource === 'manualWarehouse'
+            ? {
+                widthCm: layerManualSourceWidthCm || 0,
+                lengthM: layerManualSourceLengthM || 0,
+                quantity: layerManualSourceQuantity || 0
+              }
+            : existingLayerInfo?.manualSource
         },
         standardLength: draft.standardLengthValue
           ? {

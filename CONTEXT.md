@@ -124,6 +124,10 @@ _Avoid_: charging all same-stone لایه as fresh stone while usable same-part 
 The number of child pieces cut from the selected remaining stone geometry. It is validated by whether those pieces fit inside the remaining stone area, not by requiring one source remaining stone per child piece.
 _Avoid_: treating partition quantity as the count of source remaining stones consumed
 
+**تقسیم ظرفیت باقی‌مانده**:
+A remaining-stone demand may be fulfilled by multiple physical pieces from the same remaining stone when the requested width fits the source width and the total requested area fits the available capacity.
+_Avoid_: rejecting a demand only because its logical length is longer than one source piece when it can be split into valid physical pieces
+
 **وضعیت هنگام چاپ**:
 The contract status shown on customer-facing printed or PDF contract output at the moment the document is generated.
 _Avoid_: labeling printed status as the general contract status when the timing matters

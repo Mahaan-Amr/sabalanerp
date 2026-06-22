@@ -214,6 +214,12 @@ const getContractBaseSubtotal = (products: ContractProduct[]) =>
     return toFiniteNumber(product.squareMeters) * toFiniteNumber(product.pricePerSquareMeter);
   });
 
+const LAYER_SHORTAGE_SOURCE_LABELS = {
+  fullOrigin: 'سنگ کامل هم‌مبدا',
+  manualWarehouse: 'ابعاد انبار',
+  autoSuggested: 'محاسبه خودکار'
+} as const;
+
 const findMatchingDiscountRange = (ranges: DiscountRange[], baseSubtotal: number) =>
   ranges
     .filter((range) => range.isActive)
@@ -2820,7 +2826,11 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                 : undefined,
               layerMandatoryPercentage: layerProduct.layerUseDifferentStone
                 ? (layerProduct.layerMandatoryPercentage ?? layerAltStoneMeta?.mandatoryPercentage ?? 20)
-                : null
+                : null,
+              layerShortageSource: layerInfo?.shortageSource || null,
+              layerManualSourceWidthCm: layerInfo?.manualSource?.widthCm || null,
+              layerManualSourceLengthM: layerInfo?.manualSource?.lengthM || null,
+              layerManualSourceQuantity: layerInfo?.manualSource?.quantity || null
             };
           }
           return draft;
@@ -3251,15 +3261,28 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     }
 
     const sourceProduct = productsAfterRemoval[normalizedSourceIndex];
-    const restoredRemainingStone = sanitizeRemainingStoneEntry({
-      id: `restored_${Date.now()}_${partitionId || 'partition'}`,
-      width: productToRemove.width,
-      length: productToRemove.length,
-      squareMeters: productToRemove.squareMeters,
-      isAvailable: true,
-      sourceCutId: sourceRemainingStoneId || '',
-      quantity: productToRemove.quantity
-    } as RemainingStone);
+    const physicalPieces = Array.isArray(remainingSourceMeta.physicalPieces)
+      ? remainingSourceMeta.physicalPieces
+      : [];
+    const restoredRemainingStones = physicalPieces.length > 0
+      ? physicalPieces.map((piece: any, pieceIndex: number) => sanitizeRemainingStoneEntry({
+          id: `restored_${Date.now()}_${partitionId || 'partition'}_${pieceIndex}`,
+          width: piece.width,
+          length: piece.length,
+          squareMeters: piece.squareMeters,
+          isAvailable: true,
+          sourceCutId: sourceRemainingStoneId || '',
+          quantity: piece.quantity || 1
+        } as RemainingStone))
+      : [sanitizeRemainingStoneEntry({
+          id: `restored_${Date.now()}_${partitionId || 'partition'}`,
+          width: productToRemove.width,
+          length: productToRemove.length,
+          squareMeters: productToRemove.squareMeters,
+          isAvailable: true,
+          sourceCutId: sourceRemainingStoneId || '',
+          quantity: productToRemove.quantity
+        } as RemainingStone)];
 
     const cleanedUsedRemaining = (sourceProduct.usedRemainingStones || []).filter(stone => {
       if (!partitionId) return true;
@@ -3268,7 +3291,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     const recalculated = recalculateUsedRemainingDimensions(cleanedUsedRemaining);
     const mergedRemaining = mergeRemainingStoneCollection([
       ...(sourceProduct.remainingStones || []),
-      restoredRemainingStone
+      ...restoredRemainingStones
     ]);
 
     const updatedSourceProduct = {
@@ -6948,6 +6971,65 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                           {` | نیاز به سنگ اصلی جدید: ${formatDisplayNumber(layerMetricsPreview.layersFromNewStones || 0)} لایه`}
                                         </div>
                                       )}
+                                      {!draft.layerUseDifferentStone && (layerMetricsPreview.layersFromNewStones || 0) > 0 && (
+                                        <div className="mt-3 rounded-lg border border-orange-300 bg-white/80 p-3 dark:border-orange-700 dark:bg-slate-900/50">
+                                          <div className="mb-2 font-semibold text-orange-800 dark:text-orange-200">منبع تامین کمبود لایه</div>
+                                          <div className="grid gap-2 md:grid-cols-3">
+                                            {([
+                                              ['fullOrigin', 'سنگ کامل هم‌مبدا'],
+                                              ['manualWarehouse', 'ابعاد انبار'],
+                                              ['autoSuggested', 'محاسبه خودکار']
+                                            ] as const).map(([value, label]) => (
+                                              <button
+                                                key={value}
+                                                type="button"
+                                                onClick={() => setDraft({
+                                                  ...draft,
+                                                  layerShortageSource: value,
+                                                  layerManualSourceWidthCm: value === 'manualWarehouse' ? draft.layerManualSourceWidthCm : null,
+                                                  layerManualSourceLengthM: value === 'manualWarehouse' ? draft.layerManualSourceLengthM : null,
+                                                  layerManualSourceQuantity: value === 'manualWarehouse' ? draft.layerManualSourceQuantity : null
+                                                })}
+                                                className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                                                  draft.layerShortageSource === value
+                                                    ? 'border-orange-500 bg-orange-500 text-white'
+                                                    : 'border-orange-200 bg-orange-50 text-orange-700 hover:border-orange-400 dark:border-orange-800 dark:bg-orange-900/20 dark:text-orange-200'
+                                                }`}
+                                              >
+                                                {label}
+                                              </button>
+                                            ))}
+                                          </div>
+                                          {draft.layerShortageSource === 'manualWarehouse' && (
+                                            <div className="mt-3 grid gap-2 md:grid-cols-3">
+                                              <FormattedNumberInput
+                                                value={draft.layerManualSourceWidthCm ?? null}
+                                                onChange={(value) => setDraft({ ...draft, layerManualSourceWidthCm: value || null })}
+                                                className="rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm dark:border-orange-800 dark:bg-slate-900"
+                                                placeholder="عرض cm"
+                                                min={0}
+                                                step={0.1}
+                                              />
+                                              <FormattedNumberInput
+                                                value={draft.layerManualSourceLengthM ?? null}
+                                                onChange={(value) => setDraft({ ...draft, layerManualSourceLengthM: value || null })}
+                                                className="rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm dark:border-orange-800 dark:bg-slate-900"
+                                                placeholder="طول m"
+                                                min={0}
+                                                step={0.1}
+                                              />
+                                              <FormattedNumberInput
+                                                value={draft.layerManualSourceQuantity ?? null}
+                                                onChange={(value) => setDraft({ ...draft, layerManualSourceQuantity: value ? Math.floor(value) : null })}
+                                                className="rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm dark:border-orange-800 dark:bg-slate-900"
+                                                placeholder="تعداد"
+                                                min={1}
+                                                step={1}
+                                              />
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
                                       {stoneAreaUsedSqm > 0 && (
                                         <div>متر مربع سنگ: {formatSquareMeters(stoneAreaUsedSqm)}</div>
                                       )}
@@ -7295,19 +7377,29 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                 <td className="py-3 px-4 text-gray-700 dark:text-gray-300">
                                   <div className="flex flex-col gap-1">
                                     <span className="font-medium">{formatDisplayNumber(it.quantity || 0)} عدد</span>
-                                    {baseStoneQuantity > 0 && (
-                                      <span className="text-xs text-purple-600 dark:text-purple-300">
-                                        سنگ پایه: {formatDisplayNumber(baseStoneQuantity)} عدد
-                                        {piecesPerStoneMeta > 0 ? ` ⬢ ${formatDisplayNumber(piecesPerStoneMeta)} قطعه از هر سنگ` : ''}
-                                        {leftoverWidthMeta > 0 ? ` ⬢ باقی‌مانده: ${formatDisplayNumber(leftoverWidthMeta)}cm` : ''}
-                                      </span>
-                                    )}
-                                    {isLayer && layerInfo && (
-                                      <span className="text-xs text-orange-600 dark:text-orange-400 mt-0.5">
-                                        {layerInfo.layersFromRemainingStones > 0 || layerInfo.layersFromNewStones > 0
-                                          ? `${layerInfo.layersFromRemainingStones || 0} از باقی‌مانده ${layerInfo.layersFromNewStones || 0} از سنگ جدید`
-                                          : ''}
-                                      </span>
+                                    {(baseStoneQuantity > 0 || (isLayer && layerInfo)) && (
+                                      <details className="text-xs text-slate-600 dark:text-slate-300">
+                                        <summary className="cursor-pointer font-semibold text-purple-600 dark:text-purple-300">
+                                          جزئیات
+                                        </summary>
+                                        <div className="mt-1 space-y-1">
+                                          {baseStoneQuantity > 0 && (
+                                            <div>
+                                              سنگ پایه: {formatDisplayNumber(baseStoneQuantity)} عدد
+                                              {piecesPerStoneMeta > 0 ? ` ⬢ ${formatDisplayNumber(piecesPerStoneMeta)} قطعه از هر سنگ` : ''}
+                                              {leftoverWidthMeta > 0 ? ` ⬢ باقی‌مانده: ${formatDisplayNumber(leftoverWidthMeta)}cm` : ''}
+                                            </div>
+                                          )}
+                                          {isLayer && layerInfo && (
+                                            <div className="text-orange-600 dark:text-orange-400">
+                                              {layerInfo.layersFromRemainingStones > 0 || layerInfo.layersFromNewStones > 0
+                                                ? `${layerInfo.layersFromRemainingStones || 0} از باقی‌مانده ${layerInfo.layersFromNewStones || 0} از سنگ جدید`
+                                                : ''}
+                                              {layerInfo.shortageSource ? ` ⬢ منبع کمبود: ${LAYER_SHORTAGE_SOURCE_LABELS[layerInfo.shortageSource as keyof typeof LAYER_SHORTAGE_SOURCE_LABELS] || layerInfo.shortageSource}` : ''}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </details>
                                     )}
                                   </div>
                                 </td>
@@ -7319,28 +7411,35 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                 </td>
                                 <td className="py-3 px-4">
                                   <div className="flex flex-col gap-1.5">
-                                  {(((it as any).meta?.tools) || []).length === 0 ? (
+                                  {(((it as any).meta?.tools) || []).length === 0 && !(finishing && finishing.cost) ? (
                                     <span className="text-xs text-gray-400 dark:text-gray-500">-</span>
                                   ) : (
-                                      ((it as any).meta?.tools || []).map((t: any, i: number) => (
-                                        <div key={i} className="text-xs bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded border border-purple-200 dark:border-purple-800">
-                                          <span className="font-medium text-purple-700 dark:text-purple-300">{t.name}</span>
-                                          <span className="text-gray-600 dark:text-gray-400"> • {formatDisplayNumber(t.computedMeters || 0)} m</span>
-                                          <span className="text-gray-500 dark:text-gray-500"> × {formatPrice(t.pricePerMeter || 0)}</span>
-                                        </div>
-                                      ))
-                                    )}
-                                    {finishing && finishing.cost ? (
-                                      <div className="text-xs bg-teal-50 dark:bg-teal-900/20 px-2 py-1 rounded border border-teal-200 dark:border-teal-800">
-                                        <span className="font-medium text-teal-700 dark:text-teal-300">پرداخت:</span>
-                                        <span className="text-gray-600 dark:text-gray-400 mr-1">
-                                          {it.finishingName || 'پرداخت'} • {finishing.amountLabel}
-                                        </span>
-                                        <span className="text-teal-600 dark:text-teal-300 font-semibold">
-                                          {formatPrice(finishing.cost)}
-                                        </span>
+                                    <details className="text-xs">
+                                      <summary className="cursor-pointer font-semibold text-purple-600 dark:text-purple-300">
+                                        جزئیات خدمات
+                                      </summary>
+                                      <div className="mt-2 flex flex-col gap-1.5">
+                                        {((it as any).meta?.tools || []).map((t: any, i: number) => (
+                                          <div key={i} className="bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded border border-purple-200 dark:border-purple-800">
+                                            <span className="font-medium text-purple-700 dark:text-purple-300">{t.name}</span>
+                                            <span className="text-gray-600 dark:text-gray-400"> • {formatDisplayNumber(t.computedMeters || 0)} m</span>
+                                            <span className="text-gray-500 dark:text-gray-500"> × {formatPrice(t.pricePerMeter || 0)}</span>
+                                          </div>
+                                        ))}
+                                        {finishing && finishing.cost ? (
+                                          <div className="bg-teal-50 dark:bg-teal-900/20 px-2 py-1 rounded border border-teal-200 dark:border-teal-800">
+                                            <span className="font-medium text-teal-700 dark:text-teal-300">پرداخت:</span>
+                                            <span className="text-gray-600 dark:text-gray-400 mr-1">
+                                              {it.finishingName || 'پرداخت'} • {finishing.amountLabel}
+                                            </span>
+                                            <span className="text-teal-600 dark:text-teal-300 font-semibold">
+                                              {formatPrice(finishing.cost)}
+                                            </span>
+                                          </div>
+                                        ) : null}
                                       </div>
-                                    ) : null}
+                                    </details>
+                                  )}
                                   </div>
                                 </td>
                                 <td className="py-3 px-4">
@@ -7801,6 +7900,18 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                             cuttingCostPerMeter: layerCuttingCostPerMeter,
                             edgeDemands: layerEdgeDemands
                           });
+
+                      if (!usingAlternateLayerStone && layerMetrics.layersFromNewStones > 0 && !draft.layerShortageSource) {
+                        setErrors({ products: 'برای کمبود سنگ لایه، منبع تامین را انتخاب کنید.' });
+                        return baseItems;
+                      }
+
+                      if (draft.layerShortageSource === 'manualWarehouse') {
+                        if (!draft.layerManualSourceWidthCm || !draft.layerManualSourceLengthM || !draft.layerManualSourceQuantity) {
+                          setErrors({ products: 'برای تامین دستی لایه از انبار، عرض، طول و تعداد سنگ موجود را وارد کنید.' });
+                          return baseItems;
+                        }
+                      }
                       
                       // 🎯 STEP 5: Calculate pricing
                       const layerSqmPerStair = totalLayerSqm / (draft.quantity * draft.numberOfLayersPerStair);
@@ -7824,8 +7935,13 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                       })();
                       
                       const calculateStoneAreaUsed = (): number => {
-                        const stoneWidthCm = layerStoneProduct?.widthValue || originalWidthCm;
-                        const stoneLengthM = mainStairLengthM;
+                        const manualWarehouse = draft.layerShortageSource === 'manualWarehouse';
+                        const stoneWidthCm = manualWarehouse
+                          ? (draft.layerManualSourceWidthCm || 0)
+                          : (layerStoneProduct?.widthValue || originalWidthCm);
+                        const stoneLengthM = manualWarehouse
+                          ? (draft.layerManualSourceLengthM || mainStairLengthM)
+                          : mainStairLengthM;
                         if (stoneWidthCm <= 0 || layerWidthCm <= 0 || stoneLengthM <= 0) {
                           return usingAlternateLayerStone ? totalLayerSqm : layerSqmFromNew;
                         }
@@ -7906,6 +8022,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                             layerStoneBasePricePerSquareMeter: baseLayerPricePerSqm,
                             layerUseMandatory: draft.layerUseDifferentStone ? (draft.layerUseMandatory ?? true) : undefined,
                             layerMandatoryPercentage: draft.layerUseDifferentStone ? (draft.layerMandatoryPercentage ?? 0) : undefined,
+                            layerShortageSource: draft.layerShortageSource || null,
+                            layerManualSourceWidthCm: draft.layerManualSourceWidthCm || null,
+                            layerManualSourceLengthM: draft.layerManualSourceLengthM || null,
+                            layerManualSourceQuantity: draft.layerManualSourceQuantity || null,
                             stoneAreaUsedSqm: stoneAreaUsedSqm
                           });
                           updatedItems[existingLayerIndex] = mergedLayerProduct;
@@ -7948,6 +8068,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                           layerStoneBasePricePerSquareMeter: baseLayerPricePerSqm,
                           layerUseMandatory: draft.layerUseDifferentStone ? (draft.layerUseMandatory ?? true) : undefined,
                           layerMandatoryPercentage: draft.layerUseDifferentStone ? (draft.layerMandatoryPercentage ?? 0) : undefined,
+                          layerShortageSource: draft.layerShortageSource || null,
+                          layerManualSourceWidthCm: draft.layerManualSourceWidthCm || null,
+                          layerManualSourceLengthM: draft.layerManualSourceLengthM || null,
+                          layerManualSourceQuantity: draft.layerManualSourceQuantity || null,
                           stoneAreaUsedSqm: stoneAreaUsedSqm
                         });
                         updatedItems.push(newLayerProduct);
@@ -8005,6 +8129,10 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                     layerPricePerSquareMeter: null,
                     layerUseMandatory: undefined,
                     layerMandatoryPercentage: null,
+                    layerShortageSource: null,
+                    layerManualSourceWidthCm: null,
+                    layerManualSourceLengthM: null,
+                    layerManualSourceQuantity: null,
                     standardLengthValue: null,
                     standardLengthUnit: draft.lengthUnit || 'm',
                     finishingEnabled: false,

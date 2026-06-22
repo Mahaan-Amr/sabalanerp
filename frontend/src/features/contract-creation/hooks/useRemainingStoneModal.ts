@@ -164,6 +164,11 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
 
   const handleRemovePartition = useCallback((partitionId: string) => {
     setPartitions(prev => prev.filter(p => p.id !== partitionId));
+    setPartitionValidationErrors(prev => {
+      const next = new Map(prev);
+      next.delete(partitionId);
+      return next;
+    });
   }, []);
 
   const handleUpdatePartition = useCallback((partitionId: string, field: 'width' | 'length' | 'quantity', value: number) => {
@@ -301,6 +306,9 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
 
     const seed = Date.now();
     const childProducts: ContractProduct[] = normalizedRows.map((row, index) => {
+      const physicalPieces = validation.physicalPiecesByRow.get(row.id) || [];
+      const splitCount = physicalPieces.length;
+      const wasSplit = splitCount > row.quantity;
       const widthCut = row.width < stockInfo.sanitized.width;
       const lengthCut = row.length < stockInfo.sanitized.length;
       const cutMetersPerPiece = (widthCut ? row.length : 0) + (lengthCut ? row.width / 100 : 0);
@@ -322,7 +330,7 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
         pricePerSquareMeter: 0,
         unitPrice: 0,
         totalPrice: cuttingCost,
-        description: `ایجاد شده از سنگ باقی‌مانده • پارتیشن ${index + 1}`,
+        description: `ایجاد شده از سنگ باقی‌مانده • پارتیشن ${index + 1}${wasSplit ? ` • تقسیم فیزیکی: ${splitCount} قطعه` : ''}`,
         currency: sourceProduct.currency,
         sawKerfEnabled: remainingStoneSawKerfEnabled,
         sawKerfCm: remainingStoneSawKerfEnabled ? SAW_KERF_CM : null,
@@ -356,7 +364,13 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
             sourceProductIndex,
             sourceRemainingStoneId: selectedRemainingStone.id,
             partitionId: row.id,
-            allocatedQuantity: row.quantity
+            allocatedQuantity: row.quantity,
+            physicalPieces: physicalPieces.map(piece => ({
+              width: piece.width,
+              length: piece.length,
+              quantity: piece.quantity,
+              squareMeters: piece.squareMeters
+            }))
           },
           pricing: {
             materialCost: 0,
@@ -376,6 +390,7 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     const consumedFromRemaining: RemainingStone[] = normalizedRows.map((row, index) => {
       const widthCut = row.width < stockInfo.sanitized.width;
       const lengthCut = row.length < stockInfo.sanitized.length;
+      const physicalPieces = validation.physicalPiecesByRow.get(row.id) || [];
       return {
         id: `used_partition_${seed}_${row.id}`,
         width: row.width,
@@ -384,6 +399,12 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
         isAvailable: false,
         sourceCutId: stockInfo.sanitized.sourceCutId,
         quantity: row.quantity,
+        physicalPieces: physicalPieces.map(piece => ({
+          width: piece.width,
+          length: piece.length,
+          quantity: piece.quantity,
+          squareMeters: piece.squareMeters
+        })),
         cutType: lengthCut ? 'cross' : (widthCut ? 'longitudinal' : null),
         cuttingCostPerMeter,
         cuttingCost: childProducts[index]?.cuttingCost || 0

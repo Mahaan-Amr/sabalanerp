@@ -1164,6 +1164,33 @@ export function renderContractPdfHeaderTemplate(contract: RenderableContract): s
   `;
 }
 
+export function renderReportPdfHeaderTemplate(meta: {
+  title: string;
+  reportRange: string;
+  scopeLabel: string;
+  generatedAt: string;
+}): string {
+  const logoMarkup = logoUrl
+    ? `<img src="${escapeHtml(logoUrl, { localizeDigits: false })}" style="width:290px;height:66px;object-fit:contain;display:block;" />`
+    : '';
+
+  return `
+    <style>${renderYekanFontFaces()}</style>
+    <div style="width:100%;height:30mm;padding:4mm 5mm 0;box-sizing:border-box;font-family:'Yekan Bakh',Tahoma,Arial,sans-serif;font-size:9px;color:#1f2937;direction:rtl;">
+      <div style="height:24mm;border:1px solid #d1d5db;border-radius:8px;padding:4px 10px 4px 5px;display:flex;align-items:center;justify-content:space-between;gap:12px;direction:ltr;background:#fff;box-sizing:border-box;overflow:hidden;">
+        <div style="flex:1;display:flex;align-items:center;justify-content:flex-start;height:100%;direction:ltr;">${logoMarkup}</div>
+        <div style="min-width:240px;text-align:right;direction:rtl;line-height:1.55;">
+          <div><strong>عنوان گزارش:</strong> ${escapeHtml(meta.title)}</div>
+          <div><strong>بازه گزارش:</strong> ${escapeHtml(meta.reportRange)}</div>
+          <div><strong>دامنه داده:</strong> ${escapeHtml(meta.scopeLabel)}</div>
+          <div><strong>زمان تولید:</strong> ${escapeHtml(meta.generatedAt)}</div>
+          <div><strong>صفحه:</strong> <span class="pageNumber"></span></div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 type RenderContractHtmlOptions = {
   reservePdfHeaderSpace?: boolean;
 };

@@ -31,7 +31,10 @@ import {
   FaTimesCircle,
   FaSignature,
   FaUserCog,
-  FaUserShield
+  FaUserShield,
+  FaChartPie,
+  FaMoneyBillWave,
+  FaTruck
 } from 'react-icons/fa';
 import { useWorkspace, WORKSPACES, WORKSPACE_CONFIG } from '@/contexts/WorkspaceContext';
 import { dashboardAPI } from '@/lib/api';
@@ -313,6 +316,45 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             namePersian: 'گزارش‌های فروش',
             href: '/dashboard/sales/reports',
             icon: FaChartLine,
+            show: true
+          }
+        ];
+
+      case WORKSPACES.BI:
+        return [
+          {
+            name: 'BI Command Center',
+            namePersian: 'مرکز فرمان BI فروش',
+            href: '/dashboard/bi',
+            icon: FaChartPie,
+            show: true
+          },
+          {
+            name: 'Seller Performance',
+            namePersian: 'عملکرد فروشندگان',
+            href: '/dashboard/bi?tab=sellers',
+            icon: FaUsers,
+            show: true
+          },
+          {
+            name: 'Financial Sales',
+            namePersian: 'مالی فروش',
+            href: '/dashboard/bi?tab=finance',
+            icon: FaMoneyBillWave,
+            show: true
+          },
+          {
+            name: 'Products and Customers',
+            namePersian: 'محصولات و مشتریان',
+            href: '/dashboard/bi?tab=products',
+            icon: FaWarehouse,
+            show: true
+          },
+          {
+            name: 'Delivery Risk',
+            namePersian: 'ریسک تحویل',
+            href: '/dashboard/bi?tab=delivery',
+            icon: FaTruck,
             show: true
           }
         ];

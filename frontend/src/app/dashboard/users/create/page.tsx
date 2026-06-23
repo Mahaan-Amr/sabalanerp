@@ -34,7 +34,8 @@ const WORKSPACES = {
   HR: 'hr',
   ACCOUNTING: 'accounting',
   INVENTORY: 'inventory',
-  SECURITY: 'security'
+  SECURITY: 'security',
+  BI: 'bi'
 };
 
 const WORKSPACE_PERMISSIONS = {
@@ -49,7 +50,8 @@ const WORKSPACE_LABELS = {
   hr: 'منابع انسانی',
   accounting: 'حسابداری',
   inventory: 'انبار',
-  security: 'حراست'
+  security: 'حراست',
+  bi: 'هوش تجاری'
 };
 
 const PERMISSION_LABELS = {
@@ -88,11 +90,22 @@ const PERMISSION_PRESETS: Array<{
   {
     id: 'sales_manager',
     label: 'مدیر فروش',
-    description: 'مدیریت فروش و CRM',
+    description: 'مدیریت فروش، CRM و مشاهده BI',
     recommendedRole: 'MANAGER',
     permissions: [
       { workspace: WORKSPACES.SALES, permissionLevel: WORKSPACE_PERMISSIONS.ADMIN },
-      { workspace: WORKSPACES.CRM, permissionLevel: WORKSPACE_PERMISSIONS.ADMIN }
+      { workspace: WORKSPACES.CRM, permissionLevel: WORKSPACE_PERMISSIONS.ADMIN },
+      { workspace: WORKSPACES.BI, permissionLevel: WORKSPACE_PERMISSIONS.VIEW }
+    ]
+  },
+  {
+    id: 'bi_admin',
+    label: 'مدیر BI',
+    description: 'دسترسی مدیریتی به تحلیل کلان فروش',
+    recommendedRole: 'MANAGER',
+    permissions: [
+      { workspace: WORKSPACES.BI, permissionLevel: WORKSPACE_PERMISSIONS.ADMIN },
+      { workspace: WORKSPACES.SALES, permissionLevel: WORKSPACE_PERMISSIONS.VIEW }
     ]
   },
   {

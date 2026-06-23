@@ -33,7 +33,8 @@ export const WORKSPACES = {
   HR: 'hr',
   ACCOUNTING: 'accounting',
   INVENTORY: 'inventory',
-  SECURITY: 'security'
+  SECURITY: 'security',
+  BI: 'bi'
 } as const;
 
 export type Workspace = typeof WORKSPACES[keyof typeof WORKSPACES];

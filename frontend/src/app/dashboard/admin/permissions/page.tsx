@@ -119,6 +119,7 @@ const PERSIAN_TOKEN_MAP: Record<string, string> = {
   hr: 'منابع انسانی',
   security: 'امنیت',
   accounting: 'حسابداری',
+  bi: 'هوش تجاری',
   cut: 'برش',
   cutting: 'برش',
   types: 'انواع',
@@ -185,7 +186,8 @@ const WORKSPACES = {
   'inventory': 'انبار',
   'hr': 'منابع انسانی',
   'security': 'امنیت',
-  'accounting': 'حسابداری'
+  'accounting': 'حسابداری',
+  'bi': 'هوش تجاری'
 };
 
 const PERMISSION_LEVELS = {

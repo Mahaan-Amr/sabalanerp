@@ -78,6 +78,29 @@ async function main() {
     }
   });
 
+  await prisma.roleWorkspacePermission.upsert({
+    where: { role_workspace: { role: 'MANAGER', workspace: 'bi' } },
+    update: { permissionLevel: 'view', isActive: true },
+    create: {
+      role: 'MANAGER',
+      workspace: 'bi',
+      permissionLevel: 'view',
+      isActive: true
+    }
+  });
+
+  await prisma.roleFeaturePermission.upsert({
+    where: { role_workspace_feature: { role: 'MANAGER', workspace: 'bi', feature: 'bi_dashboard_view' } },
+    update: { workspace: 'bi', permissionLevel: 'view', isActive: true },
+    create: {
+      role: 'MANAGER',
+      workspace: 'bi',
+      feature: 'bi_dashboard_view',
+      permissionLevel: 'view',
+      isActive: true
+    }
+  });
+
   // Create sample customer
   console.log('Creating sample customer...');
   const sampleCustomer = await prisma.customer.upsert({

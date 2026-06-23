@@ -184,6 +184,50 @@ _Avoid_: passing through malformed or partially converted date strings
 The customer-facing confirmation state shown after OTP verification. Once verified, it should read as a completed state such as `تایید شده در تاریخ ...`, not as a duplicate-action warning.
 _Avoid_: wording like `قرارداد قبلا تایید شده است` when the customer has successfully reached the final confirmation state
 
+**BI فروش**:
+A native business-intelligence workspace for analyzing sales-contract performance from sales-owned data such as contracts, payments, customers, products, delivery status, discounts, and seller performance.
+_Avoid_: treating it as an embedded external BI tool or as a company-wide analytics workspace
+
+**فروش قطعی در BI فروش**:
+The sales value counted as realized sales in BI, limited to sales contracts whose status is `SIGNED` or `PRINTED`.
+_Avoid_: counting draft, pending, approved, cancelled, or expired contracts as realized sales
+
+**پایپ‌لاین فروش در BI فروش**:
+The sales value still in progress in BI, limited to sales contracts whose status is `PENDING_APPROVAL` or `APPROVED`.
+_Avoid_: mixing pipeline value with realized sales
+
+**فروش ازدست‌رفته در BI فروش**:
+The sales value excluded from realized sales because the sales contract is `CANCELLED` or `EXPIRED`.
+_Avoid_: hiding cancelled or expired value from management analysis
+
+**تاریخ فروش قطعی در BI فروش**:
+The business date used for realized-sales trends, taken from the contract signing time and falling back to contract creation time only for older signed or printed contracts without a signing time.
+_Avoid_: using print, payment, or delivery dates to trend realized sales
+
+**تاریخ پایپ‌لاین در BI فروش**:
+The business date used for sales-pipeline trends, taken from the contract creation time.
+_Avoid_: using approval time as the only pipeline date
+
+**دامنه داده در BI فروش**:
+The set of sales data a BI viewer may analyze: admins see all sales data, managers with BI view access see department-scoped sales data, and managers with BI admin access see all sales data.
+_Avoid_: allowing normal users into BI, or treating every manager as automatically company-wide
+
+**مانده قابل دریافت در BI فروش**:
+The outstanding amount for realized sales, calculated as realized sales value minus completed payments and paid installments.
+_Avoid_: reducing receivables for pending checks, pending installments, cancelled payments, or unsigned pipeline contracts
+
+**پرداخت معوق در BI فروش**:
+A due payment or installment on a realized sales contract that is not completed or paid and whose due date is before today.
+_Avoid_: treating check handover date as the due date, or counting cancelled payments as overdue
+
+**فروشنده در BI فروش**:
+The sales user credited for a v1 BI sales contract, taken from the contract creator user.
+_Avoid_: assuming a separate salesperson assignment exists before the contract model stores one
+
+**ریسک تحویل در BI فروش**:
+The management view of delivery exposure, grouped into overdue deliveries, deliveries due today or within seven days, delivered rows without customer confirmation, and completed deliveries.
+_Avoid_: treating cancelled deliveries as active delivery risk, or replacing the delivery workspace workflow
+
 **خروجی جاری قرارداد**:
 The customer-facing contract output in PDF, print, and confirmation views should reflect the current saved contract details, including edited delivery plans and payment plans.
 _Avoid_: generating customer-facing output from an older creation snapshot when the contract has since been edited

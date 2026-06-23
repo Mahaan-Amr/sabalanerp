@@ -495,6 +495,14 @@ export const accountingAPI = {
   executeAction: (data: any) => api.post('/accounting/actions', data),
 };
 
+export const biAPI = {
+  getSalesOverview: (params?: any) => api.get('/bi/sales/overview', { params }),
+  exportSalesTable: (table: string, params?: any) =>
+    api.get(`/bi/sales/export/${table}`, { params, responseType: 'blob' }),
+  downloadSalesSummaryPdf: (params?: any) =>
+    api.get('/bi/sales/summary.pdf', { params, responseType: 'blob' }),
+};
+
 // Contract Templates API
 export const contractTemplatesAPI = {
   getAll: (params?: { page?: number; limit?: number; category?: string; isActive?: boolean }) =>

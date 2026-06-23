@@ -192,6 +192,9 @@ export const FEATURES = {
   ACCOUNTING_RECORDS_APPROVE_VOID: 'accounting_records_approve_void',
   ACCOUNTING_ACTIONS_MANAGE: 'accounting_actions_manage',
 
+  // BI Features
+  BI_DASHBOARD_VIEW: 'bi_dashboard_view',
+
   // Security Features
   SECURITY_SHIFTS_VIEW: 'security_shifts_view',
   SECURITY_SHIFTS_CREATE: 'security_shifts_create',
@@ -400,6 +403,9 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID]: 'accounting',
   [FEATURES.ACCOUNTING_ACTIONS_MANAGE]: 'accounting',
 
+  // BI Features
+  [FEATURES.BI_DASHBOARD_VIEW]: 'bi',
+
   // Security Features
   [FEATURES.SECURITY_SHIFTS_VIEW]: 'security',
   [FEATURES.SECURITY_SHIFTS_CREATE]: 'security',
@@ -584,6 +590,7 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   [FEATURES.ACCOUNTING_AUDIT_VIEW]: 'Accounting Audit - View',
   [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID]: 'Accounting Records - Approve/Void',
   [FEATURES.ACCOUNTING_ACTIONS_MANAGE]: 'Accounting Actions - Manage',
+  [FEATURES.BI_DASHBOARD_VIEW]: 'BI Dashboard - View',
 
   [FEATURES.SECURITY_SHIFTS_VIEW]: 'Security Shifts - View',
   [FEATURES.SECURITY_SHIFTS_CREATE]: 'Security Shifts - Create',

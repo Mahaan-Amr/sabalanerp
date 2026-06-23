@@ -70,6 +70,22 @@ sh deploy/scripts/reset-sales-contracts.sh --env-file deploy/.env.prod --apply -
 
 The apply step creates a `pg_dump` backup under `backups/` before deleting data. The next generated sales contract number starts again from `CONTRACT_PUBLIC_NUMBER_FLOOR`, default `100001`.
 
+## Reset CRM Customers For Go-Live
+
+After test customers are no longer needed, reset active CRM customers while keeping users, products, permissions, departments, templates, and system setup. This also clears any remaining sales contracts and customer-linked accounting rows because sales contracts require a CRM customer.
+
+Always run the dry-run first:
+```bash
+sh deploy/scripts/reset-crm-customers.sh --env-file deploy/.env.prod
+```
+
+Apply the reset after reviewing the counts:
+```bash
+sh deploy/scripts/reset-crm-customers.sh --env-file deploy/.env.prod --apply --clear-contract-pdfs --clear-accounting-pdfs
+```
+
+The apply step creates a `pg_dump` backup under `backups/` before deleting data.
+
 ## Rollback
 1. Keep prior release image tags.
 2. Update `docker-compose.prod.yml` to previous tags (or previous commit).

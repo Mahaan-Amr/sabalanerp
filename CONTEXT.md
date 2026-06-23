@@ -80,6 +80,14 @@ _Avoid_: making users switch keyboard language to find numeric product values
 An informational customer-facing row that shows the full base stone consumed to create a sold cut product. It explains material usage and dimensions but is not a second charged product row.
 _Avoid_: adding سنگ مصرفی to contract totals, delivery quantities, or inventory as a separate sale row
 
+**تقسیم طول در برش هوشمند طولی**:
+در برش هوشمند سنگ طولی، طول درخواستی مشتری می‌تواند به عنوان تقاضای کل فهمیده شود و سیستم آن را با چند قطعه فیزیکی کوتاه‌تر از همان عرض تأمین کند، به شرطی که نتیجه قراردادی همان متراژ و عرض درخواستی باقی بماند.
+_Avoid_: نمایش قطعات فیزیکی کوتاه‌تر به عنوان تغییر در سفارش مشتری، یا تقسیم طول در حالتی که کاربر صریحاً قطعه یکپارچه می‌خواهد
+
+**باقی‌مانده برش هوشمند طولی**:
+باقی‌مانده سنگ طولی بر اساس بخش فیزیکی سنگ مصرف‌شده در برش هوشمند محاسبه می‌شود، نه بر اساس طول نمایشی سفارش مشتری. اگر تقاضای `18m × 20cm` از سنگ `40cm` با دو نوار فیزیکی `9m × 20cm` تأمین شود، بخش مصرفی `40cm × 9m` است و باقی‌مانده‌ای از همان برش ساخته نمی‌شود.
+_Avoid_: ساختن باقی‌مانده `18m × 20cm` وقتی تقاضا با دو نوار فیزیکی کوتاه‌تر کامل شده است
+
 **عرض درخواستی ردیف قرارداد**:
 The customer-requested finished width of a contract product row, shown when delivery scheduling needs to distinguish the requested piece from the source stone consumed to make it.
 _Avoid_: using this value as the source-material width when the row is cut from a wider stone

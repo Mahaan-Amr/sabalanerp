@@ -18,12 +18,13 @@ const approx = (actual: number, expected: number) => {
     seed: 1
   });
 
-  assert.equal(plan.mode, 'single-strip');
-  assert.deepEqual(plan.productionPieces, [{ widthCm: 15, lengthM: 10, quantity: 1 }]);
+  assert.equal(plan.mode, 'optimized');
+  assert.deepEqual(plan.productionPieces, [{ widthCm: 15, lengthM: 5, quantity: 2 }]);
   assert.equal(plan.remainingStones.length, 1);
-  approx(plan.remainingStones[0].width, 25);
-  approx(plan.remainingStones[0].length, 10);
-  approx(plan.consumedAreaSqm, 4);
+  approx(plan.remainingStones[0].width, 10);
+  approx(plan.remainingStones[0].length, 5);
+  approx(plan.consumedAreaSqm, 2);
+  approx(plan.requestedAreaSqm, 1.5);
   approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 10);
   assert.equal(plan.cuttingBreakdown.some((cut) => cut.type === 'cross'), false);
 }
@@ -115,7 +116,7 @@ const approx = (actual: number, expected: number) => {
     originalWidthCm: 40,
     enteredWidth: 20,
     enteredWidthUnit: 'cm',
-    enteredLength: 10,
+    enteredLength: 18,
     enteredLengthUnit: 'm',
     quantity: 1,
     longitudinalRatePerMeter: 100,
@@ -123,11 +124,14 @@ const approx = (actual: number, expected: number) => {
     seed: 4
   });
 
-  assert.equal(plan.mode, 'single-strip');
-  assert.deepEqual(plan.productionPieces, [{ widthCm: 20, lengthM: 10, quantity: 1 }]);
-  assert.equal(plan.remainingStones.length, 1);
-  approx(plan.remainingStones[0].width, 20);
-  approx(plan.remainingStones[0].length, 10);
+  assert.equal(plan.mode, 'optimized');
+  assert.deepEqual(plan.productionPieces, [{ widthCm: 20, lengthM: 9, quantity: 2 }]);
+  approx(plan.totalRequestedLengthM, 18);
+  approx(plan.sourceLengthConsumedM, 9);
+  approx(plan.consumedAreaSqm, 3.6);
+  approx(plan.requestedAreaSqm, 3.6);
+  assert.equal(plan.remainingStones.length, 0);
+  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 9);
 }
 
 {

@@ -363,8 +363,10 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
           remainingSource: {
             sourceProductIndex,
             sourceRemainingStoneId: selectedRemainingStone.id,
+            sourceRemainingStone: stockInfo.sanitized,
             partitionId: row.id,
             allocatedQuantity: row.quantity,
+            generatedRemainingStoneIds: remainingAreas.map(area => area.id),
             physicalPieces: physicalPieces.map(piece => ({
               width: piece.width,
               length: piece.length,

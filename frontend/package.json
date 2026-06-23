@@ -6,7 +6,8 @@
     "dev": "node --max-old-space-size=8192 node_modules/next/dist/bin/next dev",
     "build": "node --max-old-space-size=8192 node_modules/next/dist/bin/next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:contract-creation": "npx tsx src/features/contract-creation/services/__tests__/smartLongitudinalCutPlan.test.ts && npx tsx src/features/contract-creation/services/__tests__/remainingStonePartitionService.test.ts && npx tsx src/features/contract-creation/services/__tests__/contractControllerHelpers.test.ts && npx tsx src/features/contract-creation/services/__tests__/contractCreationComplexScenarios.test.ts"
   },
   "dependencies": {
     "@react-three/fiber": "^8.18.0",

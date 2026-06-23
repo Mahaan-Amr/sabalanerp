@@ -176,9 +176,14 @@ export const calculateSmartLongitudinalCutPlan = ({
   }
 
   const possibleStrips = Math.max(1, Math.floor(sourceWidthCm / consumedWidthCm));
-  const stripsPerSource = optimizationEnabled ? Math.min(possibleStrips, requestedQuantity) : 1;
-  const sourceBandsNeeded = Math.ceil(requestedQuantity / stripsPerSource);
-  const sourceLengthConsumedM = requestedLengthM * sourceBandsNeeded;
+  const shouldSplitSingleLogicalLength = optimizationEnabled && requestedQuantity === 1 && possibleStrips > 1;
+  const stripsPerSource = optimizationEnabled
+    ? (shouldSplitSingleLogicalLength ? possibleStrips : Math.min(possibleStrips, requestedQuantity))
+    : 1;
+  const sourceBandsNeeded = shouldSplitSingleLogicalLength ? 1 : Math.ceil(requestedQuantity / stripsPerSource);
+  const sourceLengthConsumedM = shouldSplitSingleLogicalLength
+    ? requestedLengthM / stripsPerSource
+    : requestedLengthM * sourceBandsNeeded;
   const consumedAreaSqm = (sourceWidthCm / 100) * sourceLengthConsumedM;
   const requestedAreaSqm = (requestedWidthCm / 100) * totalRequestedLengthM;
   const mode: SmartLongitudinalCutPlan['mode'] = optimizationEnabled && stripsPerSource > 1 ? 'optimized' : 'single-strip';
@@ -194,32 +199,35 @@ export const calculateSmartLongitudinalCutPlan = ({
 
   const productionPieces = [{
     widthCm: requestedWidthCm,
-    lengthM: requestedLengthM,
-    quantity: requestedQuantity
+    lengthM: shouldSplitSingleLogicalLength ? sourceLengthConsumedM : requestedLengthM,
+    quantity: shouldSplitSingleLogicalLength ? stripsPerSource : requestedQuantity
   }];
 
   const remainingByDimension = new Map<string, RemainingStone>();
   let remainingQuantityToPlan = requestedQuantity;
   let longitudinalMeters = 0;
   for (let bandIndex = 0; bandIndex < sourceBandsNeeded; bandIndex += 1) {
-    const piecesInBand = Math.min(stripsPerSource, remainingQuantityToPlan);
+    const piecesInBand = shouldSplitSingleLogicalLength
+      ? stripsPerSource
+      : Math.min(stripsPerSource, remainingQuantityToPlan);
     remainingQuantityToPlan -= piecesInBand;
     const remainingWidthCm = sourceWidthCm - consumedWidthCm * piecesInBand;
     const cutCount = remainingWidthCm > 0 ? piecesInBand : Math.max(piecesInBand - 1, 0);
-    longitudinalMeters += cutCount * requestedLengthM;
+    const bandLengthM = shouldSplitSingleLogicalLength ? sourceLengthConsumedM : requestedLengthM;
+    longitudinalMeters += cutCount * bandLengthM;
 
     if (remainingWidthCm > 0) {
-      const key = `${remainingWidthCm}:${requestedLengthM}`;
+      const key = `${remainingWidthCm}:${bandLengthM}`;
       const existing = remainingByDimension.get(key);
       if (existing) {
         existing.quantity = (existing.quantity || 1) + 1;
-        existing.squareMeters += (remainingWidthCm / 100) * requestedLengthM;
+        existing.squareMeters += (remainingWidthCm / 100) * bandLengthM;
       } else {
         remainingByDimension.set(key, {
           id: `remaining_smart_${baseSeed}_${bandIndex}`,
           width: remainingWidthCm,
-          length: requestedLengthM,
-          squareMeters: (remainingWidthCm / 100) * requestedLengthM,
+          length: bandLengthM,
+          squareMeters: (remainingWidthCm / 100) * bandLengthM,
           isAvailable: true,
           sourceCutId: `cut_smart_${baseSeed}_${bandIndex}`,
           quantity: 1

@@ -86,10 +86,8 @@ import {
   getProductServiceCost
 } from '@/features/contract-creation/utils/stairSystemHelpers';
 import { generateContractHTML } from '@/features/contract-creation/utils/contractHTMLGenerator';
-import { calculateRemainingStoneDimensions, recalculateUsedRemainingDimensions } from '@/features/contract-creation/utils/dimensionUtils';
 import {
   isUsableRemainingStone,
-  mergeRemainingStoneCollection,
   normalizeRemainingStoneCollection,
   sanitizeRemainingStoneEntry
 } from '@/features/contract-creation/utils/remainingStoneGuards';
@@ -108,7 +106,8 @@ import {
 } from '@/features/contract-creation/services/remainingStoneService';
 import {
   mergeEditedRemainingStoneState,
-  resolveLongitudinalWidth
+  resolveLongitudinalWidth,
+  restoreRemainingStoneAfterChildRemoval
 } from '@/features/contract-creation/utils/productConfigurationController';
 import {
   CONTRACT_DRAFT_STORAGE_KEY,
@@ -3259,61 +3258,8 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
       return;
     }
 
-    const sourceProductIndex = remainingSourceMeta.sourceProductIndex as number;
-    const partitionId = remainingSourceMeta.partitionId as string | undefined;
-    const sourceRemainingStoneId = remainingSourceMeta.sourceRemainingStoneId as string | undefined;
-    const productsAfterRemoval = wizardData.products.filter((_, i) => i !== index);
+    const productsAfterRemoval = restoreRemainingStoneAfterChildRemoval(wizardData.products, index);
     const deliveriesAfterRemoval = removeProductFromDeliveries(wizardData.deliveries || [], index);
-
-    const normalizedSourceIndex = index < sourceProductIndex ? sourceProductIndex - 1 : sourceProductIndex;
-    if (normalizedSourceIndex < 0 || normalizedSourceIndex >= productsAfterRemoval.length) {
-      updateWizardData({ products: productsAfterRemoval, deliveries: deliveriesAfterRemoval });
-      return;
-    }
-
-    const sourceProduct = productsAfterRemoval[normalizedSourceIndex];
-    const physicalPieces = Array.isArray(remainingSourceMeta.physicalPieces)
-      ? remainingSourceMeta.physicalPieces
-      : [];
-    const restoredRemainingStones = physicalPieces.length > 0
-      ? physicalPieces.map((piece: any, pieceIndex: number) => sanitizeRemainingStoneEntry({
-          id: `restored_${Date.now()}_${partitionId || 'partition'}_${pieceIndex}`,
-          width: piece.width,
-          length: piece.length,
-          squareMeters: piece.squareMeters,
-          isAvailable: true,
-          sourceCutId: sourceRemainingStoneId || '',
-          quantity: piece.quantity || 1
-        } as RemainingStone))
-      : [sanitizeRemainingStoneEntry({
-          id: `restored_${Date.now()}_${partitionId || 'partition'}`,
-          width: productToRemove.width,
-          length: productToRemove.length,
-          squareMeters: productToRemove.squareMeters,
-          isAvailable: true,
-          sourceCutId: sourceRemainingStoneId || '',
-          quantity: productToRemove.quantity
-        } as RemainingStone)];
-
-    const cleanedUsedRemaining = (sourceProduct.usedRemainingStones || []).filter(stone => {
-      if (!partitionId) return true;
-      return !(stone.id && stone.id.includes(partitionId));
-    });
-    const recalculated = recalculateUsedRemainingDimensions(cleanedUsedRemaining);
-    const mergedRemaining = mergeRemainingStoneCollection([
-      ...(sourceProduct.remainingStones || []),
-      ...restoredRemainingStones
-    ]);
-
-    const updatedSourceProduct = {
-      ...sourceProduct,
-      usedRemainingStones: cleanedUsedRemaining,
-      remainingStones: mergedRemaining,
-      totalUsedRemainingWidth: recalculated.totalUsedWidth,
-      totalUsedRemainingLength: recalculated.totalUsedLength
-    };
-
-    productsAfterRemoval[normalizedSourceIndex] = updatedSourceProduct;
     updateWizardData({ products: productsAfterRemoval, deliveries: deliveriesAfterRemoval });
   };
 

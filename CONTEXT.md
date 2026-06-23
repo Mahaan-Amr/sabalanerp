@@ -24,6 +24,14 @@ _Avoid_: adding a normal-vs-collaboration choice as a required step in every con
 A CRM customer whose relationship to a sales contract is collaborative rather than a normal project customer. A مشتری همکاری can be selected for فروش همکاری without requiring project-address selection.
 _Avoid_: creating a separate non-CRM buyer record for collaborators
 
+**معرف مشتری**:
+A person who referred or introduced a CRM customer. The referrer belongs to the customer profile, not to one specific project address or contract.
+_Avoid_: storing the same referrer separately on every project address
+
+**بازاریاب پروژه**:
+The marketer associated with a specific project address for a customer. Different project addresses for the same customer may have different marketers.
+_Avoid_: treating the project marketer as a customer-wide referrer or as the project manager
+
 **ردیف خدمات قرارداد**:
 A standalone price-bearing contract row for services such as ابزار, برش, پرداخت سنگ, or فرآوری when no stone product is being sold.
 _Avoid_: representing a service-only sale as a hidden or fake product
@@ -71,6 +79,14 @@ _Avoid_: making users switch keyboard language to find numeric product values
 **سنگ مصرفی**:
 An informational customer-facing row that shows the full base stone consumed to create a sold cut product. It explains material usage and dimensions but is not a second charged product row.
 _Avoid_: adding سنگ مصرفی to contract totals, delivery quantities, or inventory as a separate sale row
+
+**عرض درخواستی ردیف قرارداد**:
+The customer-requested finished width of a contract product row, shown when delivery scheduling needs to distinguish the requested piece from the source stone consumed to make it.
+_Avoid_: using this value as the source-material width when the row is cut from a wider stone
+
+**عرض مصرفی ردیف قرارداد**:
+The width of the source stone consumed to create a contract product row. It explains material usage and should align with سنگ مصرفی rather than replacing the customer-requested width.
+_Avoid_: treating عرض مصرفی as the finished customer-requested width
 
 **ردیف زمان‌بندی تحویل/اجرا**:
 A contract row that can be assigned to the delivery schedule because it represents either a physical stone product to deliver or a standalone service row to execute for the customer.

@@ -440,6 +440,9 @@ model CrmCustomer {
   nationalCode             String?
   projectManagerName       String?
   projectManagerNumber     String?
+  referrerFirstName        String?
+  referrerLastName         String?
+  referrerPhoneNumber      String?
   workAddress              String?
   workNumber               String?
   communications           CrmCommunication[]
@@ -468,6 +471,9 @@ model ProjectAddress {
   projectType          String?
   projectManagerName   String?
   projectManagerNumber String?
+  marketerFirstName    String?
+  marketerLastName     String?
+  marketerPhoneNumber  String?
   isActive             Boolean     @default(true)
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt

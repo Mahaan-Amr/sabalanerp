@@ -40,6 +40,9 @@ interface EditableProject {
   projectType: string;
   projectManagerName: string;
   projectManagerNumber: string;
+  marketerFirstName: string;
+  marketerLastName: string;
+  marketerPhoneNumber: string;
   isActive: boolean;
 }
 
@@ -79,6 +82,9 @@ interface CustomerFormData {
   workNumber: string;
   projectManagerName: string;
   projectManagerNumber: string;
+  referrerFirstName: string;
+  referrerLastName: string;
+  referrerPhoneNumber: string;
   isBlacklisted: boolean;
   isLocked: boolean;
 }
@@ -91,6 +97,9 @@ const emptyProject = (): EditableProject => ({
   projectType: '',
   projectManagerName: '',
   projectManagerNumber: '',
+  marketerFirstName: '',
+  marketerLastName: '',
+  marketerPhoneNumber: '',
   isActive: true
 });
 
@@ -141,6 +150,9 @@ export default function EditCustomerPage() {
     workNumber: '',
     projectManagerName: '',
     projectManagerNumber: '',
+    referrerFirstName: '',
+    referrerLastName: '',
+    referrerPhoneNumber: '',
     isBlacklisted: false,
     isLocked: false
   });
@@ -199,6 +211,9 @@ export default function EditCustomerPage() {
           workNumber: customer.workNumber || '',
           projectManagerName: customer.projectManagerName || '',
           projectManagerNumber: customer.projectManagerNumber || '',
+          referrerFirstName: customer.referrerFirstName || '',
+          referrerLastName: customer.referrerLastName || '',
+          referrerPhoneNumber: customer.referrerPhoneNumber || '',
           isBlacklisted: Boolean(customer.isBlacklisted),
           isLocked: Boolean(customer.isLocked)
         });
@@ -212,6 +227,9 @@ export default function EditCustomerPage() {
           projectType: project.projectType || '',
           projectManagerName: project.projectManagerName || '',
           projectManagerNumber: project.projectManagerNumber || '',
+          marketerFirstName: project.marketerFirstName || '',
+          marketerLastName: project.marketerLastName || '',
+          marketerPhoneNumber: project.marketerPhoneNumber || '',
           isActive: project.isActive !== false
         })));
 
@@ -248,6 +266,7 @@ export default function EditCustomerPage() {
   const updateField = (field: keyof CustomerFormData, value: any) => {
     const nextValue =
       field === 'projectManagerNumber'
+        || field === 'referrerPhoneNumber'
         ? normalizeIranianMobile(value)
         : field === 'nationalCode' || field === 'homeNumber' || field === 'workNumber'
           ? normalizePhoneDigits(value)
@@ -257,7 +276,7 @@ export default function EditCustomerPage() {
   };
 
   const updateProject = (index: number, field: keyof EditableProject, value: any) => {
-    const nextValue = field === 'projectManagerNumber' ? normalizeIranianMobile(value) : value;
+    const nextValue = field === 'projectManagerNumber' || field === 'marketerPhoneNumber' ? normalizeIranianMobile(value) : value;
     setProjects((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: nextValue } : item));
   };
 
@@ -338,12 +357,14 @@ export default function EditCustomerPage() {
     if (!validate()) return;
     const phoneErrors: Record<string, string> = {};
     const customerManagerPhoneError = validateOptionalIranianMobile(formData.projectManagerNumber);
+    const referrerPhoneError = validateOptionalIranianMobile(formData.referrerPhoneNumber);
     if (customerManagerPhoneError) phoneErrors.projectManagerNumber = customerManagerPhoneError;
+    if (referrerPhoneError) phoneErrors.referrerPhoneNumber = referrerPhoneError;
     if (phones.some((phone) => phone.isActive && validateRequiredIranianMobile(phone.number))) {
       phoneErrors.phones = 'شماره‌های تماس باید ۱۱ رقم و با 09 شروع شوند';
     }
-    if (projects.some((project) => project.isActive && validateOptionalIranianMobile(project.projectManagerNumber))) {
-      phoneErrors.projects = 'شماره مدیر پروژه باید ۱۱ رقم و با 09 شروع شود';
+    if (projects.some((project) => project.isActive && (validateOptionalIranianMobile(project.projectManagerNumber) || validateOptionalIranianMobile(project.marketerPhoneNumber)))) {
+      phoneErrors.projects = 'شماره مدیر پروژه یا بازاریاب باید ۱۱ رقم و با 09 شروع شود';
     }
     if (contacts.some((contact) => contact.isActive && validateOptionalIranianMobile(contact.mobile))) {
       phoneErrors.contacts = 'شماره موبایل مخاطب باید ۱۱ رقم و با 09 شروع شود';
@@ -372,6 +393,9 @@ export default function EditCustomerPage() {
         workNumber: normalizePhoneDigits(formData.workNumber) || null,
         projectManagerName: formData.projectManagerName.trim() || null,
         projectManagerNumber: normalizeIranianMobile(formData.projectManagerNumber) || null,
+        referrerFirstName: formData.referrerFirstName.trim() || null,
+        referrerLastName: formData.referrerLastName.trim() || null,
+        referrerPhoneNumber: normalizeIranianMobile(formData.referrerPhoneNumber) || null,
         isBlacklisted: formData.isBlacklisted,
         isLocked: formData.isLocked
       });
@@ -387,7 +411,10 @@ export default function EditCustomerPage() {
             projectName: project.projectName.trim() || null,
             projectType: project.projectType.trim() || null,
             projectManagerName: project.projectManagerName.trim() || null,
-            projectManagerNumber: normalizeIranianMobile(project.projectManagerNumber) || null
+            projectManagerNumber: normalizeIranianMobile(project.projectManagerNumber) || null,
+            marketerFirstName: project.marketerFirstName.trim() || null,
+            marketerLastName: project.marketerLastName.trim() || null,
+            marketerPhoneNumber: normalizeIranianMobile(project.marketerPhoneNumber) || null
           };
           return project.id
             ? crmAPI.updateProjectAddress(customerId, project.id, payload)
@@ -593,6 +620,19 @@ export default function EditCustomerPage() {
             <input className={inputClass} value={formData.projectManagerNumber} onChange={(e) => updateField('projectManagerNumber', e.target.value)} />
             <InlineFieldError message={errors.projectManagerNumber} />
           </div>
+          <div>
+            <label className={labelClass}>نام معرف</label>
+            <input className={inputClass} value={formData.referrerFirstName} onChange={(e) => updateField('referrerFirstName', e.target.value)} />
+          </div>
+          <div>
+            <label className={labelClass}>نام خانوادگی معرف</label>
+            <input className={inputClass} value={formData.referrerLastName} onChange={(e) => updateField('referrerLastName', e.target.value)} />
+          </div>
+          <div className="md:col-span-2">
+            <label className={labelClass}>شماره تماس معرف</label>
+            <input className={inputClass} value={formData.referrerPhoneNumber} onChange={(e) => updateField('referrerPhoneNumber', e.target.value)} />
+            <InlineFieldError message={errors.referrerPhoneNumber} />
+          </div>
         </div>
       </section>
 
@@ -626,6 +666,9 @@ export default function EditCustomerPage() {
                   </select>
                   <input className={inputClass} placeholder="نام مدیر پروژه" value={project.projectManagerName} onChange={(e) => updateProject(index, 'projectManagerName', e.target.value)} />
                   <input className={inputClass} placeholder="شماره مدیر پروژه" value={project.projectManagerNumber} onChange={(e) => updateProject(index, 'projectManagerNumber', e.target.value)} />
+                  <input className={inputClass} placeholder="نام بازاریاب" value={project.marketerFirstName} onChange={(e) => updateProject(index, 'marketerFirstName', e.target.value)} />
+                  <input className={inputClass} placeholder="نام خانوادگی بازاریاب" value={project.marketerLastName} onChange={(e) => updateProject(index, 'marketerLastName', e.target.value)} />
+                  <input className={inputClass} placeholder="شماره تماس بازاریاب" value={project.marketerPhoneNumber} onChange={(e) => updateProject(index, 'marketerPhoneNumber', e.target.value)} />
                   <textarea className={`${inputClass} md:col-span-2`} rows={2} placeholder="آدرس پروژه *" value={project.address} onChange={(e) => updateProject(index, 'address', e.target.value)} />
                 </div>
                 <button onClick={() => removeProject(index)} className="mt-3 text-red-300 hover:text-red-200 inline-flex items-center gap-2">

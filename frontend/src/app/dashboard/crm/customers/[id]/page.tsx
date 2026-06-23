@@ -75,6 +75,9 @@ interface CrmCustomer {
     projectType?: string;
     projectManagerName?: string;
     projectManagerNumber?: string;
+    marketerFirstName?: string;
+    marketerLastName?: string;
+    marketerPhoneNumber?: string;
     isActive: boolean;
   }>;
   phoneNumbers: Array<{
@@ -147,7 +150,10 @@ export default function CustomerDetailPage() {
     projectName: '',
     projectType: '',
     projectManagerName: '',
-    projectManagerNumber: ''
+    projectManagerNumber: '',
+    marketerFirstName: '',
+    marketerLastName: '',
+    marketerPhoneNumber: ''
   });
   const [contactFormData, setContactFormData] = useState({
     firstName: '',
@@ -272,7 +278,10 @@ export default function CustomerDetailPage() {
       projectName: '',
       projectType: '',
       projectManagerName: '',
-      projectManagerNumber: ''
+      projectManagerNumber: '',
+      marketerFirstName: '',
+      marketerLastName: '',
+      marketerPhoneNumber: ''
     });
     setShowAddProjectModal(true);
   };
@@ -295,7 +304,10 @@ export default function CustomerDetailPage() {
         projectName: '',
         projectType: '',
         projectManagerName: '',
-        projectManagerNumber: ''
+        projectManagerNumber: '',
+        marketerFirstName: '',
+        marketerLastName: '',
+        marketerPhoneNumber: ''
       });
       setShowAddProjectModal(true);
     }
@@ -310,7 +322,10 @@ export default function CustomerDetailPage() {
       projectName: project.projectName || '',
       projectType: project.projectType || '',
       projectManagerName: project.projectManagerName || '',
-      projectManagerNumber: project.projectManagerNumber || ''
+      projectManagerNumber: project.projectManagerNumber || '',
+      marketerFirstName: project.marketerFirstName || '',
+      marketerLastName: project.marketerLastName || '',
+      marketerPhoneNumber: project.marketerPhoneNumber || ''
     });
     setShowAddProjectModal(true);
   };
@@ -812,6 +827,28 @@ export default function CustomerDetailPage() {
                               </div>
                             </div>
                           )}
+                          {(address.marketerFirstName || address.marketerLastName || address.marketerPhoneNumber) && (
+                            <div className="mt-3 pt-3 border-t border-white/10">
+                              <div className="flex flex-wrap items-center gap-4 text-sm">
+                                {(address.marketerFirstName || address.marketerLastName) && (
+                                  <div className="flex items-center gap-2">
+                                    <FaUser className="h-4 w-4 text-purple-400" />
+                                    <span className="text-gray-300">بازاریاب:</span>
+                                    <span className="text-white font-medium">
+                                      {[address.marketerFirstName, address.marketerLastName].filter(Boolean).join(' ')}
+                                    </span>
+                                  </div>
+                                )}
+                                {address.marketerPhoneNumber && (
+                                  <div className="flex items-center gap-2">
+                                    <FaPhone className="h-4 w-4 text-green-400" />
+                                    <span className="text-gray-300">شماره:</span>
+                                    <span className="text-white font-medium">{address.marketerPhoneNumber}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-2">
                           {hasPermission('crm' as any, 'edit' as any) && (
@@ -1127,6 +1164,48 @@ export default function CustomerDetailPage() {
                       onChange={(e) => setProjectFormData(prev => ({ ...prev, projectManagerNumber: e.target.value }))}
                       className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
                       placeholder="شماره تماس مدیر پروژه"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-white/20 pt-4">
+                <h4 className="text-lg font-medium text-white mb-4 flex items-center gap-2">
+                  <FaUser className="text-purple-400" />
+                  اطلاعات بازاریاب
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">نام بازاریاب</label>
+                    <input
+                      type="text"
+                      value={projectFormData.marketerFirstName}
+                      onChange={(e) => setProjectFormData(prev => ({ ...prev, marketerFirstName: e.target.value }))}
+                      className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      placeholder="نام بازاریاب"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">نام خانوادگی بازاریاب</label>
+                    <input
+                      type="text"
+                      value={projectFormData.marketerLastName}
+                      onChange={(e) => setProjectFormData(prev => ({ ...prev, marketerLastName: e.target.value }))}
+                      className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      placeholder="نام خانوادگی بازاریاب"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-300 mb-2">شماره تماس بازاریاب</label>
+                    <input
+                      type="text"
+                      value={projectFormData.marketerPhoneNumber}
+                      onChange={(e) => setProjectFormData(prev => ({ ...prev, marketerPhoneNumber: e.target.value }))}
+                      className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      placeholder="شماره تماس بازاریاب"
                     />
                   </div>
                 </div>

@@ -85,6 +85,31 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
 
   const formatAmount = (value: number): string => formatDisplayNumber(value);
 
+  const toWidthCm = (value: number | null | undefined, unit: 'cm' | 'm' | undefined): number => {
+    const numericValue = Number(value) || 0;
+    if (numericValue <= 0) return 0;
+    return unit === 'm' ? numericValue * 100 : numericValue;
+  };
+
+  const getProductWidthSummary = (product: ContractWizardData['products'][number]): string | null => {
+    const wantedWidthCm = toWidthCm(product.width, product.widthUnit);
+    if (wantedWidthCm <= 0) return null;
+
+    const usedWidthCm = Number(
+      product.smartCutPlan?.sourceWidthCm ||
+      product.originalWidth ||
+      product.product?.widthValue ||
+      0
+    ) || 0;
+
+    const wantedLabel = `عرض درخواستی: ${formatDisplayNumber(wantedWidthCm)}cm`;
+    const usedLabel = usedWidthCm > 0
+      ? `عرض مصرفی: ${formatDisplayNumber(usedWidthCm)}cm`
+      : null;
+
+    return [wantedLabel, usedLabel].filter(Boolean).join(' | ');
+  };
+
   // Total delivery amount already assigned for a product across deliveries, optionally excluding one delivery
   const getTotalDeliveredForProduct = useCallback((productIndex: number, excludeDeliveryIndex?: number): number => {
     return wizardData.deliveries.reduce((sum, d, i) => {
@@ -293,6 +318,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                         const currentQty = currentDeliveryProduct?.amount ?? currentDeliveryProduct?.quantity ?? 0;
                         const remaining = maxForThisDelivery;
                         const productLabel = product.stoneName || product.product?.namePersian || `محصول ${productIndex + 1}`;
+                        const widthSummary = getProductWidthSummary(product);
                         const setQty = (value: number) => handleDeliveryProductQuantityChange(index, productIndex, Math.max(0, Math.min(maxForThisDelivery, value)), product.productId);
                         return (
                           <div
@@ -303,6 +329,11 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                               <span className="text-sm font-medium text-gray-800 dark:text-white">
                                 {productLabel}
                               </span>
+                              {widthSummary && (
+                                <span className="basis-full text-xs font-medium text-slate-500 dark:text-slate-400">
+                                  {widthSummary}
+                                </span>
+                              )}
                               <div className="flex items-center gap-1">
                                 <button
                                   type="button"

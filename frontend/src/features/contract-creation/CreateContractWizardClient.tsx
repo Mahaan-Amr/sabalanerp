@@ -2745,7 +2745,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
             stoneId: p.productId,
             stoneLabel: p.stoneName,
             stoneProduct: p.product,
-            pricePerSquareMeter: p.pricePerSquareMeter,
+            pricePerSquareMeter: p.pricePerSquareMeter ?? p.unitPrice ?? p.product?.basePrice ?? 0,
             useMandatory: typeof p.isMandatory === 'boolean' ? p.isMandatory : undefined,
             mandatoryPercentage: p.isMandatory
               ? (p.mandatoryPercentage || 20)
@@ -2913,7 +2913,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           treadDepth: treadProduct?.treadDepth || 30,
           quantity: treadProduct?.quantity || numberOfSteps || 0,
           squareMeters: treadProduct?.squareMeters || 0,
-          pricePerSquareMeter: treadProduct?.pricePerSquareMeter || 0,
+          pricePerSquareMeter: treadProduct?.pricePerSquareMeter ?? treadProduct?.unitPrice ?? treadProduct?.product?.basePrice ?? 0,
           totalPrice: treadProduct?.totalPrice || 0,
           nosingType: treadProduct?.nosingType || 'none',
           nosingOverhang: treadProduct?.nosingOverhang || 30,
@@ -2934,7 +2934,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           riserHeight: riserProduct?.riserHeight || 17,
           quantity: riserProduct?.quantity || numberOfSteps || 0,
           squareMeters: riserProduct?.squareMeters || 0,
-          pricePerSquareMeter: riserProduct?.pricePerSquareMeter || 0,
+          pricePerSquareMeter: riserProduct?.pricePerSquareMeter ?? riserProduct?.unitPrice ?? riserProduct?.product?.basePrice ?? 0,
           totalPrice: riserProduct?.totalPrice || 0,
           isMandatory: riserProduct?.isMandatory || false,
           mandatoryPercentage: riserProduct?.mandatoryPercentage || 20,
@@ -2952,7 +2952,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
           numberOfLandings: landingProduct?.numberOfLandings || 0,
           quantity: landingProduct?.quantity || 0,
           squareMeters: landingProduct?.squareMeters || 0,
-          pricePerSquareMeter: landingProduct?.pricePerSquareMeter || 0,
+          pricePerSquareMeter: landingProduct?.pricePerSquareMeter ?? landingProduct?.unitPrice ?? landingProduct?.product?.basePrice ?? 0,
           totalPrice: landingProduct?.totalPrice || 0,
           isMandatory: landingProduct?.isMandatory || false,
           mandatoryPercentage: landingProduct?.mandatoryPercentage || 20,
@@ -3198,23 +3198,34 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
     const source = wizardData.products[index];
     if (!source) return;
 
-    const duplicate = JSON.parse(JSON.stringify(source)) as ContractProduct;
-    if (source.productType === 'stair') {
-      duplicate.stairSystemId = `stair_duplicate_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    } else {
-      delete duplicate.stairSystemId;
-    }
-    delete duplicate.parentProductIndex;
-    if (duplicate.meta) {
+    const cloneProduct = (product: ContractProduct, sourceIndex: number, stairSystemId?: string): ContractProduct => {
+      const duplicate = JSON.parse(JSON.stringify(product)) as ContractProduct;
+      if (stairSystemId) {
+        duplicate.stairSystemId = stairSystemId;
+      } else {
+        delete duplicate.stairSystemId;
+      }
+      delete duplicate.parentProductIndex;
       duplicate.meta = {
-        ...duplicate.meta,
-        duplicatedFromProductIndex: index,
+        ...(duplicate.meta || {}),
+        duplicatedFromProductIndex: sourceIndex,
         remainingSource: undefined
       };
-    }
+      return duplicate;
+    };
+
+    const duplicateProducts = source.productType === 'stair' && source.stairSystemId
+      ? (() => {
+          const newStairSystemId = `stair_duplicate_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+          return wizardData.products
+            .map((product, productIndex) => ({ product, productIndex }))
+            .filter(({ product }) => product.productType === 'stair' && product.stairSystemId === source.stairSystemId)
+            .map(({ product, productIndex }) => cloneProduct(product, productIndex, newStairSystemId));
+        })()
+      : [cloneProduct(source, index, source.productType === 'stair' ? `stair_duplicate_${Date.now()}_${Math.random().toString(36).slice(2, 9)}` : undefined)];
 
     updateWizardData({
-      products: [...wizardData.products, duplicate]
+      products: [...wizardData.products, ...duplicateProducts]
     });
   };
 

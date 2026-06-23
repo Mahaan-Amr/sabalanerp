@@ -102,6 +102,7 @@ interface FlatProductRow {
   rate: string;
   total: string;
   className?: string;
+  renderAsNoteRow?: boolean;
 }
 
 interface NormalizedDelivery {
@@ -538,6 +539,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
       const remainingCount = Array.isArray(product?.remainingStones) ? product.remainingStones.length : 0;
       const usedRemainingCount = Array.isArray(product?.usedRemainingStones) ? product.usedRemainingStones.length : 0;
       const smartCutPlan = product?.smartCutPlan || {};
+      const isFromRemainingStone = Boolean(product?.meta?.remainingSource);
       const sourceWidthCm = toNumber(smartCutPlan?.sourceWidthCm || product?.originalWidth);
       const sourceLengthM = toNumber(smartCutPlan?.sourceLengthConsumedM || product?.originalLength || product?.actualLengthMeters);
       const sourceAreaSqm = toNumber(
@@ -566,7 +568,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         dimensions,
         quantity: toNumber(product?.quantity || relationItem?.quantity),
         squareMeters: toNumber(product?.squareMeters),
-        unitPrice: toNumber(product?.pricePerSquareMeter || product?.unitPrice || relationItem?.unitPrice),
+        unitPrice: isFromRemainingStone ? 0 : toNumber(product?.pricePerSquareMeter || product?.unitPrice || relationItem?.unitPrice),
         originalTotalPrice: toNumber(product?.originalTotalPrice),
         isMandatory: Boolean(product?.isMandatory ?? relationItem?.isMandatory),
         mandatoryPercentage: toNumber(product?.mandatoryPercentage),
@@ -869,7 +871,6 @@ const buildFlatProductRows = (
       indexLabel: toFaNumber(productIndex + 1),
       code: product.code,
       description: productDescription,
-      note: product.description && product.description !== EMPTY ? product.description : undefined,
       category: 'محصول',
       dimensionsOrAmount: product.dimensions,
       quantityOrArea: formatProductQuantityOrArea(product),
@@ -887,6 +888,20 @@ const buildFlatProductRows = (
         quantityOrArea: '',
         rate: '',
         total: ''
+      });
+    }
+
+    if (product.description && product.description !== EMPTY) {
+      rows.push({
+        indexLabel: '',
+        code: '',
+        description: product.description,
+        category: 'توضیحات',
+        dimensionsOrAmount: '',
+        quantityOrArea: '',
+        rate: '',
+        total: '',
+        renderAsNoteRow: true
       });
     }
 
@@ -1004,6 +1019,15 @@ const renderProductMainRows = (
 
   return buildFlatProductRows(products, standaloneServices, currency, grandTotal, financials).map((row) => {
     const classAttribute = row.className ? ` class="${row.className}"` : '';
+    if (row.renderAsNoteRow) {
+      return `
+      <tr class="description-detail-row">
+        <td>توضیحات</td>
+        <td colspan="7">${escapeHtml(row.description || EMPTY)}</td>
+      </tr>
+    `;
+    }
+
     const noteRow = row.note && row.note !== EMPTY
       ? `
       <tr class="description-detail-row">

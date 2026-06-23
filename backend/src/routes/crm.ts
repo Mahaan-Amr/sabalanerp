@@ -136,6 +136,9 @@ const customerSuggestionSelect = {
       projectType: true,
       projectManagerName: true,
       projectManagerNumber: true,
+      marketerFirstName: true,
+      marketerLastName: true,
+      marketerPhoneNumber: true,
       isActive: true
     }
   }
@@ -365,7 +368,10 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
             projectName: true,
             projectType: true,
             projectManagerName: true,
-            projectManagerNumber: true
+            projectManagerNumber: true,
+            marketerFirstName: true,
+            marketerLastName: true,
+            marketerPhoneNumber: true
           }
         },
         phoneNumbers: {
@@ -440,7 +446,10 @@ router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
             projectName: true,
             projectType: true,
             projectManagerName: true,
-            projectManagerNumber: true
+            projectManagerNumber: true,
+            marketerFirstName: true,
+            marketerLastName: true,
+            marketerPhoneNumber: true
           }
         },
         phoneNumbers: {
@@ -547,6 +556,11 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
       // Project Management
       projectManagerName,
       projectManagerNumber,
+
+      // Referrer Information
+      referrerFirstName,
+      referrerLastName,
+      referrerPhoneNumber,
       
       // Brand Information
       brandName,
@@ -571,13 +585,17 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
 
     const phoneValidationError = validatePhoneNumbersPayload(phoneNumbers);
     const projectManagerPhoneError = validateOptionalIranianMobileNumber(projectManagerNumber);
+    const referrerPhoneError = validateOptionalIranianMobileNumber(referrerPhoneNumber);
     const projectAddressPhoneError = Array.isArray(projectAddresses)
       ? projectAddresses.find((addr: any) => validateOptionalIranianMobileNumber(addr?.projectManagerNumber))
       : null;
-    if (phoneValidationError || projectManagerPhoneError || projectAddressPhoneError) {
+    const projectAddressMarketerPhoneError = Array.isArray(projectAddresses)
+      ? projectAddresses.find((addr: any) => validateOptionalIranianMobileNumber(addr?.marketerPhoneNumber))
+      : null;
+    if (phoneValidationError || projectManagerPhoneError || referrerPhoneError || projectAddressPhoneError || projectAddressMarketerPhoneError) {
       res.status(400).json({
         success: false,
-        error: phoneValidationError || projectManagerPhoneError || 'Project manager phone number must be 11 digits and start with 09'
+        error: phoneValidationError || projectManagerPhoneError || referrerPhoneError || 'Contact phone number must be 11 digits and start with 09'
       });
       return;
     }
@@ -613,6 +631,9 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
         workNumber,
         projectManagerName,
         projectManagerNumber,
+        referrerFirstName,
+        referrerLastName,
+        referrerPhoneNumber,
         brandName,
         brandNameDescription,
         isBlacklisted,
@@ -644,6 +665,11 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
         // Project Management
         projectManagerName,
         projectManagerNumber: normalizeOptionalIranianMobileNumber(projectManagerNumber),
+
+        // Referrer Information
+        referrerFirstName,
+        referrerLastName,
+        referrerPhoneNumber: normalizeOptionalIranianMobileNumber(referrerPhoneNumber),
         
         // Brand Information
         brandName,
@@ -673,6 +699,9 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
             projectType: addr.projectType || null,
             projectManagerName: addr.projectManagerName || null,
             projectManagerNumber: normalizeOptionalIranianMobileNumber(addr.projectManagerNumber),
+            marketerFirstName: addr.marketerFirstName || null,
+            marketerLastName: addr.marketerLastName || null,
+            marketerPhoneNumber: normalizeOptionalIranianMobileNumber(addr.marketerPhoneNumber),
             isActive: true
           }))
         } : undefined,
@@ -808,11 +837,15 @@ router.put('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
 
     const bodyPayload = req.body || {};
     const projectManagerPhoneError = validateOptionalIranianMobileNumber(bodyPayload.projectManagerNumber);
-    if (projectManagerPhoneError) {
+    const referrerPhoneError = validateOptionalIranianMobileNumber(bodyPayload.referrerPhoneNumber);
+    if (projectManagerPhoneError || referrerPhoneError) {
       res.status(400).json({
         success: false,
-        error: projectManagerPhoneError,
-        details: [{ path: 'projectManagerNumber', msg: projectManagerPhoneError }]
+        error: projectManagerPhoneError || referrerPhoneError,
+        details: [{
+          path: projectManagerPhoneError ? 'projectManagerNumber' : 'referrerPhoneNumber',
+          msg: projectManagerPhoneError || referrerPhoneError
+        }]
       });
       return;
     }
@@ -825,7 +858,9 @@ router.put('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
       'brandNameDescription',
       'homeAddress',
       'workAddress',
-      'projectManagerName'
+      'projectManagerName',
+      'referrerFirstName',
+      'referrerLastName'
     ];
 
     if ('firstName' in bodyPayload) updateData.firstName = normalizeNullableText(bodyPayload.firstName);
@@ -840,6 +875,9 @@ router.put('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
     if ('workNumber' in bodyPayload) updateData.workNumber = normalizeDigits(bodyPayload.workNumber) || null;
     if ('projectManagerNumber' in bodyPayload) {
       updateData.projectManagerNumber = normalizeOptionalIranianMobileNumber(bodyPayload.projectManagerNumber);
+    }
+    if ('referrerPhoneNumber' in bodyPayload) {
+      updateData.referrerPhoneNumber = normalizeOptionalIranianMobileNumber(bodyPayload.referrerPhoneNumber);
     }
     if ('isBlacklisted' in bodyPayload) updateData.isBlacklisted = Boolean(bodyPayload.isBlacklisted);
     if ('isLocked' in bodyPayload) updateData.isLocked = Boolean(bodyPayload.isLocked);
@@ -976,12 +1014,24 @@ router.post('/customers/:customerId/project-addresses', protect, requireAnyFeatu
     }
 
     const { customerId } = req.params;
-    const { address, city, postalCode, projectName, projectType, projectManagerName, projectManagerNumber } = req.body;
+    const {
+      address,
+      city,
+      postalCode,
+      projectName,
+      projectType,
+      projectManagerName,
+      projectManagerNumber,
+      marketerFirstName,
+      marketerLastName,
+      marketerPhoneNumber
+    } = req.body;
     const projectManagerPhoneError = validateOptionalIranianMobileNumber(projectManagerNumber);
-    if (projectManagerPhoneError) {
+    const marketerPhoneError = validateOptionalIranianMobileNumber(marketerPhoneNumber);
+    if (projectManagerPhoneError || marketerPhoneError) {
       res.status(400).json({
         success: false,
-        error: projectManagerPhoneError
+        error: projectManagerPhoneError || marketerPhoneError
       });
       return;
     }
@@ -1003,6 +1053,9 @@ router.post('/customers/:customerId/project-addresses', protect, requireAnyFeatu
         projectType,
         projectManagerName,
         projectManagerNumber: normalizeOptionalIranianMobileNumber(projectManagerNumber),
+        marketerFirstName,
+        marketerLastName,
+        marketerPhoneNumber: normalizeOptionalIranianMobileNumber(marketerPhoneNumber),
         isActive: true
       }
     });
@@ -1039,12 +1092,24 @@ router.put('/customers/:customerId/project-addresses/:projectId', protect, requi
     }
 
     const { customerId, projectId } = req.params;
-    const { address, city, postalCode, projectName, projectType, projectManagerName, projectManagerNumber } = req.body;
+    const {
+      address,
+      city,
+      postalCode,
+      projectName,
+      projectType,
+      projectManagerName,
+      projectManagerNumber,
+      marketerFirstName,
+      marketerLastName,
+      marketerPhoneNumber
+    } = req.body;
     const projectManagerPhoneError = validateOptionalIranianMobileNumber(projectManagerNumber);
-    if (projectManagerPhoneError) {
+    const marketerPhoneError = validateOptionalIranianMobileNumber(marketerPhoneNumber);
+    if (projectManagerPhoneError || marketerPhoneError) {
       res.status(400).json({
         success: false,
-        error: projectManagerPhoneError
+        error: projectManagerPhoneError || marketerPhoneError
       });
       return;
     }
@@ -1078,7 +1143,10 @@ router.put('/customers/:customerId/project-addresses/:projectId', protect, requi
         projectName,
         projectType,
         projectManagerName,
-        projectManagerNumber: normalizeOptionalIranianMobileNumber(projectManagerNumber)
+        projectManagerNumber: normalizeOptionalIranianMobileNumber(projectManagerNumber),
+        marketerFirstName,
+        marketerLastName,
+        marketerPhoneNumber: normalizeOptionalIranianMobileNumber(marketerPhoneNumber)
       }
     });
 
@@ -1817,4 +1885,3 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
 });
 
 export default router;
-

@@ -93,6 +93,9 @@ interface CustomerFormData {
   whatsappNumber: string;
   birthDate: string;
   mainJob: string;
+  referrerFirstName: string;
+  referrerLastName: string;
+  referrerPhoneNumber: string;
   
   // Project Information (Step 3)
   projectName: string;
@@ -170,6 +173,9 @@ export default function CreateCustomerPage() {
     whatsappNumber: '',
     birthDate: '',
     mainJob: '',
+    referrerFirstName: '',
+    referrerLastName: '',
+    referrerPhoneNumber: '',
     
     // Project Information (Step 3)
     projectName: '',
@@ -236,6 +242,8 @@ export default function CreateCustomerPage() {
       if (formData.nationalCode && formData.nationalCode.length !== 10) {
         newErrors.nationalCode = 'کد ملی باید 10 رقم باشد';
       }
+      const referrerPhoneNumberError = validateOptionalIranianMobile(formData.referrerPhoneNumber);
+      if (referrerPhoneNumberError) newErrors.referrerPhoneNumber = referrerPhoneNumberError;
     }
 
     if (currentStep.key === 'project') {
@@ -257,7 +265,8 @@ export default function CreateCustomerPage() {
       field === 'phoneNumber1' ||
       field === 'phoneNumber2' ||
       field === 'whatsappNumber' ||
-      field === 'projectManagerNumber'
+      field === 'projectManagerNumber' ||
+      field === 'referrerPhoneNumber'
         ? normalizeIranianMobile(value)
         : field === 'nationalCode' || field === 'homeNumber' || field === 'workNumber'
           ? normalizePhoneDigits(value)
@@ -449,9 +458,11 @@ export default function CreateCustomerPage() {
     const phone1Error = validateRequiredIranianMobile(formData.phoneNumber1);
     const phone2Error = validateOptionalIranianMobile(formData.phoneNumber2);
     const projectManagerNumberError = validateOptionalIranianMobile(formData.projectManagerNumber);
+    const referrerPhoneNumberError = validateOptionalIranianMobile(formData.referrerPhoneNumber);
     if (phone1Error) submitErrors.phoneNumber1 = phone1Error;
     if (phone2Error) submitErrors.phoneNumber2 = phone2Error;
     if (projectManagerNumberError) submitErrors.projectManagerNumber = projectManagerNumberError;
+    if (referrerPhoneNumberError) submitErrors.referrerPhoneNumber = referrerPhoneNumberError;
     if (duplicateCustomers.length > 0) {
       submitErrors.phoneNumber1 = 'مشتری با این شماره تماس قبلا ثبت شده است.';
       submitErrors.submit = 'مشتری با این شماره تماس قبلا ثبت شده است. از مشتری‌های پیشنهادی انتخاب کنید یا شماره را اصلاح کنید.';
@@ -467,6 +478,7 @@ export default function CreateCustomerPage() {
       const phoneNumber1 = normalizeIranianMobile(formData.phoneNumber1);
       const phoneNumber2 = normalizeIranianMobile(formData.phoneNumber2);
       const projectManagerNumber = normalizeIranianMobile(formData.projectManagerNumber);
+      const referrerPhoneNumber = normalizeIranianMobile(formData.referrerPhoneNumber);
       
       // Prepare data for API
       const customerData = {
@@ -489,6 +501,9 @@ export default function CreateCustomerPage() {
         whatsappNumber: normalizeIranianMobile(formData.whatsappNumber) || null,
         birthDate: formData.birthDate || null,
         mainJob: formData.mainJob.trim() || null,
+        referrerFirstName: formData.referrerFirstName.trim() || null,
+        referrerLastName: formData.referrerLastName.trim() || null,
+        referrerPhoneNumber: referrerPhoneNumber || null,
         
         // Project Management
         projectManagerName: formData.projectManagerName.trim() || null,
@@ -826,6 +841,40 @@ export default function CreateCustomerPage() {
                         placeholder="شغل اصلی"
                       />
                     </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">نام معرف</label>
+                      <input
+                        type="text"
+                        value={formData.referrerFirstName}
+                        onChange={(e) => handleInputChange('referrerFirstName', e.target.value)}
+                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        placeholder="نام معرف"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">نام خانوادگی معرف</label>
+                      <input
+                        type="text"
+                        value={formData.referrerLastName}
+                        onChange={(e) => handleInputChange('referrerLastName', e.target.value)}
+                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        placeholder="نام خانوادگی معرف"
+                      />
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-300 mb-2">شماره تماس معرف</label>
+                      <input
+                        type="text"
+                        value={formData.referrerPhoneNumber}
+                        onChange={(e) => handleInputChange('referrerPhoneNumber', e.target.value)}
+                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        placeholder="شماره تماس معرف"
+                      />
+                      <InlineFieldError message={errors.referrerPhoneNumber} />
+                    </div>
                   </div>
                 </div>
               )}
@@ -1120,4 +1169,3 @@ export default function CreateCustomerPage() {
     </div>
   );
 }
-

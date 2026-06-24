@@ -7,6 +7,7 @@ import { validatePayment, validateWizardStep } from '../validationService';
 import { calculateContractTotal, calculateFinalPrice } from '../pricingService';
 import { calculateSlabMetrics, handleSmartCalculation } from '../../utils/productCalculations';
 import {
+  activateFinishingSelection,
   calculateDefaultFinishingQuantity,
   calculateFinishingCost
 } from '../../utils/finishingUtils';
@@ -350,6 +351,42 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   approx(slabRemaining.remainingStones.reduce((sum, stone) => sum + stone.squareMeters, 0), 5.44);
   assert.equal(slabCut.remainingPieces.length, 3);
   approx(slabCut.totalCuttingCost, 260_000);
+}
+
+{
+  const activatedWithoutChoice = activateFinishingSelection({
+    finishingEnabled: false,
+    finishingId: null,
+    finishingName: null,
+    finishingLabel: null,
+    finishingPricePerSquareMeter: null,
+    finishingUnitPrice: null,
+    finishingCalculationBase: null,
+    finishingQuantity: null
+  });
+  const activatedWithSavedChoice = activateFinishingSelection({
+    finishingEnabled: false,
+    finishingId: 'finish-matte-40',
+    finishingName: 'Ù…Ø§Øª Ø¹ 40',
+    finishingLabel: 'Ù…Ø§Øª Ø¹ 40',
+    finishingPricePerSquareMeter: 150_000,
+    finishingUnitPrice: 150_000,
+    finishingCalculationBase: 'squareMeters' as const,
+    finishingQuantity: 3.6
+  });
+
+  assert.equal(activatedWithoutChoice.finishingEnabled, true);
+  assert.equal(activatedWithoutChoice.finishingId, null);
+  assert.equal(activatedWithoutChoice.finishingName, null);
+  assert.equal(activatedWithoutChoice.finishingPricePerSquareMeter, null);
+  assert.equal(activatedWithoutChoice.finishingUnitPrice, null);
+  assert.equal(activatedWithoutChoice.finishingCalculationBase, null);
+  assert.equal(activatedWithoutChoice.finishingQuantity, null);
+  assert.equal(calculateFinishingCost(activatedWithoutChoice.finishingQuantity, activatedWithoutChoice.finishingUnitPrice), 0);
+  assert.equal(activatedWithSavedChoice.finishingEnabled, true);
+  assert.equal(activatedWithSavedChoice.finishingId, 'finish-matte-40');
+  assert.equal(activatedWithSavedChoice.finishingName, 'Ù…Ø§Øª Ø¹ 40');
+  approx(calculateFinishingCost(activatedWithSavedChoice.finishingQuantity, activatedWithSavedChoice.finishingUnitPrice), 540_000);
 }
 
 {

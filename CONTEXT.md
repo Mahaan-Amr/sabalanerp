@@ -112,6 +112,10 @@ _Avoid_: ساب as a category, sub-service, tool, پرداخت سنگ
 A stone finishing or treatment option applied during contract pricing, separate from ابزار, calculated by متر طول or متر مربع depending on the item.
 _Avoid_: ابزار, خدمات, فرآوری سنگ
 
+**فعال‌سازی پرداخت سنگ**:
+فعال‌سازی پرداخت سنگ فقط بخش انتخاب پرداخت را برای همان ردیف قرارداد باز می‌کند و تا وقتی کاربر یک پرداخت مشخص را انتخاب نکند، هیچ آیتم کاتالوگ، قیمت، مقدار یا هزینه‌ای به ردیف اضافه نمی‌شود.
+_Avoid_: انتخاب خودکار اولین پرداخت سنگ کاتالوگ پس از فعال‌سازی
+
 **متر طول**:
 The canonical unit label for length-based پرداخت سنگ pricing.
 _Avoid_: متر when it can be confused with متر مربع

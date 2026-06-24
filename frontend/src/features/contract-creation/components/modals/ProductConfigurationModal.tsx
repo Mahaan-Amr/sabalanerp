@@ -22,6 +22,7 @@ import { productSupportsContractType } from '../../utils/productUtils';
 import { getPreparedKindLabel, getPreparedUnitLabel, inferPreparedKindFromProduct } from '../../utils/preparedProductUtils';
 import { resolveLongitudinalWidth } from '../../utils/productConfigurationController';
 import {
+  activateFinishingSelection,
   calculateDefaultFinishingQuantity,
   calculateFinishingCost,
   getFinishingCalculationBase,
@@ -3468,41 +3469,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                                 return;
                               }
 
-                              setProductConfig((prev: any) => {
-                                const nextDefault = prev.finishingId
-                                  ? selectableStoneFinishings.find((option) => option.id === prev.finishingId)
-                                  : selectableStoneFinishings[0];
-                                return {
-                                  ...prev,
-                                  finishingEnabled: true,
-                                  finishingId: nextDefault?.id || prev.finishingId || null,
-                                  finishingName: nextDefault
-                                    ? (nextDefault.namePersian || nextDefault.name || '')
-                                    : prev.finishingName || null,
-                                  finishingLabel: nextDefault
-                                    ? (nextDefault.namePersian || nextDefault.name || '')
-                                    : prev.finishingLabel || null,
-                                  finishingPricePerSquareMeter: nextDefault
-                                    ? getFinishingUnitPrice(nextDefault)
-                                    : prev.finishingPricePerSquareMeter || null,
-                                  finishingUnitPrice: nextDefault
-                                    ? getFinishingUnitPrice(nextDefault)
-                                    : prev.finishingUnitPrice || null,
-                                  finishingCalculationBase: nextDefault
-                                    ? getFinishingCalculationBase(nextDefault)
-                                    : prev.finishingCalculationBase || 'squareMeters',
-                                  finishingQuantity: nextDefault
-                                    ? calculateDefaultFinishingQuantity({
-                                        calculationBase: getFinishingCalculationBase(nextDefault),
-                                        productType: currentProductType as ContractProduct['productType'],
-                                        length: productConfig.length,
-                                        lengthUnit,
-                                        quantity: quantityValue,
-                                        squareMeters: pricingSquareMeters
-                                      })
-                                    : prev.finishingQuantity || null
-                                };
-                              });
+                              setProductConfig((prev: any) => activateFinishingSelection(prev));
                             }}
                           />
                           فعال‌سازی پرداخت برای این محصول

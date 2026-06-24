@@ -15,6 +15,17 @@ export interface NormalizedFinishingSnapshot {
   rateLabel: string;
 }
 
+export interface FinishingSelectionDraft {
+  finishingEnabled?: boolean;
+  finishingId?: string | null;
+  finishingName?: string | null;
+  finishingLabel?: string | null;
+  finishingPricePerSquareMeter?: number | null;
+  finishingUnitPrice?: number | null;
+  finishingCalculationBase?: FinishingCalculationBase | null;
+  finishingQuantity?: number | null;
+}
+
 export const getFinishingCalculationBase = (value?: Partial<StoneFinishing> | null): FinishingCalculationBase =>
   value?.calculationBase === 'length' ? 'length' : 'squareMeters';
 
@@ -51,6 +62,18 @@ export const calculateDefaultFinishingQuantity = ({
 
 export const calculateFinishingCost = (quantity?: number | null, unitPrice?: number | null): number =>
   toFiniteNumber(quantity) * toFiniteNumber(unitPrice);
+
+export const activateFinishingSelection = <T extends FinishingSelectionDraft>(draft: T): T => ({
+  ...draft,
+  finishingEnabled: true,
+  finishingId: draft.finishingId || null,
+  finishingName: draft.finishingId ? draft.finishingName || null : null,
+  finishingLabel: draft.finishingId ? draft.finishingLabel || null : null,
+  finishingPricePerSquareMeter: draft.finishingId ? draft.finishingPricePerSquareMeter || null : null,
+  finishingUnitPrice: draft.finishingId ? draft.finishingUnitPrice || null : null,
+  finishingCalculationBase: draft.finishingId ? draft.finishingCalculationBase || 'squareMeters' : null,
+  finishingQuantity: draft.finishingId ? draft.finishingQuantity || null : null
+});
 
 export const normalizeProductFinishing = (product: Partial<ContractProduct> | null | undefined): NormalizedFinishingSnapshot | null => {
   if (!product?.finishingId && !product?.finishingCost) return null;

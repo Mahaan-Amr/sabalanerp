@@ -140,6 +140,7 @@ import {
   getPricingLengthMeters
 } from '@/features/contract-creation/utils/stairCalculations';
 import {
+  activateFinishingSelection,
   calculateDefaultFinishingQuantity,
   calculateFinishingCost,
   getFinishingCalculationBase,
@@ -7056,36 +7057,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                     });
                                     return;
                                   }
-                                  const defaultFinishing = draft.finishingId
-                                    ? stoneFinishings.find(option => option.id === draft.finishingId)
-                                    : stoneFinishings[0];
-                                  setDraft({
-                                    ...draft,
-                                    finishingEnabled: true,
-                                    finishingId: defaultFinishing?.id || draft.finishingId || null,
-                                    finishingLabel: defaultFinishing
-                                      ? (defaultFinishing.namePersian || defaultFinishing.name || '')
-                                      : draft.finishingLabel || null,
-                                    finishingPricePerSquareMeter: defaultFinishing
-                                      ? getFinishingUnitPrice(defaultFinishing)
-                                      : draft.finishingPricePerSquareMeter || null,
-                                    finishingUnitPrice: defaultFinishing
-                                      ? getFinishingUnitPrice(defaultFinishing)
-                                      : draft.finishingUnitPrice || null,
-                                    finishingCalculationBase: defaultFinishing
-                                      ? getFinishingCalculationBase(defaultFinishing)
-                                      : draft.finishingCalculationBase || 'squareMeters',
-                                    finishingQuantity: defaultFinishing
-                                      ? calculateDefaultFinishingQuantity({
-                                          calculationBase: getFinishingCalculationBase(defaultFinishing),
-                                          productType: 'stair',
-                                          length: draft.lengthValue,
-                                          lengthUnit: draft.lengthUnit || 'm',
-                                          quantity: draft.quantity,
-                                          squareMeters: totals.pricingSquareMeters
-                                        })
-                                      : draft.finishingQuantity || null
-                                  });
+                                  setDraft(activateFinishingSelection(draft));
                                 }}
                               />
                               فعال‌سازی پرداخت برای این بخش

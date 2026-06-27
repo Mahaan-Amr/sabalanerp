@@ -144,6 +144,18 @@ _Avoid_: relying only on the current catalog image for saved contract interpreta
 The per-part note attached to a stair contract product row, such as کف پله, خیز, or پاگرد. Each selected stair part carries its own توضیحات so contract output can show the note beside the exact row it describes.
 _Avoid_: using one shared stair-system note for all stair parts
 
+**لبه‌های ابزار پله**:
+For stair product tools on کف پله, خیز پله, and پاگرد, جلو and عقب are the long horizontal span of the stair part, while چپ and راست are the short side edges based on the stair part's عرض/depth. The stair UI's طول field is the main horizontal span used by جلو and عقب.
+_Avoid_: calculating جلو from عرض/depth, or calculating چپ and راست from the main طول span
+
+**کل دور ابزار پله**:
+For stair product tools, کل دور means all four stair-part edges: جلو، عقب، چپ، and راست.
+_Avoid_: treating کل دور as only three edges, or excluding عقب from the perimeter
+
+**بازمحاسبه ابزار پله**:
+Existing saved or printed contracts keep their saved stair tool totals until the contract is opened for editing and saved again. New contracts and edited-resaved contracts calculate stair tool edges using the current لبه‌های ابزار پله rules.
+_Avoid_: silently changing historical contract totals without an edit/save action
+
 **مصرف باقی‌مانده برای سنگ لایه**:
 When سنگ لایه uses سنگ اصلی, compatible remaining pieces from the same stair part are consumed before charging any additional سنگ اصلی. Only the layer demand that cannot be supplied from those remaining pieces should count as new main-stone material.
 _Avoid_: charging all same-stone لایه as fresh stone while usable same-part remaining pieces exist

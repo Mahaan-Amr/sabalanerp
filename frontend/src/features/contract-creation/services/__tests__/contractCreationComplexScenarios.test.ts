@@ -462,9 +462,9 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   approx(totals.pricingSquareMeters, 2.4);
   assert.equal(totals.piecesPerStone, 2);
   assert.equal(totals.baseStoneQuantity, 5);
-  approx(totals.toolsTotal, 2_600_000);
+  approx(totals.toolsTotal, 1_600_000);
   approx(totals.cuttingCost, 300_000);
-  approx(totals.partTotal, 5_300_000);
+  approx(totals.partTotal, 4_300_000);
   assert.equal(layerMetrics.layersFromRemainingStones, 2);
   assert.equal(layerMetrics.layersFromNewStones, 3);
   approx(layerMetrics.squareMetersFromRemaining || 0, 0.4);

@@ -16,11 +16,11 @@ export const hasLayerEdgeSelection = (edges?: StairPartDraftV2['layerEdges']): b
 
 /**
  * Derive layer edges from tool selections
- * Aggregates edge selections from all tools and applies part-specific rules
+ * Aggregates edge selections from all tools.
  */
 export const deriveLayerEdgesFromTools = (
   draft: StairPartDraftV2,
-  part: StairStepperPart
+  _part: StairStepperPart
 ): StairPartDraftV2 => {
   if (!draft.tools || draft.tools.length === 0) return draft;
 
@@ -35,12 +35,6 @@ export const deriveLayerEdgesFromTools = (
     { front: false, left: false, right: false, back: false, perimeter: false }
   );
 
-  // Non-landing parts don't have back/perimeter edges
-  if (part !== 'landing') {
-    aggregated.back = false;
-    aggregated.perimeter = false;
-  }
-
   const hasEdges =
     aggregated.front || aggregated.left || aggregated.right || aggregated.back || aggregated.perimeter;
 
@@ -52,7 +46,7 @@ export const deriveLayerEdgesFromTools = (
         front: aggregated.front,
         left: aggregated.left,
         right: aggregated.right,
-        back: part === 'landing' ? aggregated.back : false,
+        back: aggregated.back,
         perimeter: false
       };
 

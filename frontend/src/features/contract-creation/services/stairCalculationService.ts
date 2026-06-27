@@ -80,7 +80,7 @@ export const computeSqmV2 = (draft: StairPartDraftV2): number => {
  * Calculate tool meters for a specific tool
  */
 export const computeToolMetersForTool = (
-  part: StairStepperPart,
+  _part: StairStepperPart,
   draft: StairPartDraftV2,
   tool: ToolSelectionV2
 ): number => {
@@ -89,19 +89,14 @@ export const computeToolMetersForTool = (
   const qty = draft.quantity || 0;
   let meters = 0;
   const t = tool;
-  
-  if (part === 'landing') {
-    if (t.perimeter) meters += 2 * (lengthM + widthM);
-    else {
-      if (t.front) meters += widthM;
-      if (t.back) meters += widthM;
-      if (t.left) meters += lengthM;
-      if (t.right) meters += lengthM;
-    }
+
+  if (t.perimeter) {
+    meters += 2 * (lengthM + widthM);
   } else {
-    if (t.front) meters += widthM;
-    if (t.left) meters += lengthM;
-    if (t.right) meters += lengthM;
+    if (t.front) meters += lengthM;
+    if (t.back) meters += lengthM;
+    if (t.left) meters += widthM;
+    if (t.right) meters += widthM;
   }
   
   return meters * qty;
@@ -118,7 +113,7 @@ export const computeToolsMetersV2 = (part: StairStepperPart, draft: StairPartDra
 /**
  * Calculate total layer length per stair (sum of all selected edge lengths)
  */
-export const getTotalLayerLengthPerStairM = (part: StairStepperPart, draft: StairPartDraftV2): number => {
+export const getTotalLayerLengthPerStairM = (_part: StairStepperPart, draft: StairPartDraftV2): number => {
   if (!draft.layerEdges || !draft.layerWidthCm) {
     return 0;
   }
@@ -131,29 +126,18 @@ export const getTotalLayerLengthPerStairM = (part: StairStepperPart, draft: Stai
   
   let totalLengthM = 0;
   
-  if (part === 'landing') {
-    if (edges.perimeter) {
-      totalLengthM = 2 * (stairLengthM + stairWidthM);
-    } else {
-      const hasFrontOrBack = edges.front || edges.back;
-      const hasLeftOrRight = edges.left || edges.right;
-      
-      const frontBackLengthM = hasLeftOrRight ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
-      if (edges.front) totalLengthM += frontBackLengthM;
-      if (edges.back) totalLengthM += frontBackLengthM;
-      
-      const leftRightLengthM = hasFrontOrBack ? Math.max(0, stairLengthM - layerWidthM) : stairLengthM;
-      if (edges.left) totalLengthM += leftRightLengthM;
-      if (edges.right) totalLengthM += leftRightLengthM;
-    }
+  if (edges.perimeter) {
+    totalLengthM = 2 * (stairLengthM + stairWidthM);
   } else {
-    if (edges.front) {
-      totalLengthM += stairLengthM;
-    }
+    const hasFrontOrBack = edges.front || edges.back;
+    const hasLeftOrRight = edges.left || edges.right;
+    const frontBackLengthM = hasLeftOrRight ? Math.max(0, stairLengthM - layerWidthM) : stairLengthM;
+    const leftRightLengthM = hasFrontOrBack ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
 
-    const sideLengthM = edges.front ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
-    if (edges.left) totalLengthM += sideLengthM;
-    if (edges.right) totalLengthM += sideLengthM;
+    if (edges.front) totalLengthM += frontBackLengthM;
+    if (edges.back) totalLengthM += frontBackLengthM;
+    if (edges.left) totalLengthM += leftRightLengthM;
+    if (edges.right) totalLengthM += leftRightLengthM;
   }
   
   return totalLengthM;
@@ -162,7 +146,7 @@ export const getTotalLayerLengthPerStairM = (part: StairStepperPart, draft: Stai
 /**
  * Calculate maximum layer length needed based on selected edges
  */
-export const getMaxLayerLengthM = (part: StairStepperPart, draft: StairPartDraftV2): number => {
+export const getMaxLayerLengthM = (_part: StairStepperPart, draft: StairPartDraftV2): number => {
   if (!draft.layerEdges || !draft.layerWidthCm) {
     return 0;
   }
@@ -175,29 +159,18 @@ export const getMaxLayerLengthM = (part: StairStepperPart, draft: StairPartDraft
   
   let maxLengthM = 0;
   
-  if (part === 'landing') {
-    if (edges.perimeter) {
-      maxLengthM = Math.max(stairLengthM, stairWidthM);
-    } else {
-      if (edges.front || edges.back) {
-        const hasLeftOrRight = edges.left || edges.right;
-        const frontBackLengthM = hasLeftOrRight ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
-        maxLengthM = Math.max(maxLengthM, frontBackLengthM);
-      }
-      if (edges.left || edges.right) {
-        const hasFrontOrBack = edges.front || edges.back;
-        const leftRightLengthM = hasFrontOrBack ? Math.max(0, stairLengthM - layerWidthM) : stairLengthM;
-        maxLengthM = Math.max(maxLengthM, leftRightLengthM);
-      }
-    }
+  if (edges.perimeter) {
+    maxLengthM = Math.max(stairLengthM, stairWidthM);
   } else {
-    if (edges.front) {
-      maxLengthM = Math.max(maxLengthM, stairLengthM);
+    if (edges.front || edges.back) {
+      const hasLeftOrRight = edges.left || edges.right;
+      const frontBackLengthM = hasLeftOrRight ? Math.max(0, stairLengthM - layerWidthM) : stairLengthM;
+      maxLengthM = Math.max(maxLengthM, frontBackLengthM);
     }
-    
     if (edges.left || edges.right) {
-      const sideLengthM = edges.front ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
-      maxLengthM = Math.max(maxLengthM, sideLengthM);
+      const hasFrontOrBack = edges.front || edges.back;
+      const leftRightLengthM = hasFrontOrBack ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
+      maxLengthM = Math.max(maxLengthM, leftRightLengthM);
     }
   }
   
@@ -207,7 +180,7 @@ export const getMaxLayerLengthM = (part: StairStepperPart, draft: StairPartDraft
 /**
  * Calculate layer square meters based on selected edges
  */
-export const computeLayerSqmV2 = (part: StairStepperPart, draft: StairPartDraftV2): number => {
+export const computeLayerSqmV2 = (_part: StairStepperPart, draft: StairPartDraftV2): number => {
   if (!draft.layerEdges || !draft.layerWidthCm || !draft.numberOfLayersPerStair || !draft.quantity) {
     return 0;
   }
@@ -220,29 +193,18 @@ export const computeLayerSqmV2 = (part: StairStepperPart, draft: StairPartDraftV
   
   let layerSqmPerStair = 0;
   
-  if (part === 'landing') {
-    if (edges.perimeter) {
-      layerSqmPerStair = 2 * (stairLengthM + stairWidthM) * layerWidthM;
-    } else {
-      const hasFrontOrBack = edges.front || edges.back;
-      const hasLeftOrRight = edges.left || edges.right;
-      
-      const frontBackLengthM = hasLeftOrRight ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
-      if (edges.front) layerSqmPerStair += frontBackLengthM * layerWidthM;
-      if (edges.back) layerSqmPerStair += frontBackLengthM * layerWidthM;
-      
-      const leftRightLengthM = hasFrontOrBack ? Math.max(0, stairLengthM - layerWidthM) : stairLengthM;
-      if (edges.left) layerSqmPerStair += leftRightLengthM * layerWidthM;
-      if (edges.right) layerSqmPerStair += leftRightLengthM * layerWidthM;
-    }
+  if (edges.perimeter) {
+    layerSqmPerStair = 2 * (stairLengthM + stairWidthM) * layerWidthM;
   } else {
-    if (edges.front) {
-      layerSqmPerStair += stairLengthM * layerWidthM;
-    }
+    const hasFrontOrBack = edges.front || edges.back;
+    const hasLeftOrRight = edges.left || edges.right;
+    const frontBackLengthM = hasLeftOrRight ? Math.max(0, stairLengthM - layerWidthM) : stairLengthM;
+    const leftRightLengthM = hasFrontOrBack ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
 
-    const sideLengthM = edges.front ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
-    if (edges.left) layerSqmPerStair += sideLengthM * layerWidthM;
-    if (edges.right) layerSqmPerStair += sideLengthM * layerWidthM;
+    if (edges.front) layerSqmPerStair += frontBackLengthM * layerWidthM;
+    if (edges.back) layerSqmPerStair += frontBackLengthM * layerWidthM;
+    if (edges.left) layerSqmPerStair += leftRightLengthM * layerWidthM;
+    if (edges.right) layerSqmPerStair += leftRightLengthM * layerWidthM;
   }
   
   return layerSqmPerStair * draft.numberOfLayersPerStair * draft.quantity;
@@ -251,7 +213,7 @@ export const computeLayerSqmV2 = (part: StairStepperPart, draft: StairPartDraftV
 /**
  * Get layer edge demands (what edges need layers and how many)
  */
-export const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): LayerEdgeDemand[] => {
+export const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): LayerEdgeDemand[] => {
   if (!draft.layerEdges || !draft.numberOfLayersPerStair || !draft.quantity || !draft.layerWidthCm) {
     return [];
   }
@@ -267,49 +229,34 @@ export const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraf
   const baseLayersPerEdge = draft.quantity * draft.numberOfLayersPerStair;
   const demands: LayerEdgeDemand[] = [];
 
-  if (part === 'landing') {
-    if (edges.perimeter) {
-      const perimeterLength = 2 * (stairLengthM + stairWidthM);
-      if (perimeterLength > 0) {
-        demands.push({
-          edge: 'perimeter',
-          layersNeeded: baseLayersPerEdge,
-          lengthM: perimeterLength
-        });
-      }
-      return demands;
-    }
-
-    const hasFrontOrBack = edges.front || edges.back;
-    const hasLeftOrRight = edges.left || edges.right;
-    const frontBackLength = hasLeftOrRight ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
-    const leftRightLength = hasFrontOrBack ? Math.max(0, stairLengthM - layerWidthM) : stairLengthM;
-
-    if (edges.front && frontBackLength > 0) {
-      demands.push({ edge: 'front', layersNeeded: baseLayersPerEdge, lengthM: frontBackLength });
-    }
-    if (edges.back && frontBackLength > 0) {
-      demands.push({ edge: 'back', layersNeeded: baseLayersPerEdge, lengthM: frontBackLength });
-    }
-    if (edges.left && leftRightLength > 0) {
-      demands.push({ edge: 'left', layersNeeded: baseLayersPerEdge, lengthM: leftRightLength });
-    }
-    if (edges.right && leftRightLength > 0) {
-      demands.push({ edge: 'right', layersNeeded: baseLayersPerEdge, lengthM: leftRightLength });
+  if (edges.perimeter) {
+    const perimeterLength = 2 * (stairLengthM + stairWidthM);
+    if (perimeterLength > 0) {
+      demands.push({
+        edge: 'perimeter',
+        layersNeeded: baseLayersPerEdge,
+        lengthM: perimeterLength
+      });
     }
     return demands;
   }
 
-  if (edges.front && stairLengthM > 0) {
-    demands.push({ edge: 'front', layersNeeded: baseLayersPerEdge, lengthM: stairLengthM });
+  const hasFrontOrBack = edges.front || edges.back;
+  const hasLeftOrRight = edges.left || edges.right;
+  const frontBackLength = hasLeftOrRight ? Math.max(0, stairLengthM - layerWidthM) : stairLengthM;
+  const leftRightLength = hasFrontOrBack ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
+
+  if (edges.front && frontBackLength > 0) {
+    demands.push({ edge: 'front', layersNeeded: baseLayersPerEdge, lengthM: frontBackLength });
   }
-  const hasFront = edges.front;
-  const sideLength = hasFront ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
-  if (edges.left && sideLength > 0) {
-    demands.push({ edge: 'left', layersNeeded: baseLayersPerEdge, lengthM: sideLength });
+  if (edges.back && frontBackLength > 0) {
+    demands.push({ edge: 'back', layersNeeded: baseLayersPerEdge, lengthM: frontBackLength });
   }
-  if (edges.right && sideLength > 0) {
-    demands.push({ edge: 'right', layersNeeded: baseLayersPerEdge, lengthM: sideLength });
+  if (edges.left && leftRightLength > 0) {
+    demands.push({ edge: 'left', layersNeeded: baseLayersPerEdge, lengthM: leftRightLength });
+  }
+  if (edges.right && leftRightLength > 0) {
+    demands.push({ edge: 'right', layersNeeded: baseLayersPerEdge, lengthM: leftRightLength });
   }
 
   return demands;

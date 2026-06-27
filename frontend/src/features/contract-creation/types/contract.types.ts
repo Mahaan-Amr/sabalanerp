@@ -695,11 +695,10 @@ export interface ToolSelectionV2 {
   toolId: string;
   name: string;
   pricePerMeter: number;
-  // edges for tread/riser
+  // Stair tool edges. front/back use the part length; left/right use the part width/depth.
   front?: boolean;
   left?: boolean;
   right?: boolean;
-  // landing-specific
   back?: boolean;
   perimeter?: boolean;
   computedMeters?: number;
@@ -729,11 +728,11 @@ export interface StairPartDraftV2 {
   layerTypePrice?: number | null;
   // Layer edges - which sides of the stair need layers
   layerEdges?: {
-    front?: boolean; // ?? ?? ?? ??
-    left?: boolean; // ?? ?? ?? ?
-    right?: boolean; // ?? ?? ?? ??
-    back?: boolean; // ?? ?? ?? ?? (only for landing)
-    perimeter?: boolean; // ?? ?? ?? ?? (only for landing)
+    front?: boolean;
+    left?: boolean;
+    right?: boolean;
+    back?: boolean;
+    perimeter?: boolean;
   };
   layerUseDifferentStone?: boolean;
   layerStoneProductId?: string | null;

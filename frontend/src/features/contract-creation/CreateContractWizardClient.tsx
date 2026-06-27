@@ -646,24 +646,19 @@ export default function CreateContractWizard({
   };
 
 
-  const computeToolMetersForTool = (part: StairStepperPart, draft: StairPartDraftV2, tool: ToolSelectionV2): number => {
+  const computeToolMetersForTool = (_part: StairStepperPart, draft: StairPartDraftV2, tool: ToolSelectionV2): number => {
     const lengthM = getActualLengthMeters(draft);
     const widthM = (draft.widthCm || 0) / 100;
     const qty = draft.quantity || 0;
     let meters = 0;
     const t = tool;
-    if (part === 'landing') {
-      if (t.perimeter) meters += 2 * (lengthM + widthM);
-      else {
-        if (t.front) meters += widthM;
-        if (t.back) meters += widthM;
-        if (t.left) meters += lengthM;
-        if (t.right) meters += lengthM;
-      }
+    if (t.perimeter) {
+      meters += 2 * (lengthM + widthM);
     } else {
-      if (t.front) meters += widthM;
-      if (t.left) meters += lengthM;
-      if (t.right) meters += lengthM;
+      if (t.front) meters += lengthM;
+      if (t.back) meters += lengthM;
+      if (t.left) meters += widthM;
+      if (t.right) meters += widthM;
     }
     return meters * qty;
   };
@@ -683,7 +678,7 @@ type LayerEdgeDemand = {
   lengthM: number;
 };
 
-const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): LayerEdgeDemand[] => {
+const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): LayerEdgeDemand[] => {
   if (!draft.layerEdges || !draft.numberOfLayersPerStair || !draft.quantity || !draft.layerWidthCm) {
     return [];
   }
@@ -699,50 +694,35 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
   const baseLayersPerEdge = draft.quantity * draft.numberOfLayersPerStair;
   const demands: LayerEdgeDemand[] = [];
 
-  if (part === 'landing') {
-    if (edges.perimeter) {
-      const perimeterLength = 2 * (stairLengthM + stairWidthM);
-      if (perimeterLength > 0) {
-        demands.push({
-          edge: 'perimeter',
-          layersNeeded: baseLayersPerEdge,
-          lengthM: perimeterLength
-        });
-      }
-      return demands;
-    }
-
-    const hasFrontOrBack = edges.front || edges.back;
-    const hasLeftOrRight = edges.left || edges.right;
-    const frontBackLength = hasLeftOrRight ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
-    const leftRightLength = hasFrontOrBack ? Math.max(0, stairLengthM - layerWidthM) : stairLengthM;
-
-    if (edges.front && frontBackLength > 0) {
-      demands.push({ edge: 'front', layersNeeded: baseLayersPerEdge, lengthM: frontBackLength });
-    }
-    if (edges.back && frontBackLength > 0) {
-      demands.push({ edge: 'back', layersNeeded: baseLayersPerEdge, lengthM: frontBackLength });
-    }
-    if (edges.left && leftRightLength > 0) {
-      demands.push({ edge: 'left', layersNeeded: baseLayersPerEdge, lengthM: leftRightLength });
-    }
-    if (edges.right && leftRightLength > 0) {
-      demands.push({ edge: 'right', layersNeeded: baseLayersPerEdge, lengthM: leftRightLength });
+  if (edges.perimeter) {
+    const perimeterLength = 2 * (stairLengthM + stairWidthM);
+    if (perimeterLength > 0) {
+      demands.push({
+        edge: 'perimeter',
+        layersNeeded: baseLayersPerEdge,
+        lengthM: perimeterLength
+      });
     }
     return demands;
   }
 
-  if (edges.front && stairLengthM > 0) {
-    demands.push({ edge: 'front', layersNeeded: baseLayersPerEdge, lengthM: stairLengthM });
+  const hasFrontOrBack = edges.front || edges.back;
+  const hasLeftOrRight = edges.left || edges.right;
+  const frontBackLength = hasLeftOrRight ? Math.max(0, stairLengthM - layerWidthM) : stairLengthM;
+  const leftRightLength = hasFrontOrBack ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
+
+  if (edges.front && frontBackLength > 0) {
+    demands.push({ edge: 'front', layersNeeded: baseLayersPerEdge, lengthM: frontBackLength });
   }
-    const hasFront = edges.front;
-    const sideLength = hasFront ? Math.max(0, stairWidthM - layerWidthM) : stairWidthM;
-    if (edges.left && sideLength > 0) {
-      demands.push({ edge: 'left', layersNeeded: baseLayersPerEdge, lengthM: sideLength });
-    }
-    if (edges.right && sideLength > 0) {
-      demands.push({ edge: 'right', layersNeeded: baseLayersPerEdge, lengthM: sideLength });
-    }
+  if (edges.back && frontBackLength > 0) {
+    demands.push({ edge: 'back', layersNeeded: baseLayersPerEdge, lengthM: frontBackLength });
+  }
+  if (edges.left && leftRightLength > 0) {
+    demands.push({ edge: 'left', layersNeeded: baseLayersPerEdge, lengthM: leftRightLength });
+  }
+  if (edges.right && leftRightLength > 0) {
+    demands.push({ edge: 'right', layersNeeded: baseLayersPerEdge, lengthM: leftRightLength });
+  }
 
   return demands;
   };
@@ -6046,7 +6026,6 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                       </div>
 
                       {/* Tools Section - Enhanced */}
-                      {stairSystemV2.stairActivePart !== 'riser' && (
                       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
                         <div className="flex items-center justify-between mb-4">
                           <div className="flex items-center gap-2">
@@ -6137,8 +6116,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                         </div>
                                       </div>
                                       <div className="flex flex-wrap gap-2 text-xs">
-                                        {stairSystemV2.stairActivePart === 'landing' && (
-                                          <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
+                                        <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
                                             <input 
                                               type="checkbox" 
                                               checked={!!tool.perimeter} 
@@ -6150,8 +6128,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                               className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
                                             /> 
                                             <span className="text-gray-700 dark:text-gray-300">محیط کامل</span>
-                                          </label>
-                                        )}
+                                        </label>
                                         <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
                                           <input 
                                             type="checkbox" 
@@ -6165,8 +6142,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                           /> 
                                           <span className="text-gray-700 dark:text-gray-300">جلو</span>
                                         </label>
-                                        {stairSystemV2.stairActivePart === 'landing' && (
-                                          <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
+                                        <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
                                             <input 
                                               type="checkbox" 
                                               checked={!!tool.back} 
@@ -6178,8 +6154,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                               className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
                                             /> 
                                             <span className="text-gray-700 dark:text-gray-300">عقب</span>
-                                          </label>
-                                        )}
+                                        </label>
                                         <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
                                           <input 
                                             type="checkbox" 
@@ -6215,7 +6190,6 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                           </div>
                         </div>
                       </div>
-                      )}
 
                       {/* Layers Section (لایه‌ها) - Enhanced */}
                       {/* 🎯 Hide layers section for riser */}
@@ -6688,8 +6662,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                   </span>
                                 </label>
                                 <div className="flex flex-wrap gap-2 p-3 bg-orange-50/50 dark:bg-orange-900/10 rounded-lg border border-orange-200 dark:border-orange-800">
-                                  {stairSystemV2.stairActivePart === 'landing' && (
-                                    <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
+                                  <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
                                       <input 
                                         type="checkbox" 
                                         checked={!!(draft.layerEdges?.perimeter)} 
@@ -6711,8 +6684,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                         className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                                       /> 
                                       <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">محیط کامل</span>
-                                    </label>
-                                  )}
+                                  </label>
                                   <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
                                     <input 
                                       type="checkbox" 
@@ -6733,8 +6705,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                     /> 
                                     <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">جلو</span>
                                   </label>
-                                  {stairSystemV2.stairActivePart === 'landing' && (
-                                    <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
+                                  <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
                                       <input 
                                         type="checkbox" 
                                         checked={!!(draft.layerEdges?.back)} 
@@ -6753,8 +6724,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                         disabled={!!(draft.layerEdges?.perimeter)}
                                       /> 
                                       <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">عقب</span>
-                                    </label>
-                                  )}
+                                  </label>
                                   <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
                                     <input 
                                       type="checkbox" 
@@ -6910,7 +6880,7 @@ const getLayerEdgeDemands = (part: StairStepperPart, draft: StairPartDraftV2): L
                                       <div>تعداد کل لایه‌ها: {formatDisplayNumber(totalLayers)} عدد ({formatDisplayNumber(draft.quantity)} پله × {formatDisplayNumber(draft.numberOfLayersPerStair)} لایه)</div>
                                       <div className="mt-1">
                                         <span className="font-medium">لبه‌های انتخاب شده: </span>
-                                        {stairSystemV2.stairActivePart === 'landing' && draft.layerEdges?.perimeter && (
+                                        {draft.layerEdges?.perimeter && (
                                           <span className="text-orange-600 dark:text-orange-400">محیط کامل</span>
                                         )}
                                         {!draft.layerEdges?.perimeter && (

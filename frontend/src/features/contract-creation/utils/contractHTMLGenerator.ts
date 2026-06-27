@@ -13,17 +13,30 @@ export const generateContractHTML = (data: any): string => {
   const discount = data.discount || data.contractData?.discount || null;
   const getSourceMaterialSummary = (product: any): string => {
     const smartCutPlan = product?.smartCutPlan || {};
+    const stairMeta = product?.meta?.stair || {};
     const sourceWidthCm = Number(smartCutPlan.sourceWidthCm || product?.originalWidth || 0);
-    const sourceLengthM = Number(smartCutPlan.sourceLengthConsumedM || product?.originalLength || product?.actualLengthMeters || 0);
-    const sourceAreaSqm = Number(smartCutPlan.consumedAreaSqm || (sourceWidthCm > 0 && sourceLengthM > 0 ? (sourceWidthCm / 100) * sourceLengthM : 0));
+    const smartSourceQuantity = Number(smartCutPlan.sourceBandsNeeded || 0);
+    const stairSourceQuantity = Number(stairMeta.baseStoneQuantity || 0);
+    const sourceQuantity = smartCutPlan.enabled
+      ? Math.max(1, smartSourceQuantity || 1)
+      : (stairSourceQuantity > 0 ? stairSourceQuantity : Math.max(1, Number(product?.quantity || 1)));
+    const smartTotalLengthM = Number(smartCutPlan.sourceLengthConsumedM || 0);
+    const sourceLengthM = smartCutPlan.enabled && smartTotalLengthM > 0
+      ? smartTotalLengthM / sourceQuantity
+      : Number(stairMeta.standardLength?.meters || product?.originalLength || product?.actualLengthMeters || 0);
+    const sourceAreaSqm = Number(
+      smartCutPlan.consumedAreaSqm ||
+      stairMeta.pricingSquareMeters ||
+      (sourceWidthCm > 0 && sourceLengthM > 0 ? (sourceWidthCm / 100) * sourceLengthM * sourceQuantity : 0)
+    );
     const productWidthCm = Number(product?.width || 0);
-    const kerfNote = product?.sawKerfEnabled ? ` / خوراک اره ${product?.sawKerfCm || 0.3}cm` : '';
+    const kerfNote = product?.sawKerfEnabled ? `، خوراک اره ${product?.sawKerfCm || 0.3}cm` : '';
     const hasSourceMaterial =
       sourceWidthCm > 0 &&
       sourceLengthM > 0 &&
-      (Boolean(smartCutPlan.enabled) || Boolean(product?.isCut) || (productWidthCm > 0 && sourceWidthCm > productWidthCm));
+      (Boolean(smartCutPlan.enabled) || stairSourceQuantity > 0 || Boolean(product?.isCut) || (productWidthCm > 0 && sourceWidthCm > productWidthCm));
     if (!hasSourceMaterial) return '';
-    return `عرض ${sourceWidthCm} cm × طول ${sourceLengthM} m${sourceAreaSqm > 0 ? ` / ${formatSquareMeters(sourceAreaSqm)}` : ''}${kerfNote}`;
+    return `عرض ${sourceWidthCm}cm × طول ${sourceLengthM}m × ${sourceQuantity} عدد، جمع ${formatSquareMeters(sourceAreaSqm)}${kerfNote}`;
   };
   const productsTable = data.products && data.products.length > 0 ? `
     <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">

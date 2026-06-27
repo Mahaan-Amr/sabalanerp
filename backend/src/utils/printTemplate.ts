@@ -52,6 +52,12 @@ interface NormalizedProductTool {
   cost: number;
 }
 
+interface NormalizedSourceMaterial {
+  description: string;
+  dimensionsOrAmount: string;
+  quantityOrArea: string;
+}
+
 interface NormalizedProduct {
   id: string;
   code: string;
@@ -77,6 +83,7 @@ interface NormalizedProduct {
   finishingSummary: string;
   remainingSummary: string;
   sourceMaterialSummary: string;
+  sourceMaterials: NormalizedSourceMaterial[];
 }
 
 interface NormalizedStandaloneService {
@@ -450,6 +457,68 @@ const formatDeliveryAmount = (
   return `${toFaNumber(amount, fractionDigits)} ${deliveryUnitLabel(unit)}`;
 };
 
+const lengthValueToMeters = (value: unknown, unit: unknown): number => {
+  const numeric = toNumber(value);
+  if (numeric <= 0) return 0;
+  return unit === 'cm' ? numeric / 100 : numeric;
+};
+
+const buildSourceMaterialRows = (product: any): NormalizedSourceMaterial[] => {
+  const smartCutPlan = product?.smartCutPlan || {};
+  const sourceWidthCm = toNumber(smartCutPlan?.sourceWidthCm || product?.originalWidth);
+  const productWidthCm = toNumber(product?.width);
+  const stairMeta = product?.meta?.stair || {};
+  const stairBaseStoneQuantity = toNumber(stairMeta?.baseStoneQuantity);
+  const stairStandardLengthM = toNumber(stairMeta?.standardLength?.meters);
+  const smartSourceQuantity = toNumber(smartCutPlan?.sourceBandsNeeded);
+  const isSmartCut = Boolean(smartCutPlan?.enabled);
+  const isStairSource = product?.productType === 'stair' && stairBaseStoneQuantity > 0;
+  const isLegacySource =
+    Boolean(product?.isCut) ||
+    (productWidthCm > 0 && sourceWidthCm > productWidthCm);
+
+  if (sourceWidthCm <= 0 || (!isSmartCut && !isStairSource && !isLegacySource)) {
+    return [];
+  }
+
+  const sourceQuantity = isSmartCut
+    ? Math.max(1, smartSourceQuantity || 1)
+    : isStairSource
+      ? Math.max(1, stairBaseStoneQuantity)
+      : Math.max(1, toNumber(product?.quantity) || 1);
+  const totalSourceLengthM = isSmartCut
+    ? toNumber(smartCutPlan?.sourceLengthConsumedM)
+    : 0;
+  const sourceLengthM = isSmartCut && totalSourceLengthM > 0
+    ? totalSourceLengthM / sourceQuantity
+    : (
+        stairStandardLengthM ||
+        lengthValueToMeters(product?.standardLengthValue, product?.standardLengthUnit) ||
+        toNumber(product?.originalLength) ||
+        toNumber(product?.actualLengthMeters)
+      );
+
+  if (sourceLengthM <= 0) {
+    return [];
+  }
+
+  const totalAreaSqm = isSmartCut && toNumber(smartCutPlan?.consumedAreaSqm) > 0
+    ? toNumber(smartCutPlan?.consumedAreaSqm)
+    : (
+        toNumber(stairMeta?.pricingSquareMeters) ||
+        (sourceWidthCm / 100) * sourceLengthM * sourceQuantity
+      );
+  const kerfNote = product?.sawKerfEnabled
+    ? `، خوراک اره ${toFaNumber(product?.sawKerfCm || 0.3, 1)}cm`
+    : '';
+
+  return [{
+    description: product?.stoneName || product?.product?.namePersian || product?.product?.name || EMPTY,
+    dimensionsOrAmount: `عرض ${toFaNumber(sourceWidthCm, 2)}cm × طول ${toFaNumber(sourceLengthM, 2)}m${kerfNote}`,
+    quantityOrArea: `${toFaNumber(sourceQuantity, 0)} عدد، جمع ${toFaNumber(totalAreaSqm, 3)} متر مربع`
+  }];
+};
+
 const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] => {
   const contractDataProducts = Array.isArray(contract.contractData?.products) ? contract.contractData.products : [];
   const relationItems = Array.isArray(contract.items) ? contract.items : [];
@@ -536,26 +605,14 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         length ? `طول: ${length}` : null,
         width ? `عرض: ${width}` : null,
         thickness ? `ضخامت: ${thickness}` : null
-      ].filter(Boolean).join(' | ') || EMPTY;
+      ].filter(Boolean).join('، ') || EMPTY;
 
       const remainingCount = Array.isArray(product?.remainingStones) ? product.remainingStones.length : 0;
       const usedRemainingCount = Array.isArray(product?.usedRemainingStones) ? product.usedRemainingStones.length : 0;
-      const smartCutPlan = product?.smartCutPlan || {};
+      const sourceMaterials = buildSourceMaterialRows(product);
       const isFromRemainingStone = Boolean(product?.meta?.remainingSource);
-      const sourceWidthCm = toNumber(smartCutPlan?.sourceWidthCm || product?.originalWidth);
-      const sourceLengthM = toNumber(smartCutPlan?.sourceLengthConsumedM || product?.originalLength || product?.actualLengthMeters);
-      const sourceAreaSqm = toNumber(
-        smartCutPlan?.consumedAreaSqm ||
-        (sourceWidthCm > 0 && sourceLengthM > 0 ? (sourceWidthCm / 100) * sourceLengthM : 0)
-      );
-      const productWidthCm = toNumber(product?.width);
-      const kerfNote = product?.sawKerfEnabled ? ` / خوراک اره ${toFaNumber(product?.sawKerfCm || 0.3, 1)}cm` : '';
-      const hasSourceMaterial =
-        sourceWidthCm > 0 &&
-        sourceLengthM > 0 &&
-        (Boolean(smartCutPlan?.enabled) || Boolean(product?.isCut) || (productWidthCm > 0 && sourceWidthCm > productWidthCm));
-      const sourceMaterialSummary = hasSourceMaterial
-        ? `عرض ${toFaNumber(sourceWidthCm, 2)} cm × طول ${toFaNumber(sourceLengthM, 2)} m${sourceAreaSqm > 0 ? ` / ${toFaNumber(sourceAreaSqm, 3)} متر مربع` : ''}`
+      const sourceMaterialSummary = sourceMaterials.length > 0
+        ? `${sourceMaterials[0].dimensionsOrAmount}، ${sourceMaterials[0].quantityOrArea}`
         : EMPTY;
 
       return {
@@ -575,18 +632,19 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         isMandatory: Boolean(product?.isMandatory ?? relationItem?.isMandatory),
         mandatoryPercentage: toNumber(product?.mandatoryPercentage),
         totalPrice: toNumber(product?.totalPrice || relationItem?.totalPrice),
-        description: `${product?.description || relationItem?.description || EMPTY}${product?.sawKerfEnabled ? ' / خوراک اره لحاظ شده' : ''}`,
+        description: `${product?.description || relationItem?.description || EMPTY}${product?.sawKerfEnabled ? '، خوراک اره لحاظ شده' : ''}`,
         cuts: [...cutsFromBreakdown, ...cutsFromDetails],
         services,
         tools,
         layerSummary: product?.layerTypeName
-          ? `${product.layerTypeName}${product?.layerUseMandatory ? ` / حکمی ${toFaNumber(product?.layerMandatoryPercentage || 0)}%` : ''}`
+          ? `${product.layerTypeName}${product?.layerUseMandatory ? `، حکمی ${toFaNumber(product?.layerMandatoryPercentage || 0)}%` : ''}`
           : EMPTY,
         finishingSummary: product?.finishingName ? `${product.finishingName} (${getFinishingAmountLabel(product)})` : EMPTY,
         remainingSummary: remainingCount > 0 || usedRemainingCount > 0
-          ? `باقی‌مانده: ${toFaNumber(remainingCount)} | مصرف‌شده: ${toFaNumber(usedRemainingCount)}`
+          ? `باقی‌مانده: ${toFaNumber(remainingCount)}، مصرف‌شده: ${toFaNumber(usedRemainingCount)}`
           : EMPTY,
-        sourceMaterialSummary: sourceMaterialSummary ? `${sourceMaterialSummary}${kerfNote}` : EMPTY
+        sourceMaterialSummary,
+        sourceMaterials
       };
     });
   }
@@ -615,7 +673,8 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
     layerSummary: EMPTY,
     finishingSummary: EMPTY,
     remainingSummary: EMPTY,
-    sourceMaterialSummary: EMPTY
+    sourceMaterialSummary: EMPTY,
+    sourceMaterials: []
   }));
 };
 
@@ -863,7 +922,7 @@ const buildFlatProductRows = (
       ? product.originalTotalPrice
       : Math.max(product.totalPrice - addOnsTotal, 0) || product.totalPrice;
     const preparedSummary = isPreparedProductType(product.productType)
-      ? `نوع: ${product.preparedKind} | واحد: ${product.preparedUnit}`
+      ? `نوع: ${product.preparedKind}، واحد: ${product.preparedUnit}`
       : EMPTY;
     const productDescription = [
       product.name,
@@ -880,18 +939,28 @@ const buildFlatProductRows = (
       total: formatAmount(baseAmount, currency)
     });
 
-    if (product.sourceMaterialSummary && product.sourceMaterialSummary !== EMPTY) {
+    const sourceMaterialRows = product.sourceMaterials.length > 0
+      ? product.sourceMaterials
+      : (product.sourceMaterialSummary && product.sourceMaterialSummary !== EMPTY
+        ? [{
+            description: product.name,
+            dimensionsOrAmount: product.sourceMaterialSummary,
+            quantityOrArea: ''
+          }]
+        : []);
+
+    sourceMaterialRows.forEach((sourceMaterial) => {
       rows.push({
         indexLabel: '',
         code: product.code,
-        description: `سنگ مصرفی برای ${product.name}`,
+        description: `سنگ مصرفی برای ${sourceMaterial.description || product.name}`,
         category: 'سنگ مصرفی',
-        dimensionsOrAmount: product.sourceMaterialSummary,
-        quantityOrArea: '',
+        dimensionsOrAmount: sourceMaterial.dimensionsOrAmount,
+        quantityOrArea: sourceMaterial.quantityOrArea,
         rate: '',
         total: ''
       });
-    }
+    });
 
     if (product.description && product.description !== EMPTY) {
       rows.push({

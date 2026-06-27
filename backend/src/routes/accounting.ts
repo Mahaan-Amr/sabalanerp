@@ -359,7 +359,9 @@ router.post(
     body('invoiceId').optional().isString(),
     body('receivableId').optional().isString(),
     body('paymentEventId').optional().isString(),
+    body('correctionRequestId').optional().isString(),
     body('note').optional().isString(),
+    body('resolutionNote').optional().isString(),
     body('systemInvoiceNumber').optional().isString(),
     body('systemInvoiceDate').optional().isString(),
     body('sepidarAmount').optional().isNumeric()

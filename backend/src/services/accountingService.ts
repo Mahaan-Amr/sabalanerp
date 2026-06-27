@@ -73,6 +73,8 @@ type AccountingActionRequest = {
   systemInvoiceNumber?: string;
   systemInvoiceDate?: string;
   sepidarAmount?: string | number;
+  correctionRequestId?: string;
+  resolutionNote?: string;
   category?: keyof typeof CorrectionRequestCategory | keyof typeof AccountingFlagCategory;
   priority?: keyof typeof CorrectionRequestPriority;
   severity?: keyof typeof AccountingFlagSeverity;
@@ -266,9 +268,10 @@ const validateSystemInvoiceDate = (value?: string) => {
   const invoiceDay = dateKeyToUtcDay(dateKey);
   const today = dateKeyToUtcDay(todayKey);
   const oldestAllowed = today - (2 * 24 * 60 * 60 * 1000);
+  const newestAllowed = today + (30 * 24 * 60 * 60 * 1000);
 
-  if (invoiceDay > today) {
-    throw new Error('System invoice date cannot be in the future');
+  if (invoiceDay > newestAllowed) {
+    throw new Error('System invoice date cannot be more than 30 days in the future');
   }
   if (invoiceDay < oldestAllowed) {
     throw new Error('System invoice date cannot be older than 2 days');
@@ -846,6 +849,10 @@ export const executeAccountingAction = async (command: AccountingActionRequest, 
       return flagContract(command, actor);
     case 'VOID_ACCOUNTING_RECORD':
       return voidAccountingRecord(command, actor);
+    case 'DELETE_DRAFT_ACCOUNTING_RECORD':
+      return deleteDraftAccountingRecord(command, actor);
+    case 'RESOLVE_CORRECTION':
+      return resolveCorrectionRequest(command, actor);
     default:
       throw new Error(`Unsupported accounting action: ${command.kind}`);
   }
@@ -959,6 +966,17 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
     }
     if (before.status === AccountingRecordStatus.VOIDED) {
       throw new Error('Voided invoices cannot be financially approved');
+    }
+    if (before.contractId) {
+      const openCorrection = await tx.accountingCorrectionRequest.findFirst({
+        where: {
+          contractId: before.contractId,
+          status: { in: [CorrectionRequestStatus.OPEN, CorrectionRequestStatus.ACKNOWLEDGED] }
+        }
+      });
+      if (openCorrection) {
+        throw new Error('Open correction requests must be resolved before financial approval');
+      }
     }
     if (!amountsEqual(sepidarAmount, before.amount)) {
       throw new Error('Sepidar amount must match the Sabalan invoice amount');
@@ -1323,6 +1341,48 @@ const requestCorrection = async (command: AccountingActionRequest, actor: Actor)
   return actionResponse('APPLIED', 'درخواست اصلاح ثبت شد', { contractId: correction.contractId || undefined });
 };
 
+const resolveCorrectionRequest = async (command: AccountingActionRequest, actor: Actor) => {
+  const correctionRequestId = command.correctionRequestId || command.recordId;
+  if (!correctionRequestId) throw new Error('correctionRequestId is required');
+
+  const correction = await prisma.$transaction(async (tx) => {
+    const before = await tx.accountingCorrectionRequest.findUnique({ where: { id: correctionRequestId } });
+    if (!before) throw new Error('Correction request not found');
+    if (before.status === CorrectionRequestStatus.RESOLVED) {
+      return before;
+    }
+    if (before.status === CorrectionRequestStatus.CANCELLED) {
+      throw new Error('Cancelled correction requests cannot be resolved');
+    }
+
+    const updated = await tx.accountingCorrectionRequest.update({
+      where: { id: correctionRequestId },
+      data: {
+        status: CorrectionRequestStatus.RESOLVED,
+        resolutionNote: command.resolutionNote || command.note || before.resolutionNote,
+        resolvedBy: actor.userId,
+        resolvedAt: new Date()
+      }
+    });
+
+    await audit(tx, {
+      action: 'RESOLVE_CORRECTION',
+      actorId: actor.userId,
+      contractId: updated.contractId,
+      recordId: updated.recordId,
+      entityType: 'AccountingCorrectionRequest',
+      entityId: updated.id,
+      beforeState: toJsonValue(before),
+      afterState: toJsonValue(updated),
+      note: command.note || command.resolutionNote || null
+    });
+
+    return updated;
+  });
+
+  return actionResponse('APPLIED', 'درخواست اصلاح بسته شد', { contractId: correction.contractId || undefined });
+};
+
 const flagContract = async (command: AccountingActionRequest, actor: Actor) => {
   if (!command.contractId) throw new Error('contractId is required');
   const flag = await prisma.$transaction(async (tx) => {
@@ -1384,6 +1444,49 @@ const voidAccountingRecord = async (command: AccountingActionRequest, actor: Act
   return actionResponse('APPLIED', 'رکورد حسابداری باطل شد', { contractId: result.contractId || undefined, financialRecordIds: [result.id] });
 };
 
+const deleteDraftAccountingRecord = async (command: AccountingActionRequest, actor: Actor) => {
+  const recordId = command.recordId || command.invoiceId;
+  if (!recordId) throw new Error('recordId is required');
+
+  const result = await prisma.$transaction(async (tx) => {
+    const before = await tx.accountingFinancialRecord.findUnique({
+      where: { id: recordId },
+      include: {
+        invoiceItems: true,
+        taxRecords: true,
+        receivables: true,
+        journalVouchers: true
+      }
+    });
+    if (!before) throw new Error('Accounting record not found');
+    if (before.status !== AccountingRecordStatus.DRAFT || before.financiallyApprovedAt || before.systemInvoiceNumber || before.postedAt) {
+      throw new Error('Only unsubmitted draft accounting records can be deleted');
+    }
+    if (before.receivables.length > 0 || before.journalVouchers.length > 0) {
+      throw new Error('Draft accounting records with downstream accounting entries cannot be deleted');
+    }
+
+    await tx.accountingInvoiceCandidateItem.deleteMany({ where: { invoiceId: before.id } });
+    await tx.accountingTaxRecord.deleteMany({ where: { invoiceRecordId: before.id } });
+    await tx.accountingFinancialRecord.delete({ where: { id: before.id } });
+
+    await audit(tx, {
+      action: 'DELETE_DRAFT_ACCOUNTING_RECORD',
+      actorId: actor.userId,
+      contractId: before.contractId,
+      recordId: before.id,
+      entityType: 'AccountingFinancialRecord',
+      entityId: before.id,
+      beforeState: toJsonValue(before),
+      note: command.note || null
+    });
+
+    return before;
+  });
+
+  return actionResponse('APPLIED', 'پیش‌نویس رکورد مالی حذف شد', { contractId: result.contractId || undefined, financialRecordIds: [result.id] });
+};
+
 const actionResponse = (status: 'APPLIED' | 'REJECTED' | 'NEEDS_CONFIRMATION', messageFa: string, affected: Record<string, unknown>) => ({
   actionId: `act_${Date.now()}`,
   status,
@@ -1443,11 +1546,27 @@ export const listCorrectionRequests = async (query: any = {}) => {
   const where: Prisma.AccountingCorrectionRequestWhereInput = {};
   if (query.status && query.status !== 'ALL') where.status = query.status;
   if (query.contractId) where.contractId = query.contractId;
-  return prisma.accountingCorrectionRequest.findMany({
+  const rows = await prisma.accountingCorrectionRequest.findMany({
     where,
     orderBy: { createdAt: 'desc' },
     take: Math.min(Number(query.limit) || 100, 200)
   });
+  const contractIds = [...new Set(rows.map((row) => row.contractId).filter(Boolean))] as string[];
+  if (!contractIds.length) return rows;
+
+  const approvedRecords = await prisma.accountingFinancialRecord.findMany({
+    where: {
+      contractId: { in: contractIds },
+      financiallyApprovedAt: { not: null }
+    },
+    select: { contractId: true }
+  });
+  const lockedContractIds = new Set(approvedRecords.map((record) => record.contractId).filter(Boolean));
+
+  return rows.map((row) => ({
+    ...row,
+    accountingEditLocked: row.contractId ? lockedContractIds.has(row.contractId) : false
+  }));
 };
 
 export const listAuditLogs = async (query: any = {}) => {

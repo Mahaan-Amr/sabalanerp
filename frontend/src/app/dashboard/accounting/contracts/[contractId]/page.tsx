@@ -3,7 +3,9 @@
 import { useEffect, useState } from 'react';
 import {
   FaBalanceScale,
+  FaCheckCircle,
   FaDownload,
+  FaEdit,
   FaExclamationTriangle,
   FaFileInvoice,
   FaFlag,
@@ -11,6 +13,7 @@ import {
   FaPrint,
   FaReceipt,
   FaSync,
+  FaTrashAlt,
 } from 'react-icons/fa';
 import {
   ErpButton,
@@ -80,6 +83,25 @@ export default function AccountingContractDetailPage({ params }: { params: { con
       systemInvoiceNumber: payload.systemInvoiceNumber,
       systemInvoiceDate: payload.systemInvoiceDate,
       sepidarAmount: payload.sepidarAmount,
+    });
+  };
+
+  const deleteDraftRecord = (record: any) => {
+    if (!window.confirm('این پیش‌نویس رکورد مالی حذف شود؟')) return;
+    execute({
+      kind: 'DELETE_DRAFT_ACCOUNTING_RECORD',
+      recordId: record.id,
+      note: 'Deleted draft from accounting contract detail',
+    });
+  };
+
+  const resolveCorrection = (request: any) => {
+    const resolutionNote = window.prompt('یادداشت بستن درخواست اصلاح را وارد کنید');
+    if (resolutionNote === null) return;
+    execute({
+      kind: 'RESOLVE_CORRECTION',
+      correctionRequestId: request.id,
+      resolutionNote: resolutionNote?.trim() || undefined,
     });
   };
 
@@ -225,11 +247,31 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                     amount={money(record.amount, record.currency)}
                     status={<StatusBadge status={record.status} />}
                     footer={record.kind === 'INVOICE_CANDIDATE' ? (
-                      <FinancialInvoiceApprovalForm
-                        invoice={record}
-                        busy={actionLoading}
-                        onApprove={approveFinancialInvoice}
-                      />
+                      <div className="space-y-3">
+                        {contract.accounting.openCorrections > 0 && !['ISSUED', 'POSTED', 'VOIDED'].includes(record.status) ? (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+                            ابتدا درخواست‌های اصلاح باز را بررسی و ببندید؛ سپس تایید مالی انجام می‌شود.
+                          </div>
+                        ) : (
+                          <FinancialInvoiceApprovalForm
+                            invoice={record}
+                            busy={actionLoading}
+                            onApprove={approveFinancialInvoice}
+                          />
+                        )}
+                        {record.status === 'DRAFT' && (
+                          <div className="flex justify-end">
+                            <ErpButton
+                              label="حذف پیش‌نویس"
+                              icon={FaTrashAlt}
+                              tone="danger"
+                              variant="outline"
+                              disabled={actionLoading}
+                              onClick={() => deleteDraftRecord(record)}
+                            />
+                          </div>
+                        )}
+                      </div>
                     ) : undefined}
                   />
                 ))}
@@ -357,7 +399,33 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                   <CompactQueueItem key={item.id} icon={FaFlag} title={item.title} meta={item.note} status={<StatusBadge status={item.status} />} />
                 ))}
                 {(data.correctionRequests || []).map((item: any) => (
-                  <CompactQueueItem key={item.id} icon={FaExclamationTriangle} title={item.accountantNote} meta={`اولویت: ${item.priority}`} status={<StatusBadge status={item.status} />} />
+                  <CompactQueueItem
+                    key={item.id}
+                    icon={FaExclamationTriangle}
+                    title={item.accountantNote}
+                    meta={`اولویت: ${item.priority}`}
+                    status={<StatusBadge status={item.status} />}
+                    footer={['OPEN', 'ACKNOWLEDGED'].includes(item.status) ? (
+                      <div className="flex flex-wrap gap-2">
+                        {contract.accounting.invoiceStatus !== 'ISSUED' && (
+                          <ErpButton
+                            label="ویرایش فروش"
+                            href={`/dashboard/sales/contracts/${contract.contractId}/edit`}
+                            icon={FaEdit}
+                            tone="info"
+                            variant="outline"
+                          />
+                        )}
+                        <ErpButton
+                          label="بستن اصلاح"
+                          icon={FaCheckCircle}
+                          tone="success"
+                          disabled={actionLoading}
+                          onClick={() => resolveCorrection(item)}
+                        />
+                      </div>
+                    ) : undefined}
+                  />
                 ))}
               </div>
             </ErpSection>

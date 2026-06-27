@@ -366,8 +366,10 @@ export default function AccountingContractsPage() {
       label: 'تایید مالی',
       icon: FaCheckCircle,
       tone: 'success',
-      disabled: !contract.accounting.eligibleForFinancialRecords || getPendingInvoiceCandidates(contract).length !== 1 || actionLoading === `${contract.contractId}:APPROVE_FINANCIAL_INVOICE`,
-      title: getPendingInvoiceCandidates(contract).length !== 1 ? 'برای تایید سریع باید دقیقا یک صورتحساب تایید نشده وجود داشته باشد' : undefined,
+      disabled: !contract.accounting.eligibleForFinancialRecords || contract.accounting.openCorrections > 0 || getPendingInvoiceCandidates(contract).length !== 1 || actionLoading === `${contract.contractId}:APPROVE_FINANCIAL_INVOICE`,
+      title: contract.accounting.openCorrections > 0
+        ? 'ابتدا درخواست‌های اصلاح باز را ببندید'
+        : getPendingInvoiceCandidates(contract).length !== 1 ? 'برای تایید سریع باید دقیقا یک صورتحساب تایید نشده وجود داشته باشد' : undefined,
       onClick: () => openApprovalModal(contract),
     },
     { label: 'پرچم', icon: FaFlag, tone: 'warning', onClick: () => flagContract(contract) },

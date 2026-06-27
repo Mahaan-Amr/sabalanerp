@@ -1,14 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { FaFileInvoice, FaSync } from 'react-icons/fa';
-import { ErpEmptyState, ErpListPage, type ErpColumn } from '@/components/erp';
+import { FaEye, FaFileInvoice, FaSync, FaTrashAlt } from 'react-icons/fa';
+import { ErpEmptyState, ErpListPage, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import { StatusBadge, dateFa, money } from '@/features/accounting/accountingUi';
 
 export default function AccountingInvoiceCandidatesPage() {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const loadRows = async () => {
     try {
@@ -25,6 +26,35 @@ export default function AccountingInvoiceCandidatesPage() {
   useEffect(() => {
     loadRows();
   }, []);
+
+  const deleteDraftRecord = async (row: any) => {
+    if (!window.confirm('این پیش‌نویس رکورد مالی حذف شود؟')) return;
+    setActionLoading(row.id);
+    try {
+      await accountingAPI.executeAction({
+        kind: 'DELETE_DRAFT_ACCOUNTING_RECORD',
+        recordId: row.id,
+        note: 'Deleted draft from invoice candidates register',
+      });
+      await loadRows();
+    } catch (error) {
+      console.error('Delete draft accounting record failed:', error);
+      window.alert((error as any)?.response?.data?.error || 'حذف پیش‌نویس رکورد مالی انجام نشد');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const rowActions = (row: any): ErpAction[] => [
+    ...(row.contractId ? [{ label: 'مشاهده پرونده', href: `/dashboard/accounting/contracts/${row.contractId}`, icon: FaEye, tone: 'primary' as const }] : []),
+    {
+      label: 'حذف پیش‌نویس',
+      icon: FaTrashAlt,
+      tone: 'danger',
+      disabled: row.status !== 'DRAFT' || actionLoading === row.id,
+      onClick: () => deleteDraftRecord(row),
+    },
+  ];
 
   const columns: ErpColumn<any>[] = [
     {
@@ -53,6 +83,7 @@ export default function AccountingInvoiceCandidatesPage() {
       rows={rows}
       rowKey={(row) => row.id}
       columns={columns}
+      rowActions={rowActions}
       isLoading={loading}
       emptyState={<ErpEmptyState icon={FaFileInvoice} title="پیش‌نویس صورتحسابی وجود ندارد" description="از رجیستر قراردادها، برای قراردادهای مجاز پیش‌نویس صورتحساب ایجاد کنید." />}
     />

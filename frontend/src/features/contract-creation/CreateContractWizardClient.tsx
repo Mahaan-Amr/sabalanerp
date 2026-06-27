@@ -4943,8 +4943,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               newErrors.paymentMethod = `مبلغ پرداخت ${index + 1} باید بیشتر از صفر باشد`;
               return;
             }
-            if ((method === 'CASH_CARD' || method === 'CASH_SHIBA') && !String(payment.paymentDate || '').trim()) {
-              newErrors.paymentMethod = `تاریخ پرداخت برای پرداخت ${index + 1} الزامی است`;
+            if ((method === 'CASH_CARD' || method === 'CASH_SHIBA' || method === 'CUSTOMER_BALANCE') && !String(payment.paymentDate || '').trim()) {
+              newErrors.paymentMethod = method === 'CUSTOMER_BALANCE'
+                ? `تاریخ استفاده از مانده مشتری برای پرداخت ${index + 1} الزامی است`
+                : `تاریخ پرداخت برای پرداخت ${index + 1} الزامی است`;
               return;
             }
             if (method === 'CHECK') {
@@ -4961,7 +4963,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 return;
               }
             }
-            if (!isContractEditMode && payment.paymentDate && String(payment.paymentDate).trim() !== getCurrentPersianDate()) {
+            if (!isContractEditMode && method !== 'CUSTOMER_BALANCE' && payment.paymentDate && String(payment.paymentDate).trim() !== getCurrentPersianDate()) {
               const paymentNationalCode = String(payment.nationalCode || '').trim();
               if (!paymentNationalCode) {
                 newErrors.paymentMethod = `کد ملی برای پرداخت ${index + 1} با تاریخ غیر از امروز الزامی است`;
@@ -4979,9 +4981,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             sumNumericValues(wizardData.products, (product) => product.totalPrice) +
             sumNumericValues(wizardData.serviceRows || [], (row) => row.totalPrice);
           const remainingPaymentAmount = payableTotal - paymentTotal;
+          const extraPaymentAmount = paymentTotal - payableTotal;
 
-          if (Math.abs(remainingPaymentAmount) > 0.01) {
-            newErrors.paymentMethod = `مجموع پرداخت‌ها (${formatPrice(paymentTotal, wizardData.payment.currency)}) باید با مبلغ قرارداد (${formatPrice(payableTotal, wizardData.payment.currency)}) برابر باشد. مانده: ${formatPrice(remainingPaymentAmount, wizardData.payment.currency)}`;
+          if (remainingPaymentAmount > 0.01) {
+            newErrors.paymentMethod = `مجموع پرداخت‌ها (${formatPrice(paymentTotal, wizardData.payment.currency)}) نباید کمتر از مبلغ قرارداد (${formatPrice(payableTotal, wizardData.payment.currency)}) باشد. مانده: ${formatPrice(remainingPaymentAmount, wizardData.payment.currency)}`;
+          } else if (extraPaymentAmount > 0.01 && !wizardData.payment.extraPaymentReason) {
+            newErrors.paymentMethod = `برای مبلغ اضافه (${formatPrice(extraPaymentAmount, wizardData.payment.currency)}) باید توضیحات انتخاب شود`;
           }
         }
         break;
@@ -5126,6 +5131,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           if (method === 'CASH_CARD') return 'نقدی (کارت)';
           if (method === 'CASH_SHIBA') return 'نقدی (شبا)';
           if (method === 'CHECK') return 'چک';
+          if (method === 'CUSTOMER_BALANCE') return 'استفاده از باقی مانده مشتری';
           return '—';
         };
         const mapPaymentStatusLabel = (status?: string) => {

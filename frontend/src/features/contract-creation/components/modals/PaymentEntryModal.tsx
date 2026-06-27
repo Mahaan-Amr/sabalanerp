@@ -27,7 +27,8 @@ interface PaymentEntryModalProps {
 const METHOD_OPTIONS: { value: PaymentEntryMethod; label: string }[] = [
   { value: 'CASH_CARD', label: 'نقدی (کارت‌خوان)' },
   { value: 'CASH_SHIBA', label: 'نقدی (شبا)' },
-  { value: 'CHECK', label: 'چک' }
+  { value: 'CHECK', label: 'چک' },
+  { value: 'CUSTOMER_BALANCE', label: 'استفاده از باقی مانده مشتری' }
 ];
 
 const inputClass =
@@ -53,6 +54,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
   const method = (form.method || 'CASH_CARD') as PaymentEntryMethod;
   const isCash = method === 'CASH_CARD' || method === 'CASH_SHIBA';
   const isCheck = method === 'CHECK';
+  const isCustomerBalance = method === 'CUSTOMER_BALANCE';
 
   return (
     <div
@@ -110,10 +112,16 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
               </select>
             </div>
 
-            {isCash && (
+            {isCustomerBalance && (
+              <div className="rounded-md border border-yellow-300 bg-yellow-50 p-3 text-xs leading-6 text-yellow-800 dark:border-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-200">
+                در صورت مغایرت با حسابداری قرارداد منقضی میشود
+              </div>
+            )}
+
+            {(isCash || isCustomerBalance) && (
               <>
                 <div>
-                  <label className={labelClass}>مبلغ (تومان)</label>
+                  <label className={labelClass}>{isCustomerBalance ? 'مبلغ مانده مشتری (تومان)' : 'مبلغ (تومان)'}</label>
                   <FormattedNumberInput
                     value={form.amount ?? 0}
                     onChange={(v) => onFormChange({ amount: v })}
@@ -124,7 +132,7 @@ export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({
                   {fieldErrors.amount && <p className="mt-1 text-xs text-red-500">{fieldErrors.amount}</p>}
                 </div>
                 <div>
-                  <label className={labelClass}>تاریخ پرداخت</label>
+                  <label className={labelClass}>{isCustomerBalance ? 'تاریخ استفاده از مانده' : 'تاریخ پرداخت'}</label>
                   <div className={`${inputClass} flex items-center min-h-[38px] ${fieldErrors.paymentDate ? 'border-red-500 dark:border-red-400' : ''}`}>
                     <PersianCalendarComponent
                       value={form.paymentDate ?? ''}

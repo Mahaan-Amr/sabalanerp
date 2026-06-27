@@ -152,6 +152,9 @@ interface NormalizedFinancials {
   discountPercent: number;
   discountBaseSubtotal: number;
   grandTotal: number;
+  paymentTotal: number;
+  extraPaymentAmount: number;
+  extraPaymentReasonLabel: string;
   currency: string;
 }
 
@@ -382,7 +385,7 @@ const paymentMethodLabel = (value: unknown, cashType: unknown): string => {
   if (value === 'CASH_CARD') return 'نقدی (کارت)';
   if (value === 'CASH_SHIBA') return 'نقدی (شبا)';
   if (value === 'CHECK') return 'چک';
-  if (value === 'CHECK') return 'چک';
+  if (value === 'CUSTOMER_BALANCE') return 'استفاده از باقی مانده مشتری';
   if (value === 'CASH') {
     if (cashType === 'CARD') return 'نقدی (کارت)';
     return 'نقدی';
@@ -872,6 +875,15 @@ const normalizeFinancials = (
   const discountAmount = toNumber(discount.amount);
   const discountPercent = toNumber(discount.percent);
   const discountBaseSubtotal = toNumber(discount.baseSubtotal);
+  const grandTotal = relationGrandTotal > 0 ? relationGrandTotal : Math.max(productsTotal + standaloneServicesTotal - discountAmount, 0);
+  const paymentRows = Array.isArray(contract.contractData?.payment?.payments)
+    ? contract.contractData.payment.payments
+    : [];
+  const paymentTotal = paymentRows.reduce((sum: number, payment: any) => sum + toNumber(payment?.amount), 0);
+  const extraPaymentAmount = paymentTotal - grandTotal;
+  const extraPaymentReasonLabel = contract.contractData?.payment?.extraPaymentReason === 'PREVIOUS_DEBT'
+    ? 'به علت بدهی از قبل'
+    : '';
   return {
     productsTotal,
     servicesTotal: productServicesTotal + standaloneServicesTotal,
@@ -880,7 +892,10 @@ const normalizeFinancials = (
     discountAmount,
     discountPercent,
     discountBaseSubtotal,
-    grandTotal: relationGrandTotal > 0 ? relationGrandTotal : Math.max(productsTotal + standaloneServicesTotal - discountAmount, 0),
+    grandTotal,
+    paymentTotal,
+    extraPaymentAmount,
+    extraPaymentReasonLabel,
     currency
   };
 };
@@ -1159,7 +1174,7 @@ const renderDeliveryRows = (deliveries: NormalizedDelivery[], options: { hideRec
   }).join('');
 };
 
-const renderPaymentRows = (payments: NormalizedPayment[], currency: string): string => {
+const renderPaymentRows = (payments: NormalizedPayment[], financials: NormalizedFinancials): string => {
   if (!payments.length) {
     return `<tr><td colspan="9" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
   }
@@ -1170,7 +1185,7 @@ const renderPaymentRows = (payments: NormalizedPayment[], currency: string): str
       <tr>
         <td>${toFaNumber(payment.index)}</td>
         <td>${escapeHtml(payment.methodLabel)}</td>
-        <td>${formatAmount(payment.amount, currency)}</td>
+        <td>${formatAmount(payment.amount, financials.currency)}</td>
         <td>${escapeHtml(payment.statusLabel)}</td>
         <td>${escapeHtml(payment.paymentDate)}</td>
         <td>${escapeHtml(payment.checkNumber)}</td>
@@ -1185,7 +1200,7 @@ const renderPaymentRows = (payments: NormalizedPayment[], currency: string): str
         <tr class="sub-row">
           <td>—</td>
           <td>قسط ${toFaNumber(installment.index)}</td>
-          <td>${formatAmount(installment.amount, currency)}</td>
+          <td>${formatAmount(installment.amount, financials.currency)}</td>
           <td>${escapeHtml(installment.status)}</td>
           <td>${escapeHtml(installment.dueDate)}</td>
           <td>—</td>
@@ -1196,6 +1211,22 @@ const renderPaymentRows = (payments: NormalizedPayment[], currency: string): str
       `);
     });
   });
+
+  if (financials.extraPaymentAmount > 0.01 && financials.extraPaymentReasonLabel) {
+    rows.push(`
+      <tr class="sub-row">
+        <td>—</td>
+        <td>${escapeHtml(financials.extraPaymentReasonLabel)}</td>
+        <td>${formatAmount(financials.extraPaymentAmount, financials.currency)}</td>
+        <td>—</td>
+        <td>—</td>
+        <td>—</td>
+        <td>—</td>
+        <td>—</td>
+        <td>${escapeHtml(financials.extraPaymentReasonLabel)}</td>
+      </tr>
+    `);
+  }
 
   return rows.join('');
 };
@@ -1455,7 +1486,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           </tr>
         </thead>
         <tbody>
-          ${renderPaymentRows(normalizedPayments, financials.currency)}
+          ${renderPaymentRows(normalizedPayments, financials)}
         </tbody>
       </table>
       <p class="section-note">${escapeHtml(PAYMENT_NOTE)}</p>

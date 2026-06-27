@@ -113,8 +113,12 @@ export const validatePayment = (
     const totalPaymentAmount = sumNumericValues(payment.payments, (paymentEntry) => paymentEntry.amount);
     const normalizedContractAmount = toFiniteNumber(totalContractAmount);
     
-    if (Math.abs(totalPaymentAmount - normalizedContractAmount) > 0.01) {
-      errors.push(`جمع پرداخت‌ها (${totalPaymentAmount}) باید با مبلغ کل قرارداد (${normalizedContractAmount}) برابر باشد`);
+    if (totalPaymentAmount + 0.01 < normalizedContractAmount) {
+      errors.push(`جمع پرداخت‌ها (${totalPaymentAmount}) نباید کمتر از مبلغ کل قرارداد (${normalizedContractAmount}) باشد`);
+    }
+
+    if (totalPaymentAmount - normalizedContractAmount > 0.01 && !payment.extraPaymentReason) {
+      errors.push('برای مبلغ اضافه باید توضیحات انتخاب شود');
     }
     
     // Validate individual payment entries (CASH_CARD | CASH_SHIBA | CHECK)
@@ -123,9 +127,9 @@ export const validatePayment = (
       if (toFiniteNumber(paymentEntry.amount) <= 0) {
         errors.push('مبلغ پرداخت باید بزرگ‌تر از صفر باشد');
       }
-      if (method === 'CASH_CARD' || method === 'CASH_SHIBA') {
+      if (method === 'CASH_CARD' || method === 'CASH_SHIBA' || method === 'CUSTOMER_BALANCE') {
         if (!paymentEntry.paymentDate || !String(paymentEntry.paymentDate).trim()) {
-          errors.push('تاریخ پرداخت برای پرداخت نقدی الزامی است');
+          errors.push(method === 'CUSTOMER_BALANCE' ? 'تاریخ استفاده از مانده مشتری الزامی است' : 'تاریخ پرداخت برای پرداخت نقدی الزامی است');
         }
       }
       if (method === 'CHECK') {
@@ -267,4 +271,3 @@ export const validateWizardStep = (
     errors
   };
 };
-

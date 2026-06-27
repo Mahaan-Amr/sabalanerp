@@ -785,4 +785,47 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   assert.ok(invalidPayment.errors.some((error) => error.includes('تاریخ تحویل چک')));
 }
 
+{
+  const total = 5_000_000;
+  const underPaid = validatePayment({
+    payments: [
+      { id: 'pay-1', method: 'CASH_CARD', amount: total - 1, paymentDate: '1405/04/02' }
+    ],
+    currency: 'تومان',
+    totalContractAmount: total
+  }, total);
+
+  const overPaidWithoutReason = validatePayment({
+    payments: [
+      { id: 'pay-1', method: 'CASH_CARD', amount: total + 1_000_000, paymentDate: '1405/04/02' }
+    ],
+    currency: 'تومان',
+    totalContractAmount: total
+  }, total);
+
+  const overPaidWithReason = validatePayment({
+    payments: [
+      { id: 'pay-1', method: 'CASH_CARD', amount: total + 1_000_000, paymentDate: '1405/04/02' }
+    ],
+    currency: 'تومان',
+    totalContractAmount: total,
+    extraPaymentReason: 'PREVIOUS_DEBT'
+  }, total);
+
+  const customerBalance = validatePayment({
+    payments: [
+      { id: 'pay-1', method: 'CUSTOMER_BALANCE', amount: total, paymentDate: '1405/04/02' }
+    ],
+    currency: 'تومان',
+    totalContractAmount: total
+  }, total);
+
+  assert.equal(underPaid.isValid, false);
+  assert.ok(underPaid.errors.some((error) => error.includes('نباید کمتر')));
+  assert.equal(overPaidWithoutReason.isValid, false);
+  assert.ok(overPaidWithoutReason.errors.some((error) => error.includes('توضیحات')));
+  assert.equal(overPaidWithReason.isValid, true);
+  assert.equal(customerBalance.isValid, true);
+}
+
 console.log('contractCreationComplexScenarios tests passed');

@@ -12,7 +12,9 @@ function getPaymentMethodLabel(payment: PaymentEntry): string {
   if (m === 'CASH_CARD') return 'نقد (کارت)';
   if (m === 'CASH_SHIBA') return 'نقد (شبا)';
   if (m === 'CHECK') return 'چک';
+  if (m === 'CUSTOMER_BALANCE') return 'استفاده از باقی مانده مشتری';
   if (m === 'CASH') return payment.cashType === 'CARD' ? 'نقد (کارت)' : 'نقد (شبا)';
+  if (m === 'RECEIPT') return 'رسید';
   return 'نامشخص';
 }
 
@@ -52,7 +54,10 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
   const paymentSum = sumNumericValues(wizardData.payment.payments, (payment) => payment.amount);
   const totalContractAmount = toFiniteNumber(wizardData.payment.totalContractAmount);
   const remainingAmount = totalContractAmount - paymentSum;
+  const isPaymentCovered = paymentSum + 0.01 >= totalContractAmount;
   const paymentSumMatchesTotal = Math.abs(remainingAmount) < 0.01;
+  const extraPaymentAmount = paymentSum - totalContractAmount;
+  const hasExtraPayment = extraPaymentAmount > 0.01;
 
   const handleAddPaymentEntry = () => {
     if (onAddPaymentEntry) {
@@ -79,7 +84,7 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
           روش پرداخت
         </h3>
         <p className="text-gray-600 dark:text-gray-300">
-          روش‌های پرداخت را تعیین کنید (مجموع پرداخت‌ها باید برابر مبلغ قرارداد باشد)
+          روش‌های پرداخت را تعیین کنید (جمع پرداخت و مانده مشتری نباید کمتر از مبلغ قرارداد باشد)
         </p>
       </div>
       
@@ -141,7 +146,7 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
             <div>
               <span className="text-sm text-gray-600 dark:text-gray-400">جمع پرداخت:</span>
               <div className="mr-2">
-                <span className={`font-semibold ${paymentSumMatchesTotal ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
+                <span className={`font-semibold ${isPaymentCovered ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
                   {formatPrice(paymentSum, wizardData.payment.currency)}
                 </span>
                 {wizardData.payment.currency === 'تومان' && (
@@ -152,16 +157,16 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
               </div>
             </div>
             <div>
-              <span className="text-sm text-gray-600 dark:text-gray-400">باقیمانده:</span>
+              <span className="text-sm text-gray-600 dark:text-gray-400">{hasExtraPayment ? 'مبلغ اضافه:' : 'باقیمانده:'}</span>
               <div className="mr-2">
                 <span className={`font-semibold ${
                   Math.abs(remainingAmount) < 0.01 
                     ? 'text-green-600 dark:text-green-400' 
                     : remainingAmount > 0 
                       ? 'text-yellow-600 dark:text-yellow-400' 
-                      : 'text-red-600 dark:text-red-400'
+                      : 'text-blue-600 dark:text-blue-400'
                 }`}>
-                  {formatPrice(remainingAmount, wizardData.payment.currency)}
+                  {formatPrice(Math.abs(remainingAmount), wizardData.payment.currency)}
                 </span>
                 {wizardData.payment.currency === 'تومان' && (
                   <span className="mr-2 text-xs text-gray-500 dark:text-gray-400">
@@ -172,11 +177,40 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
             </div>
           </div>
           
-          {!paymentSumMatchesTotal && (
+          {remainingAmount > 0.01 && (
             <div className="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded">
               <p className="text-yellow-700 dark:text-yellow-300 text-sm">
-                مجموع پرداخت‌ها ({formatPrice(paymentSum, wizardData.payment.currency)}) با مبلغ قرارداد ({formatPrice(totalContractAmount, wizardData.payment.currency)}) برابر نیست
+                مجموع پرداخت و مانده مشتری ({formatPrice(paymentSum, wizardData.payment.currency)}) کمتر از مبلغ قرارداد ({formatPrice(totalContractAmount, wizardData.payment.currency)}) است
               </p>
+            </div>
+          )}
+
+          {hasExtraPayment && (
+            <div className="mt-3 rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-200">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_220px] md:items-end">
+                <div>
+                  <p className="font-semibold">مبلغ اضافه: {formatPrice(extraPaymentAmount, wizardData.payment.currency)}</p>
+                  <p className="mt-1 text-xs leading-5">
+                    برای مبلغ اضافه باید توضیح انتخاب شود تا در چاپ/PDF قرارداد نمایش داده شود.
+                  </p>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium">توضیحات</label>
+                  <select
+                    value={wizardData.payment.extraPaymentReason || ''}
+                    onChange={(event) => updateWizardData({
+                      payment: {
+                        ...wizardData.payment,
+                        extraPaymentReason: event.target.value === 'PREVIOUS_DEBT' ? 'PREVIOUS_DEBT' : null
+                      }
+                    })}
+                    className="w-full rounded-md border border-blue-200 bg-white px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:border-blue-700 dark:bg-gray-800 dark:text-white"
+                  >
+                    <option value="">انتخاب کنید</option>
+                    <option value="PREVIOUS_DEBT">به علت بدهی از قبل</option>
+                  </select>
+                </div>
+              </div>
             </div>
           )}
           

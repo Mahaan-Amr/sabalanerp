@@ -62,6 +62,9 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
     sumNumericValues(data.products, (product) => product.totalPrice);
   const discountAmount = toFiniteNumber(data.discount?.amount);
   const discountPercent = toFiniteNumber(data.discount?.percent);
+  const paymentTotal = sumNumericValues(data.payment?.payments || [], (payment) => payment.amount);
+  const extraPaymentAmount = paymentTotal - totalAmount;
+  const extraPaymentReasonLabel = data.payment?.extraPaymentReason === 'PREVIOUS_DEBT' ? 'به علت بدهی از قبل' : '';
 
   return `
     <div style="font-family: 'Tahoma', sans-serif; direction: rtl; text-align: right;">
@@ -101,7 +104,7 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
             <h4>روش‌های پرداخت:</h4>
             <ul>
               ${data.payment.payments.map((payment: any) => {
-                const methodLabel = payment.method === 'CASH_CARD' ? 'نقدی (کارت)' : payment.method === 'CASH_SHIBA' ? 'نقدی (شبا)' : payment.method === 'CHECK' ? 'چک' : payment.method === 'CASH' ? 'نقدی' : payment.method || 'نامشخص';
+                const methodLabel = payment.method === 'CASH_CARD' ? 'نقدی (کارت)' : payment.method === 'CASH_SHIBA' ? 'نقدی (شبا)' : payment.method === 'CHECK' ? 'چک' : payment.method === 'CUSTOMER_BALANCE' ? 'استفاده از باقی مانده مشتری' : payment.method === 'CASH' ? 'نقدی' : payment.method || 'نامشخص';
                 return `
                 <li>
                   ${methodLabel} - 
@@ -111,6 +114,9 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
               `;
               }).join('')}
             </ul>
+            ${extraPaymentAmount > 0 && extraPaymentReasonLabel ? `
+              <p><strong>${extraPaymentReasonLabel}:</strong> ${formatPrice(extraPaymentAmount, data.payment.currency || 'تومان')}</p>
+            ` : ''}
           ` : ''}
         </div>
       ` : ''}

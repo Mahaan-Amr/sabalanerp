@@ -28,7 +28,7 @@ export const usePaymentMethod = (totalContractAmount: number) => {
 
   // Check if payment is balanced
   const isPaymentBalanced = useMemo(() => {
-    return Math.abs(totalPaymentAmount - toFiniteNumber(totalContractAmount)) < 0.01;
+    return totalPaymentAmount + 0.01 >= toFiniteNumber(totalContractAmount);
   }, [totalPaymentAmount, totalContractAmount]);
 
   // Add payment entry

@@ -497,8 +497,9 @@ export interface DeliverySchedule {
   notes?: string;
 }
 
-// ?? (??) | ?? (??) | ?
-export type PaymentEntryMethod = 'CASH_CARD' | 'CASH_SHIBA' | 'CHECK';
+// ?? (??) | ?? (??) | ? | ??????? ?? ????? ??????
+export type PaymentEntryMethod = 'CASH_CARD' | 'CASH_SHIBA' | 'CHECK' | 'CUSTOMER_BALANCE';
+export type ExtraPaymentReason = 'PREVIOUS_DEBT';
 
 export interface PaymentEntry {
   id: string; // Unique ID for this payment entry
@@ -518,6 +519,7 @@ export interface PaymentMethod {
   payments: PaymentEntry[]; // Array of payment entries (compound payments)
   currency: string; // default currency
   totalContractAmount: number; // Sum of all products (for validation)
+  extraPaymentReason?: ExtraPaymentReason | null;
 }
 
 export interface ContractDiscountSnapshot {

@@ -231,8 +231,12 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           })),
           payments: wizardData.payment.payments.map((paymentEntry) => {
             const method = paymentEntry.method as string;
-            const paymentMethod = method === 'CHECK' ? 'CHECK' : 'CASH';
+            const paymentMethod = method === 'CHECK' ? 'CHECK' : method === 'CUSTOMER_BALANCE' ? 'RECEIPT' : 'CASH';
             const cashType = method === 'CASH_SHIBA' ? 'SHIBA' : method === 'CASH_CARD' ? 'CARD' : undefined;
+            const notes = [
+              method === 'CUSTOMER_BALANCE' ? 'استفاده از باقی مانده مشتری' : null,
+              paymentEntry.description || null
+            ].filter(Boolean).join('، ');
             return {
               paymentMethod,
               totalAmount: paymentEntry.amount,
@@ -244,7 +248,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
               handoverDate: toIsoDate(paymentEntry.handoverDate),
               cashType: cashType ?? paymentEntry.cashType ?? null,
               nationalCode: paymentEntry.nationalCode || null,
-              notes: paymentEntry.description || null
+              notes: notes || null
             };
           })
         }
@@ -332,9 +336,13 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         // Create payments (compound payments - one per entry)
         for (const paymentEntry of wizardData.payment.payments) {
           const method = paymentEntry.method as string;
-          // Map frontend method to API: CASH_CARD/CASH_SHIBA -> CASH + cashType; CHECK -> CHECK
-          const paymentMethod = method === 'CHECK' ? 'CHECK' : 'CASH';
+          // Map frontend method to API: CASH_CARD/CASH_SHIBA -> CASH + cashType; CHECK -> CHECK; customer balance -> RECEIPT.
+          const paymentMethod = method === 'CHECK' ? 'CHECK' : method === 'CUSTOMER_BALANCE' ? 'RECEIPT' : 'CASH';
           const cashType = method === 'CASH_SHIBA' ? 'SHIBA' : method === 'CASH_CARD' ? 'CARD' : undefined;
+          const notes = [
+            method === 'CUSTOMER_BALANCE' ? 'استفاده از باقی مانده مشتری' : null,
+            paymentEntry.description || null
+          ].filter(Boolean).join('، ');
 
           let paymentDate: Date | undefined;
           if (paymentEntry.paymentDate) {
@@ -366,7 +374,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             handoverDate: handoverDate?.toISOString(),
             cashType: cashType ?? paymentEntry.cashType,
             nationalCode: paymentEntry.nationalCode,
-            notes: paymentEntry.description
+            notes: notes || undefined
           });
         }
         

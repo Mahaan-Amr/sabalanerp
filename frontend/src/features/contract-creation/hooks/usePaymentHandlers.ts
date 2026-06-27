@@ -53,14 +53,18 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
     return !!normalizedPaymentDate && normalizedPaymentDate !== getCurrentPersianDate();
   }, [getCurrentPersianDate]);
 
-  const paymentEntryNationalCodeRequired = isPaymentNationalCodeRequired(paymentEntryForm.paymentDate);
+  const paymentEntryNationalCodeRequired =
+    paymentEntryForm.method !== 'CUSTOMER_BALANCE' &&
+    isPaymentNationalCodeRequired(paymentEntryForm.paymentDate);
 
   const normalizePaymentEntryForm = useCallback((
     form: Partial<PaymentEntry>,
     updates: Partial<PaymentEntry> = {}
   ): Partial<PaymentEntry> => {
     const nextForm = { ...form, ...updates };
-    const nationalCodeRequired = isPaymentNationalCodeRequired(nextForm.paymentDate);
+    const nationalCodeRequired =
+      nextForm.method !== 'CUSTOMER_BALANCE' &&
+      isPaymentNationalCodeRequired(nextForm.paymentDate);
 
     if (!nationalCodeRequired) {
       return {
@@ -96,8 +100,21 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       });
       return next;
     });
-    setPaymentEntryForm((prev) => normalizePaymentEntryForm(prev, updates));
-  }, [normalizePaymentEntryForm]);
+    setPaymentEntryForm((prev) => {
+      const methodChangedToCustomerBalance = updates.method === 'CUSTOMER_BALANCE' && prev.method !== 'CUSTOMER_BALANCE';
+      const normalizedUpdates = methodChangedToCustomerBalance
+        ? {
+            ...updates,
+            paymentDate: updates.paymentDate || prev.paymentDate || getCurrentPersianDate(),
+            checkNumber: undefined,
+            checkOwnerName: undefined,
+            handoverDate: undefined,
+            nationalCode: undefined
+          }
+        : updates;
+      return normalizePaymentEntryForm(prev, normalizedUpdates);
+    });
+  }, [getCurrentPersianDate, normalizePaymentEntryForm]);
 
   const handleAddPaymentEntry = useCallback(() => {
     setEditingPaymentEntryId(null);
@@ -135,7 +152,8 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
   const handleSavePaymentEntry = useCallback(async (saveOptions?: { allowNationalCodeConflict?: boolean }) => {
     const method = paymentEntryForm.method as PaymentEntryMethod | undefined;
     const nextErrors: PaymentEntryFieldErrors = {};
-    const nationalCodeRequired = isPaymentNationalCodeRequired(paymentEntryForm.paymentDate);
+    const isCustomerBalance = method === 'CUSTOMER_BALANCE';
+    const nationalCodeRequired = !isCustomerBalance && isPaymentNationalCodeRequired(paymentEntryForm.paymentDate);
     const normalizedNationalCode = normalizeNationalCodeDigits(paymentEntryForm.nationalCode);
     const customerNationalCode = getCustomerNationalCode();
 
@@ -149,9 +167,9 @@ export const usePaymentHandlers = (options: UsePaymentHandlersOptions) => {
       nextErrors.amount = 'مبلغ باید بیشتر از صفر باشد';
     }
 
-    if (method === 'CASH_CARD' || method === 'CASH_SHIBA') {
+    if (method === 'CASH_CARD' || method === 'CASH_SHIBA' || method === 'CUSTOMER_BALANCE') {
       if (!paymentEntryForm.paymentDate || !paymentEntryForm.paymentDate.trim()) {
-        nextErrors.paymentDate = 'تاریخ پرداخت الزامی است';
+        nextErrors.paymentDate = isCustomerBalance ? 'تاریخ استفاده از مانده الزامی است' : 'تاریخ پرداخت الزامی است';
       }
     }
 

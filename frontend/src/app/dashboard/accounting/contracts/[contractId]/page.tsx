@@ -41,11 +41,20 @@ import {
 
 const toPdfViewerUrl = (url: string) => `${url}#page=1&zoom=page-fit`;
 
+type SalesPdfVariant = 'original' | 'accounting' | 'workshop';
+
+const salesPdfVariantLabels: Record<SalesPdfVariant, string> = {
+  original: 'چاپ نسخه اصلی',
+  accounting: 'چاپ حسابداری',
+  workshop: 'چاپ نمره کارگاه',
+};
+
 export default function AccountingContractDetailPage({ params }: { params: { contractId: string } }) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
+  const [salesPdfVariant, setSalesPdfVariant] = useState<SalesPdfVariant>('accounting');
 
   const loadDetail = async () => {
     try {
@@ -137,12 +146,12 @@ export default function AccountingContractDetailPage({ params }: { params: { con
     setPdfActionLoading(actionKey);
     try {
       if (!tryPrint) {
-        const response = await accountingAPI.downloadSalesContractPdf(params.contractId, { fresh: false });
-        downloadBlobResponse(response, `sales_contract_${params.contractId}.pdf`);
+        const response = await accountingAPI.downloadSalesContractPdf(params.contractId, { fresh: false, variant: salesPdfVariant });
+        downloadBlobResponse(response, `sales_contract_${params.contractId}_${salesPdfVariant}.pdf`);
         return;
       }
 
-      const response = await accountingAPI.getSalesContractPdf(params.contractId, { fresh: false });
+      const response = await accountingAPI.getSalesContractPdf(params.contractId, { fresh: false, variant: salesPdfVariant });
       const url = response.data?.data?.url;
       if (!response.data?.success || !url) throw new Error('Sales contract PDF url was not returned');
       openPdfUrl(url, tryPrint);
@@ -174,20 +183,6 @@ export default function AccountingContractDetailPage({ params }: { params: { con
       description="نمای عملیاتی حسابداری از قرارداد، بدون تغییر دادن اصل قرارداد فروش."
       backHref="/dashboard/accounting/contracts"
       actions={[
-        {
-          label: 'دانلود PDF قرارداد',
-          icon: FaDownload,
-          onClick: () => openSalesContractPdf(false),
-          tone: 'success',
-          disabled: pdfActionLoading === 'DOWNLOAD_SALES_PDF'
-        },
-        {
-          label: 'پرینت قرارداد',
-          icon: FaPrint,
-          onClick: () => openSalesContractPdf(true),
-          tone: 'purple',
-          disabled: pdfActionLoading === 'PRINT_SALES_PDF'
-        },
         { label: 'به‌روزرسانی', icon: FaSync, onClick: loadDetail, tone: 'neutral' },
       ]}
       metrics={[
@@ -197,6 +192,39 @@ export default function AccountingContractDetailPage({ params }: { params: { con
         { label: 'مانده', value: money(contract.accounting.remainingAmount), icon: FaMoneyCheckAlt, tone: contract.accounting.receivableStatus === 'OVERDUE' ? 'danger' : 'warning' },
       ]}
     >
+      <ErpSection title="خروجی چاپ قرارداد" description="نسخه مورد نیاز حسابداری را انتخاب کنید و سپس چاپ یا دانلود بگیرید.">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-200">
+            نسخه چاپ
+            <select
+              value={salesPdfVariant}
+              onChange={(event) => setSalesPdfVariant(event.target.value as SalesPdfVariant)}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            >
+              <option value="original">{salesPdfVariantLabels.original}</option>
+              <option value="accounting">{salesPdfVariantLabels.accounting}</option>
+              <option value="workshop">{salesPdfVariantLabels.workshop}</option>
+            </select>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <ErpButton
+              label="دانلود PDF"
+              icon={FaDownload}
+              tone="success"
+              disabled={pdfActionLoading === 'DOWNLOAD_SALES_PDF'}
+              onClick={() => openSalesContractPdf(false)}
+            />
+            <ErpButton
+              label="چاپ"
+              icon={FaPrint}
+              tone="purple"
+              disabled={pdfActionLoading === 'PRINT_SALES_PDF'}
+              onClick={() => openSalesContractPdf(true)}
+            />
+          </div>
+        </div>
+      </ErpSection>
+
       <div className="accounting-print-view">
         <ErpTwoColumn
           main={

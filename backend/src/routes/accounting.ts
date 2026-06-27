@@ -68,6 +68,56 @@ const resolveAccountingPdfUrl = (req: AuthRequest, pdfPath: string): string | nu
   return `${protocol}://${host}/files/accounting-contracts/${encodeURIComponent(fileName)}`;
 };
 
+type SalesContractPdfVariant = 'original' | 'accounting' | 'workshop';
+
+const salesContractPdfVariantFromQuery = (value: unknown): SalesContractPdfVariant => {
+  if (value === 'accounting' || value === 'workshop') return value;
+  return 'original';
+};
+
+const salesContractPdfCacheKey = (variant: SalesContractPdfVariant): string => {
+  if (variant === 'accounting') return 'accountingSalesPdfAccounting';
+  if (variant === 'workshop') return 'accountingSalesPdfWorkshop';
+  return 'print';
+};
+
+const salesContractPdfDownloadName = (contract: any, variant: SalesContractPdfVariant): string => {
+  const baseName = buildSalesContractPdfDownloadName(contract);
+  if (variant === 'accounting') return baseName.replace(/\.pdf$/i, '_accounting.pdf');
+  if (variant === 'workshop') return baseName.replace(/\.pdf$/i, '_workshop.pdf');
+  return baseName;
+};
+
+const markOriginalSalesContractPrinted = async (
+  req: AuthRequest,
+  contract: any,
+  currentSignatures: any,
+  pdfPath: string,
+  fingerprint: string,
+  generatedAt: string | null
+) => {
+  const printedAt = new Date();
+  const timestamp = generatedAt || printedAt.toISOString();
+  await prisma.salesContract.update({
+    where: { id: contract.id },
+    data: {
+      status: contract.status === 'SIGNED' ? 'PRINTED' : contract.status,
+      printedAt,
+      signatures: {
+        ...currentSignatures,
+        print: {
+          by: req.user!.id,
+          at: timestamp,
+          generatedAt: timestamp,
+          pdfPath,
+          fingerprint,
+          variant: 'original'
+        }
+      }
+    }
+  });
+};
+
 router.get('/workspace', accountingView, async (_req: AuthRequest, res: Response) => {
   try {
     const workspace = await getAccountingWorkspace();
@@ -159,37 +209,56 @@ router.get('/contracts/:contractId/sales-pdf', accountingView, async (req: AuthR
       return;
     }
 
+    const variant = salesContractPdfVariantFromQuery(req.query.variant);
+    const cacheKey = salesContractPdfCacheKey(variant);
     const fresh = String(req.query.fresh || 'false').toLowerCase() === 'true';
     const shouldDownload = String(req.query.download || 'false').toLowerCase() === 'true';
     const currentSignatures = (contract.signatures as any) || {};
-    const pdfFingerprint = buildSalesContractPdfFingerprint(contract);
-    const cachedPdfCandidates = [
-      {
-        pdfPath: currentSignatures?.print?.pdfPath as string | undefined,
-        generatedAt: currentSignatures?.print?.generatedAt || currentSignatures?.print?.at || null,
-        fingerprint: currentSignatures?.print?.fingerprint
-      },
-      {
-        pdfPath: currentSignatures?.accountingSalesPdf?.pdfPath as string | undefined,
-        generatedAt: currentSignatures?.accountingSalesPdf?.generatedAt ||
-          currentSignatures?.accountingSalesPdf?.at ||
-          null,
-        fingerprint: currentSignatures?.accountingSalesPdf?.fingerprint
-      }
-    ];
+    const printableContract = variant === 'original' && contract.status === 'SIGNED'
+      ? { ...contract, status: 'PRINTED' }
+      : contract;
+    const pdfFingerprint = buildSalesContractPdfFingerprint(printableContract, variant);
+    const cachedPdfCandidates = variant === 'original'
+      ? [
+          {
+            pdfPath: currentSignatures?.print?.pdfPath as string | undefined,
+            generatedAt: currentSignatures?.print?.generatedAt || currentSignatures?.print?.at || null,
+            fingerprint: currentSignatures?.print?.fingerprint
+          },
+          {
+            pdfPath: currentSignatures?.accountingSalesPdf?.pdfPath as string | undefined,
+            generatedAt: currentSignatures?.accountingSalesPdf?.generatedAt ||
+              currentSignatures?.accountingSalesPdf?.at ||
+              null,
+            fingerprint: currentSignatures?.accountingSalesPdf?.fingerprint
+          }
+        ]
+      : [
+          {
+            pdfPath: currentSignatures?.[cacheKey]?.pdfPath as string | undefined,
+            generatedAt: currentSignatures?.[cacheKey]?.generatedAt ||
+              currentSignatures?.[cacheKey]?.at ||
+              null,
+            fingerprint: currentSignatures?.[cacheKey]?.fingerprint
+          }
+        ];
     const cachedPdf = fresh
       ? null
       : cachedPdfCandidates.find((candidate) =>
           candidate.pdfPath &&
-          isSalesContractPdfCacheFresh(contract, candidate.fingerprint, pdfFingerprint) &&
+          isSalesContractPdfCacheFresh(printableContract, candidate.fingerprint, pdfFingerprint) &&
           ensureStoredSalesContractPdfExists(candidate.pdfPath)
         );
 
     if (cachedPdf?.pdfPath) {
+      if (variant === 'original') {
+        await markOriginalSalesContractPrinted(req, contract, currentSignatures, cachedPdf.pdfPath, pdfFingerprint, cachedPdf.generatedAt);
+      }
+
       if (shouldDownload) {
         res.download(
           resolveStoredSalesContractPdfPath(cachedPdf.pdfPath),
-          buildSalesContractPdfDownloadName(contract)
+          salesContractPdfDownloadName(contract, variant)
         );
         return;
       }
@@ -201,36 +270,42 @@ router.get('/contracts/:contractId/sales-pdf', accountingView, async (req: AuthR
           data: {
             url: cachedUrl,
             generatedAt: cachedPdf.generatedAt,
-            fromCache: true
+            fromCache: true,
+            variant
           }
         });
         return;
       }
     }
 
-    const pdfPath = await generateSalesContractPdf(contract);
+    const pdfPath = await generateSalesContractPdf(printableContract, variant);
     const generatedAt = new Date().toISOString();
 
-    await prisma.salesContract.update({
-      where: { id: contract.id },
-      data: {
-        signatures: {
-          ...currentSignatures,
-          accountingSalesPdf: {
-            by: req.user!.id,
-            at: generatedAt,
-            generatedAt,
-            pdfPath,
-            fingerprint: pdfFingerprint
+    if (variant === 'original') {
+      await markOriginalSalesContractPrinted(req, contract, currentSignatures, pdfPath, pdfFingerprint, generatedAt);
+    } else {
+      await prisma.salesContract.update({
+        where: { id: contract.id },
+        data: {
+          signatures: {
+            ...currentSignatures,
+            [cacheKey]: {
+              by: req.user!.id,
+              at: generatedAt,
+              generatedAt,
+              pdfPath,
+              fingerprint: pdfFingerprint,
+              variant
+            }
           }
         }
-      }
-    });
+      });
+    }
 
     if (shouldDownload) {
       res.download(
         resolveStoredSalesContractPdfPath(pdfPath),
-        buildSalesContractPdfDownloadName(contract)
+        salesContractPdfDownloadName(contract, variant)
       );
       return;
     }
@@ -246,7 +321,8 @@ router.get('/contracts/:contractId/sales-pdf', accountingView, async (req: AuthR
       data: {
         url,
         generatedAt,
-        fromCache: false
+        fromCache: false,
+        variant
       }
     });
   } catch (error) {

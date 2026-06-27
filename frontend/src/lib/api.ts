@@ -477,9 +477,9 @@ export const accountingAPI = {
       params: { download: true },
       responseType: 'blob'
     }),
-  getSalesContractPdf: (contractId: string, params?: { fresh?: boolean }) =>
+  getSalesContractPdf: (contractId: string, params?: { fresh?: boolean; variant?: 'original' | 'accounting' | 'workshop' }) =>
     api.get(`/accounting/contracts/${contractId}/sales-pdf`, { params }),
-  downloadSalesContractPdf: (contractId: string, params?: { fresh?: boolean }) =>
+  downloadSalesContractPdf: (contractId: string, params?: { fresh?: boolean; variant?: 'original' | 'accounting' | 'workshop' }) =>
     api.get(`/accounting/contracts/${contractId}/sales-pdf`, {
       params: { ...params, download: true },
       responseType: 'blob'

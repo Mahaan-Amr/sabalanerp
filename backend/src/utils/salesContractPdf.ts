@@ -3,9 +3,9 @@ import path from 'path';
 import crypto from 'crypto';
 import { Request } from 'express';
 import { generatePdfFromHtml } from './pdf';
-import { renderContractHtml, renderContractPdfHeaderTemplate } from './printTemplate';
+import { ContractPrintVariant, renderContractHtml, renderContractPdfHeaderTemplate } from './printTemplate';
 
-export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-print-header-v10-2026-06-16';
+export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-print-variants-v11-2026-06-27';
 
 export const salesContractPrintableInclude = {
   customer: {
@@ -141,13 +141,17 @@ const removePdfCacheSignatures = (signatures: any): any => {
     return signatures || null;
   }
 
-  const { print, accountingSalesPdf, ...printableSignatures } = signatures;
+  const { print, accountingSalesPdf, accountingSalesPdfAccounting, accountingSalesPdfWorkshop, ...printableSignatures } = signatures;
   return printableSignatures;
 };
 
-export const buildSalesContractPdfFingerprint = (contract: any): string => {
+export const buildSalesContractPdfFingerprint = (
+  contract: any,
+  variant: ContractPrintVariant = 'original'
+): string => {
   const printableContract = {
     templateVersion: SALES_CONTRACT_PDF_TEMPLATE_VERSION,
+    variant,
     id: contract?.id,
     contractNumber: contract?.contractNumber,
     title: contract?.title,
@@ -182,9 +186,17 @@ export const isSalesContractPdfCacheFresh = (
   return typeof cachedFingerprint === 'string' && cachedFingerprint === currentFingerprint;
 };
 
-export const generateSalesContractPdf = async (contract: any) => {
+export const generateSalesContractPdf = async (
+  contract: any,
+  variant: ContractPrintVariant = 'original'
+) => {
   const timestamp = Date.now();
-  const fileName = `sales_contract_${contract.contractNumber}_${timestamp}`;
+  const fileNamePrefix = variant === 'accounting'
+    ? 'sales_contract_accounting'
+    : variant === 'workshop'
+      ? 'sales_contract_workshop'
+      : 'sales_contract';
+  const fileName = `${fileNamePrefix}_${contract.contractNumber}_${timestamp}`;
   const contractData = contract?.contractData || {};
   const relationItemsCount = Array.isArray(contract?.items) ? contract.items.length : 0;
   const relationDeliveriesCount = Array.isArray(contract?.deliveries) ? contract.deliveries.length : 0;
@@ -201,24 +213,27 @@ export const generateSalesContractPdf = async (contract: any) => {
     relationPaymentsCount,
     snapshotProductsCount,
     snapshotDeliveriesCount,
-    snapshotPaymentsCount
+    snapshotPaymentsCount,
+    variant
   });
 
   const html = renderContractHtml({
     ...contract,
     contractData: contract.contractData
-  }, { reservePdfHeaderSpace: true });
+  }, { reservePdfHeaderSpace: variant === 'original', variant });
 
   return generatePdfFromHtml({
     htmlContent: html,
-    headerTemplate: renderContractPdfHeaderTemplate(contract),
+    headerTemplate: variant === 'original' ? renderContractPdfHeaderTemplate(contract) : '<div></div>',
     footerTemplate: '<div></div>',
-    displayHeaderFooter: true,
+    displayHeaderFooter: variant === 'original',
     fileName,
     landscape: false,
     scale: 1,
     widthMm: 210,
     heightMm: 297,
-    margin: { top: '50mm', right: '5mm', bottom: '5mm', left: '5mm' }
+    margin: variant === 'original'
+      ? { top: '50mm', right: '5mm', bottom: '5mm', left: '5mm' }
+      : { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' }
   });
 };

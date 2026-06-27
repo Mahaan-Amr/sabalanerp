@@ -105,6 +105,8 @@ interface FlatProductRow {
   renderAsNoteRow?: boolean;
 }
 
+export type ContractPrintVariant = 'original' | 'accounting' | 'workshop';
+
 interface NormalizedDelivery {
   index: number;
   date: string;
@@ -1011,19 +1013,23 @@ const renderProductMainRows = (
   standaloneServices: NormalizedStandaloneService[],
   currency: string,
   grandTotal: number,
-  financials?: NormalizedFinancials
+  financials?: NormalizedFinancials,
+  options: { hidePrices?: boolean } = {}
 ): string => {
+  const columnCount = options.hidePrices ? 6 : 8;
   if (!products.length && !standaloneServices.length) {
-    return `<tr><td colspan="8" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
+    return `<tr><td colspan="${columnCount}" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
   }
 
-  return buildFlatProductRows(products, standaloneServices, currency, grandTotal, financials).map((row) => {
+  return buildFlatProductRows(products, standaloneServices, currency, grandTotal, financials)
+    .filter((row) => !(options.hidePrices && (row.className === 'total-row' || row.className === 'discount-row')))
+    .map((row) => {
     const classAttribute = row.className ? ` class="${row.className}"` : '';
     if (row.renderAsNoteRow) {
       return `
       <tr class="description-detail-row">
         <td>توضیحات</td>
-        <td colspan="7">${escapeHtml(row.description || EMPTY)}</td>
+        <td colspan="${columnCount - 1}">${escapeHtml(row.description || EMPTY)}</td>
       </tr>
     `;
     }
@@ -1032,10 +1038,16 @@ const renderProductMainRows = (
       ? `
       <tr class="description-detail-row">
         <td>توضیحات</td>
-        <td colspan="7">${escapeHtml(row.note)}</td>
+        <td colspan="${columnCount - 1}">${escapeHtml(row.note)}</td>
       </tr>
     `
       : '';
+    const priceCells = options.hidePrices
+      ? ''
+      : `
+        <td>${escapeHtml(row.rate || EMPTY)}</td>
+        <td>${escapeHtml(row.total || EMPTY)}</td>
+      `;
     return `
       <tr${classAttribute}>
         <td>${escapeHtml(row.indexLabel)}</td>
@@ -1044,17 +1056,17 @@ const renderProductMainRows = (
         <td>${escapeHtml(row.category || EMPTY)}</td>
         <td>${escapeHtml(row.dimensionsOrAmount || EMPTY)}</td>
         <td>${escapeHtml(row.quantityOrArea || EMPTY)}</td>
-        <td>${escapeHtml(row.rate || EMPTY)}</td>
-        <td>${escapeHtml(row.total || EMPTY)}</td>
+        ${priceCells}
       </tr>
       ${noteRow}
     `;
   }).join('');
 };
 
-const renderDeliveryRows = (deliveries: NormalizedDelivery[]): string => {
+const renderDeliveryRows = (deliveries: NormalizedDelivery[], options: { hideReceiver?: boolean } = {}): string => {
+  const columnCount = options.hideReceiver ? 5 : 6;
   if (!deliveries.length) {
-    return `<tr><td colspan="6" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
+    return `<tr><td colspan="${columnCount}" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
   }
 
   return deliveries.map((delivery) => {
@@ -1071,7 +1083,7 @@ const renderDeliveryRows = (deliveries: NormalizedDelivery[]): string => {
         <td>${escapeHtml(productsLabel)}</td>
         <td>${escapeHtml(amountLabel)}</td>
         <td>${escapeHtml(delivery.date)}</td>
-        <td>${escapeHtml(delivery.receiver)}</td>
+        ${options.hideReceiver ? '' : `<td>${escapeHtml(delivery.receiver)}</td>`}
         <td>${escapeHtml(delivery.notes)}</td>
       </tr>
     `;
@@ -1142,6 +1154,43 @@ const getContractHeaderMeta = (contract: RenderableContract) => {
   };
 };
 
+const variantTitle = (variant: ContractPrintVariant): string => {
+  if (variant === 'accounting') return 'چاپ حسابداری';
+  if (variant === 'workshop') return 'چاپ نمره کارگاه';
+  return 'چاپ نسخه اصلی';
+};
+
+const renderCompactMetadataSection = (
+  contract: RenderableContract,
+  options: {
+    variant: ContractPrintVariant;
+    customerName?: string;
+    customerAddress?: string;
+  }
+): string => {
+  if (options.variant === 'original') return '';
+  const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
+  const workshopFields = options.variant === 'workshop'
+    ? `
+        <div><strong>نام مشتری:</strong> ${escapeHtml(options.customerName || EMPTY)}</div>
+        <div class="full"><strong>پروژه/آدرس:</strong> ${escapeHtml(options.customerAddress || EMPTY)}</div>
+      `
+    : '';
+
+  return `
+    <section class="section compact-metadata">
+      <h2>${escapeHtml(variantTitle(options.variant))}</h2>
+      <div class="grid two-col balanced-info">
+        <div><strong>شماره قرارداد:</strong> ${escapeHtml(contractNumber)}</div>
+        <div><strong>تاریخ قرارداد:</strong> ${escapeHtml(contractDate)}</div>
+        <div><strong>وضعیت هنگام چاپ:</strong> ${escapeHtml(statusLabel)}</div>
+        <div><strong>زمان چاپ:</strong> ${escapeHtml(formatDateTime(new Date()))}</div>
+        ${workshopFields}
+      </div>
+    </section>
+  `;
+};
+
 export function renderContractPdfHeaderTemplate(contract: RenderableContract): string {
   const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
   const logoMarkup = logoUrl
@@ -1193,9 +1242,18 @@ export function renderReportPdfHeaderTemplate(meta: {
 
 type RenderContractHtmlOptions = {
   reservePdfHeaderSpace?: boolean;
+  variant?: ContractPrintVariant;
 };
 
 export function renderContractHtml(contract: RenderableContract, options: RenderContractHtmlOptions = {}): string {
+  const variant = options.variant || 'original';
+  const isWorkshopVariant = variant === 'workshop';
+  const showFormalSection = variant === 'original';
+  const showCustomerSection = !isWorkshopVariant;
+  const showPaymentSection = !isWorkshopVariant;
+  const showDigitalConfirmation = variant === 'original';
+  const showLegalNotes = variant === 'original';
+  const showSignatures = variant === 'original';
   const contractData = contract.contractData || {};
   const customer = contract.customer || contractData.customer || {};
   const project = contractData.project || {};
@@ -1220,8 +1278,10 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   const digitalConfirmation = contract.signatures?.digitalConfirmation || null;
 
   return `
-  <div class="sheet">
-    <section class="section">
+  <div class="sheet ${isWorkshopVariant ? 'workshop-print' : ''}">
+    ${renderCompactMetadataSection(contract, { variant, customerName, customerAddress })}
+
+    ${showFormalSection ? `<section class="section">
       <h2>قرارداد رسمی فروش و اجرای خدمات سنگ</h2>
       <div class="grid two-col balanced-info">
         <div><strong>آدرس مجموعه:</strong> ${escapeHtml(SELLER_ADDRESS)}</div>
@@ -1229,9 +1289,9 @@ export function renderContractHtml(contract: RenderableContract, options: Render
         <div><strong>ایجاد کننده:</strong> ${escapeHtml(sellerName)}</div>
         <div><strong>شماره تماس فروشنده:</strong> <span class="ltr-value">${escapeHtml(sellerPhone)}</span></div>
       </div>
-    </section>
+    </section>` : ''}
 
-    <section class="section">
+    ${showCustomerSection ? `<section class="section">
       <h2>مشخصات مشتری و پروژه</h2>
       <div class="grid two-col">
         <div><strong>نام مشتری:</strong> ${escapeHtml(customerName)}</div>
@@ -1242,7 +1302,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
         <div><strong>شماره مدیر پروژه:</strong> ${escapeHtml(projectManagerNumber)}</div>
         <div class="full"><strong>آدرس پروژه:</strong> ${escapeHtml(customerAddress)}</div>
       </div>
-    </section>
+    </section>` : ''}
 
     <section class="section">
       <h2>جدول اصلی محصولات</h2>
@@ -1254,8 +1314,10 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           <col class="main-category-col" />
           <col class="main-dimensions-col" />
           <col class="main-quantity-col" />
+          ${isWorkshopVariant ? '' : `
           <col class="main-rate-col" />
           <col class="main-total-col" />
+          `}
         </colgroup>
         <thead>
           <tr>
@@ -1265,12 +1327,14 @@ export function renderContractHtml(contract: RenderableContract, options: Render
             <th>دسته</th>
             <th>ابعاد/مقدار</th>
             <th>تعداد/متراژ</th>
+            ${isWorkshopVariant ? '' : `
             <th>نرخ</th>
             <th>مبلغ کل</th>
+            `}
           </tr>
         </thead>
         <tbody>
-          ${renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials)}
+          ${renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials, { hidePrices: isWorkshopVariant })}
         </tbody>
       </table>
     </section>
@@ -1283,7 +1347,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           <col class="delivery-items-col" />
           <col class="delivery-amount-col" />
           <col class="delivery-date-col" />
-          <col class="delivery-receiver-col" />
+          ${isWorkshopVariant ? '' : '<col class="delivery-receiver-col" />'}
           <col class="delivery-notes-col" />
         </colgroup>
         <thead>
@@ -1292,18 +1356,20 @@ export function renderContractHtml(contract: RenderableContract, options: Render
             <th>اقلام</th>
             <th>متراژ</th>
             <th>تاریخ تحویل</th>
+            ${isWorkshopVariant ? '' : `
             <th>تحویل‌گیرنده</th>
+            `}
             <th>توضیحات</th>
           </tr>
         </thead>
         <tbody>
-          ${renderDeliveryRows(normalizedDeliveries)}
+          ${renderDeliveryRows(normalizedDeliveries, { hideReceiver: isWorkshopVariant })}
         </tbody>
       </table>
       <p class="section-note">${escapeHtml(DELIVERY_NOTE)}</p>
     </section>
 
-    <section class="section">
+    ${showPaymentSection ? `<section class="section">
       <h2>برنامه پرداخت</h2>
       <table>
         <thead>
@@ -1324,9 +1390,9 @@ export function renderContractHtml(contract: RenderableContract, options: Render
         </tbody>
       </table>
       <p class="section-note">${escapeHtml(PAYMENT_NOTE)}</p>
-    </section>
+    </section>` : ''}
 
-    <section class="section">
+    ${showDigitalConfirmation ? `<section class="section">
       <h2>وضعیت تایید دیجیتال</h2>
       <div class="grid two-col">
         <div><strong>وضعیت:</strong> ${escapeHtml(digitalConfirmation?.status || EMPTY)}</div>
@@ -1334,9 +1400,9 @@ export function renderContractHtml(contract: RenderableContract, options: Render
         <div><strong>زمان ارسال:</strong> ${escapeHtml(formatDateTime(digitalConfirmation?.sentAt))}</div>
         <div><strong>زمان تایید:</strong> ${escapeHtml(formatDateTime(digitalConfirmation?.verifiedAt))}</div>
       </div>
-    </section>
+    </section>` : ''}
 
-    <section class="section">
+    ${showLegalNotes ? `<section class="section">
       <h2>توضیحات</h2>
       ${contract.notes ? `<p class="notes">${escapeHtml(contract.notes)}</p>` : ''}
       <ol class="legal-list">
@@ -1350,13 +1416,13 @@ export function renderContractHtml(contract: RenderableContract, options: Render
         <li>اعتبار این قرارداد منوط به تسویه کامل و به‌موقع کلیه تعهدات مالی خریدار در مواعد مقرر می‌باشد و عدم پرداخت، موجب سلب حقوق قانونی فروشنده در مطالبه مطالبات و خسارات نخواهد بود.</li>
         <li>امضای این قرارداد به منزله مطالعه، پذیرش و تأیید کامل مفاد آن توسط خریدار می‌باشد.</li>
       </ol>
-    </section>
+    </section>` : ''}
 
-    <section class="section signatures">
+    ${showSignatures ? `<section class="section signatures">
       <div class="sign-box"><strong>امضا و مهر فروشنده</strong></div>
       <div class="sign-box"><strong>امضا و اثر انگشت خریدار</strong></div>
       <div class="sign-box"><strong>تایید نهایی اجرا</strong></div>
-    </section>
+    </section>` : ''}
 
     <footer class="footer">
       <span>نسخه چاپی قرارداد - سامانه سبلان</span>
@@ -1537,6 +1603,18 @@ export function renderContractHtml(contract: RenderableContract, options: Render
 
     .main-total-col {
       width: 11%;
+    }
+
+    .workshop-print .main-description-col {
+      width: 38%;
+    }
+
+    .workshop-print .main-dimensions-col {
+      width: 18%;
+    }
+
+    .workshop-print .main-quantity-col {
+      width: 17%;
     }
 
     .main-products-table th:first-child,

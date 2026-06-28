@@ -35,6 +35,7 @@ import { getContractPermissions, hasFeatureAccess, User as PermissionUser } from
 import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
 import { getPreparedKindLabel, getPreparedQuantity, getPreparedUnit, getPreparedUnitLabel, isPreparedProductType } from '@/features/contract-creation/utils/preparedProductUtils';
 import { normalizeProductFinishing } from '@/features/contract-creation/utils/finishingUtils';
+import { invoiceStatusLabels, receivableStatusLabels, sourceStatusLabels, StatusBadge, taxStatusLabels } from '@/features/accounting/accountingUi';
 
 interface Contract {
   id: string;
@@ -53,6 +54,18 @@ interface Contract {
   printedAt?: string;
   isSigned?: boolean;
   accountingEditLocked?: boolean;
+  accounting?: {
+    sourceStatus: string;
+    invoiceStatus: string;
+    receivableStatus: string;
+    taxStatus: string;
+    openFlags: number;
+    openCorrections: number;
+    totalContractAmount: string;
+    invoicedAmount: string;
+    receivedAmount: string;
+    remainingAmount: string;
+  } | null;
   customer: {
     id: string;
     firstName: string;
@@ -197,7 +210,7 @@ export default function ContractDetailPage() {
       }
 
       if (response.data.success) {
-        setContract(response.data.data);
+        await loadContract();
         setError(null);
       } else {
         setError(response.data.error || 'خطا در انجام عملیات');
@@ -254,6 +267,7 @@ export default function ContractDetailPage() {
       }
 
       setContract(response.data.data);
+      await loadContract();
       const pdfResponse = await salesAPI.getContractPdf(contract.id, { fresh: false });
       if (pdfResponse.data?.success && pdfResponse.data?.data?.url) {
         openPdfUrl(pdfResponse.data.data.url, true);
@@ -364,9 +378,9 @@ export default function ContractDetailPage() {
 
   const metrics: ErpMetric[] = [
     { label: 'وضعیت', value: statusLabels[contract.status] || contract.status, icon: FaFileContract, tone: statusTones[contract.status] || 'neutral' },
+    { label: 'وضعیت حسابداری', value: contract.accounting ? (sourceStatusLabels[contract.accounting.sourceStatus] || contract.accounting.sourceStatus) : 'ثبت نشده', icon: FaCreditCard, tone: contract.accounting?.sourceStatus === 'NEEDS_CORRECTION' ? 'danger' : contract.accounting?.sourceStatus === 'HAS_FINANCIAL_RECORDS' ? 'info' : 'neutral' },
     { label: 'مبلغ کل', value: formatCurrency(totalAmount, sanitizeUiText(contract.currency, 'تومان')), icon: FaCreditCard, tone: 'success' },
     { label: 'اقلام', value: products.length.toLocaleString('fa-IR'), hint: 'محصول ثبت شده', icon: FaFileContract, tone: 'info' },
-    { label: 'برنامه تحویل', value: deliveries.length.toLocaleString('fa-IR'), hint: 'مرحله تحویل', icon: FaTruck, tone: 'warning' },
   ];
 
   return (
@@ -397,6 +411,15 @@ export default function ContractDetailPage() {
                   label="وضعیت"
                   value={<ErpBadge tone={statusTones[contract.status] || 'neutral'}>{statusLabels[contract.status] || contract.status}</ErpBadge>}
                 />
+                <ErpFieldView
+                  label="وضعیت حسابداری"
+                  value={contract.accounting ? (
+                    <StatusBadge
+                      status={contract.accounting.sourceStatus}
+                      label={sourceStatusLabels[contract.accounting.sourceStatus] || contract.accounting.sourceStatus}
+                    />
+                  ) : 'ثبت نشده'}
+                />
                 <ErpFieldView label="تاریخ ایجاد" value={PersianCalendar.formatForDisplay(contract.createdAt)} />
                 <ErpFieldView label="آخرین بروزرسانی" value={PersianCalendar.formatForDisplay(contract.updatedAt)} />
               </div>
@@ -406,6 +429,34 @@ export default function ContractDetailPage() {
                 </div>
               )}
             </ErpSection>
+
+            {contract.accounting && (
+              <ErpSection
+                title="وضعیت حسابداری"
+                description="نمای خواندنی از وضعیت مالی این قرارداد در سیستم حسابداری."
+              >
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <ErpFieldView
+                    label="وضعیت حسابداری"
+                    value={<StatusBadge status={contract.accounting.sourceStatus} label={sourceStatusLabels[contract.accounting.sourceStatus] || contract.accounting.sourceStatus} />}
+                    tone="primary"
+                  />
+                  <ErpFieldView label="صورتحساب" value={invoiceStatusLabels[contract.accounting.invoiceStatus] || contract.accounting.invoiceStatus} />
+                  <ErpFieldView label="دریافتنی" value={receivableStatusLabels[contract.accounting.receivableStatus] || contract.accounting.receivableStatus} />
+                  <ErpFieldView label="مالیات" value={taxStatusLabels[contract.accounting.taxStatus] || contract.accounting.taxStatus} />
+                </div>
+                {(contract.accounting.openCorrections > 0 || contract.accounting.openFlags > 0) && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {contract.accounting.openCorrections > 0 && (
+                      <ErpBadge tone="danger">{contract.accounting.openCorrections.toLocaleString('fa-IR')} اصلاحیه باز</ErpBadge>
+                    )}
+                    {contract.accounting.openFlags > 0 && (
+                      <ErpBadge tone="warning">{contract.accounting.openFlags.toLocaleString('fa-IR')} پرچم حسابداری</ErpBadge>
+                    )}
+                  </div>
+                )}
+              </ErpSection>
+            )}
 
             <ErpSection title="اقلام قرارداد" description="محصولات، متراژ و قیمت‌های ثبت شده در قرارداد.">
               {products.length === 0 ? (

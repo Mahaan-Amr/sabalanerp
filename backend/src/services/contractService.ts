@@ -3,6 +3,7 @@
 
 import { Prisma, PrismaClient } from '@prisma/client';
 import { generateContractNumberAssignment } from './contractNumberService';
+import { buildAccountingSummaryForContracts } from './accountingService';
 
 const prisma = new PrismaClient();
 
@@ -380,11 +381,13 @@ export async function getContract(contractId: string) {
     },
     select: { id: true, financiallyApprovedAt: true }
   });
+  const accountingSummaries = await buildAccountingSummaryForContracts([contract]);
 
   return {
     ...contract,
     accountingEditLocked: Boolean(financiallyApprovedRecord),
-    accountingFinanciallyApprovedAt: financiallyApprovedRecord?.financiallyApprovedAt || null
+    accountingFinanciallyApprovedAt: financiallyApprovedRecord?.financiallyApprovedAt || null,
+    accounting: accountingSummaries.get(contract.id) || null
   };
 }
 

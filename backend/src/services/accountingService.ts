@@ -565,6 +565,18 @@ const attachAccountingCollections = async (contracts: any[]) => {
   }));
 };
 
+export const buildAccountingSummaryForContracts = async (contracts: any[]) => {
+  if (!contracts.length) return new Map<string, any>();
+
+  const [settings, contractsWithAccounting] = await Promise.all([
+    getDefaultSettings(),
+    attachAccountingCollections(contracts)
+  ]);
+  const rows = await Promise.all(contractsWithAccounting.map((contract) => buildContractRow(contract, settings)));
+
+  return new Map(rows.map((row) => [row.contractId, row.accounting]));
+};
+
 export const listAccountingContracts = async (query: ListContractsQuery = {}) => {
   const page = Math.max(Number(query.page) || 1, 1);
   const pageSize = Math.min(Math.max(Number(query.pageSize) || DEFAULT_PAGE_SIZE, 1), 100);

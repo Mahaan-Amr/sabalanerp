@@ -10,6 +10,7 @@ import { createPayment, getPayments, validatePaymentData } from '../services/pay
 import { createContract, updateContract, getContract, validateContractAccess, approveContract, rejectContract } from '../services/contractService';
 import { getNextContractNumberPreview } from '../services/contractNumberService';
 import { contractConfirmationService } from '../services/contractConfirmationService';
+import { buildAccountingSummaryForContracts } from '../services/accountingService';
 import { getRequestEvidence } from '../utils/requestEvidence';
 import {
   buildSalesContractPdfDownloadName,
@@ -384,8 +385,9 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     });
 
     const contractIds = contracts.map((contract) => contract.id);
-    const financiallyApprovedRecords = contractIds.length
-      ? await prisma.accountingFinancialRecord.findMany({
+    const [financiallyApprovedRecords, accountingSummaries] = contractIds.length
+      ? await Promise.all([
+        prisma.accountingFinancialRecord.findMany({
           where: {
             contractId: { in: contractIds },
             financiallyApprovedAt: { not: null }
@@ -394,15 +396,18 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
             contractId: true,
             financiallyApprovedAt: true
           }
-        })
-      : [];
+        }),
+        buildAccountingSummaryForContracts(contracts)
+      ])
+      : [[], new Map()];
     const financiallyApprovedByContractId = new Map(
-      financiallyApprovedRecords.map((record) => [record.contractId, record.financiallyApprovedAt])
+      financiallyApprovedRecords.map((record) => [record.contractId, record.financiallyApprovedAt] as const)
     );
     const contractsWithAccountingLock = contracts.map((contract) => ({
       ...contract,
       accountingEditLocked: financiallyApprovedByContractId.has(contract.id),
-      accountingFinanciallyApprovedAt: financiallyApprovedByContractId.get(contract.id) || null
+      accountingFinanciallyApprovedAt: financiallyApprovedByContractId.get(contract.id) || null,
+      accounting: accountingSummaries.get(contract.id) || null
     }));
 
     const total = await prisma.salesContract.count({ where: whereClause });

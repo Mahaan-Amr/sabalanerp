@@ -30,6 +30,7 @@ import { getContractPermissions, User } from '@/lib/permissions';
 import { formatPrice, sumNumericValues } from '@/lib/numberFormat';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
+import { sourceStatusLabels, StatusBadge } from '@/features/accounting/accountingUi';
 
 interface Contract {
   id: string;
@@ -42,6 +43,15 @@ interface Contract {
   currency: string;
   createdAt: string;
   accountingEditLocked?: boolean;
+  accounting?: {
+    sourceStatus: string;
+    invoiceStatus: string;
+    receivableStatus: string;
+    taxStatus: string;
+    openFlags: number;
+    openCorrections: number;
+    remainingAmount: string;
+  } | null;
   customer: {
     id: string;
     firstName: string;
@@ -172,6 +182,7 @@ export default function ContractsPage() {
       const companyName = contract.customer.companyName?.toLowerCase() || '';
       const projectManager = contract.customer.projectManagerName?.toLowerCase() || '';
       const creatorSequence = contract.creatorSequenceNumber != null ? String(contract.creatorSequenceNumber) : '';
+      const accountingStatus = contract.accounting?.sourceStatus || '';
 
       const matchesSearch =
         !normalizedSearch ||
@@ -180,7 +191,9 @@ export default function ContractsPage() {
         creatorSequence.includes(normalizedSearch) ||
         customerName.includes(normalizedSearch) ||
         companyName.includes(normalizedSearch) ||
-        projectManager.includes(normalizedSearch);
+        projectManager.includes(normalizedSearch) ||
+        accountingStatus.toLowerCase().includes(normalizedSearch) ||
+        (sourceStatusLabels[accountingStatus] || '').toLowerCase().includes(normalizedSearch);
 
       const matchesStatus = statusFilter === 'ALL' || contract.status === statusFilter;
       return matchesSearch && matchesStatus;
@@ -337,6 +350,31 @@ export default function ContractsPage() {
           {statusLabels[contract.status] || contract.status}
         </ErpBadge>
       ),
+    },
+    {
+      id: 'accounting',
+      header: 'وضعیت حسابداری',
+      mobileLabel: 'حسابداری',
+      priority: 'meta',
+      cell: (contract) => {
+        const accounting = contract.accounting;
+        if (!accounting) return <ErpBadge tone="neutral">ثبت نشده</ErpBadge>;
+        return (
+          <div className="flex flex-col items-start gap-1">
+            <StatusBadge
+              status={accounting.sourceStatus}
+              label={sourceStatusLabels[accounting.sourceStatus] || accounting.sourceStatus}
+            />
+            {(accounting.openCorrections > 0 || accounting.openFlags > 0) && (
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                {accounting.openCorrections > 0 ? `${accounting.openCorrections.toLocaleString('fa-IR')} اصلاحیه` : ''}
+                {accounting.openCorrections > 0 && accounting.openFlags > 0 ? '، ' : ''}
+                {accounting.openFlags > 0 ? `${accounting.openFlags.toLocaleString('fa-IR')} پرچم` : ''}
+              </span>
+            )}
+          </div>
+        );
+      },
     },
   ];
 

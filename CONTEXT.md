@@ -264,6 +264,10 @@ _Avoid_: generating customer-facing output from an older creation snapshot when 
 A sales contract becomes immutable for sales edits only after accounting financially approves an accounting financial record for that contract.
 _Avoid_: locking sales edits merely because the contract was sales-approved, digitally signed, or printed
 
+**وضعیت حسابداری در فروش**:
+Sales users may view the accounting status of a sales contract as read-only accounting information on the sales contract list and detail pages. The status remains owned by accounting and reflects the current accounting workflow state, including whether the contract is eligible for financial action, already has financial records, or needs accounting correction.
+_Avoid_: letting sales users edit accounting status, or showing a stale sales-owned copy of the accounting workflow state
+
 **تاریخ فاکتور سیستمی**:
 The Sepidar/system invoice date entered by accounting during financial approval. It may be today, up to two days in the past, or up to thirty days in the future.
 _Avoid_: treating future system invoice dates as invalid when they are within the accounting forward-entry window

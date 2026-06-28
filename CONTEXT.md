@@ -108,6 +108,10 @@ _Avoid_: scheduling a service in a different unit than its contract row, or allo
 A paid stone edge operation applied during contract pricing, calculated by length or square meter depending on the item.
 _Avoid_: ساب as a category, sub-service, tool, پرداخت سنگ
 
+**لبه‌های ابزار در خروجی قرارداد**:
+When an ابزار is applied to selected product edges, the chosen edges are part of the contract product detail and should be visible anywhere the contract product details are printed or exported, including customer-facing contracts, accounting copies, and workshop copies. محیط کامل means all relevant edges for that product part; otherwise the exact selected edges such as جلو، عقب، چپ، and راست should be shown with the ابزار name.
+_Avoid_: printing only the ابزار name or price when the selected edges explain what work was ordered
+
 **پرداخت سنگ**:
 A stone finishing or treatment option applied during contract pricing, separate from ابزار, calculated by متر طول or متر مربع depending on the item.
 _Avoid_: ابزار, خدمات, فرآوری سنگ

@@ -7507,7 +7507,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       subService: selectedSubService || fallbackSubService,
                       meter: meters,
                       cost: meters * (tool.pricePerMeter || 0),
-                      calculationBase: selectedSubService?.calculationBase || 'length'
+                      calculationBase: selectedSubService?.calculationBase || 'length',
+                      edges: {
+                        front: !!tool.front,
+                        left: !!tool.left,
+                        right: !!tool.right,
+                        back: !!tool.back,
+                        perimeter: !!tool.perimeter
+                      }
                     };
                   });
                   

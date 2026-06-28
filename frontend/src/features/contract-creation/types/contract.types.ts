@@ -186,6 +186,13 @@ export interface AppliedSubService {
   meter: number; // used length or area
   cost: number; // total service cost
   calculationBase: 'length' | 'squareMeters'; // calculation base
+  edges?: {
+    front?: boolean;
+    left?: boolean;
+    right?: boolean;
+    back?: boolean;
+    perimeter?: boolean;
+  };
 }
 
 export interface CuttingBreakdownEntry {

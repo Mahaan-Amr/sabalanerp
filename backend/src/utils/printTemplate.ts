@@ -36,6 +36,7 @@ interface NormalizedCut {
 interface NormalizedService {
   category: string;
   name: string;
+  selectedEdgesLabel?: string;
   amount: number;
   amountLabel: string;
   rateLabel: string;
@@ -45,6 +46,7 @@ interface NormalizedService {
 
 interface NormalizedProductTool {
   name: string;
+  selectedEdgesLabel?: string;
   amount: number;
   amountLabel: string;
   rate: number;
@@ -163,6 +165,21 @@ const SELLER_ADDRESS = 'شیراز، بزرگراه دکتر حسابی، بعد
 const COMPANY_PHONE = '071-91010900';
 const DELIVERY_NOTE = 'برنامه تحویل با توجه به شرایط اجرایی و با هماهنگی خریدار، ممکن است تغییر یابد';
 const PAYMENT_NOTE = 'در صورت عدم پرداخت، تأمین کالا به میزان وجوه پرداختی و مانده سفارش با نرخ روز خواهد بود';
+
+const selectedEdgeLabels = (source: any): string => {
+  const edges = source?.edges || source || {};
+  if (edges?.perimeter) return 'محیط کامل';
+  const labels = [
+    edges?.front ? 'جلو' : '',
+    edges?.back ? 'عقب' : '',
+    edges?.left ? 'چپ' : '',
+    edges?.right ? 'راست' : ''
+  ].filter(Boolean);
+  return labels.join('، ');
+};
+
+const withSelectedEdges = (name: string, selectedEdgesLabel?: string): string =>
+  selectedEdgesLabel ? `${name} (${selectedEdgesLabel})` : name;
 
 const publicAssetPath = (...segments: string[]): string => {
   const candidates = [
@@ -557,9 +574,11 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
       (product?.appliedSubServices || []).forEach((service: any) => {
         const amount = toNumber(service?.meter);
         const rate = toNumber(service?.subService?.pricePerMeter);
+        const selectedEdgesLabel = selectedEdgeLabels(service);
         services.push({
-          category: 'خدمات',
+          category: selectedEdgesLabel ? 'ابزار' : 'خدمات',
           name: service?.subService?.namePersian || service?.subService?.name || EMPTY,
+          selectedEdgesLabel,
           amount,
           amountLabel: `${toFaNumber(amount, 4)} ${service?.calculationBase === 'squareMeters' ? 'متر مربع' : 'متر'}`,
           rate,
@@ -591,8 +610,10 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         const amount = toNumber(tool?.computedMeters || tool?.meters || tool?.amount);
         const rate = toNumber(tool?.pricePerMeter || tool?.rate || tool?.unitPrice);
         const cost = toNumber(tool?.totalPrice || tool?.cost);
+        const selectedEdgesLabel = selectedEdgeLabels(tool);
         return {
           name: tool?.namePersian || tool?.name || EMPTY,
+          selectedEdgesLabel,
           amount,
           amountLabel: amount > 0 ? `${toFaNumber(amount, 4)} متر طول` : EMPTY,
           rate,
@@ -1022,7 +1043,7 @@ const buildFlatProductRows = (
       rows.push({
         indexLabel: '',
         code: '',
-        description: tool.name,
+        description: withSelectedEdges(tool.name, tool.selectedEdgesLabel),
         category: 'ابزار',
         dimensionsOrAmount: tool.amountLabel,
         quantityOrArea: '',
@@ -1035,7 +1056,7 @@ const buildFlatProductRows = (
       rows.push({
         indexLabel: '',
         code: '',
-        description: service.name,
+        description: withSelectedEdges(service.name, service.selectedEdgesLabel),
         category: service.category,
         dimensionsOrAmount: service.amountLabel,
         quantityOrArea: '',

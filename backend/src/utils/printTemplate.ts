@@ -40,6 +40,7 @@ interface NormalizedService {
   amount: number;
   amountLabel: string;
   rateLabel: string;
+  rateUnitLabel?: string;
   rate: number;
   cost: number;
 }
@@ -51,6 +52,7 @@ interface NormalizedProductTool {
   amountLabel: string;
   rate: number;
   rateLabel: string;
+  rateUnitLabel?: string;
   cost: number;
 }
 
@@ -275,6 +277,33 @@ const hasTextValue = (value: unknown): boolean => {
 
 const formatAmount = (value: unknown, currency = 'تومان'): string => {
   return `${toFaNumber(value)} ${escapeHtml(currency || 'تومان')}`;
+};
+
+const shouldShowRialEquivalent = (currency = 'تومان'): boolean =>
+  String(currency || '').trim() === 'تومان';
+
+const formatAccountingAmount = (value: unknown, currency = 'تومان'): string => {
+  const base = formatAmount(value, currency);
+  if (!shouldShowRialEquivalent(currency)) return base;
+  return `${base}<br><span class="rial-equivalent">${toFaNumber(toNumber(value) * 10)} ریال</span>`;
+};
+
+const formatPrintAmount = (
+  value: unknown,
+  currency = 'تومان',
+  options: { includeRialEquivalent?: boolean } = {}
+): string => options.includeRialEquivalent
+  ? formatAccountingAmount(value, currency)
+  : formatAmount(value, currency);
+
+const formatPrintRate = (
+  value: unknown,
+  currency = 'تومان',
+  unitLabel = '',
+  options: { includeRialEquivalent?: boolean } = {}
+): string => {
+  const amount = formatPrintAmount(value, currency, options);
+  return unitLabel ? `${amount} / ${escapeHtml(unitLabel)}` : amount;
 };
 
 const getFinishingBase = (product: any): 'length' | 'squareMeters' => {
@@ -582,6 +611,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         const amount = toNumber(service?.meter);
         const rate = toNumber(service?.subService?.pricePerMeter);
         const selectedEdgesLabel = selectedEdgeLabels(service);
+        const rateUnitLabel = service?.calculationBase === 'squareMeters' ? 'متر مربع' : 'متر طول';
         services.push({
           category: selectedEdgesLabel ? 'ابزار' : 'خدمات',
           name: service?.subService?.namePersian || service?.subService?.name || EMPTY,
@@ -590,6 +620,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
           amountLabel: `${toFaNumber(amount, 4)} ${service?.calculationBase === 'squareMeters' ? 'متر مربع' : 'متر'}`,
           rate,
           rateLabel: rate ? `${toFaNumber(rate)} تومان` : EMPTY,
+          rateUnitLabel,
           cost: toNumber(service?.cost)
         });
       });
@@ -606,6 +637,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
           amountLabel: getFinishingAmountLabel(product),
           rate: finishingUnitPrice,
           rateLabel: finishingUnitPrice ? `${toFaNumber(finishingUnitPrice)} تومان / ${finishingUnitLabel}` : EMPTY,
+          rateUnitLabel: finishingUnitLabel,
           cost: toNumber(product?.finishingCost)
         });
       }
@@ -625,6 +657,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
           amountLabel: amount > 0 ? `${toFaNumber(amount, 4)} متر طول` : EMPTY,
           rate,
           rateLabel: rate > 0 ? `${toFaNumber(rate)} تومان / متر طول` : EMPTY,
+          rateUnitLabel: 'متر طول',
           cost
         };
       });
@@ -952,7 +985,8 @@ const buildFlatProductRows = (
   standaloneServices: NormalizedStandaloneService[],
   currency: string,
   grandTotal: number,
-  financials?: NormalizedFinancials
+  financials?: NormalizedFinancials,
+  options: { includeRialEquivalent?: boolean } = {}
 ): FlatProductRow[] => {
   const rows: FlatProductRow[] = [];
 
@@ -978,8 +1012,8 @@ const buildFlatProductRows = (
       category: 'محصول',
       dimensionsOrAmount: product.dimensions,
       quantityOrArea: formatProductQuantityOrArea(product),
-      rate: product.unitPrice > 0 ? formatAmount(product.unitPrice, currency) : EMPTY,
-      total: formatAmount(baseAmount, currency)
+      rate: product.unitPrice > 0 ? formatPrintAmount(product.unitPrice, currency, options) : EMPTY,
+      total: formatPrintAmount(baseAmount, currency, options)
     });
 
     const sourceMaterialRows = product.sourceMaterials.length > 0
@@ -1026,10 +1060,10 @@ const buildFlatProductRows = (
         code: '',
         description: `حکمی ${toFaNumber(product.mandatoryPercentage)}٪`,
         category: 'حکمی',
-        dimensionsOrAmount: formatAmount(product.originalTotalPrice, currency),
+        dimensionsOrAmount: formatPrintAmount(product.originalTotalPrice, currency, options),
         quantityOrArea: '',
         rate: `${toFaNumber(product.mandatoryPercentage)}٪`,
-        total: formatAmount(mandatoryAmount, currency)
+        total: formatPrintAmount(mandatoryAmount, currency, options)
       });
     }
 
@@ -1041,8 +1075,8 @@ const buildFlatProductRows = (
         category: 'برش',
         dimensionsOrAmount: `${toFaNumber(cut.meters, 4)} متر`,
         quantityOrArea: '',
-        rate: cut.rate > 0 ? formatAmount(cut.rate, currency) : EMPTY,
-        total: formatAmount(cut.cost, currency)
+        rate: cut.rate > 0 ? formatPrintAmount(cut.rate, currency, options) : EMPTY,
+        total: formatPrintAmount(cut.cost, currency, options)
       });
     });
 
@@ -1054,8 +1088,8 @@ const buildFlatProductRows = (
         category: 'ابزار',
         dimensionsOrAmount: tool.amountLabel,
         quantityOrArea: '',
-        rate: tool.rateLabel,
-        total: formatAmount(tool.cost, currency)
+        rate: tool.rate > 0 ? formatPrintRate(tool.rate, currency, tool.rateUnitLabel, options) : tool.rateLabel,
+        total: formatPrintAmount(tool.cost, currency, options)
       });
     });
 
@@ -1067,8 +1101,8 @@ const buildFlatProductRows = (
         category: service.category,
         dimensionsOrAmount: service.amountLabel,
         quantityOrArea: '',
-        rate: service.rateLabel || EMPTY,
-        total: formatAmount(service.cost, currency)
+        rate: service.rate > 0 ? formatPrintRate(service.rate, currency, service.rateUnitLabel, options) : (service.rateLabel || EMPTY),
+        total: formatPrintAmount(service.cost, currency, options)
       });
     });
   });
@@ -1082,8 +1116,8 @@ const buildFlatProductRows = (
       category: service.sourceType,
       dimensionsOrAmount: `${toFaNumber(service.quantity, 4)} ${service.unit}`,
       quantityOrArea: `${toFaNumber(service.quantity, 4)} ${service.unit}`,
-      rate: service.unitPrice > 0 ? formatAmount(service.unitPrice, currency) : EMPTY,
-      total: formatAmount(service.totalPrice, currency)
+      rate: service.unitPrice > 0 ? formatPrintAmount(service.unitPrice, currency, options) : EMPTY,
+      total: formatPrintAmount(service.totalPrice, currency, options)
     });
   });
 
@@ -1096,11 +1130,11 @@ const buildFlatProductRows = (
         : 'تخفیف قرارداد',
       category: 'تخفیف',
       dimensionsOrAmount: financials.discountBaseSubtotal > 0
-        ? formatAmount(financials.discountBaseSubtotal, currency)
+        ? formatPrintAmount(financials.discountBaseSubtotal, currency, options)
         : '',
       quantityOrArea: '',
       rate: financials.discountPercent > 0 ? `${toFaNumber(financials.discountPercent)}٪` : '',
-      total: `-${formatAmount(financials.discountAmount, currency)}`,
+      total: formatPrintAmount(-financials.discountAmount, currency, options),
       className: 'discount-row'
     });
   }
@@ -1113,7 +1147,7 @@ const buildFlatProductRows = (
     dimensionsOrAmount: '',
     quantityOrArea: '',
     rate: '',
-    total: formatAmount(grandTotal, currency),
+    total: formatPrintAmount(grandTotal, currency, options),
     className: 'total-row'
   });
 
@@ -1126,14 +1160,19 @@ const renderProductMainRows = (
   currency: string,
   grandTotal: number,
   financials?: NormalizedFinancials,
-  options: { hidePrices?: boolean } = {}
+  options: { hidePrices?: boolean; includeRialEquivalent?: boolean } = {}
 ): string => {
   const columnCount = options.hidePrices ? 6 : 8;
   if (!products.length && !standaloneServices.length) {
     return `<tr><td colspan="${columnCount}" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
   }
 
-  return buildFlatProductRows(products, standaloneServices, currency, grandTotal, financials)
+  const renderFormattedAmountCell = (value: string): string =>
+    value.includes('rial-equivalent') || value.includes('<br>')
+      ? value
+      : escapeHtml(value || EMPTY);
+
+  return buildFlatProductRows(products, standaloneServices, currency, grandTotal, financials, options)
     .filter((row) => !(options.hidePrices && (row.className === 'total-row' || row.className === 'discount-row')))
     .map((row) => {
     const classAttribute = row.className ? ` class="${row.className}"` : '';
@@ -1157,8 +1196,8 @@ const renderProductMainRows = (
     const priceCells = options.hidePrices
       ? ''
       : `
-        <td>${escapeHtml(row.rate || EMPTY)}</td>
-        <td>${escapeHtml(row.total || EMPTY)}</td>
+        <td>${renderFormattedAmountCell(row.rate || EMPTY)}</td>
+        <td>${renderFormattedAmountCell(row.total || EMPTY)}</td>
       `;
     return `
       <tr${classAttribute}>
@@ -1166,7 +1205,7 @@ const renderProductMainRows = (
         <td>${escapeHtml(row.code || EMPTY)}</td>
         <td>${escapeHtml(row.description || EMPTY)}</td>
         <td>${escapeHtml(row.category || EMPTY)}</td>
-        <td>${escapeHtml(row.dimensionsOrAmount || EMPTY)}</td>
+        <td>${renderFormattedAmountCell(row.dimensionsOrAmount || EMPTY)}</td>
         <td>${escapeHtml(row.quantityOrArea || EMPTY)}</td>
         ${priceCells}
       </tr>
@@ -1202,7 +1241,11 @@ const renderDeliveryRows = (deliveries: NormalizedDelivery[], options: { hideRec
   }).join('');
 };
 
-const renderPaymentRows = (payments: NormalizedPayment[], financials: NormalizedFinancials): string => {
+const renderPaymentRows = (
+  payments: NormalizedPayment[],
+  financials: NormalizedFinancials,
+  options: { includeRialEquivalent?: boolean } = {}
+): string => {
   if (!payments.length) {
     return `<tr><td colspan="9" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
   }
@@ -1213,7 +1256,7 @@ const renderPaymentRows = (payments: NormalizedPayment[], financials: Normalized
       <tr>
         <td>${toFaNumber(payment.index)}</td>
         <td>${escapeHtml(payment.methodLabel)}</td>
-        <td>${formatAmount(payment.amount, financials.currency)}</td>
+        <td>${formatPrintAmount(payment.amount, financials.currency, options)}</td>
         <td>${escapeHtml(payment.statusLabel)}</td>
         <td>${escapeHtml(payment.paymentDate)}</td>
         <td>${escapeHtml(payment.checkNumber)}</td>
@@ -1228,7 +1271,7 @@ const renderPaymentRows = (payments: NormalizedPayment[], financials: Normalized
         <tr class="sub-row">
           <td>—</td>
           <td>قسط ${toFaNumber(installment.index)}</td>
-          <td>${formatAmount(installment.amount, financials.currency)}</td>
+          <td>${formatPrintAmount(installment.amount, financials.currency, options)}</td>
           <td>${escapeHtml(installment.status)}</td>
           <td>${escapeHtml(installment.dueDate)}</td>
           <td>—</td>
@@ -1245,7 +1288,7 @@ const renderPaymentRows = (payments: NormalizedPayment[], financials: Normalized
       <tr class="sub-row">
         <td>—</td>
         <td>${escapeHtml(financials.extraPaymentReasonLabel)}</td>
-        <td>${formatAmount(financials.extraPaymentAmount, financials.currency)}</td>
+        <td>${formatPrintAmount(financials.extraPaymentAmount, financials.currency, options)}</td>
         <td>—</td>
         <td>—</td>
         <td>—</td>
@@ -1259,14 +1302,17 @@ const renderPaymentRows = (payments: NormalizedPayment[], financials: Normalized
   return rows.join('');
 };
 
-const renderFinancialSummary = (financials: NormalizedFinancials): string => {
+const renderFinancialSummary = (
+  financials: NormalizedFinancials,
+  options: { includeRialEquivalent?: boolean } = {}
+): string => {
   const rows = [
-    `<div><strong>جمع محصولات:</strong> ${formatAmount(financials.productsTotal, financials.currency)}</div>`,
-    financials.servicesTotal > 0 ? `<div><strong>جمع خدمات:</strong> ${formatAmount(financials.servicesTotal, financials.currency)}</div>` : '',
-    financials.cutsTotal > 0 ? `<div><strong>جمع برش:</strong> ${formatAmount(financials.cutsTotal, financials.currency)}</div>` : '',
-    financials.finishingTotal > 0 ? `<div><strong>جمع پرداخت سنگ:</strong> ${formatAmount(financials.finishingTotal, financials.currency)}</div>` : '',
-    financials.discountAmount > 0 ? `<div><strong>تخفیف قرارداد${financials.discountPercent > 0 ? ` (${toFaNumber(financials.discountPercent)}٪)` : ''}:</strong> -${formatAmount(financials.discountAmount, financials.currency)}</div>` : '',
-    `<div><strong>مبلغ نهایی قرارداد:</strong> ${formatAmount(financials.grandTotal, financials.currency)}</div>`,
+    `<div><strong>جمع محصولات:</strong> ${formatPrintAmount(financials.productsTotal, financials.currency, options)}</div>`,
+    financials.servicesTotal > 0 ? `<div><strong>جمع خدمات:</strong> ${formatPrintAmount(financials.servicesTotal, financials.currency, options)}</div>` : '',
+    financials.cutsTotal > 0 ? `<div><strong>جمع برش:</strong> ${formatPrintAmount(financials.cutsTotal, financials.currency, options)}</div>` : '',
+    financials.finishingTotal > 0 ? `<div><strong>جمع پرداخت سنگ:</strong> ${formatPrintAmount(financials.finishingTotal, financials.currency, options)}</div>` : '',
+    financials.discountAmount > 0 ? `<div><strong>تخفیف قرارداد${financials.discountPercent > 0 ? ` (${toFaNumber(financials.discountPercent)}٪)` : ''}:</strong> ${formatPrintAmount(-financials.discountAmount, financials.currency, options)}</div>` : '',
+    `<div><strong>مبلغ نهایی قرارداد:</strong> ${formatPrintAmount(financials.grandTotal, financials.currency, options)}</div>`,
     `<div><strong>واحد پول:</strong> ${escapeHtml(financials.currency)}</div>`
   ].filter(Boolean);
 
@@ -1376,6 +1422,8 @@ type RenderContractHtmlOptions = {
 export function renderContractHtml(contract: RenderableContract, options: RenderContractHtmlOptions = {}): string {
   const variant = options.variant || 'original';
   const isWorkshopVariant = variant === 'workshop';
+  const isAccountingVariant = variant === 'accounting';
+  const priceFormatOptions = { includeRialEquivalent: isAccountingVariant };
   const showFormalSection = variant === 'original';
   const showCustomerSection = !isWorkshopVariant;
   const showPaymentSection = !isWorkshopVariant;
@@ -1462,7 +1510,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           </tr>
         </thead>
         <tbody>
-          ${renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials, { hidePrices: isWorkshopVariant })}
+          ${renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials, { hidePrices: isWorkshopVariant, ...priceFormatOptions })}
         </tbody>
       </table>
     </section>
@@ -1514,7 +1562,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           </tr>
         </thead>
         <tbody>
-          ${renderPaymentRows(normalizedPayments, financials)}
+          ${renderPaymentRows(normalizedPayments, financials, priceFormatOptions)}
         </tbody>
       </table>
       <p class="section-note">${escapeHtml(PAYMENT_NOTE)}</p>
@@ -1819,6 +1867,14 @@ export function renderContractHtml(contract: RenderableContract, options: Render
     .sub-row td {
       background: #fafafa;
       color: #374151;
+    }
+
+    .rial-equivalent {
+      display: inline-block;
+      color: #4b5563;
+      font-size: 9px;
+      line-height: 1.45;
+      white-space: normal;
     }
 
     .total-row td {

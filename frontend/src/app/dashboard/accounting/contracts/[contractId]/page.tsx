@@ -146,12 +146,12 @@ export default function AccountingContractDetailPage({ params }: { params: { con
     setPdfActionLoading(actionKey);
     try {
       if (!tryPrint) {
-        const response = await accountingAPI.downloadSalesContractPdf(params.contractId, { fresh: false, variant: salesPdfVariant });
+        const response = await accountingAPI.downloadSalesContractPdf(params.contractId, { fresh: true, variant: salesPdfVariant });
         downloadBlobResponse(response, `sales_contract_${params.contractId}_${salesPdfVariant}.pdf`);
         return;
       }
 
-      const response = await accountingAPI.getSalesContractPdf(params.contractId, { fresh: false, variant: salesPdfVariant });
+      const response = await accountingAPI.getSalesContractPdf(params.contractId, { fresh: true, variant: salesPdfVariant });
       const url = response.data?.data?.url;
       if (!response.data?.success || !url) throw new Error('Sales contract PDF url was not returned');
       openPdfUrl(url, tryPrint);

@@ -211,7 +211,7 @@ router.get('/contracts/:contractId/sales-pdf', accountingView, async (req: AuthR
 
     const variant = salesContractPdfVariantFromQuery(req.query.variant);
     const cacheKey = salesContractPdfCacheKey(variant);
-    const fresh = String(req.query.fresh || 'false').toLowerCase() === 'true';
+    const fresh = variant !== 'original' || String(req.query.fresh || 'false').toLowerCase() === 'true';
     const shouldDownload = String(req.query.download || 'false').toLowerCase() === 'true';
     const currentSignatures = (contract.signatures as any) || {};
     const printableContract = variant === 'original' && contract.status === 'SIGNED'

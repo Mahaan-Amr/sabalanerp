@@ -479,6 +479,10 @@ export default function CreateContractWizard({
       ? visibleWizardSteps.findIndex((step) => step.id === currentStep)
       : 0) + 1
   );
+  const isContractCreationComplete =
+    !isContractEditMode &&
+    currentStep === 7 &&
+    !!wizardData.signature?.contractId;
 
   useEffect(() => {
     if (shouldSkipDeliveryStep && currentStep === 5) {
@@ -5342,6 +5346,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     mode,
     contractId
   });
+  const handleWizardSubmit = () => {
+    if (isContractCreationComplete) {
+      router.push('/dashboard/sales/contracts');
+      return;
+    }
+
+    contractSubmission.handleCreateContract();
+  };
   
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 py-4 sm:py-8 relative z-0">
@@ -5423,13 +5435,17 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           totalSteps={visibleWizardSteps.length}
           onPrevious={goToPreviousStep}
           onNext={goToNextStep}
-          onSubmit={contractSubmission.handleCreateContract}
+          onSubmit={handleWizardSubmit}
           loading={loading || wizardLoading || contractSubmission.isSubmitting}
           canGoNext={true}
           canGoPrevious={visibleCurrentStep > 1}
           showSubmitOnEveryStep={isContractEditMode}
           labels={{
-            submit: isContractEditMode ? 'ذخیره تغییرات' : 'ثبت قرارداد',
+            submit: isContractEditMode
+              ? 'ذخیره تغییرات'
+              : isContractCreationComplete
+                ? 'اتمام و بازگشت به قراردادها'
+                : 'ثبت قرارداد',
             submitting: isContractEditMode ? 'در حال ذخیره...' : 'در حال ثبت...'
           }}
         />

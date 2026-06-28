@@ -189,6 +189,26 @@ assert.deepEqual(
   ], wizardData).map((delivery) => delivery.receiverName),
   ['مدیر پروژه', 'تحویل گیرنده متفاوت']
 );
+assert.deepEqual(
+  syncDeliveryDefaults([
+    {
+      deliveryDate: '',
+      projectManagerName: 'Ali ',
+      receiverName: 'Ali Mohammadi',
+      deliveryAddress: 'Tehran ',
+      products: []
+    }
+  ], wizardData).map((delivery) => ({
+    projectManagerName: delivery.projectManagerName,
+    receiverName: delivery.receiverName,
+    deliveryAddress: delivery.deliveryAddress
+  })),
+  [{
+    projectManagerName: 'Ali ',
+    receiverName: 'Ali Mohammadi',
+    deliveryAddress: 'Tehran '
+  }]
+);
 
 assert.equal(getDeliveryUnit(makeContractProduct({ productType: 'longitudinal' })), 'meter');
 assert.equal(getDeliveryUnitLabel('meter'), 'متر طول');

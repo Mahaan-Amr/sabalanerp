@@ -292,6 +292,10 @@ _Avoid_: a separate simplified edit form, or forcing linear navigation during ed
 During sales contract editing, users may jump directly to any step, but saving changes requires the complete contract to be valid; validation should point the user to the first invalid step.
 _Avoid_: blocking step jumps in edit mode, or saving partially invalid edited contracts
 
+**اتمام ایجاد قرارداد فروش**:
+After a new sales contract has been saved and the workflow reaches the digital confirmation step, the primary completion action means leaving the completed creation flow and returning to the sales contracts list.
+_Avoid_: showing ثبت قرارداد again after the contract has already been created, or creating a duplicate contract when the user only wants to leave the completed workflow
+
 **ویرایش جزئیات محصول قرارداد**:
 Editing a saved contract product should preserve previously selected ابزار and پرداخت سنگ details from the contract snapshot, even when the current catalog record is missing or inactive. Saved labels, units, prices, and amounts should remain visible instead of being silently dropped.
 _Avoid_: resetting selected contract product details only because catalog lookup fails
@@ -320,6 +324,10 @@ _Avoid_: forcing payment rows to equal the payable contract amount exactly, trea
 A manually entered payment-plan method that applies a claimed pre-existing customer credit or balance to a sales contract until the accounting system can verify customer balances automatically. It is distinct from new money collected through نقدی شبا، نقدی، or چک, defaults its date to today when entered, appears in contract print/PDF payment output, and warns the user that the contract may expire if accounting finds a mismatch.
 _Avoid_: using استفاده از باقی مانده مشتری to record new cash collected now, hiding it from printed payment terms, or treating the manually entered balance as automatically accounting-verified
 
+**نام‌های برنامه تحویل**:
+The project manager and receiver names on a delivery schedule are free-text person names. They may be prefilled from project/customer defaults, but multi-part names with spaces are valid and should remain exactly as the user enters them while preparing the delivery plan.
+_Avoid_: collapsing multi-part names, removing typed spacing, or replacing an edited delivery name with a default while the user is typing
+
 **برنامه تحویل چاپی**:
 The delivery schedule shown in customer-facing PDF and print output. It should prioritize readable delivered item names and a separate delivered amount/metrage column over operational fields that make the table wrap.
 _Avoid_: combining item name and delivered amount in one cramped cell when several delivery rows are present
@@ -338,8 +346,8 @@ _Avoid_: exposing prices, full customer identity details, payment terms, legal t
 
 **انتخاب نسخه چاپ در حسابداری**:
 Accounting chooses sales-contract print/PDF variants from a dropdown on the accounting contract detail page. Sales contract detail keeps the customer-facing original version, while accounting can choose نسخه اصلی، چاپ حسابداری، or چاپ نمره کارگاه.
-Only چاپ نسخه اصلی marks the commercial contract as printed. چاپ حسابداری and چاپ نمره کارگاه are internal operational outputs and do not change the contract lifecycle status or printedAt.
-_Avoid_: exposing accounting/workshop print variants as ordinary sales-detail actions, scattering print variants across unrelated buttons, or changing contract status when an internal operational print is generated
+Only چاپ نسخه اصلی marks the commercial contract as printed. چاپ حسابداری and چاپ نمره کارگاه are internal operational outputs and do not change the contract lifecycle status or printedAt. Print and PDF actions from accounting generate from the current saved contract at action time; internal accounting and workshop variants must not be served from a previously generated PDF cache.
+_Avoid_: exposing accounting/workshop print variants as ordinary sales-detail actions, scattering print variants across unrelated buttons, changing contract status when an internal operational print is generated, or reusing a stale accounting/workshop PDF after contract details have changed
 
 **طول مصرفی سنگ مصرفی**:
 The length shown for سنگ مصرفی is the source or standard length consumed from the material, not the finished/customer-requested product length. The product row shows the finished dimensions; سنگ مصرفی explains the material usage that produced it.

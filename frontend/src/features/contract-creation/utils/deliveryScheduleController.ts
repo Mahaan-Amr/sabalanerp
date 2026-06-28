@@ -31,11 +31,14 @@ export const syncDeliveryDefaults = (
   const projectManagerName = getDefaultProjectManagerName(wizardData);
   const deliveryAddress = getDefaultDeliveryAddress(wizardData);
 
+  const withDefaultText = (value: string | undefined, fallback: string): string =>
+    value === undefined || value.trim() === '' ? fallback : value;
+
   return deliveries.map((delivery) => ({
     ...delivery,
-    projectManagerName: delivery.projectManagerName?.trim() || projectManagerName,
-    receiverName: delivery.receiverName?.trim() || projectManagerName,
-    deliveryAddress: delivery.deliveryAddress?.trim() || deliveryAddress
+    projectManagerName: withDefaultText(delivery.projectManagerName, projectManagerName),
+    receiverName: withDefaultText(delivery.receiverName, projectManagerName),
+    deliveryAddress: withDefaultText(delivery.deliveryAddress, deliveryAddress)
   }));
 };
 

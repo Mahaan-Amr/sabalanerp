@@ -76,7 +76,7 @@ import { useContractProductCartController } from '@/features/contract-creation/h
 import { NOSING_TYPES, PRODUCT_TYPES, WIZARD_STEPS } from '@/features/contract-creation/constants/contract.constants';
 
 // Import utilities
-import { generateCompactProductName, generateFullProductName, productSupportsContractType } from '@/features/contract-creation/utils/productUtils';
+import { generateCompactProductName, generateFullProductName, generateSlabContractProductName, productSupportsContractType } from '@/features/contract-creation/utils/productUtils';
 import { determineSlabLineCutPlan } from '@/features/contract-creation/utils/productCalculations';
 import {
   hasLayerEdgeSelection,
@@ -2432,12 +2432,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       const defaultOriginalLength = lengthUnit === 'm'
         ? defaultStandardLengthCm / 100
         : defaultStandardLengthCm;
+      const slabProductName = generateSlabContractProductName(product);
       const defaultConfig: Partial<ContractProduct> = {
         productId: product.id,
         product,
         productType: 'slab',
         stoneCode: product.code,
-        stoneName: product.namePersian,
+        stoneName: slabProductName,
         diameterOrWidth: product.widthValue,
         length: 0,
         width: 0,
@@ -4337,7 +4338,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         product: selectedProduct,
         productType: 'slab',
         stoneCode: productConfig.stoneCode || selectedProduct.code,
-        stoneName: productConfig.stoneName || selectedProduct.namePersian,
+        stoneName: generateSlabContractProductName(selectedProduct),
         diameterOrWidth: productConfig.diameterOrWidth || selectedProduct.widthValue,
         length: calculated.length,
         width: calculated.width,

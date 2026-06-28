@@ -143,6 +143,112 @@ interface MasterDataItem {
   isActive: boolean;
 }
 
+type MasterDataKey = 'cutTypes' | 'stoneMaterials' | 'cutWidths' | 'thicknesses' | 'mines' | 'finishTypes' | 'colors';
+
+interface SearchableDropdownProps {
+  type: MasterDataKey;
+  label: string;
+  placeholder: string;
+  error?: string;
+  selectedItem: MasterDataItem | null;
+  filteredData: MasterDataItem[];
+  searchTerm: string;
+  onSearchChange: (type: MasterDataKey, value: string) => void;
+  onSelect: (type: MasterDataKey, item: MasterDataItem) => void;
+}
+
+const SearchableDropdown = ({
+  type,
+  label,
+  placeholder,
+  error,
+  selectedItem,
+  filteredData,
+  searchTerm,
+  onSearchChange,
+  onSelect
+}: SearchableDropdownProps) => (
+  <div className="space-y-4">
+    <div>
+      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+        {label} *
+      </label>
+
+      <div className="relative mb-4">
+        <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+          <FaSearch className="h-5 w-5 text-gray-400" />
+        </div>
+        <input
+          type="text"
+          placeholder={placeholder}
+          value={searchTerm}
+          onChange={(e) => onSearchChange(type, e.target.value)}
+          className="w-full pr-10 pl-4 py-3 border border-slate-200 dark:border-slate-600 rounded-lg bg-white/50 dark:bg-slate-700/50 text-slate-800 dark:text-slate-200 placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+        />
+      </div>
+
+      <div className="max-h-60 overflow-y-auto border border-slate-200 dark:border-slate-600 rounded-lg bg-white/50 dark:bg-slate-700/50">
+        {filteredData.length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-slate-500 dark:text-slate-400">
+              {searchTerm ? 'هیچ آیتمی با این جستجو یافت نشد' : 'هیچ آیتمی موجود نیست'}
+            </p>
+          </div>
+        ) : (
+          filteredData.map((item) => (
+            <div
+              key={item.id}
+              onClick={() => onSelect(type, item)}
+              className={`p-4 border-b border-slate-200 dark:border-slate-600 cursor-pointer transition-all ${
+                selectedItem?.id === item.id
+                  ? 'bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800'
+                  : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
+              }`}
+            >
+              <div className="flex justify-between items-start">
+                <div>
+                  <h4 className="font-medium text-slate-800 dark:text-slate-200">
+                    {item.namePersian}
+                  </h4>
+                  <p className="text-sm text-slate-600 dark:text-slate-300">
+                    کد: {item.code}
+                    {item.value && item.unit && ` ⬢ ${item.value} ${item.unit}`}
+                  </p>
+                  {item.description && (
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                      {item.description}
+                    </p>
+                  )}
+                </div>
+                {selectedItem?.id === item.id && (
+                  <FaCheck className="text-teal-500" />
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
+    </div>
+
+    {selectedItem && (
+      <div className="p-4 bg-teal-50 dark:bg-teal-900/20 rounded-lg border border-teal-200 dark:border-teal-800">
+        <h4 className="font-medium text-teal-800 dark:text-teal-200 mb-2">انتخاب شده:</h4>
+        <p className="text-teal-700 dark:text-teal-300">
+          <strong>{selectedItem.namePersian}</strong> ({selectedItem.code})
+          {selectedItem.value && selectedItem.unit && ` - ${selectedItem.value} ${selectedItem.unit}`}
+        </p>
+        {selectedItem.description && (
+          <p className="text-sm text-teal-600 dark:text-teal-400 mt-1">
+            {selectedItem.description}
+          </p>
+        )}
+      </div>
+    )}
+  </div>
+);
+
 interface StoneProductWizardData {
   // Step 1: Cut Type
   cutTypeId: string;
@@ -524,107 +630,6 @@ export default function CreateStoneProductWizard() {
     }
   };
 
-  // Reusable SearchableDropdown component
-  const SearchableDropdown = ({ 
-    type, 
-    label, 
-    placeholder, 
-    errorKey, 
-    selectedItem 
-  }: {
-    type: keyof typeof masterData;
-    label: string;
-    placeholder: string;
-    errorKey: string;
-    selectedItem: MasterDataItem | null;
-  }) => {
-    const filteredData = getFilteredData(type, searchTerms[type]);
-    
-    return (
-      <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-            {label} *
-          </label>
-          
-          {/* Search Input */}
-          <div className="relative mb-4">
-            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-              <FaSearch className="h-5 w-5 text-gray-400" />
-            </div>
-            <input
-              type="text"
-              placeholder={placeholder}
-              value={searchTerms[type]}
-              onChange={(e) => updateSearchTerm(type, e.target.value)}
-              className="w-full pr-10 pl-4 py-3 border border-slate-200 dark:border-slate-600 rounded-lg bg-white/50 dark:bg-slate-700/50 text-slate-800 dark:text-slate-200 placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-            />
-          </div>
-          
-          {/* Options List */}
-          <div className="max-h-60 overflow-y-auto border border-slate-200 dark:border-slate-600 rounded-lg bg-white/50 dark:bg-slate-700/50">
-            {filteredData.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-slate-500 dark:text-slate-400">
-                  {searchTerms[type] ? 'هیچ آیتمی با این جستجو یافت نشد' : 'هیچ آیتمی موجود نیست'}
-                </p>
-              </div>
-            ) : (
-              filteredData.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() => selectMasterDataItem(type, item)}
-                  className={`p-4 border-b border-slate-200 dark:border-slate-600 cursor-pointer transition-all ${
-                    selectedItem?.id === item.id
-                      ? 'bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800'
-                      : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                  }`}
-                >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h4 className="font-medium text-slate-800 dark:text-slate-200">
-                        {item.namePersian}
-                      </h4>
-                      <p className="text-sm text-slate-600 dark:text-slate-300">
-                        کد: {item.code}
-                        {item.value && item.unit && ` ⬢ ${item.value} ${item.unit}`}
-                      </p>
-                      {item.description && (
-                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                          {item.description}
-                        </p>
-                      )}
-                    </div>
-                    {selectedItem?.id === item.id && (
-                      <FaCheck className="text-teal-500" />
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-          
-          {errors[errorKey] && <p className="text-red-500 text-sm mt-1">{errors[errorKey]}</p>}
-        </div>
-        
-        {selectedItem && (
-          <div className="p-4 bg-teal-50 dark:bg-teal-900/20 rounded-lg border border-teal-200 dark:border-teal-800">
-            <h4 className="font-medium text-teal-800 dark:text-teal-200 mb-2">انتخاب شده:</h4>
-            <p className="text-teal-700 dark:text-teal-300">
-              <strong>{selectedItem.namePersian}</strong> ({selectedItem.code})
-              {selectedItem.value && selectedItem.unit && ` - ${selectedItem.value} ${selectedItem.unit}`}
-            </p>
-            {selectedItem.description && (
-              <p className="text-sm text-teal-600 dark:text-teal-400 mt-1">
-                {selectedItem.description}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
   const renderStepContent = () => {
     switch (currentStep) {
       case 1:
@@ -634,8 +639,12 @@ export default function CreateStoneProductWizard() {
               type="cutTypes"
               label="نوع برش"
               placeholder="جستجو در نوع برش..."
-              errorKey="cutType"
+              error={errors.cutType}
               selectedItem={wizardData.cutType}
+              filteredData={getFilteredData('cutTypes', searchTerms.cutTypes)}
+              searchTerm={searchTerms.cutTypes}
+              onSearchChange={updateSearchTerm}
+              onSelect={selectMasterDataItem}
             />
           </div>
         );
@@ -647,8 +656,12 @@ export default function CreateStoneProductWizard() {
               type="stoneMaterials"
               label="جنس سنگ"
               placeholder="جستجو در جنس سنگ..."
-              errorKey="stoneMaterial"
+              error={errors.stoneMaterial}
               selectedItem={wizardData.stoneMaterial}
+              filteredData={getFilteredData('stoneMaterials', searchTerms.stoneMaterials)}
+              searchTerm={searchTerms.stoneMaterials}
+              onSearchChange={updateSearchTerm}
+              onSelect={selectMasterDataItem}
             />
           </div>
         );
@@ -660,8 +673,12 @@ export default function CreateStoneProductWizard() {
               type="cutWidths"
               label="عرض برش"
               placeholder="جستجو در عرض برش..."
-              errorKey="cutWidth"
+              error={errors.cutWidth}
               selectedItem={wizardData.cutWidth}
+              filteredData={getFilteredData('cutWidths', searchTerms.cutWidths)}
+              searchTerm={searchTerms.cutWidths}
+              onSearchChange={updateSearchTerm}
+              onSelect={selectMasterDataItem}
             />
           </div>
         );
@@ -673,8 +690,12 @@ export default function CreateStoneProductWizard() {
               type="thicknesses"
               label="ضخامت"
               placeholder="جستجو در ضخامت..."
-              errorKey="thickness"
+              error={errors.thickness}
               selectedItem={wizardData.thickness}
+              filteredData={getFilteredData('thicknesses', searchTerms.thicknesses)}
+              searchTerm={searchTerms.thicknesses}
+              onSearchChange={updateSearchTerm}
+              onSelect={selectMasterDataItem}
             />
           </div>
         );
@@ -686,8 +707,12 @@ export default function CreateStoneProductWizard() {
               type="mines"
               label="معدن یا اسم سنگ"
               placeholder="جستجو در معدن یا اسم سنگ..."
-              errorKey="mine"
+              error={errors.mine}
               selectedItem={wizardData.mine}
+              filteredData={getFilteredData('mines', searchTerms.mines)}
+              searchTerm={searchTerms.mines}
+              onSearchChange={updateSearchTerm}
+              onSelect={selectMasterDataItem}
             />
           </div>
         );
@@ -699,8 +724,12 @@ export default function CreateStoneProductWizard() {
               type="finishTypes"
               label="نوع پرداخت"
               placeholder="جستجو در نوع پرداخت..."
-              errorKey="finishType"
+              error={errors.finishType}
               selectedItem={wizardData.finishType}
+              filteredData={getFilteredData('finishTypes', searchTerms.finishTypes)}
+              searchTerm={searchTerms.finishTypes}
+              onSearchChange={updateSearchTerm}
+              onSelect={selectMasterDataItem}
             />
           </div>
         );
@@ -712,8 +741,12 @@ export default function CreateStoneProductWizard() {
               type="colors"
               label="خصوصیات یا رنگ"
               placeholder="جستجو در خصوصیات یا رنگ..."
-              errorKey="color"
+              error={errors.color}
               selectedItem={wizardData.color}
+              filteredData={getFilteredData('colors', searchTerms.colors)}
+              searchTerm={searchTerms.colors}
+              onSearchChange={updateSearchTerm}
+              onSelect={selectMasterDataItem}
             />
             
             {/* Final Code Preview */}

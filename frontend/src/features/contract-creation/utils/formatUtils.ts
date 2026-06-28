@@ -64,3 +64,19 @@ export const generateCompactProductName = (product: {
   return parts.join(' ') || product.namePersian || product.name || '';
 };
 
+/**
+ * Generate display name for saved slab contract rows.
+ */
+export const generateSlabContractProductName = (product: {
+  stoneTypeNamePersian: string;
+  cuttingDimensionNamePersian: string;
+  widthValue: number;
+  thicknessValue: number;
+  mineNamePersian: string;
+  finishNamePersian: string;
+  colorNamePersian: string;
+  qualityNamePersian: string;
+  namePersian?: string;
+  name?: string;
+}): string => generateFullProductName(product) || product.namePersian || product.name || '';
+

@@ -352,6 +352,10 @@ _Avoid_: copying delivery/execution assignments from the original service row
 Stair contract product rows use the same compact stone identity style as longitudinal product rows, while stair part, layer, dimensions, and other stair-specific details remain separate row details.
 _Avoid_: saving or printing the full catalog product name as the stair product row name
 
+**نام نمایشی سنگ اسلب**:
+Slab contract product rows preserve the full catalog stone identity as the row name, including cut type, material, dimensions, mine, finish, color, and quality. Requested slab dimensions, source slab dimensions, cutting details, and finishing details remain separate row details.
+_Avoid_: replacing the slab row name with only a short material/category label such as اسلب - مرمریت, or hiding catalog identity differences inside cutting details
+
 **شماره چک ناقص**:
 A check payment saved during sales contract creation without a check number. It remains valid for contract creation and output, while preserving the missing value for later accounting follow-up.
 _Avoid_: blocking contract creation only because a check number is empty

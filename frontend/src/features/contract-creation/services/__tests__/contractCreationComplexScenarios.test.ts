@@ -25,6 +25,7 @@ import {
   resolveLongitudinalWidth,
   restoreRemainingStoneAfterChildRemoval
 } from '../../utils/productConfigurationController';
+import { generateSlabContractProductName } from '../../utils/productUtils';
 import type {
   ContractProduct,
   ContractServiceRow,
@@ -803,6 +804,26 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   assert.equal(validateWizardStep(6, validWizard).isValid, true);
   assert.equal(validateWizardStep(7, validWizard).isValid, true);
   assert.equal(validateWizardStep(5, underDeliveredWizard).isValid, false);
+}
+
+{
+  const slabProduct = product({
+    name: 'Azna polished white slab',
+    namePersian: 'اسلب - مرمریت',
+    cuttingDimensionNamePersian: 'اسلب',
+    stoneTypeNamePersian: 'اسلب',
+    widthValue: 0,
+    thicknessValue: 2,
+    mineNamePersian: 'ازنا',
+    finishNamePersian: 'صیقل',
+    colorNamePersian: 'سفید',
+    qualityNamePersian: 'استاندارد'
+  });
+
+  assert.equal(
+    generateSlabContractProductName(slabProduct),
+    'اسلب - اسلب - عرض 0×ضخامت 2cm - ازنا - صیقل - سفید - استاندارد'
+  );
 }
 
 {

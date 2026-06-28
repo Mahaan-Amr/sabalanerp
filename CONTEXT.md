@@ -6,6 +6,30 @@ Sabalan ERP manages stone inventory, sales contracts, and related pricing data f
 A product lookup in the price inquiry surface that matches product identity and price-facing product details, regardless of Persian or Arabic character variants.
 _Avoid_: treating search as only an exact prefix lookup
 
+**خروجی/ورودی اکسل کاتالوگ**:
+A catalog maintenance workflow where each catalog exports, imports, and updates its own records through an Excel file shaped for that catalog's business fields.
+_Avoid_: mixing unrelated product, service, tool, stair, layer, and finishing catalogs into one shared Excel file
+
+**قالب اکسل اختصاصی کاتالوگ**:
+An Excel format dedicated to one catalog type and based on the fields that catalog already uses in Sabalan ERP.
+_Avoid_: reusing an OPC product or service-code workbook for unrelated inventory service catalogs
+
+**کد پایدار کاتالوگ**:
+A business identifier used by catalog Excel sync to recognize the same catalog record across imports, even when display names or descriptions change.
+_Avoid_: using editable display names as identity when a catalog can be renamed
+
+**ستون‌های مالک اکسل**:
+The catalog fields that a specific Excel template is allowed to create or update during import; fields outside that template remain owned by the application or manual editing.
+_Avoid_: treating every import as a full replacement of the catalog record
+
+**همگام‌سازی کامل کاتالوگ با اکسل**:
+A catalog import mode where the Excel file is the current source of truth for that catalog: rows in the file are created or updated, and existing catalog records missing from the file are removed from active use.
+_Avoid_: assuming a full catalog sync is only an additive import
+
+**پیش‌نمایش حذف کاتالوگ**:
+A required confirmation step before a full Excel catalog sync removes missing records, showing users which records will be deleted or deactivated before changes are applied.
+_Avoid_: silently removing catalog records during import
+
 **خوراک اره**:
 A per-contract-product material-consumption adjustment for physical cuttable stone. When enabled, the saved row carries `sawKerfEnabled: true` and `sawKerfCm: 0.3`; each actually cut axis consumes the finished requested dimension plus 3mm for source-material charge, smart packing, and remaining-stone geometry. Finished dimensions, delivery, standalone services, tools, and finishing calculations stay based on the customer-requested size.
 _Avoid_: applying kerf to service rows, applying it to a full-width/full-length axis with no cut, or changing printed finished dimensions.

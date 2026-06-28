@@ -35,6 +35,7 @@ import subServicesRoutes from './routes/sub-services';
 import stairStandardLengthRoutes from './routes/stair-standard-lengths';
 import layerTypesRoutes from './routes/layer-types';
 import stoneFinishingRoutes from './routes/stone-finishings';
+import catalogExcelRoutes from './routes/catalog-excel';
 import publicContractsRoutes from './routes/public-contracts';
 import uploadsRoutes from './routes/uploads';
 
@@ -125,6 +126,7 @@ app.use('/api/accounting', accountingRoutes);
 app.use('/api/bi', biRoutes);
 app.use('/api/workspace-permissions', workspacePermissionsRoutes);
 app.use('/api/permissions', permissionsRoutes);
+app.use('/api/catalog-excel', catalogExcelRoutes);
 if (!isProduction) console.log('? Registering products routes...');
 app.use('/api/products', productsRoutes);
 if (!isProduction) console.log('? Registering services routes...');

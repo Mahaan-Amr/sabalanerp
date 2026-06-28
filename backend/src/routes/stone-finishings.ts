@@ -31,6 +31,7 @@ const decimalFromInput = (value: any): Prisma.Decimal => {
 const getUnitPriceInput = (body: any) => body.unitPrice ?? body.pricePerSquareMeter;
 
 const stoneFinishingValidators = [
+  body('code').optional().isString().trim(),
   body('namePersian').isString().notEmpty().withMessage('نام فارسی الزامی است'),
   body('name').optional().isString(),
   body('description').optional().isString(),
@@ -191,6 +192,7 @@ router.post(
       const unitPrice = decimalFromInput(getUnitPriceInput(req.body));
       const finishing = await prisma.stoneFinishing.create({
         data: {
+          code: req.body.code ? String(req.body.code).trim() : `SF-${Date.now()}`,
           name: req.body.name || null,
           namePersian: req.body.namePersian,
           description: req.body.description || null,
@@ -247,6 +249,7 @@ router.put(
         where: { id: req.params.id },
         data: {
           name: req.body.name || null,
+          code: req.body.code ? String(req.body.code).trim() : existing.code,
           namePersian: req.body.namePersian,
           description: req.body.description || null,
           pricePerSquareMeter: unitPrice,

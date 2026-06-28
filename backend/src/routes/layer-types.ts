@@ -109,6 +109,7 @@ router.post(
   requireFeatureAccess(FEATURES.INVENTORY_LAYER_TYPES_CREATE, FEATURE_PERMISSIONS.EDIT),
   [
     body('name').isString().notEmpty().withMessage('نام نوع لایه الزامی است'),
+    body('code').optional().isString().trim(),
     body('pricePerLayer')
       .isFloat({ gt: 0 })
       .withMessage('قیمت نوع لایه باید بیشتر از صفر باشد'),
@@ -119,8 +120,11 @@ router.post(
     if (validationError) return validationError;
 
     try {
+      const code = String(req.body.code || '').trim();
+      const resolvedCode = code || `LT-${Date.now()}`;
       const layerType = await prisma.layerType.create({
         data: {
+          code: resolvedCode,
           name: req.body.name,
           description: req.body.description || null,
           pricePerLayer: decimalFromInput(req.body.pricePerLayer),
@@ -150,6 +154,7 @@ router.put(
   [
     param('id').isString().notEmpty().withMessage('شناسه الزامی است'),
     body('name').isString().notEmpty().withMessage('نام نوع لایه الزامی است'),
+    body('code').optional().isString().trim(),
     body('pricePerLayer')
       .isFloat({ gt: 0 })
       .withMessage('قیمت نوع لایه باید بیشتر از صفر باشد'),
@@ -174,6 +179,7 @@ router.put(
       const updated = await prisma.layerType.update({
         where: { id: req.params.id },
         data: {
+          code: req.body.code ? String(req.body.code).trim() : existing.code,
           name: req.body.name,
           description: req.body.description || null,
           pricePerLayer: decimalFromInput(req.body.pricePerLayer)

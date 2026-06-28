@@ -278,8 +278,8 @@ export default function ProductsPage() {
         onImportComplete={(results) => {
           fetchProducts();
           setShowSuccessModal(true);
-          setModalMessage('محصولات با موفقیت وارد شدند');
-          setModalDetails(`${results.success} محصول موفق و ${results.failed} محصول ناموفق`);
+          setModalMessage('محصولات با موفقیت همگام‌سازی شدند');
+          setModalDetails(`${results.summary.creates} ایجاد، ${results.summary.updates} به‌روزرسانی، ${results.summary.removals} حذف یا غیرفعال`);
         }}
         currentFilters={{
           search: searchTerm,

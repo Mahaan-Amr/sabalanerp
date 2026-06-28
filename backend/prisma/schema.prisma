@@ -823,6 +823,7 @@ model SubService {
 
 model LayerType {
   id            String   @id @default(cuid())
+  code          String   @unique
   name          String
   description   String?
   pricePerLayer Decimal  @db.Decimal(12, 2)
@@ -835,6 +836,7 @@ model LayerType {
 
 model StoneFinishing {
   id                  String   @id @default(cuid())
+  code                String   @unique
   name                String?
   namePersian         String
   description         String?

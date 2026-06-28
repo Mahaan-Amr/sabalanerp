@@ -8,6 +8,7 @@ import multer from 'multer';
 import XLSX from 'xlsx';
 import path from 'path';
 import fs from 'fs';
+import { applyCatalogPlan, buildCatalogPlan, buildExportWorkbook, buildTemplateWorkbook } from '../services/catalogExcelSync';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -133,7 +134,74 @@ const resolveContractVisibilityFromCutType = (cutTypeInput: unknown) => {
   };
 };
 
+const sendProductWorkbook = (res: Response, buffer: Buffer, filename: string) => {
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('Content-Length', buffer.length);
+  return res.send(buffer);
+};
+
 // ==================== PRODUCT CATALOG ====================
+
+router.get('/template', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_PRODUCTS_TEMPLATE, FEATURE_PERMISSIONS.VIEW), async (_req: any, res: Response) => {
+  try {
+    return sendProductWorkbook(res, buildTemplateWorkbook('products'), 'product-import-template.xlsx');
+  } catch (error) {
+    console.error('Template generation error:', error);
+    return res.status(500).json({ success: false, error: 'خطا در تولید قالب Excel' });
+  }
+});
+
+router.get('/export', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_PRODUCTS_EXPORT, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
+  try {
+    const whereClause: any = req.query.includeDeleted === 'true' ? {} : { deletedAt: null };
+    if (req.query.search) {
+      const search = req.query.search as string;
+      whereClause.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { namePersian: { contains: search, mode: 'insensitive' } },
+        { code: { contains: search, mode: 'insensitive' } }
+      ];
+    }
+    if (req.query.stoneType) whereClause.stoneTypeCode = req.query.stoneType;
+    if (req.query.finish) whereClause.finishCode = req.query.finish;
+    if (req.query.mine) whereClause.mineCode = req.query.mine;
+    if (req.query.isActive !== undefined) whereClause.isActive = req.query.isActive === 'true';
+    const buffer = await buildExportWorkbook(prisma, 'products', whereClause);
+    return sendProductWorkbook(res, buffer, `products-export-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  } catch (error) {
+    console.error('Export error:', error);
+    return res.status(500).json({ success: false, error: 'خطا در صادر کردن محصولات' });
+  }
+});
+
+router.post('/import/preview', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_PRODUCTS_IMPORT, FEATURE_PERMISSIONS.EDIT), upload.single('file'), async (req: any, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: 'فایل Excel انتخاب نشده است' });
+    if (!hasValidExcelMagicBytes(req.file.path)) {
+      quarantineUpload(req.file.path);
+      return res.status(400).json({ success: false, error: 'امضای فایل معتبر نیست. لطفا فایل Excel استاندارد بارگذاری کنید' });
+    }
+    const plan = await buildCatalogPlan(prisma, 'products', req.file.path);
+    return res.json({ success: true, data: plan });
+  } catch (error: any) {
+    if (req.file?.path) {
+      try { fs.unlinkSync(req.file.path); } catch {}
+    }
+    console.error('Product preview error:', error);
+    return res.status(500).json({ success: false, error: error.message || 'خطا در بررسی فایل Excel' });
+  }
+});
+
+router.post('/import/apply', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_PRODUCTS_IMPORT, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response) => {
+  try {
+    const plan = await applyCatalogPlan(prisma, String(req.body.importId || ''));
+    return res.json({ success: true, data: plan });
+  } catch (error: any) {
+    console.error('Product apply error:', error);
+    return res.status(400).json({ success: false, error: error.message || 'خطا در اعمال فایل Excel' });
+  }
+});
 
 // @desc    Get all products with filtering and search
 // @route   GET /api/products

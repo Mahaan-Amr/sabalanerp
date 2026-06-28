@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { FaPlus, FaEdit, FaTrash, FaToggleOn, FaToggleOff, FaTools, FaCut, FaLayerGroup, FaRuler, FaShapes, FaPaintBrush } from 'react-icons/fa';
+import { FaPlus, FaEdit, FaTrash, FaToggleOn, FaToggleOff, FaTools, FaCut, FaLayerGroup, FaRuler, FaShapes, FaPaintBrush, FaFileExcel } from 'react-icons/fa';
 import { servicesAPI } from '@/lib/api';
 import { ErpButton, ErpLoading, ErpPage, ErpQuickFilters, ErpSection } from '@/components/erp';
+import CatalogExcelSyncModal from '@/components/CatalogExcelSyncModal';
 
 interface Service {
   id: string;
@@ -115,6 +116,7 @@ const ServicesPage: React.FC = () => {
   const [savingLayerType, setSavingLayerType] = useState(false);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showExcelModal, setShowExcelModal] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -446,6 +448,13 @@ const ServicesPage: React.FC = () => {
               className="min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder-slate-400 dark:focus:border-teal-500 dark:focus:bg-slate-900"
             />
           </div>
+          <ErpButton
+            label="وارد/صادر کردن"
+            onClick={() => setShowExcelModal(true)}
+            icon={FaFileExcel}
+            variant="outline"
+            tone="neutral"
+          />
           {activeTab !== 'stair-lengths' && activeTab !== 'layer-types' && (
             <ErpButton
               label={`افزودن ${
@@ -1127,6 +1136,18 @@ const ServicesPage: React.FC = () => {
             </div>
           )}
       </ErpSection>
+
+      <CatalogExcelSyncModal
+        isOpen={showExcelModal}
+        title={`ورود و خروج اکسل ${tabLabels[activeTab]}`}
+        onClose={() => setShowExcelModal(false)}
+        onComplete={() => loadData()}
+        downloadTemplate={() => servicesAPI.downloadCatalogTemplate(activeTab)}
+        exportData={() => servicesAPI.exportCatalog(activeTab)}
+        previewImport={(file) => servicesAPI.previewCatalogImport(activeTab, file)}
+        applyImport={(importId) => servicesAPI.applyCatalogImport(activeTab, importId)}
+        filenamePrefix={activeTab}
+      />
     </ErpPage>
   );
 };

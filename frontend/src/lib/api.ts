@@ -249,6 +249,14 @@ export const salesAPI = {
   
   // Excel Import/Export
   downloadProductTemplate: () => api.get('/products/template', { responseType: 'blob' }),
+  previewProductImport: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/products/import/preview', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
+  applyProductImport: (importId: string) => api.post('/products/import/apply', { importId }),
   importProducts: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -775,7 +783,18 @@ export const servicesAPI = {
   createStoneFinishing: (data: any) => api.post('/stone-finishings', data),
   updateStoneFinishing: (id: string, data: any) => api.put(`/stone-finishings/${id}`, data),
   deleteStoneFinishing: (id: string) => api.delete(`/stone-finishings/${id}`),
-  toggleStoneFinishingStatus: (id: string) => api.patch(`/stone-finishings/${id}/toggle`)
+  toggleStoneFinishingStatus: (id: string) => api.patch(`/stone-finishings/${id}/toggle`),
+
+  downloadCatalogTemplate: (catalog: string) => api.get(`/catalog-excel/${catalog}/template`, { responseType: 'blob' }),
+  exportCatalog: (catalog: string) => api.get(`/catalog-excel/${catalog}/export`, { responseType: 'blob' }),
+  previewCatalogImport: (catalog: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post(`/catalog-excel/${catalog}/import/preview`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
+  applyCatalogImport: (catalog: string, importId: string) => api.post(`/catalog-excel/${catalog}/import/apply`, { importId })
 };
 
 export default api;

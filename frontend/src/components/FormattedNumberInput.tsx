@@ -32,7 +32,7 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
   name,
   onFocus,
   formatWhileTyping = true,
-  decimalScale = 2
+  decimalScale = 4
 }) => {
   const [displayValue, setDisplayValue] = useState<string>('');
   const [isFocused, setIsFocused] = useState(false);

@@ -288,7 +288,7 @@ const getFinishingAmountLabel = (product: any): string => {
   const base = getFinishingBase(product);
   const unitLabel = getFinishingUnitLabel(base);
   const quantity = getFinishingQuantity(product, base);
-  return `${toFaNumber(quantity, base === 'squareMeters' ? 3 : 2)} ${unitLabel}`;
+  return `${toFaNumber(quantity, 4)} ${unitLabel}`;
 };
 
 const formatDate = (value: unknown): string => {
@@ -456,7 +456,7 @@ const formatDeliveryAmount = (
 ): string => {
   const unit = inferDeliveryUnit(product, deliveryProduct);
   const amount = toNumber(deliveryProduct?.amount || deliveryProduct?.quantity || fallbackQuantity);
-  const fractionDigits = unit === 'count' ? 0 : 2;
+  const fractionDigits = unit === 'count' ? 0 : 4;
   return `${toFaNumber(amount, fractionDigits)} ${deliveryUnitLabel(unit)}`;
 };
 
@@ -517,8 +517,8 @@ const buildSourceMaterialRows = (product: any): NormalizedSourceMaterial[] => {
 
   return [{
     description: product?.stoneName || product?.product?.namePersian || product?.product?.name || EMPTY,
-    dimensionsOrAmount: `عرض ${toFaNumber(sourceWidthCm, 2)}cm × طول ${toFaNumber(sourceLengthM, 2)}m${kerfNote}`,
-    quantityOrArea: `${toFaNumber(sourceQuantity, 0)} عدد، جمع ${toFaNumber(totalAreaSqm, 3)} متر مربع`
+    dimensionsOrAmount: `عرض ${toFaNumber(sourceWidthCm, 4)}cm × طول ${toFaNumber(sourceLengthM, 4)}m${kerfNote}`,
+    quantityOrArea: `${toFaNumber(sourceQuantity, 0)} عدد، جمع ${toFaNumber(totalAreaSqm, 4)} متر مربع`
   }];
 };
 
@@ -561,7 +561,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
           category: 'خدمات',
           name: service?.subService?.namePersian || service?.subService?.name || EMPTY,
           amount,
-          amountLabel: `${toFaNumber(amount, 2)} ${service?.calculationBase === 'squareMeters' ? 'متر مربع' : 'متر'}`,
+          amountLabel: `${toFaNumber(amount, 4)} ${service?.calculationBase === 'squareMeters' ? 'متر مربع' : 'متر'}`,
           rate,
           rateLabel: rate ? `${toFaNumber(rate)} تومان` : EMPTY,
           cost: toNumber(service?.cost)
@@ -594,7 +594,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         return {
           name: tool?.namePersian || tool?.name || EMPTY,
           amount,
-          amountLabel: amount > 0 ? `${toFaNumber(amount, 2)} متر طول` : EMPTY,
+          amountLabel: amount > 0 ? `${toFaNumber(amount, 4)} متر طول` : EMPTY,
           rate,
           rateLabel: rate > 0 ? `${toFaNumber(rate)} تومان / متر طول` : EMPTY,
           cost
@@ -725,7 +725,7 @@ const normalizeDeliveries = (
               const service = standaloneServices.find((candidate) => candidate.id === deliveryProduct?.serviceRowId);
               const amount = toNumber(deliveryProduct?.amount || deliveryProduct?.quantity);
               const unit = deliveryProduct?.unit || service?.unit;
-              const fractionDigits = unit === 'count' || unit === 'عدد' ? 0 : 2;
+              const fractionDigits = unit === 'count' || unit === 'عدد' ? 0 : 4;
               return {
                 name: service?.title || EMPTY,
                 quantity: amount,
@@ -916,7 +916,7 @@ const formatProductQuantityOrArea = (product: NormalizedProduct): string => {
   const quantityLabel = product.productType === 'طولی' && product.quantity <= 1
     ? EMPTY
     : `${toFaNumber(product.quantity, 2)} عدد`;
-  return `${quantityLabel} / ${toFaNumber(product.squareMeters, 3)} متر مربع`;
+  return `${quantityLabel} / ${toFaNumber(product.squareMeters, 4)} متر مربع`;
 };
 
 const buildFlatProductRows = (
@@ -1011,7 +1011,7 @@ const buildFlatProductRows = (
         code: '',
         description: cut.type,
         category: 'برش',
-        dimensionsOrAmount: `${toFaNumber(cut.meters, 2)} متر`,
+        dimensionsOrAmount: `${toFaNumber(cut.meters, 4)} متر`,
         quantityOrArea: '',
         rate: cut.rate > 0 ? formatAmount(cut.rate, currency) : EMPTY,
         total: formatAmount(cut.cost, currency)
@@ -1052,8 +1052,8 @@ const buildFlatProductRows = (
       description: service.title,
       note: service.description && service.description !== EMPTY ? service.description : undefined,
       category: service.sourceType,
-      dimensionsOrAmount: `${toFaNumber(service.quantity, 2)} ${service.unit}`,
-      quantityOrArea: `${toFaNumber(service.quantity, 2)} ${service.unit}`,
+      dimensionsOrAmount: `${toFaNumber(service.quantity, 4)} ${service.unit}`,
+      quantityOrArea: `${toFaNumber(service.quantity, 4)} ${service.unit}`,
       rate: service.unitPrice > 0 ? formatAmount(service.unitPrice, currency) : EMPTY,
       total: formatAmount(service.totalPrice, currency)
     });

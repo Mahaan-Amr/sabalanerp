@@ -87,7 +87,7 @@ export const formatDisplayNumber = (value: number | string | null | undefined): 
   return formatNumber(num, {
     locale: 'fa-IR',
     minimumFractionDigits: 0,
-    maximumFractionDigits: 3
+    maximumFractionDigits: 4
   });
 };
 
@@ -100,7 +100,7 @@ export const formatDisplayNumberLatin = (value: number | string | null | undefin
 
   return num.toLocaleString('en-US', {
     minimumFractionDigits: 0,
-    maximumFractionDigits: 3
+    maximumFractionDigits: 4
   });
 };
 

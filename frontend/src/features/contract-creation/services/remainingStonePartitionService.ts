@@ -115,7 +115,7 @@ export const allocateRemainingStonePartitions = (
       if (!rowErrors.has(row.id)) {
         rowErrors.set(
           row.id,
-          `مجموع متر مربع پارتیشن‌ها (${totalRequestedSquareMeters.toFixed(3)}) از ظرفیت باقی‌مانده (${stockInfo.totalSquareMeters.toFixed(3)}) بیشتر است.`
+          `مجموع متر مربع پارتیشن‌ها (${totalRequestedSquareMeters.toFixed(4)}) از ظرفیت باقی‌مانده (${stockInfo.totalSquareMeters.toFixed(4)}) بیشتر است.`
         );
       }
     });

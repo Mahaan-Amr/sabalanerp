@@ -136,7 +136,7 @@ const renderSourceItems = (items: any[] = []) => rowsOrEmpty(items.map((item, in
   <tr>
     <td>${toFaNumber(index + 1)}</td>
     <td>${escapeHtml(item.productName || item.description)}</td>
-    <td>${toFaNumber(item.quantity, 3)}</td>
+    <td>${toFaNumber(item.quantity, 4)}</td>
     <td>${money(item.unitPrice)}</td>
     <td>${money(item.totalPrice)}</td>
   </tr>

@@ -1,7 +1,7 @@
 ﻿// Contract HTML Generator
 // Generates HTML representation of contract for printing/PDF
 
-import { formatQuantity, formatSquareMeters, formatPrice } from '@/lib/numberFormat';
+import { formatDisplayNumber, formatQuantity, formatSquareMeters, formatPrice } from '@/lib/numberFormat';
 import { getServiceRowSourceLabel, getServiceRowUnitLabel } from './contractServiceRows';
 
 /**
@@ -36,7 +36,7 @@ export const generateContractHTML = (data: any): string => {
       sourceLengthM > 0 &&
       (Boolean(smartCutPlan.enabled) || stairSourceQuantity > 0 || Boolean(product?.isCut) || (productWidthCm > 0 && sourceWidthCm > productWidthCm));
     if (!hasSourceMaterial) return '';
-    return `عرض ${sourceWidthCm}cm × طول ${sourceLengthM}m × ${sourceQuantity} عدد، جمع ${formatSquareMeters(sourceAreaSqm)}${kerfNote}`;
+    return `عرض ${formatDisplayNumber(sourceWidthCm)}cm × طول ${formatDisplayNumber(sourceLengthM)}m × ${formatDisplayNumber(sourceQuantity)} عدد، جمع ${formatSquareMeters(sourceAreaSqm)}${kerfNote}`;
   };
   const productsTable = data.products && data.products.length > 0 ? `
     <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">

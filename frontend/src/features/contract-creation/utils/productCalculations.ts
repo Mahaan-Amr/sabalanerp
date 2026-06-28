@@ -1,7 +1,7 @@
 ﻿// Product calculation utilities
 // Smart calculations and metrics for different product types
 
-import type { SlabStandardDimensionEntry, SlabLineCutPlan, Product, ContractProduct } from '../types/contract.types';
+import type { SlabStandardDimensionEntry, SlabLineCutPlan, Product, ContractProduct, StoneCut } from '../types/contract.types';
 
 /**
  * Smart calculation function to handle bidirectional calculations
@@ -596,6 +596,169 @@ export const determineSlabLineCutPlan = ({
     longitudinalMeters: Number.isFinite(longitudinalMeters) ? longitudinalMeters : 0,
     crossMeters: Number.isFinite(crossMeters) ? crossMeters : 0
   };
+};
+
+type SlabVerticalCutSides = {
+  top?: boolean;
+  bottom?: boolean;
+  left?: boolean;
+  right?: boolean;
+};
+
+const selectedVerticalSideLabels = (sides: SlabVerticalCutSides = {}): string[] => {
+  const labels: string[] = [];
+  if (sides.top) labels.push('بالا');
+  if (sides.bottom) labels.push('پایین');
+  if (sides.left) labels.push('چپ');
+  if (sides.right) labels.push('راست');
+  return labels;
+};
+
+const verticalCutMetersForEntry = (
+  standardLengthCm: number,
+  standardWidthCm: number,
+  quantity: number,
+  sides: SlabVerticalCutSides = {}
+): number => {
+  let centimeters = 0;
+  if (sides.top) centimeters += standardWidthCm;
+  if (sides.bottom) centimeters += standardWidthCm;
+  if (sides.left) centimeters += standardLengthCm;
+  if (sides.right) centimeters += standardLengthCm;
+  return (centimeters / 100) * quantity;
+};
+
+export const calculateSlabVerticalCutCost = ({
+  standardLengthCm,
+  standardWidthCm,
+  quantity,
+  verticalCutSides,
+  verticalCutCostPerMeter
+}: {
+  standardLengthCm: number;
+  standardWidthCm: number;
+  quantity: number;
+  verticalCutSides: SlabVerticalCutSides;
+  verticalCutCostPerMeter: number;
+}): number => {
+  const meters = verticalCutMetersForEntry(standardLengthCm, standardWidthCm, quantity, verticalCutSides);
+  return meters * Math.max(0, verticalCutCostPerMeter || 0);
+};
+
+export const buildSlabCutDetails = ({
+  requestedLengthCm,
+  requestedWidthCm,
+  standardDimensions,
+  slabCuttingMode = 'lineBased',
+  cuttingCostPerMeterLongitudinal = 0,
+  cuttingCostPerMeterCross = 0,
+  verticalCutSides = {},
+  verticalCutCostPerMeter = 0,
+  seed = Date.now()
+}: {
+  requestedLengthCm: number;
+  requestedWidthCm: number;
+  standardDimensions: SlabStandardDimensionEntry[];
+  slabCuttingMode?: 'perSquareMeter' | 'lineBased';
+  cuttingCostPerMeterLongitudinal?: number;
+  cuttingCostPerMeterCross?: number;
+  verticalCutSides?: SlabVerticalCutSides;
+  verticalCutCostPerMeter?: number;
+  seed?: number;
+}): StoneCut[] => {
+  const cutDetails: StoneCut[] = [];
+  const verticalSides = selectedVerticalSideLabels(verticalCutSides);
+  let index = 0;
+
+  for (const entry of standardDimensions) {
+    const standardLengthCm = Number(entry.standardLengthCm) || 0;
+    const standardWidthCm = Number(entry.standardWidthCm) || 0;
+    const quantity = Number(entry.quantity) || 0;
+
+    if (standardLengthCm <= 0 || standardWidthCm <= 0 || quantity <= 0) continue;
+
+    const linePlan = determineSlabLineCutPlan({
+      requestedLengthCm,
+      requestedWidthCm,
+      standardLengthCm,
+      standardWidthCm
+    });
+    const sourceLabel = `${standardLengthCm}×${standardWidthCm}cm × ${quantity}`;
+    const common = {
+      sourceLengthCm: standardLengthCm,
+      sourceWidthCm: standardWidthCm,
+      sourceQuantity: quantity,
+      requestedLengthCm,
+      requestedWidthCm
+    };
+
+    const needsLongitudinalCut = requestedWidthCm > 0 && requestedWidthCm < standardWidthCm;
+    if (slabCuttingMode === 'lineBased' && needsLongitudinalCut && cuttingCostPerMeterLongitudinal > 0) {
+      const meters = linePlan.longitudinalMeters;
+      cutDetails.push({
+        id: `slab_longitudinal_${seed}_${index++}`,
+        type: 'longitudinal',
+        label: 'برش طولی',
+        description: `برش طولی منبع ${sourceLabel}، عرض ${standardWidthCm}cm به ${requestedWidthCm}cm`,
+        meters,
+        rate: cuttingCostPerMeterLongitudinal,
+        cost: meters * cuttingCostPerMeterLongitudinal * quantity,
+        originalWidth: standardWidthCm,
+        cutWidth: requestedWidthCm,
+        remainingWidth: standardWidthCm - requestedWidthCm,
+        length: meters,
+        cuttingCost: meters * cuttingCostPerMeterLongitudinal * quantity,
+        cuttingCostPerMeter: cuttingCostPerMeterLongitudinal,
+        orientation: 'longitudinal',
+        ...common
+      });
+    }
+
+    const needsCrossCut = requestedLengthCm > 0 && requestedLengthCm < standardLengthCm;
+    if (slabCuttingMode === 'lineBased' && needsCrossCut && cuttingCostPerMeterCross > 0) {
+      const meters = linePlan.crossMeters;
+      cutDetails.push({
+        id: `slab_cross_${seed}_${index++}`,
+        type: 'cross',
+        label: 'برش عرضی',
+        description: `برش عرضی منبع ${sourceLabel}، طول ${standardLengthCm}cm به ${requestedLengthCm}cm`,
+        meters,
+        rate: cuttingCostPerMeterCross,
+        cost: meters * cuttingCostPerMeterCross * quantity,
+        originalWidth: standardLengthCm,
+        cutWidth: requestedLengthCm,
+        remainingWidth: standardLengthCm - requestedLengthCm,
+        length: meters,
+        cuttingCost: meters * cuttingCostPerMeterCross * quantity,
+        cuttingCostPerMeter: cuttingCostPerMeterCross,
+        orientation: 'cross',
+        ...common
+      });
+    }
+
+    if (verticalSides.length > 0 && verticalCutCostPerMeter > 0) {
+      const meters = verticalCutMetersForEntry(standardLengthCm, standardWidthCm, quantity, verticalCutSides);
+      cutDetails.push({
+        id: `slab_vertical_${seed}_${index++}`,
+        type: 'vertical',
+        label: 'برش قائم',
+        description: `برش قائم منبع ${sourceLabel}، لبه‌ها: ${verticalSides.join('، ')}`,
+        meters,
+        rate: verticalCutCostPerMeter,
+        cost: meters * verticalCutCostPerMeter,
+        originalWidth: standardWidthCm,
+        cutWidth: standardWidthCm,
+        remainingWidth: 0,
+        length: meters,
+        cuttingCost: meters * verticalCutCostPerMeter,
+        cuttingCostPerMeter: verticalCutCostPerMeter,
+        selectedSides: verticalSides,
+        ...common
+      });
+    }
+  }
+
+  return cutDetails;
 };
 
 /**

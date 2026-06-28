@@ -11,7 +11,8 @@ import {
   calculateRiserMetrics,
   calculateLandingMetrics,
   getSlabStandardDimensions,
-  determineSlabLineCutPlan
+  determineSlabLineCutPlan,
+  buildSlabCutDetails
 } from '../utils/productCalculations';
 import { calculateNosingCuttingCost } from '../services/stairMetricsService';
 import { generateFullProductName } from '../utils/formatUtils';
@@ -135,6 +136,7 @@ export const useProductCalculations = (options: UseProductCalculationsOptions) =
     calculateNosingCuttingCost,
     getSlabStandardDimensions: getSlabStandardDimensionsWrapper,
     determineSlabLineCutPlan,
+    buildSlabCutDetails,
     generateFullProductName: generateFullProductNameWrapper
   };
 };

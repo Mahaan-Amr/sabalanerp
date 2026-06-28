@@ -1772,6 +1772,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const calculateSlabMetrics = productCalculations.calculateSlabMetrics;
   const getSlabStandardDimensions = productCalculations.getSlabStandardDimensions;
   const determineSlabLineCutPlan = productCalculations.determineSlabLineCutPlan;
+  const buildSlabCutDetails = productCalculations.buildSlabCutDetails;
   const generateFullProductName = productCalculations.generateFullProductName;
   const handleFieldFocus = productModal.handleFieldFocus;
 
@@ -4235,65 +4236,25 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       };
       const verticalCutCostPerMeter = getCuttingTypePricePerMeter('VERTICAL') || getCuttingTypePricePerMeter('LONG') || 0;
       
-      // Calculate vertical cut cost for each standard dimension entry
-      // TODO: Legacy code - calculateSlabVerticalCutCost was removed in Phase 1.2
-      // Need to reimplement vertical cut cost calculation if needed
-      let totalVerticalCutCost = 0;
-      // if (verticalCutCostPerMeter > 0 && standardDimensions.length > 0) {
-      //   for (const entry of standardDimensions) {
-      //     const entryVerticalCutCost = calculateSlabVerticalCutCost({
-      //       requestedLengthCm: entry.standardLengthCm,
-      //       requestedWidthCm: entry.standardWidthCm,
-      //       quantity: entry.quantity,
-      //       verticalCutSides: verticalCutSides,
-      //       verticalCutCostPerMeter: verticalCutCostPerMeter
-      //     });
-      //     totalVerticalCutCost += entryVerticalCutCost;
-      //   }
-      // }
-      
-      // TODO: Legacy code - calculateSlabCutting was removed in Phase 1.2
-      // Calculate slab cutting details for all standard dimension entries
-      // This will generate remaining stones for each entry
-      const allCutDetails: StoneCut[] = [];
-      let totalCuttingCost = 0;
-
-      // for (const entry of standardDimensions) {
-      //   const entryOriginalLengthInCurrentUnit = lengthUnit === 'm' ? entry.standardLengthCm / 100 : entry.standardLengthCm;
-      //   const entryOriginalWidthInCurrentUnit = widthUnit === 'm' ? entry.standardWidthCm / 100 : entry.standardWidthCm;
-      //
-      //   const entryLinePlan = determineSlabLineCutPlan({
-      //     requestedLengthCm: userLengthInCm,
-      //     requestedWidthCm: userWidthInCm,
-      //     standardLengthCm: entry.standardLengthCm,
-      //     standardWidthCm: entry.standardWidthCm
-      //   });
-      //
-      //   const entrySlabCutting = calculateSlabCutting({
-      //     originalLength: entryOriginalLengthInCurrentUnit,
-      //     originalWidth: entryOriginalWidthInCurrentUnit,
-      //     desiredLength: productConfig.length || 0,
-      //     desiredWidth: productConfig.width || 0,
-      //     lengthUnit: lengthUnit,
-      //     widthUnit: widthUnit,
-      //     cuttingCostPerMeterLongitudinal: slabCuttingMode === 'lineBased' ? cuttingCostPerMeterLongitudinal : 0,
-      //     cuttingCostPerMeterCross: slabCuttingMode === 'lineBased' ? cuttingCostPerMeterCross : 0,
-      //     quantity: entry.quantity,
-      //     longitudinalCutLengthMeters: entryLinePlan.longitudinalMeters,
-      //     crossCutLengthMeters: entryLinePlan.crossMeters
-      //   });
-      //
-      //   if (entrySlabCutting.needsLongitudinalCut || entrySlabCutting.needsCrossCut) {
-      //     hasAnyCut = true;
-      //   }
-      //
-      //   totalCuttingCost += entrySlabCutting.totalCuttingCost || 0;
-      //   allRemainingPieces.push(...(entrySlabCutting.remainingPieces || []));
-      //   allCutDetails.push(...(entrySlabCutting.cutDetails || []));
-      // }
-      
-      // Add برش قائم cost to total cutting cost
-      const finalTotalCuttingCost = totalCuttingCost + totalVerticalCutCost;
+      const allCutDetails: StoneCut[] = buildSlabCutDetails({
+        requestedLengthCm: userLengthInCm,
+        requestedWidthCm: userWidthInCm,
+        standardDimensions,
+        slabCuttingMode,
+        cuttingCostPerMeterLongitudinal,
+        cuttingCostPerMeterCross,
+        verticalCutSides,
+        verticalCutCostPerMeter
+      });
+      const lineCuttingCost = slabCuttingMode === 'lineBased'
+        ? allCutDetails
+            .filter((cut) => cut.type !== 'vertical')
+            .reduce((sum, cut) => sum + (cut.cost ?? cut.cuttingCost ?? 0), 0)
+        : calculated.cuttingCost;
+      const totalVerticalCutCost = allCutDetails
+        .filter((cut) => cut.type === 'vertical')
+        .reduce((sum, cut) => sum + (cut.cost ?? cut.cuttingCost ?? 0), 0);
+      const finalTotalCuttingCost = lineCuttingCost + totalVerticalCutCost;
       
       // Create a combined slab cutting result
       const slabRemaining = calculateSlabRemainingStones({
@@ -4368,6 +4329,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         ? (consumedWidthForPricingCm * consumedLengthForPricingCm * effectiveQuantity) / 10000
         : calculated.squareMeters;
       const slabMaterialTotalPrice = slabConsumedAreaSqm * (productConfig.pricePerSquareMeter || 0);
+      const slabBaseMaterialPrice = sawKerfEnabled ? slabMaterialTotalPrice : calculated.originalTotalPrice;
 
       // Create final product configuration for slab stone
       const finalProduct: ContractProduct = {
@@ -4382,7 +4344,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         quantity: effectiveQuantity,
         squareMeters: calculated.squareMeters,
         pricePerSquareMeter: productConfig.pricePerSquareMeter || 0,
-        totalPrice: sawKerfEnabled ? slabMaterialTotalPrice : calculated.totalPrice,
+        totalPrice: slabBaseMaterialPrice + finalTotalCuttingCost,
         description: productConfig.description || '',
         images: Array.isArray(productConfig.images) ? [...productConfig.images] : [...(selectedProduct.images || [])],
         sawKerfEnabled,
@@ -4402,7 +4364,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         widthUnit: widthUnit,
         isMandatory: false, // Slab stones don't use mandatory pricing
         mandatoryPercentage: 0, // Slab stones don't use mandatory pricing
-        originalTotalPrice: sawKerfEnabled ? slabMaterialTotalPrice : calculated.originalTotalPrice,
+        originalTotalPrice: slabBaseMaterialPrice,
         // Slab cutting fields (2D)
         isCut: slabCutting.needsLongitudinalCut || slabCutting.needsCrossCut,
         cutType: slabCutting.needsLongitudinalCut && slabCutting.needsCrossCut ? 'cross' : (slabCutting.needsLongitudinalCut ? 'longitudinal' : null),
@@ -4466,7 +4428,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       
       // Add SubService costs to totalPrice if they exist
       const existingSubServiceCost = (isEditMode && productConfig.totalSubServiceCost) ? productConfig.totalSubServiceCost : 0;
-      finalProduct.totalPrice = (sawKerfEnabled ? slabMaterialTotalPrice : calculated.totalPrice) + existingSubServiceCost + finishingCost;
+      finalProduct.totalPrice = slabBaseMaterialPrice + finalTotalCuttingCost + existingSubServiceCost + finishingCost;
       
       // Add to contract or update existing product
       if (isEditMode && editingProductIndex !== null) {

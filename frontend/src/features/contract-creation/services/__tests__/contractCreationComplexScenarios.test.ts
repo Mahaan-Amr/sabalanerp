@@ -5,7 +5,7 @@ import { calculateSlabCut, validateCutDimensions } from '../stoneCuttingService'
 import { calculateLayerMetrics, computeTotalsV2 } from '../stairCalculationService';
 import { validatePayment, validateWizardStep } from '../validationService';
 import { calculateContractTotal, calculateFinalPrice } from '../pricingService';
-import { calculateSlabMetrics, handleSmartCalculation } from '../../utils/productCalculations';
+import { buildSlabCutDetails, calculateSlabMetrics, handleSmartCalculation } from '../../utils/productCalculations';
 import {
   activateFinishingSelection,
   calculateDefaultFinishingQuantity,
@@ -317,8 +317,8 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
     quantity: 3,
     pricePerSquareMeter: 1_000_000,
     standardDimensions: [
-      { standardLengthCm: 300, standardWidthCm: 160, quantity: 1 },
-      { standardLengthCm: 280, standardWidthCm: 140, quantity: 2 }
+      { id: 'std-existing-1', standardLengthCm: 300, standardWidthCm: 160, quantity: 1 },
+      { id: 'std-existing-2', standardLengthCm: 280, standardWidthCm: 140, quantity: 2 }
     ],
     cuttingCostPerMeterLongitudinal: 100_000,
     cuttingCostPerMeterCross: 50_000,
@@ -328,8 +328,8 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
     requestedLengthCm: 200,
     requestedWidthCm: 120,
     standardDimensions: [
-      { standardLengthCm: 300, standardWidthCm: 160, quantity: 1 },
-      { standardLengthCm: 280, standardWidthCm: 140, quantity: 2 }
+      { id: 'std-existing-1', standardLengthCm: 300, standardWidthCm: 160, quantity: 1 },
+      { id: 'std-existing-2', standardLengthCm: 280, standardWidthCm: 140, quantity: 2 }
     ],
     seed: 201
   });
@@ -351,6 +351,43 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   approx(slabRemaining.remainingStones.reduce((sum, stone) => sum + stone.squareMeters, 0), 5.44);
   assert.equal(slabCut.remainingPieces.length, 3);
   approx(slabCut.totalCuttingCost, 260_000);
+}
+
+{
+  const slabCutDetails = buildSlabCutDetails({
+    requestedLengthCm: 180,
+    requestedWidthCm: 110,
+    standardDimensions: [
+      { id: 'std-1', standardLengthCm: 200, standardWidthCm: 120, quantity: 4 },
+      { id: 'std-2', standardLengthCm: 250, standardWidthCm: 130, quantity: 2 }
+    ],
+    slabCuttingMode: 'lineBased',
+    cuttingCostPerMeterLongitudinal: 100_000,
+    cuttingCostPerMeterCross: 50_000,
+    verticalCutCostPerMeter: 20_000,
+    verticalCutSides: { top: true, bottom: true, left: true, right: true },
+    seed: 301
+  });
+
+  assert.equal(slabCutDetails.length, 6);
+  assert.deepEqual(slabCutDetails.map(cut => cut.type), [
+    'longitudinal',
+    'cross',
+    'vertical',
+    'longitudinal',
+    'cross',
+    'vertical'
+  ]);
+  approx(slabCutDetails[0].meters || 0, 2);
+  approx(slabCutDetails[0].cost || 0, 800_000);
+  approx(slabCutDetails[1].meters || 0, 1.1);
+  approx(slabCutDetails[1].cost || 0, 220_000);
+  approx(slabCutDetails[2].meters || 0, 25.6);
+  approx(slabCutDetails[2].cost || 0, 512_000);
+  approx(slabCutDetails[5].meters || 0, 15.2);
+  approx(slabCutDetails[5].cost || 0, 304_000);
+  assert.equal(slabCutDetails[5].description?.includes('250×130cm × 2'), true);
+  assert.deepEqual(slabCutDetails[5].selectedSides, ['بالا', 'پایین', 'چپ', 'راست']);
 }
 
 {

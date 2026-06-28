@@ -377,6 +377,13 @@ const productTypeLabel = (value: unknown): string => {
   return EMPTY;
 };
 
+const cutTypeLabel = (cut: any): string => {
+  if (cut?.label) return String(cut.label);
+  if (cut?.type === 'vertical') return 'برش قائم';
+  if (cut?.type === 'cross' || cut?.orientation === 'cross') return 'برش عرضی';
+  return 'برش طولی';
+};
+
 const preparedKindLabel = (value: unknown): string => {
   if (value === 'readyPiece') return 'قطعات آماده';
   return 'کیوبیک';
@@ -563,7 +570,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         ? []
         : (Array.isArray(product?.cutDetails)
           ? product.cutDetails.map((cut: any) => ({
-              type: cut?.type === 'cross' ? 'برش عرضی' : 'برش طولی',
+              type: cutTypeLabel(cut),
               meters: toNumber(cut?.meters || cut?.length),
               rate: toNumber(cut?.rate || cut?.cuttingCostPerMeter),
               cost: toNumber(cut?.cost || cut?.cuttingCost)

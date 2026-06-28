@@ -85,6 +85,18 @@ export type ContractProductType = 'longitudinal' | 'stair' | 'slab' | 'prepared'
 
 export interface StoneCut {
   id: string;
+  type?: 'longitudinal' | 'cross' | 'vertical';
+  label?: string;
+  description?: string;
+  meters?: number;
+  rate?: number;
+  cost?: number;
+  sourceLengthCm?: number;
+  sourceWidthCm?: number;
+  sourceQuantity?: number;
+  requestedLengthCm?: number;
+  requestedWidthCm?: number;
+  selectedSides?: string[];
   originalWidth: number; // ?? ?? ??
   cutWidth: number; // cut width
   remainingWidth: number; // remaining width

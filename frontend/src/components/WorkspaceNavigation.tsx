@@ -114,6 +114,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           FaCalculator,
           FaWarehouse,
           FaShieldAlt,
+          FaTruck,
         };
 
         return accessibleWorkspaces.map((workspace) => ({
@@ -601,6 +602,47 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             namePersian: 'گزارش‌های حراست',
             href: '/dashboard/security/reports',
             icon: FaChartLine,
+            show: true
+          }
+        ];
+
+      case WORKSPACES.LOGISTICS:
+        return [
+          {
+            name: 'Logistics Dashboard',
+            namePersian: 'داشبورد لجستیک',
+            href: '/dashboard/logistics',
+            icon: FaChartLine,
+            show: true
+          },
+          {
+            name: 'Loadings',
+            namePersian: 'بارگیری‌ها',
+            href: '/dashboard/logistics/loadings',
+            icon: FaTruck,
+            show: true,
+            children: [
+              {
+                name: 'All Loadings',
+                namePersian: 'همه بارگیری‌ها',
+                href: '/dashboard/logistics/loadings',
+                icon: FaList,
+                show: true
+              },
+              {
+                name: 'New Loading',
+                namePersian: 'بارگیری جدید',
+                href: '/dashboard/logistics/loadings/new',
+                icon: FaPlus,
+                show: hasPermission(WORKSPACES.LOGISTICS, 'edit' as any)
+              }
+            ]
+          },
+          {
+            name: 'Drivers',
+            namePersian: 'راننده‌ها',
+            href: '/dashboard/logistics/drivers',
+            icon: FaUsers,
             show: true
           }
         ];

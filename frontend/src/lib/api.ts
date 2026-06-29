@@ -511,6 +511,22 @@ export const biAPI = {
     api.get('/bi/sales/summary.pdf', { params, responseType: 'blob' }),
 };
 
+export const logisticsAPI = {
+  getDashboard: () => api.get('/logistics/dashboard'),
+  getProjects: (params?: any) => api.get('/logistics/projects', { params }),
+  getRemaining: (projectId: string) => api.get(`/logistics/projects/${projectId}/remaining`),
+  getLoadings: (params?: any) => api.get('/logistics/loadings', { params }),
+  createLoading: (data: any) => api.post('/logistics/loadings', data),
+  getLoading: (id: string) => api.get(`/logistics/loadings/${id}`),
+  updateLoading: (id: string, data: any) => api.put(`/logistics/loadings/${id}`, data),
+  finalizeLoading: (id: string) => api.post(`/logistics/loadings/${id}/finalize`),
+  cancelLoading: (id: string, reason: string) => api.post(`/logistics/loadings/${id}/cancel`, { reason }),
+  createCorrection: (id: string, data: any) => api.post(`/logistics/loadings/${id}/corrections`, data),
+  getDrivers: (params?: any) => api.get('/logistics/drivers', { params }),
+  createDriver: (data: any) => api.post('/logistics/drivers', data),
+  updateDriver: (id: string, data: any) => api.put(`/logistics/drivers/${id}`, data),
+};
+
 // Contract Templates API
 export const contractTemplatesAPI = {
   getAll: (params?: { page?: number; limit?: number; category?: string; isActive?: boolean }) =>

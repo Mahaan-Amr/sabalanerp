@@ -47,6 +47,7 @@ model User {
   ownedCrmCustomers         CrmCustomer[]         @relation("CrmCustomerOwner")
   createdCrmCustomers       CrmCustomer[]         @relation("CrmCustomerCreatedBy")
   updatedCrmCustomers       CrmCustomer[]         @relation("CrmCustomerUpdatedBy")
+  logisticsDrivers          LogisticsDriver[]     @relation("LogisticsDriverCreatedBy")
 
   @@map("users")
 }
@@ -396,6 +397,7 @@ model SalesContract {
   verificationCodes     ContractVerificationCode[]
   publicConfirmations   ContractPublicConfirmation[]
   confirmationAuditLogs ContractConfirmationAuditLog[]
+  logisticsLoadingLines LogisticsLoadingLine[]
   isSigned              Boolean                        @default(false)
   signedByPhoneNumber   String?
   verificationCodeId    String?                        @unique
@@ -455,6 +457,7 @@ model CrmCustomer {
   phoneNumbers             PhoneNumber[]
   projectAddresses         ProjectAddress[]
   salesContracts           SalesContract[]
+  logisticsLoadings        LogisticsLoading[]
 
   @@index([ownerUserId])
   @@index([createdBy])
@@ -462,7 +465,7 @@ model CrmCustomer {
 }
 
 model ProjectAddress {
-  id                   String      @id @default(cuid())
+  id                   String             @id @default(cuid())
   customerId           String
   address              String
   city                 String
@@ -474,10 +477,11 @@ model ProjectAddress {
   marketerFirstName    String?
   marketerLastName     String?
   marketerPhoneNumber  String?
-  isActive             Boolean     @default(true)
-  createdAt            DateTime    @default(now())
-  updatedAt            DateTime    @updatedAt
-  customer             CrmCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  isActive             Boolean            @default(true)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  customer             CrmCustomer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  logisticsLoadings    LogisticsLoading[]
 
   @@map("project_addresses")
 }
@@ -559,8 +563,8 @@ model CrmCommunication {
 }
 
 model Product {
-  id                               String            @id @default(cuid())
-  code                             String            @unique
+  id                               String                       @id @default(cuid())
+  code                             String                       @unique
   name                             String
   namePersian                      String
   cuttingDimensionCode             String
@@ -570,10 +574,10 @@ model Product {
   stoneTypeName                    String
   stoneTypeNamePersian             String
   widthCode                        String
-  widthValue                       Decimal           @db.Decimal(5, 2)
+  widthValue                       Decimal                      @db.Decimal(5, 2)
   widthName                        String
   thicknessCode                    String
-  thicknessValue                   Decimal           @db.Decimal(5, 2)
+  thicknessValue                   Decimal                      @db.Decimal(5, 2)
   thicknessName                    String
   mineCode                         String
   mineName                         String
@@ -587,46 +591,50 @@ model Product {
   qualityCode                      String
   qualityName                      String
   qualityNamePersian               String
-  basePrice                        Decimal?          @db.Decimal(15, 2)
-  currency                         String            @default("ریال")
-  isAvailable                      Boolean           @default(true)
+  basePrice                        Decimal?                     @db.Decimal(15, 2)
+  currency                         String                       @default("ریال")
+  isAvailable                      Boolean                      @default(true)
   leadTime                         Int?
   description                      String?
   images                           String[]
-  isActive                         Boolean           @default(true)
-  availableInLongitudinalContracts Boolean           @default(true)
-  availableInStairContracts        Boolean           @default(true)
-  availableInSlabContracts         Boolean           @default(true)
-  availableInVolumetricContracts   Boolean           @default(true)
+  isActive                         Boolean                      @default(true)
+  availableInLongitudinalContracts Boolean                      @default(true)
+  availableInStairContracts        Boolean                      @default(true)
+  availableInSlabContracts         Boolean                      @default(true)
+  availableInVolumetricContracts   Boolean                      @default(true)
   deletedAt                        DateTime?
-  createdAt                        DateTime          @default(now())
-  updatedAt                        DateTime          @updatedAt
+  createdAt                        DateTime                     @default(now())
+  updatedAt                        DateTime                     @updatedAt
   contractItems                    ContractItem[]
   deliveryProducts                 DeliveryProduct[]
+  logisticsLoadingLines            LogisticsLoadingLine[]
+  logisticsLoadingCorrections      LogisticsLoadingCorrection[]
 
   @@map("products")
 }
 
 model ContractItem {
-  id                  String        @id @default(cuid())
-  contractId          String
-  productId           String
-  productType         String? // نوع محصول: 'longitudinal' | 'stair' | etc.
-  quantity            Decimal       @db.Decimal(10, 2)
-  unitPrice           Decimal       @db.Decimal(15, 2)
-  totalPrice          Decimal       @db.Decimal(15, 2)
-  description         String?
+  id                          String                       @id @default(cuid())
+  contractId                  String
+  productId                   String
+  productType                 String? // نوع محصول: 'longitudinal' | 'stair' | etc.
+  quantity                    Decimal                      @db.Decimal(10, 2)
+  unitPrice                   Decimal                      @db.Decimal(15, 2)
+  totalPrice                  Decimal                      @db.Decimal(15, 2)
+  description                 String?
   // Mandatory pricing fields
-  isMandatory         Boolean       @default(false)
-  mandatoryPercentage Decimal?      @db.Decimal(5, 2)
-  originalTotalPrice  Decimal?      @db.Decimal(15, 2)
+  isMandatory                 Boolean                      @default(false)
+  mandatoryPercentage         Decimal?                     @db.Decimal(5, 2)
+  originalTotalPrice          Decimal?                     @db.Decimal(15, 2)
   // Stair system linking fields
-  stairSystemId       String? // ID to link multiple items belonging to same stair system
-  stairPartType       String? // نوع بخش پله: 'tread' | 'riser' | 'landing' (کف پله, خیز پله, پاگرد)
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
-  contract            SalesContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  product             Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  stairSystemId               String? // ID to link multiple items belonging to same stair system
+  stairPartType               String? // نوع بخش پله: 'tread' | 'riser' | 'landing' (کف پله, خیز پله, پاگرد)
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+  contract                    SalesContract                @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  product                     Product                      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  logisticsLoadingLines       LogisticsLoadingLine[]
+  logisticsLoadingCorrections LogisticsLoadingCorrection[]
 
   @@map("contract_items")
 }
@@ -663,6 +671,114 @@ model DeliveryProduct {
   product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@map("delivery_products")
+}
+
+model LogisticsDriver {
+  id            String             @id @default(cuid())
+  firstName     String
+  lastName      String
+  vehiclePlate  String
+  vehicleType   String
+  phone         String
+  nationalCode  String
+  notes         String?
+  isActive      Boolean            @default(true)
+  createdBy     String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  createdByUser User               @relation("LogisticsDriverCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade)
+  loadings      LogisticsLoading[]
+
+  @@index([createdBy])
+  @@index([isActive])
+  @@map("logistics_drivers")
+}
+
+model LogisticsLoading {
+  id                 String                       @id @default(cuid())
+  loadingNumber      String                       @unique
+  customerId         String
+  projectId          String
+  status             LogisticsLoadingStatus       @default(DRAFT)
+  loadingDate        DateTime                     @default(now())
+  notes              String?
+  driverId           String?
+  driverSnapshot     Json?
+  finalizedAt        DateTime?
+  finalizedBy        String?
+  cancelledAt        DateTime?
+  cancelledBy        String?
+  cancellationReason String?
+  createdBy          String
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+  customer           CrmCustomer                  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  project            ProjectAddress               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  driver             LogisticsDriver?             @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  lines              LogisticsLoadingLine[]
+  corrections        LogisticsLoadingCorrection[]
+
+  @@index([customerId])
+  @@index([projectId])
+  @@index([status])
+  @@index([driverId])
+  @@index([loadingDate])
+  @@map("logistics_loadings")
+}
+
+model LogisticsLoadingLine {
+  id                   String                       @id @default(cuid())
+  loadingId            String
+  sourceContractId     String
+  sourceContractItemId String
+  productId            String
+  quantity             Decimal                      @db.Decimal(12, 3)
+  unit                 String
+  khatRas              Decimal?                     @db.Decimal(12, 3)
+  pieceCount           Decimal?                     @db.Decimal(12, 3)
+  plus                 Decimal?                     @db.Decimal(12, 3)
+  minus                Decimal?                     @db.Decimal(12, 3)
+  productSnapshot      Json?
+  sourceSnapshot       Json?
+  calculationSnapshot  Json?
+  notes                String?
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+  loading              LogisticsLoading             @relation(fields: [loadingId], references: [id], onDelete: Cascade)
+  sourceContract       SalesContract                @relation(fields: [sourceContractId], references: [id], onDelete: Cascade)
+  sourceContractItem   ContractItem                 @relation(fields: [sourceContractItemId], references: [id], onDelete: Cascade)
+  product              Product                      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  corrections          LogisticsLoadingCorrection[]
+
+  @@index([loadingId])
+  @@index([sourceContractId])
+  @@index([sourceContractItemId])
+  @@index([productId])
+  @@map("logistics_loading_lines")
+}
+
+model LogisticsLoadingCorrection {
+  id                   String                @id @default(cuid())
+  loadingId            String
+  loadingLineId        String?
+  sourceContractItemId String
+  productId            String
+  deltaQuantity        Decimal               @db.Decimal(12, 3)
+  unit                 String
+  reason               String
+  metadata             Json?
+  createdBy            String
+  createdAt            DateTime              @default(now())
+  loading              LogisticsLoading      @relation(fields: [loadingId], references: [id], onDelete: Cascade)
+  loadingLine          LogisticsLoadingLine? @relation(fields: [loadingLineId], references: [id], onDelete: SetNull)
+  sourceContractItem   ContractItem          @relation(fields: [sourceContractItemId], references: [id], onDelete: Cascade)
+  product              Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([loadingId])
+  @@index([loadingLineId])
+  @@index([sourceContractItemId])
+  @@index([productId])
+  @@map("logistics_loading_corrections")
 }
 
 // ==================== INVENTORY MASTER DATA ====================
@@ -965,34 +1081,34 @@ model ChartOfAccount {
 }
 
 model AccountingFinancialRecord {
-  id              String                           @id @default(cuid())
-  kind            FinancialRecordKind
-  status          AccountingRecordStatus           @default(DRAFT)
-  sourceKind      AccountingSourceKind
-  sourceId        String?
-  contractId      String?
-  customerId      String?
-  periodId        String?
-  amount          Decimal                          @default(0) @db.Decimal(18, 2)
-  currency        String                           @default("ریال")
-  sourceSnapshot  Json?
-  metadata        Json?
-  idempotencyKey  String?                          @unique
-  systemInvoiceNumber String?                       @unique
-  systemInvoiceDate DateTime?
-  sepidarAmount Decimal?                            @db.Decimal(18, 2)
+  id                    String                           @id @default(cuid())
+  kind                  FinancialRecordKind
+  status                AccountingRecordStatus           @default(DRAFT)
+  sourceKind            AccountingSourceKind
+  sourceId              String?
+  contractId            String?
+  customerId            String?
+  periodId              String?
+  amount                Decimal                          @default(0) @db.Decimal(18, 2)
+  currency              String                           @default("ریال")
+  sourceSnapshot        Json?
+  metadata              Json?
+  idempotencyKey        String?                          @unique
+  systemInvoiceNumber   String?                          @unique
+  systemInvoiceDate     DateTime?
+  sepidarAmount         Decimal?                         @db.Decimal(18, 2)
   financiallyApprovedAt DateTime?
   financiallyApprovedBy String?
-  createdBy       String
-  postedAt        DateTime?
-  voidedAt        DateTime?
-  createdAt       DateTime                         @default(now())
-  updatedAt       DateTime                         @updatedAt
-  period          AccountingPeriod?                @relation(fields: [periodId], references: [id])
-  invoiceItems    AccountingInvoiceCandidateItem[]
-  receivables     AccountingReceivable[]
-  taxRecords      AccountingTaxRecord[]
-  journalVouchers JournalVoucher[]
+  createdBy             String
+  postedAt              DateTime?
+  voidedAt              DateTime?
+  createdAt             DateTime                         @default(now())
+  updatedAt             DateTime                         @updatedAt
+  period                AccountingPeriod?                @relation(fields: [periodId], references: [id])
+  invoiceItems          AccountingInvoiceCandidateItem[]
+  receivables           AccountingReceivable[]
+  taxRecords            AccountingTaxRecord[]
+  journalVouchers       JournalVoucher[]
 
   @@index([kind, status])
   @@index([sourceKind, sourceId])
@@ -1267,6 +1383,12 @@ enum DeliveryStatus {
   SCHEDULED
   IN_TRANSIT
   DELIVERED
+  CANCELLED
+}
+
+enum LogisticsLoadingStatus {
+  DRAFT
+  FINALIZED
   CANCELLED
 }
 

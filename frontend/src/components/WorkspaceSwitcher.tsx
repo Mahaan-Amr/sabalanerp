@@ -11,7 +11,8 @@ import {
   FaChevronDown,
   FaChevronUp,
   FaHome,
-  FaChartPie
+  FaChartPie,
+  FaTruck
 } from 'react-icons/fa';
 import { useWorkspace, WORKSPACES, WORKSPACE_CONFIG } from '@/contexts/WorkspaceContext';
 
@@ -23,7 +24,8 @@ const iconMap = {
   FaCalculator,
   FaWarehouse,
   FaShieldAlt,
-  FaChartPie
+  FaChartPie,
+  FaTruck
 };
 
 interface WorkspaceSwitcherProps {

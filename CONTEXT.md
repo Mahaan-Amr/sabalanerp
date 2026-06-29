@@ -405,3 +405,75 @@ _Avoid_: merging different source materials into one سنگ مصرفی row, or e
 **نمایش مقدار سنگ مصرفی**:
 A grouped سنگ مصرفی row shows the consumed source width, consumed source/standard length, quantity, and total consumed area in a compact form, such as عرض ۴۰cm × طول ۱.۲m × ۳ عدد، جمع ۱.۴۴ متر مربع. Source dimensions and متر مربع may be shown with up to 4 decimal places when needed so the displayed dimensions and displayed area do not imply different calculations.
 _Avoid_: showing only one piece area when multiple source pieces are consumed, adding per-piece area when the compact total area is enough, or rounding source dimensions so aggressively that users infer a different متر مربع than the saved consumed area
+
+**بارگیری**:
+A logistics-owned execution document that records what was actually loaded for shipment from one customer project, including the selected contract rows, loaded amounts, driver or vehicle details, and resulting remaining amounts.
+_Avoid_: treating بارگیری as the customer-facing برنامه تحویل, or editing the sales delivery promise when logistics is recording actual shipment
+
+**محدوده بارگیری**:
+Each بارگیری belongs to exactly one customer project and may include deliverable rows from multiple sales contracts for that same project.
+_Avoid_: mixing multiple customer projects in one بارگیری, even when the same driver or vehicle carries them together
+
+**مانده بارگیری**:
+The remaining amount for logistics is calculated from eligible contracted amounts minus finalized بارگیری amounts, within compatible contract-row/product groupings.
+_Avoid_: using برنامه تحویل, accounting invoice state, draft بارگیری, or unrelated product rows as the source of truth for physical remaining
+
+**گروه مانده بارگیری**:
+A logistics display grouping that combines remaining amounts only for contract rows with identical logistics-relevant product specs, while preserving access to the individual source contract rows inside the group.
+_Avoid_: losing contract-row traceability when showing a grouped remaining amount, or grouping rows whose physical loading specs differ
+
+**تخصیص منبع بارگیری**:
+When a grouped remaining line contains multiple source contract rows, the logistics user manually chooses how much the بارگیری consumes from each source row before finalization.
+_Avoid_: automatically consuming contract rows behind the user's back, even when the grouped remaining amount is compatible
+
+**خط راس بارگیری**:
+A logistics calculation input for length-based loading that represents the common or average piece length used with a piece count to calculate loaded متر طول.
+_Avoid_: treating خط راس as a contract dimension, product catalog field, or separate unit of measure
+
+**اضافه و کسر بارگیری طولی**:
+Manual length adjustments applied to a length-based بارگیری calculation after خط راس × تعداد: اضافه increases the loaded متر طول and کسر decreases it.
+_Avoid_: hiding these adjustments inside the final amount without preserving how the logistics user calculated it
+
+**تلورانس بارگیری طولی**:
+A finalized length-based بارگیری may exceed the current remaining متر طول by up to 0.5m with a warning; under-loading is allowed because it leaves remaining for later shipment.
+_Avoid_: blocking small length-based overages caused by normal loading variance, or applying the 0.5m tolerance to unrelated units without a separate business decision
+
+**وضعیت بارگیری**:
+Only finalized بارگیری records reduce logistics remaining amounts. Draft بارگیری records are editable preparation records, and cancelled بارگیری records stay in history without reducing remaining.
+_Avoid_: reducing remaining from draft loading entries, or deleting cancelled logistics history
+
+**قفل بارگیری نهایی‌شده**:
+A finalized بارگیری is immutable because it affects remaining amounts and accounting visibility. Mistakes after finalization are handled through cancellation or correction records rather than silent edits.
+_Avoid_: editing finalized loading quantities, driver details, or source rows in place
+
+**اصلاح بارگیری نهایی‌شده**:
+Major or document-level mistakes in a finalized بارگیری are handled by cancelling the loading record, while small quantity mistakes are handled by linked correction records that preserve the original finalized document.
+_Avoid_: silently changing finalized بارگیری data, or forcing every small quantity adjustment to cancel and recreate the whole loading
+
+**اعتبارسنجی اصلاح بارگیری**:
+Correction records follow the same unit, remaining, and tolerance rules as normal بارگیری lines. A correction that increases loaded quantity reduces remaining, and a correction that decreases loaded quantity increases remaining.
+_Avoid_: using corrections to bypass loading tolerance or unit compatibility rules
+
+**راننده بارگیری**:
+Logistics may select a reusable driver record or enter a temporary driver during بارگیری, but every بارگیری saves its own driver and vehicle snapshot for historical accuracy.
+_Avoid_: making old loading documents depend on the current editable driver profile, or requiring every temporary driver to become a reusable driver record
+
+**راننده در نهایی‌سازی بارگیری**:
+A draft بارگیری may exist without driver information, but finalization requires a complete driver and vehicle snapshot.
+_Avoid_: blocking early loading preparation only because the truck is not known yet, or finalizing shipment evidence without driver details
+
+**ردیف قابل بارگیری**:
+A contract row is loadable only when it represents physical cargo leaving Sabalan. Services and operations are not loaded separately, but service/tool/finishing details attached to a physical product should remain visible as part of that product's loading identity.
+_Avoid_: creating بارگیری lines for standalone services, or hiding product-attached services that help logistics identify the correct cargo
+
+**مشاهده حسابداری بارگیری**:
+Accounting sees finalized logistics loading records as read-only shipment evidence, including customer/project, contract links, loaded amounts, driver snapshot, warnings, and correction history.
+_Avoid_: letting accounting directly edit physical loading quantities or driver details
+
+**برگه چاپی بارگیری**:
+A printable loading slip is an output of a finalized digital بارگیری, not the source record. It summarizes the loading document for warehouse, driver, or accounting use.
+_Avoid_: treating the old paper table as the required digital UI layout, or keeping paper as the source of truth after digital entry
+
+**برنامه تحویل در برابر بارگیری**:
+برنامه تحویل is the sales/customer promise for planned delivery timing and amounts; بارگیری is the logistics record of actual loading and shipment.
+_Avoid_: merging promised delivery schedule data with actual loading transactions when shipped quantities, dates, or drivers differ

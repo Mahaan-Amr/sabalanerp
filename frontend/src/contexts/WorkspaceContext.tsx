@@ -12,7 +12,8 @@ export enum WORKSPACES {
   ACCOUNTING = 'accounting',
   INVENTORY = 'inventory',
   SECURITY = 'security',
-  BI = 'bi'
+  BI = 'bi',
+  LOGISTICS = 'logistics'
 }
 
 export enum WORKSPACE_PERMISSIONS {
@@ -122,6 +123,16 @@ export const WORKSPACE_CONFIG: Record<WORKSPACES, WorkspaceInfo> = {
     color: 'teal',
     path: '/dashboard/bi',
     permissions: [WORKSPACE_PERMISSIONS.VIEW, WORKSPACE_PERMISSIONS.ADMIN]
+  },
+  [WORKSPACES.LOGISTICS]: {
+    id: WORKSPACES.LOGISTICS,
+    name: 'Logistics',
+    namePersian: 'لجستیک',
+    description: 'بارگیری، راننده‌ها و مانده ارسال پروژه‌ها',
+    icon: 'FaTruck',
+    color: 'cyan',
+    path: '/dashboard/logistics',
+    permissions: [WORKSPACE_PERMISSIONS.VIEW, WORKSPACE_PERMISSIONS.EDIT, WORKSPACE_PERMISSIONS.ADMIN]
   }
 };
 
@@ -241,6 +252,8 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
       return WORKSPACES.SECURITY;
     } else if (pathname.startsWith('/dashboard/bi')) {
       return WORKSPACES.BI;
+    } else if (pathname.startsWith('/dashboard/logistics')) {
+      return WORKSPACES.LOGISTICS;
     }
     return null;
   }, [pathname]);

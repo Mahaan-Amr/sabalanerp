@@ -108,8 +108,10 @@ interface FlatProductRow {
   description: string;
   note?: string;
   category: string;
-  dimensionsOrAmount: string;
-  quantityOrArea: string;
+  dimensions: string;
+  amount: string;
+  count: string;
+  area: string;
   rate: string;
   total: string;
   className?: string;
@@ -970,14 +972,46 @@ const isMeaningfulService = (service: NormalizedService): boolean =>
 const isMeaningfulTool = (tool: NormalizedProductTool): boolean =>
   hasTextValue(tool.name) || tool.amount > 0 || tool.rate > 0 || tool.cost > 0;
 
-const formatProductQuantityOrArea = (product: NormalizedProduct): string => {
+const buildProductQuantityColumns = (product: NormalizedProduct): Pick<FlatProductRow, 'amount' | 'count' | 'area'> => {
   if (isPreparedProductType(product.productType)) {
-    return `${toFaNumber(product.preparedQuantity || product.quantity, product.preparedUnit === 'تعداد' ? 0 : 2)} ${product.preparedUnit}`;
+    const quantity = toFaNumber(product.preparedQuantity || product.quantity, product.preparedUnit === 'تعداد' ? 0 : 2);
+    if (product.preparedUnit === 'تعداد') {
+      return { amount: '', count: `${quantity} ${product.preparedUnit}`, area: '' };
+    }
+    if (product.preparedUnit === 'متر مربع') {
+      return { amount: '', count: '', area: `${quantity} ${product.preparedUnit}` };
+    }
+    return { amount: `${quantity} ${product.preparedUnit}`, count: '', area: '' };
   }
-  const quantityLabel = product.productType === 'طولی' && product.quantity <= 1
-    ? EMPTY
-    : `${toFaNumber(product.quantity, 2)} عدد`;
-  return `${quantityLabel} / ${toFaNumber(product.squareMeters, 4)} متر مربع`;
+
+  return {
+    amount: '',
+    count: product.productType === 'طولی' && product.quantity <= 1 ? '' : `${toFaNumber(product.quantity, 2)} عدد`,
+    area: `${toFaNumber(product.squareMeters, 4)} متر مربع`
+  };
+};
+
+const splitSourceMaterialQuantity = (value: string): Pick<FlatProductRow, 'count' | 'area'> => {
+  const normalized = String(value || '').trim();
+  if (!normalized || normalized === EMPTY) return { count: '', area: '' };
+
+  const parts = normalized.split('،').map((part) => part.trim()).filter(Boolean);
+  const count = parts.find((part) => part.includes('عدد')) || '';
+  const areaPart = parts.find((part) => part.includes('متر مربع')) || '';
+  return {
+    count,
+    area: areaPart.replace(/^جمع\s*/, '')
+  };
+};
+
+const buildStandaloneServiceQuantityColumns = (
+  quantity: number,
+  unit: string
+): Pick<FlatProductRow, 'amount' | 'count' | 'area'> => {
+  const label = `${toFaNumber(quantity, 4)} ${unit}`;
+  if (unit === 'تعداد' || unit === 'عدد') return { amount: '', count: label, area: '' };
+  if (unit === 'متر مربع') return { amount: '', count: '', area: label };
+  return { amount: label, count: '', area: '' };
 };
 
 const buildFlatProductRows = (
@@ -1005,14 +1039,15 @@ const buildFlatProductRows = (
       product.name,
       preparedSummary
     ].filter(Boolean).join(' - ');
+    const productQuantityColumns = buildProductQuantityColumns(product);
     rows.push({
       indexLabel: toFaNumber(productIndex + 1),
       code: product.code,
       description: productDescription,
       category: 'محصول',
-      dimensionsOrAmount: product.dimensions,
-      quantityOrArea: formatProductQuantityOrArea(product),
-      rate: product.unitPrice > 0 ? formatPrintAmount(product.unitPrice, currency, options) : EMPTY,
+      dimensions: product.dimensions,
+      ...productQuantityColumns,
+      rate: formatPrintAmount(product.unitPrice, currency, options),
       total: formatPrintAmount(baseAmount, currency, options)
     });
 
@@ -1027,13 +1062,15 @@ const buildFlatProductRows = (
         : []);
 
     sourceMaterialRows.forEach((sourceMaterial) => {
+      const sourceQuantityColumns = splitSourceMaterialQuantity(sourceMaterial.quantityOrArea);
       rows.push({
         indexLabel: '',
         code: product.code,
         description: `سنگ مصرفی برای ${sourceMaterial.description || product.name}`,
         category: 'سنگ مصرفی',
-        dimensionsOrAmount: sourceMaterial.dimensionsOrAmount,
-        quantityOrArea: sourceMaterial.quantityOrArea,
+        dimensions: sourceMaterial.dimensionsOrAmount,
+        amount: '',
+        ...sourceQuantityColumns,
         rate: '',
         total: ''
       });
@@ -1045,8 +1082,10 @@ const buildFlatProductRows = (
         code: '',
         description: product.description,
         category: 'توضیحات',
-        dimensionsOrAmount: '',
-        quantityOrArea: '',
+        dimensions: '',
+        amount: '',
+        count: '',
+        area: '',
         rate: '',
         total: '',
         renderAsNoteRow: true
@@ -1060,8 +1099,10 @@ const buildFlatProductRows = (
         code: '',
         description: `حکمی ${toFaNumber(product.mandatoryPercentage)}٪`,
         category: 'حکمی',
-        dimensionsOrAmount: formatPrintAmount(product.originalTotalPrice, currency, options),
-        quantityOrArea: '',
+        dimensions: '',
+        amount: formatPrintAmount(product.originalTotalPrice, currency, options),
+        count: '',
+        area: '',
         rate: `${toFaNumber(product.mandatoryPercentage)}٪`,
         total: formatPrintAmount(mandatoryAmount, currency, options)
       });
@@ -1073,9 +1114,11 @@ const buildFlatProductRows = (
         code: '',
         description: cut.type,
         category: 'برش',
-        dimensionsOrAmount: `${toFaNumber(cut.meters, 4)} متر`,
-        quantityOrArea: '',
-        rate: cut.rate > 0 ? formatPrintAmount(cut.rate, currency, options) : EMPTY,
+        dimensions: '',
+        amount: `${toFaNumber(cut.meters, 4)} متر`,
+        count: '',
+        area: '',
+        rate: formatPrintAmount(cut.rate, currency, options),
         total: formatPrintAmount(cut.cost, currency, options)
       });
     });
@@ -1086,9 +1129,11 @@ const buildFlatProductRows = (
         code: '',
         description: withSelectedEdges(tool.name, tool.selectedEdgesLabel),
         category: 'ابزار',
-        dimensionsOrAmount: tool.amountLabel,
-        quantityOrArea: '',
-        rate: tool.rate > 0 ? formatPrintRate(tool.rate, currency, tool.rateUnitLabel, options) : tool.rateLabel,
+        dimensions: '',
+        amount: tool.amountLabel,
+        count: '',
+        area: '',
+        rate: tool.rate > 0 ? formatPrintRate(tool.rate, currency, tool.rateUnitLabel, options) : formatPrintRate(0, currency, tool.rateUnitLabel, options),
         total: formatPrintAmount(tool.cost, currency, options)
       });
     });
@@ -1099,24 +1144,27 @@ const buildFlatProductRows = (
         code: '',
         description: withSelectedEdges(service.name, service.selectedEdgesLabel),
         category: service.category,
-        dimensionsOrAmount: service.amountLabel,
-        quantityOrArea: '',
-        rate: service.rate > 0 ? formatPrintRate(service.rate, currency, service.rateUnitLabel, options) : (service.rateLabel || EMPTY),
+        dimensions: '',
+        amount: service.amountLabel,
+        count: '',
+        area: '',
+        rate: service.rate > 0 ? formatPrintRate(service.rate, currency, service.rateUnitLabel, options) : formatPrintRate(0, currency, service.rateUnitLabel, options),
         total: formatPrintAmount(service.cost, currency, options)
       });
     });
   });
 
   standaloneServices.forEach((service, serviceIndex) => {
+    const serviceQuantityColumns = buildStandaloneServiceQuantityColumns(service.quantity, service.unit);
     rows.push({
       indexLabel: toFaNumber(products.length + serviceIndex + 1),
       code: service.code,
       description: service.title,
       note: service.description && service.description !== EMPTY ? service.description : undefined,
       category: service.sourceType,
-      dimensionsOrAmount: `${toFaNumber(service.quantity, 4)} ${service.unit}`,
-      quantityOrArea: `${toFaNumber(service.quantity, 4)} ${service.unit}`,
-      rate: service.unitPrice > 0 ? formatPrintAmount(service.unitPrice, currency, options) : EMPTY,
+      dimensions: '',
+      ...serviceQuantityColumns,
+      rate: formatPrintAmount(service.unitPrice, currency, options),
       total: formatPrintAmount(service.totalPrice, currency, options)
     });
   });
@@ -1129,10 +1177,12 @@ const buildFlatProductRows = (
         ? `تخفیف قرارداد ${toFaNumber(financials.discountPercent)}٪`
         : 'تخفیف قرارداد',
       category: 'تخفیف',
-      dimensionsOrAmount: financials.discountBaseSubtotal > 0
+      dimensions: '',
+      amount: financials.discountBaseSubtotal > 0
         ? formatPrintAmount(financials.discountBaseSubtotal, currency, options)
         : '',
-      quantityOrArea: '',
+      count: '',
+      area: '',
       rate: financials.discountPercent > 0 ? `${toFaNumber(financials.discountPercent)}٪` : '',
       total: formatPrintAmount(-financials.discountAmount, currency, options),
       className: 'discount-row'
@@ -1144,8 +1194,10 @@ const buildFlatProductRows = (
     code: '',
     description: 'جمع کل فاکتور',
     category: '',
-    dimensionsOrAmount: '',
-    quantityOrArea: '',
+    dimensions: '',
+    amount: '',
+    count: '',
+    area: '',
     rate: '',
     total: formatPrintAmount(grandTotal, currency, options),
     className: 'total-row'
@@ -1162,7 +1214,7 @@ const renderProductMainRows = (
   financials?: NormalizedFinancials,
   options: { hidePrices?: boolean; includeRialEquivalent?: boolean } = {}
 ): string => {
-  const columnCount = options.hidePrices ? 6 : 8;
+  const columnCount = options.hidePrices ? 8 : 10;
   if (!products.length && !standaloneServices.length) {
     return `<tr><td colspan="${columnCount}" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
   }
@@ -1205,8 +1257,10 @@ const renderProductMainRows = (
         <td>${escapeHtml(row.code || EMPTY)}</td>
         <td>${escapeHtml(row.description || EMPTY)}</td>
         <td>${escapeHtml(row.category || EMPTY)}</td>
-        <td>${renderFormattedAmountCell(row.dimensionsOrAmount || EMPTY)}</td>
-        <td>${escapeHtml(row.quantityOrArea || EMPTY)}</td>
+        <td>${escapeHtml(row.dimensions || EMPTY)}</td>
+        <td>${renderFormattedAmountCell(row.amount || EMPTY)}</td>
+        <td>${escapeHtml(row.count || EMPTY)}</td>
+        <td>${escapeHtml(row.area || EMPTY)}</td>
         ${priceCells}
       </tr>
       ${noteRow}
@@ -1489,7 +1543,9 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           <col class="main-description-col" />
           <col class="main-category-col" />
           <col class="main-dimensions-col" />
-          <col class="main-quantity-col" />
+          <col class="main-amount-col" />
+          <col class="main-count-col" />
+          <col class="main-area-col" />
           ${isWorkshopVariant ? '' : `
           <col class="main-rate-col" />
           <col class="main-total-col" />
@@ -1501,8 +1557,10 @@ export function renderContractHtml(contract: RenderableContract, options: Render
             <th>کد</th>
             <th>شرح</th>
             <th>دسته</th>
-            <th>ابعاد/مقدار</th>
-            <th>تعداد/متراژ</th>
+            <th>ابعاد</th>
+            <th>مقدار</th>
+            <th>تعداد</th>
+            <th>متراژ</th>
             ${isWorkshopVariant ? '' : `
             <th>نرخ</th>
             <th>مبلغ کل</th>
@@ -1754,43 +1812,68 @@ export function renderContractHtml(contract: RenderableContract, options: Render
     }
 
     .main-code-col {
-      width: 12%;
+      width: 10%;
     }
 
     .main-description-col {
-      width: 28%;
+      width: 25%;
     }
 
     .main-category-col {
-      width: 9%;
+      width: 8%;
     }
 
     .main-dimensions-col {
-      width: 13%;
+      width: 10%;
     }
 
-    .main-quantity-col {
-      width: 12%;
+    .main-amount-col {
+      width: 10%;
+    }
+
+    .main-count-col {
+      width: 7%;
+    }
+
+    .main-area-col {
+      width: 10%;
     }
 
     .main-rate-col {
-      width: 11%;
+      width: 8%;
     }
 
     .main-total-col {
-      width: 11%;
+      width: 8%;
+    }
+
+    .workshop-print .main-code-col {
+      width: 13%;
     }
 
     .workshop-print .main-description-col {
-      width: 38%;
+      width: 32%;
     }
 
     .workshop-print .main-dimensions-col {
-      width: 18%;
+      width: 14%;
     }
 
-    .workshop-print .main-quantity-col {
-      width: 17%;
+    .workshop-print .main-amount-col {
+      width: 12%;
+    }
+
+    .workshop-print .main-count-col {
+      width: 7%;
+    }
+
+    .workshop-print .main-area-col {
+      width: 10%;
+    }
+
+    .main-products-table th,
+    .main-products-table td {
+      border: 1.25px solid #9ca3af;
     }
 
     .main-products-table th:first-child,

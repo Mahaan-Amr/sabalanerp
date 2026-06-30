@@ -112,6 +112,14 @@ _Avoid_: making users switch keyboard language to find numeric product values
 An informational customer-facing row that shows the full base stone consumed to create a sold cut product. It explains material usage and dimensions but is not a second charged product row.
 _Avoid_: adding سنگ مصرفی to contract totals, delivery quantities, or inventory as a separate sale row
 
+**قیمت ردیف‌های توضیحی قرارداد**:
+Informational contract output rows such as سنگ مصرفی stay visible for clarity but do not show نرخ or مبلغ کل because they are not price-bearing invoice rows.
+_Avoid_: showing prices on explanatory rows, or making visible مبلغ کل values fail to reconcile with جمع کل فاکتور
+
+**قیمت صفر در خروجی قرارداد**:
+A zero price is printed as ۰ تومان only for a real price-bearing contract row that participates in invoice calculation with a zero amount.
+_Avoid_: using a blank price for zero-charged invoice work, or using ۰ تومان for non-price explanatory rows
+
 **تقسیم طول در برش هوشمند طولی**:
 در برش هوشمند سنگ طولی، طول درخواستی مشتری می‌تواند به عنوان تقاضای کل فهمیده شود و سیستم آن را با چند قطعه فیزیکی کوتاه‌تر از همان عرض تأمین کند، به شرطی که نتیجه قراردادی همان متراژ و عرض درخواستی باقی بماند.
 _Avoid_: نمایش قطعات فیزیکی کوتاه‌تر به عنوان تغییر در سفارش مشتری، یا تقسیم طول در حالتی که کاربر صریحاً قطعه یکپارچه می‌خواهد
@@ -215,6 +223,10 @@ _Avoid_: using the current printer's phone or a later approver's phone
 **جدول اصلی محصولات**:
 The customer-facing contract table that lists product rows and their price-bearing product details as flat invoice rows.
 _Avoid_: rendering nested product detail blocks outside the main product table
+
+**ستون‌های مقداردهی جدول اصلی محصولات**:
+The customer-facing product table separates physical dimensions, measured amount, count, and area into distinct columns so each printed row shows only the values that actually apply to that row.
+_Avoid_: combining ابعاد with مقدار, combining تعداد with متراژ, or repeating one value across multiple quantity columns when only one meaning applies
 
 **حکمی**:
 An explicit percentage-based price increase applied to a contract product when the product is marked as mandatory.

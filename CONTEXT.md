@@ -356,6 +356,14 @@ _Avoid_: blocking step jumps in edit mode, or saving partially invalid edited co
 After a new sales contract has been saved and the workflow reaches the digital confirmation step, the primary completion action means leaving the completed creation flow and returning to the sales contracts list.
 _Avoid_: showing ثبت قرارداد again after the contract has already been created, or creating a duplicate contract when the user only wants to leave the completed workflow
 
+**پیش‌نویس بازیابی قرارداد فروش**:
+During contract creation, in-progress wizard data is a recoverable local draft for the same browser and device. It should survive accidental reloads, browser closes, and short screen sleeps until the contract is successfully submitted or the user discards the draft.
+_Avoid_: expiring meaningful in-progress contract creation data after only a few minutes, requiring users to rebuild large contracts after accidental navigation, or treating local recovery as a cross-device draft-management feature
+
+**لیست ردیف‌های انتخاب‌شده قرارداد**:
+During contract creation, the selected product and service rows are a scalable review surface for the contract being assembled. On desktop, large contracts should be reviewed as compact rows with key pricing and quantity fields first, while rich details such as remaining stones, layers, images, notes, and cutting summaries stay available on demand.
+_Avoid_: forcing every selected row to appear as a full detail card when the contract contains many rows
+
 **ویرایش جزئیات محصول قرارداد**:
 Editing a saved contract product should preserve previously selected ابزار and پرداخت سنگ details from the contract snapshot, even when the current catalog record is missing or inactive. Saved labels, units, prices, and amounts should remain visible instead of being silently dropped.
 _Avoid_: resetting selected contract product details only because catalog lookup fails

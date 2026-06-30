@@ -1,8 +1,8 @@
 // Step 5: Product Selection Component
 // Mobile-first catalog-to-cart product selection for contract creation.
 
-import React from 'react';
-import { FaSearch, FaPlus, FaCheck, FaEdit, FaTrash, FaTimes } from 'react-icons/fa';
+import React, { useState } from 'react';
+import { FaSearch, FaPlus, FaCheck, FaEdit, FaTrash, FaTimes, FaChevronDown } from 'react-icons/fa';
 import { formatPrice, formatSquareMeters, formatQuantity, formatDisplayNumber, parseFormattedNumber } from '@/lib/numberFormat';
 import { resolveBackendAssetUrl } from '@/lib/api';
 import { generateFullProductName } from '../../utils/productUtils';
@@ -135,6 +135,19 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   const hasSearch = catalog.hasSearch;
   const productsSummary = cart.summary;
   const selectedRowCount = cart.items.length + cart.serviceRows.length;
+  const [expandedDesktopRows, setExpandedDesktopRows] = useState<Set<string>>(new Set());
+
+  const toggleDesktopRow = (rowKey: string) => {
+    setExpandedDesktopRows((current) => {
+      const next = new Set(current);
+      if (next.has(rowKey)) {
+        next.delete(rowKey);
+      } else {
+        next.add(rowKey);
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-5">
@@ -179,7 +192,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
+      <div className="grid grid-cols-1 gap-5">
         <section className="space-y-4">
           <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900/60 sm:p-4">
             <div className="mb-4">
@@ -430,7 +443,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
           </div>
         </section>
 
-        <aside className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+        <aside className="space-y-3 lg:hidden">
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -753,6 +766,350 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
           )}
         </aside>
       </div>
+
+      <section className="hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/60 lg:block">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+          <div>
+            <h4 className="text-base font-semibold text-slate-900 dark:text-white">
+              لیست قرارداد
+            </h4>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {hasSelectedProducts ? `${selectedRowCount} ردیف انتخاب شده` : 'محصولات و خدمات انتخاب شده اینجا نمایش داده می‌شوند'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              {formatSquareMeters(productsSummary.totalSquareMeters)}
+            </span>
+            <span className="rounded-lg bg-teal-50 px-3 py-2 text-sm font-bold text-teal-800 dark:bg-teal-900/30 dark:text-teal-100">
+              {formatPrice(productsSummary.totalPrice, 'تومان')}
+            </span>
+          </div>
+        </div>
+
+        {!hasSelectedProducts ? (
+          <div className="px-4 py-8 text-center">
+            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+              <FaCheck className="h-4 w-4" />
+            </div>
+            <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">
+              هنوز ردیفی در قرارداد نیست
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200 text-right text-sm dark:divide-slate-700">
+              <thead className="bg-slate-50 text-xs font-semibold text-slate-500 dark:bg-slate-800/70 dark:text-slate-300">
+                <tr>
+                  <th className="px-3 py-3">نوع</th>
+                  <th className="min-w-[280px] px-3 py-3">شرح</th>
+                  <th className="px-3 py-3">مقدار/متراژ</th>
+                  <th className="px-3 py-3">قیمت واحد</th>
+                  <th className="px-3 py-3">مبلغ کل</th>
+                  <th className="px-3 py-3 text-center">عملیات</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {cart.items.map((product, index) => {
+                  const rowKey = `product-${index}-${product.productId || product.stoneCode || 'row'}`;
+                  const isExpanded = expandedDesktopRows.has(rowKey);
+                  const catalogProduct = product.product;
+                  const usedRemainingStoneKeys = new Set((product.usedRemainingStones || []).flatMap(getRemainingStoneUsageKeys));
+                  const availableRemainingStones = normalizeRemainingStoneCollection(product.remainingStones || [])
+                    .filter(isUsableRemainingStone)
+                    .filter((stone) => !getRemainingStoneUsageKeys(stone).some((key) => usedRemainingStoneKeys.has(key)));
+                  const smartCutPlan = product.smartCutPlan;
+                  const isLayerProduct = Boolean((product.meta as any)?.isLayer);
+                  const isRemainingStoneChild = Boolean((product.meta as any)?.remainingSource);
+                  const shouldShowRemainingStones =
+                    !isLayerProduct &&
+                    (!isRemainingStoneChild || availableRemainingStones.length > 0) &&
+                    (availableRemainingStones.length > 0 || product.productType === 'longitudinal');
+                  const isPreparedRow = isPreparedProductType(product.productType);
+                  const preparedQuantity = isPreparedRow ? getPreparedQuantity(product) : 0;
+                  const preparedUnit = isPreparedRow ? getPreparedUnit(product) : 'count';
+                  const rowTitle = product.stoneName || catalogProduct?.namePersian || `محصول ${index + 1}`;
+
+                  return (
+                    <React.Fragment key={rowKey}>
+                      <tr className="align-top hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                        <td className="whitespace-nowrap px-3 py-3">
+                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${getProductTypeClasses(product.productType)}`}>
+                            {getContractRowTypeLabel(product)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3">
+                          <p className="font-semibold leading-6 text-slate-900 dark:text-white">{rowTitle}</p>
+                          <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                            {product.stoneCode ? `کد: ${product.stoneCode}` : 'بدون کد'}
+                            {catalogProduct?.mineNamePersian ? ` | معدن: ${catalogProduct.mineNamePersian}` : ''}
+                            {product.meta?.remainingSource ? ' | از باقی‌مانده' : ''}
+                          </p>
+                          {isPreparedRow && (
+                            <p className="mt-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                              {getPreparedKindLabel(product.preparedKind)} | {getPreparedUnitLabel(preparedUnit)}
+                            </p>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-slate-700 dark:text-slate-200">
+                          {isPreparedRow ? (
+                            <>
+                              <span className="font-semibold">{formatDisplayNumber(preparedQuantity)}</span>
+                              <span className="mr-1 text-xs text-slate-500 dark:text-slate-400">{getPreparedUnitLabel(preparedUnit)}</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="font-semibold">{formatSquareMeters(product.squareMeters || 0)}</span>
+                              <span className="mr-2 text-xs text-slate-500 dark:text-slate-400">
+                                {formatQuantity(product.quantity || 0)} عدد
+                              </span>
+                            </>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 font-semibold text-slate-700 dark:text-slate-200">
+                          {formatPrice(product.unitPrice ?? product.pricePerSquareMeter ?? 0, 'تومان')}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 font-bold text-teal-700 dark:text-teal-200">
+                          {formatPrice(product.totalPrice || 0, 'تومان')}
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => toggleDesktopRow(rowKey)}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                              title="جزئیات"
+                              aria-label="نمایش جزئیات ردیف"
+                            >
+                              <FaChevronDown className={`h-3.5 w-3.5 transition ${isExpanded ? 'rotate-180' : ''}`} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => cart.duplicateItem(index)}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
+                              title="تکثیر"
+                              aria-label="تکثیر محصول"
+                            >
+                              <FaPlus className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => cart.editItem(index)}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-blue-600 transition hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
+                              title="ویرایش"
+                              aria-label="ویرایش محصول"
+                            >
+                              <FaEdit className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => cart.removeItem(index)}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20"
+                              title="حذف"
+                              aria-label="حذف محصول"
+                            >
+                              <FaTrash className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr>
+                          <td colSpan={6} className="bg-slate-50/80 px-4 py-3 dark:bg-slate-950/30">
+                            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.6fr)]">
+                              <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900/70">
+                                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">جزئیات ردیف</p>
+                                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-700 dark:text-slate-200 xl:grid-cols-4">
+                                  <span>تعداد: {formatDisplayNumber(isPreparedRow ? preparedQuantity : product.quantity || 0)}</span>
+                                  <span>متراژ: {isPreparedRow ? getPreparedUnitLabel(preparedUnit) : formatSquareMeters(product.squareMeters || 0)}</span>
+                                  <span>نوع: {getContractRowTypeLabel(product)}</span>
+                                  <span>{product.isCut ? 'برش دارد' : 'بدون برش'}</span>
+                                </div>
+                                {smartCutPlan?.enabled && (
+                                  <div className="mt-3 rounded-lg border border-teal-200 bg-teal-50 p-3 text-xs leading-5 dark:border-teal-800 dark:bg-teal-900/20">
+                                    <p className="font-semibold text-teal-800 dark:text-teal-100">خلاصه برش هوشمند</p>
+                                    {smartCutPlan.productionPieces.slice(0, 4).map((piece, pieceIndex) => (
+                                      <p key={pieceIndex} className="text-slate-700 dark:text-slate-300">
+                                        {formatDisplayNumber(piece.quantity)} × عرض {formatDisplayNumber(piece.widthCm)} cm × طول {formatDisplayNumber(piece.lengthM)} m
+                                      </p>
+                                    ))}
+                                    {smartCutPlan.cuttingBreakdown.length > 0 && (
+                                      <p className="mt-1 text-amber-700 dark:text-amber-200">
+                                        هزینه برش: {formatPrice(smartCutPlan.totalCuttingCost, 'تومان')}
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+                                <RowImageStrip
+                                  images={product.images || []}
+                                  label={rowTitle}
+                                  onChange={(images) => cart.updateItemImages(index, images)}
+                                  onUpload={cart.uploadImage}
+                                />
+                              </div>
+
+                              {shouldShowRemainingStones && (
+                                <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 dark:border-orange-800 dark:bg-orange-900/20">
+                                  <p className="text-sm font-semibold text-orange-800 dark:text-orange-100">
+                                    سنگ‌های باقیمانده
+                                  </p>
+                                  {availableRemainingStones.length === 0 ? (
+                                    <p className="mt-2 text-xs leading-5 text-orange-700 dark:text-orange-200">
+                                      پس از ثبت برش، باقی‌مانده‌های قابل استفاده اینجا نمایش داده می‌شوند.
+                                    </p>
+                                  ) : (
+                                    <div className="mt-2 space-y-2">
+                                      {availableRemainingStones.slice(0, 3).map((remainingStone) => (
+                                        <div
+                                          key={remainingStone.id}
+                                          className="rounded-lg border border-orange-200 bg-white p-2 text-xs dark:border-orange-800 dark:bg-slate-900/50"
+                                        >
+                                          <div className="flex flex-wrap items-center justify-between gap-2 text-slate-800 dark:text-slate-100">
+                                            <span>عرض {formatDisplayNumber(remainingStone.width)} cm</span>
+                                            <span>طول {formatDisplayNumber(remainingStone.length)} m</span>
+                                            <span>{formatSquareMeters(remainingStone.squareMeters)}</span>
+                                          </div>
+                                          {cart.useRemainingStone && (
+                                            <button
+                                              type="button"
+                                              onClick={() => cart.useRemainingStone?.(remainingStone, product)}
+                                              className="mt-2 inline-flex min-h-8 w-full items-center justify-center rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-orange-600"
+                                            >
+                                              استفاده از این سنگ
+                                            </button>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+
+                {cart.serviceRows.map((row) => {
+                  const rowKey = `service-${row.id}`;
+                  const isExpanded = expandedDesktopRows.has(rowKey);
+
+                  return (
+                    <React.Fragment key={rowKey}>
+                      <tr className="align-top hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                        <td className="whitespace-nowrap px-3 py-3">
+                          <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
+                            {getServiceRowSourceLabel(row.sourceType)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3">
+                          <p className="font-semibold leading-6 text-slate-900 dark:text-white">{row.title}</p>
+                          {row.description && (
+                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                              {row.description}
+                            </p>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 font-semibold text-slate-700 dark:text-slate-200">
+                          {formatDisplayNumber(row.quantity)} {getServiceRowUnitLabel(row.unit)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 font-semibold text-slate-700 dark:text-slate-200">
+                          {formatPrice(row.unitPrice || 0, row.currency || 'تومان')}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 font-bold text-emerald-700 dark:text-emerald-200">
+                          {formatPrice(row.totalPrice || 0, row.currency || 'تومان')}
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => toggleDesktopRow(rowKey)}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                              title="جزئیات"
+                              aria-label="نمایش جزئیات خدمت"
+                            >
+                              <FaChevronDown className={`h-3.5 w-3.5 transition ${isExpanded ? 'rotate-180' : ''}`} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => cart.duplicateServiceRow(row.id)}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
+                              title="تکثیر"
+                              aria-label="تکثیر خدمت"
+                            >
+                              <FaPlus className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => cart.removeServiceRow(row.id)}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20"
+                              title="حذف"
+                              aria-label="حذف خدمت"
+                            >
+                              <FaTrash className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr>
+                          <td colSpan={6} className="bg-slate-50/80 px-4 py-3 dark:bg-slate-950/30">
+                            <div className="grid gap-3 xl:grid-cols-3">
+                              <label className="rounded-lg bg-white p-2 text-xs dark:bg-slate-900/70">
+                                <span className="text-slate-500 dark:text-slate-400">
+                                  مقدار ({getServiceRowUnitLabel(row.unit)})
+                                </span>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  min="0"
+                                  step="0.01"
+                                  value={row.quantity}
+                                  onChange={(event) => cart.updateServiceRow(row.id, { quantity: parseFormattedNumber(event.target.value) })}
+                                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-left font-semibold text-slate-800 outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                                />
+                              </label>
+                              <label className="rounded-lg bg-white p-2 text-xs dark:bg-slate-900/70">
+                                <span className="text-slate-500 dark:text-slate-400">قیمت واحد</span>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  min="0"
+                                  step="1000"
+                                  value={row.unitPrice}
+                                  onChange={(event) => cart.updateServiceRow(row.id, { unitPrice: parseFormattedNumber(event.target.value) })}
+                                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-left font-semibold text-slate-800 outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                                />
+                              </label>
+                              <label className="rounded-lg bg-white p-2 text-xs dark:bg-slate-900/70">
+                                <span className="text-slate-500 dark:text-slate-400">توضیحات</span>
+                                <textarea
+                                  value={row.description || ''}
+                                  onChange={(event) => cart.updateServiceRow(row.id, { description: event.target.value })}
+                                  rows={2}
+                                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-800 outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                                />
+                              </label>
+                            </div>
+                            <RowImageStrip
+                              images={row.images || []}
+                              label={row.title || 'تصویر خدمت'}
+                              onChange={(images) => cart.updateServiceRow(row.id, { images })}
+                              onUpload={cart.uploadImage}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <div className="sticky bottom-3 z-30 lg:hidden">
         <div className="rounded-xl border border-teal-500/40 bg-slate-950/95 p-3 shadow-2xl shadow-black/30 backdrop-blur">

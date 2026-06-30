@@ -2050,15 +2050,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setAutosaveHydrated(true);
   }, []);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (isContractEditMode) return;
-    if (!autosaveHydrated) return;
-    if (wizardData.signature?.contractId) {
-      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
-      return;
-    }
-
+  const buildContractAutosaveDraft = useCallback(() => {
     const hasMeaningfulDraftProgress =
       currentStep > 1 ||
       Boolean(wizardData.customerId) ||
@@ -2076,11 +2068,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       stairSystemV2.stairSessionItems.length > 0;
 
     if (!hasMeaningfulDraftProgress) {
-      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
-      return;
+      return null;
     }
 
-    const draft = createContractAutosaveDraft({
+    return createContractAutosaveDraft({
       currentStep,
       wizardData,
       searches: {
@@ -2112,10 +2103,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         stairSessionItems: stairSystemV2.stairSessionItems
       }
     });
-
-    localStorage.setItem(CONTRACT_DRAFT_STORAGE_KEY, JSON.stringify(draft));
   }, [
-    autosaveHydrated,
     currentStep,
     wizardData,
     customerSearchTerm,
@@ -2141,6 +2129,56 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     stairSystemV2.stairSessionId,
     stairSystemV2.stairSessionItems
   ]);
+
+  const flushContractAutosaveDraft = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    if (isContractEditMode || !autosaveHydrated) return;
+    if (wizardData.signature?.contractId) {
+      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+      return;
+    }
+
+    const draft = buildContractAutosaveDraft();
+    if (!draft) {
+      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+      return;
+    }
+
+    localStorage.setItem(CONTRACT_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  }, [
+    autosaveHydrated,
+    buildContractAutosaveDraft,
+    isContractEditMode,
+    wizardData.signature?.contractId
+  ]);
+
+  useEffect(() => {
+    flushContractAutosaveDraft();
+  }, [flushContractAutosaveDraft]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (isContractEditMode) return;
+
+    const handlePageHide = () => {
+      flushContractAutosaveDraft();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushContractAutosaveDraft();
+      }
+    };
+
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('beforeunload', handlePageHide);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('beforeunload', handlePageHide);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [flushContractAutosaveDraft, isContractEditMode]);
 
   useEffect(() => {
     const initializeData = async () => {

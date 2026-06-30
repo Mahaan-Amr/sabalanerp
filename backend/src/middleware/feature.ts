@@ -195,6 +195,17 @@ export const FEATURES = {
   // BI Features
   BI_DASHBOARD_VIEW: 'bi_dashboard_view',
 
+  // Logistics Features
+  LOGISTICS_DASHBOARD_VIEW: 'logistics_dashboard_view',
+  LOGISTICS_LOADINGS_VIEW: 'logistics_loadings_view',
+  LOGISTICS_LOADINGS_CREATE: 'logistics_loadings_create',
+  LOGISTICS_LOADINGS_EDIT: 'logistics_loadings_edit',
+  LOGISTICS_LOADINGS_FINALIZE: 'logistics_loadings_finalize',
+  LOGISTICS_LOADINGS_CANCEL: 'logistics_loadings_cancel',
+  LOGISTICS_CORRECTIONS_CREATE: 'logistics_corrections_create',
+  LOGISTICS_DRIVERS_VIEW: 'logistics_drivers_view',
+  LOGISTICS_DRIVERS_MANAGE: 'logistics_drivers_manage',
+
   // Security Features
   SECURITY_SHIFTS_VIEW: 'security_shifts_view',
   SECURITY_SHIFTS_CREATE: 'security_shifts_create',
@@ -406,6 +417,17 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   // BI Features
   [FEATURES.BI_DASHBOARD_VIEW]: 'bi',
 
+  // Logistics Features
+  [FEATURES.LOGISTICS_DASHBOARD_VIEW]: 'logistics',
+  [FEATURES.LOGISTICS_LOADINGS_VIEW]: 'logistics',
+  [FEATURES.LOGISTICS_LOADINGS_CREATE]: 'logistics',
+  [FEATURES.LOGISTICS_LOADINGS_EDIT]: 'logistics',
+  [FEATURES.LOGISTICS_LOADINGS_FINALIZE]: 'logistics',
+  [FEATURES.LOGISTICS_LOADINGS_CANCEL]: 'logistics',
+  [FEATURES.LOGISTICS_CORRECTIONS_CREATE]: 'logistics',
+  [FEATURES.LOGISTICS_DRIVERS_VIEW]: 'logistics',
+  [FEATURES.LOGISTICS_DRIVERS_MANAGE]: 'logistics',
+
   // Security Features
   [FEATURES.SECURITY_SHIFTS_VIEW]: 'security',
   [FEATURES.SECURITY_SHIFTS_CREATE]: 'security',
@@ -591,6 +613,16 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID]: 'Accounting Records - Approve/Void',
   [FEATURES.ACCOUNTING_ACTIONS_MANAGE]: 'Accounting Actions - Manage',
   [FEATURES.BI_DASHBOARD_VIEW]: 'BI Dashboard - View',
+
+  [FEATURES.LOGISTICS_DASHBOARD_VIEW]: 'Logistics Dashboard - View',
+  [FEATURES.LOGISTICS_LOADINGS_VIEW]: 'Logistics Loadings - View',
+  [FEATURES.LOGISTICS_LOADINGS_CREATE]: 'Logistics Loadings - Create',
+  [FEATURES.LOGISTICS_LOADINGS_EDIT]: 'Logistics Loadings - Edit',
+  [FEATURES.LOGISTICS_LOADINGS_FINALIZE]: 'Logistics Loadings - Finalize',
+  [FEATURES.LOGISTICS_LOADINGS_CANCEL]: 'Logistics Loadings - Cancel',
+  [FEATURES.LOGISTICS_CORRECTIONS_CREATE]: 'Logistics Corrections - Create',
+  [FEATURES.LOGISTICS_DRIVERS_VIEW]: 'Logistics Drivers - View',
+  [FEATURES.LOGISTICS_DRIVERS_MANAGE]: 'Logistics Drivers - Manage',
 
   [FEATURES.SECURITY_SHIFTS_VIEW]: 'Security Shifts - View',
   [FEATURES.SECURITY_SHIFTS_CREATE]: 'Security Shifts - Create',

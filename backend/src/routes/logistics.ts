@@ -3,6 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -16,6 +17,15 @@ router.use(protect);
 
 const canEdit = requireWorkspaceAccess(WORKSPACES.LOGISTICS, WORKSPACE_PERMISSIONS.EDIT);
 const canView = requireWorkspaceAccess(WORKSPACES.LOGISTICS, WORKSPACE_PERMISSIONS.VIEW);
+const canViewDashboard = requireFeatureAccess(FEATURES.LOGISTICS_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW);
+const canViewLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_VIEW, FEATURE_PERMISSIONS.VIEW);
+const canCreateLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_CREATE, FEATURE_PERMISSIONS.EDIT);
+const canEditLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_EDIT, FEATURE_PERMISSIONS.EDIT);
+const canFinalizeLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_FINALIZE, FEATURE_PERMISSIONS.EDIT);
+const canCancelLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_CANCEL, FEATURE_PERMISSIONS.EDIT);
+const canCreateCorrections = requireFeatureAccess(FEATURES.LOGISTICS_CORRECTIONS_CREATE, FEATURE_PERMISSIONS.EDIT);
+const canViewDrivers = requireFeatureAccess(FEATURES.LOGISTICS_DRIVERS_VIEW, FEATURE_PERMISSIONS.VIEW);
+const canManageDrivers = requireFeatureAccess(FEATURES.LOGISTICS_DRIVERS_MANAGE, FEATURE_PERMISSIONS.EDIT);
 
 const toNumber = (value: unknown, fallback = 0) => {
   const parsed = Number(value);
@@ -372,7 +382,7 @@ const validateLineRemaining = async (lines: Array<{ sourceContractItemId: string
   }
 };
 
-router.get('/dashboard', canView, async (_req: any, res: Response) => {
+router.get('/dashboard', canView, canViewDashboard, async (_req: any, res: Response) => {
   try {
     const [drafts, finalized, cancelled, drivers] = await Promise.all([
       prisma.logisticsLoading.count({ where: { status: EDITABLE_STATUS as any } }),
@@ -408,7 +418,7 @@ router.get('/dashboard', canView, async (_req: any, res: Response) => {
   }
 });
 
-router.get('/projects', canView, async (req: any, res: Response) => {
+router.get('/projects', canView, canCreateLoadings, async (req: any, res: Response) => {
   try {
     const search = String(req.query.search || '').trim();
     const projects = await prisma.projectAddress.findMany({
@@ -447,7 +457,7 @@ router.get('/projects', canView, async (req: any, res: Response) => {
   }
 });
 
-router.get('/projects/:projectId/remaining', canView, async (req: any, res: Response) => {
+router.get('/projects/:projectId/remaining', canView, canCreateLoadings, async (req: any, res: Response) => {
   try {
     const data = await buildRemainingForProject(req.params.projectId);
     res.json({ success: true, data });
@@ -457,7 +467,7 @@ router.get('/projects/:projectId/remaining', canView, async (req: any, res: Resp
   }
 });
 
-router.post('/projects/:projectId/draft', canEdit, async (req: any, res: Response) => {
+router.post('/projects/:projectId/draft', canEdit, canCreateLoadings, async (req: any, res: Response) => {
   try {
     const project = await getProjectWithCustomer(req.params.projectId);
     if (!project) return res.status(404).json({ success: false, error: 'Project not found' });
@@ -495,7 +505,7 @@ router.post('/projects/:projectId/draft', canEdit, async (req: any, res: Respons
   }
 });
 
-router.get('/loadings', canView, async (req: any, res: Response) => {
+router.get('/loadings', canView, canViewLoadings, async (req: any, res: Response) => {
   try {
     const status = req.query.status ? String(req.query.status) : undefined;
     const projectId = req.query.projectId ? String(req.query.projectId) : undefined;
@@ -532,7 +542,7 @@ router.get('/loadings', canView, async (req: any, res: Response) => {
   }
 });
 
-router.post('/loadings', canEdit, [
+router.post('/loadings', canEdit, canCreateLoadings, [
   body('projectId').notEmpty().withMessage('Project is required'),
   body('lines').optional().isArray().withMessage('Lines must be an array')
 ], async (req: any, res: Response) => {
@@ -572,7 +582,7 @@ router.post('/loadings', canEdit, [
   }
 });
 
-router.get('/loadings/:id', canView, async (req: any, res: Response) => {
+router.get('/loadings/:id', canView, canViewLoadings, async (req: any, res: Response) => {
   try {
     const loading = await loadLoading(req.params.id);
     if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
@@ -583,7 +593,7 @@ router.get('/loadings/:id', canView, async (req: any, res: Response) => {
   }
 });
 
-router.put('/loadings/:id', canEdit, async (req: any, res: Response) => {
+router.put('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: Response) => {
   try {
     const existing = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id } });
     if (!existing) return res.status(404).json({ success: false, error: 'Loading not found' });
@@ -617,7 +627,7 @@ router.put('/loadings/:id', canEdit, async (req: any, res: Response) => {
   }
 });
 
-router.post('/loadings/:id/finalize', canEdit, async (req: any, res: Response) => {
+router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: any, res: Response) => {
   try {
     const loading = await loadLoading(req.params.id);
     if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
@@ -647,7 +657,7 @@ router.post('/loadings/:id/finalize', canEdit, async (req: any, res: Response) =
   }
 });
 
-router.post('/loadings/:id/cancel', canEdit, [
+router.post('/loadings/:id/cancel', canEdit, canCancelLoadings, [
   body('reason').notEmpty().withMessage('Cancellation reason is required')
 ], async (req: any, res: Response) => {
   try {
@@ -675,7 +685,7 @@ router.post('/loadings/:id/cancel', canEdit, [
   }
 });
 
-router.post('/loadings/:id/corrections', canEdit, [
+router.post('/loadings/:id/corrections', canEdit, canCreateCorrections, [
   body('sourceContractItemId').notEmpty().withMessage('Source row is required'),
   body('deltaQuantity').isNumeric().withMessage('Delta quantity is required'),
   body('reason').notEmpty().withMessage('Reason is required')
@@ -723,7 +733,7 @@ router.post('/loadings/:id/corrections', canEdit, [
   }
 });
 
-router.get('/drivers', canView, async (req: any, res: Response) => {
+router.get('/drivers', canView, canViewDrivers, async (req: any, res: Response) => {
   try {
     const includeInactive = req.query.includeInactive === 'true';
     const drivers = await prisma.logisticsDriver.findMany({
@@ -737,7 +747,7 @@ router.get('/drivers', canView, async (req: any, res: Response) => {
   }
 });
 
-router.post('/drivers', canEdit, [
+router.post('/drivers', canEdit, canManageDrivers, [
   body('firstName').notEmpty().withMessage('First name is required'),
   body('lastName').notEmpty().withMessage('Last name is required'),
   body('vehiclePlate').notEmpty().withMessage('Vehicle plate is required'),
@@ -768,7 +778,7 @@ router.post('/drivers', canEdit, [
   }
 });
 
-router.put('/drivers/:id', canEdit, async (req: any, res: Response) => {
+router.put('/drivers/:id', canEdit, canManageDrivers, async (req: any, res: Response) => {
   try {
     const driver = await prisma.logisticsDriver.update({
       where: { id: req.params.id },

@@ -515,6 +515,7 @@ export const logisticsAPI = {
   getDashboard: () => api.get('/logistics/dashboard'),
   getProjects: (params?: any) => api.get('/logistics/projects', { params }),
   getRemaining: (projectId: string) => api.get(`/logistics/projects/${projectId}/remaining`),
+  createOrResumeDraft: (projectId: string, data?: any) => api.post(`/logistics/projects/${projectId}/draft`, data || {}),
   getLoadings: (params?: any) => api.get('/logistics/loadings', { params }),
   createLoading: (data: any) => api.post('/logistics/loadings', data),
   getLoading: (id: string) => api.get(`/logistics/loadings/${id}`),

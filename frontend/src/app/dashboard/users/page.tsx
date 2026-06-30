@@ -173,7 +173,7 @@ export default function UsersManagementPage() {
 
   const getEffectiveWorkspacePermissions = (user: User): EffectiveWorkspacePermission[] => {
     if (user.role === 'ADMIN') {
-      return ['sales', 'crm', 'hr', 'accounting', 'inventory', 'security'].map((workspace) => ({
+      return ['sales', 'crm', 'hr', 'accounting', 'inventory', 'security', 'bi', 'logistics'].map((workspace) => ({
         key: `admin-${workspace}`,
         workspace,
         permissionLevel: 'admin',
@@ -233,6 +233,8 @@ export default function UsersManagementPage() {
       case 'accounting': return 'حسابداری';
       case 'inventory': return 'انبار';
       case 'security': return 'امنیت';
+      case 'bi': return 'هوش تجاری';
+      case 'logistics': return 'لجستیک';
       default: return workspace;
     }
   };

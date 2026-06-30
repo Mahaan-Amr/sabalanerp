@@ -35,7 +35,8 @@ const WORKSPACES = {
   ACCOUNTING: 'accounting',
   INVENTORY: 'inventory',
   SECURITY: 'security',
-  BI: 'bi'
+  BI: 'bi',
+  LOGISTICS: 'logistics'
 };
 
 const WORKSPACE_PERMISSIONS = {
@@ -51,7 +52,8 @@ const WORKSPACE_LABELS = {
   accounting: 'حسابداری',
   inventory: 'انبار',
   security: 'حراست',
-  bi: 'هوش تجاری'
+  bi: 'هوش تجاری',
+  logistics: 'لجستیک'
 };
 
 const PERMISSION_LABELS = {
@@ -119,14 +121,36 @@ const PERMISSION_PRESETS: Array<{
     ]
   },
   {
+    id: 'logistics_staff',
+    label: 'کارشناس لجستیک',
+    description: 'ثبت بارگیری، راننده‌ها و مشاهده فروش',
+    recommendedRole: 'USER',
+    permissions: [
+      { workspace: WORKSPACES.LOGISTICS, permissionLevel: WORKSPACE_PERMISSIONS.EDIT },
+      { workspace: WORKSPACES.SALES, permissionLevel: WORKSPACE_PERMISSIONS.VIEW }
+    ]
+  },
+  {
+    id: 'logistics_manager',
+    label: 'مدیر لجستیک',
+    description: 'مدیریت لجستیک و مشاهده فروش و انبار',
+    recommendedRole: 'MANAGER',
+    permissions: [
+      { workspace: WORKSPACES.LOGISTICS, permissionLevel: WORKSPACE_PERMISSIONS.ADMIN },
+      { workspace: WORKSPACES.SALES, permissionLevel: WORKSPACE_PERMISSIONS.VIEW },
+      { workspace: WORKSPACES.INVENTORY, permissionLevel: WORKSPACE_PERMISSIONS.VIEW }
+    ]
+  },
+  {
     id: 'operations_viewer',
     label: 'مشاهده عملیات',
-    description: 'مشاهده فروش، CRM و انبار',
+    description: 'مشاهده فروش، CRM، انبار و لجستیک',
     recommendedRole: 'USER',
     permissions: [
       { workspace: WORKSPACES.SALES, permissionLevel: WORKSPACE_PERMISSIONS.VIEW },
       { workspace: WORKSPACES.CRM, permissionLevel: WORKSPACE_PERMISSIONS.VIEW },
-      { workspace: WORKSPACES.INVENTORY, permissionLevel: WORKSPACE_PERMISSIONS.VIEW }
+      { workspace: WORKSPACES.INVENTORY, permissionLevel: WORKSPACE_PERMISSIONS.VIEW },
+      { workspace: WORKSPACES.LOGISTICS, permissionLevel: WORKSPACE_PERMISSIONS.VIEW }
     ]
   },
   {

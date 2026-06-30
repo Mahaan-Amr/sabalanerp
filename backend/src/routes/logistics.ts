@@ -457,6 +457,44 @@ router.get('/projects/:projectId/remaining', canView, async (req: any, res: Resp
   }
 });
 
+router.post('/projects/:projectId/draft', canEdit, async (req: any, res: Response) => {
+  try {
+    const project = await getProjectWithCustomer(req.params.projectId);
+    if (!project) return res.status(404).json({ success: false, error: 'Project not found' });
+
+    const forceNew = req.body?.forceNew === true;
+    if (!forceNew) {
+      const existingDraft = await prisma.logisticsLoading.findFirst({
+        where: {
+          projectId: project.id,
+          status: EDITABLE_STATUS as any
+        },
+        orderBy: { updatedAt: 'desc' }
+      });
+
+      if (existingDraft) {
+        return res.json({ success: true, resumed: true, data: await loadLoading(existingDraft.id) });
+      }
+    }
+
+    const loading = await prisma.logisticsLoading.create({
+      data: {
+        loadingNumber: await generateLoadingNumber(),
+        customerId: project.customerId,
+        projectId: project.id,
+        loadingDate: req.body?.loadingDate ? new Date(req.body.loadingDate) : new Date(),
+        notes: req.body?.notes || null,
+        createdBy: req.user.id
+      }
+    });
+
+    res.status(201).json({ success: true, resumed: false, data: await loadLoading(loading.id) });
+  } catch (error: any) {
+    console.error('Create or resume logistics draft error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Server error' });
+  }
+});
+
 router.get('/loadings', canView, async (req: any, res: Response) => {
   try {
     const status = req.query.status ? String(req.query.status) : undefined;

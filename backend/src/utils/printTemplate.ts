@@ -108,9 +108,9 @@ interface FlatProductRow {
   description: string;
   note?: string;
   category: string;
-  dimensions: string;
-  amount: string;
-  count: string;
+  length: string;
+  width: string;
+  quantity: string;
   area: string;
   rate: string;
   total: string;
@@ -337,6 +337,27 @@ const getFinishingAmountLabel = (product: any): string => {
   const unitLabel = getFinishingUnitLabel(base);
   const quantity = getFinishingQuantity(product, base);
   return `${toFaNumber(quantity, 4)} ${unitLabel}`;
+};
+
+const cleanDimensionValue = (value: string): string => value
+  .replace(/^[\s:：-]+/, '')
+  .replace(/[\s،,؛;|×xX-]+$/, '')
+  .trim();
+
+const splitDimensionColumns = (value: string): Pick<FlatProductRow, 'length' | 'width'> => {
+  const text = String(value || '').trim();
+  if (!text || text === EMPTY) return { length: '', width: '' };
+
+  const lengthMatch = text.match(/طول\s*:?\s*([^،,؛;|×xX-]+)/);
+  const widthMatch = text.match(/عرض\s*:?\s*([^،,؛;|×xX-]+)/);
+  const length = lengthMatch?.[1] ? cleanDimensionValue(lengthMatch[1]) : '';
+  const width = widthMatch?.[1] ? cleanDimensionValue(widthMatch[1]) : '';
+
+  if (length || width) {
+    return { length, width };
+  }
+
+  return { length: cleanDimensionValue(text), width: '' };
 };
 
 const formatDate = (value: unknown): string => {
@@ -972,34 +993,33 @@ const isMeaningfulService = (service: NormalizedService): boolean =>
 const isMeaningfulTool = (tool: NormalizedProductTool): boolean =>
   hasTextValue(tool.name) || tool.amount > 0 || tool.rate > 0 || tool.cost > 0;
 
-const buildProductQuantityColumns = (product: NormalizedProduct): Pick<FlatProductRow, 'amount' | 'count' | 'area'> => {
+const buildProductQuantityColumns = (product: NormalizedProduct): Pick<FlatProductRow, 'quantity' | 'area'> => {
   if (isPreparedProductType(product.productType)) {
     const quantity = toFaNumber(product.preparedQuantity || product.quantity, product.preparedUnit === 'تعداد' ? 0 : 2);
     if (product.preparedUnit === 'تعداد') {
-      return { amount: '', count: `${quantity} ${product.preparedUnit}`, area: '' };
+      return { quantity: `${quantity} ${product.preparedUnit}`, area: '' };
     }
     if (product.preparedUnit === 'متر مربع') {
-      return { amount: '', count: '', area: `${quantity} ${product.preparedUnit}` };
+      return { quantity: '', area: `${quantity} ${product.preparedUnit}` };
     }
-    return { amount: `${quantity} ${product.preparedUnit}`, count: '', area: '' };
+    return { quantity: `${quantity} ${product.preparedUnit}`, area: '' };
   }
 
   return {
-    amount: '',
-    count: product.productType === 'طولی' && product.quantity <= 1 ? '' : `${toFaNumber(product.quantity, 2)} عدد`,
+    quantity: product.productType === 'طولی' && product.quantity <= 1 ? '' : `${toFaNumber(product.quantity, 2)} عدد`,
     area: `${toFaNumber(product.squareMeters, 4)} متر مربع`
   };
 };
 
-const splitSourceMaterialQuantity = (value: string): Pick<FlatProductRow, 'count' | 'area'> => {
+const splitSourceMaterialQuantity = (value: string): Pick<FlatProductRow, 'quantity' | 'area'> => {
   const normalized = String(value || '').trim();
-  if (!normalized || normalized === EMPTY) return { count: '', area: '' };
+  if (!normalized || normalized === EMPTY) return { quantity: '', area: '' };
 
   const parts = normalized.split('،').map((part) => part.trim()).filter(Boolean);
   const count = parts.find((part) => part.includes('عدد')) || '';
   const areaPart = parts.find((part) => part.includes('متر مربع')) || '';
   return {
-    count,
+    quantity: count,
     area: areaPart.replace(/^جمع\s*/, '')
   };
 };
@@ -1007,11 +1027,10 @@ const splitSourceMaterialQuantity = (value: string): Pick<FlatProductRow, 'count
 const buildStandaloneServiceQuantityColumns = (
   quantity: number,
   unit: string
-): Pick<FlatProductRow, 'amount' | 'count' | 'area'> => {
+): Pick<FlatProductRow, 'quantity' | 'area'> => {
   const label = `${toFaNumber(quantity, 4)} ${unit}`;
-  if (unit === 'تعداد' || unit === 'عدد') return { amount: '', count: label, area: '' };
-  if (unit === 'متر مربع') return { amount: '', count: '', area: label };
-  return { amount: label, count: '', area: '' };
+  if (unit === 'متر مربع') return { quantity: '', area: label };
+  return { quantity: label, area: '' };
 };
 
 const buildFlatProductRows = (
@@ -1045,7 +1064,7 @@ const buildFlatProductRows = (
       code: product.code,
       description: productDescription,
       category: product.stairPart !== EMPTY ? product.stairPart : 'محصول',
-      dimensions: product.dimensions,
+      ...splitDimensionColumns(product.dimensions),
       ...productQuantityColumns,
       rate: formatPrintAmount(product.unitPrice, currency, options),
       total: formatPrintAmount(baseAmount, currency, options)
@@ -1062,14 +1081,15 @@ const buildFlatProductRows = (
         : []);
 
     sourceMaterialRows.forEach((sourceMaterial) => {
-      const sourceQuantityColumns = splitSourceMaterialQuantity(sourceMaterial.quantityOrArea);
+      const sourceQuantityColumns = splitSourceMaterialQuantity(
+        sourceMaterial.quantityOrArea || sourceMaterial.dimensionsOrAmount
+      );
       rows.push({
         indexLabel: '',
         code: product.code,
         description: `سنگ مصرفی برای ${sourceMaterial.description || product.name}`,
         category: 'سنگ مصرفی',
-        dimensions: sourceMaterial.dimensionsOrAmount,
-        amount: '',
+        ...splitDimensionColumns(sourceMaterial.dimensionsOrAmount),
         ...sourceQuantityColumns,
         rate: '',
         total: ''
@@ -1082,9 +1102,9 @@ const buildFlatProductRows = (
         code: '',
         description: product.description,
         category: 'توضیحات',
-        dimensions: '',
-        amount: '',
-        count: '',
+        length: '',
+        width: '',
+        quantity: '',
         area: '',
         rate: '',
         total: '',
@@ -1099,9 +1119,9 @@ const buildFlatProductRows = (
         code: '',
         description: `حکمی ${toFaNumber(product.mandatoryPercentage)}٪`,
         category: 'حکمی',
-        dimensions: '',
-        amount: formatPrintAmount(product.originalTotalPrice, currency, options),
-        count: '',
+        length: '',
+        width: '',
+        quantity: formatPrintAmount(product.originalTotalPrice, currency, options),
         area: '',
         rate: `${toFaNumber(product.mandatoryPercentage)}٪`,
         total: formatPrintAmount(mandatoryAmount, currency, options)
@@ -1114,9 +1134,9 @@ const buildFlatProductRows = (
         code: '',
         description: cut.type,
         category: 'برش',
-        dimensions: '',
-        amount: `${toFaNumber(cut.meters, 4)} متر`,
-        count: '',
+        length: '',
+        width: '',
+        quantity: `${toFaNumber(cut.meters, 4)} متر`,
         area: '',
         rate: formatPrintAmount(cut.rate, currency, options),
         total: formatPrintAmount(cut.cost, currency, options)
@@ -1129,9 +1149,9 @@ const buildFlatProductRows = (
         code: '',
         description: withSelectedEdges(tool.name, tool.selectedEdgesLabel),
         category: 'ابزار',
-        dimensions: '',
-        amount: tool.amountLabel,
-        count: '',
+        length: '',
+        width: '',
+        quantity: tool.amountLabel,
         area: '',
         rate: tool.rate > 0 ? formatPrintRate(tool.rate, currency, tool.rateUnitLabel, options) : formatPrintRate(0, currency, tool.rateUnitLabel, options),
         total: formatPrintAmount(tool.cost, currency, options)
@@ -1144,9 +1164,9 @@ const buildFlatProductRows = (
         code: '',
         description: withSelectedEdges(service.name, service.selectedEdgesLabel),
         category: service.category,
-        dimensions: '',
-        amount: service.amountLabel,
-        count: '',
+        length: '',
+        width: '',
+        quantity: service.amountLabel,
         area: '',
         rate: service.rate > 0 ? formatPrintRate(service.rate, currency, service.rateUnitLabel, options) : formatPrintRate(0, currency, service.rateUnitLabel, options),
         total: formatPrintAmount(service.cost, currency, options)
@@ -1162,7 +1182,8 @@ const buildFlatProductRows = (
       description: service.title,
       note: service.description && service.description !== EMPTY ? service.description : undefined,
       category: service.sourceType,
-      dimensions: '',
+      length: '',
+      width: '',
       ...serviceQuantityColumns,
       rate: formatPrintAmount(service.unitPrice, currency, options),
       total: formatPrintAmount(service.totalPrice, currency, options)
@@ -1177,11 +1198,11 @@ const buildFlatProductRows = (
         ? `تخفیف قرارداد ${toFaNumber(financials.discountPercent)}٪`
         : 'تخفیف قرارداد',
       category: 'تخفیف',
-      dimensions: '',
-      amount: financials.discountBaseSubtotal > 0
+      length: '',
+      width: '',
+      quantity: financials.discountBaseSubtotal > 0
         ? formatPrintAmount(financials.discountBaseSubtotal, currency, options)
         : '',
-      count: '',
       area: '',
       rate: financials.discountPercent > 0 ? `${toFaNumber(financials.discountPercent)}٪` : '',
       total: formatPrintAmount(-financials.discountAmount, currency, options),
@@ -1194,9 +1215,9 @@ const buildFlatProductRows = (
     code: '',
     description: 'جمع کل فاکتور',
     category: '',
-    dimensions: '',
-    amount: '',
-    count: '',
+    length: '',
+    width: '',
+    quantity: '',
     area: '',
     rate: '',
     total: formatPrintAmount(grandTotal, currency, options),
@@ -1257,9 +1278,9 @@ const renderProductMainRows = (
         <td>${escapeHtml(row.code || EMPTY)}</td>
         <td>${escapeHtml(row.description || EMPTY)}</td>
         <td>${escapeHtml(row.category || EMPTY)}</td>
-        <td>${escapeHtml(row.dimensions || EMPTY)}</td>
-        <td>${renderFormattedAmountCell(row.amount || EMPTY)}</td>
-        <td>${escapeHtml(row.count || EMPTY)}</td>
+        <td>${escapeHtml(row.length || EMPTY)}</td>
+        <td>${escapeHtml(row.width || EMPTY)}</td>
+        <td>${renderFormattedAmountCell(row.quantity || EMPTY)}</td>
         <td>${escapeHtml(row.area || EMPTY)}</td>
         ${priceCells}
       </tr>
@@ -1542,9 +1563,9 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           <col class="main-code-col" />
           <col class="main-description-col" />
           <col class="main-category-col" />
-          <col class="main-dimensions-col" />
-          <col class="main-amount-col" />
-          <col class="main-count-col" />
+          <col class="main-length-col" />
+          <col class="main-width-col" />
+          <col class="main-quantity-col" />
           <col class="main-area-col" />
           ${isWorkshopVariant ? '' : `
           <col class="main-rate-col" />
@@ -1557,9 +1578,9 @@ export function renderContractHtml(contract: RenderableContract, options: Render
             <th>کد</th>
             <th>شرح</th>
             <th>دسته</th>
-            <th>ابعاد</th>
-            <th>مقدار</th>
-            <th>تعداد</th>
+            <th>طول</th>
+            <th>عرض</th>
+            <th>مقدار/تعداد</th>
             <th>متراژ</th>
             ${isWorkshopVariant ? '' : `
             <th>نرخ</th>
@@ -1823,16 +1844,16 @@ export function renderContractHtml(contract: RenderableContract, options: Render
       width: 8%;
     }
 
-    .main-dimensions-col {
-      width: 10%;
+    .main-length-col {
+      width: 8%;
     }
 
-    .main-amount-col {
-      width: 10%;
+    .main-width-col {
+      width: 8%;
     }
 
-    .main-count-col {
-      width: 7%;
+    .main-quantity-col {
+      width: 11%;
     }
 
     .main-area-col {
@@ -1855,16 +1876,16 @@ export function renderContractHtml(contract: RenderableContract, options: Render
       width: 32%;
     }
 
-    .workshop-print .main-dimensions-col {
-      width: 14%;
+    .workshop-print .main-length-col {
+      width: 13%;
     }
 
-    .workshop-print .main-amount-col {
+    .workshop-print .main-width-col {
       width: 12%;
     }
 
-    .workshop-print .main-count-col {
-      width: 7%;
+    .workshop-print .main-quantity-col {
+      width: 8%;
     }
 
     .workshop-print .main-area-col {

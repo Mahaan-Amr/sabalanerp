@@ -233,8 +233,8 @@ The customer-facing contract table that lists product rows and their price-beari
 _Avoid_: rendering nested product detail blocks outside the main product table
 
 **ستون‌های مقداردهی جدول اصلی محصولات**:
-The customer-facing product table separates physical dimensions, measured amount, count, and area into distinct columns so each printed row shows only the values that actually apply to that row.
-_Avoid_: combining ابعاد with مقدار, combining تعداد with متراژ, or repeating one value across multiple quantity columns when only one meaning applies
+The customer-facing product table separates physical length, physical width, invoice-pricing quantity or meaningful count, and area into distinct columns so each printed row shows only the values that actually apply to that row.
+_Avoid_: combining طول and عرض into one ابعاد column, combining متراژ with invoice-pricing quantity, or repeating one value across multiple quantity columns when only one meaning applies
 
 **حکمی**:
 An explicit percentage-based price increase applied to a contract product when the product is marked as mandatory.
@@ -418,7 +418,7 @@ Money values in this accounting copy show both تومان and the ریال equiv
 _Avoid_: using the branded customer-facing header in the accounting copy, removing all contract identity metadata from the accounting copy, hiding the customer/project identity needed for accounting follow-up, removing payment terms from the accounting copy, removing prices from the accounting copy, or showing only one currency for accounting price fields
 
 **چاپ نمره کارگاه**:
-A production-facing print/PDF version of a sales contract for workshop execution. It removes the branded/legal customer-facing header and all price-bearing information, but keeps a compact plain metadata row with contract number, contract date, print-time status, customer name only, and project/destination context so workshop sheets can be identified without exposing unnecessary customer or financial details. جدول اصلی محصولات remains the first major section and keeps all non-price production/detail rows, including product rows, سنگ مصرفی, ابزار, خدمات, برش, پرداخت سنگ, and row توضیحات, while removing purely financial total/discount rows. Price columns are removed entirely rather than left blank, and their width is redistributed to شرح, ابعاد/مقدار, and تعداد/متراژ. It keeps برنامه تحویل with only ردیف، اقلام، متراژ/مقدار، تاریخ تحویل، and توضیحات.
+A production-facing print/PDF version of a sales contract for workshop execution. It removes the branded/legal customer-facing header and all price-bearing information, but keeps a compact plain metadata row with contract number, contract date, print-time status, customer name only, and project/destination context so workshop sheets can be identified without exposing unnecessary customer or financial details. جدول اصلی محصولات remains the first major section and keeps all non-price production/detail rows, including product rows, سنگ مصرفی, ابزار, خدمات, برش, پرداخت سنگ, and row توضیحات, while removing purely financial total/discount rows. Price columns are removed entirely rather than left blank, and their width is redistributed to شرح، طول، عرض، مقدار/تعداد، and متراژ. It keeps برنامه تحویل with only ردیف، اقلام، متراژ/مقدار، تاریخ تحویل، and توضیحات.
 _Avoid_: exposing prices, full customer identity details, payment terms, legal text, signatures, تحویل‌گیرنده, financial total/discount rows, or blank price columns in the workshop copy, or making the workshop copy hard to identify when printed
 
 **انتخاب نسخه چاپ در حسابداری**:

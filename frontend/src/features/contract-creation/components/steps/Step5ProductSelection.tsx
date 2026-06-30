@@ -16,6 +16,7 @@ import {
   normalizeRemainingStoneCollection
 } from '../../utils/remainingStoneGuards';
 import { getPreparedKindLabel, getPreparedQuantity, getPreparedUnit, getPreparedUnitLabel, isPreparedProductType } from '../../utils/preparedProductUtils';
+import { getPartDisplayLabel } from '../../utils/stairSystemHelpers';
 import type { ContractProduct, ContractServiceRowSourceType } from '../../types/contract.types';
 import type { RemainingStone } from '../../types/contract.types';
 import type { ContractProductCartController } from '../../hooks/useContractProductCartController';
@@ -51,6 +52,13 @@ interface Step5ProductSelectionProps {
 const getProductTypeLabel = (type: ContractProduct['productType']) => (
   PRODUCT_TYPES.find((item) => item.id === type)?.name ?? type
 );
+
+const getContractRowTypeLabel = (product: ContractProduct) => {
+  if (product.productType === 'stair' && product.stairPartType) {
+    return getPartDisplayLabel(product.stairPartType);
+  }
+  return getProductTypeLabel(product.productType);
+};
 
 const getProductTypeClasses = (type: ContractProduct['productType']) => {
   if (type === 'longitudinal') return 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/20 dark:text-teal-200 dark:border-teal-800';
@@ -483,7 +491,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${getProductTypeClasses(product.productType)}`}>
-                            {getProductTypeLabel(product.productType)}
+                            {getContractRowTypeLabel(product)}
                           </span>
                           {product.meta?.remainingSource && (
                             <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-700 dark:border-orange-800 dark:bg-orange-900/20 dark:text-orange-200">

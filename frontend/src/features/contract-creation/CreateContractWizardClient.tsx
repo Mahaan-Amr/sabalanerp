@@ -220,6 +220,113 @@ const LAYER_SHORTAGE_SOURCE_LABELS = {
   autoSuggested: 'محاسبه خودکار'
 } as const;
 
+const isStairLayerProduct = (product: ContractProduct | undefined): boolean =>
+  Boolean(product && (product.meta as any)?.isLayer);
+
+const isStairMainProduct = (product: ContractProduct | undefined): boolean =>
+  Boolean(product && product.productType === 'stair' && !isStairLayerProduct(product));
+
+const createEmptyStairDraft = (part: StairStepperPart): StairPartDraftV2 => ({
+  lengthUnit: 'm',
+  tools: [],
+  finishingEnabled: false,
+  useMandatory: part === 'riser' || part === 'landing',
+  mandatoryPercentage: part === 'riser' || part === 'landing' ? 20 : null,
+  description: ''
+});
+
+const getAttachedLayerIndicesForStairRow = (
+  products: ContractProduct[],
+  parentIndex: number
+): number[] => {
+  const parent = products[parentIndex];
+  if (!isStairMainProduct(parent)) return [];
+
+  const directMatches = products
+    .map((product, index) => ({ product, index }))
+    .filter(({ product }) => isStairLayerProduct(product) && product.parentProductIndex === parentIndex)
+    .map(({ index }) => index);
+
+  if (directMatches.length > 0) return directMatches;
+
+  const samePartMainRows = products.filter((product) =>
+    isStairMainProduct(product) &&
+    product.stairSystemId === parent.stairSystemId &&
+    product.stairPartType === parent.stairPartType
+  );
+
+  if (samePartMainRows.length !== 1) return [];
+
+  return products
+    .map((product, index) => ({ product, index }))
+    .filter(({ product }) => {
+      const layerInfo = (product.meta as any)?.layerInfo;
+      return isStairLayerProduct(product) &&
+        product.stairSystemId === parent.stairSystemId &&
+        layerInfo?.parentPartType === parent.stairPartType;
+    })
+    .map(({ index }) => index);
+};
+
+const getStairRowWithAttachedLayers = (
+  products: ContractProduct[],
+  parentIndex: number
+): ContractProduct[] => {
+  const parent = products[parentIndex];
+  if (!parent) return [];
+  const attachedLayerIndices = getAttachedLayerIndicesForStairRow(products, parentIndex);
+  return [parent, ...attachedLayerIndices.map((index) => products[index]).filter(Boolean)];
+};
+
+const replaceStairRowWithAttachedLayers = (
+  products: ContractProduct[],
+  parentIndex: number,
+  replacements: ContractProduct[]
+): ContractProduct[] => {
+  const attachedLayerIndices = getAttachedLayerIndicesForStairRow(products, parentIndex);
+  const removedIndices = new Set([parentIndex, ...attachedLayerIndices]);
+  const oldIndexToNewIndex = new Map<number, number>();
+  let replacementStartIndex = -1;
+  let replacementEndIndex = -1;
+  const result: ContractProduct[] = [];
+
+  products.forEach((product, index) => {
+    if (index === parentIndex) {
+      replacementStartIndex = result.length;
+      replacements.forEach((replacement) => {
+        result.push(replacement);
+      });
+      replacementEndIndex = result.length - 1;
+      return;
+    }
+
+    if (removedIndices.has(index)) return;
+
+    oldIndexToNewIndex.set(index, result.length);
+    result.push(product);
+  });
+
+  return result.map((product, index) => {
+    if (!isStairLayerProduct(product)) return product;
+
+    if (index >= replacementStartIndex && index <= replacementEndIndex) {
+      return {
+        ...product,
+        parentProductIndex: replacementStartIndex >= 0 ? replacementStartIndex : product.parentProductIndex
+      };
+    }
+
+    if (typeof product.parentProductIndex === 'number' && oldIndexToNewIndex.has(product.parentProductIndex)) {
+      return {
+        ...product,
+        parentProductIndex: oldIndexToNewIndex.get(product.parentProductIndex)
+      };
+    }
+
+    return product;
+  });
+};
+
 const findMatchingDiscountRange = (ranges: DiscountRange[], baseSubtotal: number) =>
   ranges
     .filter((range) => range.isActive)
@@ -2702,12 +2809,19 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       
       // Check if using new V2 flow
       if (useStairFlowV2) {
-        // NEW V2 FLOW: Reconstruct session items and drafts
+        const clickedPartType: StairStepperPart =
+          product.stairPartType === 'riser' || product.stairPartType === 'landing'
+            ? product.stairPartType
+            : 'tread';
+        const scopedStairProducts = getStairRowWithAttachedLayers(wizardData.products, index);
+        const clickedMainProduct = scopedStairProducts.find(isStairMainProduct) || product;
+
+        // NEW V2 FLOW: Reconstruct only the clicked row and its attached layer.
         // Set session ID to existing stairSystemId
         stairSystemV2.setStairSessionId(product.stairSystemId);
         
-        // Reconstruct session items from existing products
-        stairSystemV2.setStairSessionItems([...stairSystemProducts]);
+        // Reconstruct session items from the clicked row scope only.
+        stairSystemV2.setStairSessionItems([...scopedStairProducts]);
         
         // Helper function to convert ContractProduct to StairPartDraftV2
         const productToDraft = (p: ContractProduct, partType: StairStepperPart): StairPartDraftV2 => {
@@ -2779,7 +2893,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         // Helper function to find and merge layer info into draft
         const mergeLayerInfo = (draft: StairPartDraftV2, partType: 'tread' | 'riser' | 'landing'): StairPartDraftV2 => {
           // Find layer product for this part type
-          const layerProduct = stairSystemProducts.find(p => 
+          const layerProduct = scopedStairProducts.find(p =>
             (p.meta as any)?.isLayer && 
             (p.meta as any)?.layerInfo?.parentPartType === partType
           );
@@ -2822,28 +2936,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           return draft;
         };
         
-        // Load each part into its respective draft and merge layer info
-        if (treadProduct) {
-          const baseDraft = productToDraft(treadProduct, 'tread');
-          stairSystemV2.setDraftTread(layerManagement.normalizeLayerAltStoneSettings(mergeLayerInfo(baseDraft, 'tread')));
-        }
-        if (riserProduct) {
-          const baseDraft = productToDraft(riserProduct, 'riser');
-          stairSystemV2.setDraftRiser(layerManagement.normalizeLayerAltStoneSettings(mergeLayerInfo(baseDraft, 'riser')));
-        }
-        if (landingProduct) {
-          const baseDraft = productToDraft(landingProduct, 'landing');
-          stairSystemV2.setDraftLanding(layerManagement.normalizeLayerAltStoneSettings(mergeLayerInfo(baseDraft, 'landing')));
-        }
-        
-        // Set active part to the first available part
-        if (treadProduct) {
-          setActivePart('tread');
-        } else if (riserProduct) {
-          setActivePart('riser');
-        } else if (landingProduct) {
-          setActivePart('landing');
-        }
+        const baseDraft = productToDraft(clickedMainProduct, clickedPartType);
+        const scopedDraft = layerManagement.normalizeLayerAltStoneSettings(mergeLayerInfo(baseDraft, clickedPartType));
+        stairSystemV2.setDraftTread(clickedPartType === 'tread' ? scopedDraft : createEmptyStairDraft('tread'));
+        stairSystemV2.setDraftRiser(clickedPartType === 'riser' ? scopedDraft : createEmptyStairDraft('riser'));
+        stairSystemV2.setDraftLanding(clickedPartType === 'landing' ? scopedDraft : createEmptyStairDraft('landing'));
+        stairSystemV2.setStairActivePart(clickedPartType);
         
         // Set product config for modal type detection
         setProductConfig({
@@ -2863,11 +2961,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         
         console.log('✅ Stair V2 edit initialized:', {
           stairSystemId: product.stairSystemId,
-          sessionItems: stairSystemProducts.length,
+          sessionItems: scopedStairProducts.length,
+          clickedPartType,
           partsFound: {
-            tread: !!treadProduct,
-            riser: !!riserProduct,
-            landing: !!landingProduct
+            tread: clickedPartType === 'tread',
+            riser: clickedPartType === 'riser',
+            landing: clickedPartType === 'landing'
           }
         });
         
@@ -5090,7 +5189,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         };
         const mapStairPartLabel = (part?: string) => {
           if (part === 'tread') return 'کف پله';
-          if (part === 'riser') return 'قائمه';
+          if (part === 'riser') return 'خیز پله';
           if (part === 'landing') return 'پاگرد';
           return '—';
         };
@@ -7222,8 +7321,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             const isLayer = ((it as any).meta?.isLayer) || false;
                             const layerInfo = ((it as any).meta?.layerInfo) || null;
                             const partTypeLabel = isLayer 
-                              ? `لایه ${it.stairPartType === 'tread' ? 'کف پله' : it.stairPartType === 'riser' ? 'خیز' : 'پاگرد'}`
-                              : (it.stairPartType === 'tread' ? 'کف پله' : it.stairPartType === 'riser' ? 'خیز' : 'پاگرد');
+                              ? `لایه ${it.stairPartType === 'tread' ? 'کف پله' : it.stairPartType === 'riser' ? 'خیز پله' : 'پاگرد'}`
+                              : (it.stairPartType === 'tread' ? 'کف پله' : it.stairPartType === 'riser' ? 'خیز پله' : 'پاگرد');
                             const partTypeColor = isLayer 
                               ? 'orange' 
                               : (it.stairPartType === 'tread' ? 'purple' : it.stairPartType === 'riser' ? 'blue' : 'indigo');
@@ -7706,15 +7805,17 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   
                   // Prepare all updates in a single transaction
                   stairSystemV2.setStairSessionItems(prev => {
-                    // Remove previous entries for this part (and its layers) to keep session consistent during edits
-                    const baseItems = prev.filter(item => {
-                      const isLayerItem = ((item.meta as any)?.isLayer) || false;
-                      if (isLayerItem) {
-                        const parentPart = (item.meta as any)?.layerInfo?.parentPartType;
-                        return parentPart !== stairSystemV2.stairActivePart;
-                      }
-                      return item.stairPartType !== stairSystemV2.stairActivePart;
-                    });
+                    const shouldReplaceActivePartInSession = isEditMode && editingProductIndex !== null;
+                    const baseItems = shouldReplaceActivePartInSession
+                      ? prev.filter(item => {
+                          const isLayerItem = ((item.meta as any)?.isLayer) || false;
+                          if (isLayerItem) {
+                            const parentPart = (item.meta as any)?.layerInfo?.parentPartType;
+                            return parentPart !== stairSystemV2.stairActivePart;
+                          }
+                          return item.stairPartType !== stairSystemV2.stairActivePart;
+                        })
+                      : prev;
 
                     // Start with adding the main stair part product
                     const updatedItems = [...baseItems, product];
@@ -7725,11 +7826,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         draft.layerWidthCm && hasLayerEdges && layerManagement.getLayerEffectivePricePerSquareMeter(draft) && 
                         draft.quantity) {
                       
-                      // 🎯 STEP 1: Find existing layer product (if any)
-                      // Check both session items AND wizardData.products to prevent duplicates
+                      // 🎯 STEP 1: Find existing layer product inside this session only.
+                      // Stair rows can repeat independently, so matching contract rows must not merge across rows.
                       const existingLayerInSession = findExistingLayerProduct(updatedItems, draft, stairSystemV2.stairActivePart);
-                      const existingLayerInWizard = findExistingLayerProduct(wizardData.products, draft, stairSystemV2.stairActivePart);
-                      const existingLayerProduct = existingLayerInSession || existingLayerInWizard;
+                      const existingLayerProduct = existingLayerInSession;
                       
                       // 🎯 STEP 2: Calculate layer metrics
                       const totalLayerSqm = layerManagement.computeLayerSqmV2(stairSystemV2.stairActivePart, draft);
@@ -7883,9 +7983,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       // 🎯 FIX: Ensure layerTotalPrice is always a number (not string) and properly rounded
                       const layerTotalPrice = Number((layerMaterialPrice + layerTypeCost + chargeableLayerCuttingCost).toFixed(2));
                       
-                      // 🎯 STEP 6: Handle existing layer product merge OR create new layer product
+                      // 🎯 STEP 6: Handle existing session layer merge OR create a new layer product
                       if (existingLayerProduct) {
-                        // Check if existing layer is in session or in wizardData
                         const existingLayerIndex = updatedItems.findIndex(item => item === existingLayerProduct);
                         
                         if (existingLayerIndex >= 0) {
@@ -7920,11 +8019,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             stoneAreaUsedSqm: stoneAreaUsedSqm
                           });
                           updatedItems[existingLayerIndex] = mergedLayerProduct;
-                        } else if (existingLayerInWizard) {
-                          // Existing layer is in wizardData.products - skip creating new one in session
-                          // It will be merged when adding to wizardData (handled in the "Add to Contract" button handler)
-                          console.log('ℹ️ Existing layer product found in wizardData.products, will be merged when adding to contract');
-                          // Don't create a new layer product in session - prevents duplicates
                         }
                       } else {
                         // Create new layer product
@@ -8044,58 +8138,23 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   
                   // Handle edit mode: replace existing products instead of adding new ones
                   if (isEditMode && editingProductIndex !== null) {
-                    // Find the old stairSystemId from the product being edited
                     const oldProduct = wizardData.products[editingProductIndex];
                     const oldStairSystemId = oldProduct?.stairSystemId;
                     
                     if (oldStairSystemId) {
-                      // Remove all old products with the same stairSystemId
-                      const updatedProducts = wizardData.products.filter(p => 
-                        !(p.productType === 'stair' && p.stairSystemId === oldStairSystemId)
-                      );
-                      
-                      // Preserve the stairSystemId for the updated products and recalculate parentProductIndex for layers
-                      const currentProductsCount = updatedProducts.length;
-                      
-                      // Create a map of session items to their final indices
-                      const sessionToFinalIndexMap = new Map<ContractProduct, number>();
-                      let nonLayerCount = 0;
-                      stairSystemV2.stairSessionItems.forEach((item) => {
+                      const productsToAdd = stairSystemV2.stairSessionItems.map((item) => {
                         const isLayer = ((item.meta as any)?.isLayer) || false;
-                        if (!isLayer) {
-                          sessionToFinalIndexMap.set(item, currentProductsCount + nonLayerCount);
-                          nonLayerCount++;
-                        }
-                      });
-                      
-                      const productsToAdd = stairSystemV2.stairSessionItems.map((item, sessionIndex) => {
-                        const isLayer = ((item.meta as any)?.isLayer) || false;
-                        if (isLayer) {
-                          const layerInfo = (item.meta as any)?.layerInfo;
-                          const parentIndexInSession = layerInfo?.parentProductIndexInSession;
-                          
-                          if (parentIndexInSession !== undefined && parentIndexInSession >= 0) {
-                            const parentInSession = stairSystemV2.stairSessionItems[parentIndexInSession];
-                            if (parentInSession) {
-                              const parentFinalIndex = sessionToFinalIndexMap.get(parentInSession);
-                              if (parentFinalIndex !== undefined && parentFinalIndex >= 0) {
-                                return {
-                                  ...item,
-                                  stairSystemId: oldStairSystemId,
-                                  parentProductIndex: parentFinalIndex
-                                };
-                              }
-                            }
-                          }
-                        }
                         return {
                           ...item,
-                          stairSystemId: oldStairSystemId
+                          stairSystemId: oldStairSystemId,
+                          parentProductIndex: isLayer ? editingProductIndex : item.parentProductIndex
                         };
                       });
                       
-                      // Add updated products
-                      updateWizardData({ products: [...updatedProducts, ...productsToAdd], selectedProductTypeForAddition: 'stair' });
+                      updateWizardData({
+                        products: replaceStairRowWithAttachedLayers(wizardData.products, editingProductIndex, productsToAdd),
+                        selectedProductTypeForAddition: 'stair'
+                      });
                       clearProductAdditionSearches();
                     } else {
                       // Fallback: just replace the single product
@@ -8109,39 +8168,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     // 🎯 Set parentProductIndex for layer products to link them to their parent stair part
                     const currentProductsCount = wizardData.products.length;
                     
-                    // First, check for existing layer products in wizardData that should be merged
-                    // Filter out layer products from session that already exist in wizardData
-                    const sessionItemsToAdd: ContractProduct[] = [];
-                    const layerProductsToMerge: Array<{ existing: ContractProduct; new: ContractProduct }> = [];
-                    
-                    stairSystemV2.stairSessionItems.forEach((item) => {
-                      const isLayer = ((item.meta as any)?.isLayer) || false;
-                      if (isLayer) {
-                        // Check if this layer already exists in wizardData
-                        const existingLayer = findExistingLayerProduct(wizardData.products, {
-                          layerEdges: (item.meta as any)?.layerEdges,
-                          layerWidthCm: item.width,
-                          lengthValue: item.length,
-                          lengthUnit: item.lengthUnit || 'm',
-                          numberOfLayersPerStair: ((item.meta as any)?.layerInfo)?.numberOfLayersPerStair,
-                          layerUseDifferentStone: item.layerUseDifferentStone,
-                          layerStoneProductId: item.layerUseDifferentStone
-                            ? (item.layerStoneProductId || item.productId)
-                            : null
-                        } as StairPartDraftV2, ((item.meta as any)?.layerInfo)?.parentPartType || 'tread');
-                        
-                        if (existingLayer) {
-                          // Layer exists in wizardData - mark for merge instead of adding new
-                          layerProductsToMerge.push({ existing: existingLayer, new: item });
-                        } else {
-                          // New layer - add to session items
-                          sessionItemsToAdd.push(item);
-                        }
-                      } else {
-                        // Non-layer item - always add
-                        sessionItemsToAdd.push(item);
-                      }
-                    });
+                    const sessionItemsToAdd: ContractProduct[] = [...stairSystemV2.stairSessionItems];
                     
                     // Create a map of session items to their final indices in wizardData.products
                     const sessionToFinalIndexMap = new Map<ContractProduct, number>();
@@ -8200,61 +8227,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       return item;
                     });
                     
-                    // Merge existing layer products in wizardData
                     const updatedProducts = [...wizardData.products];
-                    layerProductsToMerge.forEach(({ existing, new: newLayer }) => {
-                      const existingIndex = updatedProducts.findIndex(p => p === existing);
-                      if (existingIndex >= 0) {
-                        const layerInfo = (newLayer.meta as any)?.layerInfo;
-                        const existingLayerInfo = (existing.meta as any)?.layerInfo;
-                        
-                        // Merge the layer product
-                        const metaLayerType = (newLayer.meta as any)?.layerType;
-                        const mergedLayer = layerManagement.mergeLayerProduct(existing, {
-                          draft: {
-                            layerEdges: (newLayer.meta as any)?.layerEdges,
-                            numberOfLayersPerStair: layerInfo?.numberOfLayersPerStair,
-                            quantity: layerInfo?.parentQuantity || 0,
-                            layerTypeId: newLayer.layerTypeId ?? metaLayerType?.id ?? null,
-                            layerTypeName: newLayer.layerTypeName ?? metaLayerType?.name ?? null,
-                            layerTypePrice: newLayer.layerTypePrice ?? metaLayerType?.pricePerLayer ?? null,
-                            layerUseDifferentStone: newLayer.layerUseDifferentStone,
-                            layerStoneProductId: newLayer.layerStoneProductId || newLayer.productId,
-                            layerStoneProduct: newLayer.layerUseDifferentStone ? newLayer.product : null,
-                            layerStoneLabel: newLayer.layerStoneName || newLayer.stoneName,
-                            layerPricePerSquareMeter: newLayer.layerStonePricePerSquareMeter || newLayer.pricePerSquareMeter
-                          } as StairPartDraftV2,
-                          parentPartType: layerInfo?.parentPartType || 'tread',
-                          newLayersNeeded: newLayer.quantity || 0,
-                          newLayerSqm: newLayer.squareMeters || 0,
-                          layerMaterialPrice: newLayer.originalTotalPrice || 0,
-                          layerTypeCost: metaLayerType?.totalCost ?? ((newLayer.layerTypePrice || 0) * (newLayer.quantity || 0)),
-                          totalLayerCuttingCost: newLayer.cuttingCost || 0,
-                          layerCutDetails: newLayer.cutDetails || [],
-                          usedRemainingStonesForLayers: newLayer.usedRemainingStones || [],
-                          layersFromRemainingStones: layerInfo?.layersFromRemainingStones || 0,
-                          layersFromNewStones: layerInfo?.layersFromNewStones || 0,
-                          layerPricePerSquareMeter: newLayer.layerUseDifferentStone
-                            ? (newLayer.layerStonePricePerSquareMeter || newLayer.pricePerSquareMeter || 0)
-                            : (newLayer.pricePerSquareMeter || 0),
-                          layerStoneLabel: newLayer.layerUseDifferentStone
-                            ? (newLayer.layerStoneName || newLayer.stoneName)
-                            : null,
-                          layerUseDifferentStone: newLayer.layerUseDifferentStone,
-                          layerStoneProductId: newLayer.layerUseDifferentStone
-                            ? (newLayer.layerStoneProductId || newLayer.productId)
-                            : null,
-                          layerStoneBasePricePerSquareMeter: newLayer.layerUseDifferentStone
-                            ? (newLayer.layerStoneBasePricePerSquareMeter || newLayer.layerStonePricePerSquareMeter || newLayer.pricePerSquareMeter || 0)
-                            : null,
-                          layerUseMandatory: newLayer.layerUseDifferentStone ? (newLayer.layerUseMandatory ?? true) : undefined,
-                          layerMandatoryPercentage: newLayer.layerUseDifferentStone ? (newLayer.layerMandatoryPercentage ?? 0) : undefined,
-                          stoneAreaUsedSqm: (newLayer.meta as any)?.stoneAreaUsedSqm
-                        });
-                        updatedProducts[existingIndex] = mergedLayer;
-                      }
-                    });
-                    
                     updateWizardData({ products: [...updatedProducts, ...productsToAdd], selectedProductTypeForAddition: 'stair' });
                     clearProductAdditionSearches();
                   }

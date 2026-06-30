@@ -9,7 +9,7 @@ import { toMeters, convertMetersToUnit, hasLengthMeasurement } from './dimension
  */
 export const getPartDisplayLabel = (part: StairStepperPart): string => {
   if (part === 'tread') return 'کف پله';
-  if (part === 'riser') return 'پیشانی پله';
+  if (part === 'riser') return 'خیز پله';
   return 'پاگرد';
 };
 

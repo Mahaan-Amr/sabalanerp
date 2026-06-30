@@ -188,6 +188,14 @@ _Avoid_: relying only on the current catalog image for saved contract interpreta
 The per-part note attached to a stair contract product row, such as کف پله, خیز, or پاگرد. Each selected stair part carries its own توضیحات so contract output can show the note beside the exact row it describes.
 _Avoid_: using one shared stair-system note for all stair parts
 
+**ردیف‌های هم‌نوع سنگ پله**:
+A stair contract may contain multiple independent rows of the same stair part type, such as several کف پله rows or several خیز rows, within the same stair session or contract.
+_Avoid_: treating stairPartType as a unique key, or overwriting an existing stair part row only because a new row has the same part type
+
+**ویرایش ردیف سنگ پله**:
+Editing from the contract list opens the clicked stair product row as an individual row edit, preserving its exact stair part type and details without loading sibling rows from the same stair system.
+_Avoid_: opening کف پله when the clicked row is خیز پله, or rebuilding every row that shares the same stairSystemId when the user edits one row
+
 **لبه‌های ابزار پله**:
 For stair product tools on کف پله, خیز پله, and پاگرد, جلو and عقب are the long horizontal span of the stair part, while چپ and راست are the short side edges based on the stair part's عرض/depth. The stair UI's طول field is the main horizontal span used by جلو and عقب.
 _Avoid_: calculating جلو from عرض/depth, or calculating چپ and راست from the main طول span
@@ -363,6 +371,10 @@ _Avoid_: copying delivery/execution assignments from the original service row
 **نام نمایشی سنگ پله**:
 Stair contract product rows use the same compact stone identity style as longitudinal product rows, while stair part, layer, dimensions, and other stair-specific details remain separate row details.
 _Avoid_: saving or printing the full catalog product name as the stair product row name
+
+**برچسب نوع ردیف سنگ پله**:
+Customer-facing contract lists and printed output label stair product rows by their specific part type: کف پله، خیز پله، or پاگرد.
+_Avoid_: showing only the generic سنگ پله label when the row's stair part type is known, or using قائمه instead of خیز پله for riser rows
 
 **نام نمایشی سنگ اسلب**:
 Slab contract product rows preserve the full catalog stone identity as the row name, including cut type, material, dimensions, mine, finish, color, and quality. Requested slab dimensions, source slab dimensions, cutting details, and finishing details remain separate row details.

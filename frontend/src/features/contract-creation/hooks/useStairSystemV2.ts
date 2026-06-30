@@ -147,7 +147,7 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
   // Helper: Get part display label
   const getPartDisplayLabel = useCallback((part: StairStepperPart): string => {
     if (part === 'tread') return 'کف پله';
-    if (part === 'riser') return 'پیشانی';
+    if (part === 'riser') return 'خیز پله';
     return 'پاگرد';
   }, []);
 

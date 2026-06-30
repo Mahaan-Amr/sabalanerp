@@ -431,7 +431,7 @@ const isPreparedProductType = (value: unknown): boolean =>
 
 const stairPartLabel = (value: unknown): string => {
   if (value === 'tread') return 'کف پله';
-  if (value === 'riser') return 'قائمه';
+  if (value === 'riser') return 'خیز پله';
   if (value === 'landing') return 'پاگرد';
   return EMPTY;
 };
@@ -1044,7 +1044,7 @@ const buildFlatProductRows = (
       indexLabel: toFaNumber(productIndex + 1),
       code: product.code,
       description: productDescription,
-      category: 'محصول',
+      category: product.stairPart !== EMPTY ? product.stairPart : 'محصول',
       dimensions: product.dimensions,
       ...productQuantityColumns,
       rate: formatPrintAmount(product.unitPrice, currency, options),

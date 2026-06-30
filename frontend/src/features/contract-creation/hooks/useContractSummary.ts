@@ -55,7 +55,7 @@ interface UseContractSummaryReturn {
 const getPartDisplayLabel = (part: StairStepperPart): string => {
   const labels: Record<StairStepperPart, string> = {
     tread: 'کف پله',
-    riser: 'پیشانی',
+    riser: 'خیز پله',
     landing: 'پاگرد'
   };
   return labels[part] || part;

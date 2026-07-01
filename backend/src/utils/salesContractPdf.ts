@@ -5,7 +5,7 @@ import { Request } from 'express';
 import { generatePdfFromHtml } from './pdf';
 import { ContractPrintVariant, renderContractHtml, renderContractPdfHeaderTemplate } from './printTemplate';
 
-export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-accounting-sales-account-v14-2026-07-01';
+export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-dedupe-edge-tools-v15-2026-07-01';
 
 export const salesContractPrintableInclude = {
   customer: {

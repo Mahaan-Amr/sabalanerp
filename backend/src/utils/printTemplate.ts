@@ -190,6 +190,15 @@ const isGeneratedCutTool = (tool: any): boolean => {
   return toolId.startsWith('cut-cross-') || toolId.startsWith('cut-longitudinal-');
 };
 
+const normalizeAddOnKeyPart = (value: string | undefined): string =>
+  String(value || '').replace(/\s+/g, ' ').trim();
+
+const edgeToolDedupeKey = (item: { name: string; selectedEdgesLabel?: string }): string => {
+  const name = normalizeAddOnKeyPart(item.name);
+  const selectedEdgesLabel = normalizeAddOnKeyPart(item.selectedEdgesLabel);
+  return name && selectedEdgesLabel ? `${name}::${selectedEdgesLabel}` : '';
+};
+
 const publicAssetPath = (...segments: string[]): string => {
   const candidates = [
     process.env.SABALAN_LOGO_PATH || '',
@@ -689,6 +698,20 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
           cost
         };
       });
+      const serviceToolKeys = new Set(
+        services
+          .filter((service) => service.category === 'ابزار')
+          .map(edgeToolDedupeKey)
+          .filter(Boolean)
+      );
+      const seenToolKeys = new Set<string>();
+      const dedupedTools = tools.filter((tool) => {
+        const key = edgeToolDedupeKey(tool);
+        if (!key) return true;
+        if (serviceToolKeys.has(key) || seenToolKeys.has(key)) return false;
+        seenToolKeys.add(key);
+        return true;
+      });
 
       const width = product?.width ? `${product.width}${product?.widthUnit || ''}` : null;
       const length = product?.length ? `${product.length}${product?.lengthUnit || ''}` : null;
@@ -727,7 +750,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         description: `${product?.description || relationItem?.description || EMPTY}${product?.sawKerfEnabled ? '، خوراک اره لحاظ شده' : ''}`,
         cuts: [...cutsFromBreakdown, ...cutsFromDetails],
         services,
-        tools,
+        tools: dedupedTools,
         layerSummary: product?.layerTypeName
           ? `${product.layerTypeName}${product?.layerUseMandatory ? `، حکمی ${toFaNumber(product?.layerMandatoryPercentage || 0)}%` : ''}`
           : EMPTY,

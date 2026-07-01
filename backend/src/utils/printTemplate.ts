@@ -295,6 +295,8 @@ const formatAmount = (value: unknown, currency = 'تومان'): string => {
   return `${toFaNumber(value)} ${escapeHtml(currency || 'تومان')}`;
 };
 
+const formatMoneyNumber = (value: unknown): string => toFaNumber(value);
+
 const shouldShowRialEquivalent = (currency = 'تومان'): boolean =>
   String(currency || '').trim() === 'تومان';
 
@@ -312,13 +314,21 @@ const formatPrintAmount = (
   ? formatAccountingAmount(value, currency)
   : formatAmount(value, currency);
 
+const formatPrintMoneyCell = (
+  value: unknown,
+  currency = 'تومان',
+  options: { includeRialEquivalent?: boolean } = {}
+): string => options.includeRialEquivalent
+  ? formatAccountingAmount(value, currency)
+  : formatMoneyNumber(value);
+
 const formatPrintRate = (
   value: unknown,
   currency = 'تومان',
   unitLabel = '',
   options: { includeRialEquivalent?: boolean } = {}
 ): string => {
-  const amount = formatPrintAmount(value, currency, options);
+  const amount = formatPrintMoneyCell(value, currency, options);
   return unitLabel ? `${amount} / ${escapeHtml(unitLabel)}` : amount;
 };
 
@@ -358,20 +368,30 @@ const cleanDimensionValue = (value: string): string => value
   .replace(/[\s،,؛;|×xX-]+$/, '')
   .trim();
 
+const formatMeterDimension = (value: string): string => {
+  const normalized = normalizeDigits(String(value || '').trim());
+  const numericMatch = normalized.match(/-?\d+(?:\.\d+)?/);
+  if (!numericMatch) return cleanDimensionValue(value);
+  const numeric = toNumber(numericMatch[0]);
+  if (numeric <= 0) return '';
+  const isCentimeter = /cm|سانتی|سانتیمتر|سانتی‌متر/i.test(normalized);
+  return toFaNumber(isCentimeter ? numeric / 100 : numeric, 4);
+};
+
 const splitDimensionColumns = (value: string): Pick<FlatProductRow, 'length' | 'width'> => {
   const text = String(value || '').trim();
   if (!text || text === EMPTY) return { length: '', width: '' };
 
   const lengthMatch = text.match(/طول\s*:?\s*([^،,؛;|×xX-]+)/);
   const widthMatch = text.match(/عرض\s*:?\s*([^،,؛;|×xX-]+)/);
-  const length = lengthMatch?.[1] ? cleanDimensionValue(lengthMatch[1]) : '';
-  const width = widthMatch?.[1] ? cleanDimensionValue(widthMatch[1]) : '';
+  const length = lengthMatch?.[1] ? formatMeterDimension(lengthMatch[1]) : '';
+  const width = widthMatch?.[1] ? formatMeterDimension(widthMatch[1]) : '';
 
   if (length || width) {
     return { length, width };
   }
 
-  return { length: cleanDimensionValue(text), width: '' };
+  return { length: formatMeterDimension(text), width: '' };
 };
 
 const formatDate = (value: unknown): string => {
@@ -1028,14 +1048,14 @@ const buildProductQuantityColumns = (product: NormalizedProduct): Pick<FlatProdu
       return { quantity: `${quantity} ${product.preparedUnit}`, area: '' };
     }
     if (product.preparedUnit === 'متر مربع') {
-      return { quantity: '', area: `${quantity} ${product.preparedUnit}` };
+      return { quantity: `${quantity} ${product.preparedUnit}`, area: '' };
     }
     return { quantity: `${quantity} ${product.preparedUnit}`, area: '' };
   }
 
   return {
-    quantity: product.productType === 'طولی' && product.quantity <= 1 ? '' : `${toFaNumber(product.quantity, 2)} عدد`,
-    area: `${toFaNumber(product.squareMeters, 4)} متر مربع`
+    quantity: `${toFaNumber(product.squareMeters, 4)} متر مربع`,
+    area: product.productType === 'طولی' && product.quantity <= 1 ? '' : `${toFaNumber(product.quantity, 2)} عدد`
   };
 };
 
@@ -1047,8 +1067,8 @@ const splitSourceMaterialQuantity = (value: string): Pick<FlatProductRow, 'quant
   const count = parts.find((part) => part.includes('عدد')) || '';
   const areaPart = parts.find((part) => part.includes('متر مربع')) || '';
   return {
-    quantity: count,
-    area: areaPart.replace(/^جمع\s*/, '')
+    quantity: areaPart.replace(/^جمع\s*/, ''),
+    area: count
   };
 };
 
@@ -1057,7 +1077,6 @@ const buildStandaloneServiceQuantityColumns = (
   unit: string
 ): Pick<FlatProductRow, 'quantity' | 'area'> => {
   const label = `${toFaNumber(quantity, 4)} ${unit}`;
-  if (unit === 'متر مربع') return { quantity: '', area: label };
   return { quantity: label, area: '' };
 };
 
@@ -1094,8 +1113,8 @@ const buildFlatProductRows = (
       category: product.stairPart !== EMPTY ? product.stairPart : 'محصول',
       ...splitDimensionColumns(product.dimensions),
       ...productQuantityColumns,
-      rate: formatPrintAmount(product.unitPrice, currency, options),
-      total: formatPrintAmount(baseAmount, currency, options)
+      rate: formatPrintMoneyCell(product.unitPrice, currency, options),
+      total: formatPrintMoneyCell(baseAmount, currency, options)
     });
 
     const sourceMaterialRows = product.sourceMaterials.length > 0
@@ -1149,10 +1168,10 @@ const buildFlatProductRows = (
         category: 'حکمی',
         length: '',
         width: '',
-        quantity: formatPrintAmount(product.originalTotalPrice, currency, options),
+        quantity: formatPrintMoneyCell(product.originalTotalPrice, currency, options),
         area: '',
         rate: `${toFaNumber(product.mandatoryPercentage)}٪`,
-        total: formatPrintAmount(mandatoryAmount, currency, options)
+        total: formatPrintMoneyCell(mandatoryAmount, currency, options)
       });
     }
 
@@ -1164,10 +1183,10 @@ const buildFlatProductRows = (
         category: 'برش',
         length: '',
         width: '',
-        quantity: `${toFaNumber(cut.meters, 4)} متر`,
+        quantity: `${toFaNumber(cut.meters, 4)} متر طول`,
         area: '',
-        rate: formatPrintAmount(cut.rate, currency, options),
-        total: formatPrintAmount(cut.cost, currency, options)
+        rate: formatPrintMoneyCell(cut.rate, currency, options),
+        total: formatPrintMoneyCell(cut.cost, currency, options)
       });
     });
 
@@ -1182,7 +1201,7 @@ const buildFlatProductRows = (
         quantity: tool.amountLabel,
         area: '',
         rate: tool.rate > 0 ? formatPrintRate(tool.rate, currency, tool.rateUnitLabel, options) : formatPrintRate(0, currency, tool.rateUnitLabel, options),
-        total: formatPrintAmount(tool.cost, currency, options)
+        total: formatPrintMoneyCell(tool.cost, currency, options)
       });
     });
 
@@ -1197,7 +1216,7 @@ const buildFlatProductRows = (
         quantity: service.amountLabel,
         area: '',
         rate: service.rate > 0 ? formatPrintRate(service.rate, currency, service.rateUnitLabel, options) : formatPrintRate(0, currency, service.rateUnitLabel, options),
-        total: formatPrintAmount(service.cost, currency, options)
+        total: formatPrintMoneyCell(service.cost, currency, options)
       });
     });
   });
@@ -1213,8 +1232,8 @@ const buildFlatProductRows = (
       length: '',
       width: '',
       ...serviceQuantityColumns,
-      rate: formatPrintAmount(service.unitPrice, currency, options),
-      total: formatPrintAmount(service.totalPrice, currency, options)
+      rate: formatPrintMoneyCell(service.unitPrice, currency, options),
+      total: formatPrintMoneyCell(service.totalPrice, currency, options)
     });
   });
 
@@ -1229,11 +1248,11 @@ const buildFlatProductRows = (
       length: '',
       width: '',
       quantity: financials.discountBaseSubtotal > 0
-        ? formatPrintAmount(financials.discountBaseSubtotal, currency, options)
+        ? formatPrintMoneyCell(financials.discountBaseSubtotal, currency, options)
         : '',
       area: '',
       rate: financials.discountPercent > 0 ? `${toFaNumber(financials.discountPercent)}٪` : '',
-      total: formatPrintAmount(-financials.discountAmount, currency, options),
+      total: formatPrintMoneyCell(-financials.discountAmount, currency, options),
       className: 'discount-row'
     });
   }
@@ -1248,7 +1267,7 @@ const buildFlatProductRows = (
     quantity: '',
     area: '',
     rate: '',
-    total: formatPrintAmount(grandTotal, currency, options),
+    total: formatPrintMoneyCell(grandTotal, currency, { includeRialEquivalent: shouldShowRialEquivalent(currency) }),
     className: 'total-row'
   });
 
@@ -1532,8 +1551,7 @@ type RenderContractHtmlOptions = {
 export function renderContractHtml(contract: RenderableContract, options: RenderContractHtmlOptions = {}): string {
   const variant = options.variant || 'original';
   const isWorkshopVariant = variant === 'workshop';
-  const isAccountingVariant = variant === 'accounting';
-  const priceFormatOptions = { includeRialEquivalent: isAccountingVariant };
+  const priceFormatOptions = {};
   const showFormalSection = variant === 'original';
   const showCustomerSection = !isWorkshopVariant;
   const showPaymentSection = !isWorkshopVariant;
@@ -1613,13 +1631,13 @@ export function renderContractHtml(contract: RenderableContract, options: Render
             <th>کد</th>
             <th>شرح</th>
             <th>دسته</th>
-            <th>طول</th>
-            <th>عرض</th>
-            <th>مقدار/تعداد</th>
-            <th>متراژ</th>
+            <th>طول - متر</th>
+            <th>عرض - متر</th>
+            <th>متراژ/مقدار</th>
+            <th>تعداد</th>
             ${isWorkshopVariant ? '' : `
-            <th>نرخ</th>
-            <th>مبلغ کل</th>
+            <th>نرخ - تومان</th>
+            <th>مبلغ کل - تومان</th>
             `}
           </tr>
         </thead>

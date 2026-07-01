@@ -120,6 +120,10 @@ _Avoid_: showing prices on explanatory rows, or making visible مبلغ کل val
 A zero price is printed as ۰ تومان only for a real price-bearing contract row that participates in invoice calculation with a zero amount.
 _Avoid_: using a blank price for zero-charged invoice work, or using ۰ تومان for non-price explanatory rows
 
+**واحد پول در جدول اصلی محصولات**:
+Normal price cells in نرخ - تومان and مبلغ کل - تومان show numeric تومان values without repeating تومان in every row. The ریال equivalent is shown only on the final جمع کل فاکتور row, as secondary text beside or under the تومان total.
+_Avoid_: repeating تومان inside every normal price cell, showing ریال equivalents on every product/payment row, or hiding ریال from the final invoice total
+
 **تقسیم طول در برش هوشمند طولی**:
 در برش هوشمند سنگ طولی، طول درخواستی مشتری می‌تواند به عنوان تقاضای کل فهمیده شود و سیستم آن را با چند قطعه فیزیکی کوتاه‌تر از همان عرض تأمین کند، به شرطی که نتیجه قراردادی همان متراژ و عرض درخواستی باقی بماند.
 _Avoid_: نمایش قطعات فیزیکی کوتاه‌تر به عنوان تغییر در سفارش مشتری، یا تقسیم طول در حالتی که کاربر صریحاً قطعه یکپارچه می‌خواهد
@@ -238,8 +242,10 @@ The customer-facing contract table that lists product rows and their price-beari
 _Avoid_: rendering nested product detail blocks outside the main product table
 
 **ستون‌های مقداردهی جدول اصلی محصولات**:
-The customer-facing product table separates physical length, physical width, invoice-pricing quantity or meaningful count, and area into distinct columns so each printed row shows only the values that actually apply to that row.
-_Avoid_: combining طول and عرض into one ابعاد column, combining متراژ with invoice-pricing quantity, or repeating one value across multiple quantity columns when only one meaning applies
+The customer-facing product table separates physical length, physical width, invoice-pricing measurement, and meaningful count into distinct columns. The متراژ/مقدار column shows the pricing basis for that row, such as متر مربع for stone, متر طول for tools and cuts, or عدد for count-priced services. The تعداد column is filled only when a separate count helps explain the row.
+The same structural columns are used in original, accounting, and workshop prints, but workshop removes price columns entirely instead of showing empty price cells.
+طول and عرض values in print/PDF output are always normalized to meters and shown as numbers only; the unit belongs in the column header, such as طول - متر and عرض - متر. Centimeter-saved values are converted to meters before printing.
+_Avoid_: combining طول and عرض into one ابعاد column, repeating one value across متراژ/مقدار and تعداد, putting count in متراژ/مقدار when the pricing basis is another measurement, reintroducing price columns in workshop print, or mixing cm and m labels inside length/width cells
 
 **حکمی**:
 An explicit percentage-based price increase applied to a contract product when the product is marked as mandatory.
@@ -419,8 +425,8 @@ _Avoid_: showing the contract header only on the first page of a multi-page cont
 
 **چاپ حسابداری قرارداد فروش**:
 An internal accounting print/PDF version of a sales contract. It removes the branded customer-facing contract header but keeps a compact plain metadata row with contract number, contract date, print-time status, and the sales account/contract creator so accounting can identify the document without relying on the file name. It keeps مشخصات مشتری و پروژه because accounting needs the invoice/receivable party and project context, keeps all price-bearing product/payment columns and totals, and keeps برنامه پرداخت because accounting needs payment method, amount, due or payment date, check details, and notes.
-Money values in this accounting copy show both تومان and the ریال equivalent so accounting can read the commercial amount and ledger amount together.
-_Avoid_: using the branded customer-facing header in the accounting copy, removing all contract identity metadata from the accounting copy, hiding the sales account/contract creator, hiding the customer/project identity needed for accounting follow-up, removing payment terms from the accounting copy, removing prices from the accounting copy, or showing only one currency for accounting price fields
+Normal money values in this accounting copy show تومان only, while the final جمع کل فاکتور shows both تومان and the ریال equivalent.
+_Avoid_: using the branded customer-facing header in the accounting copy, removing all contract identity metadata from the accounting copy, hiding the sales account/contract creator, hiding the customer/project identity needed for accounting follow-up, removing payment terms from the accounting copy, removing prices from the accounting copy, showing ریال on every dense table row, or hiding ریال from the final invoice total
 
 **چاپ نمره کارگاه**:
 A production-facing print/PDF version of a sales contract for workshop execution. It removes the branded/legal customer-facing header and all price-bearing information, but keeps a compact plain metadata row with contract number, contract date, print-time status, customer name only, and project/destination context so workshop sheets can be identified without exposing unnecessary customer or financial details. جدول اصلی محصولات remains the first major section and keeps all non-price production/detail rows, including product rows, سنگ مصرفی, ابزار, خدمات, برش, پرداخت سنگ, and row توضیحات, while removing purely financial total/discount rows. Price columns are removed entirely rather than left blank, and their width is redistributed to شرح، طول، عرض، مقدار/تعداد، and متراژ. It keeps برنامه تحویل with only ردیف، اقلام، متراژ/مقدار، تاریخ تحویل، and توضیحات.
@@ -430,6 +436,16 @@ _Avoid_: exposing prices, full customer identity details, payment terms, legal t
 Accounting chooses sales-contract print/PDF variants from a dropdown on the accounting contract detail page. Sales contract detail keeps the customer-facing original version, while accounting can choose نسخه اصلی، چاپ حسابداری، or چاپ نمره کارگاه.
 Only چاپ نسخه اصلی marks the commercial contract as printed. چاپ حسابداری and چاپ نمره کارگاه are internal operational outputs and do not change the contract lifecycle status or printedAt. Print and PDF actions from accounting generate from the current saved contract at action time; internal accounting and workshop variants must not be served from a previously generated PDF cache.
 _Avoid_: exposing accounting/workshop print variants as ordinary sales-detail actions, scattering print variants across unrelated buttons, changing contract status when an internal operational print is generated, or reusing a stale accounting/workshop PDF after contract details have changed
+
+**چاپ سفارشی حسابداری قرارداد فروش**:
+A temporary per-print accounting output configuration for a single sales contract. Accounting can choose visibility, grouping, section, and column options before printing/downloading, including detailed product rows or summarized one-row-per-product output. The choices are not saved as reusable templates and do not mutate the contract or its lifecycle status.
+Custom print may hide or group existing information, but it does not allow manual editing of contract names, quantities, prices, totals, or real saved rows.
+_Avoid_: treating custom accounting print as a saved template system, changing contract data through print settings, manually editing financial truth in the output, deleting real contract rows through print settings, or marking the commercial contract as printed from a custom internal output
+
+**خلاصه‌سازی ردیف محصول در چاپ سفارشی**:
+A custom accounting print grouping mode where each main product prints as one summarized row whose visible total rolls up the base product price plus its attached ابزار، خدمات، برش، پرداخت سنگ، حکمی, and other price-bearing add-ons. The detailed print mode remains available when those add-ons need to be audited line by line.
+In summarized mode, مبلغ کل includes all attached price-bearing add-ons for that product, while نرخ stays blank or shows — because no single unit rate honestly represents the rolled-up total.
+_Avoid_: losing access to the detailed version, changing the saved contract totals while summarizing, hiding that add-ons are included in the summarized product total, or showing a base unit rate beside a rolled-up total that will not reconcile by multiplication
 
 **طول مصرفی سنگ مصرفی**:
 The length shown for سنگ مصرفی is the source or standard length consumed from the material, not the finished/customer-requested product length. The product row shows the finished dimensions; سنگ مصرفی explains the material usage that produced it.

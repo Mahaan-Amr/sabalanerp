@@ -118,7 +118,33 @@ interface FlatProductRow {
   renderAsNoteRow?: boolean;
 }
 
-export type ContractPrintVariant = 'original' | 'accounting' | 'workshop';
+export type ContractPrintVariant = 'original' | 'accounting' | 'workshop' | 'custom';
+
+export type ContractPrintColumnKey =
+  | 'index'
+  | 'code'
+  | 'description'
+  | 'category'
+  | 'length'
+  | 'width'
+  | 'measurement'
+  | 'count'
+  | 'rate'
+  | 'total';
+
+export type ContractCustomPrintOptions = {
+  preset?: 'accounting' | 'workshop' | 'detailed' | 'summarized';
+  productRowsMode?: 'detailed' | 'summarized';
+  showCustomerSection?: boolean;
+  showProductsSection?: boolean;
+  showPrices?: boolean;
+  showExplanatoryRows?: boolean;
+  showDeliverySection?: boolean;
+  showPaymentSection?: boolean;
+  showTotals?: boolean;
+  showNotes?: boolean;
+  columns?: Partial<Record<ContractPrintColumnKey, boolean>>;
+};
 
 interface NormalizedDelivery {
   index: number;
@@ -1086,9 +1112,19 @@ const buildFlatProductRows = (
   currency: string,
   grandTotal: number,
   financials?: NormalizedFinancials,
-  options: { includeRialEquivalent?: boolean } = {}
+  options: {
+    includeRialEquivalent?: boolean;
+    productRowsMode?: 'detailed' | 'summarized';
+    showExplanatoryRows?: boolean;
+    showTotals?: boolean;
+    showNotes?: boolean;
+  } = {}
 ): FlatProductRow[] => {
   const rows: FlatProductRow[] = [];
+  const isSummarized = options.productRowsMode === 'summarized';
+  const showExplanatoryRows = options.showExplanatoryRows !== false;
+  const showTotals = options.showTotals !== false;
+  const showNotes = options.showNotes !== false;
 
   products.forEach((product, productIndex) => {
     const addOnsTotal =
@@ -1113,9 +1149,11 @@ const buildFlatProductRows = (
       category: product.stairPart !== EMPTY ? product.stairPart : 'محصول',
       ...splitDimensionColumns(product.dimensions),
       ...productQuantityColumns,
-      rate: formatPrintMoneyCell(product.unitPrice, currency, options),
-      total: formatPrintMoneyCell(baseAmount, currency, options)
+      rate: isSummarized ? '' : formatPrintMoneyCell(product.unitPrice, currency, options),
+      total: formatPrintMoneyCell(isSummarized ? product.totalPrice : baseAmount, currency, options)
     });
+
+    if (isSummarized) return;
 
     const sourceMaterialRows = product.sourceMaterials.length > 0
       ? product.sourceMaterials
@@ -1127,23 +1165,25 @@ const buildFlatProductRows = (
           }]
         : []);
 
-    sourceMaterialRows.forEach((sourceMaterial) => {
-      const sourceQuantityColumns = splitSourceMaterialQuantity(
-        sourceMaterial.quantityOrArea || sourceMaterial.dimensionsOrAmount
-      );
-      rows.push({
-        indexLabel: '',
-        code: product.code,
-        description: `سنگ مصرفی برای ${sourceMaterial.description || product.name}`,
-        category: 'سنگ مصرفی',
-        ...splitDimensionColumns(sourceMaterial.dimensionsOrAmount),
-        ...sourceQuantityColumns,
-        rate: '',
-        total: ''
+    if (showExplanatoryRows) {
+      sourceMaterialRows.forEach((sourceMaterial) => {
+        const sourceQuantityColumns = splitSourceMaterialQuantity(
+          sourceMaterial.quantityOrArea || sourceMaterial.dimensionsOrAmount
+        );
+        rows.push({
+          indexLabel: '',
+          code: product.code,
+          description: `سنگ مصرفی برای ${sourceMaterial.description || product.name}`,
+          category: 'سنگ مصرفی',
+          ...splitDimensionColumns(sourceMaterial.dimensionsOrAmount),
+          ...sourceQuantityColumns,
+          rate: '',
+          total: ''
+        });
       });
-    });
+    }
 
-    if (product.description && product.description !== EMPTY) {
+    if (showNotes && product.description && product.description !== EMPTY) {
       rows.push({
         indexLabel: '',
         code: '',
@@ -1237,7 +1277,7 @@ const buildFlatProductRows = (
     });
   });
 
-  if (financials && financials.discountAmount > 0) {
+  if (showTotals && financials && financials.discountAmount > 0) {
     rows.push({
       indexLabel: '',
       code: '',
@@ -1257,19 +1297,21 @@ const buildFlatProductRows = (
     });
   }
 
-  rows.push({
-    indexLabel: '',
-    code: '',
-    description: 'جمع کل فاکتور',
-    category: '',
-    length: '',
-    width: '',
-    quantity: '',
-    area: '',
-    rate: '',
-    total: formatPrintMoneyCell(grandTotal, currency, { includeRialEquivalent: shouldShowRialEquivalent(currency) }),
-    className: 'total-row'
-  });
+  if (showTotals) {
+    rows.push({
+      indexLabel: '',
+      code: '',
+      description: 'جمع کل فاکتور',
+      category: '',
+      length: '',
+      width: '',
+      quantity: '',
+      area: '',
+      rate: '',
+      total: formatPrintMoneyCell(grandTotal, currency, { includeRialEquivalent: shouldShowRialEquivalent(currency) }),
+      className: 'total-row'
+    });
+  }
 
   return rows;
 };
@@ -1280,11 +1322,36 @@ const renderProductMainRows = (
   currency: string,
   grandTotal: number,
   financials?: NormalizedFinancials,
-  options: { hidePrices?: boolean; includeRialEquivalent?: boolean } = {}
+  options: {
+    hidePrices?: boolean;
+    includeRialEquivalent?: boolean;
+    productRowsMode?: 'detailed' | 'summarized';
+    showExplanatoryRows?: boolean;
+    showTotals?: boolean;
+    showNotes?: boolean;
+    columns?: Partial<Record<ContractPrintColumnKey, boolean>>;
+  } = {}
 ): string => {
-  const columnCount = options.hidePrices ? 8 : 10;
+  const defaultColumns: Record<ContractPrintColumnKey, boolean> = {
+    index: true,
+    code: true,
+    description: true,
+    category: true,
+    length: true,
+    width: true,
+    measurement: true,
+    count: true,
+    rate: !options.hidePrices,
+    total: !options.hidePrices
+  };
+  const columns = {
+    ...defaultColumns,
+    ...(options.columns || {}),
+    ...(options.hidePrices ? { rate: false, total: false } : {})
+  };
+  const visibleColumnCount = Object.values(columns).filter(Boolean).length;
   if (!products.length && !standaloneServices.length) {
-    return `<tr><td colspan="${columnCount}" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
+    return `<tr><td colspan="${visibleColumnCount}" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
   }
 
   const renderFormattedAmountCell = (value: string): string =>
@@ -1299,8 +1366,8 @@ const renderProductMainRows = (
     if (row.renderAsNoteRow) {
       return `
       <tr class="description-detail-row">
-        <td>توضیحات</td>
-        <td colspan="${columnCount - 1}">${escapeHtml(row.description || EMPTY)}</td>
+        <td>${columns.index ? 'توضیحات' : ''}</td>
+        <td colspan="${Math.max(visibleColumnCount - 1, 1)}">${escapeHtml(row.description || EMPTY)}</td>
       </tr>
     `;
     }
@@ -1308,28 +1375,23 @@ const renderProductMainRows = (
     const noteRow = row.note && row.note !== EMPTY
       ? `
       <tr class="description-detail-row">
-        <td>توضیحات</td>
-        <td colspan="${columnCount - 1}">${escapeHtml(row.note)}</td>
+        <td>${columns.index ? 'توضیحات' : ''}</td>
+        <td colspan="${Math.max(visibleColumnCount - 1, 1)}">${escapeHtml(row.note)}</td>
       </tr>
     `
       : '';
-    const priceCells = options.hidePrices
-      ? ''
-      : `
-        <td>${renderFormattedAmountCell(row.rate || EMPTY)}</td>
-        <td>${renderFormattedAmountCell(row.total || EMPTY)}</td>
-      `;
     return `
       <tr${classAttribute}>
-        <td>${escapeHtml(row.indexLabel)}</td>
-        <td>${escapeHtml(row.code || EMPTY)}</td>
-        <td>${escapeHtml(row.description || EMPTY)}</td>
-        <td>${escapeHtml(row.category || EMPTY)}</td>
-        <td>${escapeHtml(row.length || EMPTY)}</td>
-        <td>${escapeHtml(row.width || EMPTY)}</td>
-        <td>${renderFormattedAmountCell(row.quantity || EMPTY)}</td>
-        <td>${escapeHtml(row.area || EMPTY)}</td>
-        ${priceCells}
+        ${columns.index ? `<td>${escapeHtml(row.indexLabel)}</td>` : ''}
+        ${columns.code ? `<td>${escapeHtml(row.code || EMPTY)}</td>` : ''}
+        ${columns.description ? `<td>${escapeHtml(row.description || EMPTY)}</td>` : ''}
+        ${columns.category ? `<td>${escapeHtml(row.category || EMPTY)}</td>` : ''}
+        ${columns.length ? `<td>${escapeHtml(row.length || EMPTY)}</td>` : ''}
+        ${columns.width ? `<td>${escapeHtml(row.width || EMPTY)}</td>` : ''}
+        ${columns.measurement ? `<td>${renderFormattedAmountCell(row.quantity || EMPTY)}</td>` : ''}
+        ${columns.count ? `<td>${escapeHtml(row.area || EMPTY)}</td>` : ''}
+        ${columns.rate ? `<td>${renderFormattedAmountCell(row.rate || EMPTY)}</td>` : ''}
+        ${columns.total ? `<td>${renderFormattedAmountCell(row.total || EMPTY)}</td>` : ''}
       </tr>
       ${noteRow}
     `;
@@ -1451,6 +1513,7 @@ const getContractHeaderMeta = (contract: RenderableContract) => {
 };
 
 const variantTitle = (variant: ContractPrintVariant): string => {
+  if (variant === 'custom') return 'چاپ سفارشی حسابداری';
   if (variant === 'accounting') return 'چاپ حسابداری';
   if (variant === 'workshop') return 'چاپ نمره کارگاه';
   return 'چاپ نسخه اصلی';
@@ -1546,15 +1609,21 @@ export function renderReportPdfHeaderTemplate(meta: {
 type RenderContractHtmlOptions = {
   reservePdfHeaderSpace?: boolean;
   variant?: ContractPrintVariant;
+  customPrint?: ContractCustomPrintOptions;
 };
 
 export function renderContractHtml(contract: RenderableContract, options: RenderContractHtmlOptions = {}): string {
   const variant = options.variant || 'original';
   const isWorkshopVariant = variant === 'workshop';
+  const isCustomVariant = variant === 'custom';
+  const customPrint = isCustomVariant ? (options.customPrint || {}) : {};
   const priceFormatOptions = {};
   const showFormalSection = variant === 'original';
-  const showCustomerSection = !isWorkshopVariant;
-  const showPaymentSection = !isWorkshopVariant;
+  const showCustomerSection = !isWorkshopVariant && customPrint.showCustomerSection !== false;
+  const showProductsSection = customPrint.showProductsSection !== false;
+  const showPriceColumns = !isWorkshopVariant && customPrint.showPrices !== false;
+  const showDeliverySection = customPrint.showDeliverySection !== false;
+  const showPaymentSection = !isWorkshopVariant && customPrint.showPaymentSection !== false;
   const showDigitalConfirmation = variant === 'original';
   const showLegalNotes = variant === 'original';
   const showSignatures = variant === 'original';
@@ -1580,6 +1649,34 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   const projectManagerNumber = project.projectManagerNumber || customer.projectManagerNumber || EMPTY;
 
   const digitalConfirmation = contract.signatures?.digitalConfirmation || null;
+  const productColumns: Record<ContractPrintColumnKey, boolean> = {
+    index: customPrint.columns?.index !== false,
+    code: customPrint.columns?.code !== false,
+    description: customPrint.columns?.description !== false,
+    category: customPrint.columns?.category !== false,
+    length: customPrint.columns?.length !== false,
+    width: customPrint.columns?.width !== false,
+    measurement: customPrint.columns?.measurement !== false,
+    count: customPrint.columns?.count !== false,
+    rate: showPriceColumns && customPrint.columns?.rate !== false,
+    total: showPriceColumns && customPrint.columns?.total !== false
+  };
+  if (!Object.values(productColumns).some(Boolean)) {
+    productColumns.description = true;
+  }
+  const productColumnDefinitions: Array<{ key: ContractPrintColumnKey; className: string; label: string }> = [
+    { key: 'index', className: 'main-index-col', label: 'ردیف' },
+    { key: 'code', className: 'main-code-col', label: 'کد' },
+    { key: 'description', className: 'main-description-col', label: 'شرح' },
+    { key: 'category', className: 'main-category-col', label: 'دسته' },
+    { key: 'length', className: 'main-length-col', label: 'طول - متر' },
+    { key: 'width', className: 'main-width-col', label: 'عرض - متر' },
+    { key: 'measurement', className: 'main-quantity-col', label: 'متراژ/مقدار' },
+    { key: 'count', className: 'main-area-col', label: 'تعداد' },
+    { key: 'rate', className: 'main-rate-col', label: 'نرخ - تومان' },
+    { key: 'total', className: 'main-total-col', label: 'مبلغ کل - تومان' }
+  ];
+  const visibleProductColumnDefinitions = productColumnDefinitions.filter((column) => productColumns[column.key]);
 
   return `
   <div class="sheet ${isWorkshopVariant ? 'workshop-print' : ''}">
@@ -1608,46 +1705,32 @@ export function renderContractHtml(contract: RenderableContract, options: Render
       </div>
     </section>` : ''}
 
-    <section class="section">
+    ${showProductsSection ? `<section class="section">
       <h2>جدول اصلی محصولات</h2>
       <table class="main-products-table">
         <colgroup>
-          <col class="main-index-col" />
-          <col class="main-code-col" />
-          <col class="main-description-col" />
-          <col class="main-category-col" />
-          <col class="main-length-col" />
-          <col class="main-width-col" />
-          <col class="main-quantity-col" />
-          <col class="main-area-col" />
-          ${isWorkshopVariant ? '' : `
-          <col class="main-rate-col" />
-          <col class="main-total-col" />
-          `}
+          ${visibleProductColumnDefinitions.map((column) => `<col class="${column.className}" />`).join('')}
         </colgroup>
         <thead>
           <tr>
-            <th>ردیف</th>
-            <th>کد</th>
-            <th>شرح</th>
-            <th>دسته</th>
-            <th>طول - متر</th>
-            <th>عرض - متر</th>
-            <th>متراژ/مقدار</th>
-            <th>تعداد</th>
-            ${isWorkshopVariant ? '' : `
-            <th>نرخ - تومان</th>
-            <th>مبلغ کل - تومان</th>
-            `}
+            ${visibleProductColumnDefinitions.map((column) => `<th>${column.label}</th>`).join('')}
           </tr>
         </thead>
         <tbody>
-          ${renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials, { hidePrices: isWorkshopVariant, ...priceFormatOptions })}
+          ${renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials, {
+            hidePrices: !showPriceColumns,
+            productRowsMode: customPrint.productRowsMode || (customPrint.preset === 'summarized' ? 'summarized' : 'detailed'),
+            showExplanatoryRows: customPrint.showExplanatoryRows,
+            showTotals: customPrint.showTotals,
+            showNotes: customPrint.showNotes,
+            columns: productColumns,
+            ...priceFormatOptions
+          })}
         </tbody>
       </table>
-    </section>
+    </section>` : ''}
 
-    <section class="section">
+    ${showDeliverySection ? `<section class="section">
       <h2>برنامه تحویل</h2>
       <table class="delivery-table">
         <colgroup>
@@ -1675,7 +1758,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
         </tbody>
       </table>
       <p class="section-note">${escapeHtml(DELIVERY_NOTE)}</p>
-    </section>
+    </section>` : ''}
 
     ${showPaymentSection ? `<section class="section">
       <h2>برنامه پرداخت</h2>

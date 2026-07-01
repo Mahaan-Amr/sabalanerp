@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { Request } from 'express';
 import { generatePdfFromHtml } from './pdf';
-import { ContractPrintVariant, renderContractHtml, renderContractPdfHeaderTemplate } from './printTemplate';
+import { ContractCustomPrintOptions, ContractPrintVariant, renderContractHtml, renderContractPdfHeaderTemplate } from './printTemplate';
 
 export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-table-units-v16-2026-07-01';
 
@@ -147,11 +147,13 @@ const removePdfCacheSignatures = (signatures: any): any => {
 
 export const buildSalesContractPdfFingerprint = (
   contract: any,
-  variant: ContractPrintVariant = 'original'
+  variant: ContractPrintVariant = 'original',
+  customPrint?: ContractCustomPrintOptions
 ): string => {
   const printableContract = {
     templateVersion: SALES_CONTRACT_PDF_TEMPLATE_VERSION,
     variant,
+    customPrint: variant === 'custom' ? customPrint : undefined,
     id: contract?.id,
     contractNumber: contract?.contractNumber,
     title: contract?.title,
@@ -188,14 +190,17 @@ export const isSalesContractPdfCacheFresh = (
 
 export const generateSalesContractPdf = async (
   contract: any,
-  variant: ContractPrintVariant = 'original'
+  variant: ContractPrintVariant = 'original',
+  customPrint?: ContractCustomPrintOptions
 ) => {
   const timestamp = Date.now();
   const fileNamePrefix = variant === 'accounting'
     ? 'sales_contract_accounting'
     : variant === 'workshop'
       ? 'sales_contract_workshop'
-      : 'sales_contract';
+      : variant === 'custom'
+        ? 'sales_contract_custom'
+        : 'sales_contract';
   const fileName = `${fileNamePrefix}_${contract.contractNumber}_${timestamp}`;
   const contractData = contract?.contractData || {};
   const relationItemsCount = Array.isArray(contract?.items) ? contract.items.length : 0;
@@ -220,7 +225,7 @@ export const generateSalesContractPdf = async (
   const html = renderContractHtml({
     ...contract,
     contractData: contract.contractData
-  }, { reservePdfHeaderSpace: variant === 'original', variant });
+  }, { reservePdfHeaderSpace: variant === 'original', variant, customPrint });
 
   return generatePdfFromHtml({
     htmlContent: html,

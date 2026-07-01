@@ -41,12 +41,65 @@ import {
 
 const toPdfViewerUrl = (url: string) => `${url}#page=1&zoom=page-fit`;
 
-type SalesPdfVariant = 'original' | 'accounting' | 'workshop';
+type SalesPdfVariant = 'original' | 'accounting' | 'workshop' | 'custom';
+type CustomPrintPreset = 'accounting' | 'workshop' | 'detailed' | 'summarized';
+type CustomProductRowsMode = 'detailed' | 'summarized';
+
+type CustomPrintSettings = {
+  preset: CustomPrintPreset;
+  productRowsMode: CustomProductRowsMode;
+  showCustomerSection: boolean;
+  showProductsSection: boolean;
+  showPrices: boolean;
+  showExplanatoryRows: boolean;
+  showDeliverySection: boolean;
+  showPaymentSection: boolean;
+  showTotals: boolean;
+  showNotes: boolean;
+  columns: {
+    index: boolean;
+    code: boolean;
+    description: boolean;
+    category: boolean;
+    length: boolean;
+    width: boolean;
+    measurement: boolean;
+    count: boolean;
+    rate: boolean;
+    total: boolean;
+  };
+};
 
 const salesPdfVariantLabels: Record<SalesPdfVariant, string> = {
   original: 'چاپ نسخه اصلی',
   accounting: 'چاپ حسابداری',
   workshop: 'چاپ نمره کارگاه',
+  custom: 'چاپ سفارشی',
+};
+
+const defaultCustomPrintSettings: CustomPrintSettings = {
+  preset: 'accounting',
+  productRowsMode: 'detailed',
+  showCustomerSection: true,
+  showProductsSection: true,
+  showPrices: true,
+  showExplanatoryRows: true,
+  showDeliverySection: true,
+  showPaymentSection: true,
+  showTotals: true,
+  showNotes: true,
+  columns: {
+    index: true,
+    code: true,
+    description: true,
+    category: true,
+    length: true,
+    width: true,
+    measurement: true,
+    count: true,
+    rate: true,
+    total: true,
+  },
 };
 
 export default function AccountingContractDetailPage({ params }: { params: { contractId: string } }) {
@@ -55,6 +108,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   const [actionLoading, setActionLoading] = useState(false);
   const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
   const [salesPdfVariant, setSalesPdfVariant] = useState<SalesPdfVariant>('accounting');
+  const [customPrintSettings, setCustomPrintSettings] = useState<CustomPrintSettings>(defaultCustomPrintSettings);
 
   const loadDetail = async () => {
     try {
@@ -141,17 +195,76 @@ export default function AccountingContractDetailPage({ params }: { params: { con
     }
   };
 
+  const applyCustomPreset = (preset: CustomPrintPreset) => {
+    setCustomPrintSettings((current) => {
+      const next: CustomPrintSettings = {
+        ...current,
+        preset,
+        productRowsMode: preset === 'summarized' ? 'summarized' : 'detailed',
+      };
+
+      if (preset === 'workshop') {
+        return {
+          ...next,
+          showPrices: false,
+          showPaymentSection: false,
+          showTotals: false,
+          columns: {
+            ...next.columns,
+            rate: false,
+            total: false,
+          },
+        };
+      }
+
+      return {
+        ...next,
+        showPrices: true,
+        showPaymentSection: true,
+        showTotals: true,
+        columns: {
+          ...next.columns,
+          rate: true,
+          total: true,
+        },
+      };
+    });
+  };
+
+  const buildCustomPrintParams = () => {
+    if (salesPdfVariant !== 'custom') return {};
+    const params: Record<string, any> = {
+      preset: customPrintSettings.preset,
+      productRowsMode: customPrintSettings.productRowsMode,
+      showCustomerSection: customPrintSettings.showCustomerSection,
+      showProductsSection: customPrintSettings.showProductsSection,
+      showPrices: customPrintSettings.showPrices,
+      showExplanatoryRows: customPrintSettings.showExplanatoryRows,
+      showDeliverySection: customPrintSettings.showDeliverySection,
+      showPaymentSection: customPrintSettings.showPaymentSection,
+      showTotals: customPrintSettings.showTotals,
+      showNotes: customPrintSettings.showNotes,
+    };
+
+    Object.entries(customPrintSettings.columns).forEach(([key, value]) => {
+      params[`column_${key}`] = value;
+    });
+
+    return params;
+  };
+
   const openSalesContractPdf = async (tryPrint = false) => {
     const actionKey = tryPrint ? 'PRINT_SALES_PDF' : 'DOWNLOAD_SALES_PDF';
     setPdfActionLoading(actionKey);
     try {
+      const pdfParams = { fresh: true, variant: salesPdfVariant, ...buildCustomPrintParams() };
       if (!tryPrint) {
-        const response = await accountingAPI.downloadSalesContractPdf(params.contractId, { fresh: true, variant: salesPdfVariant });
+        const response = await accountingAPI.downloadSalesContractPdf(params.contractId, pdfParams);
         downloadBlobResponse(response, `sales_contract_${params.contractId}_${salesPdfVariant}.pdf`);
         return;
       }
 
-      const response = await accountingAPI.getSalesContractPdf(params.contractId, { fresh: true, variant: salesPdfVariant });
+      const response = await accountingAPI.getSalesContractPdf(params.contractId, pdfParams);
       const url = response.data?.data?.url;
       if (!response.data?.success || !url) throw new Error('Sales contract PDF url was not returned');
       openPdfUrl(url, tryPrint);
@@ -204,6 +317,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
               <option value="original">{salesPdfVariantLabels.original}</option>
               <option value="accounting">{salesPdfVariantLabels.accounting}</option>
               <option value="workshop">{salesPdfVariantLabels.workshop}</option>
+              <option value="custom">{salesPdfVariantLabels.custom}</option>
             </select>
           </label>
           <div className="flex flex-wrap gap-2">
@@ -223,6 +337,101 @@ export default function AccountingContractDetailPage({ params }: { params: { con
             />
           </div>
         </div>
+        {salesPdfVariant === 'custom' && (
+          <div className="mt-4 space-y-4 rounded-xl border border-dashed border-teal-300 bg-teal-50/50 p-4 dark:border-teal-800 dark:bg-teal-950/20">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-200">
+                الگوی چاپ
+                <select
+                  value={customPrintSettings.preset}
+                  onChange={(event) => applyCustomPreset(event.target.value as CustomPrintPreset)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                >
+                  <option value="accounting">حسابداری</option>
+                  <option value="workshop">کارگاه بدون قیمت</option>
+                  <option value="detailed">جزئیات کامل</option>
+                  <option value="summarized">خلاصه محصول</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-200">
+                نمایش محصولات
+                <select
+                  value={customPrintSettings.productRowsMode}
+                  onChange={(event) => setCustomPrintSettings((current) => ({
+                    ...current,
+                    productRowsMode: event.target.value as CustomProductRowsMode,
+                  }))}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                >
+                  <option value="detailed">جزئیات کامل</option>
+                  <option value="summarized">یک ردیف خلاصه برای هر محصول</option>
+                </select>
+              </label>
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-200">بخش‌ها</p>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  ['showCustomerSection', 'مشخصات مشتری'],
+                  ['showProductsSection', 'جدول محصولات'],
+                  ['showPrices', 'قیمت‌ها'],
+                  ['showExplanatoryRows', 'ردیف‌های توضیحی'],
+                  ['showDeliverySection', 'برنامه تحویل'],
+                  ['showPaymentSection', 'برنامه پرداخت'],
+                  ['showTotals', 'جمع‌ها و تخفیف'],
+                  ['showNotes', 'توضیحات'],
+                ].map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(customPrintSettings[key as keyof CustomPrintSettings])}
+                      onChange={(event) => setCustomPrintSettings((current) => ({
+                        ...current,
+                        [key]: event.target.checked,
+                      }))}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-200">ستون‌های جدول محصولات</p>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                {[
+                  ['index', 'ردیف'],
+                  ['code', 'کد'],
+                  ['description', 'شرح'],
+                  ['category', 'دسته'],
+                  ['length', 'طول'],
+                  ['width', 'عرض'],
+                  ['measurement', 'متراژ/مقدار'],
+                  ['count', 'تعداد'],
+                  ['rate', 'نرخ'],
+                  ['total', 'مبلغ کل'],
+                ].map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={customPrintSettings.columns[key as keyof CustomPrintSettings['columns']]}
+                      onChange={(event) => setCustomPrintSettings((current) => ({
+                        ...current,
+                        columns: {
+                          ...current.columns,
+                          [key]: event.target.checked,
+                        },
+                      }))}
+                      disabled={!customPrintSettings.showPrices && (key === 'rate' || key === 'total')}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </ErpSection>
 
       <div className="accounting-print-view">

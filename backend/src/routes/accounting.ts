@@ -31,6 +31,7 @@ import {
   listTaxRecords,
   updateAccountingSettings
 } from '../services/accountingService';
+import type { ContractCustomPrintOptions, ContractPrintVariant } from '../utils/printTemplate';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -68,16 +69,17 @@ const resolveAccountingPdfUrl = (req: AuthRequest, pdfPath: string): string | nu
   return `${protocol}://${host}/files/accounting-contracts/${encodeURIComponent(fileName)}`;
 };
 
-type SalesContractPdfVariant = 'original' | 'accounting' | 'workshop';
+type SalesContractPdfVariant = ContractPrintVariant;
 
 const salesContractPdfVariantFromQuery = (value: unknown): SalesContractPdfVariant => {
-  if (value === 'accounting' || value === 'workshop') return value;
+  if (value === 'accounting' || value === 'workshop' || value === 'custom') return value;
   return 'original';
 };
 
 const salesContractPdfCacheKey = (variant: SalesContractPdfVariant): string => {
   if (variant === 'accounting') return 'accountingSalesPdfAccounting';
   if (variant === 'workshop') return 'accountingSalesPdfWorkshop';
+  if (variant === 'custom') return 'accountingSalesPdfCustom';
   return 'print';
 };
 
@@ -85,7 +87,44 @@ const salesContractPdfDownloadName = (contract: any, variant: SalesContractPdfVa
   const baseName = buildSalesContractPdfDownloadName(contract);
   if (variant === 'accounting') return baseName.replace(/\.pdf$/i, '_accounting.pdf');
   if (variant === 'workshop') return baseName.replace(/\.pdf$/i, '_workshop.pdf');
+  if (variant === 'custom') return baseName.replace(/\.pdf$/i, '_custom.pdf');
   return baseName;
+};
+
+const booleanFromQuery = (value: unknown): boolean | undefined => {
+  if (value === undefined) return undefined;
+  const normalized = String(value).toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return undefined;
+};
+
+const customPrintOptionsFromQuery = (query: any): ContractCustomPrintOptions => {
+  const columns: ContractCustomPrintOptions['columns'] = {};
+  (['index', 'code', 'description', 'category', 'length', 'width', 'measurement', 'count', 'rate', 'total'] as const).forEach((key) => {
+    const value = booleanFromQuery(query[`column_${key}`]);
+    if (value !== undefined) {
+      columns[key] = value;
+    }
+  });
+
+  const preset = ['accounting', 'workshop', 'detailed', 'summarized'].includes(String(query.preset))
+    ? String(query.preset) as ContractCustomPrintOptions['preset']
+    : undefined;
+
+  return {
+    preset,
+    productRowsMode: query.productRowsMode === 'summarized' ? 'summarized' : 'detailed',
+    showCustomerSection: booleanFromQuery(query.showCustomerSection),
+    showProductsSection: booleanFromQuery(query.showProductsSection),
+    showPrices: booleanFromQuery(query.showPrices),
+    showExplanatoryRows: booleanFromQuery(query.showExplanatoryRows),
+    showDeliverySection: booleanFromQuery(query.showDeliverySection),
+    showPaymentSection: booleanFromQuery(query.showPaymentSection),
+    showTotals: booleanFromQuery(query.showTotals),
+    showNotes: booleanFromQuery(query.showNotes),
+    columns
+  };
 };
 
 const markOriginalSalesContractPrinted = async (
@@ -211,13 +250,14 @@ router.get('/contracts/:contractId/sales-pdf', accountingView, async (req: AuthR
 
     const variant = salesContractPdfVariantFromQuery(req.query.variant);
     const cacheKey = salesContractPdfCacheKey(variant);
+    const customPrintOptions = variant === 'custom' ? customPrintOptionsFromQuery(req.query) : undefined;
     const fresh = variant !== 'original' || String(req.query.fresh || 'false').toLowerCase() === 'true';
     const shouldDownload = String(req.query.download || 'false').toLowerCase() === 'true';
     const currentSignatures = (contract.signatures as any) || {};
     const printableContract = variant === 'original' && contract.status === 'SIGNED'
       ? { ...contract, status: 'PRINTED' }
       : contract;
-    const pdfFingerprint = buildSalesContractPdfFingerprint(printableContract, variant);
+    const pdfFingerprint = buildSalesContractPdfFingerprint(printableContract, variant, customPrintOptions);
     const cachedPdfCandidates = variant === 'original'
       ? [
           {
@@ -278,12 +318,12 @@ router.get('/contracts/:contractId/sales-pdf', accountingView, async (req: AuthR
       }
     }
 
-    const pdfPath = await generateSalesContractPdf(printableContract, variant);
+    const pdfPath = await generateSalesContractPdf(printableContract, variant, customPrintOptions);
     const generatedAt = new Date().toISOString();
 
     if (variant === 'original') {
       await markOriginalSalesContractPrinted(req, contract, currentSignatures, pdfPath, pdfFingerprint, generatedAt);
-    } else {
+    } else if (variant !== 'custom') {
       await prisma.salesContract.update({
         where: { id: contract.id },
         data: {

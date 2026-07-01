@@ -226,6 +226,11 @@ const isStairLayerProduct = (product: ContractProduct | undefined): boolean =>
 const isStairMainProduct = (product: ContractProduct | undefined): boolean =>
   Boolean(product && product.productType === 'stair' && !isStairLayerProduct(product));
 
+const isGeneratedStairCutTool = (tool: any): boolean => {
+  const toolId = String(tool?.toolId || tool?.id || '');
+  return toolId.startsWith('cut-cross-') || toolId.startsWith('cut-longitudinal-');
+};
+
 const createEmptyStairDraft = (part: StairStepperPart): StairPartDraftV2 => ({
   lengthUnit: 'm',
   tools: [],
@@ -2863,7 +2868,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         
         // Helper function to convert ContractProduct to StairPartDraftV2
         const productToDraft = (p: ContractProduct, partType: StairStepperPart): StairPartDraftV2 => {
-          const metaTools = (p.meta as any)?.tools || [];
+          const metaTools = ((p.meta as any)?.tools || []).filter((tool: any) => !isGeneratedStairCutTool(tool));
           const appliedTools = (p.appliedSubServices || []).map((applied: AppliedSubService) => ({
             toolId: applied.subServiceId,
             name: applied.subService?.namePersian || applied.subService?.name || '',
@@ -7556,37 +7561,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       quantity: draft.quantity,
                       squareMeters: totals.pricingSquareMeters
                     });
-                  if (totals.cuttingCostLongitudinal > 0 && totals.shouldChargeCuttingCost) {
-                    const cutMeters = actualLengthM * totals.baseStoneQuantity;
-                    metaTools = [
-                      ...metaTools,
-                      {
-                        toolId: `cut-longitudinal-${draft.stoneId || 'new'}`,
-                        name: 'برش طولی',
-                        pricePerMeter: totals.cuttingCostPerMeterLongitudinal || totals.cuttingCostPerMeter,
-                        edges: { front: false, left: false, right: false, back: false, perimeter: true },
-                        computedMeters: cutMeters,
-                        totalPrice: chargeableCuttingCostLongitudinal
-                      }
-                    ];
-                  }
-                  if (totals.cuttingCostCross > 0 && totals.shouldChargeCuttingCost) {
-                    const widthMeters = ((draft.widthCm || 0) / 100) * totals.baseStoneQuantity;
-                    // Use "برش کله بر" if there's only 1 cross cut (no longitudinal cut)
-                    const hasOnlyCrossCut = totals.cuttingCostLongitudinal === 0 || !totals.cuttingCostLongitudinal;
-                    const cutName = hasOnlyCrossCut ? 'برش کله بر' : 'برش عرضی';
-                    metaTools = [
-                      ...metaTools,
-                      {
-                        toolId: `cut-cross-${draft.stoneId || 'new'}`,
-                        name: cutName,
-                        pricePerMeter: totals.cuttingCostPerMeterCross || totals.cuttingCostPerMeter,
-                        edges: { front: false, left: false, right: false, back: false, perimeter: true },
-                        computedMeters: widthMeters,
-                        totalPrice: chargeableCuttingCostCross
-                      }
-                    ];
-                  }
                   const toolsTotal = sumNumericValues(metaTools, (tool) => tool.totalPrice);
                   const appliedSubServices: AppliedSubService[] = (draft.tools || []).map((tool) => {
                     const selectedSubService = subServices.find((subService) => subService.id === tool.toolId);
@@ -7769,7 +7743,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         ? `برش طولی (${originalWidthCm}cm → ${userWidthCm}cm) و برش عرضی (${formatDisplayNumber(pricingLengthM)}m → ${formatDisplayNumber(actualLengthM)}m)`
                         : hasWidthCut
                           ? `برش طولی (${originalWidthCm}cm → ${userWidthCm}cm)`
-                          : `برش کله بر (${formatDisplayNumber(pricingLengthM)}m → ${formatDisplayNumber(actualLengthM)}m)`
+                          : `برش عرضی (${formatDisplayNumber(pricingLengthM)}m → ${formatDisplayNumber(actualLengthM)}m)`
                       : '',
                     remainingStones: remainingStones,
                     cutDetails: cutDetails,

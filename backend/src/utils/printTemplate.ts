@@ -185,6 +185,11 @@ const selectedEdgeLabels = (source: any): string => {
 const withSelectedEdges = (name: string, selectedEdgesLabel?: string): string =>
   selectedEdgesLabel ? `${name} (${selectedEdgesLabel})` : name;
 
+const isGeneratedCutTool = (tool: any): boolean => {
+  const toolId = String(tool?.toolId || tool?.id || '');
+  return toolId.startsWith('cut-cross-') || toolId.startsWith('cut-longitudinal-');
+};
+
 const publicAssetPath = (...segments: string[]): string => {
   const candidates = [
     process.env.SABALAN_LOGO_PATH || '',
@@ -668,7 +673,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
       const tools: NormalizedProductTool[] = [
         ...(Array.isArray(product?.tools) ? product.tools : []),
         ...(Array.isArray(product?.meta?.tools) ? product.meta.tools : [])
-      ].map((tool: any) => {
+      ].filter((tool: any) => !isGeneratedCutTool(tool)).map((tool: any) => {
         const amount = toNumber(tool?.computedMeters || tool?.meters || tool?.amount);
         const rate = toNumber(tool?.pricePerMeter || tool?.rate || tool?.unitPrice);
         const cost = toNumber(tool?.totalPrice || tool?.cost);
@@ -1419,6 +1424,12 @@ const renderCompactMetadataSection = (
 ): string => {
   if (options.variant === 'original') return '';
   const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
+  const salesAccountName = getUserName(contract.createdByUser);
+  const accountingFields = options.variant === 'accounting'
+    ? `
+        <div><strong>حساب فروش:</strong> ${escapeHtml(salesAccountName)}</div>
+      `
+    : '';
   const workshopFields = options.variant === 'workshop'
     ? `
         <div><strong>نام مشتری:</strong> ${escapeHtml(options.customerName || EMPTY)}</div>
@@ -1434,6 +1445,7 @@ const renderCompactMetadataSection = (
         <div><strong>تاریخ قرارداد:</strong> ${escapeHtml(contractDate)}</div>
         <div><strong>وضعیت هنگام چاپ:</strong> ${escapeHtml(statusLabel)}</div>
         <div><strong>زمان چاپ:</strong> ${escapeHtml(formatDateTime(new Date()))}</div>
+        ${accountingFields}
         ${workshopFields}
       </div>
     </section>

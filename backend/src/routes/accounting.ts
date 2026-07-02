@@ -19,6 +19,7 @@ import {
 import { PrismaClient } from '@prisma/client';
 import {
   executeAccountingAction,
+  getAccountantPerformanceReport,
   getAccountingSettings,
   getAccountingContractDetail,
   getAccountingWorkspace,
@@ -427,6 +428,16 @@ router.get('/audit', accountingView, async (req: AuthRequest, res: Response) => 
     res.json({ success: true, data });
   } catch (error) {
     console.error('Accounting audit error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+router.get('/performance', accountingView, async (req: AuthRequest, res: Response) => {
+  try {
+    const data = await getAccountantPerformanceReport(req.query);
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Accounting performance error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });

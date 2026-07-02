@@ -27,6 +27,7 @@ import {
   FaExclamationTriangle,
   FaSignOutAlt,
   FaClock,
+  FaUserClock,
   FaCheckCircle,
   FaTimesCircle,
   FaSignature,
@@ -510,6 +511,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             namePersian: 'سوابق عملیات',
             href: '/dashboard/accounting/audit',
             icon: FaChartLine,
+            show: true
+          },
+          {
+            name: 'Accountant Performance',
+            namePersian: 'عملکرد حسابداران',
+            href: '/dashboard/accounting/performance',
+            icon: FaUserClock,
             show: true
           },
           {

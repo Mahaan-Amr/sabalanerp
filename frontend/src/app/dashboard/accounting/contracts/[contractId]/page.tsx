@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   FaBalanceScale,
   FaCheckCircle,
@@ -25,6 +25,7 @@ import {
 } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
+import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import {
   CompactQueueItem,
   FinancialInvoiceApprovalForm,
@@ -107,10 +108,15 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [resolveTarget, setResolveTarget] = useState<any | null>(null);
+  const [flagModalOpen, setFlagModalOpen] = useState(false);
+  const [correctionModalOpen, setCorrectionModalOpen] = useState(false);
   const [salesPdfVariant, setSalesPdfVariant] = useState<SalesPdfVariant>('accounting');
   const [customPrintSettings, setCustomPrintSettings] = useState<CustomPrintSettings>(defaultCustomPrintSettings);
 
-  const loadDetail = async () => {
+  const loadDetail = useCallback(async () => {
     try {
       setLoading(true);
       const response = await accountingAPI.getContract(params.contractId);
@@ -120,20 +126,23 @@ export default function AccountingContractDetailPage({ params }: { params: { con
     } finally {
       setLoading(false);
     }
-  };
+  }, [params.contractId]);
 
   useEffect(() => {
     loadDetail();
-  }, [params.contractId]);
+  }, [loadDetail]);
 
   const execute = async (action: any) => {
     try {
+      setActionError(null);
       setActionLoading(true);
       await accountingAPI.executeAction(action);
       await loadDetail();
+      return true;
     } catch (error) {
       console.error('Accounting action failed:', error);
-      window.alert((error as any)?.response?.data?.error || 'اقدام حسابداری انجام نشد');
+      setActionError((error as any)?.response?.data?.error || 'اقدام حسابداری انجام نشد');
+      return false;
     } finally {
       setActionLoading(false);
     }
@@ -149,23 +158,51 @@ export default function AccountingContractDetailPage({ params }: { params: { con
     });
   };
 
-  const deleteDraftRecord = (record: any) => {
-    if (!window.confirm('این پیش‌نویس رکورد مالی حذف شود؟')) return;
-    execute({
+  const deleteDraftRecord = async (values: Record<string, string | number>) => {
+    if (!deleteTarget) return;
+    const applied = await execute({
       kind: 'DELETE_DRAFT_ACCOUNTING_RECORD',
-      recordId: record.id,
-      note: 'Deleted draft from accounting contract detail',
+      recordId: deleteTarget.id,
+      note: String(values.note || 'Deleted draft from accounting contract detail'),
     });
+    if (applied) setDeleteTarget(null);
   };
 
-  const resolveCorrection = (request: any) => {
-    const resolutionNote = window.prompt('یادداشت بستن درخواست اصلاح را وارد کنید');
-    if (resolutionNote === null) return;
-    execute({
+  const resolveCorrection = async (values: Record<string, string | number>) => {
+    if (!resolveTarget) return;
+    const applied = await execute({
       kind: 'RESOLVE_CORRECTION',
-      correctionRequestId: request.id,
-      resolutionNote: resolutionNote?.trim() || undefined,
+      correctionRequestId: resolveTarget.id,
+      resolutionNote: String(values.resolutionNote || '').trim() || undefined,
     });
+    if (applied) setResolveTarget(null);
+  };
+
+  const flagContract = async (values: Record<string, string | number>) => {
+    const note = String(values.note || '').trim();
+    if (!note) return;
+    const applied = await execute({
+      kind: 'FLAG_CONTRACT',
+      contractId: params.contractId,
+      category: values.category || 'OTHER',
+      severity: values.severity || 'MEDIUM',
+      title: String(values.title || 'نیازمند بررسی حسابداری'),
+      note,
+    });
+    if (applied) setFlagModalOpen(false);
+  };
+
+  const requestCorrection = async (values: Record<string, string | number>) => {
+    const reason = String(values.reason || '').trim();
+    if (!reason) return;
+    const applied = await execute({
+      kind: 'REQUEST_CORRECTION',
+      contractId: params.contractId,
+      category: values.category || 'OTHER',
+      priority: values.priority || 'MEDIUM',
+      reason,
+    });
+    if (applied) setCorrectionModalOpen(false);
   };
 
   const openPdfUrl = (url: string, tryPrint: boolean) => {
@@ -270,7 +307,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
       openPdfUrl(url, tryPrint);
     } catch (error) {
       console.error('Sales contract PDF failed:', error);
-      window.alert(tryPrint ? 'پرینت قرارداد انجام نشد' : 'دانلود PDF قرارداد انجام نشد');
+      setActionError(tryPrint ? 'پرینت قرارداد انجام نشد' : 'دانلود PDF قرارداد انجام نشد');
     } finally {
       setPdfActionLoading(null);
     }
@@ -305,6 +342,11 @@ export default function AccountingContractDetailPage({ params }: { params: { con
         { label: 'مانده', value: money(contract.accounting.remainingAmount), icon: FaMoneyCheckAlt, tone: contract.accounting.receivableStatus === 'OVERDUE' ? 'danger' : 'warning' },
       ]}
     >
+      {actionError && !deleteTarget && !resolveTarget && !flagModalOpen && !correctionModalOpen && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+          {actionError}
+        </div>
+      )}
       <ErpSection title="خروجی چاپ قرارداد" description="نسخه مورد نیاز حسابداری را انتخاب کنید و سپس چاپ یا دانلود بگیرید.">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-200">
@@ -504,7 +546,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                               tone="danger"
                               variant="outline"
                               disabled={actionLoading}
-                              onClick={() => deleteDraftRecord(record)}
+                              onClick={() => setDeleteTarget(record)}
                             />
                           </div>
                         )}
@@ -581,35 +623,14 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                   icon={FaFlag}
                   tone="warning"
                   disabled={actionLoading}
-                  onClick={() => {
-                    const note = window.prompt('یادداشت پرچم حسابداری را وارد کنید');
-                    if (!note?.trim()) return;
-                    execute({
-                      kind: 'FLAG_CONTRACT',
-                      contractId: contract.contractId,
-                      category: 'OTHER',
-                      severity: 'MEDIUM',
-                      title: 'نیازمند بررسی حسابداری',
-                      note: note.trim(),
-                    });
-                  }}
+                  onClick={() => setFlagModalOpen(true)}
                 />
                 <ErpButton
                   label="درخواست اصلاح"
                   icon={FaExclamationTriangle}
                   tone="danger"
                   disabled={actionLoading}
-                  onClick={() => {
-                    const reason = window.prompt('متن درخواست اصلاح را وارد کنید');
-                    if (!reason?.trim()) return;
-                    execute({
-                      kind: 'REQUEST_CORRECTION',
-                      contractId: contract.contractId,
-                      category: 'OTHER',
-                      priority: 'MEDIUM',
-                      reason: reason.trim(),
-                    });
-                  }}
+                  onClick={() => setCorrectionModalOpen(true)}
                 />
               </div>
             </ErpSection>
@@ -658,7 +679,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                           icon={FaCheckCircle}
                           tone="success"
                           disabled={actionLoading}
-                          onClick={() => resolveCorrection(item)}
+                          onClick={() => setResolveTarget(item)}
                         />
                       </div>
                     ) : undefined}
@@ -670,6 +691,85 @@ export default function AccountingContractDetailPage({ params }: { params: { con
           }
         />
       </div>
+      <AccountingActionModal
+        open={Boolean(deleteTarget)}
+        title="حذف پیش‌نویس رکورد مالی"
+        description="فقط رکوردهای پیش‌نویس، تایید نشده و بدون رکورد پایین‌دستی حذف می‌شوند."
+        fields={[{ id: 'note', label: 'یادداشت حذف', type: 'textarea', defaultValue: 'Deleted draft from accounting contract detail' }]}
+        submitLabel="حذف پیش‌نویس"
+        busy={actionLoading}
+        error={actionError}
+        onClose={() => setDeleteTarget(null)}
+        onSubmit={deleteDraftRecord}
+      />
+      <AccountingActionModal
+        open={Boolean(resolveTarget)}
+        title="بستن درخواست اصلاح"
+        description={resolveTarget?.accountantNote}
+        fields={[{ id: 'resolutionNote', label: 'یادداشت بستن درخواست', type: 'textarea', required: true }]}
+        submitLabel="بستن اصلاح"
+        busy={actionLoading}
+        error={actionError}
+        onClose={() => setResolveTarget(null)}
+        onSubmit={resolveCorrection}
+      />
+      <AccountingActionModal
+        open={flagModalOpen}
+        title="پرچم حسابداری"
+        description={`${contract.contractNumber} - ${contract.customer.displayName}`}
+        fields={[
+          { id: 'title', label: 'عنوان پرچم', type: 'text', required: true, defaultValue: 'نیازمند بررسی حسابداری' },
+          { id: 'category', label: 'دسته', type: 'select', defaultValue: 'OTHER', options: [
+            { label: 'هویت مشتری', value: 'CUSTOMER_IDENTITY' },
+            { label: 'مبلغ و قیمت', value: 'AMOUNT_PRICING' },
+            { label: 'برنامه پرداخت', value: 'PAYMENT_PLAN' },
+            { label: 'برنامه تحویل', value: 'DELIVERY_SCHEDULE' },
+            { label: 'مالیات', value: 'TAX_INFO' },
+            { label: 'اسناد و امضا', value: 'DOCUMENT_SIGNATURE' },
+            { label: 'سایر', value: 'OTHER' },
+          ] },
+          { id: 'severity', label: 'شدت', type: 'select', defaultValue: 'MEDIUM', options: [
+            { label: 'کم', value: 'LOW' },
+            { label: 'متوسط', value: 'MEDIUM' },
+            { label: 'زیاد', value: 'HIGH' },
+            { label: 'مسدودکننده', value: 'BLOCKER' },
+          ] },
+          { id: 'note', label: 'یادداشت', type: 'textarea', required: true },
+        ]}
+        submitLabel="ثبت پرچم"
+        busy={actionLoading}
+        error={actionError}
+        onClose={() => setFlagModalOpen(false)}
+        onSubmit={flagContract}
+      />
+      <AccountingActionModal
+        open={correctionModalOpen}
+        title="درخواست اصلاح"
+        description={`${contract.contractNumber} - ${contract.customer.displayName}`}
+        fields={[
+          { id: 'category', label: 'دسته اصلاح', type: 'select', defaultValue: 'OTHER', options: [
+            { label: 'هویت مشتری', value: 'CUSTOMER_IDENTITY' },
+            { label: 'مبلغ و قیمت', value: 'AMOUNT_PRICING' },
+            { label: 'برنامه پرداخت', value: 'PAYMENT_PLAN' },
+            { label: 'برنامه تحویل', value: 'DELIVERY_SCHEDULE' },
+            { label: 'مالیات', value: 'TAX_INFO' },
+            { label: 'اسناد و امضا', value: 'DOCUMENT_SIGNATURE' },
+            { label: 'سایر', value: 'OTHER' },
+          ] },
+          { id: 'priority', label: 'اولویت', type: 'select', defaultValue: 'MEDIUM', options: [
+            { label: 'کم', value: 'LOW' },
+            { label: 'متوسط', value: 'MEDIUM' },
+            { label: 'زیاد', value: 'HIGH' },
+            { label: 'فوری', value: 'URGENT' },
+          ] },
+          { id: 'reason', label: 'متن درخواست اصلاح', type: 'textarea', required: true },
+        ]}
+        submitLabel="ثبت درخواست"
+        busy={actionLoading}
+        error={actionError}
+        onClose={() => setCorrectionModalOpen(false)}
+        onSubmit={requestCorrection}
+      />
     </ErpPage>
   );
 }

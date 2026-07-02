@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   FaCheckCircle,
   FaClipboardCheck,
@@ -26,6 +26,7 @@ import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
 import { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
+import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import {
   AccountingContractRow,
   FinancialInvoiceApprovalForm,
@@ -72,20 +73,23 @@ export default function AccountingContractsPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [correctionTarget, setCorrectionTarget] = useState<AccountingContractRow | null>(null);
+  const [flagTarget, setFlagTarget] = useState<AccountingContractRow | null>(null);
   const [approvalTarget, setApprovalTarget] = useState<{
     contract: AccountingContractRow;
     invoice: NonNullable<AccountingContractRow['financialRecords']>[number];
   } | null>(null);
 
-  const toGregorianFilterDate = (value: string, endOfDay = false) => {
+  const toGregorianFilterDate = useCallback((value: string, endOfDay = false) => {
     if (!value) return undefined;
     const date = PersianCalendar.toGregorian(value);
     if (endOfDay) date.setHours(23, 59, 59, 999);
     else date.setHours(0, 0, 0, 0);
     return date.toISOString();
-  };
+  }, []);
 
-  const loadContracts = async (page = pagination.page) => {
+  const loadContracts = useCallback(async (page = 1) => {
     try {
       setLoading(true);
       const response = await accountingAPI.getContracts({
@@ -111,20 +115,23 @@ export default function AccountingContractsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [dateFrom, dateTo, pagination.pageSize, search, sourceStatus, status, toGregorianFilterDate]);
 
   useEffect(() => {
     loadContracts(1);
-  }, [search, status, sourceStatus, dateFrom, dateTo]);
+  }, [loadContracts]);
 
   const execute = async (contract: AccountingContractRow, action: any) => {
     setActionLoading(`${contract.contractId}:${action.kind}`);
     try {
+      setActionError(null);
       await accountingAPI.executeAction(action);
       await loadContracts(pagination.page);
+      return true;
     } catch (error) {
       console.error('Accounting action failed:', error);
-      window.alert((error as any)?.response?.data?.error || 'اقدام حسابداری انجام نشد');
+      setActionError((error as any)?.response?.data?.error || 'اقدام حسابداری انجام نشد');
+      return false;
     } finally {
       setActionLoading(null);
     }
@@ -213,35 +220,39 @@ export default function AccountingContractsPage() {
       openPdfUrl(url, tryPrint);
     } catch (error) {
       console.error('Sales contract PDF failed:', error);
-      window.alert(tryPrint ? 'پرینت قرارداد انجام نشد' : 'دانلود PDF قرارداد انجام نشد');
+      setActionError(tryPrint ? 'پرینت قرارداد انجام نشد' : 'دانلود PDF قرارداد انجام نشد');
     } finally {
       setActionLoading(null);
     }
   };
 
-  const requestCorrection = (contract: AccountingContractRow) => {
-    const reason = window.prompt('متن درخواست اصلاح را وارد کنید');
-    if (!reason?.trim()) return;
-    execute(contract, {
+  const requestCorrection = async (values: Record<string, string | number>) => {
+    if (!correctionTarget) return;
+    const reason = String(values.reason || '').trim();
+    if (!reason) return;
+    const applied = await execute(correctionTarget, {
       kind: 'REQUEST_CORRECTION',
-      contractId: contract.contractId,
-      category: 'OTHER',
-      priority: 'MEDIUM',
-      reason: reason.trim(),
+      contractId: correctionTarget.contractId,
+      category: values.category || 'OTHER',
+      priority: values.priority || 'MEDIUM',
+      reason,
     });
+    if (applied) setCorrectionTarget(null);
   };
 
-  const flagContract = (contract: AccountingContractRow) => {
-    const note = window.prompt('یادداشت پرچم حسابداری را وارد کنید');
-    if (!note?.trim()) return;
-    execute(contract, {
+  const flagContract = async (values: Record<string, string | number>) => {
+    if (!flagTarget) return;
+    const note = String(values.note || '').trim();
+    if (!note) return;
+    const applied = await execute(flagTarget, {
       kind: 'FLAG_CONTRACT',
-      contractId: contract.contractId,
-      category: 'OTHER',
-      severity: 'MEDIUM',
-      title: 'نیازمند بررسی حسابداری',
-      note: note.trim(),
+      contractId: flagTarget.contractId,
+      category: values.category || 'OTHER',
+      severity: values.severity || 'MEDIUM',
+      title: String(values.title || 'نیازمند بررسی حسابداری'),
+      note,
     });
+    if (applied) setFlagTarget(null);
   };
 
   const columns: ErpColumn<AccountingContractRow>[] = [
@@ -372,8 +383,8 @@ export default function AccountingContractsPage() {
         : getPendingInvoiceCandidates(contract).length !== 1 ? 'برای تایید سریع باید دقیقا یک صورتحساب تایید نشده وجود داشته باشد' : undefined,
       onClick: () => openApprovalModal(contract),
     },
-    { label: 'پرچم', icon: FaFlag, tone: 'warning', onClick: () => flagContract(contract) },
-    { label: 'درخواست اصلاح', icon: FaExclamationTriangle, tone: 'danger', onClick: () => requestCorrection(contract) },
+    { label: 'پرچم', icon: FaFlag, tone: 'warning', onClick: () => setFlagTarget(contract) },
+    { label: 'درخواست اصلاح', icon: FaExclamationTriangle, tone: 'danger', onClick: () => setCorrectionTarget(contract) },
   ];
 
   return (
@@ -425,6 +436,11 @@ export default function AccountingContractsPage() {
         />
       }
     >
+      {actionError && !flagTarget && !correctionTarget && !approvalTarget && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+          {actionError}
+        </div>
+      )}
       <ErpSection>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <label className="block">
@@ -468,6 +484,63 @@ export default function AccountingContractsPage() {
           </div>
         </div>
       )}
+      <AccountingActionModal
+        open={Boolean(flagTarget)}
+        title="پرچم حسابداری"
+        description={flagTarget ? `${flagTarget.contractNumber} - ${flagTarget.customer.displayName}` : undefined}
+        fields={[
+          { id: 'title', label: 'عنوان پرچم', type: 'text', required: true, defaultValue: 'نیازمند بررسی حسابداری' },
+          { id: 'category', label: 'دسته', type: 'select', defaultValue: 'OTHER', options: [
+            { label: 'هویت مشتری', value: 'CUSTOMER_IDENTITY' },
+            { label: 'مبلغ و قیمت', value: 'AMOUNT_PRICING' },
+            { label: 'برنامه پرداخت', value: 'PAYMENT_PLAN' },
+            { label: 'برنامه تحویل', value: 'DELIVERY_SCHEDULE' },
+            { label: 'مالیات', value: 'TAX_INFO' },
+            { label: 'اسناد و امضا', value: 'DOCUMENT_SIGNATURE' },
+            { label: 'سایر', value: 'OTHER' },
+          ] },
+          { id: 'severity', label: 'شدت', type: 'select', defaultValue: 'MEDIUM', options: [
+            { label: 'کم', value: 'LOW' },
+            { label: 'متوسط', value: 'MEDIUM' },
+            { label: 'زیاد', value: 'HIGH' },
+            { label: 'مسدودکننده', value: 'BLOCKER' },
+          ] },
+          { id: 'note', label: 'یادداشت', type: 'textarea', required: true },
+        ]}
+        submitLabel="ثبت پرچم"
+        busy={Boolean(actionLoading)}
+        error={actionError}
+        onClose={() => setFlagTarget(null)}
+        onSubmit={flagContract}
+      />
+      <AccountingActionModal
+        open={Boolean(correctionTarget)}
+        title="درخواست اصلاح"
+        description={correctionTarget ? `${correctionTarget.contractNumber} - ${correctionTarget.customer.displayName}` : undefined}
+        fields={[
+          { id: 'category', label: 'دسته اصلاح', type: 'select', defaultValue: 'OTHER', options: [
+            { label: 'هویت مشتری', value: 'CUSTOMER_IDENTITY' },
+            { label: 'مبلغ و قیمت', value: 'AMOUNT_PRICING' },
+            { label: 'برنامه پرداخت', value: 'PAYMENT_PLAN' },
+            { label: 'برنامه تحویل', value: 'DELIVERY_SCHEDULE' },
+            { label: 'مالیات', value: 'TAX_INFO' },
+            { label: 'اسناد و امضا', value: 'DOCUMENT_SIGNATURE' },
+            { label: 'سایر', value: 'OTHER' },
+          ] },
+          { id: 'priority', label: 'اولویت', type: 'select', defaultValue: 'MEDIUM', options: [
+            { label: 'کم', value: 'LOW' },
+            { label: 'متوسط', value: 'MEDIUM' },
+            { label: 'زیاد', value: 'HIGH' },
+            { label: 'فوری', value: 'URGENT' },
+          ] },
+          { id: 'reason', label: 'متن درخواست اصلاح', type: 'textarea', required: true },
+        ]}
+        submitLabel="ثبت درخواست"
+        busy={Boolean(actionLoading)}
+        error={actionError}
+        onClose={() => setCorrectionTarget(null)}
+        onSubmit={requestCorrection}
+      />
     </ErpListPage>
   );
 }

@@ -498,6 +498,7 @@ export const accountingAPI = {
   getTaxRecords: (params?: any) => api.get('/accounting/tax', { params }),
   getCorrectionRequests: (params?: any) => api.get('/accounting/correction-requests', { params }),
   getAuditLogs: (params?: any) => api.get('/accounting/audit', { params }),
+  getPerformanceReport: (params?: any) => api.get('/accounting/performance', { params }),
   getSettings: () => api.get('/accounting/settings'),
   updateSettings: (data: any) => api.put('/accounting/settings', data),
   executeAction: (data: any) => api.post('/accounting/actions', data),

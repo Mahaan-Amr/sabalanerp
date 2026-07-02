@@ -1,34 +1,52 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { FaEye, FaFileInvoice, FaSync, FaTrashAlt } from 'react-icons/fa';
-import { ErpEmptyState, ErpListPage, type ErpAction, type ErpColumn } from '@/components/erp';
+import { ErpEmptyState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
-import { StatusBadge, dateFa, money } from '@/features/accounting/accountingUi';
+import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money } from '@/features/accounting/accountingUi';
+import AccountingActionModal from '@/features/accounting/AccountingActionModal';
+
+const statusOptions = [
+  { label: 'همه وضعیت‌ها', value: 'ALL' },
+  { label: 'پیش‌نویس', value: 'DRAFT' },
+  { label: 'آماده', value: 'READY' },
+  { label: 'صادر شده', value: 'ISSUED' },
+  { label: 'باطل شده', value: 'VOIDED' },
+];
 
 export default function AccountingInvoiceCandidatesPage() {
   const [rows, setRows] = useState<any[]>([]);
+  const [pagination, setPagination] = useState(emptyAccountingPagination);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('ALL');
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const loadRows = async () => {
+  const loadRows = useCallback(async (page = 1) => {
     try {
       setLoading(true);
-      const response = await accountingAPI.getFinancialRecords({ kind: 'INVOICE_CANDIDATE' });
-      if (response.data.success) setRows(response.data.data);
+      const response = await accountingAPI.getFinancialRecords({ kind: 'INVOICE_CANDIDATE', search, status, page, pageSize: pagination.pageSize });
+      if (response.data.success) {
+        const data = readAccountingListResponse<any>(response.data.data);
+        setRows(data.items);
+        setPagination({ page: data.page, pageSize: data.pageSize, total: data.total });
+      }
     } catch (error) {
       console.error('Error loading invoice candidates:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [pagination.pageSize, search, status]);
 
   useEffect(() => {
-    loadRows();
-  }, []);
+    loadRows(1);
+  }, [loadRows]);
 
   const deleteDraftRecord = async (row: any) => {
-    if (!window.confirm('این پیش‌نویس رکورد مالی حذف شود؟')) return;
+    setActionError(null);
     setActionLoading(row.id);
     try {
       await accountingAPI.executeAction({
@@ -36,10 +54,11 @@ export default function AccountingInvoiceCandidatesPage() {
         recordId: row.id,
         note: 'Deleted draft from invoice candidates register',
       });
-      await loadRows();
+      setDeleteTarget(null);
+      await loadRows(pagination.page);
     } catch (error) {
       console.error('Delete draft accounting record failed:', error);
-      window.alert((error as any)?.response?.data?.error || 'حذف پیش‌نویس رکورد مالی انجام نشد');
+      setActionError((error as any)?.response?.data?.error || 'حذف پیش‌نویس رکورد مالی انجام نشد');
     } finally {
       setActionLoading(null);
     }
@@ -52,7 +71,7 @@ export default function AccountingInvoiceCandidatesPage() {
       icon: FaTrashAlt,
       tone: 'danger',
       disabled: row.status !== 'DRAFT' || actionLoading === row.id,
-      onClick: () => deleteDraftRecord(row),
+      onClick: () => setDeleteTarget(row),
     },
   ];
 
@@ -64,7 +83,8 @@ export default function AccountingInvoiceCandidatesPage() {
       cell: (row) => (
         <div>
           <p className="font-semibold text-slate-950 dark:text-white">{row.id}</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">قرارداد: {row.contractId || '—'}</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">قرارداد: {row.contract?.contractNumber || row.contractId || '—'}</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{row.contract?.customer?.displayName || 'مشتری ثبت نشده'}</p>
         </div>
       ),
     },
@@ -79,13 +99,30 @@ export default function AccountingInvoiceCandidatesPage() {
       eyebrow="حسابداری"
       title="پیش‌نویس صورتحساب‌ها"
       description="صورتحساب‌های پیشنهادی که حسابداری از قراردادهای تایید شده، امضا شده یا چاپ شده ایجاد کرده است."
-      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: loadRows, tone: 'neutral' }]}
+      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: () => loadRows(pagination.page), tone: 'neutral' }]}
+      filters={[
+        { id: 'search', label: 'جستجو', type: 'search', value: search, onChange: setSearch, placeholder: 'شماره قرارداد یا مشتری...' },
+        { id: 'status', label: 'وضعیت', type: 'select', value: status, onChange: setStatus, options: statusOptions },
+      ]}
       rows={rows}
       rowKey={(row) => row.id}
       columns={columns}
       rowActions={rowActions}
       isLoading={loading}
+      footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={loadRows} itemLabel="رکورد" />}
       emptyState={<ErpEmptyState icon={FaFileInvoice} title="پیش‌نویس صورتحسابی وجود ندارد" description="از رجیستر قراردادها، برای قراردادهای مجاز پیش‌نویس صورتحساب ایجاد کنید." />}
-    />
+    >
+      <AccountingActionModal
+        open={Boolean(deleteTarget)}
+        title="حذف پیش‌نویس رکورد مالی"
+        description="فقط پیش‌نویس‌های تایید نشده و بدون رکورد پایین‌دستی حذف می‌شوند. این اقدام در سوابق حسابداری ثبت می‌شود."
+        fields={[{ id: 'note', label: 'یادداشت حذف', type: 'textarea', defaultValue: 'Deleted draft from invoice candidates register' }]}
+        submitLabel="حذف پیش‌نویس"
+        busy={Boolean(actionLoading)}
+        error={actionError}
+        onClose={() => setDeleteTarget(null)}
+        onSubmit={(values) => deleteDraftRecord({ ...deleteTarget, note: String(values.note || '') })}
+      />
+    </ErpListPage>
   );
 }

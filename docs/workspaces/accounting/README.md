@@ -1,283 +1,109 @@
 # Accounting Workspace - Sabalan ERP
 
-## 🎯 Overview
+## Current Status
 
-The Accounting Workspace manages all financial operations in Sabalan Stone, including bookkeeping, financial reporting, budget management, and compliance. It provides comprehensive financial management capabilities with real-time integration across all workspaces.
+Accounting is in **Phase 1: sales-contract accounting control**.
 
-## 🏗️ Current Status
+Implemented today:
 
-- **Progress**: 0% Complete (New Workspace)
-- **Priority**: Medium
-- **Foundation**: Basic financial data exists in Sales
-- **Integration**: All workspaces for financial data
+- Sales contracts are visible to accounting with customer, amount, status, and accounting workflow state.
+- Accounting can create invoice-candidate financial records from eligible sales contracts.
+- Financial approval captures the Sepidar/system invoice number, system invoice date, and approved amount.
+- Financial approval locks the related sales contract against further sales edits.
+- Accounting can create receivables after financial approval.
+- Accounting can register receipts and track check status.
+- Accounting can track tax-readiness and manual Samaneh Moadian submission status.
+- Accounting can create and resolve correction requests back to sales.
+- Accounting can flag contracts for accounting review.
+- Accounting actions are written to the accounting audit log.
+- Accounting has internal print/PDF variants for original, accounting, workshop, and custom contract outputs.
+- Accounting list pages support richer contract/customer context, filtering, pagination, and direct contract links.
+- Accountant performance reporting is available from accounting workflow events.
 
-## 📋 Core Features
+Not implemented yet:
 
-### 📋 Planned Features
+- Full general ledger posting as a live accounting system.
+- Complete chart-of-accounts management UI.
+- Journal voucher draft generation, posting, reversal, and period close workflows.
+- Trial balance, balance sheet, income statement, and cash-flow statements.
+- Accounts payable/vendor accounting.
+- Bank reconciliation.
+- Direct Sepidar or tax-system integrations.
 
-#### General Ledger
-- **Chart of Accounts**: Comprehensive account structure
-- **Journal Entries**: Manual and automated entries
-- **Account Balances**: Real-time balance tracking
-- **Trial Balance**: Financial position verification
-- **Period Closing**: Month-end and year-end closing
+## Scope Boundary
 
-#### Accounts Payable
-- **Vendor Management**: Supplier information and history
-- **Invoice Processing**: Vendor invoice management
-- **Payment Processing**: Payment scheduling and execution
-- **Purchase Orders**: PO integration and tracking
-- **Vendor Payments**: Payment history and analytics
+Phase 1 is an operational accounting layer over sales contracts. It controls financial clearance, receivables, receipts, tax tracking, corrections, flags, and auditability.
 
-#### Accounts Receivable
-- **Customer Invoicing**: Invoice generation and management
-- **Payment Tracking**: Customer payment monitoring
-- **Credit Management**: Credit limits and terms
-- **Collection Management**: Outstanding receivables tracking
-- **Customer Statements**: Account statements and aging
+Full GL is future work. The `ChartOfAccount`, `JournalVoucher`, and `JournalVoucherLine` models exist in Prisma, but the workspace does not yet post accounting entries as authoritative ledger movements.
 
-#### Financial Reporting
-- **Profit & Loss**: Income statement generation
-- **Balance Sheet**: Financial position reporting
-- **Cash Flow**: Cash flow statement and analysis
-- **Budget Reports**: Budget vs. actual analysis
-- **Custom Reports**: Flexible report builder
+Recommended posting model:
 
-#### Budget Management
-- **Budget Planning**: Annual and monthly budgets
-- **Budget Tracking**: Actual vs. budget monitoring
-- **Budget Approval**: Budget approval workflow
-- **Budget Analysis**: Variance analysis and reporting
-- **Forecasting**: Financial forecasting and planning
+1. Keep financial approval as the commercial/accounting clearance point.
+2. Add explicit journal-voucher draft generation from approved invoices and receipts.
+3. Require accountant review before voucher posting.
+4. Associate posted vouchers with accounting periods.
+5. Reverse posted vouchers through reversal actions rather than silent edits.
 
-#### Tax Management
-- **Tax Calculations**: Automated tax computations
-- **Tax Reporting**: Tax return preparation
-- **Compliance**: Tax compliance monitoring
-- **Audit Trail**: Complete audit documentation
-- **Tax Planning**: Tax optimization strategies
+## Accountant Performance Reporting
 
-## 🎨 User Interface
+The performance report measures operational accounting speed from auditable database events, not browser activity.
 
-### Main Dashboard
-- **Financial Overview**: Key financial metrics and KPIs
-- **Cash Position**: Current cash and bank balances
-- **Outstanding Receivables**: Customer payment status
-- **Upcoming Payables**: Vendor payment schedule
-- **Recent Transactions**: Latest financial activities
+Current metrics:
 
-### Navigation Sidebar
-- **Dashboard**: Financial overview and analytics
-- **General Ledger**: Chart of accounts and journal entries
-- **Accounts Payable**: Vendor management and payments
-- **Accounts Receivable**: Customer invoicing and payments
-- **Financial Reports**: Financial statements and reports
-- **Budget Management**: Budget planning and tracking
-- **Tax Management**: Tax calculations and reporting
-- **Banking**: Bank account management
-- **Settings**: Workspace-specific settings
+- Average time from sales contract creation to first accounting financial record.
+- Average time from invoice-candidate creation to financial approval.
+- Average time from contract creation to receipt registration.
+- Average time to resolve correction requests.
+- Count of financial records created.
+- Count of invoices financially approved.
+- Count of receipts registered.
+- Count of correction requests opened and resolved.
+- Count of accounting audit actions.
 
-### Workspace Theme
-- **Primary Color**: Purple (#8b5cf6)
-- **Secondary Color**: Violet (#7c3aed)
-- **Accent Color**: Fuchsia (#d946ef)
-- **Design**: Glass morphism with accounting-focused elements
+This avoids hidden surveillance and keeps metrics reproducible from accounting records and audit logs.
 
-## 🔗 Integration Points
+## Key Workflows
 
-### Sales Workspace
-- **Revenue Recognition**: Contract revenue tracking
-- **Customer Invoicing**: Automatic invoice generation
-- **Payment Processing**: Customer payment tracking
-- **Sales Analytics**: Revenue analysis and reporting
+### Contract Accounting
 
-### HR Workspace
-- **Payroll Processing**: Employee salary and benefits
-- **HR Costs**: HR department expenses
-- **Employee Benefits**: Benefits cost tracking
-- **Performance Bonuses**: Bonus calculations and payments
+1. Sales creates and advances a contract.
+2. Accounting views the contract in the accounting register.
+3. Accounting creates an invoice candidate when the contract is eligible.
+4. Accounting financially approves the invoice candidate with system invoice data.
+5. The sales contract becomes locked for sales edits.
+6. Accounting creates receivables and registers receipts.
+7. Tax readiness and submission status are tracked.
+8. Corrections and flags are used when accounting needs sales-side clarification or remediation.
 
-### Inventory Workspace
-- **Cost of Goods Sold**: Inventory cost tracking
-- **Purchase Orders**: Vendor purchase management
-- **Inventory Valuation**: Stock valuation and reporting
-- **Warehouse Costs**: Warehouse operation expenses
+### Correction Requests
 
-### Security Workspace
-- **Security Costs**: Security department expenses
-- **Equipment Costs**: Security equipment purchases
-- **Maintenance Costs**: Security system maintenance
-- **Compliance Costs**: Security compliance expenses
+Correction requests are accounting-owned requests asking sales to correct contract or related data. Sales performs contract corrections through the sales edit flow when allowed. Accounting resolves the correction only after reviewing the corrected contract.
 
-## 📊 Data Models
+### Internal Prints
 
-### Core Entities
-```typescript
-// Chart of Accounts
-interface Account {
-  id: string;
-  accountCode: string;
-  accountName: string;
-  accountType: 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense';
-  parentAccountId?: string;
-  balance: number;
-  isActive: boolean;
-  description: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
+Accounting, workshop, and custom print variants are internal operational outputs. They do not mutate the commercial contract lifecycle. Only printing the original version marks the commercial contract as printed.
 
-// Journal Entry
-interface JournalEntry {
-  id: string;
-  entryNumber: string;
-  date: Date;
-  description: string;
-  reference: string;
-  totalDebit: number;
-  totalCredit: number;
-  status: 'Draft' | 'Posted' | 'Reversed';
-  lineItems: JournalLineItem[];
-  createdAt: Date;
-  updatedAt: Date;
-}
+## Next Implementation Steps
 
-// Invoice
-interface Invoice {
-  id: string;
-  invoiceNumber: string;
-  customerId: string;
-  date: Date;
-  dueDate: Date;
-  subtotal: number;
-  taxAmount: number;
-  totalAmount: number;
-  status: 'Draft' | 'Sent' | 'Paid' | 'Overdue' | 'Cancelled';
-  lineItems: InvoiceLineItem[];
-  payments: Payment[];
-  createdAt: Date;
-  updatedAt: Date;
-}
+1. Build chart-of-accounts management.
+2. Generate journal-voucher drafts from financially approved invoices and registered receipts.
+3. Add voucher posting, reversal, and period association.
+4. Add GL reports: trial balance first, then financial statements.
+5. Harden receivable/check lifecycle with replacement, reversal, and dispute flows.
+6. Add tax export/validation workflows for Samaneh Moadian.
+7. Expand accountant performance reporting with SLA thresholds and exception drill-down.
 
-// Payment
-interface Payment {
-  id: string;
-  paymentNumber: string;
-  customerId?: string;
-  vendorId?: string;
-  amount: number;
-  paymentDate: Date;
-  paymentMethod: 'Cash' | 'Check' | 'Bank Transfer' | 'Credit Card';
-  reference: string;
-  status: 'Pending' | 'Cleared' | 'Bounced';
-  bankAccountId: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
+## Permissions
 
-// Budget
-interface Budget {
-  id: string;
-  budgetName: string;
-  fiscalYear: string;
-  period: 'Monthly' | 'Quarterly' | 'Annual';
-  status: 'Draft' | 'Approved' | 'Active' | 'Closed';
-  budgetItems: BudgetItem[];
-  totalBudget: number;
-  actualAmount: number;
-  variance: number;
-  createdAt: Date;
-  updatedAt: Date;
-}
-```
+Accounting users need:
 
-## 🚀 Implementation Roadmap
+- View access for dashboard, registers, reports, and audit history.
+- Edit access for accounting actions such as invoice creation, financial approval, receipt registration, tax tracking, corrections, flags, and settings updates.
 
-### Phase 1: Foundation (Week 1-2)
-- [ ] Create Accounting workspace structure
-- [ ] Design financial data models
-- [ ] Implement chart of accounts
-- [ ] Create basic journal entry system
-- [ ] Implement workspace-specific routing
+Future GL work should introduce stricter permissions for voucher posting, reversal, period close, and chart-of-accounts administration.
 
-### Phase 2: Core Features (Week 3-4)
-- [ ] Implement accounts payable
-- [ ] Create accounts receivable
-- [ ] Add invoice management
-- [ ] Implement payment processing
-- [ ] Create accounting dashboard
+## Design System
 
-### Phase 3: Reporting (Week 5-6)
-- [ ] Implement financial reporting
-- [ ] Create budget management
-- [ ] Add tax management
-- [ ] Implement audit trail
-- [ ] Create custom report builder
+Accounting uses the shared ERP design system: slate/teal surfaces, `ErpPage`, `ErpListPage`, `ErpSection`, `ErpCard`, `ErpButton`, and `ErpBadge`.
 
-### Phase 4: Integration (Week 7-8)
-- [ ] Integrate with Sales workspace
-- [ ] Integrate with HR workspace
-- [ ] Integrate with Inventory workspace
-- [ ] Implement cross-workspace notifications
-- [ ] Test integration workflows
-
-## 🔐 Permissions
-
-### CFO/Finance Manager
-- Full access to all accounting features
-- Can approve financial transactions
-- Access to all financial reports
-- Can manage budgets and forecasts
-
-### Accountant
-- Full accounting operations
-- Can process transactions
-- Access to accounting reports
-- Can manage accounts payable/receivable
-
-### Bookkeeper
-- Basic accounting operations
-- Can enter transactions
-- Limited report access
-- Can manage basic accounts
-
-### Viewer
-- Read-only access to financial data
-- View financial reports
-- No modification permissions
-
-## 📈 Success Metrics
-
-### Business Metrics
-- **Financial Accuracy**: > 99.9%
-- **Month-End Closing**: < 5 days
-- **Invoice Processing**: < 24 hours
-- **Payment Processing**: < 48 hours
-
-### Technical Metrics
-- **Transaction Processing**: < 1 second
-- **Report Generation**: < 10 seconds
-- **System Uptime**: > 99.9%
-- **Data Integrity**: > 99.9%
-
-## 🔄 Future Enhancements
-
-### Advanced Features
-- **AI-Powered Financial Analytics**: Predictive financial insights
-- **Automated Reconciliation**: Bank statement reconciliation
-- **Advanced Forecasting**: Machine learning financial forecasting
-- **Mobile Accounting**: Mobile financial management
-- **Blockchain Integration**: Cryptocurrency and blockchain support
-
-### Integration Expansions
-- **Banking Integration**: Direct bank connectivity
-- **Tax Software Integration**: Tax preparation software
-- **Audit Software**: External audit system integration
-- **Financial Planning**: Advanced financial planning tools
-- **Compliance Management**: Regulatory compliance tracking
-
----
-
-**Last Updated**: September 21, 2025  
-**Next Review**: September 28, 2025  
-**Owner**: Accounting Development Team
+Do not reintroduce standalone purple/glassmorphism accounting screens. Accounting should remain visually consistent with the rest of Sabalan ERP.

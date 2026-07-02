@@ -11,6 +11,7 @@ import {
   FaMoneyCheckAlt,
   FaReceipt,
   FaSync,
+  FaUserClock,
 } from 'react-icons/fa';
 import {
   ErpActionGrid,
@@ -115,6 +116,13 @@ export default function AccountingDashboardPage() {
             href: '/dashboard/accounting/audit',
             icon: FaHistory,
             tone: 'neutral',
+          },
+          {
+            title: 'عملکرد حسابداران',
+            description: 'میانگین زمان اقدام، تایید مالی، ثبت دریافت و بستن اصلاحیه برای هر حسابدار.',
+            href: '/dashboard/accounting/performance',
+            icon: FaUserClock,
+            tone: 'primary',
           },
         ]}
       />

@@ -74,6 +74,27 @@ export type AccountingContractRow = {
   }>;
 };
 
+export type AccountingPaginatedResult<T> = {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+};
+
+export const emptyAccountingPagination = { page: 1, pageSize: 50, total: 0 };
+
+export const readAccountingListResponse = <T,>(payload: any, fallbackPageSize = 50): AccountingPaginatedResult<T> => {
+  if (Array.isArray(payload)) {
+    return { items: payload, page: 1, pageSize: fallbackPageSize, total: payload.length };
+  }
+  return {
+    items: Array.isArray(payload?.items) ? payload.items : [],
+    page: Number(payload?.page) || 1,
+    pageSize: Number(payload?.pageSize) || fallbackPageSize,
+    total: Number(payload?.total) || 0,
+  };
+};
+
 export const contractStatusLabels: Record<string, string> = {
   DRAFT: 'پیش‌نویس',
   PENDING_APPROVAL: 'در انتظار تایید',

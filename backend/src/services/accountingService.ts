@@ -1506,65 +1506,218 @@ const actionResponse = (status: 'APPLIED' | 'REJECTED' | 'NEEDS_CONFIRMATION', m
   affected
 });
 
+const getPagination = (query: any = {}) => {
+  const page = Math.max(Number(query.page) || 1, 1);
+  const pageSize = Math.min(Math.max(Number(query.pageSize || query.limit) || DEFAULT_PAGE_SIZE, 1), 200);
+  return { page, pageSize, skip: (page - 1) * pageSize };
+};
+
+const dateRangeFilter = (query: any, field: string) => {
+  const range: Record<string, Date> = {};
+  if (query.dateFrom) {
+    const from = new Date(String(query.dateFrom));
+    if (!Number.isNaN(from.getTime())) range.gte = from;
+  }
+  if (query.dateTo) {
+    const to = new Date(String(query.dateTo));
+    if (!Number.isNaN(to.getTime())) range.lte = to;
+  }
+  return Object.keys(range).length ? { [field]: range } : {};
+};
+
+const getActorMap = async (ids: string[]) => {
+  const uniqueIds = [...new Set(ids.filter(Boolean))];
+  if (!uniqueIds.length) return new Map<string, { id: string; displayName: string; username: string }>();
+  const users = await prisma.user.findMany({
+    where: { id: { in: uniqueIds } },
+    select: { id: true, firstName: true, lastName: true, username: true }
+  });
+  return new Map(users.map((user) => [
+    user.id,
+    {
+      id: user.id,
+      displayName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username,
+      username: user.username
+    }
+  ]));
+};
+
+const getContractContextMap = async (contractIds: string[]) => {
+  const uniqueIds = [...new Set(contractIds.filter(Boolean))];
+  if (!uniqueIds.length) return new Map<string, any>();
+  const contracts = await prisma.salesContract.findMany({
+    where: { id: { in: uniqueIds } },
+    include: { customer: true }
+  });
+  return new Map(contracts.map((contract) => [
+    contract.id,
+    {
+      contractId: contract.id,
+      contractNumber: contract.contractNumber,
+      titlePersian: contract.titlePersian || contract.title,
+      status: contract.status,
+      createdAt: contract.createdAt,
+      customer: {
+        id: contract.customer?.id,
+        displayName: getCustomerName(contract.customer || {}),
+        nationalCode: contract.customer?.nationalCode
+      }
+    }
+  ]));
+};
+
+const attachListContext = async <T extends { contractId?: string | null; createdBy?: string | null; actorId?: string | null; resolvedBy?: string | null }>(rows: T[]) => {
+  const contractMap = await getContractContextMap(rows.map((row) => row.contractId).filter(Boolean) as string[]);
+  const actorMap = await getActorMap(rows.flatMap((row) => [row.createdBy, row.actorId, row.resolvedBy].filter(Boolean) as string[]));
+  return rows.map((row) => ({
+    ...row,
+    contract: row.contractId ? contractMap.get(row.contractId) || null : null,
+    actor: row.actorId ? actorMap.get(row.actorId) || null : null,
+    createdByUser: row.createdBy ? actorMap.get(row.createdBy) || null : null,
+    resolvedByUser: row.resolvedBy ? actorMap.get(row.resolvedBy) || null : null
+  }));
+};
+
+const searchContractIds = async (search?: string) => {
+  const normalized = String(search || '').trim();
+  if (!normalized) return undefined;
+  const contracts = await prisma.salesContract.findMany({
+    where: {
+      OR: [
+        { contractNumber: { contains: normalized, mode: 'insensitive' } },
+        { title: { contains: normalized, mode: 'insensitive' } },
+        { titlePersian: { contains: normalized, mode: 'insensitive' } },
+        { customer: { firstName: { contains: normalized, mode: 'insensitive' } } },
+        { customer: { lastName: { contains: normalized, mode: 'insensitive' } } },
+        { customer: { companyName: { contains: normalized, mode: 'insensitive' } } },
+        { customer: { nationalCode: { contains: normalized, mode: 'insensitive' } } }
+      ]
+    },
+    select: { id: true }
+  });
+  return contracts.map((contract) => contract.id);
+};
+
+const applyContractSearch = async (where: { contractId?: any }, query: any) => {
+  const contractIds = await searchContractIds(query.search);
+  if (!contractIds) return true;
+  if (!contractIds.length) return false;
+  where.contractId = { in: contractIds };
+  return true;
+};
+
 export const listFinancialRecords = async (query: any = {}) => {
   const where: Prisma.AccountingFinancialRecordWhereInput = {};
   if (query.kind && query.kind !== 'ALL') where.kind = query.kind;
   if (query.status && query.status !== 'ALL') where.status = query.status;
   if (query.contractId) where.contractId = query.contractId;
-  return prisma.accountingFinancialRecord.findMany({
-    where,
-    include: { invoiceItems: true, taxRecords: true, receivables: true },
-    orderBy: { createdAt: 'desc' },
-    take: Math.min(Number(query.limit) || 100, 200)
-  });
+  Object.assign(where, dateRangeFilter(query, 'createdAt'));
+  const { page, pageSize, skip } = getPagination(query);
+  const hasSearchMatches = await applyContractSearch(where, query);
+  if (!hasSearchMatches) return { items: [], page, pageSize, total: 0 };
+  const [rows, total] = await Promise.all([
+    prisma.accountingFinancialRecord.findMany({
+      where,
+      include: { invoiceItems: true, taxRecords: true, receivables: true },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: pageSize
+    }),
+    prisma.accountingFinancialRecord.count({ where })
+  ]);
+  return {
+    items: await attachListContext(rows),
+    page,
+    pageSize,
+    total
+  };
 };
 
 export const listReceivables = async (query: any = {}) => {
   const where: Prisma.AccountingReceivableWhereInput = {};
   if (query.status && query.status !== 'ALL') where.status = query.status;
   if (query.contractId) where.contractId = query.contractId;
-  return prisma.accountingReceivable.findMany({
-    where,
-    include: { paymentStatuses: true },
-    orderBy: { dueDate: 'asc' },
-    take: Math.min(Number(query.limit) || 100, 200)
-  });
+  Object.assign(where, dateRangeFilter(query, 'dueDate'));
+  const { page, pageSize, skip } = getPagination(query);
+  const hasSearchMatches = await applyContractSearch(where, query);
+  if (!hasSearchMatches) return { items: [], page, pageSize, total: 0 };
+  const [rows, total] = await Promise.all([
+    prisma.accountingReceivable.findMany({
+      where,
+      include: { paymentStatuses: true },
+      orderBy: { dueDate: 'asc' },
+      skip,
+      take: pageSize
+    }),
+    prisma.accountingReceivable.count({ where })
+  ]);
+  return { items: await attachListContext(rows), page, pageSize, total };
 };
 
 export const listPaymentStatuses = async (query: any = {}) => {
   const where: Prisma.AccountingPaymentStatusWhereInput = {};
   if (query.status && query.status !== 'ALL') where.status = query.status;
   if (query.checkStatus && query.checkStatus !== 'ALL') where.checkStatus = query.checkStatus;
+  if (query.method && query.method !== 'ALL') where.method = query.method;
   if (query.contractId) where.contractId = query.contractId;
-  return prisma.accountingPaymentStatus.findMany({
-    where,
-    orderBy: [{ checkDueDate: 'asc' }, { createdAt: 'desc' }],
-    take: Math.min(Number(query.limit) || 100, 200)
-  });
+  Object.assign(where, dateRangeFilter(query, 'createdAt'));
+  const { page, pageSize, skip } = getPagination(query);
+  const hasSearchMatches = await applyContractSearch(where, query);
+  if (!hasSearchMatches) return { items: [], page, pageSize, total: 0 };
+  const [rows, total] = await Promise.all([
+    prisma.accountingPaymentStatus.findMany({
+      where,
+      orderBy: [{ checkDueDate: 'asc' }, { createdAt: 'desc' }],
+      skip,
+      take: pageSize
+    }),
+    prisma.accountingPaymentStatus.count({ where })
+  ]);
+  return { items: await attachListContext(rows), page, pageSize, total };
 };
 
 export const listTaxRecords = async (query: any = {}) => {
   const where: Prisma.AccountingTaxRecordWhereInput = {};
   if (query.submissionStatus && query.submissionStatus !== 'ALL') where.submissionStatus = query.submissionStatus;
+  if (query.readinessStatus && query.readinessStatus !== 'ALL') where.readinessStatus = query.readinessStatus;
   if (query.contractId) where.contractId = query.contractId;
-  return prisma.accountingTaxRecord.findMany({
-    where,
-    orderBy: { createdAt: 'desc' },
-    take: Math.min(Number(query.limit) || 100, 200)
-  });
+  Object.assign(where, dateRangeFilter(query, 'updatedAt'));
+  const { page, pageSize, skip } = getPagination(query);
+  const hasSearchMatches = await applyContractSearch(where, query);
+  if (!hasSearchMatches) return { items: [], page, pageSize, total: 0 };
+  const [rows, total] = await Promise.all([
+    prisma.accountingTaxRecord.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: pageSize
+    }),
+    prisma.accountingTaxRecord.count({ where })
+  ]);
+  return { items: await attachListContext(rows), page, pageSize, total };
 };
 
 export const listCorrectionRequests = async (query: any = {}) => {
   const where: Prisma.AccountingCorrectionRequestWhereInput = {};
   if (query.status && query.status !== 'ALL') where.status = query.status;
+  if (query.priority && query.priority !== 'ALL') where.priority = query.priority;
   if (query.contractId) where.contractId = query.contractId;
-  const rows = await prisma.accountingCorrectionRequest.findMany({
-    where,
-    orderBy: { createdAt: 'desc' },
-    take: Math.min(Number(query.limit) || 100, 200)
-  });
+  Object.assign(where, dateRangeFilter(query, 'createdAt'));
+  const { page, pageSize, skip } = getPagination(query);
+  const hasSearchMatches = await applyContractSearch(where, query);
+  if (!hasSearchMatches) return { items: [], page, pageSize, total: 0 };
+  const [rows, total] = await Promise.all([
+    prisma.accountingCorrectionRequest.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: pageSize
+    }),
+    prisma.accountingCorrectionRequest.count({ where })
+  ]);
+  const enrichedRows = await attachListContext(rows);
   const contractIds = [...new Set(rows.map((row) => row.contractId).filter(Boolean))] as string[];
-  if (!contractIds.length) return rows;
+  if (!contractIds.length) return { items: enrichedRows, page, pageSize, total };
 
   const approvedRecords = await prisma.accountingFinancialRecord.findMany({
     where: {
@@ -1575,21 +1728,190 @@ export const listCorrectionRequests = async (query: any = {}) => {
   });
   const lockedContractIds = new Set(approvedRecords.map((record) => record.contractId).filter(Boolean));
 
-  return rows.map((row) => ({
+  return {
+    items: enrichedRows.map((row) => ({
     ...row,
     accountingEditLocked: row.contractId ? lockedContractIds.has(row.contractId) : false
-  }));
+    })),
+    page,
+    pageSize,
+    total
+  };
 };
 
 export const listAuditLogs = async (query: any = {}) => {
   const where: Prisma.AccountingAuditLogWhereInput = {};
   if (query.contractId) where.contractId = query.contractId;
   if (query.recordId) where.recordId = query.recordId;
-  return prisma.accountingAuditLog.findMany({
-    where,
-    orderBy: { createdAt: 'desc' },
-    take: Math.min(Number(query.limit) || 100, 200)
+  if (query.action && query.action !== 'ALL') where.action = query.action;
+  if (query.actorId) where.actorId = query.actorId;
+  Object.assign(where, dateRangeFilter(query, 'createdAt'));
+  const { page, pageSize, skip } = getPagination(query);
+  const hasSearchMatches = await applyContractSearch(where, query);
+  if (!hasSearchMatches) return { items: [], page, pageSize, total: 0 };
+  const [rows, total] = await Promise.all([
+    prisma.accountingAuditLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: pageSize
+    }),
+    prisma.accountingAuditLog.count({ where })
+  ]);
+  return { items: await attachListContext(rows), page, pageSize, total };
+};
+
+export const getAccountantPerformanceReport = async (query: any = {}) => {
+  const { page, pageSize, skip } = getPagination(query);
+  const from = query.dateFrom ? new Date(String(query.dateFrom)) : addDays(new Date(), -30);
+  const to = query.dateTo ? new Date(String(query.dateTo)) : new Date();
+  const range = {
+    gte: Number.isNaN(from.getTime()) ? addDays(new Date(), -30) : from,
+    lte: Number.isNaN(to.getTime()) ? new Date() : to
+  };
+
+  const [records, payments, corrections, auditRows] = await Promise.all([
+    prisma.accountingFinancialRecord.findMany({
+      where: { createdAt: range },
+      orderBy: { createdAt: 'asc' }
+    }),
+    prisma.accountingPaymentStatus.findMany({
+      where: { createdAt: range },
+      orderBy: { createdAt: 'asc' }
+    }),
+    prisma.accountingCorrectionRequest.findMany({
+      where: { createdAt: range },
+      orderBy: { createdAt: 'asc' }
+    }),
+    prisma.accountingAuditLog.findMany({
+      where: { createdAt: range },
+      orderBy: { createdAt: 'desc' }
+    })
+  ]);
+
+  const contractMap = await getContractContextMap([
+    ...records.map((row) => row.contractId).filter(Boolean) as string[],
+    ...payments.map((row) => row.contractId).filter(Boolean) as string[],
+    ...corrections.map((row) => row.contractId).filter(Boolean) as string[],
+    ...auditRows.map((row) => row.contractId).filter(Boolean) as string[]
+  ]);
+  const actorMap = await getActorMap([
+    ...records.map((row) => row.createdBy),
+    ...records.map((row) => row.financiallyApprovedBy).filter(Boolean) as string[],
+    ...payments.map((row) => row.createdBy),
+    ...corrections.map((row) => row.createdBy),
+    ...corrections.map((row) => row.resolvedBy).filter(Boolean) as string[],
+    ...auditRows.map((row) => row.actorId)
+  ]);
+
+  type Bucket = {
+    accountant: { id: string; displayName: string; username: string };
+    firstRecordDelays: number[];
+    approvalDelays: number[];
+    receiptDelays: number[];
+    correctionClosureDelays: number[];
+    financialRecordsCreated: number;
+    invoicesApproved: number;
+    receiptsRegistered: number;
+    correctionsOpened: number;
+    correctionsResolved: number;
+    actionsLogged: number;
+  };
+
+  const buckets = new Map<string, Bucket>();
+  const getBucket = (userId: string) => {
+    const actor = actorMap.get(userId) || { id: userId, displayName: 'کاربر حسابداری', username: userId };
+    if (!buckets.has(userId)) {
+      buckets.set(userId, {
+        accountant: actor,
+        firstRecordDelays: [],
+        approvalDelays: [],
+        receiptDelays: [],
+        correctionClosureDelays: [],
+        financialRecordsCreated: 0,
+        invoicesApproved: 0,
+        receiptsRegistered: 0,
+        correctionsOpened: 0,
+        correctionsResolved: 0,
+        actionsLogged: 0
+      });
+    }
+    return buckets.get(userId)!;
+  };
+
+  const firstRecordByContract = new Map<string, typeof records[number]>();
+  records.forEach((record) => {
+    if (!record.contractId) return;
+    const current = firstRecordByContract.get(record.contractId);
+    if (!current || record.createdAt < current.createdAt) firstRecordByContract.set(record.contractId, record);
   });
+
+  records.forEach((record) => {
+    const bucket = getBucket(record.createdBy);
+    bucket.financialRecordsCreated += 1;
+    if (record.financiallyApprovedAt) {
+      const approvalBucket = getBucket(record.financiallyApprovedBy || record.createdBy);
+      approvalBucket.invoicesApproved += 1;
+      approvalBucket.approvalDelays.push(record.financiallyApprovedAt.getTime() - record.createdAt.getTime());
+    }
+  });
+
+  firstRecordByContract.forEach((record) => {
+    const contract = record.contractId ? contractMap.get(record.contractId) : null;
+    if (!contract?.createdAt) return;
+    getBucket(record.createdBy).firstRecordDelays.push(record.createdAt.getTime() - new Date(contract.createdAt).getTime());
+  });
+
+  payments.forEach((payment) => {
+    const bucket = getBucket(payment.createdBy);
+    bucket.receiptsRegistered += 1;
+    const contract = payment.contractId ? contractMap.get(payment.contractId) : null;
+    if (contract?.createdAt) bucket.receiptDelays.push(payment.createdAt.getTime() - new Date(contract.createdAt).getTime());
+  });
+
+  corrections.forEach((correction) => {
+    getBucket(correction.createdBy).correctionsOpened += 1;
+    if (correction.resolvedBy && correction.resolvedAt) {
+      const bucket = getBucket(correction.resolvedBy);
+      bucket.correctionsResolved += 1;
+      bucket.correctionClosureDelays.push(correction.resolvedAt.getTime() - correction.createdAt.getTime());
+    }
+  });
+
+  auditRows.forEach((row) => {
+    getBucket(row.actorId).actionsLogged += 1;
+  });
+
+  const averageHours = (durations: number[]) => {
+    if (!durations.length) return null;
+    const averageMs = durations.reduce((sum, value) => sum + Math.max(value, 0), 0) / durations.length;
+    return Math.round((averageMs / (1000 * 60 * 60)) * 10) / 10;
+  };
+
+  const rows = [...buckets.values()]
+    .map((bucket) => ({
+      accountant: bucket.accountant,
+      financialRecordsCreated: bucket.financialRecordsCreated,
+      invoicesApproved: bucket.invoicesApproved,
+      receiptsRegistered: bucket.receiptsRegistered,
+      correctionsOpened: bucket.correctionsOpened,
+      correctionsResolved: bucket.correctionsResolved,
+      actionsLogged: bucket.actionsLogged,
+      averageHoursToFirstFinancialRecord: averageHours(bucket.firstRecordDelays),
+      averageHoursToApproveInvoice: averageHours(bucket.approvalDelays),
+      averageHoursToRegisterReceipt: averageHours(bucket.receiptDelays),
+      averageHoursToResolveCorrection: averageHours(bucket.correctionClosureDelays)
+    }))
+    .filter((row) => !query.search || row.accountant.displayName.includes(String(query.search)) || row.accountant.username.includes(String(query.search)))
+    .sort((left, right) => right.actionsLogged - left.actionsLogged);
+
+  return {
+    items: rows.slice(skip, skip + pageSize),
+    page,
+    pageSize,
+    total: rows.length,
+    range
+  };
 };
 
 export const getAccountingSettings = async () => getDefaultSettings();

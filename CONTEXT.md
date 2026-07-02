@@ -359,6 +359,10 @@ _Avoid_: financially approving and locking a contract while a requested sales co
 After sales edits a contract for a pre-approval correction request, the request remains open until accounting manually reviews the corrected contract and resolves it with an optional resolution note.
 _Avoid_: adding a separate handoff status before the workflow needs it, or auto-resolving a correction request merely because the contract was edited
 
+**عملکرد حسابدار**:
+An operational accounting metric for how quickly and consistently an accountant performs auditable accounting workflow actions, measured from accounting records and audit events rather than browser presence.
+_Avoid_: treating accountant performance as hidden activity tracking, keystroke monitoring, or time spent with a page open
+
 **ویرایش مرحله‌ای قرارداد فروش**:
 Editing a sales contract uses the same step-based contract workflow as creation, with prefilled saved contract details and direct access to any step that may need correction.
 _Avoid_: a separate simplified edit form, or forcing linear navigation during edit

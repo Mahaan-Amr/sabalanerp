@@ -350,7 +350,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                   <option value="accounting">حسابداری</option>
                   <option value="workshop">کارگاه بدون قیمت</option>
                   <option value="detailed">جزئیات کامل</option>
-                  <option value="summarized">خلاصه محصول</option>
+                  <option value="summarized">خلاصه خدمات و ابزارها</option>
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-200">
@@ -364,7 +364,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                   className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                 >
                   <option value="detailed">جزئیات کامل</option>
-                  <option value="summarized">یک ردیف خلاصه برای هر محصول</option>
+                  <option value="summarized">ردیف خلاصه خدمات و ابزارها</option>
                 </select>
               </label>
             </div>

@@ -1125,12 +1125,17 @@ const buildFlatProductRows = (
   const showExplanatoryRows = options.showExplanatoryRows !== false;
   const showTotals = options.showTotals !== false;
   const showNotes = options.showNotes !== false;
+  let compactAddOnsTotal = 0;
 
   products.forEach((product, productIndex) => {
     const addOnsTotal =
       product.cuts.reduce((sum, cut) => sum + toNumber(cut.cost), 0) +
       product.tools.reduce((sum, tool) => sum + toNumber(tool.cost), 0) +
       product.services.reduce((sum, service) => sum + toNumber(service.cost), 0);
+    const mandatoryAmount = product.isMandatory && product.mandatoryPercentage > 0 && product.originalTotalPrice > 0
+      ? product.originalTotalPrice * (product.mandatoryPercentage / 100)
+      : 0;
+    compactAddOnsTotal += addOnsTotal + mandatoryAmount;
     const baseAmount = product.originalTotalPrice > 0
       ? product.originalTotalPrice
       : Math.max(product.totalPrice - addOnsTotal, 0) || product.totalPrice;
@@ -1149,8 +1154,8 @@ const buildFlatProductRows = (
       category: product.stairPart !== EMPTY ? product.stairPart : 'محصول',
       ...splitDimensionColumns(product.dimensions),
       ...productQuantityColumns,
-      rate: isSummarized ? '' : formatPrintMoneyCell(product.unitPrice, currency, options),
-      total: formatPrintMoneyCell(isSummarized ? product.totalPrice : baseAmount, currency, options)
+      rate: formatPrintMoneyCell(product.unitPrice, currency, options),
+      total: formatPrintMoneyCell(baseAmount, currency, options)
     });
 
     if (isSummarized) return;
@@ -1262,6 +1267,11 @@ const buildFlatProductRows = (
   });
 
   standaloneServices.forEach((service, serviceIndex) => {
+    if (isSummarized) {
+      compactAddOnsTotal += toNumber(service.totalPrice);
+      return;
+    }
+
     const serviceQuantityColumns = buildStandaloneServiceQuantityColumns(service.quantity, service.unit);
     rows.push({
       indexLabel: toFaNumber(products.length + serviceIndex + 1),
@@ -1276,6 +1286,21 @@ const buildFlatProductRows = (
       total: formatPrintMoneyCell(service.totalPrice, currency, options)
     });
   });
+
+  if (isSummarized && compactAddOnsTotal > 0) {
+    rows.push({
+      indexLabel: '',
+      code: '',
+      description: 'خدمات و ابزارها',
+      category: 'خلاصه',
+      length: '',
+      width: '',
+      quantity: '',
+      area: '',
+      rate: '',
+      total: formatPrintMoneyCell(compactAddOnsTotal, currency, options)
+    });
+  }
 
   if (showTotals && financials && financials.discountAmount > 0) {
     rows.push({

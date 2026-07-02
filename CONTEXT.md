@@ -438,14 +438,14 @@ Only چاپ نسخه اصلی marks the commercial contract as printed. چاپ �
 _Avoid_: exposing accounting/workshop print variants as ordinary sales-detail actions, scattering print variants across unrelated buttons, changing contract status when an internal operational print is generated, or reusing a stale accounting/workshop PDF after contract details have changed
 
 **چاپ سفارشی حسابداری قرارداد فروش**:
-A temporary per-print accounting output configuration for a single sales contract. Accounting can choose visibility, grouping, section, and column options before printing/downloading, including detailed product rows or summarized one-row-per-product output. The choices are not saved as reusable templates and do not mutate the contract or its lifecycle status.
+A temporary per-print accounting output configuration for a single sales contract. Accounting can choose visibility, grouping, section, and column options before printing/downloading, including detailed product rows or a summarized add-ons row. The choices are not saved as reusable templates and do not mutate the contract or its lifecycle status.
 Custom print may hide or group existing information, but it does not allow manual editing of contract names, quantities, prices, totals, or real saved rows.
 _Avoid_: treating custom accounting print as a saved template system, changing contract data through print settings, manually editing financial truth in the output, deleting real contract rows through print settings, or marking the commercial contract as printed from a custom internal output
 
-**خلاصه‌سازی ردیف محصول در چاپ سفارشی**:
-A custom accounting print grouping mode where each main product prints as one summarized row whose visible total rolls up the base product price plus its attached ابزار، خدمات، برش، پرداخت سنگ، حکمی, and other price-bearing add-ons. The detailed print mode remains available when those add-ons need to be audited line by line.
-In summarized mode, مبلغ کل includes all attached price-bearing add-ons for that product, while نرخ stays blank or shows — because no single unit rate honestly represents the rolled-up total.
-_Avoid_: losing access to the detailed version, changing the saved contract totals while summarizing, hiding that add-ons are included in the summarized product total, or showing a base unit rate beside a rolled-up total that will not reconcile by multiplication
+**ردیف خلاصه خدمات و ابزارها**:
+A custom accounting print grouping mode where normal product rows stay visible with their base product price, while attached ابزار، خدمات، برش، پرداخت سنگ، حکمی, and standalone service add-ons are collapsed into one global خدمات و ابزارها row for the whole contract. The detailed print mode remains available when those add-ons need to be audited line by line.
+In summarized mode, the خدمات و ابزارها row مبلغ کل is the add-ons total, product rows keep their base product totals, and جمع کل فاکتور reconciles as base products plus the compact add-ons row minus discount.
+_Avoid_: losing access to the detailed version, changing the saved contract totals while summarizing, rolling add-ons into each product row, or hiding add-ons without a compact row that keeps the invoice total understandable
 
 **طول مصرفی سنگ مصرفی**:
 The length shown for سنگ مصرفی is the source or standard length consumed from the material, not the finished/customer-requested product length. The product row shows the finished dimensions; سنگ مصرفی explains the material usage that produced it.

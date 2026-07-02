@@ -447,6 +447,10 @@ A custom accounting print grouping mode where normal product rows stay visible w
 In summarized mode, the خدمات و ابزارها row مبلغ کل is the add-ons total, product rows keep their base product totals, and جمع کل فاکتور reconciles as base products plus the compact add-ons row minus discount.
 _Avoid_: losing access to the detailed version, changing the saved contract totals while summarizing, rolling add-ons into each product row, or hiding add-ons without a compact row that keeps the invoice total understandable
 
+**خلاصه قرارداد فروش سنگ**:
+A fixed sales-side customer-facing print/PDF output option beside the full-detail sales contract. It uses the same summarized add-ons meaning as ردیف خلاصه خدمات و ابزارها, but sales users cannot customize sections or columns.
+_Avoid_: exposing the accounting custom-print controls in sales, replacing the full-detail sales contract, or treating the summary output as a manual edit of contract data
+
 **طول مصرفی سنگ مصرفی**:
 The length shown for سنگ مصرفی is the source or standard length consumed from the material, not the finished/customer-requested product length. The product row shows the finished dimensions; سنگ مصرفی explains the material usage that produced it.
 _Avoid_: showing the finished product length as the consumed source length when a standard/source length was used, or hiding the standard length consumed by the workshop

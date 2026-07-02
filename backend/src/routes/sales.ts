@@ -22,6 +22,7 @@ import {
   resolveSalesContractPdfUrl,
   salesContractPrintableInclude
 } from '../utils/salesContractPdf';
+import type { ContractPrintVariant } from '../utils/printTemplate';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -548,14 +549,19 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
       });
     }
 
-    const fresh = String(req.query.fresh || 'false').toLowerCase() === 'true';
+    const variant: ContractPrintVariant = req.query.variant === 'summary' ? 'summary' : 'original';
+    const fresh = variant === 'summary' || String(req.query.fresh || 'false').toLowerCase() === 'true';
     const shouldDownload = String(req.query.download || 'false').toLowerCase() === 'true';
     const currentSignatures = (contract.signatures as any) || {};
     const cachedPdfPath = currentSignatures?.print?.pdfPath as string | undefined;
-    const pdfFingerprint = buildSalesContractPdfFingerprint(contract);
+    const pdfFingerprint = buildSalesContractPdfFingerprint(contract, variant);
+    const downloadName = variant === 'summary'
+      ? buildSalesContractPdfDownloadName(contract).replace(/\.pdf$/i, '_summary.pdf')
+      : buildSalesContractPdfDownloadName(contract);
 
     if (
       !fresh &&
+      variant === 'original' &&
       cachedPdfPath &&
       isSalesContractPdfCacheFresh(contract, currentSignatures?.print?.fingerprint, pdfFingerprint) &&
       ensureStoredSalesContractPdfExists(cachedPdfPath)
@@ -563,7 +569,7 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
       if (shouldDownload) {
         return res.download(
           resolveStoredSalesContractPdfPath(cachedPdfPath),
-          buildSalesContractPdfDownloadName(contract)
+          downloadName
         );
       }
 
@@ -580,29 +586,32 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
       }
     }
 
-    const pdfPath = await generateSalesContractPdf(contract);
+    const pdfPath = await generateSalesContractPdf(contract, variant);
+    const generatedAt = new Date().toISOString();
 
-    const updatedPrintSignature = {
-      ...(currentSignatures?.print || {}),
-      pdfPath,
-      generatedAt: new Date().toISOString(),
-      fingerprint: pdfFingerprint
-    };
+    if (variant === 'original') {
+      const updatedPrintSignature = {
+        ...(currentSignatures?.print || {}),
+        pdfPath,
+        generatedAt,
+        fingerprint: pdfFingerprint
+      };
 
-    await prisma.salesContract.update({
-      where: { id: contract.id },
-      data: {
-        signatures: {
-          ...currentSignatures,
-          print: updatedPrintSignature
+      await prisma.salesContract.update({
+        where: { id: contract.id },
+        data: {
+          signatures: {
+            ...currentSignatures,
+            print: updatedPrintSignature
+          }
         }
-      }
-    });
+      });
+    }
 
     if (shouldDownload) {
       return res.download(
         resolveStoredSalesContractPdfPath(pdfPath),
-        buildSalesContractPdfDownloadName(contract)
+        downloadName
       );
     }
 
@@ -618,8 +627,9 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
       success: true,
       data: {
         url,
-        generatedAt: updatedPrintSignature.generatedAt,
-        fromCache: false
+        generatedAt,
+        fromCache: false,
+        variant
       }
     });
   } catch (error) {

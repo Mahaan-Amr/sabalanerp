@@ -103,6 +103,13 @@ interface Contract {
   payments?: any[];
 }
 
+type SalesContractPrintVariant = 'original' | 'summary';
+
+const salesContractPrintVariantLabels: Record<SalesContractPrintVariant, string> = {
+  original: 'قرارداد با جزئیات کامل',
+  summary: 'خلاصه قرارداد',
+};
+
 const statusLabels: Record<string, string> = {
   DRAFT: 'پیش‌نویس',
   PENDING_APPROVAL: 'در انتظار تایید',
@@ -152,6 +159,7 @@ export default function ContractDetailPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [printVariant, setPrintVariant] = useState<SalesContractPrintVariant>('original');
 
   useEffect(() => {
     loadContract();
@@ -247,8 +255,9 @@ export default function ContractDetailPage() {
     if (!contract) return;
     setActionLoading('download');
     try {
-      const response = await salesAPI.downloadContractPdf(contract.id, { fresh: false });
-      downloadBlobResponse(response, `sales_contract_${contract.contractNumber || contract.id}.pdf`);
+      const response = await salesAPI.downloadContractPdf(contract.id, { fresh: printVariant === 'summary', variant: printVariant });
+      const suffix = printVariant === 'summary' ? '_summary' : '';
+      downloadBlobResponse(response, `sales_contract_${contract.contractNumber || contract.id}${suffix}.pdf`);
     } catch (error: any) {
       setError(error.response?.data?.error || 'خطا در دانلود PDF قرارداد');
     } finally {
@@ -268,12 +277,29 @@ export default function ContractDetailPage() {
 
       setContract(response.data.data);
       await loadContract();
-      const pdfResponse = await salesAPI.getContractPdf(contract.id, { fresh: false });
+      const pdfResponse = await salesAPI.getContractPdf(contract.id, { fresh: false, variant: 'original' });
       if (pdfResponse.data?.success && pdfResponse.data?.data?.url) {
         openPdfUrl(pdfResponse.data.data.url, true);
       }
     } catch (error: any) {
       setError(error.response?.data?.error || 'خطا در پرینت قرارداد');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handlePrintSummaryContract = async () => {
+    if (!contract) return;
+    setActionLoading('print-summary');
+    try {
+      const pdfResponse = await salesAPI.getContractPdf(contract.id, { fresh: true, variant: 'summary' });
+      if (pdfResponse.data?.success && pdfResponse.data?.data?.url) {
+        openPdfUrl(pdfResponse.data.data.url, true);
+      } else {
+        setError(pdfResponse.data?.error || 'پرینت خلاصه قرارداد ناموفق بود');
+      }
+    } catch (error: any) {
+      setError(error.response?.data?.error || 'خطا در پرینت خلاصه قرارداد');
     } finally {
       setActionLoading(null);
     }
@@ -353,7 +379,7 @@ export default function ContractDetailPage() {
     ...(canReject ? [{ label: 'رد', onClick: () => handleAction('reject'), icon: FaTimes, tone: 'danger' as ErpTone, disabled: actionLoading === 'reject' }] : []),
     ...(canSign ? [{ label: 'امضا', onClick: () => handleAction('sign'), icon: FaSignature, tone: 'success' as ErpTone, disabled: actionLoading === 'sign' }] : []),
     ...(canPrint ? [{ label: 'دانلود PDF', onClick: handleDownloadPdf, icon: FaDownload, tone: 'success' as ErpTone, disabled: actionLoading === 'download' }] : []),
-    ...(canPrint ? [{ label: 'پرینت', onClick: handlePrintContract, icon: FaPrint, tone: 'purple' as ErpTone, disabled: actionLoading === 'print' }] : []),
+    ...(canPrint ? [{ label: 'پرینت', onClick: printVariant === 'summary' ? handlePrintSummaryContract : handlePrintContract, icon: FaPrint, tone: 'purple' as ErpTone, disabled: actionLoading === 'print' || actionLoading === 'print-summary' }] : []),
   ];
 
   if (!canPrint && canDownloadPdf) {
@@ -397,6 +423,20 @@ export default function ContractDetailPage() {
           {error}
         </div>
       )}
+
+      <ErpSection title="خروجی چاپ قرارداد" description="نوع خروجی فروش را انتخاب کنید و سپس دانلود یا پرینت بگیرید.">
+        <label className="flex max-w-md flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-200">
+          نسخه چاپ
+          <select
+            value={printVariant}
+            onChange={(event) => setPrintVariant(event.target.value as SalesContractPrintVariant)}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+          >
+            <option value="original">{salesContractPrintVariantLabels.original}</option>
+            <option value="summary">{salesContractPrintVariantLabels.summary}</option>
+          </select>
+        </label>
+      </ErpSection>
 
       <ErpTwoColumn
         main={

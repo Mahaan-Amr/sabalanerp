@@ -118,7 +118,7 @@ interface FlatProductRow {
   renderAsNoteRow?: boolean;
 }
 
-export type ContractPrintVariant = 'original' | 'accounting' | 'workshop' | 'custom';
+export type ContractPrintVariant = 'original' | 'summary' | 'accounting' | 'workshop' | 'custom';
 
 export type ContractPrintColumnKey =
   | 'index'
@@ -1541,6 +1541,7 @@ const variantTitle = (variant: ContractPrintVariant): string => {
   if (variant === 'custom') return 'چاپ سفارشی حسابداری';
   if (variant === 'accounting') return 'چاپ حسابداری';
   if (variant === 'workshop') return 'چاپ نمره کارگاه';
+  if (variant === 'summary') return 'خلاصه قرارداد';
   return 'چاپ نسخه اصلی';
 };
 
@@ -1552,7 +1553,7 @@ const renderCompactMetadataSection = (
     customerAddress?: string;
   }
 ): string => {
-  if (options.variant === 'original') return '';
+  if (options.variant === 'original' || options.variant === 'summary') return '';
   const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
   const salesAccountName = getUserName(contract.createdByUser);
   const accountingFields = options.variant === 'accounting'
@@ -1641,17 +1642,22 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   const variant = options.variant || 'original';
   const isWorkshopVariant = variant === 'workshop';
   const isCustomVariant = variant === 'custom';
-  const customPrint = isCustomVariant ? (options.customPrint || {}) : {};
+  const isSummaryVariant = variant === 'summary';
+  const customPrint = isCustomVariant
+    ? (options.customPrint || {})
+    : isSummaryVariant
+      ? { productRowsMode: 'summarized' as const }
+      : {};
   const priceFormatOptions = {};
-  const showFormalSection = variant === 'original';
+  const showFormalSection = variant === 'original' || isSummaryVariant;
   const showCustomerSection = !isWorkshopVariant && customPrint.showCustomerSection !== false;
   const showProductsSection = customPrint.showProductsSection !== false;
   const showPriceColumns = !isWorkshopVariant && customPrint.showPrices !== false;
   const showDeliverySection = customPrint.showDeliverySection !== false;
   const showPaymentSection = !isWorkshopVariant && customPrint.showPaymentSection !== false;
-  const showDigitalConfirmation = variant === 'original';
-  const showLegalNotes = variant === 'original';
-  const showSignatures = variant === 'original';
+  const showDigitalConfirmation = variant === 'original' || isSummaryVariant;
+  const showLegalNotes = variant === 'original' || isSummaryVariant;
+  const showSignatures = variant === 'original' || isSummaryVariant;
   const contractData = contract.contractData || {};
   const customer = contract.customer || contractData.customer || {};
   const project = contractData.project || {};

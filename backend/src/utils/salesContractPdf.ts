@@ -193,6 +193,7 @@ export const generateSalesContractPdf = async (
   variant: ContractPrintVariant = 'original',
   customPrint?: ContractCustomPrintOptions
 ) => {
+  const usesCustomerFacingHeader = variant === 'original' || variant === 'summary';
   const timestamp = Date.now();
   const fileNamePrefix = variant === 'accounting'
     ? 'sales_contract_accounting'
@@ -200,7 +201,9 @@ export const generateSalesContractPdf = async (
       ? 'sales_contract_workshop'
       : variant === 'custom'
         ? 'sales_contract_custom'
-        : 'sales_contract';
+        : variant === 'summary'
+          ? 'sales_contract_summary'
+          : 'sales_contract';
   const fileName = `${fileNamePrefix}_${contract.contractNumber}_${timestamp}`;
   const contractData = contract?.contractData || {};
   const relationItemsCount = Array.isArray(contract?.items) ? contract.items.length : 0;
@@ -225,19 +228,19 @@ export const generateSalesContractPdf = async (
   const html = renderContractHtml({
     ...contract,
     contractData: contract.contractData
-  }, { reservePdfHeaderSpace: variant === 'original', variant, customPrint });
+  }, { reservePdfHeaderSpace: usesCustomerFacingHeader, variant, customPrint });
 
   return generatePdfFromHtml({
     htmlContent: html,
-    headerTemplate: variant === 'original' ? renderContractPdfHeaderTemplate(contract) : '<div></div>',
+    headerTemplate: usesCustomerFacingHeader ? renderContractPdfHeaderTemplate(contract) : '<div></div>',
     footerTemplate: '<div></div>',
-    displayHeaderFooter: variant === 'original',
+    displayHeaderFooter: usesCustomerFacingHeader,
     fileName,
     landscape: false,
     scale: 1,
     widthMm: 210,
     heightMm: 297,
-    margin: variant === 'original'
+    margin: usesCustomerFacingHeader
       ? { top: '50mm', right: '5mm', bottom: '5mm', left: '5mm' }
       : { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' }
   });

@@ -196,10 +196,10 @@ export const salesAPI = {
   
   printContract: (id: string, note?: string) => api.put(`/sales/contracts/${id}/print`, { note }),
 
-  getContractPdf: (contractId: string, params?: { fresh?: boolean }) =>
+  getContractPdf: (contractId: string, params?: { fresh?: boolean; variant?: 'original' | 'summary' }) =>
     api.get(`/sales/contracts/${contractId}/pdf`, { params }),
 
-  downloadContractPdf: (contractId: string, params?: { fresh?: boolean }) =>
+  downloadContractPdf: (contractId: string, params?: { fresh?: boolean; variant?: 'original' | 'summary' }) =>
     api.get(`/sales/contracts/${contractId}/pdf`, {
       params: { ...params, download: true },
       responseType: 'blob'

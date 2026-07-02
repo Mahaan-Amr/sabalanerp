@@ -161,6 +161,10 @@ _Avoid_: printing only the ابزار name or price when the selected edges expl
 A stone finishing or treatment option applied during contract pricing, separate from ابزار, calculated by متر طول or متر مربع depending on the item.
 _Avoid_: ابزار, خدمات, فرآوری سنگ
 
+**کد فرآوری سنگ**:
+The stable catalog code for a پرداخت سنگ / فرآوری سنگ record. Catalog managers provide it during manual create/edit and Excel sync uses it as the record identity, while historical records may still carry generated fallback codes.
+_Avoid_: using the display name as the stable identity for پرداخت سنگ, hiding the code from catalog management, or rewriting historical generated codes during unrelated print changes
+
 **فعال‌سازی پرداخت سنگ**:
 فعال‌سازی پرداخت سنگ فقط بخش انتخاب پرداخت را برای همان ردیف قرارداد باز می‌کند و تا وقتی کاربر یک پرداخت مشخص را انتخاب نکند، هیچ آیتم کاتالوگ، قیمت، مقدار یا هزینه‌ای به ردیف اضافه نمی‌شود.
 _Avoid_: انتخاب خودکار اولین پرداخت سنگ کاتالوگ پس از فعال‌سازی
@@ -442,13 +446,14 @@ A temporary per-print accounting output configuration for a single sales contrac
 Custom print may hide or group existing information, but it does not allow manual editing of contract names, quantities, prices, totals, or real saved rows.
 _Avoid_: treating custom accounting print as a saved template system, changing contract data through print settings, manually editing financial truth in the output, deleting real contract rows through print settings, or marking the commercial contract as printed from a custom internal output
 
-**ردیف خلاصه خدمات و ابزارها**:
-A custom accounting print grouping mode where normal product rows stay visible with their base product price, while attached ابزار، خدمات، برش، پرداخت سنگ، حکمی, and standalone service add-ons are collapsed into one global خدمات و ابزارها row for the whole contract. The detailed print mode remains available when those add-ons need to be audited line by line.
-In summarized mode, the خدمات و ابزارها row مبلغ کل is the add-ons total, product rows keep their base product totals, and جمع کل فاکتور reconciles as base products plus the compact add-ons row minus discount.
-_Avoid_: losing access to the detailed version, changing the saved contract totals while summarizing, rolling add-ons into each product row, or hiding add-ons without a compact row that keeps the invoice total understandable
+**ردیف‌های خلاصه افزونه‌های قرارداد**:
+A summarized print grouping mode where normal product rows stay visible with their base product price, while attached ابزار، خدمات، برش، پرداخت سنگ، حکمی, and standalone service add-ons are grouped into compact rows by the same catalog identity across the whole contract. The detailed print mode remains available when those add-ons need to be audited line by line.
+In summarized mode, each add-on summary row shows the grouped add-on identity, combined amount, rate when it remains truthful, and grouped مبلغ کل. Product rows keep their base product totals, and جمع کل فاکتور reconciles as base products plus grouped add-on rows minus discount.
+Catalog codes are part of the summarized add-on identity when available, so the printed summary remains auditable without expanding every product-level detail.
+_Avoid_: losing access to the detailed version, changing the saved contract totals while summarizing, rolling add-ons into each product row, collapsing all add-ons into one generic row, hiding available catalog codes, or grouping unrelated catalog items only because their display names look similar
 
 **خلاصه قرارداد فروش سنگ**:
-A fixed sales-side customer-facing print/PDF output option beside the full-detail sales contract. It uses the same summarized add-ons meaning as ردیف خلاصه خدمات و ابزارها, but sales users cannot customize sections or columns.
+A fixed sales-side customer-facing print/PDF output option beside the full-detail sales contract. It uses the same summarized add-ons meaning as ردیف‌های خلاصه افزونه‌های قرارداد, but sales users cannot customize sections or columns.
 _Avoid_: exposing the accounting custom-print controls in sales, replacing the full-detail sales contract, or treating the summary output as a manual edit of contract data
 
 **طول مصرفی سنگ مصرفی**:

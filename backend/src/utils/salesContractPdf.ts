@@ -2,10 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { Request } from 'express';
+import { PrismaClient } from '@prisma/client';
 import { generatePdfFromHtml } from './pdf';
 import { ContractCustomPrintOptions, ContractPrintVariant, renderContractHtml, renderContractPdfHeaderTemplate } from './printTemplate';
 
-export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-table-units-v16-2026-07-01';
+export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-summary-addons-v17-2026-07-02';
+const prisma = new PrismaClient();
 
 export const salesContractPrintableInclude = {
   customer: {
@@ -225,10 +227,25 @@ export const generateSalesContractPdf = async (
     variant
   });
 
+  const finishingIds = new Set<string>();
+  if (Array.isArray(contractData?.products)) {
+    contractData.products.forEach((product: any) => {
+      const finishingId = String(product?.finishingId || product?.meta?.finishing?.id || '').trim();
+      const finishingCode = String(product?.finishingCode || product?.meta?.finishing?.code || '').trim();
+      if (finishingId && !finishingCode) finishingIds.add(finishingId);
+    });
+  }
+  const finishingCodeById = finishingIds.size > 0
+    ? Object.fromEntries((await prisma.stoneFinishing.findMany({
+        where: { id: { in: Array.from(finishingIds) } },
+        select: { id: true, code: true }
+      })).map((finishing) => [finishing.id, finishing.code]))
+    : {};
+
   const html = renderContractHtml({
     ...contract,
     contractData: contract.contractData
-  }, { reservePdfHeaderSpace: usesCustomerFacingHeader, variant, customPrint });
+  }, { reservePdfHeaderSpace: usesCustomerFacingHeader, variant, customPrint, finishingCodeById });
 
   return generatePdfFromHtml({
     htmlContent: html,

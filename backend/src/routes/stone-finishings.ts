@@ -96,6 +96,7 @@ router.get(
 
       if (search) {
         where.OR = [
+          { code: { contains: search, mode: 'insensitive' } },
           { namePersian: { contains: search, mode: 'insensitive' } },
           { name: { contains: search, mode: 'insensitive' } }
         ];

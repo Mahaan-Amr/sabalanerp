@@ -2924,6 +2924,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               : ((p.standardLengthUnit as UnitType) ?? (p.meta as any)?.stair?.standardLength?.unit ?? (p.lengthUnit || 'm')),
             finishingEnabled: !!(p.finishingId || p.finishingCost || metaFinishing.id || metaFinishing.cost),
             finishingId: p.finishingId || metaFinishing.id || null,
+            finishingCode: p.finishingCode || metaFinishing.code || null,
             finishingLabel: p.finishingName || metaFinishing.name || null,
             finishingPricePerSquareMeter: p.finishingPricePerSquareMeter || p.finishingUnitPrice || metaFinishing.unitPrice || null,
             finishingUnitPrice: p.finishingUnitPrice || p.finishingPricePerSquareMeter || metaFinishing.unitPrice || null,
@@ -4493,6 +4494,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         sawKerfEnabled,
         sawKerfCm,
         finishingId: finishingEnabled ? (productConfig.finishingId || null) : null,
+        finishingCode: finishingEnabled ? (productConfig.finishingCode || selectedFinishing?.code || null) : null,
         finishingName: finishingEnabled
           ? (productConfig.finishingName || selectedFinishing?.namePersian || selectedFinishing?.name || null)
           : null,
@@ -4556,6 +4558,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           finishing: finishingEnabled && finishingCost > 0
             ? {
                 id: productConfig.finishingId || null,
+                code: productConfig.finishingCode || selectedFinishing?.code || null,
                 name: productConfig.finishingName || selectedFinishing?.namePersian || selectedFinishing?.name || null,
                 pricePerSquareMeter: finishingPricePerSquareMeter,
                 unitPrice: finishingSnapshot.unitPrice,
@@ -4794,6 +4797,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       sawKerfEnabled,
       sawKerfCm,
       finishingId: finishingEnabled ? (productConfig.finishingId || null) : null,
+      finishingCode: finishingEnabled ? (productConfig.finishingCode || selectedFinishing?.code || null) : null,
       finishingName: finishingEnabled
         ? (productConfig.finishingName || selectedFinishing?.namePersian || selectedFinishing?.name || null)
         : null,
@@ -4857,6 +4861,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         finishing: finishingEnabled && finishingCost > 0
           ? {
               id: productConfig.finishingId || null,
+              code: productConfig.finishingCode || selectedFinishing?.code || null,
               name: productConfig.finishingName || selectedFinishing?.namePersian || selectedFinishing?.name || null,
               pricePerSquareMeter: finishingPricePerSquareMeter,
               unitPrice: finishingSnapshot.unitPrice,
@@ -7146,6 +7151,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       ...draft,
                                       finishingEnabled: false,
                                       finishingId: null,
+                                      finishingCode: null,
                                       finishingLabel: null,
                                       finishingPricePerSquareMeter: null,
                                       finishingUnitPrice: null,
@@ -7180,6 +7186,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           onClick={() => setDraft({
                                             ...draft,
                                             finishingId: null,
+                                            finishingCode: null,
                                             finishingLabel: null,
                                             finishingPricePerSquareMeter: null,
                                             finishingUnitPrice: null,
@@ -7219,6 +7226,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                             ...draft,
                                             finishingEnabled: true,
                                             finishingId: option.id,
+                                            finishingCode: option.code || null,
                                             finishingLabel: option.namePersian || option.name || '',
                                             finishingPricePerSquareMeter: unitPrice,
                                             finishingUnitPrice: unitPrice,
@@ -7767,6 +7775,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       : (draft.standardLengthUnit || draft.lengthUnit || 'm'),
                     actualLengthMeters: actualLengthM || null,
                     finishingId: draft.finishingEnabled ? draft.finishingId || null : null,
+                    finishingCode: draft.finishingEnabled ? (selectedFinishing?.code || null) : null,
                     finishingName: draft.finishingEnabled ? (draft.finishingLabel || selectedFinishing?.namePersian || selectedFinishing?.name || null) : null,
                     finishingPricePerSquareMeter: draft.finishingEnabled ? finishingUnitPrice : null,
                     finishingUnitPrice: draft.finishingEnabled ? finishingUnitPrice : null,
@@ -7791,6 +7800,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       },
                       finishing: draft.finishingEnabled && finishingCost > 0 ? {
                         id: draft.finishingId,
+                        code: selectedFinishing?.code || null,
                         name: draft.finishingLabel || selectedFinishing?.namePersian || selectedFinishing?.name,
                         pricePerSquareMeter: finishingUnitPrice,
                         unitPrice: finishingUnitPrice,
@@ -8134,6 +8144,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     standardLengthUnit: draft.lengthUnit || 'm',
                     finishingEnabled: false,
                     finishingId: null,
+                    finishingCode: null,
                     finishingLabel: null,
                     finishingPricePerSquareMeter: null,
                     finishingUnitPrice: null,

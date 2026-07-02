@@ -3459,6 +3459,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                                   ...prev,
                                   finishingEnabled: false,
                                   finishingId: null,
+                                  finishingCode: null,
                                   finishingName: null,
                                   finishingLabel: null,
                                   finishingPricePerSquareMeter: null,
@@ -3494,6 +3495,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                                   onClick={() => setProductConfig((prev: any) => ({
                                     ...prev,
                                     finishingId: null,
+                                    finishingCode: null,
                                     finishingName: null,
                                     finishingLabel: null,
                                     finishingPricePerSquareMeter: null,
@@ -3533,6 +3535,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                                     ...prev,
                                     finishingEnabled: true,
                                     finishingId: option.id,
+                                    finishingCode: option.code || null,
                                     finishingName: option.namePersian || option.name || '',
                                     finishingLabel: option.namePersian || option.name || '',
                                     finishingPricePerSquareMeter: unitPrice,

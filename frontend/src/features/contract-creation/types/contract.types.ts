@@ -181,6 +181,7 @@ export interface CuttingType {
 
 export interface StoneFinishing {
   id: string;
+  code?: string;
   name?: string;
   namePersian: string;
   description?: string;
@@ -483,6 +484,7 @@ export interface ContractProduct {
   meta?: any;
   // Stone finishing
   finishingId?: string | null;
+  finishingCode?: string | null;
   finishingName?: string | null;
   finishingPricePerSquareMeter?: number | null;
   finishingUnitPrice?: number | null;
@@ -771,6 +773,7 @@ export interface StairPartDraftV2 {
   // Finishing fields
   finishingEnabled?: boolean;
   finishingId?: string | null;
+  finishingCode?: string | null;
   finishingLabel?: string | null;
   finishingPricePerSquareMeter?: number | null;
   finishingUnitPrice?: number | null;

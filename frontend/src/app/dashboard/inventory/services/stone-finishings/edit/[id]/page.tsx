@@ -14,6 +14,7 @@ const EditStoneFinishingPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [formData, setFormData] = useState({
+    code: '',
     namePersian: '',
     name: '',
     description: '',
@@ -32,6 +33,7 @@ const EditStoneFinishingPage: React.FC = () => {
         if (response.data.success) {
           const data = response.data.data;
           setFormData({
+            code: data.code || '',
             namePersian: data.namePersian || '',
             name: data.name || '',
             description: data.description || '',
@@ -59,6 +61,12 @@ const EditStoneFinishingPage: React.FC = () => {
     if (!finishingId) return;
     setLoading(true);
     setErrors({});
+
+    if (!formData.code.trim()) {
+      setErrors({ code: 'کد فرآوری سنگ الزامی است' });
+      setLoading(false);
+      return;
+    }
 
     try {
       const response = await servicesAPI.updateStoneFinishing(finishingId, {
@@ -138,6 +146,24 @@ const EditStoneFinishingPage: React.FC = () => {
         <div className="max-w-2xl mx-auto">
           <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-xl border border-slate-200/60 dark:border-slate-700/60 shadow-lg p-6">
             <form onSubmit={handleSubmit} className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  کد فرآوری سنگ *
+                </label>
+                <input
+                  type="text"
+                  value={formData.code}
+                  onChange={(e) => setFormData(prev => ({ ...prev, code: e.target.value }))}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
+                    errors.code ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
+                  }`}
+                  placeholder="مثال: SF-001"
+                />
+                {errors.code && (
+                  <p className="text-red-500 text-sm mt-1">{errors.code}</p>
+                )}
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   

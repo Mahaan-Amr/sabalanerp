@@ -5,6 +5,7 @@ export type FinishingCalculationBase = 'length' | 'squareMeters';
 
 export interface NormalizedFinishingSnapshot {
   id: string | null;
+  code: string | null;
   name: string | null;
   calculationBase: FinishingCalculationBase;
   unitPrice: number;
@@ -18,6 +19,7 @@ export interface NormalizedFinishingSnapshot {
 export interface FinishingSelectionDraft {
   finishingEnabled?: boolean;
   finishingId?: string | null;
+  finishingCode?: string | null;
   finishingName?: string | null;
   finishingLabel?: string | null;
   finishingPricePerSquareMeter?: number | null;
@@ -67,6 +69,7 @@ export const activateFinishingSelection = <T extends FinishingSelectionDraft>(dr
   ...draft,
   finishingEnabled: true,
   finishingId: draft.finishingId || null,
+  finishingCode: draft.finishingId ? draft.finishingCode || null : null,
   finishingName: draft.finishingId ? draft.finishingName || null : null,
   finishingLabel: draft.finishingId ? draft.finishingLabel || null : null,
   finishingPricePerSquareMeter: draft.finishingId ? draft.finishingPricePerSquareMeter || null : null,
@@ -98,6 +101,7 @@ export const normalizeProductFinishing = (product: Partial<ContractProduct> | nu
 
   return {
     id: product.finishingId || metaFinishing.id || null,
+    code: product.finishingCode || metaFinishing.code || null,
     name: product.finishingName || metaFinishing.name || null,
     calculationBase,
     unitPrice,

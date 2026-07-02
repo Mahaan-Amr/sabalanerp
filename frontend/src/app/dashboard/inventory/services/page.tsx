@@ -66,6 +66,7 @@ interface LayerType {
 
 interface StoneFinishing {
   id: string;
+  code: string;
   name?: string;
   namePersian: string;
   description?: string;
@@ -393,6 +394,7 @@ const ServicesPage: React.FC = () => {
 
   const filteredStoneFinishings = stoneFinishings.filter(finishing =>
     finishing.namePersian.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    finishing.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (finishing.name && finishing.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (finishing.description && finishing.description.toLowerCase().includes(searchTerm.toLowerCase()))
   );
@@ -1062,6 +1064,7 @@ const ServicesPage: React.FC = () => {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-slate-700">
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">کد فرآوری سنگ</th>
                         <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام فارسی</th>
                         <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام انگلیسی</th>
                         <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">واحد</th>
@@ -1074,6 +1077,9 @@ const ServicesPage: React.FC = () => {
                     <tbody>
                       {filteredStoneFinishings.map((finishing) => (
                         <tr key={finishing.id} className="border-b border-slate-100 dark:border-slate-700">
+                          <td className="py-3 px-4 text-slate-900 dark:text-slate-100 font-mono">
+                            {finishing.code}
+                          </td>
                           <td className="py-3 px-4 text-slate-900 dark:text-slate-100">
                             {finishing.namePersian}
                           </td>

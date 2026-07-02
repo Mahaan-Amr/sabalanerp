@@ -28,12 +28,15 @@ interface RenderableContract {
 
 interface NormalizedCut {
   type: string;
+  code?: string;
   meters: number;
   rate: number;
   cost: number;
 }
 
 interface NormalizedService {
+  code?: string;
+  sourceId?: string;
   category: string;
   name: string;
   selectedEdgesLabel?: string;
@@ -46,6 +49,8 @@ interface NormalizedService {
 }
 
 interface NormalizedProductTool {
+  code?: string;
+  sourceId?: string;
   name: string;
   selectedEdgesLabel?: string;
   amount: number;
@@ -219,10 +224,22 @@ const isGeneratedCutTool = (tool: any): boolean => {
 const normalizeAddOnKeyPart = (value: string | undefined): string =>
   String(value || '').replace(/\s+/g, ' ').trim();
 
+const normalizeAddOnIdentity = (value: string | undefined): string =>
+  normalizeAddOnKeyPart(value).toLocaleLowerCase('fa-IR');
+
 const edgeToolDedupeKey = (item: { name: string; selectedEdgesLabel?: string }): string => {
   const name = normalizeAddOnKeyPart(item.name);
   const selectedEdgesLabel = normalizeAddOnKeyPart(item.selectedEdgesLabel);
   return name && selectedEdgesLabel ? `${name}::${selectedEdgesLabel}` : '';
+};
+
+const firstText = (...values: unknown[]): string => {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return '';
 };
 
 const publicAssetPath = (...segments: string[]): string => {
@@ -658,7 +675,10 @@ const buildSourceMaterialRows = (product: any): NormalizedSourceMaterial[] => {
   }];
 };
 
-const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] => {
+const normalizeProducts = (
+  contract: RenderableContract,
+  lookups: { finishingCodeById?: Record<string, string> } = {}
+): NormalizedProduct[] => {
   const contractDataProducts = Array.isArray(contract.contractData?.products) ? contract.contractData.products : [];
   const relationItems = Array.isArray(contract.items) ? contract.items : [];
 
@@ -671,10 +691,11 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
 
       const cutsFromBreakdown: NormalizedCut[] = Array.isArray(product?.cuttingBreakdown)
         ? product.cuttingBreakdown.map((cut: any) => ({
-            type: cut?.type === 'cross' ? 'برش عرضی' : 'برش طولی',
-            meters: toNumber(cut?.meters),
-            rate: toNumber(cut?.rate),
-            cost: toNumber(cut?.cost)
+          type: cut?.type === 'cross' ? 'برش عرضی' : 'برش طولی',
+          code: firstText(cut?.code, cut?.sourceCode),
+          meters: toNumber(cut?.meters),
+          rate: toNumber(cut?.rate),
+          cost: toNumber(cut?.cost)
           }))
         : [];
 
@@ -683,6 +704,7 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         : (Array.isArray(product?.cutDetails)
           ? product.cutDetails.map((cut: any) => ({
               type: cutTypeLabel(cut),
+              code: firstText(cut?.code, cut?.sourceCode),
               meters: toNumber(cut?.meters || cut?.length),
               rate: toNumber(cut?.rate || cut?.cuttingCostPerMeter),
               cost: toNumber(cut?.cost || cut?.cuttingCost)
@@ -696,6 +718,8 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         const selectedEdgesLabel = selectedEdgeLabels(service);
         const rateUnitLabel = service?.calculationBase === 'squareMeters' ? 'متر مربع' : 'متر طول';
         services.push({
+          code: firstText(service?.subService?.code, service?.code, service?.sourceCode),
+          sourceId: firstText(service?.subServiceId, service?.subService?.id),
           category: selectedEdgesLabel ? 'ابزار' : 'خدمات',
           name: service?.subService?.namePersian || service?.subService?.name || EMPTY,
           selectedEdgesLabel,
@@ -709,11 +733,21 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
       });
 
       if (product?.finishingId || product?.finishingCost) {
+        const metaFinishing = product?.meta?.finishing || {};
+        const finishingId = firstText(product?.finishingId, metaFinishing?.id);
+        const finishingCode = firstText(
+          product?.finishingCode,
+          product?.finishing?.code,
+          metaFinishing?.code,
+          finishingId ? lookups.finishingCodeById?.[finishingId] : ''
+        );
         const finishingBase = getFinishingBase(product);
         const finishingUnitLabel = getFinishingUnitLabel(finishingBase);
         const finishingQuantity = getFinishingQuantity(product, finishingBase);
         const finishingUnitPrice = getFinishingUnitPrice(product);
         services.push({
+          code: finishingCode,
+          sourceId: finishingId,
           category: 'پرداخت سنگ',
           name: product?.finishingName || EMPTY,
           amount: finishingQuantity,
@@ -734,6 +768,8 @@ const normalizeProducts = (contract: RenderableContract): NormalizedProduct[] =>
         const cost = toNumber(tool?.totalPrice || tool?.cost);
         const selectedEdgesLabel = selectedEdgeLabels(tool);
         return {
+          code: firstText(tool?.code, tool?.toolCode, tool?.sourceCode),
+          sourceId: firstText(tool?.toolId, tool?.id, tool?.sourceId),
           name: tool?.namePersian || tool?.name || EMPTY,
           selectedEdgesLabel,
           amount,
@@ -1067,6 +1103,115 @@ const isMeaningfulService = (service: NormalizedService): boolean =>
 const isMeaningfulTool = (tool: NormalizedProductTool): boolean =>
   hasTextValue(tool.name) || tool.amount > 0 || tool.rate > 0 || tool.cost > 0;
 
+type SummaryAddOnInput = {
+  code?: string;
+  sourceId?: string;
+  category: string;
+  description: string;
+  amount: number;
+  unitLabel?: string;
+  rate: number;
+  total: number;
+};
+
+type SummaryAddOnGroup = {
+  key: string;
+  code: string;
+  category: string;
+  description: string;
+  amount: number;
+  total: number;
+  rates: Set<number>;
+  unitLabels: Set<string>;
+};
+
+const buildSummaryAddOnKey = (addOn: SummaryAddOnInput): string => {
+  const category = normalizeAddOnIdentity(addOn.category);
+  const code = normalizeAddOnIdentity(addOn.code);
+  if (category && code) return `code::${category}::${code}`;
+
+  const sourceId = normalizeAddOnIdentity(addOn.sourceId);
+  if (category && sourceId) return `id::${category}::${sourceId}`;
+
+  return [
+    'fallback',
+    category,
+    normalizeAddOnIdentity(addOn.description),
+    normalizeAddOnIdentity(addOn.unitLabel),
+    toNumber(addOn.rate).toString()
+  ].join('::');
+};
+
+const addSummaryAddOn = (
+  groups: Map<string, SummaryAddOnGroup>,
+  addOn: SummaryAddOnInput
+) => {
+  if (!hasTextValue(addOn.description) && toNumber(addOn.total) <= 0) return;
+  const key = buildSummaryAddOnKey(addOn);
+  const amount = toNumber(addOn.amount);
+  const rate = toNumber(addOn.rate);
+  const total = toNumber(addOn.total);
+  const existing = groups.get(key);
+
+  if (!existing) {
+    const group: SummaryAddOnGroup = {
+      key,
+      code: normalizeAddOnKeyPart(addOn.code) || EMPTY,
+      category: addOn.category || EMPTY,
+      description: addOn.description || EMPTY,
+      amount,
+      total,
+      rates: new Set(rate > 0 ? [rate] : []),
+      unitLabels: new Set(addOn.unitLabel ? [addOn.unitLabel] : [])
+    };
+    groups.set(key, group);
+    return;
+  }
+
+  existing.amount += amount;
+  existing.total += total;
+  if (rate > 0) existing.rates.add(rate);
+  if (addOn.unitLabel) existing.unitLabels.add(addOn.unitLabel);
+};
+
+const summaryAmountLabel = (group: SummaryAddOnGroup): string => {
+  if (group.amount <= 0) return '';
+  if (group.unitLabels.size !== 1) return toFaNumber(group.amount, 4);
+  const unitLabel = Array.from(group.unitLabels)[0];
+  return `${toFaNumber(group.amount, 4)} ${unitLabel}`;
+};
+
+const summaryRateLabel = (
+  group: SummaryAddOnGroup,
+  currency: string,
+  options: { includeRialEquivalent?: boolean } = {}
+): string => {
+  if (group.rates.size !== 1) return '';
+  const rate = Array.from(group.rates)[0];
+  const unitLabel = group.unitLabels.size === 1 ? Array.from(group.unitLabels)[0] : '';
+  return formatPrintRate(rate, currency, unitLabel, options);
+};
+
+const summaryAddOnGroupsToRows = (
+  groups: Map<string, SummaryAddOnGroup>,
+  currency: string,
+  options: { includeRialEquivalent?: boolean } = {}
+): FlatProductRow[] => Array.from(groups.values())
+  .filter((group) => group.total > 0 || group.amount > 0 || hasTextValue(group.description))
+  .sort((a, b) => `${a.category}-${a.description}`.localeCompare(`${b.category}-${b.description}`, 'fa'))
+  .map((group) => ({
+    indexLabel: '',
+    code: group.code,
+    description: group.description,
+    category: group.category,
+    length: '',
+    width: '',
+    quantity: summaryAmountLabel(group),
+    area: '',
+    rate: summaryRateLabel(group, currency, options),
+    total: formatPrintMoneyCell(group.total, currency, options)
+  }));
+
 const buildProductQuantityColumns = (product: NormalizedProduct): Pick<FlatProductRow, 'quantity' | 'area'> => {
   if (isPreparedProductType(product.productType)) {
     const quantity = toFaNumber(product.preparedQuantity || product.quantity, product.preparedUnit === 'تعداد' ? 0 : 2);
@@ -1125,7 +1270,7 @@ const buildFlatProductRows = (
   const showExplanatoryRows = options.showExplanatoryRows !== false;
   const showTotals = options.showTotals !== false;
   const showNotes = options.showNotes !== false;
-  let compactAddOnsTotal = 0;
+  const summaryAddOnGroups = new Map<string, SummaryAddOnGroup>();
 
   products.forEach((product, productIndex) => {
     const addOnsTotal =
@@ -1135,7 +1280,52 @@ const buildFlatProductRows = (
     const mandatoryAmount = product.isMandatory && product.mandatoryPercentage > 0 && product.originalTotalPrice > 0
       ? product.originalTotalPrice * (product.mandatoryPercentage / 100)
       : 0;
-    compactAddOnsTotal += addOnsTotal + mandatoryAmount;
+    if (isSummarized) {
+      if (mandatoryAmount > 0) {
+        addSummaryAddOn(summaryAddOnGroups, {
+          category: 'حکمی',
+          description: `حکمی ${toFaNumber(product.mandatoryPercentage)}٪`,
+          amount: 0,
+          rate: 0,
+          total: mandatoryAmount
+        });
+      }
+      product.cuts.filter(isMeaningfulCut).forEach((cut) => {
+        addSummaryAddOn(summaryAddOnGroups, {
+          code: cut.code,
+          category: 'برش',
+          description: cut.type,
+          amount: cut.meters,
+          unitLabel: 'متر طول',
+          rate: cut.rate,
+          total: cut.cost
+        });
+      });
+      product.tools.filter(isMeaningfulTool).forEach((tool) => {
+        addSummaryAddOn(summaryAddOnGroups, {
+          code: tool.code,
+          sourceId: tool.sourceId,
+          category: 'ابزار',
+          description: tool.name,
+          amount: tool.amount,
+          unitLabel: tool.rateUnitLabel || 'متر طول',
+          rate: tool.rate,
+          total: tool.cost
+        });
+      });
+      product.services.filter(isMeaningfulService).forEach((service) => {
+        addSummaryAddOn(summaryAddOnGroups, {
+          code: service.code,
+          sourceId: service.sourceId,
+          category: service.category,
+          description: service.name,
+          amount: service.amount,
+          unitLabel: service.rateUnitLabel,
+          rate: service.rate,
+          total: service.cost
+        });
+      });
+    }
     const baseAmount = product.originalTotalPrice > 0
       ? product.originalTotalPrice
       : Math.max(product.totalPrice - addOnsTotal, 0) || product.totalPrice;
@@ -1223,7 +1413,7 @@ const buildFlatProductRows = (
     product.cuts.filter(isMeaningfulCut).forEach((cut) => {
       rows.push({
         indexLabel: '',
-        code: '',
+        code: cut.code || '',
         description: cut.type,
         category: 'برش',
         length: '',
@@ -1238,7 +1428,7 @@ const buildFlatProductRows = (
     product.tools.filter(isMeaningfulTool).forEach((tool) => {
       rows.push({
         indexLabel: '',
-        code: '',
+        code: tool.code || '',
         description: withSelectedEdges(tool.name, tool.selectedEdgesLabel),
         category: 'ابزار',
         length: '',
@@ -1253,7 +1443,7 @@ const buildFlatProductRows = (
     product.services.filter(isMeaningfulService).forEach((service) => {
       rows.push({
         indexLabel: '',
-        code: '',
+        code: service.code || '',
         description: withSelectedEdges(service.name, service.selectedEdgesLabel),
         category: service.category,
         length: '',
@@ -1268,7 +1458,16 @@ const buildFlatProductRows = (
 
   standaloneServices.forEach((service, serviceIndex) => {
     if (isSummarized) {
-      compactAddOnsTotal += toNumber(service.totalPrice);
+      addSummaryAddOn(summaryAddOnGroups, {
+        code: service.code,
+        sourceId: service.id,
+        category: service.sourceType,
+        description: service.title,
+        amount: service.quantity,
+        unitLabel: service.unit,
+        rate: service.unitPrice,
+        total: service.totalPrice
+      });
       return;
     }
 
@@ -1287,19 +1486,8 @@ const buildFlatProductRows = (
     });
   });
 
-  if (isSummarized && compactAddOnsTotal > 0) {
-    rows.push({
-      indexLabel: '',
-      code: '',
-      description: 'خدمات و ابزارها',
-      category: 'خلاصه',
-      length: '',
-      width: '',
-      quantity: '',
-      area: '',
-      rate: '',
-      total: formatPrintMoneyCell(compactAddOnsTotal, currency, options)
-    });
+  if (isSummarized && summaryAddOnGroups.size > 0) {
+    rows.push(...summaryAddOnGroupsToRows(summaryAddOnGroups, currency, options));
   }
 
   if (showTotals && financials && financials.discountAmount > 0) {
@@ -1636,6 +1824,7 @@ type RenderContractHtmlOptions = {
   reservePdfHeaderSpace?: boolean;
   variant?: ContractPrintVariant;
   customPrint?: ContractCustomPrintOptions;
+  finishingCodeById?: Record<string, string>;
 };
 
 export function renderContractHtml(contract: RenderableContract, options: RenderContractHtmlOptions = {}): string {
@@ -1662,7 +1851,9 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   const customer = contract.customer || contractData.customer || {};
   const project = contractData.project || {};
 
-  const normalizedProducts = normalizeProducts(contract);
+  const normalizedProducts = normalizeProducts(contract, {
+    finishingCodeById: options.finishingCodeById
+  });
   const normalizedStandaloneServices = normalizeStandaloneServices(contract);
   const normalizedDeliveries = normalizeDeliveries(contract, normalizedProducts, normalizedStandaloneServices);
   const normalizedPayments = normalizePayments(contract);

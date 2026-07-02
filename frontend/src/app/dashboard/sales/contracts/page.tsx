@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FaCheck,
+  FaChevronDown,
   FaClock,
   FaDownload,
   FaEdit,
@@ -63,6 +64,15 @@ interface Contract {
     projectManagerName?: string;
   };
 }
+
+interface ContractPagination {
+  page: number;
+  limit: number;
+  total: number;
+  pages: number;
+}
+
+const CONTRACTS_PAGE_SIZE = 10;
 
 const statusLabels: Record<string, string> = {
   DRAFT: 'پیش‌نویس',
@@ -139,29 +149,67 @@ export default function ContractsPage() {
     canPrint: false,
   });
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [pagination, setPagination] = useState<ContractPagination>({
+    page: 1,
+    limit: CONTRACTS_PAGE_SIZE,
+    total: 0,
+    pages: 1,
+  });
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
-    loadContracts();
     loadCurrentUser();
   }, []);
 
-  const loadContracts = async () => {
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm.trim());
+    }, 350);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [searchTerm]);
+
+  const loadContracts = useCallback(async (page = 1, options: { append?: boolean } = {}) => {
+    const append = options.append === true;
     try {
-      setLoading(true);
-      const response = await salesAPI.getContracts();
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+      }
+
+      const response = await salesAPI.getContracts({
+        page,
+        limit: CONTRACTS_PAGE_SIZE,
+        ...(statusFilter !== 'ALL' ? { status: statusFilter } : {}),
+        ...(debouncedSearchTerm ? { search: debouncedSearchTerm } : {}),
+      });
+
       if (response.data.success) {
-        setContracts(response.data.data);
+        setContracts((current) => (append ? [...current, ...response.data.data] : response.data.data));
+        if (response.data.pagination) {
+          setPagination(response.data.pagination);
+        }
       }
     } catch (error) {
       console.error('Error loading contracts:', error);
     } finally {
-      setLoading(false);
+      if (append) {
+        setLoadingMore(false);
+      } else {
+        setLoading(false);
+      }
     }
-  };
+  }, [debouncedSearchTerm, statusFilter]);
+
+  useEffect(() => {
+    loadContracts(1, { append: false });
+  }, [loadContracts]);
 
   const loadCurrentUser = async () => {
     try {
@@ -176,10 +224,11 @@ export default function ContractsPage() {
   };
 
   const filteredContracts = useMemo(() => {
-    const normalizedSearch = searchTerm.trim().toLowerCase();
+    const normalizedSearch = debouncedSearchTerm.toLowerCase();
     return contracts.filter((contract) => {
       const customerName = `${contract.customer.firstName} ${contract.customer.lastName}`.toLowerCase();
       const companyName = contract.customer.companyName?.toLowerCase() || '';
+      const nationalCode = contract.customer.nationalCode?.toLowerCase() || '';
       const projectManager = contract.customer.projectManagerName?.toLowerCase() || '';
       const creatorSequence = contract.creatorSequenceNumber != null ? String(contract.creatorSequenceNumber) : '';
       const accountingStatus = contract.accounting?.sourceStatus || '';
@@ -191,6 +240,7 @@ export default function ContractsPage() {
         creatorSequence.includes(normalizedSearch) ||
         customerName.includes(normalizedSearch) ||
         companyName.includes(normalizedSearch) ||
+        nationalCode.includes(normalizedSearch) ||
         projectManager.includes(normalizedSearch) ||
         accountingStatus.toLowerCase().includes(normalizedSearch) ||
         (sourceStatusLabels[accountingStatus] || '').toLowerCase().includes(normalizedSearch);
@@ -198,17 +248,24 @@ export default function ContractsPage() {
       const matchesStatus = statusFilter === 'ALL' || contract.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
-  }, [contracts, searchTerm, statusFilter]);
+  }, [contracts, debouncedSearchTerm, statusFilter]);
+
+  const hasMoreContracts = pagination.page < pagination.pages;
+
+  const handleLoadMore = () => {
+    if (loading || loadingMore || !hasMoreContracts) return;
+    loadContracts(pagination.page + 1, { append: true });
+  };
 
   const metrics: ErpMetric[] = useMemo(() => {
     const totalAmount = sumNumericValues(filteredContracts, (contract) => contract.totalAmount);
     return [
-      { label: 'کل قراردادها', value: contracts.length.toLocaleString('fa-IR'), icon: FaFileContract, tone: 'primary' },
+      { label: 'کل قراردادها', value: pagination.total.toLocaleString('fa-IR'), icon: FaFileContract, tone: 'primary' },
       { label: 'نتایج فعلی', value: filteredContracts.length.toLocaleString('fa-IR'), hint: statusFilter === 'ALL' ? 'همه وضعیت‌ها' : statusLabels[statusFilter], icon: FaEye, tone: 'info' },
       { label: 'در انتظار تایید', value: contracts.filter((contract) => contract.status === 'PENDING_APPROVAL').length.toLocaleString('fa-IR'), icon: FaClock, tone: 'warning' },
       { label: 'مبلغ نتایج', value: formatCurrency(totalAmount, 'تومان'), icon: FaFileContract, tone: 'success' },
     ];
-  }, [contracts, filteredContracts, statusFilter]);
+  }, [contracts, filteredContracts, pagination.total, statusFilter]);
 
   const openPdfUrl = (url: string, tryPrint: boolean) => {
     const win = window.open(url, '_blank', 'noopener,noreferrer');
@@ -271,7 +328,7 @@ export default function ContractsPage() {
             openPdfUrl(pdfResponse.data.data.url, true);
           }
         }
-        await loadContracts();
+        await loadContracts(1, { append: false });
       } else {
         console.error('Error:', response.data.error);
       }
@@ -474,6 +531,30 @@ export default function ContractsPage() {
       columns={columns}
       rowActions={getRowActions}
       isLoading={loading}
+      footer={
+        filteredContracts.length > 0 ? (
+          <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              {contracts.length.toLocaleString('fa-IR')} از {pagination.total.toLocaleString('fa-IR')} قرارداد نمایش داده شده است
+            </p>
+            {hasMoreContracts && (
+              <button
+                type="button"
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[#074747]/25 bg-white px-4 py-2 text-sm font-semibold text-[#074747] transition hover:bg-[#074747]/5 disabled:cursor-not-allowed disabled:opacity-60 dark:border-teal-700 dark:bg-slate-900 dark:text-teal-200 dark:hover:bg-teal-950/40"
+              >
+                {loadingMore ? (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                ) : (
+                  <FaChevronDown className="h-4 w-4" />
+                )}
+                نمایش قراردادهای بیشتر
+              </button>
+            )}
+          </div>
+        ) : null
+      }
       emptyState={
         <ErpEmptyState
           icon={FaFileContract}

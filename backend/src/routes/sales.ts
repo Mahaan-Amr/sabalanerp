@@ -302,11 +302,13 @@ router.get('/contracts/next-number', protect, requireWorkspaceAccess(WORKSPACES.
 // @access  Private/Sales Workspace
 router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_CONTRACTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
+    const page = Math.max(parseInt(req.query.page as string) || 1, 1);
+    const requestedLimit = parseInt(req.query.limit as string) || 10;
+    const limit = Math.min(Math.max(requestedLimit, 1), 100);
     const skip = (page - 1) * limit;
     const status = req.query.status as string;
     const departmentId = req.query.departmentId as string;
+    const search = String(req.query.search || '').trim();
 
     // Build where clause based on user role and department
     let whereClause: any = {};
@@ -321,6 +323,31 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
       if (status) whereClause.status = status;
     } else if (status) {
       whereClause.status = status;
+    }
+
+    if (search) {
+      const numericSearch = Number.parseInt(search, 10);
+      const searchConditions: any[] = [
+        { contractNumber: { contains: search, mode: 'insensitive' } },
+        { title: { contains: search, mode: 'insensitive' } },
+        { titlePersian: { contains: search, mode: 'insensitive' } },
+        { customer: { firstName: { contains: search, mode: 'insensitive' } } },
+        { customer: { lastName: { contains: search, mode: 'insensitive' } } },
+        { customer: { companyName: { contains: search, mode: 'insensitive' } } },
+        { customer: { nationalCode: { contains: search, mode: 'insensitive' } } },
+        { customer: { projectManagerName: { contains: search, mode: 'insensitive' } } }
+      ];
+
+      if (Number.isFinite(numericSearch)) {
+        searchConditions.push({ creatorSequenceNumber: numericSearch });
+      }
+
+      whereClause = {
+        AND: [
+          whereClause,
+          { OR: searchConditions }
+        ]
+      };
     }
 
     const contracts = await prisma.salesContract.findMany({

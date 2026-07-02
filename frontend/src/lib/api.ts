@@ -179,7 +179,7 @@ export const departmentsAPI = {
 // Sales Workspace API
 export const salesAPI = {
   // Contracts
-  getContracts: (params?: { page?: number; limit?: number; status?: string; departmentId?: string }) =>
+  getContracts: (params?: { page?: number; limit?: number; status?: string; departmentId?: string; search?: string }) =>
     api.get('/sales/contracts', { params }),
   
   getContract: (id: string) => api.get(`/sales/contracts/${id}`),

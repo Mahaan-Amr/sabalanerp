@@ -476,6 +476,10 @@ _Avoid_: treating بارگیری as the customer-facing برنامه تحویل,
 Each بارگیری belongs to exactly one customer project and may include deliverable rows from multiple sales contracts for that same project.
 _Avoid_: mixing multiple customer projects in one بارگیری, even when the same driver or vehicle carries them together
 
+**جستجوی پروژه در بارگیری**:
+A logistics project lookup matches the project, address, customer identity, company identity, and contact numbers tied to the customer or project.
+_Avoid_: forcing logistics users to know the project name when the operational clue they have is a phone number
+
 **شروع پیش‌نویس بارگیری**:
 A draft بارگیری starts when logistics selects the customer project, so the in-progress shipment can be resumed before rows, driver, or vehicle details are complete.
 _Avoid_: treating بارگیری creation as only the final submit action, or keeping meaningful loading progress as a browser-only form

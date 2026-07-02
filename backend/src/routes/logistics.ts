@@ -34,6 +34,22 @@ const toNumber = (value: unknown, fallback = 0) => {
 
 const decimalInput = (value: unknown) => Number(toNumber(value).toFixed(3));
 
+const normalizeDigits = (value: unknown): string => {
+  if (typeof value !== 'string' && typeof value !== 'number') return '';
+  return String(value)
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/\D/g, '');
+};
+
+const normalizePhoneSearch = (value: unknown): string => {
+  const digits = normalizeDigits(value);
+  if (digits.startsWith('0098')) return `0${digits.slice(4)}`;
+  if (digits.startsWith('98') && digits.length === 12) return `0${digits.slice(2)}`;
+  if (digits.startsWith('9') && digits.length === 10) return `0${digits}`;
+  return digits;
+};
+
 const isLinearUnit = (unit?: string | null) => {
   const normalized = String(unit || '').toLowerCase();
   return ['meter', 'linear_meter', 'linear-meter', 'm'].includes(normalized) || normalized.includes('طول');
@@ -421,6 +437,8 @@ router.get('/dashboard', canView, canViewDashboard, async (_req: any, res: Respo
 router.get('/projects', canView, canCreateLoadings, async (req: any, res: Response) => {
   try {
     const search = String(req.query.search || '').trim();
+    const phoneSearch = normalizePhoneSearch(search);
+    const phoneContains = phoneSearch.length >= 3 ? { contains: phoneSearch, mode: 'insensitive' as const } : null;
     const projects = await prisma.projectAddress.findMany({
       where: {
         isActive: true,
@@ -428,6 +446,19 @@ router.get('/projects', canView, canCreateLoadings, async (req: any, res: Respon
           OR: [
             { projectName: { contains: search, mode: 'insensitive' } },
             { address: { contains: search, mode: 'insensitive' } },
+            { city: { contains: search, mode: 'insensitive' } },
+            ...(phoneContains ? [
+              { projectManagerNumber: phoneContains },
+              { marketerPhoneNumber: phoneContains },
+              { customer: { phoneNumbers: { some: { number: phoneContains } } } },
+              { customer: { homeNumber: phoneContains } },
+              { customer: { workNumber: phoneContains } },
+              { customer: { projectManagerNumber: phoneContains } },
+              { customer: { referrerPhoneNumber: phoneContains } },
+              { customer: { primaryContact: { is: { phone: phoneContains } } } },
+              { customer: { primaryContact: { is: { mobile: phoneContains } } } },
+              { customer: { contacts: { some: { OR: [{ phone: phoneContains }, { mobile: phoneContains }] } } } }
+            ] : []),
             { customer: { firstName: { contains: search, mode: 'insensitive' } } },
             { customer: { lastName: { contains: search, mode: 'insensitive' } } },
             { customer: { companyName: { contains: search, mode: 'insensitive' } } }

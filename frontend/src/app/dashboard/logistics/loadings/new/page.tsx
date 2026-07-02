@@ -386,7 +386,7 @@ export default function NewLoadingPage() {
   const renderProjectStep = () => (
     <ErpSection title="انتخاب پروژه" description="انتخاب پروژه اولین تعهد بارگیری است؛ اگر پیش‌نویس فعالی برای پروژه وجود داشته باشد همان ادامه داده می‌شود.">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <input className={inputClass} value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="جستجوی مشتری، شرکت، پروژه یا آدرس" />
+        <input className={inputClass} value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="جستجوی مشتری، شرکت، پروژه، آدرس یا شماره تماس" />
         <ErpButton label="جستجو" icon={FaSearch} onClick={loadProjects} />
       </div>
       <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">

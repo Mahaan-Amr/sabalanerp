@@ -246,10 +246,10 @@ The customer-facing contract table that lists product rows and their price-beari
 _Avoid_: rendering nested product detail blocks outside the main product table
 
 **ستون‌های مقداردهی جدول اصلی محصولات**:
-The customer-facing product table separates physical length, physical width, invoice-pricing measurement, and meaningful count into distinct columns. The متراژ/مقدار column shows the pricing basis for that row, such as متر مربع for stone, متر طول for tools and cuts, or عدد for count-priced services. The تعداد column is filled only when a separate count helps explain the row.
+The customer-facing product table separates physical length, physical width, متر طول, متر مربع, and meaningful count into distinct columns. Each measurement cell shows only the bare number because the unit is already named in the column header; تعداد is filled only when a separate count helps explain the row or when the row is count-priced.
 The same structural columns are used in original, accounting, and workshop prints, but workshop removes price columns entirely instead of showing empty price cells.
 طول and عرض values in print/PDF output are always normalized to meters and shown as numbers only; the unit belongs in the column header, such as طول - متر and عرض - متر. Centimeter-saved values are converted to meters before printing.
-_Avoid_: combining طول and عرض into one ابعاد column, repeating one value across متراژ/مقدار and تعداد, putting count in متراژ/مقدار when the pricing basis is another measurement, reintroducing price columns in workshop print, or mixing cm and m labels inside length/width cells
+_Avoid_: combining طول and عرض into one ابعاد column, repeating unit labels inside متر طول، متر مربع، or تعداد cells, repeating one value across measurement and count columns, putting count in measurement columns when the pricing basis is another measurement, reintroducing price columns in workshop print, or mixing cm and m labels inside length/width cells
 
 **حکمی**:
 An explicit percentage-based price increase applied to a contract product when the product is marked as mandatory.
@@ -494,7 +494,8 @@ _Avoid_: silently creating duplicate active drafts for the same project during o
 
 **مانده بارگیری**:
 The remaining amount for logistics is calculated from eligible contracted amounts minus finalized بارگیری amounts, within compatible contract-row/product groupings.
-_Avoid_: using برنامه تحویل, accounting invoice state, draft بارگیری, or unrelated product rows as the source of truth for physical remaining
+Accounting financial approval is an eligibility gate for which contract rows may enter logistics, but it is not the quantity source for the remaining calculation.
+_Avoid_: using برنامه تحویل, draft accounting financial records, unapproved invoice candidates, sales approval, signature, print state, draft بارگیری, or unrelated product rows as the source of truth for physical remaining
 
 **گروه مانده بارگیری**:
 A logistics display grouping that combines remaining amounts only for contract rows with identical logistics-relevant product specs, while preserving access to the individual source contract rows inside the group.

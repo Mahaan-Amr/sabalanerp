@@ -399,7 +399,6 @@ export default function NewLoadingPage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <ErpButton label="انتخاب" icon={FaTruck} onClick={() => selectProject(project.id)} variant="solid" />
-                <ErpButton label="شروع پیش‌نویس جدید" onClick={() => selectProject(project.id, true)} tone="neutral" variant="outline" />
               </div>
             </div>
           </ErpCard>

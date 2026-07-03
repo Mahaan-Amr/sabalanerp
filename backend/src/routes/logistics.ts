@@ -121,7 +121,7 @@ const getProjectWithCustomer = async (projectId: string) => {
 };
 
 const getProjectContracts = async (projectId: string, customerId: string) => {
-  return prisma.salesContract.findMany({
+  const contracts = await prisma.salesContract.findMany({
     where: {
       customerId,
       status: { notIn: ['CANCELLED', 'EXPIRED'] as any },
@@ -138,6 +138,19 @@ const getProjectContracts = async (projectId: string, customerId: string) => {
     },
     orderBy: { createdAt: 'asc' }
   });
+
+  if (!contracts.length) return [];
+
+  const approvedRecords = await prisma.accountingFinancialRecord.findMany({
+    where: {
+      contractId: { in: contracts.map((contract) => contract.id) },
+      financiallyApprovedAt: { not: null }
+    },
+    select: { contractId: true }
+  });
+  const financiallyApprovedContractIds = new Set(approvedRecords.map((record) => record.contractId).filter(Boolean));
+
+  return contracts.filter((contract) => financiallyApprovedContractIds.has(contract.id));
 };
 
 const getConsumptionByItemIds = async (itemIds: string[]) => {
@@ -295,6 +308,18 @@ const linePayloadToCreate = async (line: any) => {
 
   if (!sourceItem) {
     throw new Error('Source contract item not found');
+  }
+
+  const financiallyApprovedRecord = await prisma.accountingFinancialRecord.findFirst({
+    where: {
+      contractId: sourceItem.contractId,
+      financiallyApprovedAt: { not: null }
+    },
+    select: { id: true }
+  });
+
+  if (!financiallyApprovedRecord) {
+    throw new Error('Contract is not financially approved for logistics loading');
   }
 
   const unit = String(line.unit || inferUnit(sourceItem, null));

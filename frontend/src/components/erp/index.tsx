@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { FaArrowRight, FaSearch } from 'react-icons/fa';
 
 type IconType = React.ComponentType<{ className?: string }>;
@@ -556,12 +557,41 @@ export function ErpPage({ eyebrow, title, description, actions = [], metrics = [
   metrics?: ErpMetric[];
   backHref?: string;
 }) {
+  const router = useRouter();
+  React.useEffect(() => {
+    const currentPath = `${window.location.pathname}${window.location.search}`;
+    const previousCurrentPath = window.sessionStorage.getItem('sabalanerp:currentPath');
+    if (previousCurrentPath && previousCurrentPath !== currentPath) {
+      window.sessionStorage.setItem('sabalanerp:previousPath', previousCurrentPath);
+    }
+    window.sessionStorage.setItem('sabalanerp:currentPath', currentPath);
+  }, []);
+
+  const handleBack = React.useCallback(() => {
+    if (!backHref) return;
+
+    const hasBrowserHistory = typeof window !== 'undefined' && window.history.length > 1;
+    const currentPath = `${window.location.pathname}${window.location.search}`;
+    const previousPath = window.sessionStorage.getItem('sabalanerp:previousPath');
+    const hasTrackedInAppHistory = Boolean(previousPath && previousPath !== currentPath);
+    const hasSameOriginReferrer = typeof document !== 'undefined'
+      && Boolean(document.referrer)
+      && document.referrer.startsWith(window.location.origin);
+
+    if (hasBrowserHistory && (hasTrackedInAppHistory || hasSameOriginReferrer)) {
+      router.back();
+      return;
+    }
+
+    router.push(backHref);
+  }, [backHref, router]);
+
   return (
     <div className="mx-auto w-full max-w-7xl space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           {backHref && (
-            <ErpIconButton label="بازگشت" href={backHref} icon={FaArrowRight} tone="neutral" />
+            <ErpIconButton label="بازگشت" onClick={handleBack} icon={FaArrowRight} tone="neutral" />
           )}
           <div className="min-w-0">
             {eyebrow && <p className="text-xs font-semibold uppercase tracking-wide text-[#074747] dark:text-teal-200">{eyebrow}</p>}

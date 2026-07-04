@@ -25,6 +25,14 @@ interface ContractForEdit {
   id: string;
   status: string;
   accountingEditLocked?: boolean;
+  canOpenCorrectionEdit?: boolean;
+  activeCorrectionRequest?: {
+    id: string;
+    category: string;
+    priority?: string;
+    accountantNote: string;
+    resolutionNote?: string | null;
+  } | null;
   contractData?: ContractWizardData | null;
   customerId?: string;
   contractNumber: string;
@@ -66,7 +74,7 @@ export default function SalesContractEditPage() {
           return;
         }
 
-        if (nextContract.accountingEditLocked) {
+        if (nextContract.accountingEditLocked && !nextContract.canOpenCorrectionEdit) {
           setError('این قرارداد پس از تایید مالی حسابداری قابل ویرایش نیست');
           return;
         }
@@ -114,11 +122,20 @@ export default function SalesContractEditPage() {
   }
 
   return (
-    <CreateContractWizardClient
-      mode="edit"
-      contractId={contract.id}
-      initialContractStatus={contract.status}
-      initialWizardData={contract.contractData}
-    />
+    <div className="space-y-4" dir="rtl">
+      {contract.canOpenCorrectionEdit && contract.activeCorrectionRequest && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100">
+          <p className="font-semibold">اصلاح قرارداد با تایید حسابداری</p>
+          <p className="mt-2 leading-6">{contract.activeCorrectionRequest.accountantNote}</p>
+          <p className="mt-2 text-xs opacity-80">دسته اصلاح: {contract.activeCorrectionRequest.category}</p>
+        </div>
+      )}
+      <CreateContractWizardClient
+        mode="edit"
+        contractId={contract.id}
+        initialContractStatus={contract.status}
+        initialWizardData={contract.contractData}
+      />
+    </div>
   );
 }

@@ -1694,6 +1694,8 @@ enum CorrectionRequestPriority {
 enum CorrectionRequestStatus {
   OPEN
   ACKNOWLEDGED
+  APPROVED_FOR_SALES_EDIT
+  SALES_EDITED
   RESOLVED
   CANCELLED
 }

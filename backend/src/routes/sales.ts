@@ -1,6 +1,6 @@
 import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
-import { PrismaClient } from '@prisma/client';
+import { CorrectionRequestStatus, PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
@@ -413,7 +413,7 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     });
 
     const contractIds = contracts.map((contract) => contract.id);
-    const [financiallyApprovedRecords, accountingSummaries] = contractIds.length
+    const [financiallyApprovedRecords, approvedCorrectionRequests, accountingSummaries] = contractIds.length
       ? await Promise.all([
         prisma.accountingFinancialRecord.findMany({
           where: {
@@ -425,15 +425,32 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
             financiallyApprovedAt: true
           }
         }),
+        prisma.accountingCorrectionRequest.findMany({
+          where: {
+            contractId: { in: contractIds },
+            status: CorrectionRequestStatus.APPROVED_FOR_SALES_EDIT
+          },
+          select: {
+            contractId: true,
+            id: true,
+            category: true,
+            accountantNote: true
+          }
+        }),
         buildAccountingSummaryForContracts(contracts)
       ])
-      : [[], new Map()];
+      : [[], [], new Map()];
     const financiallyApprovedByContractId = new Map(
       financiallyApprovedRecords.map((record) => [record.contractId, record.financiallyApprovedAt] as const)
+    );
+    const approvedCorrectionByContractId = new Map(
+      approvedCorrectionRequests.map((request) => [request.contractId, request] as const)
     );
     const contractsWithAccountingLock = contracts.map((contract) => ({
       ...contract,
       accountingEditLocked: financiallyApprovedByContractId.has(contract.id),
+      canOpenCorrectionEdit: approvedCorrectionByContractId.has(contract.id),
+      activeCorrectionRequest: approvedCorrectionByContractId.get(contract.id) || null,
       accountingFinanciallyApprovedAt: financiallyApprovedByContractId.get(contract.id) || null,
       accounting: accountingSummaries.get(contract.id) || null
     }));

@@ -50,6 +50,11 @@ const accountingEdit = [
   requireFeatureAccess(FEATURES.ACCOUNTING_ACTIONS_MANAGE, FEATURE_PERMISSIONS.EDIT)
 ];
 
+const managerReviewActions = new Set([
+  'APPROVE_CORRECTION_FOR_SALES_EDIT',
+  'DECLINE_CORRECTION'
+]);
+
 const handleValidation = (req: AuthRequest, res: Response) => {
   const errors = validationResult(req);
   if (errors.isEmpty()) return false;
@@ -497,6 +502,17 @@ router.post(
     if (handleValidation(req, res)) return;
 
     try {
+      if (
+        managerReviewActions.has(req.body.kind) &&
+        req.user!.role !== 'ADMIN' &&
+        (req as any).workspacePermission !== WORKSPACE_PERMISSIONS.ADMIN
+      ) {
+        return res.status(403).json({
+          success: false,
+          error: 'Accounting admin permission is required for correction review'
+        });
+      }
+
       const result = await executeAccountingAction(req.body, {
         userId: req.user!.id,
         role: req.user!.role

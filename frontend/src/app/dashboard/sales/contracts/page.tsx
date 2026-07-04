@@ -44,6 +44,12 @@ interface Contract {
   currency: string;
   createdAt: string;
   accountingEditLocked?: boolean;
+  canOpenCorrectionEdit?: boolean;
+  activeCorrectionRequest?: {
+    id: string;
+    category: string;
+    accountantNote: string;
+  } | null;
   accounting?: {
     sourceStatus: string;
     invoiceStatus: string;
@@ -461,8 +467,13 @@ export default function ContractsPage() {
         disabled: actionLoading === `${contract.id}:print`,
       });
     }
-    if (contractPermissions.canEdit && !contract.accountingEditLocked) {
-      actions.push({ label: 'ویرایش قرارداد', href: `/dashboard/sales/contracts/${contract.id}/edit`, icon: FaEdit, tone: 'info' });
+    if (contractPermissions.canEdit && (!contract.accountingEditLocked || contract.canOpenCorrectionEdit)) {
+      actions.push({
+        label: contract.canOpenCorrectionEdit ? 'اصلاح قرارداد' : 'ویرایش قرارداد',
+        href: `/dashboard/sales/contracts/${contract.id}/edit`,
+        icon: FaEdit,
+        tone: contract.canOpenCorrectionEdit ? 'warning' : 'info'
+      });
     }
 
     if ((contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canApprove) {

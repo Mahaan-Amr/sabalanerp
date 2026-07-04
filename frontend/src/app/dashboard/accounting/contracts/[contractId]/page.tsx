@@ -663,24 +663,24 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                     title={item.accountantNote}
                     meta={`اولویت: ${item.priority}`}
                     status={<StatusBadge status={item.status} />}
-                    footer={['OPEN', 'ACKNOWLEDGED'].includes(item.status) ? (
+                    footer={['APPROVED_FOR_SALES_EDIT', 'SALES_EDITED'].includes(item.status) ? (
                       <div className="flex flex-wrap gap-2">
-                        {contract.accounting.invoiceStatus !== 'ISSUED' && (
+                        {item.status === 'APPROVED_FOR_SALES_EDIT' && (
                           <ErpButton
-                            label="ویرایش فروش"
+                            label="اصلاح قرارداد"
                             href={`/dashboard/sales/contracts/${contract.contractId}/edit`}
                             icon={FaEdit}
                             tone="info"
                             variant="outline"
                           />
                         )}
-                        <ErpButton
+                        {item.status === 'SALES_EDITED' && <ErpButton
                           label="بستن اصلاح"
                           icon={FaCheckCircle}
                           tone="success"
                           disabled={actionLoading}
                           onClick={() => setResolveTarget(item)}
-                        />
+                        />}
                       </div>
                     ) : undefined}
                   />

@@ -1,11 +1,22 @@
 ﻿// Contract service
 // Handles contract business logic
 
-import { Prisma, PrismaClient } from '@prisma/client';
+import { CorrectionRequestStatus, Prisma, PrismaClient } from '@prisma/client';
 import { generateContractNumberAssignment } from './contractNumberService';
 import { buildAccountingSummaryForContracts } from './accountingService';
 
 const prisma = new PrismaClient();
+
+const getApprovedSalesCorrection = (contractId: string, tx: Prisma.TransactionClient | PrismaClient = prisma) =>
+  tx.accountingCorrectionRequest.findFirst({
+    where: {
+      contractId,
+      status: CorrectionRequestStatus.APPROVED_FOR_SALES_EDIT
+    },
+    orderBy: { updatedAt: 'desc' }
+  });
+
+const toJsonValue = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
 export interface CreateContractData {
   title: string;
@@ -195,8 +206,9 @@ export async function updateContract(
     },
     select: { id: true }
   });
+  const approvedSalesCorrection = await getApprovedSalesCorrection(contractId);
 
-  if (financiallyApprovedRecord) {
+  if (financiallyApprovedRecord && !approvedSalesCorrection) {
     throw new Error('Contract cannot be modified after accounting financial approval');
   }
 
@@ -278,6 +290,33 @@ export async function updateContract(
           });
         }
       }
+    }
+
+    if (approvedSalesCorrection) {
+      const updatedCorrection = await tx.accountingCorrectionRequest.update({
+        where: { id: approvedSalesCorrection.id },
+        data: {
+          status: CorrectionRequestStatus.SALES_EDITED,
+          resolutionNote: [
+            approvedSalesCorrection.resolutionNote,
+            data.notes ? `Sales correction save note: ${data.notes}` : null
+          ].filter(Boolean).join('\n')
+        }
+      });
+
+      await tx.accountingAuditLog.create({
+        data: {
+          action: 'SALES_CORRECTION_SAVED',
+          actorId: userId,
+          contractId,
+          recordId: updatedCorrection.recordId,
+          entityType: 'AccountingCorrectionRequest',
+          entityId: updatedCorrection.id,
+          beforeState: toJsonValue(approvedSalesCorrection),
+          afterState: toJsonValue(updatedCorrection),
+          note: data.notes || null
+        }
+      });
     }
 
     return tx.salesContract.update({
@@ -381,11 +420,21 @@ export async function getContract(contractId: string) {
     },
     select: { id: true, financiallyApprovedAt: true }
   });
+  const approvedSalesCorrection = await getApprovedSalesCorrection(contractId);
   const accountingSummaries = await buildAccountingSummaryForContracts([contract]);
 
   return {
     ...contract,
     accountingEditLocked: Boolean(financiallyApprovedRecord),
+    canOpenCorrectionEdit: Boolean(approvedSalesCorrection),
+    activeCorrectionRequest: approvedSalesCorrection ? {
+      id: approvedSalesCorrection.id,
+      category: approvedSalesCorrection.category,
+      priority: approvedSalesCorrection.priority,
+      status: approvedSalesCorrection.status,
+      accountantNote: approvedSalesCorrection.accountantNote,
+      resolutionNote: approvedSalesCorrection.resolutionNote
+    } : null,
     accountingFinanciallyApprovedAt: financiallyApprovedRecord?.financiallyApprovedAt || null,
     accounting: accountingSummaries.get(contract.id) || null
   };

@@ -200,7 +200,7 @@ export default function AccountingDashboardPage() {
       </div>
 
       <ErpSection
-        title="درخواست‌های اصلاح"
+        title="بررسی اصلاحات"
         description="درخواست‌هایی که حسابداری برای تکمیل اطلاعات فروش، مشتری، پرداخت، تحویل یا مالیات ثبت کرده است."
         actions={[{ label: 'مشاهده همه', href: '/dashboard/accounting/correction-requests', icon: FaExclamationTriangle, tone: 'warning' }]}
       >

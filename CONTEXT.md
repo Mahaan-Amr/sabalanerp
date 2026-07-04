@@ -364,12 +364,12 @@ An accounting financial record may be physically deleted only while it is still 
 _Avoid_: deleting financially approved accounting records, or keeping undeletable draft clutter when a new draft should be regenerated
 
 **درخواست اصلاح حسابداری**:
-A correction request created by accounting when a sales contract or related draft accounting data needs correction before accounting can clear it. Sales performs contract corrections through the step-based contract edit flow, and accounting keeps the request open until it reviews the corrected contract and resolves the request.
-_Avoid_: accounting silently editing the commercial contract, or closing a correction request before accounting has reviewed the corrected contract
+A correction request created by accounting when a sales contract or related accounting data needs correction. It moves from manager review, to an approved sales correction window when allowed, to accounting review of the corrected contract, and finally to resolution or cancellation.
+_Avoid_: accounting silently editing the commercial contract, or treating a requested correction as permission for sales to edit before manager approval
 
 **اصلاح حسابداری پس از تایید مالی**:
-A correction request after financial approval is an accounting-side tracking and remediation workflow, not permission for sales to edit the locked contract. Fixing it requires accounting void, reversal, or correction handling instead of the normal sales contract edit flow.
-_Avoid_: reopening sales edits after financial approval, or treating post-approval correction as the same workflow as pre-approval correction
+A correction request after financial approval can reopen a locked sales contract for a controlled sales correction only after manager approval. The existing financially approved record remains immutable and accounting owns any void, reversal, correction, review, and replacement approval needed after the sales correction.
+_Avoid_: editing the approved financial record directly, or treating manager-approved sales correction as accounting approval of the replacement financial result
 
 **تایید مالی با اصلاح باز**:
 Accounting financial approval is blocked while a contract has an open or acknowledged pre-approval correction request. Accounting must review and resolve the correction request before financially approving the invoice candidate.
@@ -379,6 +379,14 @@ _Avoid_: financially approving and locking a contract while a requested sales co
 After sales edits a contract for a pre-approval correction request, the request remains open until accounting manually reviews the corrected contract and resolves it with an optional resolution note.
 _Avoid_: adding a separate handoff status before the workflow needs it, or auto-resolving a correction request merely because the contract was edited
 
+**بررسی اصلاحات حسابداری**:
+The manager-level accounting review of whether an accounting correction request may open a controlled sales contract correction window. The authority belongs to accounting workspace admin permission, with global administrators included.
+_Avoid_: hard-coding review authority only to a role name, or allowing normal accounting edit permission to approve sales unlocks
+
+**رد اصلاح حسابداری**:
+A manager decision that closes a correction request without opening sales editing, while preserving the existing contract and financial record states. The decline reason is part of the accounting audit trail.
+_Avoid_: unlocking the contract after a declined review, or changing the financial record just because the request was declined
+
 **عملکرد حسابدار**:
 An operational accounting metric for how quickly and consistently an accountant performs auditable accounting workflow actions, measured from accounting records and audit events rather than browser presence.
 _Avoid_: treating accountant performance as hidden activity tracking, keystroke monitoring, or time spent with a page open
@@ -386,6 +394,10 @@ _Avoid_: treating accountant performance as hidden activity tracking, keystroke 
 **ویرایش مرحله‌ای قرارداد فروش**:
 Editing a sales contract uses the same step-based contract workflow as creation, with prefilled saved contract details and direct access to any step that may need correction.
 _Avoid_: a separate simplified edit form, or forcing linear navigation during edit
+
+**پنجره اصلاح قرارداد فروش**:
+A controlled sales-edit opportunity tied to an approved accounting correction request. It allows sales to use the normal full step-based contract edit flow with the correction category and accountant note visible, save one correction edit, and then return the contract to the accounting lock until accounting reviews the corrected contract.
+_Avoid_: leaving a previously locked contract generally editable, or trying to field-lock contract editing by correction category
 
 **اعتبارسنجی ویرایش قرارداد فروش**:
 During sales contract editing, users may jump directly to any step, but saving changes requires the complete contract to be valid; validation should point the user to the first invalid step.

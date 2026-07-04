@@ -153,6 +153,15 @@ export const sourceStatusLabels: Record<string, string> = {
   NEEDS_CORRECTION: 'نیازمند اصلاح',
 };
 
+export const correctionStatusLabels: Record<string, string> = {
+  OPEN: 'در انتظار بررسی مدیر',
+  ACKNOWLEDGED: 'در جریان',
+  APPROVED_FOR_SALES_EDIT: 'تایید شده برای اصلاح فروش',
+  SALES_EDITED: 'اصلاح شده توسط فروش',
+  RESOLVED: 'بسته شده',
+  CANCELLED: 'رد یا لغو شده',
+};
+
 export const money = (amount?: string | number | null, _currency = 'ریال') => {
   const value = toFiniteNumber(amount);
   return `${formatDisplayNumber(value)} ریال`;
@@ -165,9 +174,9 @@ export const dateFa = (value?: string | Date | null) => {
 
 export const toneForStatus = (status?: string): ErpTone => {
   if (!status) return 'neutral';
-  if (['SIGNED', 'SETTLED', 'ACCEPTED', 'READY', 'CLEARED', 'RECONCILED'].includes(status)) return 'success';
-  if (['APPROVED', 'ISSUED', 'OPEN', 'RECEIVED', 'SUBMITTED_MANUALLY', 'SUBMITTED_EXTERNALLY'].includes(status)) return 'info';
-  if (['PENDING_APPROVAL', 'DRAFT', 'PARTIALLY_PAID', 'RECEIVED', 'DEPOSITED'].includes(status)) return 'warning';
+  if (['SIGNED', 'SETTLED', 'ACCEPTED', 'READY', 'CLEARED', 'RECONCILED', 'RESOLVED'].includes(status)) return 'success';
+  if (['APPROVED', 'ISSUED', 'OPEN', 'RECEIVED', 'SUBMITTED_MANUALLY', 'SUBMITTED_EXTERNALLY', 'APPROVED_FOR_SALES_EDIT'].includes(status)) return 'info';
+  if (['PENDING_APPROVAL', 'DRAFT', 'PARTIALLY_PAID', 'RECEIVED', 'DEPOSITED', 'SALES_EDITED'].includes(status)) return 'warning';
   if (['CANCELLED', 'VOIDED', 'OVERDUE', 'REJECTED', 'NEEDS_CORRECTION', 'BOUNCED', 'DISPUTED'].includes(status)) return 'danger';
   return 'neutral';
 };
@@ -175,7 +184,7 @@ export const toneForStatus = (status?: string): ErpTone => {
 export function StatusBadge({ label, status, tone }: { label?: string; status?: string; tone?: ErpTone }) {
   return (
     <ErpBadge tone={tone || toneForStatus(status)}>
-      {label || (status ? taxStatusLabels[status] || receivableStatusLabels[status] || invoiceStatusLabels[status] || contractStatusLabels[status] || status : '—')}
+      {label || (status ? correctionStatusLabels[status] || taxStatusLabels[status] || receivableStatusLabels[status] || invoiceStatusLabels[status] || contractStatusLabels[status] || status : '—')}
     </ErpBadge>
   );
 }

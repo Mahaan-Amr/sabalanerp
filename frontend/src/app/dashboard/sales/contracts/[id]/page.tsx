@@ -54,6 +54,12 @@ interface Contract {
   printedAt?: string;
   isSigned?: boolean;
   accountingEditLocked?: boolean;
+  canOpenCorrectionEdit?: boolean;
+  activeCorrectionRequest?: {
+    id: string;
+    category: string;
+    accountantNote: string;
+  } | null;
   accounting?: {
     sourceStatus: string;
     invoiceStatus: string;
@@ -362,7 +368,7 @@ export default function ContractDetailPage() {
     sumNumericValues(products, (item: any) => item.totalPrice) ||
     toFiniteNumber(contract.contractData?.payment?.totalAmount);
 
-  const canEdit = !contract.accountingEditLocked && (contractPermissions.canEdit || contract.createdByUser.id === currentUser?.id);
+  const canEdit = (!contract.accountingEditLocked || contract.canOpenCorrectionEdit) && (contractPermissions.canEdit || contract.createdByUser.id === currentUser?.id);
   const canApprove = (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canApprove;
   const canReject = (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canReject;
   const canSign = contract.status === 'APPROVED' && contractPermissions.canSign;
@@ -374,7 +380,13 @@ export default function ContractDetailPage() {
     hasFeatureAccess(currentUser, 'sales_verification_send', 'edit');
 
   const actions: ErpAction[] = [
-    ...(canEdit ? [{ label: 'ویرایش', href: `/dashboard/sales/contracts/${contract.id}/edit`, icon: FaEdit, tone: 'info' as ErpTone, variant: 'soft' as const }] : []),
+    ...(canEdit ? [{
+      label: contract.canOpenCorrectionEdit ? 'اصلاح قرارداد' : 'ویرایش',
+      href: `/dashboard/sales/contracts/${contract.id}/edit`,
+      icon: FaEdit,
+      tone: (contract.canOpenCorrectionEdit ? 'warning' : 'info') as ErpTone,
+      variant: 'soft' as const
+    }] : []),
     ...(canApprove ? [{ label: 'تایید', onClick: () => handleAction('approve'), icon: FaCheck, tone: 'success' as ErpTone, disabled: actionLoading === 'approve' }] : []),
     ...(canReject ? [{ label: 'رد', onClick: () => handleAction('reject'), icon: FaTimes, tone: 'danger' as ErpTone, disabled: actionLoading === 'reject' }] : []),
     ...(canSign ? [{ label: 'امضا', onClick: () => handleAction('sign'), icon: FaSignature, tone: 'success' as ErpTone, disabled: actionLoading === 'sign' }] : []),

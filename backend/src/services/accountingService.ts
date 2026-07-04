@@ -29,6 +29,13 @@ const ELIGIBLE_CONTRACT_STATUSES: ContractStatus[] = [
 const DEFAULT_PAGE_SIZE = 50;
 const DEFAULT_CURRENCY = 'ریال';
 
+const activeCorrectionStatuses = () => [
+  CorrectionRequestStatus.OPEN,
+  CorrectionRequestStatus.APPROVED_FOR_SALES_EDIT,
+  CorrectionRequestStatus.SALES_EDITED,
+  CorrectionRequestStatus.ACKNOWLEDGED
+];
+
 type Actor = {
   userId: string;
   role: string;
@@ -406,7 +413,7 @@ const buildContractRow = async (contract: any, settings: any) => {
   const remainingAmount = Prisma.Decimal.max(contractAmount.minus(receivedAmount), new Prisma.Decimal(0));
   const missingFields = getTaxMissingFields(contract, settings);
   const eligible = ELIGIBLE_CONTRACT_STATUSES.includes(contract.status);
-  const openCorrections = corrections.filter((item: any) => item.status === CorrectionRequestStatus.OPEN || item.status === CorrectionRequestStatus.ACKNOWLEDGED);
+  const openCorrections = corrections.filter((item: any) => activeCorrectionStatuses().includes(item.status));
   const openFlags = flags.filter((item: any) => item.status === 'OPEN');
   const hasRecords = records.length > 0 || receivables.length > 0 || payments.length > 0 || taxRecords.length > 0;
   const issuedInvoices = records.filter((record: any) => (
@@ -725,7 +732,7 @@ export const getAccountingWorkspace = async () => {
     where: { submissionStatus: { in: [TaxSubmissionStatus.NOT_READY, TaxSubmissionStatus.NEEDS_CORRECTION, TaxSubmissionStatus.REJECTED] } }
   });
   const openCorrections = await prisma.accountingCorrectionRequest.findMany({
-    where: { status: { in: [CorrectionRequestStatus.OPEN, CorrectionRequestStatus.ACKNOWLEDGED] } }
+    where: { status: { in: activeCorrectionStatuses() } }
   });
 
   return {
@@ -857,6 +864,10 @@ export const executeAccountingAction = async (command: AccountingActionRequest, 
       return trackTaxSubmission(command, actor);
     case 'REQUEST_CORRECTION':
       return requestCorrection(command, actor);
+    case 'APPROVE_CORRECTION_FOR_SALES_EDIT':
+      return approveCorrectionForSalesEdit(command, actor);
+    case 'DECLINE_CORRECTION':
+      return declineCorrectionRequest(command, actor);
     case 'FLAG_CONTRACT':
       return flagContract(command, actor);
     case 'VOID_ACCOUNTING_RECORD':
@@ -983,7 +994,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       const openCorrection = await tx.accountingCorrectionRequest.findFirst({
         where: {
           contractId: before.contractId,
-          status: { in: [CorrectionRequestStatus.OPEN, CorrectionRequestStatus.ACKNOWLEDGED] }
+          status: { in: activeCorrectionStatuses() }
         }
       });
       if (openCorrection) {
@@ -1320,7 +1331,19 @@ const trackTaxSubmission = async (command: AccountingActionRequest, actor: Actor
 };
 
 const requestCorrection = async (command: AccountingActionRequest, actor: Actor) => {
+  if (!command.contractId) throw new Error('contractId is required');
   const correction = await prisma.$transaction(async (tx) => {
+    const activeRequest = await tx.accountingCorrectionRequest.findFirst({
+      where: {
+        contractId: command.contractId,
+        status: { in: activeCorrectionStatuses() }
+      },
+      select: { id: true }
+    });
+    if (activeRequest) {
+      throw new Error('An active correction request already exists for this contract');
+    }
+
     const item = await tx.accountingCorrectionRequest.create({
       data: {
         contractId: command.contractId,
@@ -1353,6 +1376,97 @@ const requestCorrection = async (command: AccountingActionRequest, actor: Actor)
   return actionResponse('APPLIED', 'درخواست اصلاح ثبت شد', { contractId: correction.contractId || undefined });
 };
 
+const approveCorrectionForSalesEdit = async (command: AccountingActionRequest, actor: Actor) => {
+  const correctionRequestId = command.correctionRequestId || command.recordId;
+  if (!correctionRequestId) throw new Error('correctionRequestId is required');
+
+  const correction = await prisma.$transaction(async (tx) => {
+    const before = await tx.accountingCorrectionRequest.findUnique({ where: { id: correctionRequestId } });
+    if (!before) throw new Error('Correction request not found');
+    if (before.status !== CorrectionRequestStatus.OPEN && before.status !== CorrectionRequestStatus.ACKNOWLEDGED) {
+      throw new Error('Only open correction requests can be approved for sales edit');
+    }
+    if (!before.contractId) throw new Error('Correction request is not linked to a contract');
+
+    const otherActive = await tx.accountingCorrectionRequest.findFirst({
+      where: {
+        contractId: before.contractId,
+        id: { not: before.id },
+        status: { in: activeCorrectionStatuses() }
+      },
+      select: { id: true }
+    });
+    if (otherActive) throw new Error('Another active correction request already exists for this contract');
+
+    const updated = await tx.accountingCorrectionRequest.update({
+      where: { id: correctionRequestId },
+      data: {
+        status: CorrectionRequestStatus.APPROVED_FOR_SALES_EDIT,
+        resolutionNote: command.note || command.resolutionNote || before.resolutionNote
+      }
+    });
+
+    await audit(tx, {
+      action: 'APPROVE_CORRECTION_FOR_SALES_EDIT',
+      actorId: actor.userId,
+      contractId: updated.contractId,
+      recordId: updated.recordId,
+      entityType: 'AccountingCorrectionRequest',
+      entityId: updated.id,
+      beforeState: toJsonValue(before),
+      afterState: toJsonValue(updated),
+      note: command.note || command.resolutionNote || null
+    });
+
+    return updated;
+  });
+
+  return actionResponse('APPLIED', 'درخواست اصلاح برای ویرایش فروش تایید شد', { contractId: correction.contractId || undefined });
+};
+
+const declineCorrectionRequest = async (command: AccountingActionRequest, actor: Actor) => {
+  const correctionRequestId = command.correctionRequestId || command.recordId;
+  if (!correctionRequestId) throw new Error('correctionRequestId is required');
+  const declineNote = String(command.resolutionNote || command.note || '').trim();
+  if (!declineNote) throw new Error('Decline note is required');
+
+  const correction = await prisma.$transaction(async (tx) => {
+    const before = await tx.accountingCorrectionRequest.findUnique({ where: { id: correctionRequestId } });
+    if (!before) throw new Error('Correction request not found');
+    if (before.status === CorrectionRequestStatus.RESOLVED) throw new Error('Resolved correction requests cannot be declined');
+    if (before.status === CorrectionRequestStatus.CANCELLED) return before;
+    if (before.status === CorrectionRequestStatus.SALES_EDITED) {
+      throw new Error('Correction requests already edited by sales cannot be declined');
+    }
+
+    const updated = await tx.accountingCorrectionRequest.update({
+      where: { id: correctionRequestId },
+      data: {
+        status: CorrectionRequestStatus.CANCELLED,
+        resolutionNote: declineNote,
+        resolvedBy: actor.userId,
+        resolvedAt: new Date()
+      }
+    });
+
+    await audit(tx, {
+      action: 'DECLINE_CORRECTION',
+      actorId: actor.userId,
+      contractId: updated.contractId,
+      recordId: updated.recordId,
+      entityType: 'AccountingCorrectionRequest',
+      entityId: updated.id,
+      beforeState: toJsonValue(before),
+      afterState: toJsonValue(updated),
+      note: declineNote
+    });
+
+    return updated;
+  });
+
+  return actionResponse('APPLIED', 'درخواست اصلاح رد شد', { contractId: correction.contractId || undefined });
+};
+
 const resolveCorrectionRequest = async (command: AccountingActionRequest, actor: Actor) => {
   const correctionRequestId = command.correctionRequestId || command.recordId;
   if (!correctionRequestId) throw new Error('correctionRequestId is required');
@@ -1365,6 +1479,12 @@ const resolveCorrectionRequest = async (command: AccountingActionRequest, actor:
     }
     if (before.status === CorrectionRequestStatus.CANCELLED) {
       throw new Error('Cancelled correction requests cannot be resolved');
+    }
+    if (before.status === CorrectionRequestStatus.OPEN || before.status === CorrectionRequestStatus.ACKNOWLEDGED) {
+      throw new Error('Correction requests must be approved and edited before they can be resolved');
+    }
+    if (before.status === CorrectionRequestStatus.APPROVED_FOR_SALES_EDIT) {
+      throw new Error('Sales must save the correction before accounting can resolve it');
     }
 
     const updated = await tx.accountingCorrectionRequest.update({

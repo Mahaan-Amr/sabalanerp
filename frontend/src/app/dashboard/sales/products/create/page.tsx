@@ -530,7 +530,20 @@ export default function CreateStoneProductWizard() {
       wizardData.mine?.code,
       wizardData.finishType?.code,
       wizardData.color?.code
-    ].filter(Boolean).join('-');
+    ].filter(Boolean).join('');
+  };
+
+  const generateCanonicalProductName = () => {
+    const widthLabel = wizardData.cutWidth?.value ? `ع${wizardData.cutWidth.value}` : '';
+    const thicknessLabel = wizardData.thickness?.value ? `ض${wizardData.thickness.value}` : '';
+    return [
+      wizardData.cutType?.namePersian,
+      wizardData.stoneMaterial?.namePersian,
+      widthLabel,
+      thicknessLabel,
+      wizardData.mine?.namePersian,
+      wizardData.finishType?.namePersian
+    ].filter(Boolean).join(' ');
   };
 
   const handleCreateProduct = async () => {
@@ -540,23 +553,24 @@ export default function CreateStoneProductWizard() {
       setLoading(true);
       
       const finalCode = generateFinalCode();
+      const canonicalProductName = generateCanonicalProductName();
       
       const productData = {
         code: finalCode,
-        name: `${wizardData.cutType?.namePersian} - ${wizardData.stoneMaterial?.namePersian}`,
-        namePersian: `${wizardData.cutType?.namePersian} - ${wizardData.stoneMaterial?.namePersian}`,
+        name: canonicalProductName,
+        namePersian: canonicalProductName,
         cuttingDimensionCode: wizardData.cutType?.code || '',
         cuttingDimensionName: wizardData.cutType?.name || '',
         cuttingDimensionNamePersian: wizardData.cutType?.namePersian || '',
-        stoneTypeCode: wizardData.cutType?.code || '',
-        stoneTypeName: wizardData.cutType?.name || '',
-        stoneTypeNamePersian: wizardData.cutType?.namePersian || '',
+        stoneTypeCode: wizardData.stoneMaterial?.code || '',
+        stoneTypeName: wizardData.stoneMaterial?.name || '',
+        stoneTypeNamePersian: wizardData.stoneMaterial?.namePersian || '',
         widthCode: wizardData.cutWidth?.code || '',
         widthValue: wizardData.cutWidth?.value || 0,
-        widthName: `${wizardData.cutWidth?.value || 0} ${wizardData.cutWidth?.unit || 'cm'}`,
+        widthName: wizardData.cutWidth?.value ? `ع${wizardData.cutWidth.value}` : '',
         thicknessCode: wizardData.thickness?.code || '',
         thicknessValue: wizardData.thickness?.value || 0,
-        thicknessName: `${wizardData.thickness?.value || 0} ${wizardData.thickness?.unit || 'cm'}`,
+        thicknessName: wizardData.thickness?.value ? `ض${wizardData.thickness.value}` : '',
         mineCode: wizardData.mine?.code || '',
         mineName: wizardData.mine?.name || '',
         mineNamePersian: wizardData.mine?.namePersian || '',

@@ -8,7 +8,7 @@ import multer from 'multer';
 import XLSX from 'xlsx';
 import path from 'path';
 import fs from 'fs';
-import { applyCatalogPlan, buildCatalogPlan, buildExportWorkbook, buildTemplateWorkbook } from '../services/catalogExcelSync';
+import { applyCatalogPlan, buildCatalogPlan, buildExportWorkbook, buildTemplateWorkbook, canonicalizeProductData } from '../services/catalogExcelSync';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -682,9 +682,11 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
       });
     }
 
+    const canonicalProduct = canonicalizeProductData({ ...req.body }, 1);
+
     // Check if product code already exists
     const existingProduct = await prisma.product.findUnique({
-      where: { code: req.body.code }
+      where: { code: canonicalProduct.key }
     });
 
     if (existingProduct) {
@@ -695,45 +697,45 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
     }
 
     const defaultContractVisibility = resolveContractVisibilityFromCutType(
-      req.body.cuttingDimensionNamePersian || req.body.cuttingDimensionName
+      canonicalProduct.data.cuttingDimensionNamePersian || canonicalProduct.data.cuttingDimensionName
     );
 
     const product = await prisma.product.create({
       data: {
-        code: req.body.code,
-        name: req.body.name,
-        namePersian: req.body.namePersian,
-        cuttingDimensionCode: req.body.cuttingDimensionCode,
-        cuttingDimensionName: req.body.cuttingDimensionName,
-        cuttingDimensionNamePersian: req.body.cuttingDimensionNamePersian,
-        stoneTypeCode: req.body.stoneTypeCode,
-        stoneTypeName: req.body.stoneTypeName,
-        stoneTypeNamePersian: req.body.stoneTypeNamePersian,
-        widthCode: req.body.widthCode,
-        widthValue: parseFloat(req.body.widthValue),
-        widthName: req.body.widthName,
-        thicknessCode: req.body.thicknessCode,
-        thicknessValue: parseFloat(req.body.thicknessValue),
-        thicknessName: req.body.thicknessName,
-        mineCode: req.body.mineCode,
-        mineName: req.body.mineName,
-        mineNamePersian: req.body.mineNamePersian,
-        finishCode: req.body.finishCode,
-        finishName: req.body.finishName,
-        finishNamePersian: req.body.finishNamePersian,
-        colorCode: req.body.colorCode,
-        colorName: req.body.colorName,
-        colorNamePersian: req.body.colorNamePersian,
-        qualityCode: req.body.qualityCode,
-        qualityName: req.body.qualityName,
-        qualityNamePersian: req.body.qualityNamePersian,
-        basePrice: req.body.basePrice ? parseFloat(req.body.basePrice) : null,
-        currency: req.body.currency || 'ریال',
-        isAvailable: req.body.isAvailable !== undefined ? req.body.isAvailable : true,
-        leadTime: req.body.leadTime ? parseInt(req.body.leadTime) : null,
-        description: req.body.description || null,
-        images: req.body.images || [],
-        isActive: req.body.isActive !== undefined ? req.body.isActive : true,
+        code: canonicalProduct.data.code,
+        name: canonicalProduct.data.name,
+        namePersian: canonicalProduct.data.namePersian,
+        cuttingDimensionCode: canonicalProduct.data.cuttingDimensionCode,
+        cuttingDimensionName: canonicalProduct.data.cuttingDimensionName,
+        cuttingDimensionNamePersian: canonicalProduct.data.cuttingDimensionNamePersian,
+        stoneTypeCode: canonicalProduct.data.stoneTypeCode,
+        stoneTypeName: canonicalProduct.data.stoneTypeName,
+        stoneTypeNamePersian: canonicalProduct.data.stoneTypeNamePersian,
+        widthCode: canonicalProduct.data.widthCode,
+        widthValue: parseFloat(canonicalProduct.data.widthValue),
+        widthName: canonicalProduct.data.widthName,
+        thicknessCode: canonicalProduct.data.thicknessCode,
+        thicknessValue: parseFloat(canonicalProduct.data.thicknessValue),
+        thicknessName: canonicalProduct.data.thicknessName,
+        mineCode: canonicalProduct.data.mineCode,
+        mineName: canonicalProduct.data.mineName,
+        mineNamePersian: canonicalProduct.data.mineNamePersian,
+        finishCode: canonicalProduct.data.finishCode,
+        finishName: canonicalProduct.data.finishName,
+        finishNamePersian: canonicalProduct.data.finishNamePersian,
+        colorCode: canonicalProduct.data.colorCode,
+        colorName: canonicalProduct.data.colorName,
+        colorNamePersian: canonicalProduct.data.colorNamePersian,
+        qualityCode: canonicalProduct.data.qualityCode,
+        qualityName: canonicalProduct.data.qualityName,
+        qualityNamePersian: canonicalProduct.data.qualityNamePersian,
+        basePrice: canonicalProduct.data.basePrice ? parseFloat(canonicalProduct.data.basePrice) : null,
+        currency: canonicalProduct.data.currency || 'ریال',
+        isAvailable: canonicalProduct.data.isAvailable !== undefined ? canonicalProduct.data.isAvailable : true,
+        leadTime: canonicalProduct.data.leadTime ? parseInt(canonicalProduct.data.leadTime) : null,
+        description: canonicalProduct.data.description || null,
+        images: canonicalProduct.data.images || [],
+        isActive: canonicalProduct.data.isActive !== undefined ? canonicalProduct.data.isActive : true,
         availableInLongitudinalContracts: req.body.availableInLongitudinalContracts !== undefined ? req.body.availableInLongitudinalContracts : defaultContractVisibility.availableInLongitudinalContracts,
         availableInStairContracts: req.body.availableInStairContracts !== undefined ? req.body.availableInStairContracts : defaultContractVisibility.availableInStairContracts,
         availableInSlabContracts: req.body.availableInSlabContracts !== undefined ? req.body.availableInSlabContracts : defaultContractVisibility.availableInSlabContracts,

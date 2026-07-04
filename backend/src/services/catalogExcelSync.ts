@@ -16,9 +16,11 @@ type RemovalAction = 'hardDelete' | 'deactivate';
 
 interface ParsedRow {
   key: string;
+  uploadedKey?: string;
   rowNumber: number;
   label: string;
   data: Record<string, any>;
+  warnings?: string[];
 }
 
 export interface CatalogSyncPlan {
@@ -32,11 +34,13 @@ export interface CatalogSyncPlan {
     updates: number;
     removals: number;
     errors: number;
+    warnings: number;
   };
   creates: Array<{ key: string; rowNumber: number; label: string; data: Record<string, any> }>;
   updates: Array<{ key: string; rowNumber: number; label: string; changes: Record<string, { from: any; to: any }> }>;
   removals: Array<{ key: string; label: string; action: RemovalAction; reason: string }>;
   errors: Array<{ row?: number; key?: string; error: string }>;
+  warnings: Array<{ row?: number; key?: string; warning: string }>;
 }
 
 interface StoredPlan {
@@ -60,6 +64,7 @@ const normalizeText = (input: unknown): string => normalizeDigits(input)
   .trim();
 
 const text = (input: unknown): string => String(input ?? '').trim();
+const codeText = (input: unknown): string => normalizeDigits(input).trim();
 
 const numberFrom = (input: unknown, fallback = 0): number => {
   const normalized = normalizeDigits(input).replace(/,/g, '').trim();
@@ -88,12 +93,130 @@ const toComparable = (value: any): string => {
 
 const decimal = (value: unknown) => new Prisma.Decimal(numberFrom(value, 0));
 
+const compactNumber = (input: unknown): string => {
+  const normalized = normalizeDigits(input).replace(/,/g, '').trim();
+  const match = normalized.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return '';
+  return match[0].replace(/\.0+$/, '');
+};
+
+const widthLabel = (input: unknown): string => {
+  const value = text(input);
+  if (!value) return '';
+  if (normalizeText(value).startsWith('ع')) return value;
+  const numeric = compactNumber(value);
+  return numeric ? `ع${numeric}` : value;
+};
+
+const thicknessLabel = (input: unknown): string => {
+  const value = text(input);
+  if (!value) return '';
+  if (normalizeText(value).startsWith('ض')) return value;
+  const numeric = compactNumber(value);
+  return numeric ? `ض${numeric}` : value;
+};
+
+const buildCanonicalProductName = (data: Record<string, any>) => [
+  data.cuttingDimensionNamePersian,
+  data.stoneTypeNamePersian,
+  widthLabel(data.widthName || data.widthValue),
+  thicknessLabel(data.thicknessName || data.thicknessValue),
+  data.mineNamePersian,
+  data.finishNamePersian
+].map(text).filter(Boolean).join(' ');
+
+const productCodeComponents = [
+  'cuttingDimensionCode',
+  'stoneTypeCode',
+  'widthCode',
+  'thicknessCode',
+  'mineCode',
+  'finishCode',
+  'colorCode'
+];
+
+const buildCanonicalProductCode = (data: Record<string, any>): string | null => {
+  const parts = productCodeComponents.map((field) => codeText(data[field]));
+  return parts.every(Boolean) ? parts.join('') : null;
+};
+
+const missingCanonicalNameFields = (data: Record<string, any>) => {
+  const fields: Array<[string, unknown]> = [
+    ['نوع برش', data.cuttingDimensionNamePersian],
+    ['جنس سنگ', data.stoneTypeNamePersian],
+    ['عرض', data.widthName || data.widthValue],
+    ['ضخامت', data.thicknessName || data.thicknessValue],
+    ['معدن', data.mineNamePersian],
+    ['نوع پرداخت', data.finishNamePersian]
+  ];
+  return fields.filter(([, value]) => !text(value)).map(([label]) => label);
+};
+
+export const canonicalizeProductData = (data: Record<string, any>, rowNumber: number) => {
+  const warnings: string[] = [];
+  const uploadedCode = codeText(data.code);
+  for (const field of productCodeComponents.concat(['qualityCode'])) {
+    if (data[field] !== undefined) data[field] = codeText(data[field]);
+  }
+
+  const generatedName = buildCanonicalProductName(data);
+  const missingNameFields = missingCanonicalNameFields(data);
+  if (generatedName) {
+    if (text(data.namePersian) && normalizeText(data.namePersian) !== normalizeText(generatedName)) {
+      warnings.push(`نام محصول از روی اجزای محصول بازسازی شد: ${generatedName}`);
+    }
+    data.namePersian = generatedName;
+    data.name = generatedName;
+  }
+  if (missingNameFields.length) {
+    warnings.push(`اجزای نام محصول کامل نیستند: ${missingNameFields.join('، ')}`);
+  }
+
+  const generatedCode = buildCanonicalProductCode(data);
+  if (generatedCode) {
+    if (uploadedCode && uploadedCode !== generatedCode) {
+      warnings.push(`کد محصول از روی اجزای کد اصلاح شد: ${uploadedCode} ← ${generatedCode}`);
+    }
+    data.code = generatedCode;
+  } else {
+    data.code = uploadedCode;
+    const missingCodeFields = productCodeComponents
+      .filter((field) => !codeText(data[field]))
+      .join(', ');
+    warnings.push(`اجزای کد محصول کامل نیستند: ${missingCodeFields}`);
+  }
+
+  return {
+    data,
+    key: data.code,
+    uploadedKey: uploadedCode || undefined,
+    label: data.namePersian || data.name || data.code || `ردیف ${rowNumber}`,
+    warnings
+  };
+};
+
 const worksheetRows = (workbook: XLSX.WorkBook, preferredSheet?: string): any[][] => {
   const sheetName = preferredSheet && workbook.Sheets[preferredSheet]
     ? preferredSheet
     : workbook.SheetNames[0];
   if (!sheetName) return [];
   return XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, raw: false, defval: '' }) as any[][];
+};
+
+const applyTextFormatToColumns = (worksheet: XLSX.WorkSheet, columnIndexes: number[]) => {
+  const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1:A1');
+  for (const columnIndex of columnIndexes) {
+    for (let rowIndex = range.s.r; rowIndex <= range.e.r; rowIndex += 1) {
+      const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
+      const cellValue = worksheet[address]?.v ?? '';
+      worksheet[address] = {
+        ...(worksheet[address] || {}),
+        t: 's',
+        v: String(cellValue),
+        z: '@'
+      };
+    }
+  }
 };
 
 const headerMap = (headers: any[]) => {
@@ -152,30 +275,30 @@ const parseProducts = (workbook: XLSX.WorkBook): { rows: ParsedRow[]; sourceForm
     const rowNumber = index + 1;
     const data = isOpc
       ? {
-          code: text(row[15]),
+          code: codeText(row[15]),
           name: text(row[14]),
           namePersian: text(row[14]),
           cuttingDimensionName: text(row[0]),
           cuttingDimensionNamePersian: text(row[0]),
-          cuttingDimensionCode: text(row[1]),
+          cuttingDimensionCode: codeText(row[1]),
           stoneTypeName: text(row[2]),
           stoneTypeNamePersian: text(row[2]),
-          stoneTypeCode: text(row[3]),
+          stoneTypeCode: codeText(row[3]),
           widthName: text(row[4]),
           widthValue: numberFrom(row[4]),
-          widthCode: text(row[5]),
+          widthCode: codeText(row[5]),
           thicknessName: text(row[6]),
           thicknessValue: numberFrom(row[6]),
-          thicknessCode: text(row[7]),
+          thicknessCode: codeText(row[7]),
           mineName: text(row[8]),
           mineNamePersian: text(row[8]),
-          mineCode: text(row[9]),
+          mineCode: codeText(row[9]),
           finishName: text(row[10]),
           finishNamePersian: text(row[10]),
-          finishCode: text(row[11]),
+          finishCode: codeText(row[11]),
           colorName: text(row[12]) || 'بدون رنگ',
           colorNamePersian: text(row[12]) || 'بدون رنگ',
-          colorCode: text(row[13]) || '00',
+          colorCode: codeText(row[13]) || '00',
           qualityCode: '1',
           qualityName: 'Standard',
           qualityNamePersian: 'استاندارد',
@@ -187,31 +310,31 @@ const parseProducts = (workbook: XLSX.WorkBook): { rows: ParsedRow[]; sourceForm
           ...productVisibility(row[0])
         }
       : {
-          code: text(cell(row, headers, ['کد محصول'])),
+          code: codeText(cell(row, headers, ['کد محصول'])),
           name: text(cell(row, headers, ['نام محصول', 'نام محصول (انگلیسی)'])),
           namePersian: text(cell(row, headers, ['نام فارسی محصول', 'نام محصول (فارسی)', 'نام محصول'])),
           cuttingDimensionName: text(cell(row, headers, ['نوع برش'])),
           cuttingDimensionNamePersian: text(cell(row, headers, ['نوع برش'])),
-          cuttingDimensionCode: text(cell(row, headers, ['کد نوع برش'])),
+          cuttingDimensionCode: codeText(cell(row, headers, ['کد نوع برش'])),
           stoneTypeName: text(cell(row, headers, ['جنس سنگ'])),
           stoneTypeNamePersian: text(cell(row, headers, ['جنس سنگ'])),
-          stoneTypeCode: text(cell(row, headers, ['کد جنس سنگ'])),
+          stoneTypeCode: codeText(cell(row, headers, ['کد جنس سنگ'])),
           widthName: text(cell(row, headers, ['عرض', 'عرض / مشخصات'])),
           widthValue: numberFrom(cell(row, headers, ['مقدار عرض', 'عرض', 'عرض / مشخصات'])),
-          widthCode: text(cell(row, headers, ['کد عرض'])),
+          widthCode: codeText(cell(row, headers, ['کد عرض'])),
           thicknessName: text(cell(row, headers, ['ضخامت'])),
           thicknessValue: numberFrom(cell(row, headers, ['مقدار ضخامت', 'ضخامت'])),
-          thicknessCode: text(cell(row, headers, ['کد ضخامت'])),
+          thicknessCode: codeText(cell(row, headers, ['کد ضخامت'])),
           mineName: text(cell(row, headers, ['معدن'])),
           mineNamePersian: text(cell(row, headers, ['معدن'])),
-          mineCode: text(cell(row, headers, ['کد معدن'])),
+          mineCode: codeText(cell(row, headers, ['کد معدن'])),
           finishName: text(cell(row, headers, ['نوع پرداخت'])),
           finishNamePersian: text(cell(row, headers, ['نوع پرداخت'])),
-          finishCode: text(cell(row, headers, ['کد نوع پرداخت'])),
+          finishCode: codeText(cell(row, headers, ['کد نوع پرداخت'])),
           colorName: text(cell(row, headers, ['رنگ'])) || 'بدون رنگ',
           colorNamePersian: text(cell(row, headers, ['رنگ'])) || 'بدون رنگ',
-          colorCode: text(cell(row, headers, ['کد رنگ'])) || '00',
-          qualityCode: text(cell(row, headers, ['کد کیفیت'])) || '1',
+          colorCode: codeText(cell(row, headers, ['کد رنگ'])) || '00',
+          qualityCode: codeText(cell(row, headers, ['کد کیفیت'])) || '1',
           qualityName: text(cell(row, headers, ['کیفیت'])) || 'Standard',
           qualityNamePersian: text(cell(row, headers, ['کیفیت'])) || 'استاندارد',
           basePrice: cell(row, headers, ['قیمت پایه']) === '' ? null : numberFrom(cell(row, headers, ['قیمت پایه'])),
@@ -228,13 +351,14 @@ const parseProducts = (workbook: XLSX.WorkBook): { rows: ParsedRow[]; sourceForm
 
     if (!data.namePersian) data.namePersian = productName(data);
     if (!data.name) data.name = data.namePersian;
-    const required = ['code', 'cuttingDimensionCode', 'stoneTypeCode', 'widthCode', 'thicknessCode', 'mineCode', 'finishCode'];
-    const missing = required.filter((field) => !data[field]);
+    const canonical = canonicalizeProductData(data, rowNumber);
+    const required = ['code'];
+    const missing = required.filter((field) => !canonical.data[field]);
     if (missing.length) {
       errors.push({ row: rowNumber, error: `فیلدهای اجباری خالی هستند: ${missing.join(', ')}` });
       continue;
     }
-    parsed.push({ key: data.code, rowNumber, label: data.namePersian, data });
+    parsed.push({ key: canonical.key, uploadedKey: canonical.uploadedKey, rowNumber, label: canonical.label, data: canonical.data, warnings: canonical.warnings });
   }
   return { rows: parsed, sourceFormat: isOpc ? 'OPC کد سنگ' : 'ERP محصولات', errors };
 };
@@ -247,6 +371,12 @@ const catalogSheets: Record<CatalogKey, string> = {
   'stair-lengths': 'طول پله',
   'layer-types': 'نوع لایه',
   'stone-finishings': 'فرآوری سنگ'
+};
+
+const catalogTextColumnIndexes = (catalog: CatalogKey) => {
+  if (catalog === 'products') return [0, 2, 4, 6, 8, 10, 12, 14, 16];
+  if (catalog === 'stair-lengths') return [];
+  return [0];
 };
 
 const parseSimpleCatalog = (catalog: CatalogKey, workbook: XLSX.WorkBook) => {
@@ -343,6 +473,9 @@ export const buildCatalogPlan = async (prisma: PrismaClient, catalog: CatalogKey
   const parsed = catalog === 'products' ? parseProducts(workbook) : parseSimpleCatalog(catalog, workbook);
   const duplicateErrors = findDuplicateErrors(parsed.rows);
   const errors = [...parsed.errors, ...duplicateErrors];
+  const warnings: CatalogSyncPlan['warnings'] = parsed.rows.flatMap((row) =>
+    (row.warnings || []).map((warning) => ({ row: row.rowNumber, key: row.key, warning }))
+  );
   const importId = crypto.randomUUID();
 
   const creates: CatalogSyncPlan['creates'] = [];
@@ -356,6 +489,18 @@ export const buildCatalogPlan = async (prisma: PrismaClient, catalog: CatalogKey
     const existingMap = new Map(existing.map((item) => [normalizeText(item.code), item]));
     const incomingKeys = new Set(parsed.rows.map((row) => normalizeText(row.key)));
     for (const row of parsed.rows) {
+      if (row.uploadedKey && normalizeText(row.uploadedKey) !== normalizeText(row.key)) {
+        const uploadedProduct = existingMap.get(normalizeText(row.uploadedKey));
+        const generatedProduct = existingMap.get(normalizeText(row.key));
+        if (uploadedProduct && generatedProduct && uploadedProduct.id !== generatedProduct.id) {
+          errors.push({
+            row: row.rowNumber,
+            key: row.key,
+            error: `کد محصول بارگذاری‌شده (${row.uploadedKey}) و کد تولیدشده (${row.key}) به دو محصول متفاوت اشاره می‌کنند`
+          });
+          continue;
+        }
+      }
       const current = existingMap.get(normalizeText(row.key));
       if (!current) creates.push({ key: row.key, rowNumber: row.rowNumber, label: row.label, data: row.data });
       else {
@@ -406,12 +551,14 @@ export const buildCatalogPlan = async (prisma: PrismaClient, catalog: CatalogKey
       creates: creates.length,
       updates: updates.length,
       removals: removals.length,
-      errors: errors.length
+      errors: errors.length,
+      warnings: warnings.length
     },
     creates,
     updates,
     removals,
-    errors
+    errors,
+    warnings
   };
 
   rememberPlan(plan, parsed.rows);
@@ -482,8 +629,8 @@ export const buildTemplateWorkbook = (catalog: CatalogKey) => {
   let headers: string[];
   let sample: any[];
   if (catalog === 'products') {
-    headers = ['کد محصول', 'نام محصول', 'کد نوع برش', 'نوع برش', 'کد جنس سنگ', 'جنس سنگ', 'کد عرض', 'عرض', 'کد ضخامت', 'ضخامت', 'کد معدن', 'معدن', 'کد نوع پرداخت', 'نوع پرداخت', 'کد رنگ', 'رنگ', 'قیمت پایه', 'ارز', 'موجود', 'فعال', 'طولی', 'پله', 'اسلب', 'حجمی', 'زمان تحویل', 'توضیحات'];
-    sample = ['1010810450100', 'طولی تراورتن ع40 ض2 ابرکوه صیقل', '1', 'طولی', '01', 'تراورتن', '08', 'ع40', '1', 'ض2', '045', 'ابرکوه', '01', 'صیقل', '00', 'بدون رنگ', '', 'تومان', 'بله', 'فعال', 'بله', 'بله', 'خیر', 'خیر', '', ''];
+    headers = ['کد محصول', 'نام محصول', 'کد نوع برش', 'نوع برش', 'کد جنس سنگ', 'جنس سنگ', 'کد عرض', 'عرض', 'کد ضخامت', 'ضخامت', 'کد معدن', 'معدن', 'کد نوع پرداخت', 'نوع پرداخت', 'کد رنگ', 'رنگ', 'کد کیفیت', 'کیفیت', 'قیمت پایه', 'ارز', 'موجود', 'فعال', 'طولی', 'پله', 'اسلب', 'حجمی', 'زمان تحویل', 'توضیحات'];
+    sample = ['1010810450100', 'طولی تراورتن ع40 ض2 ابرکوه صیقل', '1', 'طولی', '01', 'تراورتن', '08', 'ع40', '1', 'ض2', '045', 'ابرکوه', '01', 'صیقل', '00', 'بدون رنگ', '1', 'استاندارد', '', 'تومان', 'بله', 'فعال', 'بله', 'بله', 'خیر', 'خیر', '', ''];
   } else if (catalog === 'services') {
     headers = ['کد', 'نام فارسی', 'نام انگلیسی/داخلی', 'توضیحات', 'فعال'];
     sample = ['SVC-001', 'خدمت نمونه', '', '', 'فعال'];
@@ -505,6 +652,10 @@ export const buildTemplateWorkbook = (catalog: CatalogKey) => {
   }
   const worksheet = XLSX.utils.aoa_to_sheet([headers, sample]);
   worksheet['!cols'] = headers.map(() => ({ wch: 22 }));
+  applyTextFormatToColumns(
+    worksheet,
+    catalogTextColumnIndexes(catalog)
+  );
   XLSX.utils.book_append_sheet(workbook, worksheet, catalogSheets[catalog]);
   return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 };
@@ -515,7 +666,7 @@ export const buildExportWorkbook = async (prisma: PrismaClient, catalog: Catalog
   if (catalog === 'products') {
     const products = await prisma.product.findMany({ where: productsWhere || { deletedAt: null }, orderBy: { createdAt: 'desc' } });
     data = [[...XLSX.utils.sheet_to_json(XLSX.read(buildTemplateWorkbook('products'), { type: 'buffer' }).Sheets['محصولات'], { header: 1 })[0] as any[]]];
-    data.push(...products.map((item) => [item.code, item.namePersian, item.cuttingDimensionCode, item.cuttingDimensionNamePersian, item.stoneTypeCode, item.stoneTypeNamePersian, item.widthCode, item.widthName, item.thicknessCode, item.thicknessName, item.mineCode, item.mineNamePersian, item.finishCode, item.finishNamePersian, item.colorCode, item.colorNamePersian, item.basePrice?.toString() || '', item.currency, item.isAvailable ? 'بله' : 'خیر', item.isActive ? 'فعال' : 'غیرفعال', item.availableInLongitudinalContracts ? 'بله' : 'خیر', item.availableInStairContracts ? 'بله' : 'خیر', item.availableInSlabContracts ? 'بله' : 'خیر', item.availableInVolumetricContracts ? 'بله' : 'خیر', item.leadTime || '', item.description || '']));
+    data.push(...products.map((item) => [item.code, item.namePersian, item.cuttingDimensionCode, item.cuttingDimensionNamePersian, item.stoneTypeCode, item.stoneTypeNamePersian, item.widthCode, item.widthName, item.thicknessCode, item.thicknessName, item.mineCode, item.mineNamePersian, item.finishCode, item.finishNamePersian, item.colorCode, item.colorNamePersian, item.qualityCode, item.qualityNamePersian, item.basePrice?.toString() || '', item.currency, item.isAvailable ? 'بله' : 'خیر', item.isActive ? 'فعال' : 'غیرفعال', item.availableInLongitudinalContracts ? 'بله' : 'خیر', item.availableInStairContracts ? 'بله' : 'خیر', item.availableInSlabContracts ? 'بله' : 'خیر', item.availableInVolumetricContracts ? 'بله' : 'خیر', item.leadTime || '', item.description || '']));
   } else {
     const items = await prismaModel(prisma, catalog).findMany({ orderBy: { createdAt: 'desc' } });
     const templateRows = XLSX.utils.sheet_to_json(XLSX.read(buildTemplateWorkbook(catalog), { type: 'buffer' }).Sheets[catalogSheets[catalog]], { header: 1 }) as any[][];
@@ -531,6 +682,10 @@ export const buildExportWorkbook = async (prisma: PrismaClient, catalog: Catalog
   }
   const worksheet = XLSX.utils.aoa_to_sheet(data);
   worksheet['!cols'] = (data[0] || []).map(() => ({ wch: 22 }));
+  applyTextFormatToColumns(
+    worksheet,
+    catalogTextColumnIndexes(catalog)
+  );
   XLSX.utils.book_append_sheet(workbook, worksheet, catalogSheets[catalog]);
   return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 };

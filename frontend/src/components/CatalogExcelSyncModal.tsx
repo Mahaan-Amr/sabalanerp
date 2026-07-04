@@ -14,11 +14,13 @@ interface CatalogSyncPlan {
     updates: number;
     removals: number;
     errors: number;
+    warnings: number;
   };
   creates: Array<{ key: string; rowNumber: number; label: string }>;
   updates: Array<{ key: string; rowNumber: number; label: string; changes: Record<string, unknown> }>;
   removals: Array<{ key: string; label: string; action: 'hardDelete' | 'deactivate'; reason: string }>;
   errors: Array<{ row?: number; key?: string; error: string }>;
+  warnings: Array<{ row?: number; key?: string; warning: string }>;
 }
 
 interface CatalogExcelSyncModalProps {
@@ -56,7 +58,7 @@ const PreviewList = ({ title, items, tone }: { title: string; items: any[]; tone
       <div className="max-h-36 space-y-1 overflow-y-auto text-sm text-slate-700 dark:text-slate-300">
         {items.slice(0, 30).map((item, index) => (
           <div key={`${item.key || index}-${index}`} className="flex items-start justify-between gap-3 border-b border-slate-100 py-1 last:border-0 dark:border-slate-800">
-            <span className="min-w-0 truncate">{item.label || item.error}</span>
+            <span className="min-w-0 truncate">{item.label || item.error || item.warning}</span>
             <span className="shrink-0 text-xs text-slate-400">{item.action === 'hardDelete' ? 'حذف کامل' : item.action === 'deactivate' ? 'غیرفعال' : item.rowNumber ? `ردیف ${item.rowNumber}` : item.row ? `ردیف ${item.row}` : ''}</span>
           </div>
         ))}
@@ -208,11 +210,12 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
 
               {plan && (
                 <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/50">
-                  <div className="grid grid-cols-2 gap-3 text-center sm:grid-cols-5">
+                  <div className="grid grid-cols-2 gap-3 text-center sm:grid-cols-6">
                     <div><div className="text-xl font-bold">{plan.summary.totalRows}</div><div className="text-xs text-slate-500">ردیف</div></div>
                     <div><div className="text-xl font-bold text-green-600">{plan.summary.creates}</div><div className="text-xs text-slate-500">ایجاد</div></div>
                     <div><div className="text-xl font-bold text-blue-600">{plan.summary.updates}</div><div className="text-xs text-slate-500">به‌روزرسانی</div></div>
                     <div><div className="text-xl font-bold text-amber-600">{plan.summary.removals}</div><div className="text-xs text-slate-500">حذف/غیرفعال</div></div>
+                    <div><div className="text-xl font-bold text-orange-600">{plan.summary.warnings || 0}</div><div className="text-xs text-slate-500">هشدار</div></div>
                     <div><div className="text-xl font-bold text-red-600">{plan.summary.errors}</div><div className="text-xs text-slate-500">خطا</div></div>
                   </div>
 
@@ -220,6 +223,7 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
                     <PreviewList title="رکوردهای جدید" items={plan.creates} tone="text-green-600" />
                     <PreviewList title="رکوردهای قابل به‌روزرسانی" items={plan.updates} tone="text-blue-600" />
                     <PreviewList title="رکوردهای حذف یا غیرفعال" items={plan.removals} tone="text-amber-600" />
+                    <PreviewList title="هشدارها" items={plan.warnings || []} tone="text-orange-600" />
                     <PreviewList title="خطاهای اعتبارسنجی" items={plan.errors} tone="text-red-600" />
                   </div>
 

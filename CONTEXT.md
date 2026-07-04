@@ -6,6 +6,26 @@ Sabalan ERP manages stone inventory, sales contracts, and related pricing data f
 A product lookup in the price inquiry surface that matches product identity and price-facing product details, regardless of Persian or Arabic character variants.
 _Avoid_: treating search as only an exact prefix lookup
 
+**Canonical OPC Product Name**:
+The saved catalog product name generated from the product's coded stone attributes in the order cut type, stone material, width label, thickness label, mine, and finish; when attributes are missing, the name is generated from the available attributes without placeholder text.
+_Avoid_: saving a manually shortened family label such as only cut type plus stone material when the full coded attributes are available
+
+**Incomplete Product Attribute Set**:
+A product catalog row missing one or more attributes normally used to form the Canonical OPC Product Name, while still being allowed as a deliberate catalog exception after the missing attributes are made visible.
+_Avoid_: silently accepting incomplete product identity, or blocking every partial product row as invalid
+
+**Catalog Code**:
+A text business identifier whose characters and leading zeros are meaningful for product catalog identity and coded product attributes.
+_Avoid_: treating catalog codes as numbers, trimming leading zeros, or comparing only their numeric value
+
+**Canonical OPC Product Code**:
+The product catalog code generated from the product's coded attributes when the required component codes are available; if required component codes are missing, the current product code remains the best available identity for that partial row.
+_Avoid_: leaving a stale generated product code after the coded attributes change
+
+**Product Code Conflict**:
+An Excel import row where the uploaded product code and the generated Canonical OPC Product Code identify two different existing products; the row cannot be applied until the conflict is corrected.
+_Avoid_: silently merging product identities, overwriting the uploaded-code product, or overwriting the generated-code product
+
 **خروجی/ورودی اکسل کاتالوگ**:
 A catalog maintenance workflow where each catalog exports, imports, and updates its own records through an Excel file shaped for that catalog's business fields.
 _Avoid_: mixing unrelated product, service, tool, stair, layer, and finishing catalogs into one shared Excel file

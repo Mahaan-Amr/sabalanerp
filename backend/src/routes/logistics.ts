@@ -25,7 +25,6 @@ const canFinalizeLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_FIN
 const canCancelLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_CANCEL, FEATURE_PERMISSIONS.EDIT);
 const canCreateCorrections = requireFeatureAccess(FEATURES.LOGISTICS_CORRECTIONS_CREATE, FEATURE_PERMISSIONS.EDIT);
 const canViewDrivers = requireFeatureAccess(FEATURES.LOGISTICS_DRIVERS_VIEW, FEATURE_PERMISSIONS.VIEW);
-const canManageDrivers = requireFeatureAccess(FEATURES.LOGISTICS_DRIVERS_MANAGE, FEATURE_PERMISSIONS.EDIT);
 
 const toNumber = (value: unknown, fallback = 0) => {
   const parsed = Number(value);
@@ -269,6 +268,7 @@ const buildRemainingForProject = async (projectId: string) => {
 
 const buildDriverSnapshot = (driver: any, override: any = {}) => ({
   driverId: driver?.id || null,
+  vehiclePairId: driver?.id || null,
   firstName: override.firstName ?? driver?.firstName ?? '',
   lastName: override.lastName ?? driver?.lastName ?? '',
   vehiclePlate: override.vehiclePlate ?? driver?.vehiclePlate ?? '',
@@ -372,6 +372,7 @@ const loadLoading = (id: string) => {
       customer: true,
       project: true,
       driver: true,
+      vehiclePair: true,
       lines: {
         include: {
           product: true,
@@ -429,7 +430,7 @@ router.get('/dashboard', canView, canViewDashboard, async (_req: any, res: Respo
       prisma.logisticsLoading.count({ where: { status: EDITABLE_STATUS as any } }),
       prisma.logisticsLoading.count({ where: { status: FINALIZED_STATUS as any } }),
       prisma.logisticsLoading.count({ where: { status: CANCELLED_STATUS as any } }),
-      prisma.logisticsDriver.count({ where: { isActive: true } })
+      prisma.securityVehiclePair.count({ where: { isActive: true } })
     ]);
 
     const recent = await prisma.logisticsLoading.findMany({
@@ -610,7 +611,7 @@ router.post('/loadings', canEdit, canCreateLoadings, [
     if (!project) return res.status(404).json({ success: false, error: 'Project not found' });
 
     const loadingNumber = await generateLoadingNumber();
-    const driver = req.body.driverId ? await prisma.logisticsDriver.findUnique({ where: { id: req.body.driverId } }) : null;
+    const driver = req.body.driverId ? await prisma.securityVehiclePair.findFirst({ where: { id: req.body.driverId, isActive: true } }) : null;
     const driverSnapshot = req.body.driverSnapshot || (driver ? buildDriverSnapshot(driver) : null);
     const lineCreates: any[] = [];
     for (const line of req.body.lines || []) {
@@ -624,7 +625,7 @@ router.post('/loadings', canEdit, canCreateLoadings, [
         projectId: project.id,
         loadingDate: req.body.loadingDate ? new Date(req.body.loadingDate) : new Date(),
         notes: req.body.notes || null,
-        driverId: driver?.id || null,
+        vehiclePairId: driver?.id || null,
         driverSnapshot,
         createdBy: req.user.id,
         lines: { create: lineCreates }
@@ -655,7 +656,7 @@ router.put('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: Resp
     if (!existing) return res.status(404).json({ success: false, error: 'Loading not found' });
     if (existing.status !== EDITABLE_STATUS) return res.status(400).json({ success: false, error: 'Only draft loadings can be edited' });
 
-    const driver = req.body.driverId ? await prisma.logisticsDriver.findUnique({ where: { id: req.body.driverId } }) : null;
+    const driver = req.body.driverId ? await prisma.securityVehiclePair.findFirst({ where: { id: req.body.driverId, isActive: true } }) : null;
     const driverSnapshot = req.body.driverSnapshot || (driver ? buildDriverSnapshot(driver) : existing.driverSnapshot);
     const lineCreates: any[] = [];
     for (const line of req.body.lines || []) {
@@ -669,7 +670,7 @@ router.put('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: Resp
         data: {
           loadingDate: req.body.loadingDate ? new Date(req.body.loadingDate) : existing.loadingDate,
           notes: req.body.notes ?? existing.notes,
-          driverId: driver?.id || req.body.driverId || null,
+          vehiclePairId: driver?.id || req.body.driverId || null,
           driverSnapshot,
           lines: { create: lineCreates }
         }
@@ -792,66 +793,13 @@ router.post('/loadings/:id/corrections', canEdit, canCreateCorrections, [
 router.get('/drivers', canView, canViewDrivers, async (req: any, res: Response) => {
   try {
     const includeInactive = req.query.includeInactive === 'true';
-    const drivers = await prisma.logisticsDriver.findMany({
+    const drivers = await prisma.securityVehiclePair.findMany({
       where: includeInactive ? undefined : { isActive: true },
       orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
     });
     res.json({ success: true, data: drivers });
   } catch (error) {
     console.error('Drivers list error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
-  }
-});
-
-router.post('/drivers', canEdit, canManageDrivers, [
-  body('firstName').notEmpty().withMessage('First name is required'),
-  body('lastName').notEmpty().withMessage('Last name is required'),
-  body('vehiclePlate').notEmpty().withMessage('Vehicle plate is required'),
-  body('vehicleType').notEmpty().withMessage('Vehicle type is required'),
-  body('phone').notEmpty().withMessage('Phone is required'),
-  body('nationalCode').notEmpty().withMessage('National code is required')
-], async (req: any, res: Response) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
-
-    const driver = await prisma.logisticsDriver.create({
-      data: {
-        firstName: req.body.firstName,
-        lastName: req.body.lastName,
-        vehiclePlate: req.body.vehiclePlate,
-        vehicleType: req.body.vehicleType,
-        phone: req.body.phone,
-        nationalCode: req.body.nationalCode,
-        notes: req.body.notes || null,
-        createdBy: req.user.id
-      }
-    });
-    res.status(201).json({ success: true, data: driver });
-  } catch (error) {
-    console.error('Create driver error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
-  }
-});
-
-router.put('/drivers/:id', canEdit, canManageDrivers, async (req: any, res: Response) => {
-  try {
-    const driver = await prisma.logisticsDriver.update({
-      where: { id: req.params.id },
-      data: {
-        firstName: req.body.firstName,
-        lastName: req.body.lastName,
-        vehiclePlate: req.body.vehiclePlate,
-        vehicleType: req.body.vehicleType,
-        phone: req.body.phone,
-        nationalCode: req.body.nationalCode,
-        notes: req.body.notes,
-        isActive: req.body.isActive
-      }
-    });
-    res.json({ success: true, data: driver });
-  } catch (error) {
-    console.error('Update driver error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });

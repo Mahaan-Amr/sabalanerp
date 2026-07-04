@@ -534,12 +534,74 @@ Correction records follow the same unit, remaining, and tolerance rules as norma
 _Avoid_: using corrections to bypass loading tolerance or unit compatibility rules
 
 **راننده بارگیری**:
-Logistics may select a reusable driver record or enter a temporary driver during بارگیری, but every بارگیری saves its own driver and vehicle snapshot for historical accuracy.
-_Avoid_: making old loading documents depend on the current editable driver profile, or requiring every temporary driver to become a reusable driver record
+Logistics selects the driver and vehicle for بارگیری from the حراست-owned active driver/vehicle registry, while every بارگیری still saves its own driver and vehicle snapshot for historical accuracy.
+_Avoid_: letting logistics own the reusable driver registry, making old loading documents depend on the current editable driver profile, or treating gate approval as approval of loading quantities
 
 **راننده در نهایی‌سازی بارگیری**:
 A draft بارگیری may exist without driver information, but finalization requires a complete driver and vehicle snapshot.
 _Avoid_: blocking early loading preparation only because the truck is not known yet, or finalizing shipment evidence without driver details
+
+**رجیستر راننده و خودرو**:
+A حراست-owned registry of reusable fixed driver/vehicle pairs that may be activated or deactivated for operational use. Logistics consumes these pairs for بارگیری selection but does not own their creation or lifecycle.
+_Avoid_: splitting the reusable registry into independent driver and vehicle lifecycles without a separate business decision, duplicating reusable driver/vehicle records inside logistics, keeping logistics create/edit/delete controls for the registry, or deleting historical shipment snapshots when the registry changes
+
+**تردد خودرو**:
+A حراست-owned gate movement record for a vehicle entering or leaving the facility, including its exact gate time and movement purpose.
+_Avoid_: treating تردد خودرو as the same document as بارگیری, or using gate movement approval to validate contract rows or loaded quantities
+
+**تردد متفرقه**:
+A one-time حراست gate movement for a driver/vehicle that should be recorded for entry or exit history without becoming an active reusable driver/vehicle pair for logistics.
+_Avoid_: cluttering the reusable driver/vehicle registry with every one-time supplier, customer, or visitor movement
+
+**خروج با سواری شخصی مشتری**:
+A lightweight outbound sales movement where the customer takes goods with a personal vehicle. It must be tied to the customer or linked بارگیری/project and must record the exact exit time, without requiring a reusable driver/vehicle pair.
+_Avoid_: forcing customer personal vehicles into the reusable logistics driver/vehicle registry, or requiring freight settlement fields for a customer pickup
+
+**زمان خروج فروش**:
+The official outbound sales exit time is the حراست-recorded gate time when the vehicle physically leaves. It is separate from the logistics بارگیری finalization time.
+_Avoid_: treating logistics finalization time as proof of physical gate exit
+
+**وضعیت خروج فروش**:
+An outbound sales movement is آماده خروج after logistics finalizes بارگیری, خارج شد after حراست records the physical gate exit time, and لغو خروج when the gate movement is voided because it was created by mistake or the vehicle did not leave.
+_Avoid_: adding an approved-for-loading status that makes حراست responsible for logistics loading correctness
+
+**ورود خودروی پر**:
+A حراست inbound loaded-vehicle movement whose purpose is one of خرید بیرونی, برگشت از فروش, or امانی.
+_Avoid_: recording inbound loaded cargo without a movement purpose, or mixing inbound loaded-vehicle purposes with outbound sales loading
+
+**وضعیت ورود خودروی پر**:
+An inbound loaded-vehicle movement is ثبت ورود when the entry time is recorded, تکمیل اطلاعات when required follow-up details such as documents, settlement, or attachments have been completed, and لغو ورود when the entry record is voided as a mistake.
+_Avoid_: deleting inbound gate history to correct mistakes, or treating an incomplete paperwork state as if all entry evidence has been captured
+
+**تسویه بارنامه ورود**:
+Trip-specific settlement information captured on an inbound loaded-vehicle movement, including the delivery price and bank/card owner details needed for بارنامه settlement.
+_Avoid_: storing trip-specific settlement truth only on the reusable driver/vehicle registry, or making settlement history depend on later registry edits
+
+**پیوست تردد**:
+A categorized photo or file attached to a حراست gate movement, such as vehicle/plate, driver/document, بارنامه, purchase invoice, cargo, or other evidence.
+_Avoid_: storing gate photos as uncategorized blobs that cannot later be filtered or audited by evidence type
+
+**گزارش سرپرست حراست**:
+A daily or shift-level report written by the security supervisor, with author, date/shift, summary, incidents, follow-up notes, and optional attachments. It may reference vehicle movements or personnel events but is not merely a tabular export.
+_Avoid_: reducing گزارش سرپرست to a filterable movement table, or mixing supervisor narrative responsibility with automatic operational reports
+
+**نفرات حراست**:
+The حراست people area covers employee attendance, shifts, exceptions, missions, and security personnel workflows. Drivers are not managed here; they belong to خودرویی because their operational role is tied to vehicle movement.
+_Avoid_: mixing driver/vehicle registry work into personnel attendance workflows
+
+**خرید بیرونی در ورود خودروی پر**:
+An inbound loaded-vehicle purpose for purchased cargo arriving from outside Sabalan. It may have a purchase invoice and may have a بارنامه.
+Its completed entry information captures the driver/vehicle details, document presence for purchase invoice and بارنامه, and any trip-specific settlement details needed for بارنامه settlement.
+_Avoid_: requiring every outside purchase entry to have both documents when one may be absent in reality, or moving trip-specific settlement evidence to the reusable driver/vehicle registry
+
+**برگشت از فروش در ورود خودروی پر**:
+An inbound loaded-vehicle purpose for goods returning from a sold/customer delivery. It has no purchase invoice, must reference the customer, and may have a بارنامه.
+_Avoid_: treating returned sales goods as an outside purchase, or entering the customer as free text when the customer exists in CRM
+
+**امانی در ورود خودروی پر**:
+A reserved inbound loaded-vehicle purpose for consignment or entrusted goods whose detailed workflow is intentionally not defined yet.
+It may be visible as در دست تعریف, but users should not complete امانی entries until its business meaning and lifecycle are resolved.
+_Avoid_: implementing امانی rules before the business meaning and lifecycle are resolved
 
 **ردیف قابل بارگیری**:
 A contract row is loadable only when it represents physical cargo leaving Sabalan. Services and operations are not loaded separately, but service/tool/finishing details attached to a physical product should remain visible as part of that product's loading identity.

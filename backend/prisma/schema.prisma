@@ -48,6 +48,7 @@ model User {
   createdCrmCustomers       CrmCustomer[]         @relation("CrmCustomerCreatedBy")
   updatedCrmCustomers       CrmCustomer[]         @relation("CrmCustomerUpdatedBy")
   logisticsDrivers          LogisticsDriver[]     @relation("LogisticsDriverCreatedBy")
+  securityVehiclePairs      SecurityVehiclePair[] @relation("SecurityVehiclePairCreatedBy")
 
   @@map("users")
 }
@@ -198,17 +199,18 @@ model Contract {
 }
 
 model Shift {
-  id                String              @id @default(cuid())
-  name              String              @unique
-  namePersian       String              @unique
+  id                String                     @id @default(cuid())
+  name              String                     @unique
+  namePersian       String                     @unique
   startTime         String
   endTime           String
   duration          Int
-  isActive          Boolean             @default(true)
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
+  isActive          Boolean                    @default(true)
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
   attendanceRecords AttendanceRecord[]
   securityPersonnel SecurityPersonnel[]
+  supervisorReports SecuritySupervisorReport[]
 
   @@map("shifts")
 }
@@ -414,30 +416,30 @@ model SalesContract {
 }
 
 model CrmCustomer {
-  id                       String             @id @default(cuid())
+  id                       String                    @id @default(cuid())
   ownerUserId              String?
   createdBy                String?
   updatedBy                String?
   companyName              String?
-  customerType             String             @default("Individual")
+  customerType             String                    @default("Individual")
   industry                 String?
-  status                   String             @default("Active")
-  primaryContactId         String?            @unique
+  status                   String                    @default("Active")
+  primaryContactId         String?                   @unique
   address                  String?
   city                     String?
-  country                  String             @default("ایران")
+  country                  String                    @default("ایران")
   communicationPreferences Json?
   customFields             Json?
-  isActive                 Boolean            @default(true)
-  createdAt                DateTime           @default(now())
-  updatedAt                DateTime           @updatedAt
+  isActive                 Boolean                   @default(true)
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
   brandName                String?
   brandNameDescription     String?
   firstName                String
   homeAddress              String?
   homeNumber               String?
-  isBlacklisted            Boolean            @default(false)
-  isLocked                 Boolean            @default(false)
+  isBlacklisted            Boolean                   @default(false)
+  isLocked                 Boolean                   @default(false)
   lastName                 String
   nationalCode             String?
   projectManagerName       String?
@@ -448,16 +450,17 @@ model CrmCustomer {
   workAddress              String?
   workNumber               String?
   communications           CrmCommunication[]
-  contacts                 CrmContact[]       @relation("CustomerContacts")
-  primaryContact           CrmContact?        @relation("CustomerPrimaryContact", fields: [primaryContactId], references: [id])
+  contacts                 CrmContact[]              @relation("CustomerContacts")
+  primaryContact           CrmContact?               @relation("CustomerPrimaryContact", fields: [primaryContactId], references: [id])
   leads                    CrmLead[]
-  ownerUser                User?              @relation("CrmCustomerOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
-  createdByUser            User?              @relation("CrmCustomerCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
-  updatedByUser            User?              @relation("CrmCustomerUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+  ownerUser                User?                     @relation("CrmCustomerOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  createdByUser            User?                     @relation("CrmCustomerCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  updatedByUser            User?                     @relation("CrmCustomerUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
   phoneNumbers             PhoneNumber[]
   projectAddresses         ProjectAddress[]
   salesContracts           SalesContract[]
   logisticsLoadings        LogisticsLoading[]
+  securityVehicleMovements SecurityVehicleMovement[]
 
   @@index([ownerUserId])
   @@index([createdBy])
@@ -465,23 +468,24 @@ model CrmCustomer {
 }
 
 model ProjectAddress {
-  id                   String             @id @default(cuid())
-  customerId           String
-  address              String
-  city                 String
-  postalCode           String?
-  projectName          String?
-  projectType          String?
-  projectManagerName   String?
-  projectManagerNumber String?
-  marketerFirstName    String?
-  marketerLastName     String?
-  marketerPhoneNumber  String?
-  isActive             Boolean            @default(true)
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-  customer             CrmCustomer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  logisticsLoadings    LogisticsLoading[]
+  id                       String                    @id @default(cuid())
+  customerId               String
+  address                  String
+  city                     String
+  postalCode               String?
+  projectName              String?
+  projectType              String?
+  projectManagerName       String?
+  projectManagerNumber     String?
+  marketerFirstName        String?
+  marketerLastName         String?
+  marketerPhoneNumber      String?
+  isActive                 Boolean                   @default(true)
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  customer                 CrmCustomer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  logisticsLoadings        LogisticsLoading[]
+  securityVehicleMovements SecurityVehicleMovement[]
 
   @@map("project_addresses")
 }
@@ -694,34 +698,133 @@ model LogisticsDriver {
   @@map("logistics_drivers")
 }
 
-model LogisticsLoading {
-  id                 String                       @id @default(cuid())
-  loadingNumber      String                       @unique
-  customerId         String
-  projectId          String
-  status             LogisticsLoadingStatus       @default(DRAFT)
-  loadingDate        DateTime                     @default(now())
-  notes              String?
-  driverId           String?
+model SecurityVehiclePair {
+  id            String                    @id @default(cuid())
+  firstName     String
+  lastName      String
+  vehiclePlate  String
+  vehicleType   String
+  phone         String
+  nationalCode  String
+  notes         String?
+  isActive      Boolean                   @default(true)
+  createdBy     String
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  createdByUser User                      @relation("SecurityVehiclePairCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade)
+  loadings      LogisticsLoading[]
+  movements     SecurityVehicleMovement[]
+
+  @@index([createdBy])
+  @@index([isActive])
+  @@map("security_vehicle_pairs")
+}
+
+model SecurityVehicleMovement {
+  id                 String                           @id @default(cuid())
+  movementNumber     String                           @unique
+  direction          SecurityVehicleMovementDirection
+  purpose            SecurityVehicleMovementPurpose
+  status             SecurityVehicleMovementStatus    @default(ENTRY_RECORDED)
+  vehiclePairId      String?
+  loadingId          String?
+  customerId         String?
+  projectId          String?
+  occurredAt         DateTime                         @default(now())
+  completedAt        DateTime?
+  voidedAt           DateTime?
+  voidedBy           String?
+  voidReason         String?
   driverSnapshot     Json?
-  finalizedAt        DateTime?
-  finalizedBy        String?
-  cancelledAt        DateTime?
-  cancelledBy        String?
-  cancellationReason String?
+  documentSnapshot   Json?
+  settlementSnapshot Json?
+  notes              String?
   createdBy          String
-  createdAt          DateTime                     @default(now())
-  updatedAt          DateTime                     @updatedAt
-  customer           CrmCustomer                  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  project            ProjectAddress               @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  driver             LogisticsDriver?             @relation(fields: [driverId], references: [id], onDelete: SetNull)
-  lines              LogisticsLoadingLine[]
-  corrections        LogisticsLoadingCorrection[]
+  createdAt          DateTime                         @default(now())
+  updatedAt          DateTime                         @updatedAt
+  vehiclePair        SecurityVehiclePair?             @relation(fields: [vehiclePairId], references: [id], onDelete: SetNull)
+  loading            LogisticsLoading?                @relation(fields: [loadingId], references: [id], onDelete: SetNull)
+  customer           CrmCustomer?                     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  project            ProjectAddress?                  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  attachments        SecurityVehicleAttachment[]
+
+  @@index([direction])
+  @@index([purpose])
+  @@index([status])
+  @@index([vehiclePairId])
+  @@index([loadingId])
+  @@index([customerId])
+  @@index([projectId])
+  @@index([occurredAt])
+  @@map("security_vehicle_movements")
+}
+
+model SecurityVehicleAttachment {
+  id         String                            @id @default(cuid())
+  movementId String
+  category   SecurityVehicleAttachmentCategory
+  url        String
+  fileName   String?
+  notes      String?
+  createdAt  DateTime                          @default(now())
+  movement   SecurityVehicleMovement           @relation(fields: [movementId], references: [id], onDelete: Cascade)
+
+  @@index([movementId])
+  @@index([category])
+  @@map("security_vehicle_attachments")
+}
+
+model SecuritySupervisorReport {
+  id            String   @id @default(cuid())
+  reportDate    DateTime
+  shiftId       String?
+  authorId      String
+  summary       String
+  incidents     String?
+  followUpNotes String?
+  attachments   Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  shift         Shift?   @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  @@index([reportDate])
+  @@index([shiftId])
+  @@index([authorId])
+  @@map("security_supervisor_reports")
+}
+
+model LogisticsLoading {
+  id                       String                       @id @default(cuid())
+  loadingNumber            String                       @unique
+  customerId               String
+  projectId                String
+  status                   LogisticsLoadingStatus       @default(DRAFT)
+  loadingDate              DateTime                     @default(now())
+  notes                    String?
+  driverId                 String?
+  vehiclePairId            String?
+  driverSnapshot           Json?
+  finalizedAt              DateTime?
+  finalizedBy              String?
+  cancelledAt              DateTime?
+  cancelledBy              String?
+  cancellationReason       String?
+  createdBy                String
+  createdAt                DateTime                     @default(now())
+  updatedAt                DateTime                     @updatedAt
+  customer                 CrmCustomer                  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  project                  ProjectAddress               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  driver                   LogisticsDriver?             @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  vehiclePair              SecurityVehiclePair?         @relation(fields: [vehiclePairId], references: [id], onDelete: SetNull)
+  lines                    LogisticsLoadingLine[]
+  corrections              LogisticsLoadingCorrection[]
+  securityVehicleMovements SecurityVehicleMovement[]
 
   @@index([customerId])
   @@index([projectId])
   @@index([status])
   @@index([driverId])
+  @@index([vehiclePairId])
   @@index([loadingDate])
   @@map("logistics_loadings")
 }
@@ -1390,6 +1493,38 @@ enum LogisticsLoadingStatus {
   DRAFT
   FINALIZED
   CANCELLED
+}
+
+enum SecurityVehicleMovementDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum SecurityVehicleMovementPurpose {
+  OUTSIDE_PURCHASE
+  SALES_RETURN
+  CONSIGNMENT
+  SALES_EXIT
+  CUSTOMER_PERSONAL_CAR_EXIT
+  MISC
+}
+
+enum SecurityVehicleMovementStatus {
+  ENTRY_RECORDED
+  INFO_COMPLETED
+  ENTRY_VOIDED
+  READY_TO_EXIT
+  EXITED
+  EXIT_VOIDED
+}
+
+enum SecurityVehicleAttachmentCategory {
+  VEHICLE_PLATE
+  DRIVER_DOCUMENT
+  WAYBILL
+  PURCHASE_INVOICE
+  CARGO
+  OTHER
 }
 
 enum PaymentMethod {

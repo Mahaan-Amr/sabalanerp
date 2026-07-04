@@ -578,8 +578,15 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             show: true
           },
           {
+            name: 'Vehicles',
+            namePersian: 'خودرویی',
+            href: '/dashboard/security/vehicles',
+            icon: FaTruck,
+            show: true
+          },
+          {
             name: 'Attendance',
-            namePersian: 'حضور و غیاب',
+            namePersian: 'نفرات',
             href: '/dashboard/security/attendance',
             icon: FaCalendarAlt,
             show: true
@@ -603,6 +610,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             namePersian: 'استثناها',
             href: '/dashboard/security/exceptions',
             icon: FaExclamationTriangle,
+            show: true
+          },
+          {
+            name: 'Supervisor Reports',
+            namePersian: 'گزارش سرپرست',
+            href: '/dashboard/security/supervisor-reports',
+            icon: FaClipboardList,
             show: true
           },
           {
@@ -645,13 +659,6 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
                 show: hasPermission(WORKSPACES.LOGISTICS, 'edit' as any)
               }
             ]
-          },
-          {
-            name: 'Drivers',
-            namePersian: 'راننده‌ها',
-            href: '/dashboard/logistics/drivers',
-            icon: FaUsers,
-            show: true
           }
         ];
 

@@ -525,8 +525,6 @@ export const logisticsAPI = {
   cancelLoading: (id: string, reason: string) => api.post(`/logistics/loadings/${id}/cancel`, { reason }),
   createCorrection: (id: string, data: any) => api.post(`/logistics/loadings/${id}/corrections`, data),
   getDrivers: (params?: any) => api.get('/logistics/drivers', { params }),
-  createDriver: (data: any) => api.post('/logistics/drivers', data),
-  updateDriver: (id: string, data: any) => api.put(`/logistics/drivers/${id}`, data),
 };
 
 // Contract Templates API
@@ -704,6 +702,20 @@ export const securityAPI = {
   // Personnel management
   getPersonnel: () => api.get('/security/personnel'),
   assignPersonnel: (data: any) => api.post('/security/personnel', data),
+
+  // Vehicle gate operations
+  getVehiclePairs: (params?: any) => api.get('/security/vehicle-pairs', { params }),
+  createVehiclePair: (data: any) => api.post('/security/vehicle-pairs', data),
+  updateVehiclePair: (id: string, data: any) => api.put(`/security/vehicle-pairs/${id}`, data),
+  getVehicleMovements: (params?: any) => api.get('/security/vehicle-movements', { params }),
+  getReadyExitLoadings: () => api.get('/security/vehicle-movements/ready-exit'),
+  createInboundVehicleMovement: (data: any) => api.post('/security/vehicle-movements/inbound', data),
+  completeVehicleMovement: (id: string, data: any) => api.put(`/security/vehicle-movements/${id}/complete`, data),
+  recordVehicleExit: (data: any) => api.post('/security/vehicle-movements/exit', data),
+  voidVehicleMovement: (id: string, reason: string) => api.put(`/security/vehicle-movements/${id}/void`, { reason }),
+  addVehicleMovementAttachment: (id: string, data: any) => api.post(`/security/vehicle-movements/${id}/attachments`, data),
+  getSupervisorReports: (params?: any) => api.get('/security/supervisor-reports', { params }),
+  createSupervisorReport: (data: any) => api.post('/security/supervisor-reports', data),
 
   // Exception handling system
   createExceptionRequest: (data: any) => api.post('/security/exceptions/request', data),

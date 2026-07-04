@@ -8,6 +8,411 @@ import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middlewa
 const router = express.Router();
 const prisma = new PrismaClient();
 
+const securityView = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW);
+const securityEdit = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT);
+const securityAdmin = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN);
+
+const pairSnapshot = (pair: any, override: any = {}) => ({
+  driverId: pair?.id || null,
+  vehiclePairId: pair?.id || null,
+  firstName: override.firstName ?? pair?.firstName ?? '',
+  lastName: override.lastName ?? pair?.lastName ?? '',
+  vehiclePlate: override.vehiclePlate ?? pair?.vehiclePlate ?? '',
+  vehicleType: override.vehicleType ?? pair?.vehicleType ?? '',
+  phone: override.phone ?? pair?.phone ?? '',
+  nationalCode: override.nationalCode ?? pair?.nationalCode ?? '',
+  capturedAt: new Date().toISOString()
+});
+
+const generateMovementNumber = async (prefix: 'IN' | 'OUT') => {
+  const now = new Date();
+  const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+  const count = await prisma.securityVehicleMovement.count({
+    where: {
+      createdAt: {
+        gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+        lt: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+      }
+    }
+  });
+  return `${prefix}-${datePart}-${String(count + 1).padStart(4, '0')}`;
+};
+
+const includeMovement = {
+  vehiclePair: true,
+  loading: {
+    include: {
+      customer: true,
+      project: true
+    }
+  },
+  customer: true,
+  project: true,
+  attachments: true
+};
+
+// @desc    Get security-owned driver/vehicle pairs
+// @route   GET /api/security/vehicle-pairs
+router.get('/vehicle-pairs', protect, securityView, async (req: AuthRequest, res: Response) => {
+  try {
+    const includeInactive = req.query.includeInactive === 'true';
+    const search = String(req.query.search || '').trim();
+    const pairs = await prisma.securityVehiclePair.findMany({
+      where: {
+        ...(includeInactive ? {} : { isActive: true }),
+        ...(search ? {
+          OR: [
+            { firstName: { contains: search, mode: 'insensitive' } },
+            { lastName: { contains: search, mode: 'insensitive' } },
+            { vehiclePlate: { contains: search, mode: 'insensitive' } },
+            { vehicleType: { contains: search, mode: 'insensitive' } },
+            { phone: { contains: search, mode: 'insensitive' } },
+            { nationalCode: { contains: search, mode: 'insensitive' } }
+          ]
+        } : {})
+      },
+      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
+    });
+    res.json({ success: true, data: pairs });
+  } catch (error) {
+    console.error('Security vehicle pairs list error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// @desc    Create security-owned driver/vehicle pair
+// @route   POST /api/security/vehicle-pairs
+router.post('/vehicle-pairs', protect, securityAdmin, [
+  body('firstName').notEmpty().withMessage('First name is required'),
+  body('lastName').notEmpty().withMessage('Last name is required'),
+  body('vehiclePlate').notEmpty().withMessage('Vehicle plate is required'),
+  body('vehicleType').notEmpty().withMessage('Vehicle type is required'),
+  body('phone').notEmpty().withMessage('Phone is required'),
+  body('nationalCode').notEmpty().withMessage('National code is required')
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+
+    const pair = await prisma.securityVehiclePair.create({
+      data: {
+        firstName: req.body.firstName,
+        lastName: req.body.lastName,
+        vehiclePlate: req.body.vehiclePlate,
+        vehicleType: req.body.vehicleType,
+        phone: req.body.phone,
+        nationalCode: req.body.nationalCode,
+        notes: req.body.notes || null,
+        createdBy: req.user!.id
+      }
+    });
+    res.status(201).json({ success: true, data: pair });
+  } catch (error) {
+    console.error('Create security vehicle pair error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// @desc    Update security-owned driver/vehicle pair
+// @route   PUT /api/security/vehicle-pairs/:id
+router.put('/vehicle-pairs/:id', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const pair = await prisma.securityVehiclePair.update({
+      where: { id: req.params.id },
+      data: {
+        firstName: req.body.firstName,
+        lastName: req.body.lastName,
+        vehiclePlate: req.body.vehiclePlate,
+        vehicleType: req.body.vehicleType,
+        phone: req.body.phone,
+        nationalCode: req.body.nationalCode,
+        notes: req.body.notes,
+        isActive: req.body.isActive
+      }
+    });
+    res.json({ success: true, data: pair });
+  } catch (error) {
+    console.error('Update security vehicle pair error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// @desc    Get finalized logistics loadings waiting for gate exit
+// @route   GET /api/security/vehicle-movements/ready-exit
+router.get('/vehicle-movements/ready-exit', protect, securityView, async (_req: AuthRequest, res: Response) => {
+  try {
+    const exited = await prisma.securityVehicleMovement.findMany({
+      where: {
+        direction: 'OUTBOUND',
+        status: 'EXITED',
+        loadingId: { not: null }
+      },
+      select: { loadingId: true }
+    });
+    const exitedIds = exited.map((item) => item.loadingId).filter(Boolean) as string[];
+    const loadings = await prisma.logisticsLoading.findMany({
+      where: {
+        status: 'FINALIZED',
+        id: exitedIds.length ? { notIn: exitedIds } : undefined
+      },
+      include: {
+        customer: true,
+        project: true,
+        vehiclePair: true,
+        lines: true
+      },
+      orderBy: { finalizedAt: 'desc' },
+      take: 100
+    });
+    res.json({ success: true, data: loadings });
+  } catch (error) {
+    console.error('Ready exit loadings error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// @desc    List vehicle movements
+// @route   GET /api/security/vehicle-movements
+router.get('/vehicle-movements', protect, securityView, async (req: AuthRequest, res: Response) => {
+  try {
+    const where: any = {};
+    if (req.query.direction) where.direction = String(req.query.direction);
+    if (req.query.status) where.status = String(req.query.status);
+    if (req.query.purpose) where.purpose = String(req.query.purpose);
+
+    const movements = await prisma.securityVehicleMovement.findMany({
+      where,
+      include: includeMovement,
+      orderBy: { occurredAt: 'desc' },
+      take: Number(req.query.limit || 100)
+    });
+    res.json({ success: true, data: movements });
+  } catch (error) {
+    console.error('Vehicle movements list error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// @desc    Record inbound loaded vehicle entry
+// @route   POST /api/security/vehicle-movements/inbound
+router.post('/vehicle-movements/inbound', protect, securityEdit, [
+  body('purpose').isIn(['OUTSIDE_PURCHASE', 'SALES_RETURN', 'CONSIGNMENT']).withMessage('Invalid inbound purpose')
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    if (req.body.purpose === 'CONSIGNMENT') {
+      return res.status(400).json({ success: false, error: 'Consignment flow is not defined yet' });
+    }
+    if (req.body.purpose === 'SALES_RETURN' && !req.body.customerId) {
+      return res.status(400).json({ success: false, error: 'Customer is required for sales return' });
+    }
+
+    const pair = req.body.vehiclePairId
+      ? await prisma.securityVehiclePair.findUnique({ where: { id: req.body.vehiclePairId } })
+      : null;
+
+    const movement = await prisma.securityVehicleMovement.create({
+      data: {
+        movementNumber: await generateMovementNumber('IN'),
+        direction: 'INBOUND',
+        purpose: req.body.purpose,
+        status: 'ENTRY_RECORDED',
+        vehiclePairId: pair?.id || null,
+        customerId: req.body.customerId || null,
+        projectId: req.body.projectId || null,
+        occurredAt: req.body.occurredAt ? new Date(req.body.occurredAt) : new Date(),
+        driverSnapshot: req.body.driverSnapshot || (pair ? pairSnapshot(pair) : null),
+        documentSnapshot: req.body.documentSnapshot || null,
+        settlementSnapshot: req.body.settlementSnapshot || null,
+        notes: req.body.notes || null,
+        createdBy: req.user!.id
+      },
+      include: includeMovement
+    });
+    res.status(201).json({ success: true, data: movement });
+  } catch (error: any) {
+    console.error('Create inbound movement error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Server error' });
+  }
+});
+
+// @desc    Complete inbound movement details
+// @route   PUT /api/security/vehicle-movements/:id/complete
+router.put('/vehicle-movements/:id/complete', protect, securityEdit, async (req: AuthRequest, res: Response) => {
+  try {
+    const movement = await prisma.securityVehicleMovement.findUnique({ where: { id: req.params.id } });
+    if (!movement) return res.status(404).json({ success: false, error: 'Movement not found' });
+    if (movement.direction !== 'INBOUND') return res.status(400).json({ success: false, error: 'Only inbound movements can be completed here' });
+    if (movement.purpose === 'CONSIGNMENT') return res.status(400).json({ success: false, error: 'Consignment flow is not defined yet' });
+
+    const updated = await prisma.securityVehicleMovement.update({
+      where: { id: movement.id },
+      data: {
+        status: 'INFO_COMPLETED',
+        completedAt: new Date(),
+        driverSnapshot: req.body.driverSnapshot ?? movement.driverSnapshot,
+        documentSnapshot: req.body.documentSnapshot ?? movement.documentSnapshot,
+        settlementSnapshot: req.body.settlementSnapshot ?? movement.settlementSnapshot,
+        notes: req.body.notes ?? movement.notes
+      },
+      include: includeMovement
+    });
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Complete inbound movement error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// @desc    Record outbound sales exit at gate
+// @route   POST /api/security/vehicle-movements/exit
+router.post('/vehicle-movements/exit', protect, securityEdit, [
+  body('loadingId').notEmpty().withMessage('Loading is required')
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+
+    const loading = await prisma.logisticsLoading.findUnique({
+      where: { id: req.body.loadingId },
+      include: { customer: true, project: true, vehiclePair: true }
+    });
+    if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
+    if (loading.status !== 'FINALIZED') return res.status(400).json({ success: false, error: 'Only finalized loadings can exit the gate' });
+
+    const existingExit = await prisma.securityVehicleMovement.findFirst({
+      where: { loadingId: loading.id, direction: 'OUTBOUND', status: 'EXITED' }
+    });
+    if (existingExit) return res.status(400).json({ success: false, error: 'Gate exit already recorded for this loading' });
+
+    const purpose = req.body.customerPersonalCar ? 'CUSTOMER_PERSONAL_CAR_EXIT' : 'SALES_EXIT';
+    const pair = req.body.vehiclePairId
+      ? await prisma.securityVehiclePair.findUnique({ where: { id: req.body.vehiclePairId } })
+      : loading.vehiclePair;
+
+    const movement = await prisma.securityVehicleMovement.create({
+      data: {
+        movementNumber: await generateMovementNumber('OUT'),
+        direction: 'OUTBOUND',
+        purpose: purpose as any,
+        status: 'EXITED',
+        vehiclePairId: purpose === 'SALES_EXIT' ? pair?.id || null : null,
+        loadingId: loading.id,
+        customerId: loading.customerId,
+        projectId: loading.projectId,
+        occurredAt: req.body.occurredAt ? new Date(req.body.occurredAt) : new Date(),
+        driverSnapshot: purpose === 'SALES_EXIT' ? (req.body.driverSnapshot || (pair ? pairSnapshot(pair) : loading.driverSnapshot)) : null,
+        notes: req.body.notes || null,
+        createdBy: req.user!.id
+      },
+      include: includeMovement
+    });
+    res.status(201).json({ success: true, data: movement });
+  } catch (error: any) {
+    console.error('Create outbound exit error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Server error' });
+  }
+});
+
+// @desc    Void vehicle movement
+// @route   PUT /api/security/vehicle-movements/:id/void
+router.put('/vehicle-movements/:id/void', protect, securityAdmin, [
+  body('reason').notEmpty().withMessage('Void reason is required')
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    const movement = await prisma.securityVehicleMovement.findUnique({ where: { id: req.params.id } });
+    if (!movement) return res.status(404).json({ success: false, error: 'Movement not found' });
+    const status = movement.direction === 'INBOUND' ? 'ENTRY_VOIDED' : 'EXIT_VOIDED';
+    const updated = await prisma.securityVehicleMovement.update({
+      where: { id: movement.id },
+      data: {
+        status: status as any,
+        voidedAt: new Date(),
+        voidedBy: req.user!.id,
+        voidReason: req.body.reason
+      },
+      include: includeMovement
+    });
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Void vehicle movement error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// @desc    Add categorized attachment to a vehicle movement
+// @route   POST /api/security/vehicle-movements/:id/attachments
+router.post('/vehicle-movements/:id/attachments', protect, securityEdit, [
+  body('category').isIn(['VEHICLE_PLATE', 'DRIVER_DOCUMENT', 'WAYBILL', 'PURCHASE_INVOICE', 'CARGO', 'OTHER']).withMessage('Invalid attachment category'),
+  body('url').notEmpty().withMessage('Attachment URL is required')
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    const attachment = await prisma.securityVehicleAttachment.create({
+      data: {
+        movementId: req.params.id,
+        category: req.body.category,
+        url: req.body.url,
+        fileName: req.body.fileName || null,
+        notes: req.body.notes || null
+      }
+    });
+    res.status(201).json({ success: true, data: attachment });
+  } catch (error) {
+    console.error('Create vehicle movement attachment error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// @desc    List supervisor reports
+// @route   GET /api/security/supervisor-reports
+router.get('/supervisor-reports', protect, securityView, async (req: AuthRequest, res: Response) => {
+  try {
+    const reports = await prisma.securitySupervisorReport.findMany({
+      where: req.query.shiftId ? { shiftId: String(req.query.shiftId) } : undefined,
+      include: { shift: true },
+      orderBy: { reportDate: 'desc' },
+      take: Number(req.query.limit || 50)
+    });
+    res.json({ success: true, data: reports });
+  } catch (error) {
+    console.error('Supervisor reports list error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// @desc    Create supervisor report
+// @route   POST /api/security/supervisor-reports
+router.post('/supervisor-reports', protect, securityAdmin, [
+  body('reportDate').isISO8601().withMessage('Report date must be valid'),
+  body('summary').notEmpty().withMessage('Summary is required')
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    const report = await prisma.securitySupervisorReport.create({
+      data: {
+        reportDate: new Date(req.body.reportDate),
+        shiftId: req.body.shiftId || null,
+        authorId: req.user!.id,
+        summary: req.body.summary,
+        incidents: req.body.incidents || null,
+        followUpNotes: req.body.followUpNotes || null,
+        attachments: req.body.attachments || null
+      },
+      include: { shift: true }
+    });
+    res.status(201).json({ success: true, data: report });
+  } catch (error) {
+    console.error('Create supervisor report error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
 // @desc    Get all shifts
 // @route   GET /api/security/shifts
 // @access  Private/Security Workspace

@@ -266,6 +266,12 @@ interface MissionAssignment {
 - Can view own records
 - Limited system access
 
+### Vehicle Gate Operations
+- **Security Manager / Supervisor**: can create, edit, activate/deactivate driver+vehicle registry pairs; void inbound/outbound movement records; and write supervisor shift reports.
+- **Security Personnel**: can record inbound loaded-vehicle entries, complete inbound information, record outbound gate exit time, add categorized movement attachments, and view active registry pairs.
+- **Logistics**: can view/select only active security-owned driver+vehicle pairs during بارگیری; logistics cannot create, edit, delete, or deactivate the registry.
+- **Boundary**: حراست approves driver/vehicle eligibility and physical gate movement. لجستیک remains responsible for بارگیری rows, quantities, and remaining shipment calculations.
+
 ### Viewer
 - Read-only access to security data
 - View security reports

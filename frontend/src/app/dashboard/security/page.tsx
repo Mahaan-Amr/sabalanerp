@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState } from 'react';
 import {
@@ -13,6 +13,7 @@ import {
   FaSignature,
   FaSignInAlt,
   FaSignOutAlt,
+  FaTruck,
   FaUserCheck,
   FaUserClock,
   FaUsers,
@@ -124,28 +125,28 @@ const getStatusTone = (status: string) => {
 const getStatusLabel = (status: string) => {
   switch (status) {
     case 'PRESENT':
-      return 'حاضر';
+      return 'Ø­Ø§Ø¶Ø±';
     case 'ABSENT':
-      return 'غایب';
+      return 'ØºØ§ÛŒØ¨';
     case 'LATE':
-      return 'تاخیر';
+      return 'ØªØ§Ø®ÛŒØ±';
     case 'MISSION':
-      return 'ماموریت';
+      return 'Ù…Ø§Ù…ÙˆØ±ÛŒØª';
     case 'HOURLY_LEAVE':
-      return 'مرخصی ساعتی';
+      return 'Ù…Ø±Ø®ØµÛŒ Ø³Ø§Ø¹ØªÛŒ';
     case 'SICK_LEAVE':
-      return 'مرخصی استعلاجی';
+      return 'Ù…Ø±Ø®ØµÛŒ Ø§Ø³ØªØ¹Ù„Ø§Ø¬ÛŒ';
     case 'VACATION':
-      return 'مرخصی روزانه';
+      return 'Ù…Ø±Ø®ØµÛŒ Ø±ÙˆØ²Ø§Ù†Ù‡';
     default:
-      return 'نامشخص';
+      return 'Ù†Ø§Ù…Ø´Ø®Øµ';
   }
 };
 
 const getRequestStatusBadge = (status: string) => {
-  if (status === 'PENDING') return <ErpBadge tone="warning">در انتظار</ErpBadge>;
-  if (status === 'APPROVED') return <ErpBadge tone="success">تایید شده</ErpBadge>;
-  return <ErpBadge tone="danger">رد شده</ErpBadge>;
+  if (status === 'PENDING') return <ErpBadge tone="warning">Ø¯Ø± Ø§Ù†ØªØ¸Ø§Ø±</ErpBadge>;
+  if (status === 'APPROVED') return <ErpBadge tone="success">ØªØ§ÛŒÛŒØ¯ Ø´Ø¯Ù‡</ErpBadge>;
+  return <ErpBadge tone="danger">Ø±Ø¯ Ø´Ø¯Ù‡</ErpBadge>;
 };
 
 export default function SecurityDashboardPage() {
@@ -178,7 +179,7 @@ export default function SecurityDashboardPage() {
       if (attendanceResponse.data.success) setDailyAttendance(attendanceResponse.data.data);
     } catch (requestError: any) {
       console.error('Error fetching security data:', requestError);
-      setError(requestError.response?.data?.error || 'خطا در دریافت اطلاعات');
+      setError(requestError.response?.data?.error || 'Ø®Ø·Ø§ Ø¯Ø± Ø¯Ø±ÛŒØ§ÙØª Ø§Ø·Ù„Ø§Ø¹Ø§Øª');
     } finally {
       setLoading(false);
     }
@@ -220,7 +221,7 @@ export default function SecurityDashboardPage() {
 
   const handleCheckIn = async () => {
     if (!selectedEmployee) {
-      alert('لطفا کارمند را انتخاب کنید');
+      alert('Ù„Ø·ÙØ§ Ú©Ø§Ø±Ù…Ù†Ø¯ Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯');
       return;
     }
 
@@ -228,13 +229,13 @@ export default function SecurityDashboardPage() {
       setActionLoading(true);
       const response = await securityAPI.checkIn(selectedEmployee);
       if (response.data.success) {
-        alert('ورود با موفقیت ثبت شد');
+        alert('ÙˆØ±ÙˆØ¯ Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø«Ø¨Øª Ø´Ø¯');
         setSelectedEmployee('');
         fetchSecurityData();
       }
     } catch (requestError: any) {
       console.error('Check-in error:', requestError);
-      alert(requestError.response?.data?.error || 'خطا در ثبت عملیات');
+      alert(requestError.response?.data?.error || 'Ø®Ø·Ø§ Ø¯Ø± Ø«Ø¨Øª Ø¹Ù…Ù„ÛŒØ§Øª');
     } finally {
       setActionLoading(false);
     }
@@ -242,7 +243,7 @@ export default function SecurityDashboardPage() {
 
   const handleCheckOut = async () => {
     if (!selectedEmployee) {
-      alert('لطفا کارمند را انتخاب کنید');
+      alert('Ù„Ø·ÙØ§ Ú©Ø§Ø±Ù…Ù†Ø¯ Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯');
       return;
     }
 
@@ -250,13 +251,13 @@ export default function SecurityDashboardPage() {
       setActionLoading(true);
       const response = await securityAPI.checkOut(selectedEmployee);
       if (response.data.success) {
-        alert('خروج با موفقیت ثبت شد');
+        alert('Ø®Ø±ÙˆØ¬ Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø«Ø¨Øª Ø´Ø¯');
         setSelectedEmployee('');
         fetchSecurityData();
       }
     } catch (requestError: any) {
       console.error('Check-out error:', requestError);
-      alert(requestError.response?.data?.error || 'خطا در ثبت عملیات');
+      alert(requestError.response?.data?.error || 'Ø®Ø·Ø§ Ø¯Ø± Ø«Ø¨Øª Ø¹Ù…Ù„ÛŒØ§Øª');
     } finally {
       setActionLoading(false);
     }
@@ -266,11 +267,11 @@ export default function SecurityDashboardPage() {
     try {
       setActionLoading(true);
       await securityAPI.createExceptionRequest(data);
-      alert('درخواست با موفقیت ثبت شد');
+      alert('Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø«Ø¨Øª Ø´Ø¯');
       setShowExceptionForm(false);
       fetchExceptionRequests();
     } catch (requestError: any) {
-      alert(`خطا در ثبت عملیات: ${requestError.response?.data?.error || requestError.message}`);
+      alert(`Ø®Ø·Ø§ Ø¯Ø± Ø«Ø¨Øª Ø¹Ù…Ù„ÛŒØ§Øª: ${requestError.response?.data?.error || requestError.message}`);
     } finally {
       setActionLoading(false);
     }
@@ -280,11 +281,11 @@ export default function SecurityDashboardPage() {
     try {
       setActionLoading(true);
       await securityAPI.createMissionAssignment(data);
-      alert('ماموریت با موفقیت ثبت شد');
+      alert('Ù…Ø§Ù…ÙˆØ±ÛŒØª Ø¨Ø§ Ù…ÙˆÙÙ‚ÛŒØª Ø«Ø¨Øª Ø´Ø¯');
       setShowMissionForm(false);
       fetchMissionAssignments();
     } catch (requestError: any) {
-      alert(`خطا در ثبت عملیات: ${requestError.response?.data?.error || requestError.message}`);
+      alert(`Ø®Ø·Ø§ Ø¯Ø± Ø«Ø¨Øª Ø¹Ù…Ù„ÛŒØ§Øª: ${requestError.response?.data?.error || requestError.message}`);
     } finally {
       setActionLoading(false);
     }
@@ -300,7 +301,7 @@ export default function SecurityDashboardPage() {
       fetchSecurityData();
     } catch (requestError: any) {
       console.error('Error saving signature:', requestError);
-      alert(`خطا در ثبت عملیات: ${requestError.response?.data?.error || requestError.message}`);
+      alert(`Ø®Ø·Ø§ Ø¯Ø± Ø«Ø¨Øª Ø¹Ù…Ù„ÛŒØ§Øª: ${requestError.response?.data?.error || requestError.message}`);
     }
   };
 
@@ -310,15 +311,15 @@ export default function SecurityDashboardPage() {
     return (
       <ErpPage
         eyebrow="Security"
-        title="حراست"
-        description="داشبورد ورود و خروج و کنترل شیفت‌ها"
+        title="Ø­Ø±Ø§Ø³Øª"
+        description="Ø¯Ø§Ø´Ø¨ÙˆØ±Ø¯ ÙˆØ±ÙˆØ¯ Ùˆ Ø®Ø±ÙˆØ¬ Ùˆ Ú©Ù†ØªØ±Ù„ Ø´ÛŒÙØªâ€ŒÙ‡Ø§"
         metrics={[]}
       >
         <ErpEmptyState
           icon={FaExclamationTriangle}
-          title="اطلاعات حراست دریافت نشد"
+          title="Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø­Ø±Ø§Ø³Øª Ø¯Ø±ÛŒØ§ÙØª Ù†Ø´Ø¯"
           description={error}
-          action={{ label: 'تلاش مجدد', onClick: fetchSecurityData, icon: FaClock, variant: 'solid' }}
+          action={{ label: 'ØªÙ„Ø§Ø´ Ù…Ø¬Ø¯Ø¯', onClick: fetchSecurityData, icon: FaClock, variant: 'solid' }}
         />
       </ErpPage>
     );
@@ -332,48 +333,50 @@ export default function SecurityDashboardPage() {
   return (
     <ErpPage
       eyebrow="Security"
-      title="حراست"
-      description={`${stats?.securityPersonnel.name || 'کاربر حراست'} - ${stats?.securityPersonnel.position || 'اپراتور شیفت'}`}
+      title="Ø­Ø±Ø§Ø³Øª"
+      description={`${stats?.securityPersonnel.name || 'Ú©Ø§Ø±Ø¨Ø± Ø­Ø±Ø§Ø³Øª'} - ${stats?.securityPersonnel.position || 'Ø§Ù¾Ø±Ø§ØªÙˆØ± Ø´ÛŒÙØª'}`}
       actions={[
-        { label: 'درخواست استثنا', onClick: () => setShowExceptionForm(true), icon: FaExclamationTriangle, tone: 'warning' },
-        { label: 'ماموریت جدید', onClick: () => setShowMissionForm(true), icon: FaPlane, tone: 'info' },
+        { label: 'Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø§Ø³ØªØ«Ù†Ø§', onClick: () => setShowExceptionForm(true), icon: FaExclamationTriangle, tone: 'warning' },
+        { label: 'Ù…Ø§Ù…ÙˆØ±ÛŒØª Ø¬Ø¯ÛŒØ¯', onClick: () => setShowMissionForm(true), icon: FaPlane, tone: 'info' },
       ]}
       metrics={[
-        { label: 'کل کارکنان', value: stats?.todayStats.totalEmployees || 0, icon: FaUsers, tone: 'neutral' },
-        { label: 'حاضر', value: stats?.todayStats.present || 0, icon: FaUserCheck, tone: 'success' },
-        { label: 'غایب', value: stats?.todayStats.absent || 0, icon: FaUserTimes, tone: 'danger' },
-        { label: 'تاخیر', value: stats?.todayStats.late || 0, icon: FaUserClock, tone: 'warning' },
-        { label: 'ماموریت', value: stats?.todayStats.mission || 0, icon: FaPlane, tone: 'info' },
-        { label: 'مرخصی', value: stats?.todayStats.leave || 0, icon: FaCalendarDay, tone: 'purple' },
+        { label: 'Ú©Ù„ Ú©Ø§Ø±Ú©Ù†Ø§Ù†', value: stats?.todayStats.totalEmployees || 0, icon: FaUsers, tone: 'neutral' },
+        { label: 'Ø­Ø§Ø¶Ø±', value: stats?.todayStats.present || 0, icon: FaUserCheck, tone: 'success' },
+        { label: 'ØºØ§ÛŒØ¨', value: stats?.todayStats.absent || 0, icon: FaUserTimes, tone: 'danger' },
+        { label: 'ØªØ§Ø®ÛŒØ±', value: stats?.todayStats.late || 0, icon: FaUserClock, tone: 'warning' },
+        { label: 'Ù…Ø§Ù…ÙˆØ±ÛŒØª', value: stats?.todayStats.mission || 0, icon: FaPlane, tone: 'info' },
+        { label: 'Ù…Ø±Ø®ØµÛŒ', value: stats?.todayStats.leave || 0, icon: FaCalendarDay, tone: 'purple' },
       ]}
     >
       <ErpSection
-        title="شیفت و دسترسی سریع"
-        description={currentShift ? `${currentShift.namePersian} از ${currentShift.startTime} تا ${currentShift.endTime}` : 'شیفت جاری ثبت نشده است'}
+        title="Ø´ÛŒÙØª Ùˆ Ø¯Ø³ØªØ±Ø³ÛŒ Ø³Ø±ÛŒØ¹"
+        description={currentShift ? `${currentShift.namePersian} Ø§Ø² ${currentShift.startTime} ØªØ§ ${currentShift.endTime}` : 'Ø´ÛŒÙØª Ø¬Ø§Ø±ÛŒ Ø«Ø¨Øª Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª'}
       >
         <ErpActionGrid
           columns={4}
           compact
           items={[
-            { title: 'حضور و غیاب', description: 'لیست روزانه ورود و خروج', href: '/dashboard/security/attendance', icon: FaClock, tone: 'primary' },
-            { title: 'کارکنان حراست', description: 'مدیریت پرسنل و نقش‌ها', href: '/dashboard/security/personnel', icon: FaShieldAlt, tone: 'neutral' },
-            { title: 'شیفت‌ها', description: 'تعریف برنامه کاری', href: '/dashboard/security/shifts', icon: FaCalendarDay, tone: 'info' },
-            { title: 'گزارش‌ها', description: 'خروجی و تحلیل تردد', href: '/dashboard/security/reports', icon: FaChartLine, tone: 'success' },
-            { title: 'استثناها', description: 'تاخیر، مرخصی و اصلاح تردد', href: '/dashboard/security/exceptions', icon: FaFileAlt, tone: 'warning' },
+            { title: 'Ø­Ø¶ÙˆØ± Ùˆ ØºÛŒØ§Ø¨', description: 'Ù„ÛŒØ³Øª Ø±ÙˆØ²Ø§Ù†Ù‡ ÙˆØ±ÙˆØ¯ Ùˆ Ø®Ø±ÙˆØ¬', href: '/dashboard/security/attendance', icon: FaClock, tone: 'primary' },
+            { title: 'خودرویی', description: 'رجیستر راننده/خودرو، ورود خودروی پر و خروج فروش', href: '/dashboard/security/vehicles', icon: FaTruck, tone: 'info' },
+            { title: 'Ú©Ø§Ø±Ú©Ù†Ø§Ù† Ø­Ø±Ø§Ø³Øª', description: 'Ù…Ø¯ÛŒØ±ÛŒØª Ù¾Ø±Ø³Ù†Ù„ Ùˆ Ù†Ù‚Ø´â€ŒÙ‡Ø§', href: '/dashboard/security/personnel', icon: FaShieldAlt, tone: 'neutral' },
+            { title: 'Ø´ÛŒÙØªâ€ŒÙ‡Ø§', description: 'ØªØ¹Ø±ÛŒÙ Ø¨Ø±Ù†Ø§Ù…Ù‡ Ú©Ø§Ø±ÛŒ', href: '/dashboard/security/shifts', icon: FaCalendarDay, tone: 'info' },
+            { title: 'گزارش سرپرست', description: 'ثبت گزارش شیفت، رخدادها و پیگیری‌ها', href: '/dashboard/security/supervisor-reports', icon: FaFileAlt, tone: 'success' },
+            { title: 'Ú¯Ø²Ø§Ø±Ø´â€ŒÙ‡Ø§', description: 'Ø®Ø±ÙˆØ¬ÛŒ Ùˆ ØªØ­Ù„ÛŒÙ„ ØªØ±Ø¯Ø¯', href: '/dashboard/security/reports', icon: FaChartLine, tone: 'success' },
+            { title: 'Ø§Ø³ØªØ«Ù†Ø§Ù‡Ø§', description: 'ØªØ§Ø®ÛŒØ±ØŒ Ù…Ø±Ø®ØµÛŒ Ùˆ Ø§ØµÙ„Ø§Ø­ ØªØ±Ø¯Ø¯', href: '/dashboard/security/exceptions', icon: FaFileAlt, tone: 'warning' },
           ]}
         />
       </ErpSection>
 
-      <ErpSection title="ثبت ورود و خروج" description="برای ثبت دستی عملیات، ابتدا کارمند را از لیست همان روز انتخاب کنید.">
+      <ErpSection title="Ø«Ø¨Øª ÙˆØ±ÙˆØ¯ Ùˆ Ø®Ø±ÙˆØ¬" description="Ø¨Ø±Ø§ÛŒ Ø«Ø¨Øª Ø¯Ø³ØªÛŒ Ø¹Ù…Ù„ÛŒØ§ØªØŒ Ø§Ø¨ØªØ¯Ø§ Ú©Ø§Ø±Ù…Ù†Ø¯ Ø±Ø§ Ø§Ø² Ù„ÛŒØ³Øª Ù‡Ù…Ø§Ù† Ø±ÙˆØ² Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯.">
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">انتخاب کارمند</span>
+            <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ø§Ø±Ù…Ù†Ø¯</span>
             <select
               value={selectedEmployee}
               onChange={(event) => setSelectedEmployee(event.target.value)}
               className="min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900"
             >
-              <option value="">کارمند را انتخاب کنید</option>
+              <option value="">Ú©Ø§Ø±Ù…Ù†Ø¯ Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯</option>
               {attendanceRows.map((record) => (
                 <option key={record.employee.id} value={record.employee.id}>
                   {record.employee.firstName} {record.employee.lastName}
@@ -382,23 +385,23 @@ export default function SecurityDashboardPage() {
             </select>
           </label>
           <div className="flex flex-wrap gap-2">
-            <ErpButton label="ثبت ورود" onClick={handleCheckIn} disabled={actionLoading || !selectedEmployee} icon={FaSignInAlt} variant="solid" />
-            <ErpButton label="ثبت خروج" onClick={handleCheckOut} disabled={actionLoading || !selectedEmployee} icon={FaSignOutAlt} tone="neutral" />
+            <ErpButton label="Ø«Ø¨Øª ÙˆØ±ÙˆØ¯" onClick={handleCheckIn} disabled={actionLoading || !selectedEmployee} icon={FaSignInAlt} variant="solid" />
+            <ErpButton label="Ø«Ø¨Øª Ø®Ø±ÙˆØ¬" onClick={handleCheckOut} disabled={actionLoading || !selectedEmployee} icon={FaSignOutAlt} tone="neutral" />
           </div>
         </div>
       </ErpSection>
 
       <ErpSection
-        title="ورود و خروج روزانه"
-        description={`گزارش روز ${PersianCalendar.formatForDisplay(selectedDate)}`}
-        actions={[{ label: 'به‌روزرسانی', onClick: fetchSecurityData, icon: FaClock, tone: 'neutral' }]}
+        title="ÙˆØ±ÙˆØ¯ Ùˆ Ø®Ø±ÙˆØ¬ Ø±ÙˆØ²Ø§Ù†Ù‡"
+        description={`Ú¯Ø²Ø§Ø±Ø´ Ø±ÙˆØ² ${PersianCalendar.formatForDisplay(selectedDate)}`}
+        actions={[{ label: 'Ø¨Ù‡â€ŒØ±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ', onClick: fetchSecurityData, icon: FaClock, tone: 'neutral' }]}
       >
         <div className="mb-4 max-w-xs">
-          <PersianCalendarComponent value={selectedDate} onChange={setSelectedDate} placeholder="تاریخ گزارش" />
+          <PersianCalendarComponent value={selectedDate} onChange={setSelectedDate} placeholder="ØªØ§Ø±ÛŒØ® Ú¯Ø²Ø§Ø±Ø´" />
         </div>
 
         {attendanceRows.length === 0 ? (
-          <ErpEmptyState icon={FaClock} title="رکوردی برای این روز ثبت نشده است" description="پس از ثبت ورود یا انتخاب تاریخ دیگر، لیست این بخش به‌روزرسانی می‌شود." />
+          <ErpEmptyState icon={FaClock} title="Ø±Ú©ÙˆØ±Ø¯ÛŒ Ø¨Ø±Ø§ÛŒ Ø§ÛŒÙ† Ø±ÙˆØ² Ø«Ø¨Øª Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª" description="Ù¾Ø³ Ø§Ø² Ø«Ø¨Øª ÙˆØ±ÙˆØ¯ ÛŒØ§ Ø§Ù†ØªØ®Ø§Ø¨ ØªØ§Ø±ÛŒØ® Ø¯ÛŒÚ¯Ø±ØŒ Ù„ÛŒØ³Øª Ø§ÛŒÙ† Ø¨Ø®Ø´ Ø¨Ù‡â€ŒØ±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ Ù…ÛŒâ€ŒØ´ÙˆØ¯." />
         ) : (
           <>
             <div className="space-y-3 lg:hidden">
@@ -415,15 +418,15 @@ export default function SecurityDashboardPage() {
                   </div>
                   <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
                     <div>
-                      <dt className="text-xs text-slate-500 dark:text-slate-400">ورود</dt>
+                      <dt className="text-xs text-slate-500 dark:text-slate-400">ÙˆØ±ÙˆØ¯</dt>
                       <dd className="font-medium text-slate-900 dark:text-white">{record.attendance?.entryTime || '-'}</dd>
                     </div>
                     <div>
-                      <dt className="text-xs text-slate-500 dark:text-slate-400">خروج</dt>
+                      <dt className="text-xs text-slate-500 dark:text-slate-400">Ø®Ø±ÙˆØ¬</dt>
                       <dd className="font-medium text-slate-900 dark:text-white">{record.attendance?.exitTime || '-'}</dd>
                     </div>
                   </dl>
-                  <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{record.attendance?.notes || record.attendance?.exceptionType || 'بدون توضیح'}</p>
+                  <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{record.attendance?.notes || record.attendance?.exceptionType || 'Ø¨Ø¯ÙˆÙ† ØªÙˆØ¶ÛŒØ­'}</p>
                 </div>
               ))}
             </div>
@@ -432,11 +435,11 @@ export default function SecurityDashboardPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-700">
-                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">کارمند</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">ورود</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">خروج</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">وضعیت</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">توضیحات</th>
+                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">Ú©Ø§Ø±Ù…Ù†Ø¯</th>
+                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">ÙˆØ±ÙˆØ¯</th>
+                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">Ø®Ø±ÙˆØ¬</th>
+                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">ÙˆØ¶Ø¹ÛŒØª</th>
+                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">ØªÙˆØ¶ÛŒØ­Ø§Øª</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -462,7 +465,7 @@ export default function SecurityDashboardPage() {
       </ErpSection>
 
       {stats?.recentActivity?.length ? (
-        <ErpSection title="فعالیت‌های اخیر" description="آخرین رخدادهای ثبت‌شده برای شیفت جاری">
+        <ErpSection title="ÙØ¹Ø§Ù„ÛŒØªâ€ŒÙ‡Ø§ÛŒ Ø§Ø®ÛŒØ±" description="Ø¢Ø®Ø±ÛŒÙ† Ø±Ø®Ø¯Ø§Ø¯Ù‡Ø§ÛŒ Ø«Ø¨Øªâ€ŒØ´Ø¯Ù‡ Ø¨Ø±Ø§ÛŒ Ø´ÛŒÙØª Ø¬Ø§Ø±ÛŒ">
           <div className="space-y-3">
             {stats.recentActivity.map((activity, index) => (
               <div key={`${activity.employeeId}-${index}`} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/70 sm:flex-row sm:items-center sm:justify-between">
@@ -472,8 +475,8 @@ export default function SecurityDashboardPage() {
                   </span>
                   <div>
                     <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                      {activity.entryTime && `ورود: ${activity.entryTime}`}
-                      {activity.exitTime && `${activity.entryTime ? ' | ' : ''}خروج: ${activity.exitTime}`}
+                      {activity.entryTime && `ÙˆØ±ÙˆØ¯: ${activity.entryTime}`}
+                      {activity.exitTime && `${activity.entryTime ? ' | ' : ''}Ø®Ø±ÙˆØ¬: ${activity.exitTime}`}
                     </p>
                     <div className="mt-1 flex flex-wrap gap-2">
                       <ErpBadge tone={getStatusTone(activity.status)}>{getStatusLabel(activity.status)}</ErpBadge>
@@ -483,7 +486,7 @@ export default function SecurityDashboardPage() {
                 </div>
                 {!activity.digitalSignature && (
                   <ErpButton
-                    label="ثبت امضا"
+                    label="Ø«Ø¨Øª Ø§Ù…Ø¶Ø§"
                     onClick={() => {
                       setSelectedRecord(activity);
                       setShowSignatureModal(true);
@@ -499,10 +502,10 @@ export default function SecurityDashboardPage() {
       ) : null}
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <ErpSection title="درخواست‌های استثنا" actions={[{ label: 'درخواست جدید', onClick: () => setShowExceptionForm(true), icon: FaExclamationTriangle, tone: 'warning' }]}>
+        <ErpSection title="Ø¯Ø±Ø®ÙˆØ§Ø³Øªâ€ŒÙ‡Ø§ÛŒ Ø§Ø³ØªØ«Ù†Ø§" actions={[{ label: 'Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø¬Ø¯ÛŒØ¯', onClick: () => setShowExceptionForm(true), icon: FaExclamationTriangle, tone: 'warning' }]}>
           <div className="space-y-3">
             {exceptionRequests.length === 0 ? (
-              <p className="text-center text-sm text-slate-500 dark:text-slate-400">درخواستی ثبت نشده است</p>
+              <p className="text-center text-sm text-slate-500 dark:text-slate-400">Ø¯Ø±Ø®ÙˆØ§Ø³ØªÛŒ Ø«Ø¨Øª Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª</p>
             ) : (
               exceptionRequests.map((request) => (
                 <div key={request.id} className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
@@ -519,10 +522,10 @@ export default function SecurityDashboardPage() {
           </div>
         </ErpSection>
 
-        <ErpSection title="ماموریت‌ها" actions={[{ label: 'ماموریت جدید', onClick: () => setShowMissionForm(true), icon: FaPlane, tone: 'info' }]}>
+        <ErpSection title="Ù…Ø§Ù…ÙˆØ±ÛŒØªâ€ŒÙ‡Ø§" actions={[{ label: 'Ù…Ø§Ù…ÙˆØ±ÛŒØª Ø¬Ø¯ÛŒØ¯', onClick: () => setShowMissionForm(true), icon: FaPlane, tone: 'info' }]}>
           <div className="space-y-3">
             {missionAssignments.length === 0 ? (
-              <p className="text-center text-sm text-slate-500 dark:text-slate-400">ماموریتی ثبت نشده است</p>
+              <p className="text-center text-sm text-slate-500 dark:text-slate-400">Ù…Ø§Ù…ÙˆØ±ÛŒØªÛŒ Ø«Ø¨Øª Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª</p>
             ) : (
               missionAssignments.map((mission) => (
                 <div key={mission.id} className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">

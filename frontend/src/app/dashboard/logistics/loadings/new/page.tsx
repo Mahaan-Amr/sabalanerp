@@ -33,20 +33,20 @@ const emptyDriver = {
 };
 
 const steps: Array<{ id: WizardStep; label: string }> = [
-  { id: 'project', label: 'Ù¾Ø±ÙˆÚ˜Ù‡' },
-  { id: 'remaining', label: 'Ù…Ø§Ù†Ø¯Ù‡' },
-  { id: 'quantities', label: 'Ù…Ù‚Ø¯Ø§Ø±' },
-  { id: 'driver', label: 'Ø±Ø§Ù†Ù†Ø¯Ù‡' },
-  { id: 'review', label: 'Ø¨Ø§Ø²Ø¨ÛŒÙ†ÛŒ' },
+  { id: 'project', label: 'پروژه' },
+  { id: 'remaining', label: 'مانده' },
+  { id: 'quantities', label: 'مقدار' },
+  { id: 'driver', label: 'راننده' },
+  { id: 'review', label: 'بازبینی' },
 ];
 
 const driverFields = [
-  ['firstName', 'Ù†Ø§Ù…'],
-  ['lastName', 'Ù†Ø§Ù… Ø®Ø§Ù†ÙˆØ§Ø¯Ú¯ÛŒ'],
-  ['vehiclePlate', 'Ø´Ù…Ø§Ø±Ù‡ Ù¾Ù„Ø§Ú©'],
-  ['vehicleType', 'Ù†ÙˆØ¹ Ù…Ø§Ø´ÛŒÙ†'],
-  ['phone', 'Ø´Ù…Ø§Ø±Ù‡ ØªÙ…Ø§Ø³'],
-  ['nationalCode', 'Ú©Ø¯ Ù…Ù„ÛŒ'],
+  ['firstName', 'نام'],
+  ['lastName', 'نام خانوادگی'],
+  ['vehiclePlate', 'شماره پلاک'],
+  ['vehicleType', 'نوع ماشین'],
+  ['phone', 'شماره تماس'],
+  ['nationalCode', 'کد ملی'],
 ] as const;
 
 const lineFromSource = (source: any, quantity = ''): DraftLine => ({
@@ -162,10 +162,10 @@ export default function NewLoadingPage() {
       setDriverSnapshot(loadingDraft.driverSnapshot || emptyDriver);
       setLines((loadingDraft.lines || []).map(lineFromLoadingLine));
       await loadRemaining(projectId);
-      setMessage(response.data.resumed ? 'Ù¾ÛŒØ´â€ŒÙ†ÙˆÛŒØ³ ÙØ¹Ø§Ù„ Ø§ÛŒÙ† Ù¾Ø±ÙˆÚ˜Ù‡ Ø§Ø¯Ø§Ù…Ù‡ Ø¯Ø§Ø¯Ù‡ Ø´Ø¯.' : 'Ù¾ÛŒØ´â€ŒÙ†ÙˆÛŒØ³ Ø¨Ø§Ø±Ú¯ÛŒØ±ÛŒ Ø³Ø§Ø®ØªÙ‡ Ø´Ø¯.');
+      setMessage(response.data.resumed ? 'پیش‌نویس فعال این پروژه ادامه داده شد.' : 'پیش‌نویس بارگیری ساخته شد.');
       setStep('remaining');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Ø³Ø§Ø®Øª Ù¾ÛŒØ´â€ŒÙ†ÙˆÛŒØ³ Ù†Ø§Ù…ÙˆÙÙ‚ Ø¨ÙˆØ¯.');
+      setError(err.response?.data?.error || 'ساخت پیش‌نویس ناموفق بود.');
     } finally {
       setLoading(false);
     }
@@ -192,7 +192,7 @@ export default function NewLoadingPage() {
 
   const addSingleSource = (source: any) => {
     setLines((current) => [...current, lineFromSource(source)]);
-    setMessage('Ø±Ø¯ÛŒÙ Ø¨Ù‡ Ù¾ÛŒØ´â€ŒÙ†ÙˆÛŒØ³ Ø§Ø¶Ø§ÙÙ‡ Ø´Ø¯.');
+    setMessage('ردیف به پیش‌نویس اضافه شد.');
   };
 
   const openGroupAllocation = (group: any) => {
@@ -212,7 +212,7 @@ export default function NewLoadingPage() {
       .map((item: any) => lineFromSource(item.source, item.quantity));
 
     if (!added.length) {
-      setError('Ø¨Ø±Ø§ÛŒ Ø­Ø¯Ø§Ù‚Ù„ ÛŒÚ© Ù‚Ø±Ø§Ø±Ø¯Ø§Ø¯ Ù…Ù‚Ø¯Ø§Ø± ÙˆØ§Ø±Ø¯ Ú©Ù†ÛŒØ¯.');
+      setError('برای حداقل یک قرارداد مقدار وارد کنید.');
       return;
     }
 
@@ -220,7 +220,7 @@ export default function NewLoadingPage() {
     setSelectedGroupKey('');
     setAllocations({});
     setError('');
-    setMessage('ØªØ®ØµÛŒØµ Ù…Ù†Ø¨Ø¹ Ø¨Ù‡ Ù¾ÛŒØ´â€ŒÙ†ÙˆÛŒØ³ Ø§Ø¶Ø§ÙÙ‡ Ø´Ø¯.');
+    setMessage('تخصیص منبع به پیش‌نویس اضافه شد.');
   };
 
   const buildPayload = () => ({
@@ -256,11 +256,11 @@ export default function NewLoadingPage() {
       const response = await logisticsAPI.updateLoading(draft.id, buildPayload());
       if (response.data.success) {
         setDraft(response.data.data);
-        setMessage('Ù¾ÛŒØ´â€ŒÙ†ÙˆÛŒØ³ Ø°Ø®ÛŒØ±Ù‡ Ø´Ø¯.');
+        setMessage('پیش‌نویس ذخیره شد.');
         return true;
       }
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Ø°Ø®ÛŒØ±Ù‡ Ù¾ÛŒØ´â€ŒÙ†ÙˆÛŒØ³ Ù†Ø§Ù…ÙˆÙÙ‚ Ø¨ÙˆØ¯.');
+      setError(err.response?.data?.error || 'ذخیره پیش‌نویس ناموفق بود.');
     } finally {
       setSaving(false);
     }
@@ -269,12 +269,12 @@ export default function NewLoadingPage() {
 
   const blockers = useMemo(() => {
     const items: string[] = [];
-    if (!draft?.projectId) items.push('Ù¾Ø±ÙˆÚ˜Ù‡ Ø§Ù†ØªØ®Ø§Ø¨ Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª.');
-    if (!lines.length) items.push('Ø­Ø¯Ø§Ù‚Ù„ ÛŒÚ© Ø±Ø¯ÛŒÙ Ø¨Ø§Ø±Ú¯ÛŒØ±ÛŒ Ù„Ø§Ø²Ù… Ø§Ø³Øª.');
-    if (lines.some((line) => calculateLineQuantity(line) <= 0)) items.push('Ù…Ù‚Ø¯Ø§Ø± Ù‡Ù…Ù‡ Ø±Ø¯ÛŒÙâ€ŒÙ‡Ø§ Ø¨Ø§ÛŒØ¯ Ø¨ÛŒØ´ØªØ± Ø§Ø² ØµÙØ± Ø¨Ø§Ø´Ø¯.');
+    if (!draft?.projectId) items.push('پروژه انتخاب نشده است.');
+    if (!lines.length) items.push('حداقل یک ردیف بارگیری لازم است.');
+    if (lines.some((line) => calculateLineQuantity(line) <= 0)) items.push('مقدار همه ردیف‌ها باید بیشتر از صفر باشد.');
     const requiredDriverFields = ['firstName', 'lastName', 'vehiclePlate', 'vehicleType', 'phone', 'nationalCode'];
     if (requiredDriverFields.some((field) => !String(driverSnapshot?.[field] || '').trim())) {
-      items.push('Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø±Ø§Ù†Ù†Ø¯Ù‡ Ùˆ Ø®ÙˆØ¯Ø±Ùˆ Ú©Ø§Ù…Ù„ Ù†ÛŒØ³Øª.');
+      items.push('اطلاعات راننده و خودرو کامل نیست.');
     }
     return items;
   }, [draft, lines, driverSnapshot]);
@@ -292,7 +292,7 @@ export default function NewLoadingPage() {
 
   const finalize = async () => {
     if (blockers.length) {
-      setError('Ù…ÙˆØ§Ø±Ø¯ Ù„Ø§Ø²Ù… Ø¨Ø±Ø§ÛŒ Ù†Ù‡Ø§ÛŒÛŒâ€ŒØ³Ø§Ø²ÛŒ Ø±Ø§ ØªÚ©Ù…ÛŒÙ„ Ú©Ù†ÛŒØ¯.');
+      setError('موارد لازم برای نهایی‌سازی را تکمیل کنید.');
       return;
     }
     const saved = await saveDraft();
@@ -301,21 +301,21 @@ export default function NewLoadingPage() {
       const response = await logisticsAPI.finalizeLoading(draft.id);
       if (response.data.success) router.push(`/dashboard/logistics/loadings/${draft.id}`);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Ù†Ù‡Ø§ÛŒÛŒâ€ŒØ³Ø§Ø²ÛŒ Ù†Ø§Ù…ÙˆÙÙ‚ Ø¨ÙˆØ¯.');
+      setError(err.response?.data?.error || 'نهایی‌سازی ناموفق بود.');
     }
   };
 
   const goNext = async () => {
     if (step === 'project' && !draft?.id) {
-      setError('Ø§Ø¨ØªØ¯Ø§ Ù¾Ø±ÙˆÚ˜Ù‡ Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯.');
+      setError('ابتدا پروژه را انتخاب کنید.');
       return;
     }
     if (step === 'remaining' && lines.length === 0) {
-      setError('Ø­Ø¯Ø§Ù‚Ù„ ÛŒÚ© Ù…Ø§Ù†Ø¯Ù‡ Ù‚Ø§Ø¨Ù„ Ø¨Ø§Ø±Ú¯ÛŒØ±ÛŒ Ø±Ø§ Ø§Ø¶Ø§ÙÙ‡ Ú©Ù†ÛŒØ¯.');
+      setError('حداقل یک مانده قابل بارگیری را اضافه کنید.');
       return;
     }
     if (step === 'quantities' && !hasValidLineQuantities) {
-      setError('Ù…Ù‚Ø¯Ø§Ø± Ù‡Ù…Ù‡ Ø±Ø¯ÛŒÙâ€ŒÙ‡Ø§ Ø¨Ø§ÛŒØ¯ Ø¨ÛŒØ´ØªØ± Ø§Ø² ØµÙØ± Ø¨Ø§Ø´Ø¯.');
+      setError('مقدار همه ردیف‌ها باید بیشتر از صفر باشد.');
       return;
     }
     setError('');
@@ -356,10 +356,10 @@ export default function NewLoadingPage() {
   );
 
   const renderProjectStep = () => (
-    <ErpSection title="Ø§Ù†ØªØ®Ø§Ø¨ Ù¾Ø±ÙˆÚ˜Ù‡" description="Ø§Ù†ØªØ®Ø§Ø¨ Ù¾Ø±ÙˆÚ˜Ù‡ Ø§ÙˆÙ„ÛŒÙ† ØªØ¹Ù‡Ø¯ Ø¨Ø§Ø±Ú¯ÛŒØ±ÛŒ Ø§Ø³ØªØ› Ø§Ú¯Ø± Ù¾ÛŒØ´â€ŒÙ†ÙˆÛŒØ³ ÙØ¹Ø§Ù„ÛŒ Ø¨Ø±Ø§ÛŒ Ù¾Ø±ÙˆÚ˜Ù‡ ÙˆØ¬ÙˆØ¯ Ø¯Ø§Ø´ØªÙ‡ Ø¨Ø§Ø´Ø¯ Ù‡Ù…Ø§Ù† Ø§Ø¯Ø§Ù…Ù‡ Ø¯Ø§Ø¯Ù‡ Ù…ÛŒâ€ŒØ´ÙˆØ¯.">
+    <ErpSection title="انتخاب پروژه" description="انتخاب پروژه اولین تعهد بارگیری است؛ اگر پیش‌نویس فعالی برای پروژه وجود داشته باشد همان ادامه داده می‌شود.">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <input className={inputClass} value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="Ø¬Ø³ØªØ¬ÙˆÛŒ Ù…Ø´ØªØ±ÛŒØŒ Ø´Ø±Ú©ØªØŒ Ù¾Ø±ÙˆÚ˜Ù‡ØŒ Ø¢Ø¯Ø±Ø³ ÛŒØ§ Ø´Ù…Ø§Ø±Ù‡ ØªÙ…Ø§Ø³" />
-        <ErpButton label="Ø¬Ø³ØªØ¬Ùˆ" icon={FaSearch} onClick={loadProjects} />
+        <input className={inputClass} value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="جستجوی مشتری، شرکت، پروژه، آدرس یا شماره تماس" />
+        <ErpButton label="جستجو" icon={FaSearch} onClick={loadProjects} />
       </div>
       <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
         {projects.map((project) => (
@@ -367,10 +367,10 @@ export default function NewLoadingPage() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="font-semibold text-slate-900 dark:text-white">{project.projectName || project.address}</p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">{project.companyName || project.customerName} Â· {project.city || 'Ø¨Ø¯ÙˆÙ† Ø´Ù‡Ø±'}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">{project.companyName || project.customerName} · {project.city || 'بدون شهر'}</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <ErpButton label="Ø§Ù†ØªØ®Ø§Ø¨" icon={FaTruck} onClick={() => selectProject(project.id)} variant="solid" />
+                <ErpButton label="انتخاب" icon={FaTruck} onClick={() => selectProject(project.id)} variant="solid" />
               </div>
             </div>
           </ErpCard>
@@ -380,11 +380,11 @@ export default function NewLoadingPage() {
   );
 
   const renderRemainingStep = () => (
-    <ErpSection title="Ø§Ù†ØªØ®Ø§Ø¨ Ù…Ø§Ù†Ø¯Ù‡ Ù‚Ø§Ø¨Ù„ Ø¨Ø§Ø±Ú¯ÛŒØ±ÛŒ" description="Ø§Ø¨ØªØ¯Ø§ Ù…Ø§Ù†Ø¯Ù‡â€ŒÙ‡Ø§ÛŒ ÙÛŒØ²ÛŒÚ©ÛŒ Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯Ø› Ø§Ú¯Ø± ÛŒÚ© Ú¯Ø±ÙˆÙ‡ Ú†Ù†Ø¯ Ù…Ù†Ø¨Ø¹ Ù‚Ø±Ø§Ø±Ø¯Ø§Ø¯ÛŒ Ø¯Ø§Ø´ØªÙ‡ Ø¨Ø§Ø´Ø¯ ØªØ®ØµÛŒØµ Ù…Ù†Ø¨Ø¹ Ø¬Ø¯Ø§Ú¯Ø§Ù†Ù‡ Ø§Ù†Ø¬Ø§Ù… Ù…ÛŒâ€ŒØ´ÙˆØ¯.">
+    <ErpSection title="انتخاب مانده قابل بارگیری" description="ابتدا مانده‌های فیزیکی را انتخاب کنید؛ اگر یک گروه چند منبع قراردادی داشته باشد تخصیص منبع جداگانه انجام می‌شود.">
       {!remaining ? (
-        <ErpEmptyState icon={FaTruck} title="Ø§Ø¨ØªØ¯Ø§ Ù¾Ø±ÙˆÚ˜Ù‡ Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯" />
+        <ErpEmptyState icon={FaTruck} title="ابتدا پروژه را انتخاب کنید" />
       ) : remaining.groups.length === 0 ? (
-        <ErpEmptyState icon={FaTruck} title="Ù…Ø§Ù†Ø¯Ù‡ Ù‚Ø§Ø¨Ù„ Ø¨Ø§Ø±Ú¯ÛŒØ±ÛŒ ÙˆØ¬ÙˆØ¯ Ù†Ø¯Ø§Ø±Ø¯" />
+        <ErpEmptyState icon={FaTruck} title="مانده قابل بارگیری وجود ندارد" />
       ) : (
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
           {remaining.groups.map((group: any) => (
@@ -392,13 +392,13 @@ export default function NewLoadingPage() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="font-semibold text-slate-900 dark:text-white">{group.displayName}</p>
-                  <p className="mt-1 text-xs text-slate-500">{group.productType || 'Ù…Ø­ØµÙˆÙ„'} Â· {group.unitLabel} Â· {group.sources.length.toLocaleString('fa-IR')} Ù…Ù†Ø¨Ø¹</p>
+                  <p className="mt-1 text-xs text-slate-500">{group.productType || 'محصول'} · {group.unitLabel} · {group.sources.length.toLocaleString('fa-IR')} منبع</p>
                 </div>
-                <ErpBadge tone="success">Ù…Ø§Ù†Ø¯Ù‡ {numberFa(group.remainingTotal)} {group.unitLabel}</ErpBadge>
+                <ErpBadge tone="success">مانده {numberFa(group.remainingTotal)} {group.unitLabel}</ErpBadge>
               </div>
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3 dark:border-slate-800">
-                <p className="text-xs text-slate-500">Ù‚Ø±Ø§Ø±Ø¯Ø§Ø¯Ù‡Ø§: {group.sources.map((source: any) => source.contractNumber).join('ØŒ ')}</p>
-                <ErpButton label={group.sources.length > 1 ? 'ØªØ®ØµÛŒØµ Ù…Ù†Ø¨Ø¹' : 'Ø§ÙØ²ÙˆØ¯Ù†'} icon={FaPlus} onClick={() => openGroupAllocation(group)} />
+                <p className="text-xs text-slate-500">قراردادها: {group.sources.map((source: any) => source.contractNumber).join('، ')}</p>
+                <ErpButton label={group.sources.length > 1 ? 'تخصیص منبع' : 'افزودن'} icon={FaPlus} onClick={() => openGroupAllocation(group)} />
               </div>
             </ErpCard>
           ))}
@@ -409,21 +409,21 @@ export default function NewLoadingPage() {
         <ErpCard className="mt-4 p-4" tone="info">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h3 className="font-semibold text-slate-900 dark:text-white">ØªØ®ØµÛŒØµ Ù…Ù†Ø¨Ø¹: {selectedGroup.displayName}</h3>
-              <p className="mt-1 text-sm text-slate-500">Ø§ÛŒÙ† Ù…Ù‚Ø¯Ø§Ø± Ø§Ø² Ú©Ø¯Ø§Ù… Ù‚Ø±Ø§Ø±Ø¯Ø§Ø¯Ù‡Ø§ Ù…ØµØ±Ù Ø´ÙˆØ¯ØŸ</p>
+              <h3 className="font-semibold text-slate-900 dark:text-white">تخصیص منبع: {selectedGroup.displayName}</h3>
+              <p className="mt-1 text-sm text-slate-500">این مقدار از کدام قراردادها مصرف شود؟</p>
             </div>
-            <ErpButton label="Ø¨Ø³ØªÙ†" onClick={() => setSelectedGroupKey('')} tone="neutral" variant="ghost" />
+            <ErpButton label="بستن" onClick={() => setSelectedGroupKey('')} tone="neutral" variant="ghost" />
           </div>
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             {selectedGroup.sources.map((source: any) => (
               <label key={source.contractItemId}>
-                <span className={labelClass}>Ù‚Ø±Ø§Ø±Ø¯Ø§Ø¯ {source.contractNumber} Â· Ù…Ø§Ù†Ø¯Ù‡ {numberFa(source.remainingQuantity)} {source.unitLabel}</span>
-                <input className={inputClass} value={allocations[source.contractItemId] || ''} onChange={(event) => setAllocations((current) => ({ ...current, [source.contractItemId]: event.target.value }))} placeholder="Ù…Ù‚Ø¯Ø§Ø± Ù…ØµØ±Ù Ø§Ø² Ø§ÛŒÙ† Ù‚Ø±Ø§Ø±Ø¯Ø§Ø¯" />
+                <span className={labelClass}>قرارداد {source.contractNumber} · مانده {numberFa(source.remainingQuantity)} {source.unitLabel}</span>
+                <input className={inputClass} value={allocations[source.contractItemId] || ''} onChange={(event) => setAllocations((current) => ({ ...current, [source.contractItemId]: event.target.value }))} placeholder="مقدار مصرف از این قرارداد" />
               </label>
             ))}
           </div>
           <div className="mt-4">
-            <ErpButton label="Ø§ÙØ²ÙˆØ¯Ù† ØªØ®ØµÛŒØµâ€ŒÙ‡Ø§" icon={FaPlus} onClick={addAllocatedSources} variant="solid" />
+            <ErpButton label="افزودن تخصیص‌ها" icon={FaPlus} onClick={addAllocatedSources} variant="solid" />
           </div>
         </ErpCard>
       )}
@@ -431,9 +431,9 @@ export default function NewLoadingPage() {
   );
 
   const renderQuantitiesStep = () => (
-    <ErpSection title="Ù…Ù‚Ø¯Ø§Ø±Ø¯Ù‡ÛŒ Ø±Ø¯ÛŒÙâ€ŒÙ‡Ø§" description="Ø¨Ø±Ø§ÛŒ Ø±Ø¯ÛŒÙâ€ŒÙ‡Ø§ÛŒ Ù…ØªØ± Ø·ÙˆÙ„ØŒ Ø®Ø· Ø±Ø§Ø³ Ù¾ÛŒØ´â€ŒÙØ±Ø¶ Ø§Ø³Øª Ùˆ Ù…Ù‚Ø¯Ø§Ø± Ù…Ø³ØªÙ‚ÛŒÙ… Ù‡Ù…Ú†Ù†Ø§Ù† Ø¯Ø± Ø¯Ø³ØªØ±Ø³ Ù…ÛŒâ€ŒÙ…Ø§Ù†Ø¯.">
+    <ErpSection title="مقداردهی ردیف‌ها" description="برای ردیف‌های متر طول، خط راس پیش‌فرض است و مقدار مستقیم همچنان در دسترس می‌ماند.">
       {lines.length === 0 ? (
-        <ErpEmptyState icon={FaClipboardList} title="Ù‡Ù†ÙˆØ² Ø±Ø¯ÛŒÙÛŒ Ø§Ø¶Ø§ÙÙ‡ Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª" action={{ label: 'Ø±ÙØªÙ† Ø¨Ù‡ Ø§Ù†ØªØ®Ø§Ø¨ Ù…Ø§Ù†Ø¯Ù‡', onClick: () => setStep('remaining'), icon: FaPlus }} />
+        <ErpEmptyState icon={FaClipboardList} title="هنوز ردیفی اضافه نشده است" action={{ label: 'رفتن به انتخاب مانده', onClick: () => setStep('remaining'), icon: FaPlus }} />
       ) : (
         <div className="space-y-3">
           {lines.map((line) => {
@@ -442,12 +442,12 @@ export default function NewLoadingPage() {
               <ErpCard key={line.key} className="p-4">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
-                    <p className="font-semibold text-slate-900 dark:text-white">{line.source.productSnapshot?.name || 'Ù…Ø­ØµÙˆÙ„'}</p>
-                    <p className="mt-1 text-xs text-slate-500">Ù‚Ø±Ø§Ø±Ø¯Ø§Ø¯ {line.source.contractNumber} Â· Ù…Ø§Ù†Ø¯Ù‡ {numberFa(line.source.remainingQuantity)} {line.source.unitLabel}</p>
+                    <p className="font-semibold text-slate-900 dark:text-white">{line.source.productSnapshot?.name || 'محصول'}</p>
+                    <p className="mt-1 text-xs text-slate-500">قرارداد {line.source.contractNumber} · مانده {numberFa(line.source.remainingQuantity)} {line.source.unitLabel}</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <ErpBadge tone={quantity > 0 ? 'success' : 'warning'}>{numberFa(quantity)} {unitLabels[line.source.unit] || line.source.unit}</ErpBadge>
-                    <ErpButton label="Ø­Ø°Ù" onClick={() => removeLine(line.key)} tone="danger" variant="soft" />
+                    <ErpButton label="حذف" onClick={() => removeLine(line.key)} tone="danger" variant="soft" />
                   </div>
                 </div>
                 {line.source.unit === 'meter' && (
@@ -456,8 +456,8 @@ export default function NewLoadingPage() {
                       value={line.mode}
                       onChange={(value) => updateLine(line.key, { mode: value })}
                       options={[
-                        { value: 'linear', label: 'Ø®Ø· Ø±Ø§Ø³' },
-                        { value: 'direct', label: 'Ù…Ù‚Ø¯Ø§Ø± Ù…Ø³ØªÙ‚ÛŒÙ…' },
+                        { value: 'linear', label: 'خط راس' },
+                        { value: 'direct', label: 'مقدار مستقیم' },
                       ]}
                     />
                   </div>
@@ -465,13 +465,13 @@ export default function NewLoadingPage() {
                 <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
                   {line.mode === 'linear' ? (
                     <>
-                      <label><span className={labelClass}>Ø®Ø· Ø±Ø§Ø³</span><input className={inputClass} value={line.khatRas} onChange={(event) => updateLine(line.key, { khatRas: event.target.value })} /></label>
-                      <label><span className={labelClass}>ØªØ¹Ø¯Ø§Ø¯</span><input className={inputClass} value={line.pieceCount} onChange={(event) => updateLine(line.key, { pieceCount: event.target.value })} /></label>
-                      <label><span className={labelClass}>Ø§Ø¶Ø§ÙÙ‡</span><input className={inputClass} value={line.plus} onChange={(event) => updateLine(line.key, { plus: event.target.value })} /></label>
-                      <label><span className={labelClass}>Ú©Ø³Ø±</span><input className={inputClass} value={line.minus} onChange={(event) => updateLine(line.key, { minus: event.target.value })} /></label>
+                      <label><span className={labelClass}>خط راس</span><input className={inputClass} value={line.khatRas} onChange={(event) => updateLine(line.key, { khatRas: event.target.value })} /></label>
+                      <label><span className={labelClass}>تعداد</span><input className={inputClass} value={line.pieceCount} onChange={(event) => updateLine(line.key, { pieceCount: event.target.value })} /></label>
+                      <label><span className={labelClass}>اضافه</span><input className={inputClass} value={line.plus} onChange={(event) => updateLine(line.key, { plus: event.target.value })} /></label>
+                      <label><span className={labelClass}>کسر</span><input className={inputClass} value={line.minus} onChange={(event) => updateLine(line.key, { minus: event.target.value })} /></label>
                     </>
                   ) : (
-                    <label><span className={labelClass}>Ù…Ù‚Ø¯Ø§Ø± Ù…Ø³ØªÙ‚ÛŒÙ…</span><input className={inputClass} value={line.quantity} onChange={(event) => updateLine(line.key, { quantity: event.target.value })} /></label>
+                    <label><span className={labelClass}>مقدار مستقیم</span><input className={inputClass} value={line.quantity} onChange={(event) => updateLine(line.key, { quantity: event.target.value })} /></label>
                   )}
                 </div>
               </ErpCard>
@@ -515,48 +515,48 @@ export default function NewLoadingPage() {
     </ErpSection>
   );
   const renderReviewStep = () => (
-    <ErpSection title="Ø¨Ø§Ø²Ø¨ÛŒÙ†ÛŒ Ùˆ Ù†Ù‡Ø§ÛŒÛŒâ€ŒØ³Ø§Ø²ÛŒ">
+    <ErpSection title="بازبینی و نهایی‌سازی">
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-3">
           <ErpCard className="p-4">
-            <p className="text-sm text-slate-500">Ù¾Ø±ÙˆÚ˜Ù‡</p>
-            <p className="mt-1 font-semibold text-slate-900 dark:text-white">{draft?.project?.projectName || draft?.project?.address || remaining?.project?.projectName || 'Ø§Ù†ØªØ®Ø§Ø¨ Ù†Ø´Ø¯Ù‡'}</p>
+            <p className="text-sm text-slate-500">پروژه</p>
+            <p className="mt-1 font-semibold text-slate-900 dark:text-white">{draft?.project?.projectName || draft?.project?.address || remaining?.project?.projectName || 'انتخاب نشده'}</p>
             <p className="mt-1 text-xs text-slate-500">{remaining?.project?.companyName || remaining?.project?.customerName || ''}</p>
           </ErpCard>
           <ErpCard className="p-4">
-            <p className="text-sm text-slate-500">Ø±Ø§Ù†Ù†Ø¯Ù‡</p>
-            <p className="mt-1 font-semibold text-slate-900 dark:text-white">{driverSnapshot.firstName || 'Ø¨Ø¯ÙˆÙ† Ù†Ø§Ù…'} {driverSnapshot.lastName || ''}</p>
-            <p className="mt-1 text-xs text-slate-500">{driverSnapshot.vehicleType || 'Ù†ÙˆØ¹ Ù…Ø§Ø´ÛŒÙ†'} Â· {driverSnapshot.vehiclePlate || 'Ù¾Ù„Ø§Ú©'}</p>
+            <p className="text-sm text-slate-500">راننده</p>
+            <p className="mt-1 font-semibold text-slate-900 dark:text-white">{driverSnapshot.firstName || 'بدون نام'} {driverSnapshot.lastName || ''}</p>
+            <p className="mt-1 text-xs text-slate-500">{driverSnapshot.vehicleType || 'نوع ماشین'} · {driverSnapshot.vehiclePlate || 'پلاک'}</p>
           </ErpCard>
           <ErpCard className="p-4">
-            <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Ø±Ø¯ÛŒÙâ€ŒÙ‡Ø§</p>
+            <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">ردیف‌ها</p>
             <div className="space-y-2">
               {lines.map((line) => (
                 <div key={line.key} className="flex items-start justify-between gap-3 rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800">
-                  <span>{line.source.productSnapshot?.name || 'Ù…Ø­ØµÙˆÙ„'} Â· Ù‚Ø±Ø§Ø±Ø¯Ø§Ø¯ {line.source.contractNumber}</span>
+                  <span>{line.source.productSnapshot?.name || 'محصول'} · قرارداد {line.source.contractNumber}</span>
                   <span className="font-semibold text-[#074747] dark:text-teal-200">{numberFa(calculateLineQuantity(line))} {unitLabels[line.source.unit] || line.source.unit}</span>
                 </div>
               ))}
-              {!lines.length && <p className="text-sm text-slate-500">Ø±Ø¯ÛŒÙÛŒ Ø§Ø¶Ø§ÙÙ‡ Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª.</p>}
+              {!lines.length && <p className="text-sm text-slate-500">ردیفی اضافه نشده است.</p>}
             </div>
           </ErpCard>
           <label>
-            <span className={labelClass}>ÛŒØ§Ø¯Ø¯Ø§Ø´Øª</span>
+            <span className={labelClass}>یادداشت</span>
             <textarea className={`${inputClass} min-h-28`} value={notes} onChange={(event) => setNotes(event.target.value)} />
           </label>
         </div>
         <ErpCard className="p-4">
-          <p className="font-semibold text-slate-900 dark:text-white">Ø¢Ù…Ø§Ø¯Ú¯ÛŒ Ù†Ù‡Ø§ÛŒÛŒâ€ŒØ³Ø§Ø²ÛŒ</p>
+          <p className="font-semibold text-slate-900 dark:text-white">آمادگی نهایی‌سازی</p>
           <div className="mt-3 space-y-2">
             {blockers.length === 0 ? (
-              <p className="rounded-lg bg-emerald-50 p-3 text-sm font-semibold text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200">Ù‡Ù…Ù‡ Ù…ÙˆØ§Ø±Ø¯ ØªÚ©Ù…ÛŒÙ„ Ø§Ø³Øª.</p>
+              <p className="rounded-lg bg-emerald-50 p-3 text-sm font-semibold text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200">همه موارد تکمیل است.</p>
             ) : blockers.map((blocker) => (
               <p key={blocker} className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-100">{blocker}</p>
             ))}
           </div>
           <div className="mt-4 space-y-2">
-            <ErpButton label={saving ? 'Ø¯Ø± Ø­Ø§Ù„ Ø°Ø®ÛŒØ±Ù‡...' : 'Ø°Ø®ÛŒØ±Ù‡ Ù¾ÛŒØ´â€ŒÙ†ÙˆÛŒØ³'} icon={FaSave} onClick={saveDraft} disabled={saving || !draft?.id} tone="neutral" />
-            <ErpButton label="Ø«Ø¨Øª Ù†Ù‡Ø§ÛŒÛŒ Ø¨Ø§Ø±Ú¯ÛŒØ±ÛŒ" icon={FaCheck} onClick={finalize} disabled={blockers.length > 0 || saving} tone="success" variant="solid" />
+            <ErpButton label={saving ? 'در حال ذخیره...' : 'ذخیره پیش‌نویس'} icon={FaSave} onClick={saveDraft} disabled={saving || !draft?.id} tone="neutral" />
+            <ErpButton label="ثبت نهایی بارگیری" icon={FaCheck} onClick={finalize} disabled={blockers.length > 0 || saving} tone="success" variant="solid" />
           </div>
         </ErpCard>
       </div>
@@ -567,12 +567,12 @@ export default function NewLoadingPage() {
 
   return (
     <ErpPage
-      eyebrow="Ù„Ø¬Ø³ØªÛŒÚ©"
-      title="Ø¨Ø§Ø±Ú¯ÛŒØ±ÛŒ Ø¬Ø¯ÛŒØ¯"
-      description="ÛŒÚ© Ø¨Ø§Ø±Ú¯ÛŒØ±ÛŒ Ø§Ø² Ø§Ù†ØªØ®Ø§Ø¨ Ù¾Ø±ÙˆÚ˜Ù‡ Ø´Ø±ÙˆØ¹ Ù…ÛŒâ€ŒØ´ÙˆØ¯ØŒ Ø¨Ù‡â€ŒØµÙˆØ±Øª Ù¾ÛŒØ´â€ŒÙ†ÙˆÛŒØ³ Ù‚Ø§Ø¨Ù„ Ø§Ø¯Ø§Ù…Ù‡ Ø§Ø³ØªØŒ Ùˆ ÙÙ‚Ø· Ø¯Ø± Ø¨Ø§Ø²Ø¨ÛŒÙ†ÛŒ Ù†Ù‡Ø§ÛŒÛŒ Ú©Ø§Ù…Ù„ Ø¨ÙˆØ¯Ù† Ø±Ø¯ÛŒÙâ€ŒÙ‡Ø§ Ùˆ Ø±Ø§Ù†Ù†Ø¯Ù‡ Ø±Ø§ Ø§Ù„Ø²Ø§Ù… Ù…ÛŒâ€ŒÚ©Ù†Ø¯."
+      eyebrow="لجستیک"
+      title="بارگیری جدید"
+      description="یک بارگیری از انتخاب پروژه شروع می‌شود، به‌صورت پیش‌نویس قابل ادامه است، و فقط در بازبینی نهایی کامل بودن ردیف‌ها و راننده را الزام می‌کند."
       backHref="/dashboard/logistics/loadings"
       actions={[
-        { label: saving ? 'Ø¯Ø± Ø­Ø§Ù„ Ø°Ø®ÛŒØ±Ù‡...' : 'Ø°Ø®ÛŒØ±Ù‡ Ù¾ÛŒØ´â€ŒÙ†ÙˆÛŒØ³', icon: FaSave, onClick: saveDraft, disabled: saving || !draft?.id, tone: 'neutral' },
+        { label: saving ? 'در حال ذخیره...' : 'ذخیره پیش‌نویس', icon: FaSave, onClick: saveDraft, disabled: saving || !draft?.id, tone: 'neutral' },
       ]}
     >
       {renderStepNav()}
@@ -587,14 +587,14 @@ export default function NewLoadingPage() {
 
       <div className="sticky bottom-3 z-10 rounded-lg border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
         <div className="flex items-center justify-between gap-3">
-            <ErpButton label="Ù‚Ø¨Ù„ÛŒ" icon={FaArrowRight} onClick={goBack} disabled={step === 'project'} tone="neutral" variant="outline" />
+            <ErpButton label="قبلی" icon={FaArrowRight} onClick={goBack} disabled={step === 'project'} tone="neutral" variant="outline" />
           <div className="text-center text-xs text-slate-500">
-            {draft?.loadingNumber ? <span>Ù¾ÛŒØ´â€ŒÙ†ÙˆÛŒØ³ {draft.loadingNumber}</span> : <span>Ø§Ø¨ØªØ¯Ø§ Ù¾Ø±ÙˆÚ˜Ù‡ Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯</span>}
+            {draft?.loadingNumber ? <span>پیش‌نویس {draft.loadingNumber}</span> : <span>ابتدا پروژه را انتخاب کنید</span>}
           </div>
           {step === 'review' ? (
-            <ErpButton label="Ù†Ù‡Ø§ÛŒÛŒâ€ŒØ³Ø§Ø²ÛŒ" icon={FaCheck} onClick={finalize} disabled={blockers.length > 0 || saving} tone="success" variant="solid" />
+            <ErpButton label="نهایی‌سازی" icon={FaCheck} onClick={finalize} disabled={blockers.length > 0 || saving} tone="success" variant="solid" />
           ) : (
-            <ErpButton label="Ø¨Ø¹Ø¯ÛŒ" icon={FaArrowLeft} onClick={goNext} disabled={(step === 'project' && !draft?.id) || (step !== 'project' && !draft?.id)} variant="solid" />
+            <ErpButton label="بعدی" icon={FaArrowLeft} onClick={goNext} disabled={(step === 'project' && !draft?.id) || (step !== 'project' && !draft?.id)} variant="solid" />
           )}
         </div>
       </div>

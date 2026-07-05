@@ -603,6 +603,11 @@ export default function AccountingContractDetailPage({ params }: { params: { con
 
                       {replacementWorkflow.canApproveReplacement && replacementRecord && (
                         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+                          {actionError && (
+                            <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+                              {actionError}
+                            </div>
+                          )}
                           <FinancialInvoiceApprovalForm
                             invoice={replacementRecord}
                             busy={actionLoading}

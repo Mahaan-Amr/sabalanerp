@@ -1274,7 +1274,13 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
         id: { not: invoiceId }
       }
     });
-    if (duplicate) throw new Error('System invoice number is already used');
+    if (duplicate) {
+      const metadata = metadataObject(before.metadata);
+      if (metadata.replacesRecordId === duplicate.id) {
+        throw new Error('Replacement invoice needs a new system invoice number; the old voided invoice already uses this number');
+      }
+      throw new Error('System invoice number is already used');
+    }
 
     const updated = await tx.accountingFinancialRecord.update({
       where: { id: invoiceId },

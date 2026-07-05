@@ -1,14 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { FaClipboardCheck, FaPlus, FaRedo } from 'react-icons/fa';
-import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
+import { FaClipboardCheck, FaExclamationTriangle, FaList, FaPlus, FaRedo, FaTasks } from 'react-icons/fa';
+import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpSegmentedControl } from '@/components/erp';
 import { securityAPI } from '@/lib/api';
 
 const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
 const labelClass = 'mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
+type SupervisorSection = 'create' | 'reports' | 'follow-ups' | 'incidents';
 
 export default function SecuritySupervisorReportsPage() {
   const [reports, setReports] = useState<any[]>([]);
@@ -24,6 +25,7 @@ export default function SecuritySupervisorReportsPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [activeSection, setActiveSection] = useState<SupervisorSection>('create');
 
   const loadData = async () => {
     setLoading(true);
@@ -80,6 +82,18 @@ export default function SecuritySupervisorReportsPage() {
       {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{message}</div>}
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
 
+      <ErpSegmentedControl<SupervisorSection>
+        value={activeSection}
+        onChange={setActiveSection}
+        options={[
+          { value: 'create', label: 'ثبت گزارش سرپرست', icon: FaPlus },
+          { value: 'reports', label: 'گزارش‌های سرپرست', icon: FaList },
+          { value: 'follow-ups', label: 'پیگیری‌ها', icon: FaTasks },
+          { value: 'incidents', label: 'رخدادها', icon: FaExclamationTriangle },
+        ]}
+      />
+
+      {activeSection === 'create' && (
       <ErpSection title="ثبت گزارش شیفت">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <label>
@@ -112,8 +126,10 @@ export default function SecuritySupervisorReportsPage() {
           <ErpButton label="ثبت گزارش" icon={FaPlus} onClick={createReport} disabled={saving || !form.summary.trim()} variant="solid" />
         </div>
       </ErpSection>
+      )}
 
-      <ErpSection title="گزارش‌های ثبت‌شده">
+      {activeSection === 'reports' && (
+      <ErpSection title="گزارش‌های سرپرست">
         {reports.length === 0 ? (
           <ErpEmptyState icon={FaClipboardCheck} title="گزارش سرپرست ثبت نشده است" />
         ) : (
@@ -134,6 +150,51 @@ export default function SecuritySupervisorReportsPage() {
           </div>
         )}
       </ErpSection>
+      )}
+
+      {activeSection === 'follow-ups' && (
+      <ErpSection title="پیگیری‌ها">
+        {reports.filter((report) => report.followUpNotes).length === 0 ? (
+          <ErpEmptyState icon={FaTasks} title="پیگیری ثبت نشده است" />
+        ) : (
+          <div className="space-y-3">
+            {reports.filter((report) => report.followUpNotes).map((report) => (
+              <ErpCard key={report.id} className="p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-900 dark:text-white">{new Date(report.reportDate).toLocaleDateString('fa-IR')}</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{report.followUpNotes}</p>
+                  </div>
+                  <ErpBadge tone="warning">در پیگیری</ErpBadge>
+                </div>
+              </ErpCard>
+            ))}
+          </div>
+        )}
+      </ErpSection>
+      )}
+
+      {activeSection === 'incidents' && (
+      <ErpSection title="رخدادها">
+        {reports.filter((report) => report.incidents).length === 0 ? (
+          <ErpEmptyState icon={FaExclamationTriangle} title="رخدادی ثبت نشده است" />
+        ) : (
+          <div className="space-y-3">
+            {reports.filter((report) => report.incidents).map((report) => (
+              <ErpCard key={report.id} className="p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-900 dark:text-white">{new Date(report.reportDate).toLocaleDateString('fa-IR')}</p>
+                    <p className="mt-2 text-sm leading-6 text-amber-700 dark:text-amber-200">{report.incidents}</p>
+                  </div>
+                  <ErpBadge tone="danger">رخداد</ErpBadge>
+                </div>
+              </ErpCard>
+            ))}
+          </div>
+        )}
+      </ErpSection>
+      )}
     </ErpPage>
   );
 }

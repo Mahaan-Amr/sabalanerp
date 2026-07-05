@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { FaBan, FaCarSide, FaCheck, FaClipboardList, FaPlus, FaRedo, FaSearch, FaTruck, FaUserShield } from 'react-icons/fa';
-import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpSegmentedControl } from '@/components/erp';
 import { crmAPI, securityAPI } from '@/lib/api';
 
 const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
@@ -61,6 +61,8 @@ const statusTone = (status: string) => {
   return 'neutral' as const;
 };
 
+type VehicleSection = 'registry' | 'movements' | 'inbound' | 'sales-exit';
+
 export default function SecurityVehiclesPage() {
   const [pairs, setPairs] = useState<any[]>([]);
   const [movements, setMovements] = useState<any[]>([]);
@@ -73,6 +75,7 @@ export default function SecurityVehiclesPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [activeSection, setActiveSection] = useState<VehicleSection>('registry');
 
   const activePairs = useMemo(() => pairs.filter((pair) => pair.isActive), [pairs]);
 
@@ -183,7 +186,7 @@ export default function SecurityVehiclesPage() {
       description="رجیستر راننده و خودرو، ورود خودروهای پر، خروج فروش و تاریخچه ترددها."
       actions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: loadData, tone: 'neutral' }]}
       metrics={[
-        { label: 'زوج فعال راننده/خودرو', value: activePairs.length, icon: FaTruck, tone: 'success' },
+        { label: 'رجیستر فعال راننده و خودرو', value: activePairs.length, icon: FaTruck, tone: 'success' },
         { label: 'ترددهای اخیر', value: movements.length, icon: FaClipboardList, tone: 'info' },
         { label: 'آماده خروج', value: readyExit.length, icon: FaCarSide, tone: 'warning' },
       ]}
@@ -191,7 +194,19 @@ export default function SecurityVehiclesPage() {
       {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{message}</div>}
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
 
-      <ErpSection title="رجیستر راننده و خودرو" description="هر رکورد یک زوج ثابت راننده و خودرو است که لجستیک فقط در حالت فعال می‌تواند انتخاب کند.">
+      <ErpSegmentedControl<VehicleSection>
+        value={activeSection}
+        onChange={setActiveSection}
+        options={[
+          { value: 'registry', label: 'رجیستر راننده و خودرو', icon: FaTruck },
+          { value: 'inbound', label: 'ورود خودروی پر', icon: FaCarSide },
+          { value: 'sales-exit', label: 'خروج فروش', icon: FaCheck },
+          { value: 'movements', label: 'تردد خودرو', icon: FaClipboardList },
+        ]}
+      />
+
+      {activeSection === 'registry' && (
+      <ErpSection title="رجیستر راننده و خودرو" description="رکوردهای فعال این رجیستر تنها گزینه‌های قابل انتخاب برای بارگیری لجستیک هستند.">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           {Object.entries({ firstName: 'نام', lastName: 'نام خانوادگی', vehiclePlate: 'پلاک', vehicleType: 'نوع خودرو', phone: 'موبایل', nationalCode: 'کد ملی' }).map(([field, label]) => (
             <label key={field}>
@@ -201,7 +216,7 @@ export default function SecurityVehiclesPage() {
           ))}
         </div>
         <div className="mt-3">
-          <ErpButton label="ثبت زوج راننده و خودرو" icon={FaPlus} onClick={savePair} disabled={saving} variant="solid" />
+          <ErpButton label="ثبت راننده و خودرو" icon={FaPlus} onClick={savePair} disabled={saving} variant="solid" />
         </div>
 
         <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -222,7 +237,9 @@ export default function SecurityVehiclesPage() {
           ))}
         </div>
       </ErpSection>
+      )}
 
+      {activeSection === 'inbound' && (
       <ErpSection title="ورود خودروی پر">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <label>
@@ -234,7 +251,7 @@ export default function SecurityVehiclesPage() {
             </select>
           </label>
           <label>
-            <span className={labelClass}>زوج راننده/خودرو</span>
+            <span className={labelClass}>رجیستر راننده و خودرو</span>
             <select className={inputClass} value={inboundForm.vehiclePairId} onChange={(event) => selectInboundPair(event.target.value)}>
               <option value="">تردد متفرقه</option>
               {activePairs.map((pair) => <option key={pair.id} value={pair.id}>{pair.firstName} {pair.lastName} · {pair.vehiclePlate}</option>)}
@@ -277,8 +294,10 @@ export default function SecurityVehiclesPage() {
           <ErpButton label="ثبت ورود" icon={FaTruck} onClick={recordInbound} disabled={saving || (inboundForm.purpose === 'SALES_RETURN' && !inboundForm.customerId)} variant="solid" />
         </div>
       </ErpSection>
+      )}
 
-      <ErpSection title="خروج کالا برای فروش" description="این لیست از بارگیری‌های نهایی‌شده لجستیک می‌آید و زمان خروج را حراست ثبت می‌کند.">
+      {activeSection === 'sales-exit' && (
+      <ErpSection title="خروج فروش" description="این لیست از بارگیری‌های نهایی‌شده لجستیک می‌آید و زمان خروج را حراست ثبت می‌کند.">
         {readyExit.length === 0 ? (
           <ErpEmptyState icon={FaCarSide} title="بارگیری آماده خروج وجود ندارد" />
         ) : (
@@ -302,8 +321,10 @@ export default function SecurityVehiclesPage() {
           </div>
         )}
       </ErpSection>
+      )}
 
-      <ErpSection title="ترددهای اخیر">
+      {activeSection === 'movements' && (
+      <ErpSection title="تردد خودرو">
         <div className="space-y-3">
           {movements.map((movement) => (
             <ErpCard key={movement.id} className="p-4">
@@ -326,6 +347,7 @@ export default function SecurityVehiclesPage() {
           ))}
         </div>
       </ErpSection>
+      )}
     </ErpPage>
   );
 }

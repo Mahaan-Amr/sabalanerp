@@ -521,6 +521,7 @@ export const logisticsAPI = {
   createLoading: (data: any) => api.post('/logistics/loadings', data),
   getLoading: (id: string) => api.get(`/logistics/loadings/${id}`),
   updateLoading: (id: string, data: any) => api.put(`/logistics/loadings/${id}`, data),
+  deleteLoading: (id: string) => api.delete(`/logistics/loadings/${id}`),
   finalizeLoading: (id: string) => api.post(`/logistics/loadings/${id}/finalize`),
   cancelLoading: (id: string, reason: string) => api.post(`/logistics/loadings/${id}/cancel`, { reason }),
   createCorrection: (id: string, data: any) => api.post(`/logistics/loadings/${id}/corrections`, data),

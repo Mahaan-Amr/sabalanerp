@@ -1,14 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
-import { FaBan, FaCheck, FaPlus, FaPrint, FaSync } from 'react-icons/fa';
+import { useParams, useRouter } from 'next/navigation';
+import { FaBan, FaCheck, FaEdit, FaPlus, FaPrint, FaSync, FaTrash } from 'react-icons/fa';
 import { ErpButton, ErpCard, ErpLoading, ErpPage, ErpSection, ErpSummaryGrid, ErpTwoColumn } from '@/components/erp';
 import { logisticsAPI } from '@/lib/api';
 import { StatusBadge, dateFa, driverName, inputClass, labelClass, numberFa, unitLabels } from '../../logistics-ui';
 
 export default function LoadingDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const [loading, setLoading] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [actionError, setActionError] = useState('');
@@ -39,11 +40,22 @@ export default function LoadingDetailPage() {
     }
   };
 
+  const deleteDraft = async () => {
+    setActionError('');
+    try {
+      await logisticsAPI.deleteLoading(loading.id);
+      router.push('/dashboard/logistics/loadings');
+    } catch (err: any) {
+      setActionError(err.response?.data?.error || 'حذف پیش‌نویس ناموفق بود.');
+    }
+  };
+
   if (isLoading) return <ErpLoading />;
   if (!loading) return <ErpPage title="بارگیری پیدا نشد" backHref="/dashboard/logistics/loadings"><div /></ErpPage>;
 
   const driver = loading.driverSnapshot || {};
   const canFinalize = loading.status === 'DRAFT';
+  const canDeleteDraft = loading.status === 'DRAFT';
   const canCancel = loading.status !== 'CANCELLED';
   const canCorrect = loading.status === 'FINALIZED';
   const printPage = () => window.print();
@@ -55,6 +67,8 @@ export default function LoadingDetailPage() {
       description={`${loading.customer?.firstName || ''} ${loading.customer?.lastName || ''} · ${loading.project?.projectName || loading.project?.address || ''}`}
       backHref="/dashboard/logistics/loadings"
       actions={[
+        { label: 'ویرایش پیش‌نویس', icon: FaEdit, href: `/dashboard/logistics/loadings/new?draftId=${loading.id}`, disabled: !canDeleteDraft, tone: 'primary' },
+        { label: 'حذف پیش‌نویس', icon: FaTrash, onClick: deleteDraft, disabled: !canDeleteDraft, tone: 'danger' },
         { label: 'چاپ', icon: FaPrint, onClick: printPage, tone: 'neutral' },
         { label: 'به‌روزرسانی', icon: FaSync, onClick: load, tone: 'neutral' },
         { label: 'نهایی‌سازی', icon: FaCheck, onClick: () => runAction(() => logisticsAPI.finalizeLoading(loading.id)), disabled: !canFinalize, tone: 'success', variant: 'solid' },

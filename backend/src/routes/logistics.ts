@@ -1,6 +1,6 @@
 import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
@@ -93,17 +93,49 @@ const itemSnapshot = (contract: any, item: any, itemIndex: number) => {
   return products.find((product: any) => product?.productId === item.productId) || null;
 };
 
+const getDeliverableQuantity = (item: any, snapshot: any, unit: string) => {
+  if (unit === 'meter') {
+    const length = toNumber(snapshot?.length ?? snapshot?.actualLength ?? snapshot?.actualLengthMeters);
+    const lengthM = snapshot?.lengthUnit === 'cm' ? length / 100 : length;
+    const quantity = toNumber(snapshot?.quantity, 1);
+    const total = lengthM * quantity;
+    return total > 0 ? Number(total.toFixed(3)) : toNumber(item.quantity);
+  }
+
+  if (unit === 'squareMeter') {
+    const squareMeters = toNumber(snapshot?.squareMeters);
+    if (squareMeters > 0) return Number(squareMeters.toFixed(3));
+    const preparedQuantity = toNumber(snapshot?.preparedQuantity);
+    if (preparedQuantity > 0) return Number(preparedQuantity.toFixed(3));
+  }
+
+  if (unit === 'ton') {
+    const preparedQuantity = toNumber(snapshot?.preparedQuantity);
+    if (preparedQuantity > 0) return Number(preparedQuantity.toFixed(3));
+  }
+
+  return toNumber(snapshot?.preparedQuantity ?? snapshot?.quantity ?? item.quantity);
+};
+
 const productSnapshotFor = (contract: any, item: any, itemIndex: number) => {
   const snapshot = itemSnapshot(contract, item, itemIndex);
+  const unit = inferUnit(item, snapshot);
+  const contractedQuantity = getDeliverableQuantity(item, snapshot, unit);
   return {
     productId: item.productId,
     productType: item.productType,
     name: productDisplayName(item.product, snapshot),
     catalogName: item.product?.namePersian || item.product?.name || null,
-    quantity: toNumber(item.quantity),
-    unit: inferUnit(item, snapshot),
+    quantity: contractedQuantity,
+    rowQuantity: toNumber(item.quantity),
+    unit,
     width: snapshot?.width ?? item.product?.widthValue ?? null,
     thickness: snapshot?.thickness ?? item.product?.thicknessValue ?? null,
+    length: snapshot?.length ?? snapshot?.actualLength ?? snapshot?.actualLengthMeters ?? null,
+    lengthUnit: snapshot?.lengthUnit ?? null,
+    squareMeters: snapshot?.squareMeters ?? null,
+    preparedQuantity: snapshot?.preparedQuantity ?? null,
+    preparedUnit: snapshot?.preparedUnit ?? null,
     services: snapshot?.services || snapshot?.selectedServices || [],
     tools: snapshot?.tools || snapshot?.selectedTools || [],
     finishing: snapshot?.finishing || snapshot?.stoneFinishing || null,
@@ -193,7 +225,7 @@ const buildRemainingForProject = async (projectId: string) => {
     contract.items.forEach((item, index) => {
       const snapshot = productSnapshotFor(contract, item, index);
       const unit = snapshot.unit;
-      const contractedQuantity = toNumber(item.quantity);
+      const contractedQuantity = snapshot.quantity;
       const finalizedLoadedQuantity = consumed.get(item.id) || 0;
       const remainingQuantity = Number((contractedQuantity - finalizedLoadedQuantity).toFixed(3));
       const groupKey = [
@@ -283,6 +315,13 @@ const validateDriverSnapshot = (snapshot: any) => {
   return required.every((field) => String(snapshot?.[field] || '').trim().length > 0);
 };
 
+const requireActiveVehiclePair = async (vehiclePairId?: string | null) => {
+  if (!vehiclePairId) return null;
+  const vehiclePair = await prisma.securityVehiclePair.findFirst({ where: { id: vehiclePairId, isActive: true } });
+  if (!vehiclePair) throw new Error('Selected driver and vehicle must be active in security registry');
+  return vehiclePair;
+};
+
 const generateLoadingNumber = async () => {
   const now = new Date();
   const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
@@ -350,7 +389,7 @@ const linePayloadToCreate = async (line: any) => {
       contractId: sourceItem.contractId,
       contractNumber: sourceItem.contract.contractNumber,
       contractItemId: sourceItem.id,
-      contractedQuantity: toNumber(sourceItem.quantity)
+      contractedQuantity: productSnapshotFor(sourceItem.contract, sourceItem, 0).quantity
     },
     calculationSnapshot: {
       formula: khatRas !== null && pieceCount !== null ? 'khatRas * pieceCount + plus - minus' : 'direct',
@@ -398,7 +437,8 @@ const loadLoading = (id: string) => {
 const validateLineRemaining = async (lines: Array<{ sourceContractItemId: string; quantity: number; unit: string }>, excludeLoadingId?: string) => {
   const itemIds = lines.map((line) => line.sourceContractItemId);
   const sourceItems = await prisma.contractItem.findMany({
-    where: { id: { in: itemIds } }
+    where: { id: { in: itemIds } },
+    include: { contract: true, product: true }
   });
   const sourceById = new Map(sourceItems.map((item) => [item.id, item]));
   const consumed = await getConsumptionByItemIds(itemIds);
@@ -416,7 +456,8 @@ const validateLineRemaining = async (lines: Array<{ sourceContractItemId: string
   for (const line of lines) {
     const item = sourceById.get(line.sourceContractItemId);
     if (!item) throw new Error('Source contract item not found');
-    const remaining = toNumber(item.quantity) - (consumed.get(line.sourceContractItemId) || 0);
+    const snapshot = productSnapshotFor((item as any).contract, item, 0);
+    const remaining = snapshot.quantity - (consumed.get(line.sourceContractItemId) || 0);
     const allowed = remaining + (isLinearUnit(line.unit) ? LINEAR_TOLERANCE : 0);
     if (line.quantity > allowed + 0.0001) {
       throw new Error(`Loaded quantity exceeds remaining for source row ${line.sourceContractItemId}`);
@@ -496,16 +537,25 @@ router.get('/projects', canView, canCreateLoadings, async (req: any, res: Respon
       take: 50
     });
 
+    const loadableProjects: Array<{ project: any; remainingCount: number }> = [];
+    for (const project of projects) {
+      const remaining = await buildRemainingForProject(project.id);
+      if (remaining.groups.length > 0) {
+        loadableProjects.push({ project, remainingCount: remaining.groups.length });
+      }
+    }
+
     res.json({
       success: true,
-      data: projects.map((project) => ({
+      data: loadableProjects.map(({ project, remainingCount }) => ({
         id: project.id,
         projectName: project.projectName,
         address: project.address,
         city: project.city,
         customerId: project.customerId,
         customerName: `${project.customer.firstName} ${project.customer.lastName}`.trim(),
-        companyName: project.customer.companyName
+        companyName: project.customer.companyName,
+        remainingCount
       }))
     });
   } catch (error) {
@@ -542,6 +592,11 @@ router.post('/projects/:projectId/draft', canEdit, canCreateLoadings, async (req
       if (existingDraft) {
         return res.json({ success: true, resumed: true, data: await loadLoading(existingDraft.id) });
       }
+    }
+
+    const remaining = await buildRemainingForProject(project.id);
+    if (remaining.groups.length === 0) {
+      return res.status(400).json({ success: false, error: 'No loadable remaining exists for this project' });
     }
 
     const loading = await prisma.logisticsLoading.create({
@@ -611,8 +666,8 @@ router.post('/loadings', canEdit, canCreateLoadings, [
     if (!project) return res.status(404).json({ success: false, error: 'Project not found' });
 
     const loadingNumber = await generateLoadingNumber();
-    const driver = req.body.driverId ? await prisma.securityVehiclePair.findFirst({ where: { id: req.body.driverId, isActive: true } }) : null;
-    const driverSnapshot = req.body.driverSnapshot || (driver ? buildDriverSnapshot(driver) : null);
+    const driver = await requireActiveVehiclePair(req.body.driverId);
+    const driverSnapshot = driver ? buildDriverSnapshot(driver) : null;
     const lineCreates: any[] = [];
     for (const line of req.body.lines || []) {
       lineCreates.push(await linePayloadToCreate(line));
@@ -626,7 +681,7 @@ router.post('/loadings', canEdit, canCreateLoadings, [
         loadingDate: req.body.loadingDate ? new Date(req.body.loadingDate) : new Date(),
         notes: req.body.notes || null,
         vehiclePairId: driver?.id || null,
-        driverSnapshot,
+        driverSnapshot: driverSnapshot ?? Prisma.JsonNull,
         createdBy: req.user.id,
         lines: { create: lineCreates }
       }
@@ -656,8 +711,8 @@ router.put('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: Resp
     if (!existing) return res.status(404).json({ success: false, error: 'Loading not found' });
     if (existing.status !== EDITABLE_STATUS) return res.status(400).json({ success: false, error: 'Only draft loadings can be edited' });
 
-    const driver = req.body.driverId ? await prisma.securityVehiclePair.findFirst({ where: { id: req.body.driverId, isActive: true } }) : null;
-    const driverSnapshot = req.body.driverSnapshot || (driver ? buildDriverSnapshot(driver) : existing.driverSnapshot);
+    const driver = await requireActiveVehiclePair(req.body.driverId);
+    const driverSnapshot = driver ? buildDriverSnapshot(driver) : null;
     const lineCreates: any[] = [];
     for (const line of req.body.lines || []) {
       lineCreates.push(await linePayloadToCreate(line));
@@ -670,8 +725,8 @@ router.put('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: Resp
         data: {
           loadingDate: req.body.loadingDate ? new Date(req.body.loadingDate) : existing.loadingDate,
           notes: req.body.notes ?? existing.notes,
-          vehiclePairId: driver?.id || req.body.driverId || null,
-          driverSnapshot,
+          vehiclePairId: driver?.id || null,
+          driverSnapshot: driverSnapshot ?? Prisma.JsonNull,
           lines: { create: lineCreates }
         }
       });
@@ -684,12 +739,28 @@ router.put('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: Resp
   }
 });
 
+router.delete('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: Response) => {
+  try {
+    const existing = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'Loading not found' });
+    if (existing.status !== EDITABLE_STATUS) return res.status(400).json({ success: false, error: 'Only draft loadings can be deleted' });
+
+    await prisma.logisticsLoading.delete({ where: { id: existing.id } });
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Delete loading draft error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Server error' });
+  }
+});
+
 router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: any, res: Response) => {
   try {
     const loading = await loadLoading(req.params.id);
     if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
     if (loading.status !== EDITABLE_STATUS) return res.status(400).json({ success: false, error: 'Only draft loadings can be finalized' });
     if (!loading.lines.length) return res.status(400).json({ success: false, error: 'At least one loading line is required' });
+    if (!loading.vehiclePairId) return res.status(400).json({ success: false, error: 'Select an active security driver and vehicle before finalization' });
+    await requireActiveVehiclePair(loading.vehiclePairId);
     if (!validateDriverSnapshot(loading.driverSnapshot)) return res.status(400).json({ success: false, error: 'Complete driver snapshot is required before finalization' });
 
     await validateLineRemaining(loading.lines.map((line: any) => ({

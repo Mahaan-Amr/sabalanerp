@@ -566,7 +566,8 @@ _Avoid_: mixing multiple customer projects in one بارگیری, even when the 
 
 **جستجوی پروژه در بارگیری**:
 A logistics project lookup matches the project, address, customer identity, company identity, and contact numbers tied to the customer or project.
-_Avoid_: forcing logistics users to know the project name when the operational clue they have is a phone number
+In the new-loading project picker, a project is selectable only when it currently has at least one positive مانده بارگیری group. Existing draft or historical loading records for a project with no current remaining stay accessible through the loading list for edit, cancellation, or history.
+_Avoid_: forcing logistics users to know the project name when the operational clue they have is a phone number, or offering projects for a new loading when logistics has no remaining physical cargo to select
 
 **شروع پیش‌نویس بارگیری**:
 A draft بارگیری starts when logistics selects the customer project, so the in-progress shipment can be resumed before rows, driver, or vehicle details are complete.
@@ -579,7 +580,8 @@ _Avoid_: silently creating duplicate active drafts for the same project during o
 **مانده بارگیری**:
 The remaining amount for logistics is calculated from eligible contracted amounts minus finalized بارگیری amounts, within compatible contract-row/product groupings.
 Accounting financial approval is an eligibility gate for which contract rows may enter logistics, but it is not the quantity source for the remaining calculation.
-_Avoid_: using برنامه تحویل, draft accounting financial records, unapproved invoice candidates, sales approval, signature, print state, draft بارگیری, or unrelated product rows as the source of truth for physical remaining
+The eligible contracted amount must be the contract row's true deliverable quantity in its loading unit, such as متر طول for longitudinal rows, متر مربع for area rows, or the sold ton/count quantity for tonnage and count rows.
+_Avoid_: using برنامه تحویل, draft accounting financial records, unapproved invoice candidates, sales approval, signature, print state, draft بارگیری, unrelated product rows, or a generic row quantity field that does not represent the row's physical deliverable amount as the source of truth for physical remaining
 
 **گروه مانده بارگیری**:
 A logistics display grouping that combines remaining amounts only for contract rows with identical logistics-relevant product specs, while preserving access to the individual source contract rows inside the group.
@@ -603,7 +605,8 @@ _Avoid_: blocking small length-based overages caused by normal loading variance,
 
 **وضعیت بارگیری**:
 Only finalized بارگیری records reduce logistics remaining amounts. Draft بارگیری records are editable preparation records, and cancelled بارگیری records stay in history without reducing remaining.
-_Avoid_: reducing remaining from draft loading entries, or deleting cancelled logistics history
+Draft بارگیری records support normal preparation CRUD before finalization, including updating notes, rows, quantities, source allocations, and selected driver/vehicle pair, and cancelling or deleting the draft when it should not proceed.
+_Avoid_: reducing remaining from draft loading entries, deleting cancelled logistics history, or using draft CRUD semantics for finalized loading records
 
 **قفل بارگیری نهایی‌شده**:
 A finalized بارگیری is immutable because it affects remaining amounts and accounting visibility. Mistakes after finalization are handled through cancellation or correction records rather than silent edits.
@@ -623,11 +626,16 @@ _Avoid_: letting logistics own the reusable driver registry, making old loading 
 
 **راننده در نهایی‌سازی بارگیری**:
 A draft بارگیری may exist without driver information, but finalization requires a complete driver and vehicle snapshot.
-_Avoid_: blocking early loading preparation only because the truck is not known yet, or finalizing shipment evidence without driver details
+If an older draft contains manually entered driver or vehicle data, that data may remain as draft history, but finalization requires reselecting an active حراست-owned driver/vehicle pair so the final snapshot comes from the registry.
+_Avoid_: blocking early loading preparation only because the truck is not known yet, finalizing shipment evidence without driver details, or treating legacy manual draft data as an acceptable final driver selection
 
 **رجیستر راننده و خودرو**:
 A حراست-owned registry of reusable fixed driver/vehicle pairs that may be activated or deactivated for operational use. Logistics consumes these pairs for بارگیری selection but does not own their creation or lifecycle.
 _Avoid_: splitting the reusable registry into independent driver and vehicle lifecycles without a separate business decision, duplicating reusable driver/vehicle records inside logistics, keeping logistics create/edit/delete controls for the registry, or deleting historical shipment snapshots when the registry changes
+
+**خودرویی حراست**:
+The حراست vehicle area is a workflow hub for vehicle-related security operations. Its operational pages are رجیستر راننده و خودرو, تردد خودرو, ورود خودروی پر, and خروج فروش, while shared counters may remain on a dashboard.
+_Avoid_: combining reusable registry maintenance, gate movement history, inbound loaded-vehicle work, and outbound sales exit recording into one large data-entry page
 
 **تردد خودرو**:
 A حراست-owned gate movement record for a vehicle entering or leaving the facility, including its exact gate time and movement purpose.
@@ -667,7 +675,8 @@ _Avoid_: storing gate photos as uncategorized blobs that cannot later be filtere
 
 **گزارش سرپرست حراست**:
 A daily or shift-level report written by the security supervisor, with author, date/shift, summary, incidents, follow-up notes, and optional attachments. It may reference vehicle movements or personnel events but is not merely a tabular export.
-_Avoid_: reducing گزارش سرپرست to a filterable movement table, or mixing supervisor narrative responsibility with automatic operational reports
+The supervisor-report workspace separates ثبت گزارش سرپرست, گزارش‌های سرپرست, پیگیری‌ها, and رخدادها when follow-ups or incidents need their own operational tracking. Attachments remain inside the report unless attachment management becomes a heavy workflow of its own.
+_Avoid_: reducing گزارش سرپرست to a filterable movement table, mixing supervisor narrative responsibility with automatic operational reports, or hiding follow-up ownership inside an untrackable text field once it needs status tracking
 
 **نفرات حراست**:
 The حراست people area covers employee attendance, shifts, exceptions, missions, and security personnel workflows. Drivers are not managed here; they belong to خودرویی because their operational role is tied to vehicle movement.
@@ -689,7 +698,8 @@ _Avoid_: implementing امانی rules before the business meaning and lifecycle
 
 **ردیف قابل بارگیری**:
 A contract row is loadable only when it represents physical cargo leaving Sabalan. Services and operations are not loaded separately, but service/tool/finishing details attached to a physical product should remain visible as part of that product's loading identity.
-_Avoid_: creating بارگیری lines for standalone services, or hiding product-attached services that help logistics identify the correct cargo
+A loading identity includes the product or stone name, product family, loading unit, remaining amount, logistics-relevant dimensions, contract number, and any attached service, tool, or finishing details needed to distinguish the physical cargo.
+_Avoid_: creating بارگیری lines for standalone services, hiding product-attached services that help logistics identify the correct cargo, or showing only the origin catalog name when the contract row has more specific loading details
 
 **مشاهده حسابداری بارگیری**:
 Accounting sees finalized logistics loading records as read-only shipment evidence, including customer/project, contract links, loaded amounts, driver snapshot, warnings, and correction history.

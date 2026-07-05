@@ -124,6 +124,10 @@ _Avoid_: merging the source catalogs just because contract rows share one shape
 A per-contract note attached to a selected standalone service row, prefilled from the catalog description when available but editable without changing the catalog.
 _Avoid_: editing the catalog service description when the user only means the current contract row
 
+**توضیحات خروجی محصول قرارداد**:
+A product-level description printed inside the product's own output group as the last row for that product, after related explanatory, mandatory, cutting, tool, service, and finishing rows.
+_Avoid_: printing the product description before the product's related detail rows, or moving standalone service notes into a product group
+
 **جستجوی عددی محصول**:
 A product catalog search that treats Persian, Arabic, and Latin digits as the same value when matching numeric product details such as عرض, ضخامت, کد, and قیمت.
 _Avoid_: making users switch keyboard language to find numeric product values
@@ -364,7 +368,7 @@ Sales users may view the accounting status of a sales contract as read-only acco
 _Avoid_: letting sales users edit accounting status, or showing a stale sales-owned copy of the accounting workflow state
 
 **تاریخ فاکتور سیستمی**:
-The Sepidar/system invoice date entered by accounting during financial approval. It may be today, up to two days in the past, or up to thirty days in the future.
+The Sepidar/system invoice date entered by accounting during financial approval. It may be today, up to ten days in the past, or up to thirty days in the future.
 _Avoid_: treating future system invoice dates as invalid when they are within the accounting forward-entry window
 
 **حذف پیش‌نویس رکورد مالی**:

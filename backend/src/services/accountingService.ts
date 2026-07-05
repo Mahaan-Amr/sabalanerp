@@ -274,14 +274,14 @@ const validateSystemInvoiceDate = (value?: string) => {
   const todayKey = getTehranDateKey(new Date());
   const invoiceDay = dateKeyToUtcDay(dateKey);
   const today = dateKeyToUtcDay(todayKey);
-  const oldestAllowed = today - (2 * 24 * 60 * 60 * 1000);
+  const oldestAllowed = today - (10 * 24 * 60 * 60 * 1000);
   const newestAllowed = today + (30 * 24 * 60 * 60 * 1000);
 
   if (invoiceDay > newestAllowed) {
     throw new Error('System invoice date cannot be more than 30 days in the future');
   }
   if (invoiceDay < oldestAllowed) {
-    throw new Error('System invoice date cannot be older than 2 days');
+    throw new Error('System invoice date cannot be older than 10 days');
   }
 
   return new Date(`${dateKey}T00:00:00.000Z`);

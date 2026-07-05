@@ -1416,21 +1416,6 @@ const buildFlatProductRows = (
       });
     }
 
-    if (showNotes && product.description && product.description !== EMPTY) {
-      rows.push({
-        indexLabel: '',
-        code: '',
-        description: product.description,
-        category: 'توضیحات',
-        length: '',
-        width: '',
-        ...emptyMeasurementCells(),
-        rate: '',
-        total: '',
-        renderAsNoteRow: true
-      });
-    }
-
     if (product.isMandatory && product.mandatoryPercentage > 0 && product.originalTotalPrice > 0) {
       const mandatoryAmount = product.originalTotalPrice * (product.mandatoryPercentage / 100);
       rows.push({
@@ -1489,6 +1474,21 @@ const buildFlatProductRows = (
         total: formatPrintMoneyCell(service.cost, currency, options)
       });
     });
+
+    if (showNotes && product.description && product.description !== EMPTY) {
+      rows.push({
+        indexLabel: '',
+        code: '',
+        description: product.description,
+        category: 'توضیحات',
+        length: '',
+        width: '',
+        ...emptyMeasurementCells(),
+        rate: '',
+        total: '',
+        renderAsNoteRow: true
+      });
+    }
   });
 
   standaloneServices.forEach((service, serviceIndex) => {

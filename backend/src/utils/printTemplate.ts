@@ -71,6 +71,7 @@ interface NormalizedProduct {
   id: string;
   code: string;
   name: string;
+  productTypeCode: string;
   productType: string;
   preparedKind: string;
   preparedUnit: string;
@@ -819,6 +820,7 @@ const normalizeProducts = (
         id: `${product?.productId || 'product'}-${index}`,
         code: product?.stoneCode || product?.product?.code || relationItem?.product?.code || EMPTY,
         name: product?.stoneName || product?.product?.namePersian || product?.product?.name || relationItem?.product?.namePersian || relationItem?.product?.name || EMPTY,
+        productTypeCode: String(product?.productType || relationItem?.productType || ''),
         productType: productTypeLabel(product?.productType || relationItem?.productType),
         preparedKind: preparedKindLabel(product?.preparedKind),
         preparedUnit: preparedUnitLabel(product?.preparedUnit),
@@ -853,6 +855,7 @@ const normalizeProducts = (
     id: item?.id || `item-${index}`,
     code: item?.product?.code || EMPTY,
     name: item?.product?.namePersian || item?.product?.name || EMPTY,
+    productTypeCode: String(item?.productType || ''),
     productType: productTypeLabel(item?.productType),
     preparedKind: preparedKindLabel(item?.preparedKind),
     preparedUnit: preparedUnitLabel(item?.preparedUnit),
@@ -1100,6 +1103,13 @@ const normalizeFinancials = (
 const isMeaningfulCut = (cut: NormalizedCut): boolean =>
   cut.meters > 0 || cut.rate > 0 || cut.cost > 0;
 
+const hasNonBillableMandatoryLongitudinalCuts = (
+  product: Pick<NormalizedProduct, 'productTypeCode' | 'isMandatory' | 'mandatoryPercentage'>
+): boolean =>
+  product.productTypeCode === 'longitudinal' &&
+  product.isMandatory === true &&
+  product.mandatoryPercentage > 0;
+
 const isMeaningfulService = (service: NormalizedService): boolean =>
   hasTextValue(service.name) || service.amount > 0 || service.rate > 0 || service.cost > 0;
 
@@ -1311,8 +1321,10 @@ const buildFlatProductRows = (
   const summaryAddOnGroups = new Map<string, SummaryAddOnGroup>();
 
   products.forEach((product, productIndex) => {
+    const nonBillableMandatoryLongitudinalCuts = hasNonBillableMandatoryLongitudinalCuts(product);
+    const billableCuts = nonBillableMandatoryLongitudinalCuts ? [] : product.cuts;
     const addOnsTotal =
-      product.cuts.reduce((sum, cut) => sum + toNumber(cut.cost), 0) +
+      billableCuts.reduce((sum, cut) => sum + toNumber(cut.cost), 0) +
       product.tools.reduce((sum, tool) => sum + toNumber(tool.cost), 0) +
       product.services.reduce((sum, service) => sum + toNumber(service.cost), 0);
     const mandatoryAmount = product.isMandatory && product.mandatoryPercentage > 0 && product.originalTotalPrice > 0
@@ -1328,7 +1340,7 @@ const buildFlatProductRows = (
           total: mandatoryAmount
         });
       }
-      product.cuts.filter(isMeaningfulCut).forEach((cut) => {
+      billableCuts.filter(isMeaningfulCut).forEach((cut) => {
         addSummaryAddOn(summaryAddOnGroups, {
           code: cut.code,
           category: 'برش',
@@ -1442,8 +1454,8 @@ const buildFlatProductRows = (
         linearMeasurement: toFaNumber(cut.meters, 4),
         squareMeasurement: '',
         count: '',
-        rate: formatPrintMoneyCell(cut.rate, currency, options),
-        total: formatPrintMoneyCell(cut.cost, currency, options)
+        rate: nonBillableMandatoryLongitudinalCuts ? '' : formatPrintMoneyCell(cut.rate, currency, options),
+        total: nonBillableMandatoryLongitudinalCuts ? '' : formatPrintMoneyCell(cut.cost, currency, options)
       });
     });
 

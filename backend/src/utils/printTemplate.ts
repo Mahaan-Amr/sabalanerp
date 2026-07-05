@@ -1643,10 +1643,10 @@ const renderProductMainRows = (
         ${columns.category ? `<td>${escapeHtml(row.category || EMPTY)}</td>` : ''}
         ${columns.length ? `<td>${escapeHtml(row.length || EMPTY)}</td>` : ''}
         ${columns.width ? `<td>${escapeHtml(row.width || EMPTY)}</td>` : ''}
+        ${columns.count ? `<td>${escapeHtml(row.count || EMPTY)}</td>` : ''}
         ${columns.linearMeasurement ? `<td>${escapeHtml(row.linearMeasurement || EMPTY)}</td>` : ''}
         ${columns.squareMeasurement ? `<td>${escapeHtml(row.squareMeasurement || EMPTY)}</td>` : ''}
         ${columns.measurement ? `<td>${escapeHtml(row.linearMeasurement || row.squareMeasurement || EMPTY)}</td>` : ''}
-        ${columns.count ? `<td>${escapeHtml(row.count || EMPTY)}</td>` : ''}
         ${columns.rate ? `<td>${renderFormattedAmountCell(row.rate || EMPTY)}</td>` : ''}
         ${columns.total ? `<td>${renderFormattedAmountCell(row.total || EMPTY)}</td>` : ''}
       </tr>
@@ -1939,9 +1939,9 @@ export function renderContractHtml(contract: RenderableContract, options: Render
     { key: 'category', className: 'main-category-col', label: 'دسته' },
     { key: 'length', className: 'main-length-col', label: 'طول - متر' },
     { key: 'width', className: 'main-width-col', label: 'عرض - متر' },
+    { key: 'count', className: 'main-area-col', label: 'تعداد' },
     { key: 'linearMeasurement', className: 'main-linear-col', label: 'متر طول' },
     { key: 'squareMeasurement', className: 'main-square-col', label: 'متر مربع' },
-    { key: 'count', className: 'main-area-col', label: 'تعداد' },
     { key: 'rate', className: 'main-rate-col', label: 'نرخ - تومان' },
     { key: 'total', className: 'main-total-col', label: 'مبلغ کل - تومان' }
   ];

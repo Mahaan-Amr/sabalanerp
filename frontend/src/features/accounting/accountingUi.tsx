@@ -193,16 +193,39 @@ export function QueueList<T>({
   title,
   items,
   emptyText,
+  actions = [],
   renderItem,
 }: {
   title: string;
   items: T[];
   emptyText: string;
+  actions?: Array<{
+    label: string;
+    href: string;
+    icon?: React.ComponentType<{ className?: string }>;
+    tone?: ErpTone;
+  }>;
   renderItem: (item: T) => React.ReactNode;
 }) {
   return (
     <ErpCard className="p-4">
-      <h2 className="text-base font-semibold text-slate-900 dark:text-white">{title}</h2>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-base font-semibold text-slate-900 dark:text-white">{title}</h2>
+        {actions.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {actions.map((action) => (
+              <ErpButton
+                key={`${action.href}-${action.label}`}
+                label={action.label}
+                href={action.href}
+                icon={action.icon}
+                tone={action.tone || 'neutral'}
+                variant="soft"
+              />
+            ))}
+          </div>
+        )}
+      </div>
       <div className="mt-4 space-y-3">
         {items.length === 0 ? (
           <p className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">{emptyText}</p>

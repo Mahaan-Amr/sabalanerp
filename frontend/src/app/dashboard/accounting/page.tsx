@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import {
   FaBalanceScale,
   FaClipboardCheck,
@@ -15,7 +14,6 @@ import {
 } from 'react-icons/fa';
 import {
   ErpActionGrid,
-  ErpButton,
   ErpLoading,
   ErpPage,
   ErpSection,
@@ -26,11 +24,9 @@ import {
   QueueList,
   StatusBadge,
   accountingIcons,
-  contractStatusLabels,
   dateFa,
   money,
   taxStatusLabels,
-  type AccountingContractRow,
 } from '@/features/accounting/accountingUi';
 
 export default function AccountingDashboardPage() {
@@ -60,6 +56,7 @@ export default function AccountingDashboardPage() {
   }
 
   const queues = workspace?.queues || {};
+  const commandCenter = workspace?.commandCenter || {};
 
   return (
     <ErpPage
@@ -71,7 +68,7 @@ export default function AccountingDashboardPage() {
       ]}
     >
       <ErpActionGrid
-        columns={3}
+        columns={4}
         items={[
           {
             title: 'قراردادهای قابل بررسی',
@@ -80,6 +77,7 @@ export default function AccountingDashboardPage() {
             icon: FaClipboardCheck,
             tone: 'primary',
             meta: 'ورود به رجیستر قراردادها',
+            badge: <StatusBadge label={(queues.contracts?.length || 0).toLocaleString('fa-IR')} tone="primary" />,
           },
           {
             title: 'پیش‌نویس صورتحساب‌ها',
@@ -87,7 +85,7 @@ export default function AccountingDashboardPage() {
             href: '/dashboard/accounting/invoice-candidates',
             icon: FaFileInvoice,
             tone: 'info',
-            badge: <StatusBadge label={(workspace?.commandCenter?.invoiceCandidates?.count || 0).toLocaleString('fa-IR')} tone="info" />,
+            badge: <StatusBadge label={(commandCenter.invoiceCandidates?.count || 0).toLocaleString('fa-IR')} tone="info" />,
           },
           {
             title: 'دریافت‌ها و چک‌ها',
@@ -95,6 +93,7 @@ export default function AccountingDashboardPage() {
             href: '/dashboard/accounting/payments',
             icon: FaMoneyCheckAlt,
             tone: 'warning',
+            badge: <StatusBadge label={(commandCenter.checksDue?.count || 0).toLocaleString('fa-IR')} tone="warning" />,
           },
           {
             title: 'دریافتنی‌ها',
@@ -102,6 +101,7 @@ export default function AccountingDashboardPage() {
             href: '/dashboard/accounting/receivables',
             icon: FaReceipt,
             tone: 'success',
+            badge: <StatusBadge label={(commandCenter.openReceivables?.count || 0).toLocaleString('fa-IR')} tone="success" />,
           },
           {
             title: 'مالیات و سامانه مودیان',
@@ -109,6 +109,15 @@ export default function AccountingDashboardPage() {
             href: '/dashboard/accounting/tax',
             icon: FaBalanceScale,
             tone: 'purple',
+            badge: <StatusBadge label={(commandCenter.taxNotReady?.count || 0).toLocaleString('fa-IR')} tone="purple" />,
+          },
+          {
+            title: 'بررسی اصلاحات',
+            description: 'بررسی مدیریتی درخواست‌های اصلاح و پیگیری اصلاح‌های برگشته از فروش.',
+            href: '/dashboard/accounting/correction-requests',
+            icon: FaExclamationTriangle,
+            tone: 'warning',
+            badge: <StatusBadge label={(commandCenter.correctionRequests?.count || 0).toLocaleString('fa-IR')} tone="warning" />,
           },
           {
             title: 'سوابق عملیات',
@@ -116,6 +125,7 @@ export default function AccountingDashboardPage() {
             href: '/dashboard/accounting/audit',
             icon: FaHistory,
             tone: 'neutral',
+            meta: 'آخرین رویدادها',
           },
           {
             title: 'عملکرد حسابداران',
@@ -123,53 +133,17 @@ export default function AccountingDashboardPage() {
             href: '/dashboard/accounting/performance',
             icon: FaUserClock,
             tone: 'primary',
+            meta: 'گزارش عملکرد',
           },
         ]}
       />
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         <QueueList
-          title="قراردادهای نیازمند توجه حسابداری"
-          items={(queues.contracts || []) as AccountingContractRow[]}
-          emptyText="فعلا قراردادی در صف اقدام حسابداری نیست."
-          renderItem={(contract) => (
-            <CompactQueueItem
-              key={contract.contractId}
-              icon={FaClipboardCheck}
-              title={<Link href={`/dashboard/accounting/contracts/${contract.contractId}`}>{contract.contractNumber}</Link>}
-              meta={`${contract.customer.displayName} · ${contractStatusLabels[contract.status] || contract.status}`}
-              amount={money(contract.accounting.remainingAmount)}
-              status={<StatusBadge status={contract.accounting.sourceStatus} />}
-              footer={
-                <div className="flex flex-wrap gap-2">
-                  <ErpButton label="جزئیات" href={`/dashboard/accounting/contracts/${contract.contractId}`} tone="primary" variant="soft" />
-                  <ErpButton label="رجیستر" href="/dashboard/accounting/contracts" tone="neutral" variant="soft" />
-                </div>
-              }
-            />
-          )}
-        />
-
-        <QueueList
-          title="پیش‌نویس صورتحساب‌ها"
-          items={queues.invoiceCandidates || []}
-          emptyText="هنوز پیش‌نویس صورتحسابی ایجاد نشده است."
-          renderItem={(record: any) => (
-            <CompactQueueItem
-              key={record.id}
-              icon={accountingIcons.invoice}
-              title="پیش‌نویس صورتحساب"
-              meta={`ایجاد: ${dateFa(record.createdAt)}`}
-              amount={money(record.amount, record.currency)}
-              status={<StatusBadge status={record.status} />}
-            />
-          )}
-        />
-
-        <QueueList
           title="دریافتنی‌های نزدیک سررسید"
           items={queues.receivables || []}
           emptyText="دریافتنی بازی برای نمایش وجود ندارد."
+          actions={[{ label: 'مشاهده همه', href: '/dashboard/accounting/receivables', icon: FaReceipt, tone: 'success' }]}
           renderItem={(item: any) => (
             <CompactQueueItem
               key={item.id}
@@ -186,6 +160,7 @@ export default function AccountingDashboardPage() {
           title="مالیات و سامانه مودیان"
           items={queues.tax || []}
           emptyText="پرونده مالیاتی فعالی در صف نیست."
+          actions={[{ label: 'مشاهده همه', href: '/dashboard/accounting/tax', icon: FaBalanceScale, tone: 'purple' }]}
           renderItem={(item: any) => (
             <CompactQueueItem
               key={item.id}

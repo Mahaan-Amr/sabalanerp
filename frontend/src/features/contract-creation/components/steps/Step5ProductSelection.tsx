@@ -17,6 +17,7 @@ import {
 } from '../../utils/remainingStoneGuards';
 import { getPreparedKindLabel, getPreparedQuantity, getPreparedUnit, getPreparedUnitLabel, isPreparedProductType } from '../../utils/preparedProductUtils';
 import { getPartDisplayLabel } from '../../utils/stairSystemHelpers';
+import { isMandatoryLongitudinalCuttingNonBillable } from '../../utils/mandatoryCuttingPricing';
 import type { ContractProduct, ContractServiceRowSourceType } from '../../types/contract.types';
 import type { RemainingStone } from '../../types/contract.types';
 import type { ContractProductCartController } from '../../hooks/useContractProductCartController';
@@ -481,6 +482,9 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                   .filter(isUsableRemainingStone)
                   .filter((stone) => !getRemainingStoneUsageKeys(stone).some((key) => usedRemainingStoneKeys.has(key)));
                 const smartCutPlan = product.smartCutPlan;
+                const billableCuttingCost = isMandatoryLongitudinalCuttingNonBillable(product)
+                  ? 0
+                  : Number(product.cuttingCost || 0);
                 const isLayerProduct = Boolean((product.meta as any)?.isLayer);
                 const isRemainingStoneChild = Boolean((product.meta as any)?.remainingSource);
                 const shouldShowRemainingStones =
@@ -599,9 +603,9 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                               {formatDisplayNumber(piece.quantity)} × عرض {formatDisplayNumber(piece.widthCm)} cm × طول {formatDisplayNumber(piece.lengthM)} m
                             </p>
                           ))}
-                          {smartCutPlan.cuttingBreakdown.length > 0 && (
+                          {smartCutPlan.cuttingBreakdown.length > 0 && billableCuttingCost > 0 && (
                             <p className="text-amber-700 dark:text-amber-200">
-                              هزینه برش: {formatPrice(smartCutPlan.totalCuttingCost, 'تومان')}
+                              هزینه برش: {formatPrice(billableCuttingCost, 'تومان')}
                             </p>
                           )}
                         </div>
@@ -819,6 +823,9 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                     .filter(isUsableRemainingStone)
                     .filter((stone) => !getRemainingStoneUsageKeys(stone).some((key) => usedRemainingStoneKeys.has(key)));
                   const smartCutPlan = product.smartCutPlan;
+                  const billableCuttingCost = isMandatoryLongitudinalCuttingNonBillable(product)
+                    ? 0
+                    : Number(product.cuttingCost || 0);
                   const isLayerProduct = Boolean((product.meta as any)?.isLayer);
                   const isRemainingStoneChild = Boolean((product.meta as any)?.remainingSource);
                   const shouldShowRemainingStones =
@@ -933,9 +940,9 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                                         {formatDisplayNumber(piece.quantity)} × عرض {formatDisplayNumber(piece.widthCm)} cm × طول {formatDisplayNumber(piece.lengthM)} m
                                       </p>
                                     ))}
-                                    {smartCutPlan.cuttingBreakdown.length > 0 && (
+                                    {smartCutPlan.cuttingBreakdown.length > 0 && billableCuttingCost > 0 && (
                                       <p className="mt-1 text-amber-700 dark:text-amber-200">
-                                        هزینه برش: {formatPrice(smartCutPlan.totalCuttingCost, 'تومان')}
+                                        هزینه برش: {formatPrice(billableCuttingCost, 'تومان')}
                                       </p>
                                     )}
                                   </div>

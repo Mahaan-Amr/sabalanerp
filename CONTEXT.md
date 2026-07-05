@@ -275,6 +275,14 @@ _Avoid_: combining طول and عرض into one ابعاد column, repeating unit 
 An explicit percentage-based price increase applied to a contract product when the product is marked as mandatory.
 _Avoid_: printing or charging حکمی from a default percentage when the product is not explicitly marked mandatory
 
+**برش غیرقابل دریافت در حکمی**:
+A physical stone cut that remains part of the contract product's workshop and remaining-stone truth but has no separate billable cutting charge because the product is marked حکمی. The product may still show that it has a physical cut, but invoice-facing totals should not include a paid برش amount for that cut.
+_Avoid_: removing the cut geometry, hiding the workshop cut, charging both حکمی and برش for the same mandatory product row, or showing a priced برش line for a non-billable mandatory cut
+
+**بازذخیره قیمت‌گذاری حکمی**:
+Opening an existing contract for editing and saving it again applies the current حکمی pricing rule to the saved product rows.
+_Avoid_: silently changing old saved contract pricing without an edit-save action, or preserving an old paid برش charge after a mandatory row has been edited and saved
+
 **تخفیف قرارداد**:
 A percentage reduction applied only to the sum of base stone product subtotals in a sales contract, including کیوبیک و قطعات آماده rows when they are sold as main catalog stone products, before payments are compared to the payable total. It does not reduce ابزار, لایه، پرداخت سنگ, cutting, standalone service rows, or حکمی add-on amounts.
 _Avoid_: applying تخفیف to the full contract total including add-ons, or selecting discount limits per individual product row

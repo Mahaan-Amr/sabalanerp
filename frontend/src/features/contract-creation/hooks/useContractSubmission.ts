@@ -12,6 +12,7 @@ import { CONTRACT_DRAFT_STORAGE_KEY } from '../utils/contractDraftStorage';
 import { normalizeProductFinishing } from '../utils/finishingUtils';
 import { getPreparedQuantity, getPreparedUnit, isPreparedProductType, normalizeContractProductType } from '../utils/preparedProductUtils';
 import { getDeliverableProductEntries } from '../utils/deliveryScheduleController';
+import { normalizeMandatoryLongitudinalCuttingPricing } from '../utils/mandatoryCuttingPricing';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
@@ -135,7 +136,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             pricePerSquareMeter: originalProduct.unitPrice ?? originalProduct.pricePerSquareMeter ?? 0
           })
         };
-        const product = productWithType;
+        const product = normalizeMandatoryLongitudinalCuttingPricing(productWithType);
         const finishing = normalizeProductFinishing(product);
         if (!finishing) return product;
         return {

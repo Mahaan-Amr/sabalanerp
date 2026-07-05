@@ -4775,6 +4775,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       previousProduct: previousLongitudinalProduct
     });
     const missingCuttingRateWarning = shouldCutByGeometry && finalCuttingCostPerMeter <= 0;
+    const shouldChargeCuttingCost = !(isMandatory && mandatoryPercentage > 0);
+    const calculatedCuttingCost = smartCutPlan.enabled ? smartCutPlan.totalCuttingCost : finalCuttingCost;
+    const billableCuttingCost = shouldChargeCuttingCost ? calculatedCuttingCost : 0;
     
     // Create final product configuration for longitudinal stone
     const finalProduct: ContractProduct = {
@@ -4827,7 +4830,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       originalLength: (isEditMode && productConfig.originalLength !== undefined) 
         ? productConfig.originalLength 
         : (lengthUnit === 'm' ? calculated.length : (calculated.length / 100)),
-      cuttingCost: smartCutPlan.enabled ? smartCutPlan.totalCuttingCost : finalCuttingCost,
+      cuttingCost: billableCuttingCost,
       cuttingCostPerMeter: finalCuttingCostPerMeter,
       cuttingBreakdown: smartCutPlan.enabled ? smartCutPlan.cuttingBreakdown : undefined,
       smartCutPlan: smartCutPlan.enabled ? smartCutPlan : null,
@@ -4877,7 +4880,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     
     // Add SubService costs to totalPrice if they exist
     const existingSubServiceCost = (isEditMode && productConfig.totalSubServiceCost) ? productConfig.totalSubServiceCost : 0;
-    finalProduct.totalPrice = finalProduct.totalPrice + (smartCutPlan.enabled ? smartCutPlan.totalCuttingCost : finalCuttingCost) + existingSubServiceCost + finishingCost;
+    finalProduct.totalPrice = finalProduct.totalPrice + billableCuttingCost + existingSubServiceCost + finishingCost;
     
     // Add to contract or update existing product
     if (isEditMode && editingProductIndex !== null) {

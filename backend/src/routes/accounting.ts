@@ -52,7 +52,11 @@ const accountingEdit = [
 
 const managerReviewActions = new Set([
   'APPROVE_CORRECTION_FOR_SALES_EDIT',
-  'DECLINE_CORRECTION'
+  'DECLINE_CORRECTION',
+  'VOID_ACCOUNTING_RECORD',
+  'CREATE_REPLACEMENT_INVOICE',
+  'APPROVE_FINANCIAL_INVOICE',
+  'RESOLVE_CORRECTION'
 ]);
 
 const handleValidation = (req: AuthRequest, res: Response) => {
@@ -492,6 +496,9 @@ router.post(
     body('receivableId').optional().isString(),
     body('paymentEventId').optional().isString(),
     body('correctionRequestId').optional().isString(),
+    body('replacesRecordId').optional().isString(),
+    body('externalReference').optional().isString(),
+    body('downstreamNote').optional().isString(),
     body('note').optional().isString(),
     body('resolutionNote').optional().isString(),
     body('systemInvoiceNumber').optional().isString(),

@@ -81,6 +81,9 @@ type AccountingActionRequest = {
   systemInvoiceDate?: string;
   sepidarAmount?: string | number;
   correctionRequestId?: string;
+  replacesRecordId?: string;
+  externalReference?: string;
+  downstreamNote?: string;
   resolutionNote?: string;
   category?: keyof typeof CorrectionRequestCategory | keyof typeof AccountingFlagCategory;
   priority?: keyof typeof CorrectionRequestPriority;
@@ -122,6 +125,11 @@ const toRialDecimal = (value: Prisma.Decimal | number | string | null | undefine
 };
 
 const amountsEqual = (left: Prisma.Decimal, right: Prisma.Decimal) => left.toFixed(0) === right.toFixed(0);
+
+const metadataObject = (value: Prisma.JsonValue | null | undefined): Record<string, any> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Record<string, any>;
+};
 
 const getContractDateValue = (contract: any): Date | null => {
   const data = contract.contractData;
@@ -353,6 +361,125 @@ const getDefaultSettings = async () => {
       requiredTaxFields: ['companyEconomicCode', 'companyNationalId', 'fiscalMemoryId', 'customerNationalCode', 'invoiceItems']
     }
   });
+};
+
+const isSubmittedTaxStatus = (status: TaxSubmissionStatus) => ([
+  TaxSubmissionStatus.SUBMITTED_MANUALLY,
+  TaxSubmissionStatus.SUBMITTED_EXTERNALLY,
+  TaxSubmissionStatus.ACCEPTED,
+  TaxSubmissionStatus.REJECTED,
+  TaxSubmissionStatus.NEEDS_CORRECTION
+] as TaxSubmissionStatus[]).includes(status);
+
+const isReceivedPaymentStatus = (status: PaymentAccountingStatus) => ([
+  PaymentAccountingStatus.RECEIVED,
+  PaymentAccountingStatus.RECONCILED
+] as PaymentAccountingStatus[]).includes(status);
+
+const buildCorrectionReplacementWorkflow = (
+  contractAmount: Prisma.Decimal,
+  financialRecords: any[],
+  receivables: any[],
+  paymentEvents: any[],
+  taxRecords: any[],
+  correctionRequests: any[]
+) => {
+  const correction = correctionRequests.find((item) => item.status === CorrectionRequestStatus.SALES_EDITED);
+  if (!correction) return null;
+
+  const isReplacementForCorrection = (record: any) => {
+    const metadata = metadataObject(record.metadata);
+    return metadata.correctionRequestId === correction.id && metadata.replacesRecordId;
+  };
+
+  const sourceRecord = correction.recordId
+    ? financialRecords.find((record) => record.id === correction.recordId)
+    : financialRecords.find((record) => (
+        record.kind === FinancialRecordKind.INVOICE_CANDIDATE &&
+        record.financiallyApprovedAt &&
+        !isReplacementForCorrection(record)
+      ));
+
+  if (!sourceRecord) {
+    return {
+      correctionRequestId: correction.id,
+      status: 'NO_SOURCE_RECORD',
+      amountChanged: false,
+      correctedAmount: decimalToString(contractAmount),
+      canResolve: false,
+      blockingReasons: ['No approved source invoice was found for this correction']
+    };
+  }
+
+  const replacementRecords = financialRecords.filter((record) => {
+    const metadata = metadataObject(record.metadata);
+    return (
+      record.kind === FinancialRecordKind.INVOICE_CANDIDATE &&
+      metadata.correctionRequestId === correction.id &&
+      metadata.replacesRecordId === sourceRecord.id
+    );
+  });
+  const replacementRecord = replacementRecords[0] || null;
+  const amountChanged = !amountsEqual(toDecimal(sourceRecord.amount), contractAmount);
+  const sourceReceivables = receivables.filter((item) => item.invoiceRecordId === sourceRecord.id);
+  const sourceReceivableIds = new Set(sourceReceivables.map((item) => item.id));
+  const sourcePayments = paymentEvents.filter((item) => item.receivableId && sourceReceivableIds.has(item.receivableId));
+  const sourceTaxRecords = taxRecords.filter((item) => item.invoiceRecordId === sourceRecord.id);
+  const hasReceivedPayments = sourcePayments.some((item) => isReceivedPaymentStatus(item.status));
+  const hasSubmittedTax = sourceTaxRecords.some((item) => isSubmittedTaxStatus(item.submissionStatus));
+  const openReceivables = sourceReceivables.filter((item) => item.status !== ReceivableStatus.VOIDED);
+  const metadata = metadataObject(sourceRecord.metadata);
+  const downstreamEvidencePresent = Boolean(metadata.downstreamCorrectionNote);
+
+  const blockingReasons: string[] = [];
+  if (amountChanged) {
+    if (sourceRecord.status !== AccountingRecordStatus.VOIDED) {
+      blockingReasons.push('Old approved invoice must be voided or reversed first');
+    }
+    if (sourceRecord.status === AccountingRecordStatus.VOIDED && !replacementRecord) {
+      blockingReasons.push('Replacement invoice candidate must be created');
+    }
+    if (replacementRecord && !replacementRecord.financiallyApprovedAt) {
+      blockingReasons.push('Replacement invoice candidate must be financially approved');
+    }
+    if ((hasReceivedPayments || hasSubmittedTax) && !downstreamEvidencePresent) {
+      blockingReasons.push('Downstream payment or tax correction evidence is required');
+    }
+  }
+
+  const nextStep = !amountChanged
+    ? 'REVIEW_NO_AMOUNT_IMPACT'
+    : sourceRecord.status !== AccountingRecordStatus.VOIDED
+      ? 'VOID_SOURCE_RECORD'
+      : !replacementRecord
+        ? 'CREATE_REPLACEMENT'
+        : !replacementRecord.financiallyApprovedAt
+          ? 'APPROVE_REPLACEMENT'
+          : blockingReasons.length > 0
+            ? 'DOCUMENT_DOWNSTREAM'
+            : 'READY_TO_RESOLVE';
+
+  return {
+    correctionRequestId: correction.id,
+    sourceRecordId: sourceRecord.id,
+    replacementRecordId: replacementRecord?.id || null,
+    amountChanged,
+    oldAmount: decimalToString(sourceRecord.amount),
+    correctedAmount: decimalToString(contractAmount),
+    sourceRecordStatus: sourceRecord.status,
+    replacementRecordStatus: replacementRecord?.status || null,
+    replacementFinanciallyApprovedAt: replacementRecord?.financiallyApprovedAt || null,
+    nextStep,
+    canVoidSource: amountChanged && sourceRecord.status !== AccountingRecordStatus.VOIDED,
+    canCreateReplacement: amountChanged && sourceRecord.status === AccountingRecordStatus.VOIDED && !replacementRecord,
+    canApproveReplacement: amountChanged && Boolean(replacementRecord) && !replacementRecord.financiallyApprovedAt,
+    canResolve: amountChanged ? blockingReasons.length === 0 : true,
+    hasReceivables: sourceReceivables.length > 0,
+    hasReceivedPayments,
+    hasSubmittedTax,
+    openReceivableCount: openReceivables.length,
+    blockingReasons
+  };
 };
 
 const getOrCreateCurrentPeriod = async () => {
@@ -796,6 +923,14 @@ export const getAccountingContractDetail = async (contractId: string) => {
     prisma.accountingCorrectionRequest.findMany({ where: { contractId }, orderBy: { createdAt: 'desc' } }),
     prisma.accountingContractFlag.findMany({ where: { contractId }, orderBy: { createdAt: 'desc' } })
   ]);
+  const replacementWorkflow = buildCorrectionReplacementWorkflow(
+    toRialDecimal(getContractAmount(contract), contract.currency),
+    financialRecords,
+    receivables,
+    paymentEvents,
+    tax,
+    correctionRequests
+  );
 
   return {
     contract: row,
@@ -823,6 +958,7 @@ export const getAccountingContractDetail = async (contractId: string) => {
     flags,
     auditTrail,
     correctionRequests,
+    replacementWorkflow,
     availableActions: row.nextBestActions
   };
 };
@@ -850,6 +986,8 @@ export const executeAccountingAction = async (command: AccountingActionRequest, 
   switch (command.kind) {
     case 'CREATE_INVOICE':
       return createInvoiceCandidate(command, actor, period.id);
+    case 'CREATE_REPLACEMENT_INVOICE':
+      return createReplacementInvoiceCandidate(command, actor, period.id);
     case 'CREATE_RECEIVABLE':
       return createReceivable(command, actor, period.id);
     case 'APPROVE_FINANCIAL_INVOICE':
@@ -968,6 +1106,124 @@ const createInvoiceCandidate = async (command: AccountingActionRequest, actor: A
   return actionResponse('APPLIED', 'پیش‌نویس صورتحساب ایجاد شد', { contractId: contract.id, financialRecordIds: [record.id] });
 };
 
+const createReplacementInvoiceCandidate = async (command: AccountingActionRequest, actor: Actor, periodId: string) => {
+  if (!command.contractId) throw new Error('contractId is required');
+  if (!command.correctionRequestId) throw new Error('correctionRequestId is required');
+  if (!command.replacesRecordId) throw new Error('replacesRecordId is required');
+
+  const contract = await ensureEligibleContract(command.contractId);
+  const settings = await getDefaultSettings();
+  const amount = toRialDecimal(getContractAmount(contract), contract.currency);
+  const idempotencyKey = command.idempotencyKey || `replacement-invoice:${contract.id}:${command.correctionRequestId}`;
+  const existing = await prisma.accountingFinancialRecord.findUnique({ where: { idempotencyKey } });
+  if (existing) return actionResponse('APPLIED', 'Replacement invoice draft already exists', { financialRecordIds: [existing.id], contractId: contract.id });
+
+  const correction = await prisma.accountingCorrectionRequest.findUnique({ where: { id: command.correctionRequestId } });
+  if (!correction || correction.contractId !== contract.id) throw new Error('Correction request not found for this contract');
+  if (correction.status !== CorrectionRequestStatus.SALES_EDITED) {
+    throw new Error('Replacement invoices can only be created after sales saves the correction');
+  }
+
+  const sourceRecord = await prisma.accountingFinancialRecord.findUnique({ where: { id: command.replacesRecordId } });
+  if (!sourceRecord || sourceRecord.contractId !== contract.id) throw new Error('Source financial record not found for this contract');
+  if (!sourceRecord.financiallyApprovedAt) throw new Error('Replacement requires a financially approved source invoice');
+  if (sourceRecord.status !== AccountingRecordStatus.VOIDED) throw new Error('Source invoice must be voided before creating a replacement');
+  if (amountsEqual(toDecimal(sourceRecord.amount), amount)) {
+    throw new Error('Replacement invoice is not required because the corrected amount did not change');
+  }
+
+  const duplicateReplacement = await prisma.accountingFinancialRecord.findFirst({
+    where: {
+      contractId: contract.id,
+      kind: FinancialRecordKind.INVOICE_CANDIDATE,
+      metadata: {
+        path: ['correctionRequestId'],
+        equals: correction.id
+      }
+    }
+  });
+  if (duplicateReplacement) {
+    return actionResponse('APPLIED', 'Replacement invoice draft already exists', { financialRecordIds: [duplicateReplacement.id], contractId: contract.id });
+  }
+
+  const missingFields = getTaxMissingFields(contract, settings);
+  const vatRate = settings.defaultVatRate || new Prisma.Decimal(0);
+  const vatAmount = amount.mul(vatRate).div(100);
+
+  const record = await prisma.$transaction(async (tx) => {
+    const invoice = await tx.accountingFinancialRecord.create({
+      data: {
+        kind: FinancialRecordKind.INVOICE_CANDIDATE,
+        status: AccountingRecordStatus.DRAFT,
+        sourceKind: AccountingSourceKind.SALES_CONTRACT,
+        sourceId: contract.id,
+        contractId: contract.id,
+        customerId: contract.customerId,
+        periodId,
+        amount,
+        currency: DEFAULT_CURRENCY,
+        sourceSnapshot: toJsonValue(contract),
+        metadata: {
+          mode: 'REPLACEMENT_AFTER_CORRECTION',
+          correctionRequestId: correction.id,
+          replacesRecordId: sourceRecord.id,
+          replacementReason: command.reason || command.note || correction.accountantNote,
+          correctedContractAmount: decimalToString(amount),
+          originalApprovedAmount: decimalToString(sourceRecord.amount),
+          issueDate: command.issueDate || new Date().toISOString(),
+          dueDate: command.dueDate || addDays(new Date(), settings.defaultInvoiceDueDays).toISOString()
+        },
+        idempotencyKey,
+        createdBy: actor.userId
+      }
+    });
+
+    if (contract.items.length > 0) {
+      await tx.accountingInvoiceCandidateItem.createMany({
+        data: contract.items.map((item) => ({
+          invoiceId: invoice.id,
+          contractItemId: item.id,
+          productId: item.productId,
+          description: item.product?.namePersian || item.description || 'Contract item',
+          quantity: item.quantity,
+          unitPrice: toRialDecimal(item.unitPrice, contract.currency),
+          totalPrice: toRialDecimal(item.totalPrice, contract.currency),
+          taxRate: vatRate
+        }))
+      });
+    }
+
+    await tx.accountingTaxRecord.create({
+      data: {
+        invoiceRecordId: invoice.id,
+        contractId: contract.id,
+        readinessStatus: missingFields.length ? TaxReadinessStatus.MISSING_DATA : TaxReadinessStatus.READY,
+        submissionStatus: missingFields.length ? TaxSubmissionStatus.NOT_READY : TaxSubmissionStatus.READY,
+        taxableAmount: amount,
+        vatRate,
+        vatAmount,
+        missingFields,
+        createdBy: actor.userId
+      }
+    });
+
+    await audit(tx, {
+      action: 'CREATE_REPLACEMENT_INVOICE',
+      actorId: actor.userId,
+      contractId: contract.id,
+      recordId: invoice.id,
+      entityType: 'AccountingFinancialRecord',
+      entityId: invoice.id,
+      afterState: toJsonValue(invoice),
+      note: command.note || null
+    });
+
+    return invoice;
+  });
+
+  return actionResponse('APPLIED', 'Replacement invoice draft created', { contractId: contract.id, financialRecordIds: [record.id] });
+};
+
 const approveFinancialInvoice = async (command: AccountingActionRequest, actor: Actor) => {
   const invoiceId = command.invoiceId || command.recordId;
   if (!invoiceId) throw new Error('invoiceId is required');
@@ -998,7 +1254,14 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
         }
       });
       if (openCorrection) {
-        throw new Error('Open correction requests must be resolved before financial approval');
+        const metadata = metadataObject(before.metadata);
+        const isReplacementForOpenCorrection =
+          openCorrection.status === CorrectionRequestStatus.SALES_EDITED &&
+          metadata.correctionRequestId === openCorrection.id &&
+          Boolean(metadata.replacesRecordId);
+        if (!isReplacementForOpenCorrection) {
+          throw new Error('Open correction requests must be resolved before financial approval');
+        }
       }
     }
     if (!amountsEqual(sepidarAmount, before.amount)) {
@@ -1486,6 +1749,31 @@ const resolveCorrectionRequest = async (command: AccountingActionRequest, actor:
     if (before.status === CorrectionRequestStatus.APPROVED_FOR_SALES_EDIT) {
       throw new Error('Sales must save the correction before accounting can resolve it');
     }
+    if (before.status === CorrectionRequestStatus.SALES_EDITED && before.contractId) {
+      const contract = await tx.salesContract.findUnique({
+        where: { id: before.contractId },
+        include: getAccountingInclude()
+      });
+      if (!contract) throw new Error('Contract not found');
+      const [financialRecords, receivables, paymentEvents, taxRecords, correctionRequests] = await Promise.all([
+        tx.accountingFinancialRecord.findMany({ where: { contractId: before.contractId }, orderBy: { createdAt: 'desc' } }),
+        tx.accountingReceivable.findMany({ where: { contractId: before.contractId } }),
+        tx.accountingPaymentStatus.findMany({ where: { contractId: before.contractId } }),
+        tx.accountingTaxRecord.findMany({ where: { contractId: before.contractId } }),
+        tx.accountingCorrectionRequest.findMany({ where: { contractId: before.contractId }, orderBy: { createdAt: 'desc' } })
+      ]);
+      const workflow = buildCorrectionReplacementWorkflow(
+        toRialDecimal(getContractAmount(contract), contract.currency),
+        financialRecords,
+        receivables,
+        paymentEvents,
+        taxRecords,
+        correctionRequests
+      );
+      if (workflow && !workflow.canResolve) {
+        throw new Error(`Correction cannot be resolved yet: ${workflow.blockingReasons.join('; ')}`);
+      }
+    }
 
     const updated = await tx.accountingCorrectionRequest.update({
       where: { id: correctionRequestId },
@@ -1552,12 +1840,73 @@ const flagContract = async (command: AccountingActionRequest, actor: Actor) => {
 const voidAccountingRecord = async (command: AccountingActionRequest, actor: Actor) => {
   const recordId = command.recordId || command.invoiceId;
   if (!recordId) throw new Error('recordId is required');
+  const voidReason = String(command.reason || command.note || '').trim();
+  const externalReference = String(command.externalReference || '').trim();
+  const downstreamNote = String(command.downstreamNote || '').trim();
   const result = await prisma.$transaction(async (tx) => {
-    const before = await tx.accountingFinancialRecord.findUnique({ where: { id: recordId } });
+    const before = await tx.accountingFinancialRecord.findUnique({
+      where: { id: recordId },
+      include: {
+        receivables: true,
+        taxRecords: true
+      }
+    });
     if (!before) throw new Error('Accounting record not found');
+    if (before.status === AccountingRecordStatus.VOIDED) return before;
+    if (before.kind !== FinancialRecordKind.INVOICE_CANDIDATE) {
+      throw new Error('Only invoice records can be voided from this workflow');
+    }
+    if (before.financiallyApprovedAt || before.systemInvoiceNumber) {
+      if (!voidReason) throw new Error('Void reason is required for approved accounting records');
+      if (!externalReference) throw new Error('External cancellation or reversal reference is required');
+    }
+    const receivableIds = before.receivables.map((item) => item.id);
+    const payments = receivableIds.length
+      ? await tx.accountingPaymentStatus.findMany({ where: { receivableId: { in: receivableIds } } })
+      : [];
+    const hasReceivedPayments = payments.some((item) => isReceivedPaymentStatus(item.status));
+    const hasSubmittedTax = before.taxRecords.some((item) => isSubmittedTaxStatus(item.submissionStatus));
+    if ((hasReceivedPayments || hasSubmittedTax) && !downstreamNote) {
+      throw new Error('Downstream payment or tax correction evidence is required before voiding this record');
+    }
+    const unsafeReceivables = before.receivables.filter((item) => (
+      item.status === ReceivableStatus.PARTIALLY_PAID ||
+      item.status === ReceivableStatus.SETTLED ||
+      item.paidAmount.gt(0)
+    ));
+    if (unsafeReceivables.length > 0 && !downstreamNote) {
+      throw new Error('Paid receivables require downstream correction evidence before voiding this record');
+    }
+
+    await tx.accountingReceivable.updateMany({
+      where: {
+        invoiceRecordId: before.id,
+        paidAmount: new Prisma.Decimal(0),
+        status: { in: [ReceivableStatus.OPEN, ReceivableStatus.OVERDUE] }
+      },
+      data: {
+        status: ReceivableStatus.VOIDED,
+        metadata: {
+          voidedWithInvoiceRecordId: before.id,
+          voidReason,
+          externalVoidReference: externalReference || null
+        }
+      }
+    });
+
+    const beforeMetadata = metadataObject(before.metadata);
     const record = await tx.accountingFinancialRecord.update({
       where: { id: recordId },
-      data: { status: AccountingRecordStatus.VOIDED, voidedAt: new Date() }
+      data: {
+        status: AccountingRecordStatus.VOIDED,
+        voidedAt: new Date(),
+        metadata: {
+          ...beforeMetadata,
+          voidReason: voidReason || beforeMetadata.voidReason,
+          externalVoidReference: externalReference || beforeMetadata.externalVoidReference,
+          downstreamCorrectionNote: downstreamNote || beforeMetadata.downstreamCorrectionNote
+        }
+      }
     });
     await audit(tx, {
       action: 'VOID_ACCOUNTING_RECORD',
@@ -1568,7 +1917,7 @@ const voidAccountingRecord = async (command: AccountingActionRequest, actor: Act
       entityId: record.id,
       beforeState: toJsonValue(before),
       afterState: toJsonValue(record),
-      note: command.note || null
+      note: voidReason || null
     });
     return record;
   });

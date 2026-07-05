@@ -110,6 +110,8 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [voidTarget, setVoidTarget] = useState<any | null>(null);
+  const [replacementTarget, setReplacementTarget] = useState<any | null>(null);
   const [resolveTarget, setResolveTarget] = useState<any | null>(null);
   const [flagModalOpen, setFlagModalOpen] = useState(false);
   const [correctionModalOpen, setCorrectionModalOpen] = useState(false);
@@ -166,6 +168,32 @@ export default function AccountingContractDetailPage({ params }: { params: { con
       note: String(values.note || 'Deleted draft from accounting contract detail'),
     });
     if (applied) setDeleteTarget(null);
+  };
+
+  const voidAccountingRecord = async (values: Record<string, string | number>) => {
+    if (!voidTarget) return;
+    const applied = await execute({
+      kind: 'VOID_ACCOUNTING_RECORD',
+      recordId: voidTarget.sourceRecordId,
+      reason: String(values.note || '').trim(),
+      note: String(values.note || '').trim(),
+      externalReference: String(values.externalReference || '').trim(),
+      downstreamNote: String(values.downstreamNote || '').trim() || undefined,
+    });
+    if (applied) setVoidTarget(null);
+  };
+
+  const createReplacementInvoice = async (values: Record<string, string | number>) => {
+    if (!replacementTarget) return;
+    const applied = await execute({
+      kind: 'CREATE_REPLACEMENT_INVOICE',
+      contractId: params.contractId,
+      correctionRequestId: replacementTarget.correctionRequestId,
+      replacesRecordId: replacementTarget.sourceRecordId,
+      note: String(values.note || '').trim() || undefined,
+      idempotencyKey: `replacement-invoice:${params.contractId}:${replacementTarget.correctionRequestId}`,
+    });
+    if (applied) setReplacementTarget(null);
   };
 
   const resolveCorrection = async (values: Record<string, string | number>) => {
@@ -325,6 +353,10 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   const contract = data.contract;
   const source = data.sourceSnapshot;
   const canCreateRecords = contract.accounting.eligibleForFinancialRecords;
+  const replacementWorkflow = data.replacementWorkflow;
+  const replacementRecord = replacementWorkflow?.replacementRecordId
+    ? (data.financialRecords || []).find((record: any) => record.id === replacementWorkflow.replacementRecordId)
+    : null;
 
   return (
     <ErpPage
@@ -342,7 +374,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
         { label: 'مانده', value: money(contract.accounting.remainingAmount), icon: FaMoneyCheckAlt, tone: contract.accounting.receivableStatus === 'OVERDUE' ? 'danger' : 'warning' },
       ]}
     >
-      {actionError && !deleteTarget && !resolveTarget && !flagModalOpen && !correctionModalOpen && (
+      {actionError && !deleteTarget && !voidTarget && !replacementTarget && !resolveTarget && !flagModalOpen && !correctionModalOpen && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
           {actionError}
         </div>
@@ -493,6 +525,96 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                 ]}
               />
             </ErpSection>
+
+            {replacementWorkflow && (
+              <ErpSection title="راهنمای جایگزینی رکورد مالی">
+                <div className="space-y-4">
+                  <ErpSummaryGrid
+                    columns={3}
+                    items={[
+                      { label: 'مبلغ رکورد قبلی', value: replacementWorkflow.oldAmount ? money(replacementWorkflow.oldAmount) : '-' },
+                      { label: 'مبلغ اصلاح‌شده', value: money(replacementWorkflow.correctedAmount) },
+                      { label: 'اثر مبلغی', value: replacementWorkflow.amountChanged ? 'دارد' : 'ندارد' },
+                    ]}
+                  />
+
+                  {!replacementWorkflow.amountChanged ? (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100">
+                      مبلغ تایید شده با مبلغ اصلاح‌شده برابر است. پس از بررسی مدیریتی، اصلاح را با یادداشت بستن ثبت کنید.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="grid gap-3 lg:grid-cols-4">
+                        <CompactQueueItem
+                          icon={FaFileInvoice}
+                          title="۱. ابطال رکورد قبلی"
+                          meta={replacementWorkflow.sourceRecordStatus === 'VOIDED' ? 'انجام شده' : 'نیازمند شاهد خارجی'}
+                          status={<StatusBadge status={replacementWorkflow.sourceRecordStatus} />}
+                        />
+                        <CompactQueueItem
+                          icon={FaFileInvoice}
+                          title="۲. پیش‌نویس جایگزین"
+                          meta={replacementWorkflow.replacementRecordId ? 'ایجاد شده' : 'در انتظار'}
+                          status={<StatusBadge status={replacementWorkflow.replacementRecordStatus || 'PENDING'} />}
+                        />
+                        <CompactQueueItem
+                          icon={FaCheckCircle}
+                          title="۳. تایید مالی جایگزین"
+                          meta={replacementWorkflow.replacementFinanciallyApprovedAt ? dateFa(replacementWorkflow.replacementFinanciallyApprovedAt) : 'در انتظار'}
+                          status={<StatusBadge status={replacementWorkflow.replacementFinanciallyApprovedAt ? 'ISSUED' : 'PENDING'} />}
+                        />
+                        <CompactQueueItem
+                          icon={FaCheckCircle}
+                          title="۴. بستن اصلاح"
+                          meta={replacementWorkflow.canResolve ? 'آماده بستن' : 'ناتمام'}
+                          status={<StatusBadge status={replacementWorkflow.canResolve ? 'READY' : 'NEEDS_CORRECTION'} />}
+                        />
+                      </div>
+
+                      {replacementWorkflow.blockingReasons?.length > 0 && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+                          {replacementWorkflow.blockingReasons.join('، ')}
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap gap-2">
+                        <ErpButton
+                          label="ابطال رکورد قبلی"
+                          icon={FaExclamationTriangle}
+                          tone="danger"
+                          disabled={!replacementWorkflow.canVoidSource || actionLoading}
+                          onClick={() => setVoidTarget(replacementWorkflow)}
+                        />
+                        <ErpButton
+                          label="ایجاد پیش‌نویس جایگزین"
+                          icon={FaFileInvoice}
+                          tone="info"
+                          disabled={!replacementWorkflow.canCreateReplacement || actionLoading}
+                          onClick={() => setReplacementTarget(replacementWorkflow)}
+                        />
+                        <ErpButton
+                          label="بستن اصلاح"
+                          icon={FaCheckCircle}
+                          tone="success"
+                          disabled={!replacementWorkflow.canResolve || actionLoading}
+                          onClick={() => setResolveTarget({ id: replacementWorkflow.correctionRequestId })}
+                        />
+                      </div>
+
+                      {replacementWorkflow.canApproveReplacement && replacementRecord && (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+                          <FinancialInvoiceApprovalForm
+                            invoice={replacementRecord}
+                            busy={actionLoading}
+                            onApprove={approveFinancialInvoice}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </ErpSection>
+            )}
 
             <ErpSection title="اقلام قرارداد" description="این اطلاعات از قرارداد فروش خوانده می‌شود و در رکوردهای حسابداری به صورت Snapshot نگهداری می‌شود.">
               <div className="space-y-3">
@@ -678,7 +800,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                           label="بستن اصلاح"
                           icon={FaCheckCircle}
                           tone="success"
-                          disabled={actionLoading}
+                          disabled={actionLoading || (replacementWorkflow?.correctionRequestId === item.id && !replacementWorkflow.canResolve)}
                           onClick={() => setResolveTarget(item)}
                         />}
                       </div>
@@ -701,6 +823,32 @@ export default function AccountingContractDetailPage({ params }: { params: { con
         error={actionError}
         onClose={() => setDeleteTarget(null)}
         onSubmit={deleteDraftRecord}
+      />
+      <AccountingActionModal
+        open={Boolean(voidTarget)}
+        title="ابطال رکورد مالی قبلی"
+        description="برای رکورد مالی تایید شده، دلیل ابطال و شاهد ابطال یا برگشت در سیستم خارجی الزامی است."
+        fields={[
+          { id: 'note', label: 'دلیل ابطال', type: 'textarea', required: true },
+          { id: 'externalReference', label: 'شاهد ابطال/برگشت خارجی', type: 'text', required: true },
+          { id: 'downstreamNote', label: 'یادداشت وابستگی‌های دریافتنی/مالیات', type: 'textarea' },
+        ]}
+        submitLabel="ابطال رکورد"
+        busy={actionLoading}
+        error={actionError}
+        onClose={() => setVoidTarget(null)}
+        onSubmit={voidAccountingRecord}
+      />
+      <AccountingActionModal
+        open={Boolean(replacementTarget)}
+        title="ایجاد پیش‌نویس جایگزین"
+        description="پیش‌نویس جایگزین با مبلغ اصلاح‌شده قرارداد و پیوند به اصلاح جاری ساخته می‌شود."
+        fields={[{ id: 'note', label: 'یادداشت جایگزینی', type: 'textarea' }]}
+        submitLabel="ایجاد پیش‌نویس جایگزین"
+        busy={actionLoading}
+        error={actionError}
+        onClose={() => setReplacementTarget(null)}
+        onSubmit={createReplacementInvoice}
       />
       <AccountingActionModal
         open={Boolean(resolveTarget)}

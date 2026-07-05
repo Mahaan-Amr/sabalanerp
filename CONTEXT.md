@@ -383,6 +383,46 @@ _Avoid_: accounting silently editing the commercial contract, or treating a requ
 A correction request after financial approval can reopen a locked sales contract for a controlled sales correction only after manager approval. The existing financially approved record remains immutable and accounting owns any void, reversal, correction, review, and replacement approval needed after the sales correction.
 _Avoid_: editing the approved financial record directly, or treating manager-approved sales correction as accounting approval of the replacement financial result
 
+**رکورد مالی جایگزین پس از اصلاح**:
+When a corrected sales contract changes the financially approved amount, the old approved financial record remains historical and is voided or reversed, while accounting creates and approves a new financial record from the corrected contract amount.
+_Avoid_: editing the old approved record amount in place, or resolving the correction request before accounting confirms the replacement financial result
+
+**شاهد ابطال مالی خارجی**:
+When a financially approved Sabalan record has already been registered in Sepidar or another external accounting system, voiding it in Sabalan requires an accountant-entered reason and external cancellation, reversal, or correction reference.
+_Avoid_: marking an externally registered financial record as voided in Sabalan without preserving what happened to the external accounting document
+
+**وابستگی‌های ابطال رکورد مالی**:
+Voiding a financially approved invoice must account for downstream receivables, receipts, checks, and tax submissions tied to that invoice. Simple replacement is allowed only when downstream records are absent or safely closable; received payments, checks, or submitted tax records require explicit accounting correction evidence before the correction is closed.
+_Avoid_: silently deleting or rewriting downstream accounting records when an approved invoice is voided
+
+**بستن اصلاح مبلغ پس از تایید مالی**:
+A price-changing correction request after financial approval is closed only after the old approved invoice is voided or reversed with external evidence, a replacement invoice candidate is created from the corrected contract amount, that replacement is financially approved, and downstream accounting dependencies are handled or documented.
+_Avoid_: resolving the correction immediately after sales saves the contract edit, or before the replacement financial result is approved
+
+**وضعیت محاسبه‌شده اصلاح مالی**:
+After sales saves a post-approval correction, the correction request may remain in `SALES_EDITED` while accounting progress is derived from related financial records: whether the old approved invoice is voided, whether a replacement invoice candidate exists, whether it is financially approved, and whether downstream dependencies are handled.
+_Avoid_: adding a new persisted correction-request status for each accounting sub-step when the related records already express that state
+
+**پیوند رکورد مالی جایگزین**:
+A replacement invoice candidate created after a post-approval correction is explicitly linked to the correction request and to the old financial record it replaces. Its identity is separate from the original full-contract invoice candidate so accounting can create one replacement for the corrected contract amount without reusing the old invoice candidate.
+_Avoid_: using the original contract-level invoice idempotency key for replacement records, or leaving the replacement record disconnected from the correction that required it
+
+**اختیار ابطال و جایگزینی رکورد مالی**:
+Voiding an approved financial record and financially approving its replacement require manager-level accounting authority, expressed through accounting approve/void permission rather than a hard-coded role name. Normal accounting users may request corrections and prepare allowed drafts, but sales users never void or replace accounting records.
+_Avoid_: allowing every accountant to void approved records, or coupling the authority only to one role label instead of the accounting permission model
+
+**راهنمای جایگزینی رکورد مالی**:
+For a post-approval correction whose saved sales edit changed the approved amount, the accounting contract detail page guides accounting through voiding the old financial record, creating the replacement draft, financially approving the replacement, and then closing the correction. Each step is enabled only when the previous accounting truth is complete.
+_Avoid_: exposing only generic accounting buttons that leave accountants guessing which correction step is currently allowed
+
+**تشخیص اثر مبلغی اصلاح**:
+Whether a post-approval sales correction changed the approved financial amount is determined automatically by comparing the old approved financial record amount with the current corrected contract amount in ریال, using the same accounting total calculation used for invoice candidate creation.
+_Avoid_: asking accountants to manually classify whether a corrected contract changed the financial amount, or comparing formatted display text
+
+**اصلاح بدون اثر مبلغی پس از تایید مالی**:
+When a post-approval correction does not change the approved financial amount, the old approved financial record remains valid and accounting may close the correction after manager-level review and a resolution note. If the non-amount change affects customer identity, tax, Sepidar, or external documents, accounting records the needed evidence or note without recreating the invoice unless the external document itself must be corrected.
+_Avoid_: forcing invoice void and replacement for every corrected contract when the approved amount did not change
+
 **تایید مالی با اصلاح باز**:
 Accounting financial approval is blocked while a contract has an open or acknowledged pre-approval correction request. Accounting must review and resolve the correction request before financially approving the invoice candidate.
 _Avoid_: financially approving and locking a contract while a requested sales correction is still unresolved

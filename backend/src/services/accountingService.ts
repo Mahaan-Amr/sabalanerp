@@ -1268,17 +1268,21 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       throw new Error('Sepidar amount must match the Sabalan invoice amount');
     }
 
-    const duplicate = await tx.accountingFinancialRecord.findFirst({
+    const duplicateRecords = await tx.accountingFinancialRecord.findMany({
       where: {
         systemInvoiceNumber,
         id: { not: invoiceId }
       }
     });
-    if (duplicate) {
-      const metadata = metadataObject(before.metadata);
-      if (metadata.replacesRecordId === duplicate.id) {
-        throw new Error('Replacement invoice needs a new system invoice number; the old voided invoice already uses this number');
-      }
+    const metadata = metadataObject(before.metadata);
+    const replacedRecordId = typeof metadata.replacesRecordId === 'string' ? metadata.replacesRecordId : null;
+    const replacementNumberSource = duplicateRecords.length === 1 ? duplicateRecords[0] : null;
+    const isAllowedReplacementNumberReuse =
+      Boolean(replacementNumberSource) &&
+      replacedRecordId === replacementNumberSource?.id &&
+      replacementNumberSource?.kind === FinancialRecordKind.INVOICE_CANDIDATE &&
+      replacementNumberSource?.status === AccountingRecordStatus.VOIDED;
+    if (duplicateRecords.length > 0 && !isAllowedReplacementNumberReuse) {
       throw new Error('System invoice number is already used');
     }
 
@@ -1295,6 +1299,10 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       }
     });
 
+    const replacementNumberReuseNote = isAllowedReplacementNumberReuse && replacementNumberSource
+      ? `Replacement invoice reused system invoice number ${systemInvoiceNumber} from voided source record ${replacementNumberSource.id}; replacement record ${updated.id} is linked by metadata.replacesRecordId. Reason: linked replacement invoice for a post-approval correction.`
+      : null;
+
     await audit(tx, {
       action: 'APPROVE_FINANCIAL_INVOICE',
       actorId: actor.userId,
@@ -1304,7 +1312,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       entityId: updated.id,
       beforeState: toJsonValue(before),
       afterState: toJsonValue(updated),
-      note: command.note || null
+      note: [command.note, replacementNumberReuseNote].filter(Boolean).join(' | ') || null
     });
 
     return updated;

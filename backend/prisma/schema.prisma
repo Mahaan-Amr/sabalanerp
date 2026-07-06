@@ -1197,7 +1197,7 @@ model AccountingFinancialRecord {
   sourceSnapshot        Json?
   metadata              Json?
   idempotencyKey        String?                          @unique
-  systemInvoiceNumber   String?                          @unique
+  systemInvoiceNumber   String?
   systemInvoiceDate     DateTime?
   sepidarAmount         Decimal?                         @db.Decimal(18, 2)
   financiallyApprovedAt DateTime?
@@ -1217,6 +1217,7 @@ model AccountingFinancialRecord {
   @@index([sourceKind, sourceId])
   @@index([contractId])
   @@index([customerId])
+  @@index([systemInvoiceNumber])
   @@map("accounting_financial_records")
 }
 

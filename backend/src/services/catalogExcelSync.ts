@@ -51,6 +51,7 @@ interface StoredPlan {
 
 const plans = new Map<string, StoredPlan>();
 const PLAN_TTL_MS = 30 * 60 * 1000;
+const CATALOG_EXCEL_IMPORT_ROW_LIMIT = 5000;
 const DEFAULT_CURRENCY = 'تومان';
 
 const normalizeDigits = (input: unknown): string => String(input ?? '')
@@ -203,8 +204,10 @@ const worksheetRows = (workbook: XLSX.WorkBook, preferredSheet?: string): any[][
   return XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, raw: false, defval: '' }) as any[][];
 };
 
-const applyTextFormatToColumns = (worksheet: XLSX.WorkSheet, columnIndexes: number[]) => {
+const applyTextFormatToColumns = (worksheet: XLSX.WorkSheet, columnIndexes: number[], minRows = 1) => {
   const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1:A1');
+  range.e.r = Math.max(range.e.r, minRows - 1);
+  worksheet['!ref'] = XLSX.utils.encode_range(range);
   for (const columnIndex of columnIndexes) {
     for (let rowIndex = range.s.r; rowIndex <= range.e.r; rowIndex += 1) {
       const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
@@ -654,7 +657,8 @@ export const buildTemplateWorkbook = (catalog: CatalogKey) => {
   worksheet['!cols'] = headers.map(() => ({ wch: 22 }));
   applyTextFormatToColumns(
     worksheet,
-    catalogTextColumnIndexes(catalog)
+    catalogTextColumnIndexes(catalog),
+    catalog === 'products' ? CATALOG_EXCEL_IMPORT_ROW_LIMIT : 1
   );
   XLSX.utils.book_append_sheet(workbook, worksheet, catalogSheets[catalog]);
   return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
@@ -684,7 +688,8 @@ export const buildExportWorkbook = async (prisma: PrismaClient, catalog: Catalog
   worksheet['!cols'] = (data[0] || []).map(() => ({ wch: 22 }));
   applyTextFormatToColumns(
     worksheet,
-    catalogTextColumnIndexes(catalog)
+    catalogTextColumnIndexes(catalog),
+    catalog === 'products' ? CATALOG_EXCEL_IMPORT_ROW_LIMIT : 1
   );
   XLSX.utils.book_append_sheet(workbook, worksheet, catalogSheets[catalog]);
   return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });

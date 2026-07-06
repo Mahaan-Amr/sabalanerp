@@ -362,8 +362,10 @@ export const computeTotalsV2 = (
   cuttingCostPerMeter: number;
   cuttingCostLongitudinal: number;
   cuttingCostPerMeterLongitudinal: number;
+  cuttingMetersLongitudinal: number;
   cuttingCostCross: number;
   cuttingCostPerMeterCross: number;
+  cuttingMetersCross: number;
   baseMaterialPrice: number;
   billableCuttingCost: number;
   billableCuttingCostLongitudinal: number;
@@ -413,20 +415,25 @@ export const computeTotalsV2 = (
   let cuttingCost = 0;
   let cuttingCostLongitudinal = 0;
   let cuttingCostPerMeterLongitudinal = 0;
+  let cuttingMetersLongitudinal = 0;
   let cuttingCostCross = 0;
   let cuttingCostPerMeterCross = 0;
+  let cuttingMetersCross = 0;
   const needsWidthCut =
     originalWidthCm > 0 && userWidthCm > 0 && userWidthCm < originalWidthCm && actualLengthM > 0;
   const needsLengthCut =
     pricingLengthM > 0 && actualLengthM > 0 && pricingLengthM - actualLengthM > 0.0001 && userWidthCm > 0;
 
   if (needsWidthCut && stoneQuantityForPricing > 0) {
+    const baseLongitudinalMeters = actualLengthM * stoneQuantityForPricing;
+    const calibrationCutMeters = (draft.calibrationCutEnabled ?? true) ? baseLongitudinalMeters : 0;
+    cuttingMetersLongitudinal = baseLongitudinalMeters + calibrationCutMeters;
     cuttingCostPerMeterLongitudinal =
       (draft.stoneProduct as any)?.cuttingCostPerMeter ??
       getCuttingTypePricePerMeter('LONG') ??
       0;
     if (cuttingCostPerMeterLongitudinal > 0) {
-      cuttingCostLongitudinal = cuttingCostPerMeterLongitudinal * actualLengthM * stoneQuantityForPricing;
+      cuttingCostLongitudinal = cuttingCostPerMeterLongitudinal * cuttingMetersLongitudinal;
     }
   }
 
@@ -439,7 +446,8 @@ export const computeTotalsV2 = (
     cuttingCostPerMeterCross = crossRateFromConfig;
     if (cuttingCostPerMeterCross > 0) {
       const widthInMeters = userWidthCm / 100;
-      cuttingCostCross = cuttingCostPerMeterCross * widthInMeters * stoneQuantityForPricing;
+      cuttingMetersCross = widthInMeters * stoneQuantityForPricing;
+      cuttingCostCross = cuttingCostPerMeterCross * cuttingMetersCross;
     }
   }
 
@@ -466,8 +474,10 @@ export const computeTotalsV2 = (
     cuttingCostPerMeter,
     cuttingCostLongitudinal,
     cuttingCostPerMeterLongitudinal,
+    cuttingMetersLongitudinal,
     cuttingCostCross,
     cuttingCostPerMeterCross,
+    cuttingMetersCross,
     baseMaterialPrice,
     billableCuttingCost,
     billableCuttingCostLongitudinal,

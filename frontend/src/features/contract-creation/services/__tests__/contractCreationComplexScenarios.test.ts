@@ -213,9 +213,9 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   approx(smartPlan.requestedAreaSqm, 3.6);
   approx(smartPlan.consumedAreaSqm, 3.6);
   assert.equal(smartPlan.remainingStones.length, 0);
-  approx(smartPlan.totalCuttingCost, 360_000);
+  approx(smartPlan.totalCuttingCost, 720_000);
   approx(pricing.originalPrice, 3_780_000);
-  approx(pricing.totalWithCutting, 4_140_000);
+  approx(pricing.totalWithCutting, 4_500_000);
 }
 
 {
@@ -501,12 +501,34 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   assert.equal(totals.piecesPerStone, 2);
   assert.equal(totals.baseStoneQuantity, 5);
   approx(totals.toolsTotal, 1_600_000);
-  approx(totals.cuttingCost, 300_000);
-  approx(totals.partTotal, 4_300_000);
+  approx(totals.cuttingMetersLongitudinal, 12);
+  approx(totals.cuttingCost, 600_000);
+  approx(totals.partTotal, 4_600_000);
   assert.equal(layerMetrics.layersFromRemainingStones, 2);
   assert.equal(layerMetrics.layersFromNewStones, 3);
   approx(layerMetrics.squareMetersFromRemaining || 0, 0.4);
   approx(layerMetrics.squareMetersFromNew || 0, 0.6);
+}
+
+{
+  const stairProduct = product({ id: 'mandatory-stair-stone', widthValue: 40, thicknessValue: 3 });
+  const totals = computeTotalsV2('tread', {
+    stoneProduct: stairProduct,
+    lengthValue: 1.2,
+    lengthUnit: 'm',
+    widthCm: 20,
+    quantity: 10,
+    pricePerSquareMeter: 1_000_000,
+    useMandatory: true,
+    mandatoryPercentage: 20,
+    calibrationCutEnabled: true,
+    tools: []
+  }, (code) => code === 'LONG' ? 50_000 : 25_000);
+
+  approx(totals.cuttingMetersLongitudinal, 12);
+  approx(totals.cuttingCostLongitudinal, 600_000);
+  approx(totals.billableCuttingCostLongitudinal, 0);
+  assert.equal(totals.shouldChargeCuttingCost, false);
 }
 
 {

@@ -54,6 +54,10 @@ _Avoid_: silently removing catalog records during import
 A per-contract-product material-consumption adjustment for physical cuttable stone. When enabled, the saved row carries `sawKerfEnabled: true` and `sawKerfCm: 0.3`; each actually cut axis consumes the finished requested dimension plus 3mm for source-material charge, smart packing, and remaining-stone geometry. Finished dimensions, delivery, standalone services, tools, and finishing calculations stay based on the customer-requested size.
 _Avoid_: applying kerf to service rows, applying it to a full-width/full-length axis with no cut, or changing printed finished dimensions.
 
+**برش کالیبر**:
+A cutting-charge modifier for طولی and stair product rows that adds one paid side-edge longitudinal cut for each consumed source band while leaving material area, delivery dimensions, and remaining-stone geometry unchanged. It is included inside the normal برش total and printed cutting details rather than shown as a separate add-on.
+_Avoid_: treating برش کالیبر as extra consumed material, a separate service row, or a separate printed line item
+
 **برش قائم اسلب**:
 A paid edge-preparation cut applied to selected sides of each standard/source slab before the slab is cut to the customer's requested finished dimensions.
 _Avoid_: charging برش قائم from the finished requested piece dimensions, or applying it to unselected slab sides.

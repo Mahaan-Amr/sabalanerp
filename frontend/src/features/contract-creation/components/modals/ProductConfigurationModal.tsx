@@ -3678,6 +3678,28 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                     </span>
                   </label>
                   )}
+                  {currentProductType === 'longitudinal' && (
+                  <label className="flex items-start gap-3 rounded-lg border border-teal-200 bg-teal-50 p-3 dark:border-teal-800 dark:bg-teal-900/20">
+                    <input
+                      type="checkbox"
+                      checked={productConfig.calibrationCutEnabled ?? true}
+                      onChange={(event) => {
+                        const enabled = event.target.checked;
+                        setProductConfig((prev: any) => ({
+                          ...prev,
+                          calibrationCutEnabled: enabled
+                        }));
+                      }}
+                      className="mt-1 h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                    />
+                    <span>
+                      <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">برش کالیبر</span>
+                      <span className="mt-1 block text-xs leading-5 text-teal-700 dark:text-teal-200">
+                        در صورت وجود برش عرضی از سنگ اصلی، یک برش طولی کنار کار به متراژ برش اضافه می‌شود و به صورت ردیف جداگانه نمایش داده نمی‌شود.
+                      </span>
+                    </span>
+                  </label>
+                  )}
                   {/* Mandatory Pricing Section - Only for longitudinal stones */}
                   {currentProductType === 'longitudinal' && (
                   <div className="border-t border-gray-200 dark:border-gray-600 pt-4">

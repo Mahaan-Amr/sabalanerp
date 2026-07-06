@@ -237,6 +237,7 @@ export interface SmartLongitudinalCutPlan {
   requestedAreaSqm: number;
   sawKerfEnabled?: boolean;
   sawKerfCm?: number | null;
+  calibrationCutEnabled?: boolean;
   productionPieces: SmartCutProductionPiece[];
   remainingStones: RemainingStone[];
   cuttingBreakdown: CuttingBreakdownEntry[];
@@ -405,6 +406,7 @@ export interface ContractProduct {
   currency: string;
   sawKerfEnabled?: boolean;
   sawKerfCm?: number | null;
+  calibrationCutEnabled?: boolean;
   // Unit information for proper display
   lengthUnit: 'cm' | 'm'; // ?? ??
   widthUnit: 'cm' | 'm'; // ?? ??
@@ -483,6 +485,7 @@ export interface ContractProduct {
   // Metadata for stair stepper V2 and other extensions
   meta?: any;
   // Stone finishing
+  finishingEnabled?: boolean;
   finishingId?: string | null;
   finishingCode?: string | null;
   finishingName?: string | null;
@@ -780,6 +783,7 @@ export interface StairPartDraftV2 {
   finishingCalculationBase?: 'length' | 'squareMeters' | null;
   finishingQuantity?: number | null;
   finishingSearchTerm?: string;
+  calibrationCutEnabled?: boolean;
   description?: string | null;
 }
 

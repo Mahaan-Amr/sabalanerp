@@ -18,6 +18,7 @@ interface LongitudinalRemainingInput {
   quantity: number;
   sawKerfEnabled?: boolean;
   sawKerfCm?: number | null;
+  calibrationCutEnabled?: boolean;
   seed?: number;
 }
 
@@ -103,6 +104,7 @@ export const calculateSmartLongitudinalCutPlan = ({
   quantity,
   sawKerfEnabled = false,
   sawKerfCm = null,
+  calibrationCutEnabled = true,
   longitudinalRatePerMeter = 0,
   optimizationEnabled = true,
   seed
@@ -139,6 +141,7 @@ export const calculateSmartLongitudinalCutPlan = ({
       requestedAreaSqm: 0,
       sawKerfEnabled,
       sawKerfCm: sawKerfEnabled ? kerfCm : null,
+      calibrationCutEnabled,
       productionPieces: [],
       remainingStones: [],
       cuttingBreakdown: [],
@@ -167,6 +170,7 @@ export const calculateSmartLongitudinalCutPlan = ({
       requestedAreaSqm: 0,
       sawKerfEnabled,
       sawKerfCm: sawKerfEnabled ? kerfCm : null,
+      calibrationCutEnabled,
       productionPieces: [],
       remainingStones: [],
       cuttingBreakdown: [],
@@ -238,18 +242,21 @@ export const calculateSmartLongitudinalCutPlan = ({
   const remainingStones: RemainingStone[] = Array.from(remainingByDimension.values());
 
   const cuttingBreakdown: CuttingBreakdownEntry[] = [];
-  const longitudinalCost = longitudinalMeters * longitudinalRatePerMeter;
-  if (longitudinalMeters > 0) {
+  const hasWidthCut = requestedWidthCm < sourceWidthCm;
+  const calibrationCutMeters = calibrationCutEnabled && hasWidthCut && sourceLengthConsumedM > 0 ? sourceLengthConsumedM : 0;
+  const paidLongitudinalMeters = hasWidthCut ? longitudinalMeters + calibrationCutMeters : 0;
+  const longitudinalCost = paidLongitudinalMeters * longitudinalRatePerMeter;
+  if (paidLongitudinalMeters > 0) {
     cuttingBreakdown.push({
       type: 'longitudinal',
-      meters: longitudinalMeters,
+      meters: paidLongitudinalMeters,
       rate: longitudinalRatePerMeter,
       cost: longitudinalCost
     });
   }
 
   return {
-    enabled: requestedWidthCm < sourceWidthCm,
+    enabled: hasWidthCut,
     mode,
     sourceWidthCm,
     requestedWidthCm,
@@ -264,6 +271,7 @@ export const calculateSmartLongitudinalCutPlan = ({
     requestedAreaSqm,
     sawKerfEnabled,
     sawKerfCm: sawKerfEnabled ? kerfCm : null,
+    calibrationCutEnabled,
     productionPieces,
     remainingStones,
     cuttingBreakdown,

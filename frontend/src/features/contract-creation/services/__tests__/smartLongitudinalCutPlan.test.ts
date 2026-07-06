@@ -25,7 +25,7 @@ const approx = (actual: number, expected: number) => {
   approx(plan.remainingStones[0].length, 5);
   approx(plan.consumedAreaSqm, 2);
   approx(plan.requestedAreaSqm, 1.5);
-  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 10);
+  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 15);
   assert.equal(plan.cuttingBreakdown.some((cut) => cut.type === 'cross'), false);
 }
 
@@ -88,7 +88,7 @@ const approx = (actual: number, expected: number) => {
   assert.deepEqual(plan.productionPieces, [{ widthCm: 25, lengthM: 10, quantity: 1 }]);
   approx(plan.remainingStones[0].width, 15);
   approx(plan.remainingStones[0].length, 10);
-  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 10);
+  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 20);
   assert.equal(plan.cuttingBreakdown.some((cut) => cut.type === 'cross'), false);
 }
 
@@ -131,7 +131,7 @@ const approx = (actual: number, expected: number) => {
   approx(plan.consumedAreaSqm, 3.6);
   approx(plan.requestedAreaSqm, 3.6);
   assert.equal(plan.remainingStones.length, 0);
-  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 9);
+  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 18);
 }
 
 {
@@ -156,8 +156,76 @@ const approx = (actual: number, expected: number) => {
   approx(plan.remainingStones[0].width, 14);
   approx(plan.remainingStones[0].length, 2);
   approx(plan.remainingStones[0].squareMeters, 0.28);
-  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 4);
+  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 6);
   assert.equal(plan.cuttingBreakdown.some((cut) => cut.type === 'cross'), false);
+}
+
+{
+  const plan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 20,
+    enteredWidthUnit: 'cm',
+    enteredLength: 20,
+    enteredLengthUnit: 'm',
+    quantity: 1,
+    longitudinalRatePerMeter: 100,
+    seed: 8
+  });
+
+  approx(plan.sourceLengthConsumedM, 10);
+  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 20);
+  approx(plan.totalCuttingCost, 2000);
+}
+
+{
+  const plan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 10,
+    enteredWidthUnit: 'cm',
+    enteredLength: 10,
+    enteredLengthUnit: 'm',
+    quantity: 4,
+    longitudinalRatePerMeter: 100,
+    seed: 9
+  });
+
+  approx(plan.sourceLengthConsumedM, 10);
+  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 40);
+  approx(plan.totalCuttingCost, 4000);
+}
+
+{
+  const plan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 20,
+    enteredWidthUnit: 'cm',
+    enteredLength: 20,
+    enteredLengthUnit: 'm',
+    quantity: 1,
+    longitudinalRatePerMeter: 100,
+    calibrationCutEnabled: false,
+    seed: 10
+  });
+
+  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 10);
+  approx(plan.totalCuttingCost, 1000);
+}
+
+{
+  const plan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 40,
+    enteredWidthUnit: 'cm',
+    enteredLength: 10,
+    enteredLengthUnit: 'm',
+    quantity: 1,
+    longitudinalRatePerMeter: 100,
+    seed: 11
+  });
+
+  assert.equal(plan.enabled, false);
+  assert.equal(plan.cuttingBreakdown.length, 0);
+  approx(plan.totalCuttingCost, 0);
 }
 
 {

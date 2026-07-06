@@ -574,11 +574,12 @@ _Avoid_: mixing multiple customer projects in one بارگیری, even when the 
 
 **جستجوی پروژه در بارگیری**:
 A logistics project lookup matches the project, address, customer identity, company identity, and contact numbers tied to the customer or project.
-In the new-loading project picker, a project is selectable only when it currently has at least one positive مانده بارگیری group. Existing draft or historical loading records for a project with no current remaining stay accessible through the loading list for edit, cancellation, or history.
-_Avoid_: forcing logistics users to know the project name when the operational clue they have is a phone number, or offering projects for a new loading when logistics has no remaining physical cargo to select
+In the new-loading project picker, only projects with at least one positive مانده بارگیری group are shown. Existing draft or historical loading records for a project with no current remaining stay accessible through the loading list for edit, cancellation, or history.
+_Avoid_: forcing logistics users to know the project name when the operational clue they have is a phone number, showing non-loadable projects in the new-loading flow, or offering projects for a new loading when logistics has no remaining physical cargo to select
 
 **شروع پیش‌نویس بارگیری**:
 A draft بارگیری starts when logistics selects the customer project, so the in-progress shipment can be resumed before rows, driver, or vehicle details are complete.
+Customer search before project selection is only navigation/filtering and does not start a draft.
 _Avoid_: treating بارگیری creation as only the final submit action, or keeping meaningful loading progress as a browser-only form
 
 **ادامه پیش‌نویس بارگیری**:
@@ -594,6 +595,22 @@ _Avoid_: using برنامه تحویل, draft accounting financial records, unap
 **گروه مانده بارگیری**:
 A logistics display grouping that combines remaining amounts only for contract rows with identical logistics-relevant product specs, while preserving access to the individual source contract rows inside the group.
 _Avoid_: losing contract-row traceability when showing a grouped remaining amount, or grouping rows whose physical loading specs differ
+
+**خلاصه گروهی بارگیری**:
+The مقدار step may show identical selected rows as one grouped summary for readability, but quantity entry for a group with multiple source contract rows stays per source row. The grouped line shows a live summed total and a جزئیات view for the per-contract quantities.
+_Avoid_: accepting one grouped total that the system silently splits across source contracts
+
+**جزئیات محصول در بارگیری**:
+The product details shown while preparing a بارگیری are production/logistics identifiers: product name and type, deliverable remaining amount and unit, dimensions, quantity, ابزار, پرداخت سنگ, selected services or cuts, and row notes when they help identify what is being shipped.
+_Avoid_: showing price, discount, payment, accounting information, or source/consumed-stone explanation rows in the logistics loading workflow
+
+**انتخاب ردیف برای بارگیری**:
+In the new-loading wizard, selecting contract product rows only marks them as candidates for the بارگیری. Quantity entry and validation happen later in the مقدار step.
+_Avoid_: mixing product-row selection with loaded-quantity entry in the contract inspection step
+
+**مقداردهی بارگیری**:
+Selected rows enter the مقدار step with blank loaded quantities. The logistics operator intentionally enters the actually loaded amount, while the available مانده بارگیری is shown beside the input; optional fill-from-remaining actions must be explicit per source row.
+_Avoid_: automatically defaulting a selected row to its full remaining amount
 
 **تخصیص منبع بارگیری**:
 When a grouped remaining line contains multiple source contract rows, the logistics user manually chooses how much the بارگیری consumes from each source row before finalization.
@@ -614,7 +631,12 @@ _Avoid_: blocking small length-based overages caused by normal loading variance,
 **وضعیت بارگیری**:
 Only finalized بارگیری records reduce logistics remaining amounts. Draft بارگیری records are editable preparation records, and cancelled بارگیری records stay in history without reducing remaining.
 Draft بارگیری records support normal preparation CRUD before finalization, including updating notes, rows, quantities, source allocations, and selected driver/vehicle pair, and cancelling or deleting the draft when it should not proceed.
+After project selection starts or resumes a draft, wizard changes are saved on step transitions and by the explicit ذخیره پیش‌نویس action; finalization saves the draft first and then finalizes it.
 _Avoid_: reducing remaining from draft loading entries, deleting cancelled logistics history, or using draft CRUD semantics for finalized loading records
+
+**انتخاب راننده بارگیری**:
+Logistics selects a driver/vehicle only from active حراست-owned vehicle pairs. The loading wizard uses a searchable active driver/vehicle picker matching driver name, phone, national code, plate, and vehicle type; logistics cannot create, edit, delete, or activate driver/vehicle records in this flow.
+_Avoid_: using a long unsearchable dropdown for active drivers, or letting logistics manage the security registry from بارگیری
 
 **قفل بارگیری نهایی‌شده**:
 A finalized بارگیری is immutable because it affects remaining amounts and accounting visibility. Mistakes after finalization are handled through cancellation or correction records rather than silent edits.

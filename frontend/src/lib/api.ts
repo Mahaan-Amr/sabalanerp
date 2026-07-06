@@ -514,6 +514,8 @@ export const biAPI = {
 
 export const logisticsAPI = {
   getDashboard: () => api.get('/logistics/dashboard'),
+  getLoadableCustomers: (params?: any) => api.get('/logistics/customers', { params }),
+  getCustomerProjects: (customerId: string) => api.get(`/logistics/customers/${customerId}/projects`),
   getProjects: (params?: any) => api.get('/logistics/projects', { params }),
   getRemaining: (projectId: string) => api.get(`/logistics/projects/${projectId}/remaining`),
   createOrResumeDraft: (projectId: string, data?: any) => api.post(`/logistics/projects/${projectId}/draft`, data || {}),

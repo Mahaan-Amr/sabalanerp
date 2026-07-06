@@ -1,19 +1,45 @@
-﻿'use client';
+'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { FaArrowLeft, FaArrowRight, FaCheck, FaClipboardList, FaPlus, FaSave, FaSearch, FaTruck, FaUsers } from 'react-icons/fa';
-import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpSegmentedControl } from '@/components/erp';
+import {
+  FaArrowLeft,
+  FaArrowRight,
+  FaCheck,
+  FaChevronDown,
+  FaChevronUp,
+  FaClipboardList,
+  FaEye,
+  FaPlus,
+  FaSave,
+  FaSearch,
+  FaTrash,
+  FaTruck,
+  FaUser,
+  FaUsers,
+} from 'react-icons/fa';
+import {
+  ErpBadge,
+  ErpButton,
+  ErpCard,
+  ErpEmptyState,
+  ErpLoading,
+  ErpPage,
+  ErpSection,
+  ErpSegmentedControl,
+} from '@/components/erp';
 import { logisticsAPI } from '@/lib/api';
 import { inputClass, labelClass, numberFa, unitLabels } from '../../logistics-ui';
 
-type WizardStep = 'project' | 'remaining' | 'quantities' | 'driver' | 'review';
+type WizardStep = 'customer' | 'project' | 'contracts' | 'quantities' | 'driver' | 'review';
 type QuantityMode = 'linear' | 'direct';
-type DriverMode = 'saved';
 
 type DraftLine = {
   key: string;
   source: any;
+  groupKey: string;
+  groupDisplayName: string;
+  groupSnapshot: any;
   mode: QuantityMode;
   quantity: string;
   khatRas: string;
@@ -33,8 +59,9 @@ const emptyDriver = {
 };
 
 const steps: Array<{ id: WizardStep; label: string }> = [
+  { id: 'customer', label: 'مشتری' },
   { id: 'project', label: 'پروژه' },
-  { id: 'remaining', label: 'مانده' },
+  { id: 'contracts', label: 'قراردادها' },
   { id: 'quantities', label: 'مقدار' },
   { id: 'driver', label: 'راننده' },
   { id: 'review', label: 'بازبینی' },
@@ -49,11 +76,52 @@ const driverFields = [
   ['nationalCode', 'کد ملی'],
 ] as const;
 
-const lineFromSource = (source: any, quantity = ''): DraftLine => ({
+const compactValue = (value: any) => {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value === 'number') return numberFa(value);
+  return String(value);
+};
+
+const productIdentityParts = (snapshot: any = {}) => [
+  snapshot.productType,
+  snapshot.width ? `عرض ${compactValue(snapshot.width)}` : '',
+  snapshot.thickness ? `ضخامت ${compactValue(snapshot.thickness)}` : '',
+  snapshot.length ? `طول ${compactValue(snapshot.length)}${snapshot.lengthUnit || ''}` : '',
+  snapshot.squareMeters ? `${compactValue(snapshot.squareMeters)} متر مربع` : '',
+  snapshot.quantity ? `مقدار قراردادی ${compactValue(snapshot.quantity)}` : '',
+  snapshot.preparedUnit ? `واحد ${snapshot.preparedUnit}` : '',
+].filter(Boolean);
+
+const detailNames = (value: any, fallback: string) => {
+  if (!value) return [];
+  const values = Array.isArray(value) ? value : [value];
+  return values
+    .map((item) => item?.namePersian || item?.name || item?.title || item?.serviceName || item?.toolName || fallback)
+    .filter(Boolean);
+};
+
+const productDetailBadges = (snapshot: any = {}) => [
+  ...detailNames(snapshot.tools, 'ابزار').map((name) => `ابزار: ${name}`),
+  ...detailNames(snapshot.services, 'خدمات').map((name) => `خدمات: ${name}`),
+  snapshot.finishing ? `پرداخت: ${snapshot.finishing?.namePersian || snapshot.finishing?.name || snapshot.finishingName || 'انتخاب شده'}` : '',
+  snapshot.description ? `توضیح: ${snapshot.description}` : '',
+].filter(Boolean);
+
+const sourceWithGroup = (source: any, group: any) => ({
+  ...source,
+  groupKey: group.groupKey,
+  groupDisplayName: group.displayName,
+  groupSnapshot: group.productSnapshot,
+});
+
+const lineFromSource = (source: any): DraftLine => ({
   key: `${source.contractItemId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   source,
+  groupKey: source.groupKey || `${source.productId}-${source.contractItemId}`,
+  groupDisplayName: source.groupDisplayName || source.productSnapshot?.name || 'محصول',
+  groupSnapshot: source.groupSnapshot || source.productSnapshot,
   mode: source.unit === 'meter' ? 'linear' : 'direct',
-  quantity,
+  quantity: '',
   khatRas: '',
   pieceCount: '',
   plus: '0',
@@ -63,6 +131,7 @@ const lineFromSource = (source: any, quantity = ''): DraftLine => ({
 
 const lineFromLoadingLine = (line: any): DraftLine => {
   const sourceSnapshot = line.sourceSnapshot || {};
+  const productSnapshot = line.productSnapshot || {};
   const source = {
     contractId: line.sourceContractId,
     contractNumber: sourceSnapshot.contractNumber || line.sourceContract?.contractNumber || '',
@@ -71,12 +140,18 @@ const lineFromLoadingLine = (line: any): DraftLine => {
     remainingQuantity: sourceSnapshot.remainingQuantity || line.quantity,
     unit: line.unit,
     unitLabel: unitLabels[line.unit] || line.unit,
-    productSnapshot: line.productSnapshot,
+    productSnapshot,
+    groupKey: sourceSnapshot.groupKey || `${line.productId}-${line.sourceContractItemId}`,
+    groupDisplayName: productSnapshot.name || 'محصول',
+    groupSnapshot: productSnapshot,
   };
 
   return {
     key: line.id || `${line.sourceContractItemId}-${Date.now()}`,
     source,
+    groupKey: source.groupKey,
+    groupDisplayName: source.groupDisplayName,
+    groupSnapshot: productSnapshot,
     mode: line.khatRas || line.pieceCount ? 'linear' : 'direct',
     quantity: line.khatRas || line.pieceCount ? '' : String(line.quantity || ''),
     khatRas: line.khatRas ? String(line.khatRas) : '',
@@ -87,63 +162,112 @@ const lineFromLoadingLine = (line: any): DraftLine => {
   };
 };
 
-const compactValue = (value: any) => {
-  if (value === undefined || value === null || value === '') return '';
-  if (typeof value === 'number') return numberFa(value);
-  return String(value);
-};
-
-const productIdentityParts = (snapshot: any = {}) => {
-  const parts = [
-    snapshot.productType,
-    snapshot.width ? `عرض ${compactValue(snapshot.width)}` : '',
-    snapshot.thickness ? `ضخامت ${compactValue(snapshot.thickness)}` : '',
-    snapshot.length ? `طول ${compactValue(snapshot.length)}${snapshot.lengthUnit || ''}` : '',
-    snapshot.squareMeters ? `${compactValue(snapshot.squareMeters)} متر مربع` : '',
-    snapshot.preparedUnit ? `واحد ${snapshot.preparedUnit}` : '',
-  ].filter(Boolean);
-  return parts;
-};
-
-const countDetails = (value: any) => Array.isArray(value) ? value.length : value ? 1 : 0;
-
-const productDetailBadges = (snapshot: any = {}) => [
-  countDetails(snapshot.services) ? `خدمات ${countDetails(snapshot.services)}` : '',
-  countDetails(snapshot.tools) ? `ابزار ${countDetails(snapshot.tools)}` : '',
-  snapshot.finishing ? 'فرآوری دارد' : '',
-  snapshot.catalogName ? `کاتالوگ: ${snapshot.catalogName}` : '',
-].filter(Boolean);
+const normalizeSearch = (value: string) => value.trim().toLowerCase();
 
 export default function NewLoadingPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const draftId = searchParams.get('draftId');
-  const [step, setStep] = useState<WizardStep>('project');
-  const [projectSearch, setProjectSearch] = useState('');
+
+  const [step, setStep] = useState<WizardStep>('customer');
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [projects, setProjects] = useState<any[]>([]);
   const [draft, setDraft] = useState<any>(null);
   const [remaining, setRemaining] = useState<any>(null);
-  const [selectedGroupKey, setSelectedGroupKey] = useState('');
-  const [allocations, setAllocations] = useState<Record<string, string>>({});
+  const [expandedContracts, setExpandedContracts] = useState<Record<string, boolean>>({});
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [drivers, setDrivers] = useState<any[]>([]);
-  const [driverMode, setDriverMode] = useState<DriverMode>('saved');
+  const [driverSearch, setDriverSearch] = useState('');
   const [driverId, setDriverId] = useState('');
   const [driverSnapshot, setDriverSnapshot] = useState<any>(emptyDriver);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
-  const [selectingProjectId, setSelectingProjectId] = useState('');
   const [saving, setSaving] = useState(false);
+  const [selectingProjectId, setSelectingProjectId] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
   const selectedDriver = useMemo(() => drivers.find((driver) => driver.id === driverId), [drivers, driverId]);
-  const selectedGroup = useMemo(() => remaining?.groups?.find((group: any) => group.groupKey === selectedGroupKey), [remaining, selectedGroupKey]);
   const selectedSourceIds = useMemo(() => new Set(lines.map((line) => line.source.contractItemId)), [lines]);
 
-  const loadProjects = async () => {
-    const response = await logisticsAPI.getProjects(projectSearch ? { search: projectSearch } : undefined);
-    if (response.data.success) setProjects(response.data.data);
+  const contracts = useMemo(() => {
+    const byContract = new Map<string, any>();
+    for (const group of remaining?.groups || []) {
+      for (const rawSource of group.sources || []) {
+        if (Number(rawSource.remainingQuantity || 0) <= 0) continue;
+        const source = sourceWithGroup(rawSource, group);
+        if (!byContract.has(source.contractId)) {
+          byContract.set(source.contractId, {
+            id: source.contractId,
+            contractNumber: source.contractNumber,
+            contractStatus: source.contractStatus,
+            rows: [],
+          });
+        }
+        byContract.get(source.contractId).rows.push(source);
+      }
+    }
+    return Array.from(byContract.values()).sort((a, b) => String(a.contractNumber).localeCompare(String(b.contractNumber)));
+  }, [remaining]);
+
+  const groupedLines = useMemo(() => {
+    const groups = new Map<string, { key: string; displayName: string; snapshot: any; unit: string; unitLabel: string; lines: DraftLine[] }>();
+    for (const line of lines) {
+      if (!groups.has(line.groupKey)) {
+        groups.set(line.groupKey, {
+          key: line.groupKey,
+          displayName: line.groupDisplayName,
+          snapshot: line.groupSnapshot,
+          unit: line.source.unit,
+          unitLabel: unitLabels[line.source.unit] || line.source.unit,
+          lines: [],
+        });
+      }
+      groups.get(line.groupKey)!.lines.push(line);
+    }
+    return Array.from(groups.values());
+  }, [lines]);
+
+  const filteredDrivers = useMemo(() => {
+    const search = normalizeSearch(driverSearch);
+    if (!search) return drivers;
+    return drivers.filter((driver) => [
+      driver.firstName,
+      driver.lastName,
+      driver.phone,
+      driver.nationalCode,
+      driver.vehiclePlate,
+      driver.vehicleType,
+    ].some((value) => String(value || '').toLowerCase().includes(search)));
+  }, [drivers, driverSearch]);
+
+  const loadCustomers = async () => {
+    setError('');
+    try {
+      const response = await logisticsAPI.getLoadableCustomers(customerSearch ? { search: customerSearch } : undefined);
+      if (response.data.success) setCustomers(response.data.data);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'دریافت مشتری‌های قابل بارگیری ناموفق بود.');
+    }
+  };
+
+  const loadCustomerProjects = async (customer: any) => {
+    setError('');
+    setSelectedCustomer(customer);
+    setProjects([]);
+    setDraft(null);
+    setRemaining(null);
+    setLines([]);
+    try {
+      const response = await logisticsAPI.getCustomerProjects(customer.id);
+      if (response.data.success) setProjects(response.data.data);
+      setStep('project');
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'دریافت پروژه‌های قابل بارگیری ناموفق بود.');
+    }
   };
 
   const loadDrivers = async () => {
@@ -151,8 +275,13 @@ export default function NewLoadingPage() {
     if (response.data.success) setDrivers(response.data.data);
   };
 
+  const loadRemaining = async (projectId: string) => {
+    const response = await logisticsAPI.getRemaining(projectId);
+    if (response.data.success) setRemaining(response.data.data);
+  };
+
   useEffect(() => {
-    loadProjects();
+    loadCustomers();
     loadDrivers();
   }, []);
 
@@ -166,13 +295,25 @@ export default function NewLoadingPage() {
         if (!response.data.success) return;
         const loadingDraft = response.data.data;
         setDraft(loadingDraft);
+        setSelectedCustomer({
+          id: loadingDraft.customerId,
+          customerName: `${loadingDraft.customer?.firstName || ''} ${loadingDraft.customer?.lastName || ''}`.trim(),
+          companyName: loadingDraft.customer?.companyName,
+        });
+        setProjects([{
+          id: loadingDraft.projectId,
+          projectName: loadingDraft.project?.projectName,
+          address: loadingDraft.project?.address,
+          city: loadingDraft.project?.city,
+          customerId: loadingDraft.customerId,
+        }]);
         setNotes(loadingDraft.notes || '');
         setDriverId(loadingDraft.vehiclePairId || loadingDraft.driverSnapshot?.vehiclePairId || '');
         setDriverSnapshot(loadingDraft.driverSnapshot || emptyDriver);
         setLines((loadingDraft.lines || []).map(lineFromLoadingLine));
         await loadRemaining(loadingDraft.projectId);
         setMessage('پیش‌نویس بارگیری برای ویرایش باز شد.');
-        setStep((loadingDraft.lines || []).length ? 'quantities' : 'remaining');
+        setStep((loadingDraft.lines || []).length ? 'quantities' : 'contracts');
       } catch (err: any) {
         setError(err.response?.data?.error || 'دریافت پیش‌نویس ناموفق بود.');
       } finally {
@@ -183,7 +324,6 @@ export default function NewLoadingPage() {
   }, [draftId]);
 
   useEffect(() => {
-    if (driverMode !== 'saved') return;
     if (selectedDriver) {
       setDriverSnapshot({
         driverId: selectedDriver.id,
@@ -198,12 +338,7 @@ export default function NewLoadingPage() {
     } else if (!driverId) {
       setDriverSnapshot(emptyDriver);
     }
-  }, [selectedDriver, driverId, driverMode]);
-
-  const loadRemaining = async (projectId: string) => {
-    const response = await logisticsAPI.getRemaining(projectId);
-    if (response.data.success) setRemaining(response.data.data);
-  };
+  }, [selectedDriver, driverId]);
 
   const selectProject = async (projectId: string, forceNew = false) => {
     setError('');
@@ -220,7 +355,7 @@ export default function NewLoadingPage() {
       setLines((loadingDraft.lines || []).map(lineFromLoadingLine));
       await loadRemaining(projectId);
       setMessage(response.data.resumed ? 'پیش‌نویس فعال این پروژه ادامه داده شد.' : 'پیش‌نویس بارگیری ساخته شد.');
-      setStep('remaining');
+      setStep('contracts');
     } catch (err: any) {
       setError(err.response?.data?.error || 'ساخت پیش‌نویس ناموفق بود.');
     } finally {
@@ -236,6 +371,14 @@ export default function NewLoadingPage() {
     setLines((current) => current.filter((line) => line.key !== key));
   };
 
+  const toggleSource = (source: any) => {
+    if (selectedSourceIds.has(source.contractItemId)) {
+      setLines((current) => current.filter((line) => line.source.contractItemId !== source.contractItemId));
+      return;
+    }
+    setLines((current) => [...current, lineFromSource(source)]);
+  };
+
   const calculateLineQuantity = (line: DraftLine) => {
     if (line.mode === 'linear') {
       const khatRas = Number(line.khatRas || 0);
@@ -247,53 +390,21 @@ export default function NewLoadingPage() {
     return Number(line.quantity || 0);
   };
 
-  const addSingleSource = (source: any) => {
-    if (selectedSourceIds.has(source.contractItemId)) {
-      setMessage('این ردیف قبلا به پیش‌نویس اضافه شده است.');
-      setStep('quantities');
-      return;
-    }
-    setLines((current) => [...current, lineFromSource(source)]);
-    setMessage('ردیف به پیش‌نویس اضافه شد.');
-    setStep('quantities');
-  };
-
-  const openGroupAllocation = (group: any) => {
-    if (group.sources.length === 1) {
-      addSingleSource(group.sources[0]);
-      return;
-    }
-    setSelectedGroupKey(group.groupKey);
-    setAllocations(Object.fromEntries(group.sources.map((source: any) => [source.contractItemId, ''])));
-  };
-
-  const addAllocatedSources = () => {
-    if (!selectedGroup) return;
-    const added = selectedGroup.sources
-      .map((source: any) => ({ source, quantity: allocations[source.contractItemId] }))
-      .filter((item: any) => Number(item.quantity || 0) > 0)
-      .map((item: any) => lineFromSource(item.source, item.quantity));
-
-    if (!added.length) {
-      setError('برای حداقل یک قرارداد مقدار وارد کنید.');
-      return;
-    }
-
-    setLines((current) => {
-      const existing = new Set(current.map((line) => line.source.contractItemId));
-      return [...current, ...added.filter((line: DraftLine) => !existing.has(line.source.contractItemId))];
+  const fillLineWithRemaining = (line: DraftLine) => {
+    updateLine(line.key, {
+      mode: 'direct',
+      quantity: String(line.source.remainingQuantity || ''),
+      khatRas: '',
+      pieceCount: '',
+      plus: '0',
+      minus: '0',
     });
-    setSelectedGroupKey('');
-    setAllocations({});
-    setError('');
-    setMessage('تخصیص منبع به پیش‌نویس اضافه شد.');
-    setStep('quantities');
   };
 
   const buildPayload = () => ({
     projectId: draft?.projectId,
     notes,
-    driverId: driverMode === 'saved' && selectedDriver ? selectedDriver.id : null,
+    driverId: selectedDriver ? selectedDriver.id : null,
     driverSnapshot,
     lines: lines.map((line) => ({
       sourceContractItemId: line.source.contractItemId,
@@ -310,6 +421,7 @@ export default function NewLoadingPage() {
         contractItemId: line.source.contractItemId,
         contractedQuantity: line.source.contractedQuantity,
         remainingQuantity: line.source.remainingQuantity,
+        groupKey: line.groupKey,
       },
       notes: line.notes,
     })),
@@ -334,6 +446,7 @@ export default function NewLoadingPage() {
     return false;
   };
 
+  const hasValidLineQuantities = lines.length > 0 && lines.every((line) => calculateLineQuantity(line) > 0);
   const blockers = useMemo(() => {
     const items: string[] = [];
     if (!draft?.projectId) items.push('پروژه انتخاب نشده است.');
@@ -343,15 +456,13 @@ export default function NewLoadingPage() {
     return items;
   }, [draft, lines, driverId]);
 
-  const hasValidLineQuantities = lines.length > 0 && lines.every((line) => calculateLineQuantity(line) > 0);
-
   const canEnterStep = (target: WizardStep) => {
-    if (target === 'project') return true;
-    if (!draft?.id) return false;
-    if (target === 'remaining') return true;
-    if (target === 'quantities') return lines.length > 0;
-    if (target === 'driver') return hasValidLineQuantities;
-    return true;
+    if (target === 'customer') return true;
+    if (target === 'project') return Boolean(selectedCustomer);
+    if (target === 'contracts') return Boolean(draft?.id);
+    if (target === 'quantities') return Boolean(draft?.id && lines.length);
+    if (target === 'driver') return Boolean(draft?.id && hasValidLineQuantities);
+    return Boolean(draft?.id);
   };
 
   const finalize = async () => {
@@ -370,31 +481,54 @@ export default function NewLoadingPage() {
   };
 
   const goNext = async () => {
+    if (step === 'customer' && !selectedCustomer) {
+      setError('ابتدا مشتری دارای مانده بارگیری را انتخاب کنید.');
+      return;
+    }
     if (step === 'project' && !draft?.id) {
       setError('ابتدا پروژه را انتخاب کنید.');
       return;
     }
-    if (step === 'remaining' && lines.length === 0) {
-      setError('حداقل یک مانده قابل بارگیری را اضافه کنید.');
+    if (step === 'contracts' && !lines.length) {
+      setError('حداقل یک ردیف از قراردادها را انتخاب کنید.');
       return;
     }
     if (step === 'quantities' && !hasValidLineQuantities) {
       setError('مقدار همه ردیف‌ها باید بیشتر از صفر باشد.');
       return;
     }
+    if (step === 'driver' && !driverId) {
+      setError('راننده و خودروی فعال حراست را انتخاب کنید.');
+      return;
+    }
     setError('');
-    if (step !== 'project') await saveDraft();
+    if (draft?.id && step !== 'customer' && step !== 'project') {
+      const saved = await saveDraft();
+      if (!saved) return;
+    }
     const index = steps.findIndex((item) => item.id === step);
     setStep(steps[Math.min(index + 1, steps.length - 1)].id);
   };
 
-  const goBack = () => {
+  const navigateToStep = async (target: WizardStep) => {
+    if (target === step || !canEnterStep(target)) return;
+    if (draft?.id && step !== 'customer' && step !== 'project') {
+      const saved = await saveDraft();
+      if (!saved) return;
+    }
+    setStep(target);
+  };
+
+  const goBack = async () => {
+    if (draft?.id && step !== 'customer' && step !== 'project') {
+      await saveDraft();
+    }
     const index = steps.findIndex((item) => item.id === step);
     setStep(steps[Math.max(index - 1, 0)].id);
   };
 
   const renderStepNav = () => (
-    <div className="grid grid-cols-5 gap-2">
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
       {steps.map((item, index) => {
         const active = item.id === step;
         const done = steps.findIndex((candidate) => candidate.id === step) > index;
@@ -403,7 +537,7 @@ export default function NewLoadingPage() {
             key={item.id}
             type="button"
             disabled={!canEnterStep(item.id)}
-            onClick={() => setStep(item.id)}
+            onClick={() => { void navigateToStep(item.id); }}
             className={`min-h-12 rounded-lg border px-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
               active
                 ? 'border-[#074747] bg-[#074747] text-white'
@@ -419,21 +553,67 @@ export default function NewLoadingPage() {
     </div>
   );
 
-  const renderProjectStep = () => (
-    <ErpSection title="انتخاب پروژه" description="انتخاب پروژه اولین تعهد بارگیری است؛ اگر پیش‌نویس فعالی برای پروژه وجود داشته باشد همان ادامه داده می‌شود.">
+  const renderCustomerStep = () => (
+    <ErpSection title="انتخاب مشتری" description="فقط مشتری‌هایی نمایش داده می‌شوند که حداقل یک پروژه با مانده مثبت بارگیری دارند.">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <input className={inputClass} value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="جستجوی مشتری، شرکت، پروژه، آدرس یا شماره تماس" />
-        <ErpButton label="جستجو" icon={FaSearch} onClick={loadProjects} />
+        <input
+          className={inputClass}
+          value={customerSearch}
+          onChange={(event) => setCustomerSearch(event.target.value)}
+          onKeyDown={(event) => { if (event.key === 'Enter') loadCustomers(); }}
+          placeholder="جستجوی نام، شرکت، تلفن، کد ملی، مدیر پروژه یا پروژه"
+        />
+        <ErpButton label="جستجو" icon={FaSearch} onClick={loadCustomers} />
       </div>
       <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {customers.map((customer) => (
+          <button
+            key={customer.id}
+            type="button"
+            onClick={() => loadCustomerProjects(customer)}
+            className={`rounded-lg border bg-white p-4 text-right shadow-sm transition hover:border-[#074747]/40 dark:bg-slate-900/70 ${
+              selectedCustomer?.id === customer.id ? 'border-[#074747]' : 'border-slate-200 dark:border-slate-700'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold text-slate-900 dark:text-white">{customer.customerName}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  {[customer.companyName, customer.brandName, customer.primaryPhone].filter(Boolean).join(' · ') || 'بدون اطلاعات تکمیلی'}
+                </p>
+                {customer.projectManagerName && (
+                  <p className="mt-1 text-xs text-slate-500">مدیر پروژه: {customer.projectManagerName} {customer.projectManagerNumber ? `· ${customer.projectManagerNumber}` : ''}</p>
+                )}
+              </div>
+              <ErpBadge tone="success">{numberFa(customer.loadableProjectCount, 0)} پروژه قابل بارگیری</ErpBadge>
+            </div>
+          </button>
+        ))}
+        {!customers.length && <ErpEmptyState icon={FaUser} title="مشتری قابل بارگیری پیدا نشد" />}
+      </div>
+    </ErpSection>
+  );
+
+  const renderProjectStep = () => (
+    <ErpSection title="انتخاب پروژه" description="فقط پروژه‌هایی که مانده مثبت بارگیری دارند قابل انتخاب هستند.">
+      {selectedCustomer && (
+        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
+          مشتری انتخاب‌شده: {selectedCustomer.customerName || selectedCustomer.companyName}
+        </div>
+      )}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {projects.map((project) => (
           <ErpCard key={project.id} interactive className="p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="font-semibold text-slate-900 dark:text-white">{project.projectName || project.address}</p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">{project.companyName || project.customerName} · {project.city || 'بدون شهر'}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">{[project.city, project.address].filter(Boolean).join(' · ')}</p>
+                {(project.projectManagerName || project.projectManagerNumber) && (
+                  <p className="mt-1 text-xs text-slate-500">مدیر پروژه: {[project.projectManagerName, project.projectManagerNumber].filter(Boolean).join(' · ')}</p>
+                )}
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 sm:justify-end">
+                <ErpBadge tone="success">{numberFa(project.remainingCount, 0)} گروه مانده</ErpBadge>
                 <ErpButton
                   label={selectingProjectId === project.id ? 'در حال انتخاب...' : 'انتخاب'}
                   icon={FaTruck}
@@ -445,123 +625,160 @@ export default function NewLoadingPage() {
             </div>
           </ErpCard>
         ))}
+        {!projects.length && <ErpEmptyState icon={FaTruck} title="این مشتری پروژه قابل بارگیری ندارد" />}
       </div>
     </ErpSection>
   );
 
-  const renderRemainingStep = () => (
-    <ErpSection title="انتخاب مانده قابل بارگیری" description="ابتدا مانده‌های فیزیکی را انتخاب کنید؛ اگر یک گروه چند منبع قراردادی داشته باشد تخصیص منبع جداگانه انجام می‌شود.">
+  const renderContractsStep = () => (
+    <ErpSection title="انتخاب ردیف‌های قرارداد" description="قرارداد را باز کنید، جزئیات محصول را ببینید، و فقط ردیف‌های کاندید بارگیری را انتخاب کنید. مقداردهی در مرحله بعد انجام می‌شود.">
       {!remaining ? (
-        <ErpEmptyState icon={FaTruck} title="ابتدا پروژه را انتخاب کنید" />
-      ) : remaining.groups.length === 0 ? (
-        <ErpEmptyState icon={FaTruck} title="مانده قابل بارگیری وجود ندارد" />
+        <ErpEmptyState icon={FaClipboardList} title="ابتدا پروژه را انتخاب کنید" />
+      ) : contracts.length === 0 ? (
+        <ErpEmptyState icon={FaClipboardList} title="قرارداد قابل بارگیری برای این پروژه وجود ندارد" />
       ) : (
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-          {remaining.groups.map((group: any) => (
-            <ErpCard key={group.groupKey} className="p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <p className="font-semibold text-slate-900 dark:text-white">{group.displayName}</p>
-                  <p className="mt-1 text-xs text-slate-500">{[group.productType || 'محصول', group.unitLabel, `${group.sources.length.toLocaleString('fa-IR')} منبع`, ...productIdentityParts(group.productSnapshot)].filter(Boolean).join(' · ')}</p>
-                  {productDetailBadges(group.productSnapshot).length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {productDetailBadges(group.productSnapshot).map((detail) => <ErpBadge key={detail} tone="info">{detail}</ErpBadge>)}
-                    </div>
-                  )}
+        <div className="space-y-3">
+          {contracts.map((contract) => {
+            const isOpen = expandedContracts[contract.id] ?? true;
+            const selectedCount = contract.rows.filter((row: any) => selectedSourceIds.has(row.contractItemId)).length;
+            return (
+              <ErpCard key={contract.id} className="p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-900 dark:text-white">قرارداد {contract.contractNumber}</p>
+                    <p className="mt-1 text-xs text-slate-500">{numberFa(contract.rows.length, 0)} ردیف قابل بارگیری · {numberFa(selectedCount, 0)} انتخاب‌شده</p>
+                  </div>
+                  <ErpButton
+                    label={isOpen ? 'بستن جزئیات' : 'مشاهده محصولات'}
+                    icon={isOpen ? FaChevronUp : FaEye}
+                    onClick={() => setExpandedContracts((current) => ({ ...current, [contract.id]: !isOpen }))}
+                    tone="neutral"
+                  />
                 </div>
-                <ErpBadge tone="success">مانده {numberFa(group.remainingTotal)} {group.unitLabel}</ErpBadge>
-              </div>
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3 dark:border-slate-800">
-                <p className="text-xs text-slate-500">قراردادها: {group.sources.map((source: any) => source.contractNumber).join('، ')}</p>
-                <ErpButton
-                  label={group.sources.length > 1 ? 'تخصیص منبع' : selectedSourceIds.has(group.sources[0]?.contractItemId) ? 'اضافه شد' : 'افزودن'}
-                  icon={FaPlus}
-                  onClick={() => openGroupAllocation(group)}
-                  disabled={group.sources.length === 1 && selectedSourceIds.has(group.sources[0]?.contractItemId)}
-                  tone={group.sources.length === 1 && selectedSourceIds.has(group.sources[0]?.contractItemId) ? 'success' : 'primary'}
-                />
-              </div>
-            </ErpCard>
-          ))}
+                {isOpen && (
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="w-full min-w-[820px] text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-700">
+                          <th className="px-3 py-3 text-right">محصول</th>
+                          <th className="px-3 py-3 text-right">مشخصات</th>
+                          <th className="px-3 py-3 text-right">جزئیات</th>
+                          <th className="px-3 py-3 text-center">مانده</th>
+                          <th className="px-3 py-3 text-left">انتخاب</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {contract.rows.map((source: any) => {
+                          const selected = selectedSourceIds.has(source.contractItemId);
+                          const details = productDetailBadges(source.productSnapshot);
+                          return (
+                            <tr key={source.contractItemId} className="border-b border-slate-100 align-top dark:border-slate-800">
+                              <td className="px-3 py-4 font-semibold text-slate-900 dark:text-white">{source.productSnapshot?.name || source.groupDisplayName}</td>
+                              <td className="px-3 py-4 text-xs leading-6 text-slate-500">{productIdentityParts(source.productSnapshot).join(' · ') || 'بدون مشخصات'}</td>
+                              <td className="px-3 py-4">
+                                <div className="flex max-w-md flex-wrap gap-1">
+                                  {details.length ? details.slice(0, 5).map((detail) => <ErpBadge key={detail} tone="info">{detail}</ErpBadge>) : <span className="text-xs text-slate-400">بدون جزئیات افزوده</span>}
+                                </div>
+                              </td>
+                              <td className="px-3 py-4 text-center">
+                                <ErpBadge tone="success">{numberFa(source.remainingQuantity)} {source.unitLabel}</ErpBadge>
+                              </td>
+                              <td className="px-3 py-4 text-left">
+                                <ErpButton
+                                  label={selected ? 'حذف از انتخاب' : 'انتخاب'}
+                                  icon={selected ? FaTrash : FaPlus}
+                                  onClick={() => toggleSource(source)}
+                                  tone={selected ? 'danger' : 'primary'}
+                                  variant={selected ? 'soft' : 'solid'}
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </ErpCard>
+            );
+          })}
         </div>
-      )}
-
-      {selectedGroup && (
-        <ErpCard className="mt-4 p-4" tone="info">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h3 className="font-semibold text-slate-900 dark:text-white">تخصیص منبع: {selectedGroup.displayName}</h3>
-              <p className="mt-1 text-sm text-slate-500">این مقدار از کدام قراردادها مصرف شود؟</p>
-            </div>
-            <ErpButton label="بستن" onClick={() => setSelectedGroupKey('')} tone="neutral" variant="ghost" />
-          </div>
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-            {selectedGroup.sources.map((source: any) => (
-              <label key={source.contractItemId}>
-                <span className={labelClass}>قرارداد {source.contractNumber} · مانده {numberFa(source.remainingQuantity)} {source.unitLabel}</span>
-                <span className="mb-2 block text-xs text-slate-500">{productIdentityParts(source.productSnapshot).join(' · ')}</span>
-                <input className={inputClass} value={allocations[source.contractItemId] || ''} onChange={(event) => setAllocations((current) => ({ ...current, [source.contractItemId]: event.target.value }))} placeholder="مقدار مصرف از این قرارداد" />
-              </label>
-            ))}
-          </div>
-          <div className="mt-4">
-            <ErpButton label="افزودن تخصیص‌ها" icon={FaPlus} onClick={addAllocatedSources} variant="solid" />
-          </div>
-        </ErpCard>
       )}
     </ErpSection>
   );
 
+  const renderLineQuantityInputs = (line: DraftLine) => (
+    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-slate-900 dark:text-white">قرارداد {line.source.contractNumber}</p>
+          <p className="mt-1 text-xs text-slate-500">مانده قابل بارگیری: {numberFa(line.source.remainingQuantity)} {line.source.unitLabel}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <ErpButton label="پر کردن با کل مانده" onClick={() => fillLineWithRemaining(line)} tone="neutral" variant="soft" />
+          <ErpButton label="حذف" icon={FaTrash} onClick={() => removeLine(line.key)} tone="danger" variant="soft" />
+        </div>
+      </div>
+      {line.source.unit === 'meter' && (
+        <div className="mt-3">
+          <ErpSegmentedControl<QuantityMode>
+            value={line.mode}
+            onChange={(value) => updateLine(line.key, { mode: value })}
+            options={[
+              { value: 'linear', label: 'خط راس' },
+              { value: 'direct', label: 'مقدار مستقیم' },
+            ]}
+          />
+        </div>
+      )}
+      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
+        {line.mode === 'linear' ? (
+          <>
+            <label><span className={labelClass}>خط راس</span><input className={inputClass} value={line.khatRas} onChange={(event) => updateLine(line.key, { khatRas: event.target.value })} /></label>
+            <label><span className={labelClass}>تعداد</span><input className={inputClass} value={line.pieceCount} onChange={(event) => updateLine(line.key, { pieceCount: event.target.value })} /></label>
+            <label><span className={labelClass}>اضافه</span><input className={inputClass} value={line.plus} onChange={(event) => updateLine(line.key, { plus: event.target.value })} /></label>
+            <label><span className={labelClass}>کسر</span><input className={inputClass} value={line.minus} onChange={(event) => updateLine(line.key, { minus: event.target.value })} /></label>
+          </>
+        ) : (
+          <label><span className={labelClass}>مقدار مستقیم</span><input className={inputClass} value={line.quantity} onChange={(event) => updateLine(line.key, { quantity: event.target.value })} /></label>
+        )}
+      </div>
+      <p className="mt-2 text-xs font-semibold text-[#074747] dark:text-teal-200">
+        مقدار محاسبه‌شده: {numberFa(calculateLineQuantity(line))} {unitLabels[line.source.unit] || line.source.unit}
+      </p>
+    </div>
+  );
+
   const renderQuantitiesStep = () => (
-    <ErpSection title="مقداردهی ردیف‌ها" description="برای ردیف‌های متر طول، خط راس پیش‌فرض است و مقدار مستقیم همچنان در دسترس می‌ماند.">
-      {lines.length === 0 ? (
-        <ErpEmptyState icon={FaClipboardList} title="هنوز ردیفی اضافه نشده است" action={{ label: 'رفتن به انتخاب مانده', onClick: () => setStep('remaining'), icon: FaPlus }} />
+    <ErpSection title="مقداردهی ردیف‌های انتخاب‌شده" description="ردیف‌های مشابه به صورت خلاصه گروهی نمایش داده می‌شوند، اما مقدار هر منبع قراردادی جداگانه وارد می‌شود.">
+      {groupedLines.length === 0 ? (
+        <ErpEmptyState icon={FaClipboardList} title="هنوز ردیفی انتخاب نشده است" action={{ label: 'رفتن به قراردادها', onClick: () => setStep('contracts'), icon: FaPlus }} />
       ) : (
         <div className="space-y-3">
-          {lines.map((line) => {
-            const quantity = calculateLineQuantity(line);
+          {groupedLines.map((group) => {
+            const total = group.lines.reduce((sum, line) => sum + calculateLineQuantity(line), 0);
+            const remainingTotal = group.lines.reduce((sum, line) => sum + Number(line.source.remainingQuantity || 0), 0);
+            const isOpen = expandedGroups[group.key] ?? true;
             return (
-              <ErpCard key={line.key} className="p-4">
+              <ErpCard key={group.key} className="p-4">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
-                    <p className="font-semibold text-slate-900 dark:text-white">{line.source.productSnapshot?.name || 'محصول'}</p>
-                    <p className="mt-1 text-xs text-slate-500">قرارداد {line.source.contractNumber} · مانده {numberFa(line.source.remainingQuantity)} {line.source.unitLabel}</p>
-                    <p className="mt-1 text-xs text-slate-500">{productIdentityParts(line.source.productSnapshot).join(' · ')}</p>
-                    {productDetailBadges(line.source.productSnapshot).length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {productDetailBadges(line.source.productSnapshot).map((detail) => <ErpBadge key={detail} tone="info">{detail}</ErpBadge>)}
-                      </div>
-                    )}
+                    <p className="font-semibold text-slate-900 dark:text-white">{group.displayName}</p>
+                    <p className="mt-1 text-xs text-slate-500">{productIdentityParts(group.snapshot).join(' · ') || 'بدون مشخصات'}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <ErpBadge tone={total > 0 ? 'success' : 'warning'}>جمع مقدار: {numberFa(total)} {group.unitLabel}</ErpBadge>
+                      <ErpBadge tone="neutral">مانده کل: {numberFa(remainingTotal)} {group.unitLabel}</ErpBadge>
+                      <ErpBadge tone="info">{numberFa(group.lines.length, 0)} منبع قراردادی</ErpBadge>
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <ErpBadge tone={quantity > 0 ? 'success' : 'warning'}>{numberFa(quantity)} {unitLabels[line.source.unit] || line.source.unit}</ErpBadge>
-                    <ErpButton label="حذف" onClick={() => removeLine(line.key)} tone="danger" variant="soft" />
-                  </div>
+                  <ErpButton
+                    label={isOpen ? 'بستن جزئیات' : 'جزئیات'}
+                    icon={isOpen ? FaChevronUp : FaChevronDown}
+                    onClick={() => setExpandedGroups((current) => ({ ...current, [group.key]: !isOpen }))}
+                    tone="neutral"
+                  />
                 </div>
-                {line.source.unit === 'meter' && (
-                  <div className="mt-4">
-                    <ErpSegmentedControl<QuantityMode>
-                      value={line.mode}
-                      onChange={(value) => updateLine(line.key, { mode: value })}
-                      options={[
-                        { value: 'linear', label: 'خط راس' },
-                        { value: 'direct', label: 'مقدار مستقیم' },
-                      ]}
-                    />
-                  </div>
-                )}
-                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
-                  {line.mode === 'linear' ? (
-                    <>
-                      <label><span className={labelClass}>خط راس</span><input className={inputClass} value={line.khatRas} onChange={(event) => updateLine(line.key, { khatRas: event.target.value })} /></label>
-                      <label><span className={labelClass}>تعداد</span><input className={inputClass} value={line.pieceCount} onChange={(event) => updateLine(line.key, { pieceCount: event.target.value })} /></label>
-                      <label><span className={labelClass}>اضافه</span><input className={inputClass} value={line.plus} onChange={(event) => updateLine(line.key, { plus: event.target.value })} /></label>
-                      <label><span className={labelClass}>کسر</span><input className={inputClass} value={line.minus} onChange={(event) => updateLine(line.key, { minus: event.target.value })} /></label>
-                    </>
-                  ) : (
-                    <label><span className={labelClass}>مقدار مستقیم</span><input className={inputClass} value={line.quantity} onChange={(event) => updateLine(line.key, { quantity: event.target.value })} /></label>
-                  )}
-                </div>
+                {isOpen && <div>{group.lines.map((line) => <div key={line.key}>{renderLineQuantityInputs(line)}</div>)}</div>}
               </ErpCard>
             );
           })}
@@ -571,48 +788,60 @@ export default function NewLoadingPage() {
   );
 
   const renderDriverStep = () => (
-    <ErpSection title="راننده و خودرو" description="لجستیک فقط راننده/خودروی فعال تعریف‌شده در حراست را انتخاب می‌کند؛ snapshot برای تاریخچه بارگیری ذخیره می‌شود.">
-      <ErpSegmentedControl<DriverMode>
-        value={driverMode}
-        onChange={setDriverMode}
-        options={[
-          { value: 'saved', label: 'راننده و خودروی فعال حراست', icon: FaUsers },
-        ]}
+    <ErpSection title="انتخاب راننده و خودرو" description="لجستیک فقط از راننده/خودروی فعال‌شده توسط حراست انتخاب می‌کند.">
+      <input
+        className={inputClass}
+        value={driverSearch}
+        onChange={(event) => setDriverSearch(event.target.value)}
+        placeholder="جستجوی راننده، تلفن، کد ملی، پلاک یا نوع خودرو"
       />
-
-      <div className="mt-4 space-y-4">
-        <label>
-          <span className={labelClass}>انتخاب راننده و خودرو</span>
-          <select className={inputClass} value={driverId} onChange={(event) => setDriverId(event.target.value)}>
-            <option value="">بدون انتخاب</option>
-            {drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.firstName} {driver.lastName} · {driver.vehiclePlate}</option>)}
-          </select>
-        </label>
-        {driverId ? (
-          <ErpCard className="p-4" tone="info">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              {driverFields.map(([field, label]) => (
-                <div key={field}>
-                  <p className="text-xs text-slate-500">{label}</p>
-                  <p className="mt-1 font-semibold text-slate-900 dark:text-white">{driverSnapshot[field] || '—'}</p>
+      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {filteredDrivers.map((driver) => {
+          const selected = driver.id === driverId;
+          return (
+            <button
+              key={driver.id}
+              type="button"
+              onClick={() => setDriverId(driver.id)}
+              className={`rounded-lg border bg-white p-4 text-right shadow-sm transition hover:border-[#074747]/40 dark:bg-slate-900/70 ${
+                selected ? 'border-[#074747]' : 'border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-900 dark:text-white">{driver.firstName} {driver.lastName}</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">{[driver.vehiclePlate, driver.vehicleType, driver.phone, driver.nationalCode].filter(Boolean).join(' · ')}</p>
                 </div>
-              ))}
-            </div>
-          </ErpCard>
-        ) : (
-          <ErpEmptyState icon={FaUsers} title="راننده و خودروی فعال حراست را انتخاب کنید" />
-        )}
+                <ErpBadge tone={selected ? 'success' : 'neutral'}>{selected ? 'انتخاب شده' : 'فعال حراست'}</ErpBadge>
+              </div>
+            </button>
+          );
+        })}
+        {!filteredDrivers.length && <ErpEmptyState icon={FaUsers} title="راننده فعال پیدا نشد" />}
       </div>
+      {driverId && (
+        <ErpCard className="mt-4 p-4" tone="info">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            {driverFields.map(([field, label]) => (
+              <div key={field}>
+                <p className="text-xs text-slate-500">{label}</p>
+                <p className="mt-1 font-semibold text-slate-900 dark:text-white">{driverSnapshot[field] || '—'}</p>
+              </div>
+            ))}
+          </div>
+        </ErpCard>
+      )}
     </ErpSection>
   );
+
   const renderReviewStep = () => (
     <ErpSection title="بازبینی و نهایی‌سازی">
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-3">
           <ErpCard className="p-4">
-            <p className="text-sm text-slate-500">پروژه</p>
-            <p className="mt-1 font-semibold text-slate-900 dark:text-white">{draft?.project?.projectName || draft?.project?.address || remaining?.project?.projectName || 'انتخاب نشده'}</p>
-            <p className="mt-1 text-xs text-slate-500">{remaining?.project?.companyName || remaining?.project?.customerName || ''}</p>
+            <p className="text-sm text-slate-500">مشتری و پروژه</p>
+            <p className="mt-1 font-semibold text-slate-900 dark:text-white">{selectedCustomer?.customerName || remaining?.project?.customerName || 'انتخاب نشده'}</p>
+            <p className="mt-1 text-xs text-slate-500">{remaining?.project?.projectName || remaining?.project?.address || draft?.project?.projectName || ''}</p>
           </ErpCard>
           <ErpCard className="p-4">
             <p className="text-sm text-slate-500">راننده</p>
@@ -620,18 +849,22 @@ export default function NewLoadingPage() {
             <p className="mt-1 text-xs text-slate-500">{driverSnapshot.vehicleType || 'نوع ماشین'} · {driverSnapshot.vehiclePlate || 'پلاک'}</p>
           </ErpCard>
           <ErpCard className="p-4">
-            <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">ردیف‌ها</p>
+            <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">خلاصه ردیف‌ها</p>
             <div className="space-y-2">
-              {lines.map((line) => (
-                <div key={line.key} className="flex items-start justify-between gap-3 rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800">
-                  <span>
-                    {line.source.productSnapshot?.name || 'محصول'} · قرارداد {line.source.contractNumber}
-                    <span className="mt-1 block text-xs text-slate-500">{productIdentityParts(line.source.productSnapshot).join(' · ')}</span>
-                  </span>
-                  <span className="font-semibold text-[#074747] dark:text-teal-200">{numberFa(calculateLineQuantity(line))} {unitLabels[line.source.unit] || line.source.unit}</span>
+              {groupedLines.map((group) => (
+                <div key={group.key} className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800">
+                  <div className="flex items-start justify-between gap-3">
+                    <span>
+                      {group.displayName}
+                      <span className="mt-1 block text-xs text-slate-500">{group.lines.map((line) => `قرارداد ${line.source.contractNumber}: ${numberFa(calculateLineQuantity(line))}`).join(' · ')}</span>
+                    </span>
+                    <span className="font-semibold text-[#074747] dark:text-teal-200">
+                      {numberFa(group.lines.reduce((sum, line) => sum + calculateLineQuantity(line), 0))} {group.unitLabel}
+                    </span>
+                  </div>
                 </div>
               ))}
-              {!lines.length && <p className="text-sm text-slate-500">ردیفی اضافه نشده است.</p>}
+              {!groupedLines.length && <p className="text-sm text-slate-500">ردیفی اضافه نشده است.</p>}
             </div>
           </ErpCard>
           <label>
@@ -663,7 +896,7 @@ export default function NewLoadingPage() {
     <ErpPage
       eyebrow="لجستیک"
       title="بارگیری جدید"
-      description="یک بارگیری از انتخاب پروژه شروع می‌شود، به‌صورت پیش‌نویس قابل ادامه است، و فقط در بازبینی نهایی کامل بودن ردیف‌ها و راننده را الزام می‌کند."
+      description="بارگیری از مشتری دارای مانده شروع می‌شود، برای یک پروژه قابل بارگیری پیش‌نویس می‌سازد، ردیف‌های قرارداد را انتخاب می‌کند و مقدار واقعی بارگیری را جداگانه ثبت می‌کند."
       backHref="/dashboard/logistics/loadings"
       actions={[
         { label: saving ? 'در حال ذخیره...' : 'ذخیره پیش‌نویس', icon: FaSave, onClick: saveDraft, disabled: saving || !draft?.id, tone: 'neutral' },
@@ -673,22 +906,23 @@ export default function NewLoadingPage() {
       {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">{message}</div>}
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">{error}</div>}
 
+      {step === 'customer' && renderCustomerStep()}
       {step === 'project' && renderProjectStep()}
-      {step === 'remaining' && renderRemainingStep()}
+      {step === 'contracts' && renderContractsStep()}
       {step === 'quantities' && renderQuantitiesStep()}
       {step === 'driver' && renderDriverStep()}
       {step === 'review' && renderReviewStep()}
 
       <div className="sticky bottom-3 z-10 rounded-lg border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
         <div className="flex items-center justify-between gap-3">
-            <ErpButton label="قبلی" icon={FaArrowRight} onClick={goBack} disabled={step === 'project'} tone="neutral" variant="outline" />
+          <ErpButton label="قبلی" icon={FaArrowRight} onClick={goBack} disabled={step === 'customer' || saving} tone="neutral" variant="outline" />
           <div className="text-center text-xs text-slate-500">
-            {draft?.loadingNumber ? <span>پیش‌نویس {draft.loadingNumber}</span> : <span>ابتدا پروژه را انتخاب کنید</span>}
+            {draft?.loadingNumber ? <span>پیش‌نویس {draft.loadingNumber}</span> : <span>ابتدا مشتری و پروژه قابل بارگیری را انتخاب کنید</span>}
           </div>
           {step === 'review' ? (
             <ErpButton label="نهایی‌سازی" icon={FaCheck} onClick={finalize} disabled={blockers.length > 0 || saving} tone="success" variant="solid" />
           ) : (
-            <ErpButton label="بعدی" icon={FaArrowLeft} onClick={goNext} disabled={(step === 'project' && !draft?.id) || (step !== 'project' && !draft?.id)} variant="solid" />
+            <ErpButton label="بعدی" icon={FaArrowLeft} onClick={goNext} disabled={saving} variant="solid" />
           )}
         </div>
       </div>

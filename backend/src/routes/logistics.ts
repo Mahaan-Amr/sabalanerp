@@ -298,6 +298,63 @@ const buildRemainingForProject = async (projectId: string) => {
   };
 };
 
+const customerDisplayName = (customer: any) => {
+  return `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || customer.companyName || 'Customer';
+};
+
+const customerSearchWhere = (search: string, phoneContains: any) => ({
+  isActive: true,
+  ...(search ? {
+    OR: [
+      { firstName: { contains: search, mode: 'insensitive' as const } },
+      { lastName: { contains: search, mode: 'insensitive' as const } },
+      { companyName: { contains: search, mode: 'insensitive' as const } },
+      { brandName: { contains: search, mode: 'insensitive' as const } },
+      { nationalCode: { contains: search, mode: 'insensitive' as const } },
+      { projectManagerName: { contains: search, mode: 'insensitive' as const } },
+      { referrerFirstName: { contains: search, mode: 'insensitive' as const } },
+      { referrerLastName: { contains: search, mode: 'insensitive' as const } },
+      { projectAddresses: { some: { projectName: { contains: search, mode: 'insensitive' as const } } } },
+      { projectAddresses: { some: { address: { contains: search, mode: 'insensitive' as const } } } },
+      { projectAddresses: { some: { projectManagerName: { contains: search, mode: 'insensitive' as const } } } },
+      ...(phoneContains ? [
+        { phoneNumbers: { some: { number: phoneContains } } },
+        { homeNumber: phoneContains },
+        { workNumber: phoneContains },
+        { projectManagerNumber: phoneContains },
+        { referrerPhoneNumber: phoneContains },
+        { primaryContact: { is: { phone: phoneContains } } },
+        { primaryContact: { is: { mobile: phoneContains } } },
+        { contacts: { some: { OR: [{ phone: phoneContains }, { mobile: phoneContains }] } } },
+        { projectAddresses: { some: { projectManagerNumber: phoneContains } } },
+        { projectAddresses: { some: { marketerPhoneNumber: phoneContains } } }
+      ] : [])
+    ]
+  } : {})
+});
+
+const loadableProjectsForCustomer = async (customerId: string) => {
+  const projects = await prisma.projectAddress.findMany({
+    where: { customerId, isActive: true },
+    include: { customer: true },
+    orderBy: { updatedAt: 'desc' }
+  });
+
+  const loadableProjects: Array<{ project: any; remainingCount: number; remainingTotal: number }> = [];
+  for (const project of projects) {
+    const remaining = await buildRemainingForProject(project.id);
+    if (remaining.groups.length > 0) {
+      loadableProjects.push({
+        project,
+        remainingCount: remaining.groups.length,
+        remainingTotal: remaining.groups.reduce((sum: number, group: any) => sum + toNumber(group.remainingTotal), 0)
+      });
+    }
+  }
+
+  return loadableProjects;
+};
+
 const buildDriverSnapshot = (driver: any, override: any = {}) => ({
   driverId: driver?.id || null,
   vehiclePairId: driver?.id || null,
@@ -497,6 +554,76 @@ router.get('/dashboard', canView, canViewDashboard, async (_req: any, res: Respo
     });
   } catch (error) {
     console.error('Logistics dashboard error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+router.get('/customers', canView, canCreateLoadings, async (req: any, res: Response) => {
+  try {
+    const search = String(req.query.search || '').trim();
+    const phoneSearch = normalizePhoneSearch(search);
+    const phoneContains = phoneSearch.length >= 3 ? { contains: phoneSearch, mode: 'insensitive' as const } : null;
+    const customers = await prisma.crmCustomer.findMany({
+      where: customerSearchWhere(search, phoneContains),
+      include: {
+        phoneNumbers: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+        projectAddresses: { where: { isActive: true }, orderBy: { updatedAt: 'desc' } },
+        primaryContact: true
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 50
+    });
+
+    const loadableCustomers: any[] = [];
+    for (const customer of customers) {
+      const projects = await loadableProjectsForCustomer(customer.id);
+      if (projects.length > 0) {
+        loadableCustomers.push({
+          id: customer.id,
+          customerName: customerDisplayName(customer),
+          companyName: customer.companyName,
+          brandName: customer.brandName,
+          projectManagerName: customer.projectManagerName,
+          projectManagerNumber: customer.projectManagerNumber,
+          primaryPhone: customer.phoneNumbers[0]?.number || customer.primaryContact?.mobile || customer.primaryContact?.phone || customer.homeNumber || customer.workNumber || null,
+          loadableProjectCount: projects.length,
+          remainingGroupCount: projects.reduce((sum, item) => sum + item.remainingCount, 0)
+        });
+      }
+    }
+
+    res.json({ success: true, data: loadableCustomers });
+  } catch (error) {
+    console.error('Logistics customers error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+router.get('/customers/:customerId/projects', canView, canCreateLoadings, async (req: any, res: Response) => {
+  try {
+    const customer = await prisma.crmCustomer.findUnique({ where: { id: req.params.customerId } });
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+
+    const projects = await loadableProjectsForCustomer(customer.id);
+    res.json({
+      success: true,
+      data: projects.map(({ project, remainingCount, remainingTotal }) => ({
+        id: project.id,
+        projectName: project.projectName,
+        projectType: project.projectType,
+        address: project.address,
+        city: project.city,
+        customerId: project.customerId,
+        customerName: customerDisplayName(project.customer),
+        companyName: project.customer.companyName,
+        projectManagerName: project.projectManagerName || project.customer.projectManagerName,
+        projectManagerNumber: project.projectManagerNumber || project.customer.projectManagerNumber,
+        remainingCount,
+        remainingTotal: Number(remainingTotal.toFixed(3))
+      }))
+    });
+  } catch (error) {
+    console.error('Logistics customer projects error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });

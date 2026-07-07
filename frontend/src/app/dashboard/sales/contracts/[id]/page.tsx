@@ -497,13 +497,10 @@ export default function ContractDetailPage() {
                   <ErpFieldView label="دریافتنی" value={receivableStatusLabels[contract.accounting.receivableStatus] || contract.accounting.receivableStatus} />
                   <ErpFieldView label="مالیات" value={taxStatusLabels[contract.accounting.taxStatus] || contract.accounting.taxStatus} />
                 </div>
-                {(contract.accounting.openCorrections > 0 || contract.accounting.openFlags > 0) && (
+                {contract.accounting.openCorrections > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {contract.accounting.openCorrections > 0 && (
                       <ErpBadge tone="danger">{contract.accounting.openCorrections.toLocaleString('fa-IR')} اصلاحیه باز</ErpBadge>
-                    )}
-                    {contract.accounting.openFlags > 0 && (
-                      <ErpBadge tone="warning">{contract.accounting.openFlags.toLocaleString('fa-IR')} پرچم حسابداری</ErpBadge>
                     )}
                   </div>
                 )}

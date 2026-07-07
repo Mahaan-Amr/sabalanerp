@@ -14,7 +14,7 @@ Implemented today:
 - Accounting can register receipts and track check status.
 - Accounting can track tax-readiness and manual Samaneh Moadian submission status.
 - Accounting can create and resolve correction requests back to sales.
-- Accounting can flag contracts for accounting review.
+- Accounting can flag contracts for internal accounting review, then resolve or cancel open flags with an auditable reason.
 - Accounting actions are written to the accounting audit log.
 - Accounting has internal print/PDF variants for original, accounting, workshop, and custom contract outputs.
 - Accounting list pages support richer contract/customer context, filtering, pagination, and direct contract links.
@@ -73,7 +73,7 @@ This avoids hidden surveillance and keeps metrics reproducible from accounting r
 5. The sales contract becomes locked for sales edits.
 6. Accounting creates receivables and registers receipts.
 7. Tax readiness and submission status are tracked.
-8. Corrections and flags are used when accounting needs sales-side clarification or remediation.
+8. Correction requests are used when Sales must act; flags remain internal accounting review markers. Open blocker flags prevent financial approval only.
 
 ### Correction Requests
 

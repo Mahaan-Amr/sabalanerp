@@ -374,8 +374,15 @@ const validateDriverSnapshot = (snapshot: any) => {
 
 const requireActiveVehiclePair = async (vehiclePairId?: string | null) => {
   if (!vehiclePairId) return null;
-  const vehiclePair = await prisma.securityVehiclePair.findFirst({ where: { id: vehiclePairId, isActive: true } });
+  const vehiclePair = await prisma.securityVehiclePair.findFirst({
+    where: { id: vehiclePairId, isActive: true },
+    include: { photos: true }
+  });
   if (!vehiclePair) throw new Error('Selected driver and vehicle must be active in security registry');
+  const complete = Boolean(vehiclePair.homeAddress && vehiclePair.relativePhone && ['DRIVER_LICENSE', 'VEHICLE_CARD', 'DRIVER_PHOTO'].every((category) => vehiclePair.photos.some((photo) => photo.category === category)));
+  if (!complete && (!vehiclePair.informationGraceEndsAt || vehiclePair.informationGraceEndsAt <= new Date())) {
+    throw new Error('Selected driver and vehicle registry information must be completed by security');
+  }
   return vehiclePair;
 };
 
@@ -992,8 +999,21 @@ router.get('/drivers', canView, canViewDrivers, async (req: any, res: Response) 
   try {
     const includeInactive = req.query.includeInactive === 'true';
     const drivers = await prisma.securityVehiclePair.findMany({
-      where: includeInactive ? undefined : { isActive: true },
-      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
+      where: includeInactive ? undefined : {
+        isActive: true,
+        OR: [
+          { informationGraceEndsAt: { gt: new Date() } },
+          { AND: [
+            { homeAddress: { not: null } },
+            { relativePhone: { not: null } },
+            { photos: { some: { category: 'DRIVER_LICENSE' } } },
+            { photos: { some: { category: 'VEHICLE_CARD' } } },
+            { photos: { some: { category: 'DRIVER_PHOTO' } } }
+          ] }
+        ]
+      },
+      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
+      select: { id: true, firstName: true, lastName: true, vehiclePlate: true, vehicleType: true, phone: true, nationalCode: true, isActive: true, updatedAt: true }
     });
     res.json({ success: true, data: drivers });
   } catch (error) {

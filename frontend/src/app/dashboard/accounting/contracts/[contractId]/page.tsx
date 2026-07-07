@@ -13,6 +13,7 @@ import {
   FaPrint,
   FaReceipt,
   FaSync,
+  FaTimes,
   FaTrashAlt,
 } from 'react-icons/fa';
 import {
@@ -114,6 +115,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   const [replacementTarget, setReplacementTarget] = useState<any | null>(null);
   const [resolveTarget, setResolveTarget] = useState<any | null>(null);
   const [flagModalOpen, setFlagModalOpen] = useState(false);
+  const [flagCloseTarget, setFlagCloseTarget] = useState<{ item: any; mode: 'resolve' | 'cancel' } | null>(null);
   const [correctionModalOpen, setCorrectionModalOpen] = useState(false);
   const [salesPdfVariant, setSalesPdfVariant] = useState<SalesPdfVariant>('accounting');
   const [customPrintSettings, setCustomPrintSettings] = useState<CustomPrintSettings>(defaultCustomPrintSettings);
@@ -218,6 +220,18 @@ export default function AccountingContractDetailPage({ params }: { params: { con
       note,
     });
     if (applied) setFlagModalOpen(false);
+  };
+
+  const closeFlag = async (values: Record<string, string | number>) => {
+    if (!flagCloseTarget) return;
+    const note = String(values.note || '').trim();
+    if (!note) return;
+    const applied = await execute({
+      kind: flagCloseTarget.mode === 'resolve' ? 'RESOLVE_CONTRACT_FLAG' : 'CANCEL_CONTRACT_FLAG',
+      flagId: flagCloseTarget.item.id,
+      ...(flagCloseTarget.mode === 'resolve' ? { resolutionNote: note } : { reason: note }),
+    });
+    if (applied) setFlagCloseTarget(null);
   };
 
   const requestCorrection = async (values: Record<string, string | number>) => {
@@ -654,9 +668,9 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                     status={<StatusBadge status={record.status} />}
                     footer={record.kind === 'INVOICE_CANDIDATE' ? (
                       <div className="space-y-3">
-                        {contract.accounting.openCorrections > 0 && !['ISSUED', 'POSTED', 'VOIDED'].includes(record.status) ? (
+                        {(contract.accounting.openCorrections > 0 || contract.accounting.openBlockerFlags > 0) && !['ISSUED', 'POSTED', 'VOIDED'].includes(record.status) ? (
                           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
-                            ابتدا درخواست‌های اصلاح باز را بررسی و ببندید؛ سپس تایید مالی انجام می‌شود.
+                            ابتدا درخواست‌های اصلاح و پرچم‌های مسدودکننده باز را بررسی و ببندید؛ سپس تایید مالی انجام می‌شود.
                           </div>
                         ) : (
                           <FinancialInvoiceApprovalForm
@@ -781,7 +795,17 @@ export default function AccountingContractDetailPage({ params }: { params: { con
             <ErpSection title="درخواست‌های اصلاح و پرچم‌ها">
               <div className="space-y-3">
                 {(data.flags || []).map((item: any) => (
-                  <CompactQueueItem key={item.id} icon={FaFlag} title={item.title} meta={item.note} status={<StatusBadge status={item.status} />} />
+                  <CompactQueueItem
+                    key={item.id}
+                    icon={FaFlag}
+                    title={item.title}
+                    meta={item.resolutionNote || item.cancellationReason || item.note}
+                    status={<StatusBadge status={item.status} />}
+                    footer={item.status === 'OPEN' ? <div className="flex flex-wrap gap-2">
+                      <ErpButton label="بستن پرچم" icon={FaCheckCircle} tone="success" variant="soft" onClick={() => setFlagCloseTarget({ item, mode: 'resolve' })} />
+                      <ErpButton label="لغو پرچم" icon={FaTimes} tone="danger" variant="soft" onClick={() => setFlagCloseTarget({ item, mode: 'cancel' })} />
+                    </div> : undefined}
+                  />
                 ))}
                 {(data.correctionRequests || []).map((item: any) => (
                   <CompactQueueItem
@@ -894,6 +918,17 @@ export default function AccountingContractDetailPage({ params }: { params: { con
         error={actionError}
         onClose={() => setFlagModalOpen(false)}
         onSubmit={flagContract}
+      />
+      <AccountingActionModal
+        open={Boolean(flagCloseTarget)}
+        title={flagCloseTarget?.mode === 'resolve' ? 'بستن پرچم' : 'لغو پرچم'}
+        description={flagCloseTarget?.item?.title}
+        fields={[{ id: 'note', label: flagCloseTarget?.mode === 'resolve' ? 'یادداشت نتیجه بررسی' : 'دلیل لغو', type: 'textarea', required: true }]}
+        submitLabel={flagCloseTarget?.mode === 'resolve' ? 'بستن پرچم' : 'لغو پرچم'}
+        busy={actionLoading}
+        error={actionError}
+        onClose={() => setFlagCloseTarget(null)}
+        onSubmit={closeFlag}
       />
       <AccountingActionModal
         open={correctionModalOpen}

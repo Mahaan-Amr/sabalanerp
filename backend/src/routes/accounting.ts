@@ -496,11 +496,13 @@ router.post(
     body('receivableId').optional().isString(),
     body('paymentEventId').optional().isString(),
     body('correctionRequestId').optional().isString(),
+    body('flagId').optional().isString(),
     body('replacesRecordId').optional().isString(),
     body('externalReference').optional().isString(),
     body('downstreamNote').optional().isString(),
     body('note').optional().isString(),
     body('resolutionNote').optional().isString(),
+    body('reason').optional().isString(),
     body('systemInvoiceNumber').optional().isString(),
     body('systemInvoiceDate').optional().isString(),
     body('sepidarAmount').optional().isNumeric()

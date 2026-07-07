@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { FaBan, FaCarSide, FaCheck, FaClipboardList, FaPlus, FaRedo, FaSearch, FaTruck, FaUserShield } from 'react-icons/fa';
+import { FaBan, FaCamera, FaCarSide, FaCheck, FaClipboardList, FaEdit, FaPlus, FaRedo, FaSearch, FaTrash, FaTruck, FaUserShield } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpSegmentedControl } from '@/components/erp';
 import { crmAPI, securityAPI } from '@/lib/api';
 
@@ -15,8 +15,16 @@ const emptyPair = {
   vehicleType: '',
   phone: '',
   nationalCode: '',
+  homeAddress: '',
+  relativePhone: '',
   notes: '',
 };
+
+const photoCategories = [
+  { field: 'driverLicensePhotos', category: 'DRIVER_LICENSE', label: 'عکس گواهینامه' },
+  { field: 'vehicleCardPhotos', category: 'VEHICLE_CARD', label: 'عکس کارت ماشین' },
+  { field: 'driverPhotos', category: 'DRIVER_PHOTO', label: 'عکس راننده' },
+] as const;
 
 const emptyInbound = {
   purpose: 'OUTSIDE_PURCHASE',
@@ -70,6 +78,8 @@ export default function SecurityVehiclesPage() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [customerSearch, setCustomerSearch] = useState('');
   const [pairForm, setPairForm] = useState(emptyPair);
+  const [pairPhotos, setPairPhotos] = useState<Record<string, File[]>>({ driverLicensePhotos: [], vehicleCardPhotos: [], driverPhotos: [] });
+  const [editingPairId, setEditingPairId] = useState<string | null>(null);
   const [inboundForm, setInboundForm] = useState<any>(emptyInbound);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -78,6 +88,12 @@ export default function SecurityVehiclesPage() {
   const [activeSection, setActiveSection] = useState<VehicleSection>('registry');
 
   const activePairs = useMemo(() => pairs.filter((pair) => pair.isActive), [pairs]);
+  const editingPair = useMemo(() => pairs.find((pair) => pair.id === editingPairId), [pairs, editingPairId]);
+  const canSavePair = useMemo(() => {
+    const fieldsComplete = Object.entries(pairForm).every(([field, value]) => field === 'notes' || value.trim().length > 0);
+    const photosComplete = photoCategories.every(({ field, category }) => pairPhotos[field].length > 0 || editingPair?.photos?.some((photo: any) => photo.category === category));
+    return fieldsComplete && photosComplete;
+  }, [editingPair, pairForm, pairPhotos]);
 
   const loadData = async () => {
     setLoading(true);
@@ -112,8 +128,20 @@ export default function SecurityVehiclesPage() {
     setSaving(true);
     setError('');
     try {
-      await securityAPI.createVehiclePair(pairForm);
+      if (editingPairId) {
+        const photoData = new FormData();
+        Object.entries(pairPhotos).forEach(([field, files]) => files.forEach((file) => photoData.append(field, file)));
+        if (Object.values(pairPhotos).some((files) => files.length > 0)) await securityAPI.addVehiclePairPhotos(editingPairId, photoData);
+        await securityAPI.updateVehiclePair(editingPairId, pairForm);
+      } else {
+        const data = new FormData();
+        Object.entries(pairForm).forEach(([field, value]) => data.append(field, value));
+        Object.entries(pairPhotos).forEach(([field, files]) => files.forEach((file) => data.append(field, file)));
+        await securityAPI.createVehiclePair(data);
+      }
       setPairForm(emptyPair);
+      setPairPhotos({ driverLicensePhotos: [], vehicleCardPhotos: [], driverPhotos: [] });
+      setEditingPairId(null);
       setMessage('راننده و خودرو در رجیستر حراست ثبت شد.');
       await loadData();
     } catch (err: any) {
@@ -121,6 +149,31 @@ export default function SecurityVehiclesPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const editPair = (pair: any) => {
+    setEditingPairId(pair.id);
+    setPairForm(Object.fromEntries(Object.keys(emptyPair).map((key) => [key, pair[key] || ''])) as typeof emptyPair);
+    setPairPhotos({ driverLicensePhotos: [], vehicleCardPhotos: [], driverPhotos: [] });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const deletePair = async (pair: any) => {
+    if (!window.confirm('این رکورد و تمام تصاویر آن حذف شود؟')) return;
+    try { await securityAPI.deleteVehiclePair(pair.id); await loadData(); }
+    catch (err: any) { setError(err.response?.data?.error || 'حذف رکورد ناموفق بود.'); }
+  };
+
+  const deletePhoto = async (pair: any, photoId: string) => {
+    try { await securityAPI.deleteVehiclePairPhoto(pair.id, photoId); await loadData(); }
+    catch (err: any) { setError(err.response?.data?.error || 'حذف تصویر ناموفق بود.'); }
+  };
+
+  const viewPhoto = async (photoId: string) => {
+    const response = await securityAPI.getVehiclePairPhoto(photoId);
+    const url = URL.createObjectURL(response.data);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
 
   const togglePair = async (pair: any) => {
@@ -206,17 +259,28 @@ export default function SecurityVehiclesPage() {
       />
 
       {activeSection === 'registry' && (
-      <ErpSection title="رجیستر راننده و خودرو" description="رکوردهای فعال این رجیستر تنها گزینه‌های قابل انتخاب برای بارگیری لجستیک هستند.">
+      <ErpSection title="رجیستر راننده و خودرو" description="فقط رکوردهای فعال و کامل برای بارگیری لجستیک قابل انتخاب هستند.">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          {Object.entries({ firstName: 'نام', lastName: 'نام خانوادگی', vehiclePlate: 'پلاک', vehicleType: 'نوع خودرو', phone: 'موبایل', nationalCode: 'کد ملی' }).map(([field, label]) => (
+          {Object.entries({ firstName: 'نام', lastName: 'نام خانوادگی', vehiclePlate: 'پلاک خودرو', vehicleType: 'نوع خودرو', phone: 'شماره موبایل', nationalCode: 'کد ملی', homeAddress: 'آدرس منزل', relativePhone: 'شماره موبایل بستگان' }).map(([field, label]) => (
             <label key={field}>
               <span className={labelClass}>{label}</span>
               <input className={inputClass} value={(pairForm as any)[field]} onChange={(event) => setPairForm((current) => ({ ...current, [field]: event.target.value }))} />
             </label>
           ))}
         </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+          {photoCategories.map(({ field, label }) => (
+            <label key={field} className="rounded-lg border border-dashed border-slate-300 p-4 dark:border-slate-700">
+              <span className={labelClass}>{label} *</span>
+              <span className="mb-2 block text-xs text-slate-500">JPEG، PNG یا WebP؛ حداکثر ۱۰ مگابایت برای هر تصویر</span>
+              <span className="flex flex-col gap-2"><span>انتخاب فایل</span><input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => setPairPhotos((current) => ({ ...current, [field]: [...current[field], ...Array.from(event.target.files || [])] }))} /><span className="flex items-center gap-2"><FaCamera /> ثبت با دوربین</span><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => setPairPhotos((current) => ({ ...current, [field]: [...current[field], ...Array.from(event.target.files || [])] }))} /></span>
+              <span className="mt-2 block text-xs font-semibold text-teal-700">{pairPhotos[field].length.toLocaleString('fa-IR')} تصویر جدید</span>
+              {pairPhotos[field].map((file, index) => <span key={`${file.name}-${index}`} className="mt-1 flex items-center justify-between gap-2 text-xs"><span className="truncate">{file.name}</span><button type="button" className="text-red-600" onClick={() => setPairPhotos((current) => ({ ...current, [field]: current[field].filter((_, itemIndex) => itemIndex !== index) }))}><FaTrash /></button></span>)}
+            </label>
+          ))}
+        </div>
         <div className="mt-3">
-          <ErpButton label="ثبت راننده و خودرو" icon={FaPlus} onClick={savePair} disabled={saving} variant="solid" />
+          <ErpButton label={editingPairId ? 'ذخیره تغییرات' : 'ثبت راننده و خودرو'} icon={editingPairId ? FaEdit : FaPlus} onClick={savePair} disabled={saving || !canSavePair} variant="solid" />
         </div>
 
         <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -227,11 +291,27 @@ export default function SecurityVehiclesPage() {
                   <p className="font-semibold text-slate-900 dark:text-white">{pair.firstName} {pair.lastName}</p>
                   <p className="mt-1 text-sm text-slate-500">{pair.vehicleType} · {pair.vehiclePlate}</p>
                   <p className="mt-1 text-xs text-slate-500">{pair.phone} · {pair.nationalCode}</p>
+                  <p className="mt-1 text-xs text-slate-500">{pair.homeAddress || 'آدرس تکمیل نشده'} · {pair.relativePhone || 'موبایل بستگان تکمیل نشده'}</p>
                 </div>
-                <ErpBadge tone={pair.isActive ? 'success' : 'neutral'}>{pair.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge>
+                <div className="flex flex-wrap gap-2">
+                  <ErpBadge tone={pair.isActive ? 'success' : 'neutral'}>{pair.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge>
+                  {!pair.informationComplete && <ErpBadge tone="warning">نیازمند تکمیل اطلاعات</ErpBadge>}
+                </div>
               </div>
-              <div className="mt-3">
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {photoCategories.map(({ category, label }) => (
+                  <div key={category} className="rounded-lg bg-slate-50 p-2 text-xs dark:bg-slate-800">
+                    <p className="font-semibold">{label}</p>
+                    {(pair.photos || []).filter((photo: any) => photo.category === category).map((photo: any) => (
+                      <div key={photo.id} className="mt-1 flex items-center justify-between gap-2"><button type="button" onClick={() => viewPhoto(photo.id)} className="truncate text-teal-700 underline">{photo.originalName}</button><button type="button" onClick={() => deletePhoto(pair, photo.id)} className="text-red-600"><FaTrash /></button></div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <ErpButton label="ویرایش" icon={FaEdit} onClick={() => editPair(pair)} variant="soft" />
                 <ErpButton label={pair.isActive ? 'غیرفعال کردن' : 'فعال کردن'} icon={pair.isActive ? FaBan : FaCheck} onClick={() => togglePair(pair)} tone={pair.isActive ? 'danger' : 'success'} variant="soft" />
+                {pair.canDelete && <ErpButton label="حذف" icon={FaTrash} onClick={() => deletePair(pair)} tone="danger" variant="soft" />}
               </div>
             </ErpCard>
           ))}

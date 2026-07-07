@@ -1,6 +1,9 @@
 ﻿import express, { Response } from 'express';
+import fs from 'fs';
+import path from 'path';
+import multer from 'multer';
 import { body, validationResult } from 'express-validator';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, SecurityVehiclePairPhotoCategory } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
@@ -11,6 +14,58 @@ const prisma = new PrismaClient();
 const securityView = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW);
 const securityEdit = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT);
 const securityAdmin = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN);
+
+const vehiclePhotoDir = path.join(process.cwd(), 'uploads', 'security-vehicle-pairs');
+const categoryByField: Record<string, SecurityVehiclePairPhotoCategory> = {
+  driverLicensePhotos: SecurityVehiclePairPhotoCategory.DRIVER_LICENSE,
+  vehicleCardPhotos: SecurityVehiclePairPhotoCategory.VEHICLE_CARD,
+  driverPhotos: SecurityVehiclePairPhotoCategory.DRIVER_PHOTO
+};
+const normalizeDigits = (value: unknown) => String(value ?? '')
+  .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+  .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)));
+const normalizePhone = (value: unknown) => normalizeDigits(value).replace(/[\s()-]/g, '');
+const normalizeNationalCode = (value: unknown) => normalizeDigits(value).replace(/\D/g, '');
+const normalizePlate = (value: unknown) => normalizeDigits(value).trim().replace(/\s+/g, ' ');
+const validNationalCode = (value: string) => {
+  if (!/^\d{10}$/.test(value) || /^(\d)\1{9}$/.test(value)) return false;
+  const check = Number(value[9]);
+  const remainder = value.slice(0, 9).split('').reduce((sum, digit, index) => sum + Number(digit) * (10 - index), 0) % 11;
+  return check === (remainder < 2 ? remainder : 11 - remainder);
+};
+const pairIsComplete = (pair: any) => Boolean(
+  pair.homeAddress?.trim() && pair.relativePhone?.trim() &&
+  ['DRIVER_LICENSE', 'VEHICLE_CARD', 'DRIVER_PHOTO'].every((category) => pair.photos?.some((photo: any) => photo.category === category))
+);
+const removeStoredFiles = (files: Express.Multer.File[] = []) => files.forEach((file) => {
+  try { fs.unlinkSync(file.path); } catch { /* best effort cleanup */ }
+});
+const vehiclePhotoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => { fs.mkdirSync(vehiclePhotoDir, { recursive: true }); cb(null, vehiclePhotoDir); },
+    filename: (_req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`)
+  }),
+  fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype) && ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(file.originalname).toLowerCase())),
+  limits: { fileSize: 10 * 1024 * 1024 }
+});
+const uploadedFiles = (req: any) => (Array.isArray(req.files) ? req.files : Object.values(req.files || {}).flat()) as Express.Multer.File[];
+const photoCreateData = (req: any) => uploadedFiles(req).filter((file) => categoryByField[file.fieldname]).map((file) => ({
+  category: categoryByField[file.fieldname], storageName: file.filename, originalName: file.originalname, mimeType: file.mimetype, size: file.size
+}));
+const normalizedPairInput = (body: any) => ({
+  firstName: String(body.firstName || '').trim(), lastName: String(body.lastName || '').trim(),
+  vehiclePlate: normalizePlate(body.vehiclePlate), vehicleType: String(body.vehicleType || '').trim(),
+  phone: normalizePhone(body.phone), nationalCode: normalizeNationalCode(body.nationalCode),
+  homeAddress: String(body.homeAddress || '').trim(), relativePhone: normalizePhone(body.relativePhone),
+  notes: String(body.notes || '').trim() || null
+});
+const validatePairInput = (data: ReturnType<typeof normalizedPairInput>) => {
+  if (Object.entries(data).some(([key, value]) => key !== 'notes' && !value)) return 'تمام اطلاعات راننده و خودرو الزامی است.';
+  if (!validNationalCode(data.nationalCode)) return 'کد ملی معتبر ۱۰ رقمی وارد کنید.';
+  if (!/^09\d{9}$/.test(data.phone) || !/^09\d{9}$/.test(data.relativePhone)) return 'شماره موبایل باید با قالب 09xxxxxxxxx وارد شود.';
+  if (data.phone === data.relativePhone) return 'شماره موبایل بستگان باید با موبایل راننده متفاوت باشد.';
+  return null;
+};
 
 const pairSnapshot = (pair: any, override: any = {}) => ({
   driverId: pair?.id || null,
@@ -71,9 +126,14 @@ router.get('/vehicle-pairs', protect, securityView, async (req: AuthRequest, res
           ]
         } : {})
       },
-      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
+      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
+      include: { photos: true, _count: { select: { loadings: true, movements: true } } }
     });
-    res.json({ success: true, data: pairs });
+    res.json({ success: true, data: pairs.map((pair) => ({
+      ...pair,
+      informationComplete: pairIsComplete(pair),
+      canDelete: pair._count.loadings + pair._count.movements === 0
+    })) });
   } catch (error) {
     console.error('Security vehicle pairs list error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
@@ -82,32 +142,31 @@ router.get('/vehicle-pairs', protect, securityView, async (req: AuthRequest, res
 
 // @desc    Create security-owned driver/vehicle pair
 // @route   POST /api/security/vehicle-pairs
-router.post('/vehicle-pairs', protect, securityAdmin, [
-  body('firstName').notEmpty().withMessage('First name is required'),
-  body('lastName').notEmpty().withMessage('Last name is required'),
-  body('vehiclePlate').notEmpty().withMessage('Vehicle plate is required'),
-  body('vehicleType').notEmpty().withMessage('Vehicle type is required'),
-  body('phone').notEmpty().withMessage('Phone is required'),
-  body('nationalCode').notEmpty().withMessage('National code is required')
-], async (req: AuthRequest, res: Response) => {
+router.post('/vehicle-pairs', protect, securityAdmin, vehiclePhotoUpload.any(), async (req: AuthRequest, res: Response) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
-
+    const data = normalizedPairInput(req.body);
+    const inputError = validatePairInput(data);
+    const photos = photoCreateData(req);
+    const files = uploadedFiles(req);
+    if (inputError || files.some((file) => !categoryByField[file.fieldname]) || !Object.values(SecurityVehiclePairPhotoCategory).every((category) => photos.some((photo) => photo.category === category))) {
+      removeStoredFiles(uploadedFiles(req));
+      return res.status(400).json({ success: false, error: inputError || 'حداقل یک تصویر در هر دسته الزامی است.' });
+    }
+    const duplicate = await prisma.securityVehiclePair.findFirst({ where: { nationalCode: data.nationalCode, vehiclePlate: data.vehiclePlate } });
+    if (duplicate) {
+      removeStoredFiles(uploadedFiles(req));
+      return res.status(409).json({ success: false, error: duplicate.isActive ? 'این راننده و خودرو قبلاً ثبت شده است.' : 'این زوج غیرفعال است؛ آن را ویرایش یا فعال کنید.' });
+    }
     const pair = await prisma.securityVehiclePair.create({
       data: {
-        firstName: req.body.firstName,
-        lastName: req.body.lastName,
-        vehiclePlate: req.body.vehiclePlate,
-        vehicleType: req.body.vehicleType,
-        phone: req.body.phone,
-        nationalCode: req.body.nationalCode,
-        notes: req.body.notes || null,
-        createdBy: req.user!.id
-      }
+        ...data, createdBy: req.user!.id, informationGraceEndsAt: null,
+        photos: { create: photos }
+      },
+      include: { photos: true }
     });
     res.status(201).json({ success: true, data: pair });
   } catch (error) {
+    removeStoredFiles(uploadedFiles(req));
     console.error('Create security vehicle pair error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
   }
@@ -117,24 +176,65 @@ router.post('/vehicle-pairs', protect, securityAdmin, [
 // @route   PUT /api/security/vehicle-pairs/:id
 router.put('/vehicle-pairs/:id', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
   try {
+    const data = normalizedPairInput(req.body);
+    const inputError = validatePairInput(data);
+    if (inputError) return res.status(400).json({ success: false, error: inputError });
+    const existing = await prisma.securityVehiclePair.findUnique({ where: { id: req.params.id }, include: { photos: true } });
+    if (!existing) return res.status(404).json({ success: false, error: 'رکورد پیدا نشد.' });
+    if (!pairIsComplete(existing)) return res.status(400).json({ success: false, error: 'ابتدا تصاویر الزامی را تکمیل کنید.' });
+    const duplicate = await prisma.securityVehiclePair.findFirst({ where: { nationalCode: data.nationalCode, vehiclePlate: data.vehiclePlate, id: { not: req.params.id } } });
+    if (duplicate) return res.status(409).json({ success: false, error: duplicate.isActive ? 'این راننده و خودرو قبلاً ثبت شده است.' : 'زوج مشابه غیرفعال را فعال یا ویرایش کنید.' });
     const pair = await prisma.securityVehiclePair.update({
       where: { id: req.params.id },
-      data: {
-        firstName: req.body.firstName,
-        lastName: req.body.lastName,
-        vehiclePlate: req.body.vehiclePlate,
-        vehicleType: req.body.vehicleType,
-        phone: req.body.phone,
-        nationalCode: req.body.nationalCode,
-        notes: req.body.notes,
-        isActive: req.body.isActive
-      }
+      data: { ...data, isActive: req.body.isActive, informationGraceEndsAt: null },
+      include: { photos: true }
     });
     res.json({ success: true, data: pair });
   } catch (error) {
     console.error('Update security vehicle pair error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
   }
+});
+
+router.post('/vehicle-pairs/:id/photos', protect, securityAdmin, vehiclePhotoUpload.any(), async (req: AuthRequest, res: Response) => {
+  const files = uploadedFiles(req);
+  try {
+    if (!files.length) return res.status(400).json({ success: false, error: 'حداقل یک تصویر انتخاب کنید.' });
+    if (files.some((file) => !categoryByField[file.fieldname])) { removeStoredFiles(files); return res.status(400).json({ success: false, error: 'دسته تصویر نامعتبر است.' }); }
+    const pair = await prisma.securityVehiclePair.findUnique({ where: { id: req.params.id } });
+    if (!pair) { removeStoredFiles(files); return res.status(404).json({ success: false, error: 'رکورد پیدا نشد.' }); }
+    await prisma.securityVehiclePairPhoto.createMany({ data: photoCreateData(req).map((photo) => ({ ...photo, vehiclePairId: pair.id })) });
+    const updated = await prisma.securityVehiclePair.findUnique({ where: { id: pair.id }, include: { photos: true } });
+    res.status(201).json({ success: true, data: updated });
+  } catch (error) {
+    removeStoredFiles(files);
+    res.status(500).json({ success: false, error: 'بارگذاری تصویر ناموفق بود.' });
+  }
+});
+
+router.get('/vehicle-pairs/photos/:photoId', protect, securityView, async (req: AuthRequest, res: Response) => {
+  const photo = await prisma.securityVehiclePairPhoto.findUnique({ where: { id: req.params.photoId } });
+  if (!photo) return res.status(404).end();
+  res.type(photo.mimeType).sendFile(path.join(vehiclePhotoDir, photo.storageName));
+});
+
+router.delete('/vehicle-pairs/:id/photos/:photoId', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  const photo = await prisma.securityVehiclePairPhoto.findFirst({ where: { id: req.params.photoId, vehiclePairId: req.params.id } });
+  if (!photo) return res.status(404).json({ success: false, error: 'تصویر پیدا نشد.' });
+  const count = await prisma.securityVehiclePairPhoto.count({ where: { vehiclePairId: req.params.id, category: photo.category } });
+  if (count <= 1) return res.status(400).json({ success: false, error: 'آخرین تصویر این دسته قابل حذف نیست.' });
+  await prisma.securityVehiclePairPhoto.delete({ where: { id: photo.id } });
+  try { fs.unlinkSync(path.join(vehiclePhotoDir, photo.storageName)); } catch { /* best effort */ }
+  res.json({ success: true });
+});
+
+router.delete('/vehicle-pairs/:id', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  const pair = await prisma.securityVehiclePair.findUnique({ where: { id: req.params.id }, include: { photos: true, _count: { select: { loadings: true, movements: true } } } });
+  if (!pair) return res.status(404).json({ success: false, error: 'رکورد پیدا نشد.' });
+  if (pair._count.loadings + pair._count.movements > 0) return res.status(409).json({ success: false, error: 'رکورد استفاده‌شده قابل حذف نیست؛ آن را غیرفعال کنید.' });
+  await prisma.securityVehiclePair.delete({ where: { id: pair.id } });
+  pair.photos.forEach((photo) => { try { fs.unlinkSync(path.join(vehiclePhotoDir, photo.storageName)); } catch { /* best effort */ } });
+  res.json({ success: true });
 });
 
 // @desc    Get finalized logistics loadings waiting for gate exit

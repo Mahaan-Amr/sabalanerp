@@ -428,11 +428,9 @@ export default function ContractsPage() {
               status={accounting.sourceStatus}
               label={sourceStatusLabels[accounting.sourceStatus] || accounting.sourceStatus}
             />
-            {(accounting.openCorrections > 0 || accounting.openFlags > 0) && (
+            {accounting.openCorrections > 0 && (
               <span className="text-xs text-slate-500 dark:text-slate-400">
                 {accounting.openCorrections > 0 ? `${accounting.openCorrections.toLocaleString('fa-IR')} اصلاحیه` : ''}
-                {accounting.openCorrections > 0 && accounting.openFlags > 0 ? '، ' : ''}
-                {accounting.openFlags > 0 ? `${accounting.openFlags.toLocaleString('fa-IR')} پرچم` : ''}
               </span>
             )}
           </div>

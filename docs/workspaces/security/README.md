@@ -271,6 +271,7 @@ interface MissionAssignment {
 - **Security Personnel**: can record inbound loaded-vehicle entries, complete inbound information, record outbound gate exit time, add categorized movement attachments, and view active registry pairs.
 - **Logistics**: can view/select only active security-owned driver+vehicle pairs during بارگیری; logistics cannot create, edit, delete, or deactivate the registry.
 - **Boundary**: حراست approves driver/vehicle eligibility and physical gate movement. لجستیک remains responsible for بارگیری rows, quantities, and remaining shipment calculations.
+- **Registry completeness**: new pairs require driver identity/contact details, vehicle details, home and relative contact information, and at least one license, vehicle-card, and driver photo. Existing incomplete pairs have a 30-day completion grace period.
 
 ### Viewer
 - Read-only access to security data

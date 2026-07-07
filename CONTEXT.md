@@ -383,6 +383,11 @@ _Avoid_: deleting financially approved accounting records, or keeping undeletabl
 A correction request created by accounting when a sales contract or related accounting data needs correction. It moves from manager review, to an approved sales correction window when allowed, to accounting review of the corrected contract, and finally to resolution or cancellation.
 _Avoid_: accounting silently editing the commercial contract, or treating a requested correction as permission for sales to edit before manager approval
 
+**پرچم حسابداری**:
+An internal accounting risk or review marker attached to a sales contract. An open blocker flag prevents financial approval but permits preparatory and read-only accounting work; an authorized accounting user closes a flag with a mandatory resolution note, and may cancel an open mistaken flag with a mandatory cancellation reason.
+Resolved and cancelled flags remain in auditable history and are not reopened; a recurring concern becomes a new flag.
+_Avoid_: treating a flag as a sales correction request, deleting or reopening it after review, or leaving it without a closable lifecycle
+
 **اصلاح حسابداری پس از تایید مالی**:
 A correction request after financial approval can reopen a locked sales contract for a controlled sales correction only after manager approval. The existing financially approved record remains immutable and accounting owns any void, reversal, correction, review, and replacement approval needed after the sales correction.
 _Avoid_: editing the approved financial record directly, or treating manager-approved sales correction as accounting approval of the replacement financial result
@@ -660,8 +665,10 @@ If an older draft contains manually entered driver or vehicle data, that data ma
 _Avoid_: blocking early loading preparation only because the truck is not known yet, finalizing shipment evidence without driver details, or treating legacy manual draft data as an acceptable final driver selection
 
 **رجیستر راننده و خودرو**:
-A حراست-owned registry of reusable fixed driver/vehicle pairs that may be activated or deactivated for operational use. Logistics consumes these pairs for بارگیری selection but does not own their creation or lifecycle.
-_Avoid_: splitting the reusable registry into independent driver and vehicle lifecycles without a separate business decision, duplicating reusable driver/vehicle records inside logistics, keeping logistics create/edit/delete controls for the registry, or deleting historical shipment snapshots when the registry changes
+A حراست-owned registry of reusable fixed driver/vehicle pairs that may be activated or deactivated for operational use. A complete pair requires the driver's first name, last name, mobile, national code, home address, relative's mobile, vehicle plate and type, plus at least one categorized photo each of the driver's license, vehicle card, and driver; every category may contain additional photos without a count limit.
+Logistics consumes complete active pairs for بارگیری selection but does not own their creation or lifecycle.
+A never-used pair may be permanently deleted; once referenced by an operational record it may only be deactivated, and its historical snapshots remain unchanged by later registry edits.
+_Avoid_: splitting the reusable registry into independent driver and vehicle lifecycles, allowing incomplete pairs into operational use, duplicating reusable driver/vehicle records inside logistics, keeping logistics create/edit/delete controls for the registry, hard-deleting a used pair, or changing historical shipment snapshots when the registry changes
 
 **خودرویی حراست**:
 The حراست vehicle area is a workflow hub for vehicle-related security operations. Its operational pages are رجیستر راننده و خودرو, تردد خودرو, ورود خودروی پر, and خروج فروش, while shared counters may remain on a dashboard.

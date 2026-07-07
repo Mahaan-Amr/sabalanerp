@@ -4,18 +4,20 @@ import { useEffect, useState } from 'react';
 import { FaClipboardCheck, FaExclamationTriangle, FaList, FaPlus, FaRedo, FaTasks } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpSegmentedControl } from '@/components/erp';
 import { securityAPI } from '@/lib/api';
+import PersianCalendarComponent from '@/components/PersianCalendar';
+import PersianCalendar from '@/lib/persian-calendar';
 
 const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
 const labelClass = 'mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200';
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+const todayPersian = () => PersianCalendar.now('jYYYY/jMM/jDD');
 type SupervisorSection = 'create' | 'reports' | 'follow-ups' | 'incidents';
 
 export default function SecuritySupervisorReportsPage() {
   const [reports, setReports] = useState<any[]>([]);
   const [shifts, setShifts] = useState<any[]>([]);
   const [form, setForm] = useState({
-    reportDate: todayIso(),
+    reportDate: todayPersian(),
     shiftId: '',
     summary: '',
     incidents: '',
@@ -54,10 +56,10 @@ export default function SecuritySupervisorReportsPage() {
     try {
       await securityAPI.createSupervisorReport({
         ...form,
-        reportDate: new Date(form.reportDate).toISOString(),
+        reportDate: PersianCalendar.toGregorian(form.reportDate, 'jYYYY/jMM/jDD').toISOString(),
         shiftId: form.shiftId || null,
       });
-      setForm({ reportDate: todayIso(), shiftId: '', summary: '', incidents: '', followUpNotes: '' });
+      setForm({ reportDate: todayPersian(), shiftId: '', summary: '', incidents: '', followUpNotes: '' });
       setMessage('گزارش سرپرست ثبت شد.');
       await loadData();
     } catch (err: any) {
@@ -98,7 +100,7 @@ export default function SecuritySupervisorReportsPage() {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <label>
             <span className={labelClass}>تاریخ گزارش</span>
-            <input className={inputClass} type="date" value={form.reportDate} onChange={(event) => setForm((current) => ({ ...current, reportDate: event.target.value }))} />
+            <PersianCalendarComponent value={form.reportDate} onChange={(reportDate) => setForm((current) => ({ ...current, reportDate }))} placeholder="تاریخ گزارش" />
           </label>
           <label>
             <span className={labelClass}>شیفت</span>

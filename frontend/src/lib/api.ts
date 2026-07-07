@@ -708,8 +708,12 @@ export const securityAPI = {
 
   // Vehicle gate operations
   getVehiclePairs: (params?: any) => api.get('/security/vehicle-pairs', { params }),
-  createVehiclePair: (data: any) => api.post('/security/vehicle-pairs', data),
+  createVehiclePair: (data: FormData) => api.post('/security/vehicle-pairs', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
   updateVehiclePair: (id: string, data: any) => api.put(`/security/vehicle-pairs/${id}`, data),
+  deleteVehiclePair: (id: string) => api.delete(`/security/vehicle-pairs/${id}`),
+  addVehiclePairPhotos: (id: string, data: FormData) => api.post(`/security/vehicle-pairs/${id}/photos`, data, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  deleteVehiclePairPhoto: (id: string, photoId: string) => api.delete(`/security/vehicle-pairs/${id}/photos/${photoId}`),
+  getVehiclePairPhoto: (photoId: string) => api.get(`/security/vehicle-pairs/photos/${photoId}`, { responseType: 'blob' }),
   getVehicleMovements: (params?: any) => api.get('/security/vehicle-movements', { params }),
   getReadyExitLoadings: () => api.get('/security/vehicle-movements/ready-exit'),
   createInboundVehicleMovement: (data: any) => api.post('/security/vehicle-movements/inbound', data),

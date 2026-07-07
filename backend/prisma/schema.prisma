@@ -706,6 +706,9 @@ model SecurityVehiclePair {
   vehicleType   String
   phone         String
   nationalCode  String
+  homeAddress   String?
+  relativePhone String?
+  informationGraceEndsAt DateTime?
   notes         String?
   isActive      Boolean                   @default(true)
   createdBy     String
@@ -714,10 +717,27 @@ model SecurityVehiclePair {
   createdByUser User                      @relation("SecurityVehiclePairCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade)
   loadings      LogisticsLoading[]
   movements     SecurityVehicleMovement[]
+  photos        SecurityVehiclePairPhoto[]
 
   @@index([createdBy])
   @@index([isActive])
   @@map("security_vehicle_pairs")
+}
+
+model SecurityVehiclePairPhoto {
+  id            String                           @id @default(cuid())
+  vehiclePairId String
+  category      SecurityVehiclePairPhotoCategory
+  storageName   String
+  originalName  String
+  mimeType      String
+  size          Int
+  createdAt     DateTime                         @default(now())
+  vehiclePair   SecurityVehiclePair              @relation(fields: [vehiclePairId], references: [id], onDelete: Cascade)
+
+  @@index([vehiclePairId])
+  @@index([category])
+  @@map("security_vehicle_pair_photos")
 }
 
 model SecurityVehicleMovement {
@@ -1338,6 +1358,10 @@ model AccountingContractFlag {
   createdBy  String
   resolvedBy String?
   resolvedAt DateTime?
+  resolutionNote String?
+  cancelledBy String?
+  cancelledAt DateTime?
+  cancellationReason String?
   createdAt  DateTime               @default(now())
   updatedAt  DateTime               @updatedAt
 
@@ -1673,6 +1697,12 @@ enum AccountingFlagStatus {
   OPEN
   RESOLVED
   CANCELLED
+}
+
+enum SecurityVehiclePairPhotoCategory {
+  DRIVER_LICENSE
+  VEHICLE_CARD
+  DRIVER_PHOTO
 }
 
 enum CorrectionRequestCategory {

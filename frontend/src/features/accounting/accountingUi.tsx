@@ -48,6 +48,7 @@ export type AccountingContractRow = {
     receivableStatus: string;
     taxStatus: string;
     openFlags: number;
+    openBlockerFlags: number;
     openCorrections: number;
     totalContractAmount: string;
     invoicedAmount: string;

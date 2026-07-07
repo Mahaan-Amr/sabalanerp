@@ -1,6 +1,7 @@
 import {
   AccountingFlagCategory,
   AccountingFlagSeverity,
+  AccountingFlagStatus,
   AccountingPaymentMethod,
   AccountingRecordStatus,
   AccountingSourceKind,
@@ -81,6 +82,7 @@ type AccountingActionRequest = {
   systemInvoiceDate?: string;
   sepidarAmount?: string | number;
   correctionRequestId?: string;
+  flagId?: string;
   replacesRecordId?: string;
   externalReference?: string;
   downstreamNote?: string;
@@ -578,7 +580,7 @@ const buildContractRow = async (contract: any, settings: any) => {
   const taxStatus = latestTax?.submissionStatus || (missingFields.length ? TaxSubmissionStatus.NOT_READY : TaxSubmissionStatus.READY);
 
   let sourceStatus = eligible ? 'ELIGIBLE' : 'VISIBLE_ONLY';
-  if (openCorrections.length > 0 || openFlags.some((flag: any) => flag.severity === AccountingFlagSeverity.BLOCKER)) {
+  if (openCorrections.length > 0) {
     sourceStatus = 'NEEDS_CORRECTION';
   } else if (hasRecords) {
     sourceStatus = 'HAS_FINANCIAL_RECORDS';
@@ -639,6 +641,7 @@ const buildContractRow = async (contract: any, settings: any) => {
       receivableStatus,
       taxStatus,
       openFlags: openFlags.length,
+      openBlockerFlags: openFlags.filter((flag: any) => flag.severity === AccountingFlagSeverity.BLOCKER).length,
       openCorrections: openCorrections.length,
       totalContractAmount: decimalToString(contractAmount),
       invoicedAmount: decimalToString(invoicedAmount),
@@ -1008,6 +1011,10 @@ export const executeAccountingAction = async (command: AccountingActionRequest, 
       return declineCorrectionRequest(command, actor);
     case 'FLAG_CONTRACT':
       return flagContract(command, actor);
+    case 'RESOLVE_CONTRACT_FLAG':
+      return closeContractFlag(command, actor, AccountingFlagStatus.RESOLVED);
+    case 'CANCEL_CONTRACT_FLAG':
+      return closeContractFlag(command, actor, AccountingFlagStatus.CANCELLED);
     case 'VOID_ACCOUNTING_RECORD':
       return voidAccountingRecord(command, actor);
     case 'DELETE_DRAFT_ACCOUNTING_RECORD':
@@ -1247,6 +1254,10 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       throw new Error('Voided invoices cannot be financially approved');
     }
     if (before.contractId) {
+      const blockerFlag = await tx.accountingContractFlag.findFirst({
+        where: { contractId: before.contractId, status: AccountingFlagStatus.OPEN, severity: AccountingFlagSeverity.BLOCKER }
+      });
+      if (blockerFlag) throw new Error('Open blocker flags must be closed before financial approval');
       const openCorrection = await tx.accountingCorrectionRequest.findFirst({
         where: {
           contractId: before.contractId,
@@ -1849,6 +1860,31 @@ const flagContract = async (command: AccountingActionRequest, actor: Actor) => {
   });
 
   return actionResponse('APPLIED', 'پرچم حسابداری ثبت شد', { contractId: flag.contractId });
+};
+
+const closeContractFlag = async (command: AccountingActionRequest, actor: Actor, status: AccountingFlagStatus) => {
+  if (!command.flagId) throw new Error('flagId is required');
+  const reason = String(status === AccountingFlagStatus.RESOLVED ? (command.resolutionNote || command.note || '') : (command.reason || command.note || '')).trim();
+  if (!reason) throw new Error(status === AccountingFlagStatus.RESOLVED ? 'Resolution note is required' : 'Cancellation reason is required');
+  const updated = await prisma.$transaction(async (tx) => {
+    const before = await tx.accountingContractFlag.findUnique({ where: { id: command.flagId } });
+    if (!before) throw new Error('Accounting flag not found');
+    if (before.status !== AccountingFlagStatus.OPEN) throw new Error('Only open flags can be closed or cancelled');
+    const now = new Date();
+    const item = await tx.accountingContractFlag.update({
+      where: { id: before.id },
+      data: status === AccountingFlagStatus.RESOLVED
+        ? { status, resolutionNote: reason, resolvedBy: actor.userId, resolvedAt: now }
+        : { status, cancellationReason: reason, cancelledBy: actor.userId, cancelledAt: now }
+    });
+    await audit(tx, {
+      action: status === AccountingFlagStatus.RESOLVED ? 'RESOLVE_CONTRACT_FLAG' : 'CANCEL_CONTRACT_FLAG',
+      actorId: actor.userId, contractId: before.contractId, entityType: 'AccountingContractFlag', entityId: before.id,
+      beforeState: toJsonValue(before), afterState: toJsonValue(item), note: reason
+    });
+    return item;
+  });
+  return actionResponse('APPLIED', status === AccountingFlagStatus.RESOLVED ? 'پرچم بسته شد' : 'پرچم لغو شد', { contractId: updated.contractId });
 };
 
 const voidAccountingRecord = async (command: AccountingActionRequest, actor: Actor) => {

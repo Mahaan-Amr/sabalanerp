@@ -360,7 +360,7 @@ export default function SecurityDashboardPage() {
             { title: 'خودرویی', description: 'رجیستر راننده/خودرو، ورود خودروی پر و خروج فروش', href: '/dashboard/security/vehicles', icon: FaTruck, tone: 'info' },
             { title: 'کارکنان حراست', description: 'مدیریت پرسنل و نقش‌ها', href: '/dashboard/security/personnel', icon: FaShieldAlt, tone: 'neutral' },
             { title: 'شیفت‌ها', description: 'تعریف برنامه کاری', href: '/dashboard/security/shifts', icon: FaCalendarDay, tone: 'info' },
-            { title: 'گزارش سرپرست', description: 'ثبت گزارش شیفت، رخدادها و پیگیری‌ها', href: '/dashboard/security/supervisor-reports', icon: FaFileAlt, tone: 'success' },
+            { title: 'گزارش شیفت', description: 'ثبت گزارش شیفت، رخدادها و پیگیری‌ها', href: '/dashboard/security/supervisor-reports', icon: FaFileAlt, tone: 'success' },
             { title: 'گزارش‌ها', description: 'خروجی و تحلیل تردد', href: '/dashboard/security/reports', icon: FaChartLine, tone: 'success' },
             { title: 'استثناها', description: 'تاخیر، مرخصی و اصلاح تردد', href: '/dashboard/security/exceptions', icon: FaFileAlt, tone: 'warning' },
           ]}

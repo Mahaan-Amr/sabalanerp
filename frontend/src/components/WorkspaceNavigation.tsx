@@ -613,8 +613,8 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             show: true
           },
           {
-            name: 'Supervisor Reports',
-            namePersian: 'گزارش سرپرست',
+            name: 'Shift Reports',
+            namePersian: 'گزارش شیفت',
             href: '/dashboard/security/supervisor-reports',
             icon: FaClipboardList,
             show: true

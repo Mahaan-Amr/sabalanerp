@@ -689,6 +689,20 @@ export const securityAPI = {
   createShift: (data: any) => api.post('/security/shifts', data),
   startShift: (shiftId: string) => api.post('/security/shifts/start', { shiftId }),
   endShift: () => api.post('/security/shifts/end'),
+  getShiftPlans: (includeDrafts = false) => api.get('/security/shift-plans', { params: { includeDrafts } }),
+  getShiftPlanDefaults: () => api.get('/security/shift-plans/defaults'),
+  createShiftPlan: (data: any) => api.post('/security/shift-plans', data),
+  publishShiftPlan: (id: string) => api.post(`/security/shift-plans/${id}/publish`),
+  getShiftPlanSlots: (params?: any) => api.get('/security/shift-plan-slots', { params }),
+  setShiftReplacement: (id: string, personnelId: string, overrideReason?: string) => api.put(`/security/shift-plan-slots/${id}/replacement`, { personnelId, overrideReason }),
+  markShiftEmergencyUncovered: (id: string, reason: string) => api.put(`/security/shift-plan-slots/${id}/emergency-uncovered`, { reason }),
+  addTemporaryShiftCoverage: (id: string, data: any) => api.post(`/security/shift-plan-slots/${id}/temporary-coverage`, data),
+  getMyShiftWorkflow: () => api.get('/security/shift-workflow/me'),
+  registerShiftAttendance: (slotId: string) => api.post(`/security/shift-plan-slots/${slotId}/attendance`),
+  startPlannedShift: (slotId: string) => api.post(`/security/shift-plan-slots/${slotId}/start`),
+  endPlannedShift: (slotId: string) => api.post(`/security/shift-plan-slots/${slotId}/end`),
+  forceCloseShift: (sessionId: string, reason: string, summary: string) => api.post(`/security/shift-sessions/${sessionId}/force-close`, { reason, summary }),
+  correctShiftAttendance: (attendanceId: string, arrivedAt: string, reason: string) => api.put(`/security/shift-attendance/${attendanceId}/correct`, { arrivedAt, reason }),
   
   // Attendance management
   checkIn: (employeeId: string, entryTime?: string) => 

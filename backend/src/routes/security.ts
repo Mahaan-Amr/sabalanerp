@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
 import { body, validationResult } from 'express-validator';
-import { PrismaClient, SecurityDriverQueueTurnStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
+import { PrismaClient, SecurityDriverQueueTurnStatus, SecurityShiftCoverageStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
@@ -543,7 +543,7 @@ router.get('/supervisor-reports', protect, securityView, async (req: AuthRequest
   try {
     const reports = await prisma.securitySupervisorReport.findMany({
       where: req.query.shiftId ? { shiftId: String(req.query.shiftId) } : undefined,
-      include: { shift: true },
+      include: { shift: true, planSlot: true },
       orderBy: { reportDate: 'desc' },
       take: Number(req.query.limit || 50)
     });
@@ -556,24 +556,33 @@ router.get('/supervisor-reports', protect, securityView, async (req: AuthRequest
 
 // @desc    Create supervisor report
 // @route   POST /api/security/supervisor-reports
-router.post('/supervisor-reports', protect, securityAdmin, [
+router.post('/supervisor-reports', protect, securityEdit, [
   body('reportDate').isISO8601().withMessage('Report date must be valid'),
   body('summary').notEmpty().withMessage('Summary is required')
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    if (req.body.planSlotId) {
+      const [slot, personnel] = await Promise.all([
+        prisma.securityShiftPlanSlot.findUnique({ where: { id: req.body.planSlotId } }),
+        getSelfPersonnel(req.user!.id)
+      ]);
+      const isManager = req.user!.role === 'ADMIN' || (req as any).workspacePermission === WORKSPACE_PERMISSIONS.ADMIN;
+      if (!slot || (!isManager && (!personnel || effectivePersonnelId(slot) !== personnel.id))) return res.status(403).json({ success: false, error: 'ثبت گزارش فقط برای مسئول واقعی این شیفت مجاز است.' });
+    }
     const report = await prisma.securitySupervisorReport.create({
       data: {
         reportDate: new Date(req.body.reportDate),
         shiftId: req.body.shiftId || null,
+        planSlotId: req.body.planSlotId || null,
         authorId: req.user!.id,
         summary: req.body.summary,
         incidents: req.body.incidents || null,
         followUpNotes: req.body.followUpNotes || null,
         attachments: req.body.attachments || null
       },
-      include: { shift: true }
+      include: { shift: true, planSlot: true }
     });
     res.status(201).json({ success: true, data: report });
   } catch (error) {
@@ -585,6 +594,216 @@ router.post('/supervisor-reports', protect, securityAdmin, [
 // @desc    Get all shifts
 // @route   GET /api/security/shifts
 // @access  Private/Security Workspace
+const shiftPlanInclude = {
+  primaryA: { include: { user: true } }, primaryB: { include: { user: true } }, primaryC: { include: { user: true } },
+  _count: { select: { slots: true } }
+};
+const slotInclude = {
+  plan: true,
+  plannedPersonnel: { include: { user: true } },
+  replacementPersonnel: { include: { user: true } },
+  attendance: true,
+  session: true,
+  report: true,
+  temporaryCoverage: { include: { personnel: { include: { user: true } } } }
+};
+const effectivePersonnelId = (slot: any) => slot.replacementPersonnelId || slot.plannedPersonnelId;
+const getSelfPersonnel = (userId: string) => prisma.securityPersonnel.findUnique({ where: { userId } });
+
+router.get('/shift-plans', protect, securityView, async (req: AuthRequest, res: Response) => {
+  const mayViewDrafts = req.query.includeDrafts === 'true' && (req.user!.role === 'ADMIN' || (req as any).workspacePermission === WORKSPACE_PERMISSIONS.ADMIN);
+  const plans = await prisma.securityShiftPlan.findMany({
+    where: mayViewDrafts ? undefined : { status: SecurityShiftPlanStatus.PUBLISHED },
+    include: shiftPlanInclude,
+    orderBy: [{ persianYear: 'desc' }, { revision: 'desc' }]
+  });
+  res.json({ success: true, data: plans });
+});
+
+router.get('/shift-plans/defaults', protect, securityAdmin, async (_req: AuthRequest, res: Response) => {
+  const [latestSlot, personnel] = await Promise.all([
+    prisma.securityShiftPlanSlot.findFirst({ orderBy: { endsAt: 'desc' }, include: { plan: true } }),
+    prisma.securityPersonnel.findMany({ where: { isActive: true }, include: { user: true }, orderBy: { createdAt: 'asc' } })
+  ]);
+  const nextPrimaryId = latestSlot ? [latestSlot.plan.primaryAId, latestSlot.plan.primaryBId, latestSlot.plan.primaryCId][(latestSlot.sequence + 1) % 3] : personnel[0]?.id;
+  res.json({ success: true, data: { anchorAt: latestSlot?.endsAt || null, slotDurationMinutes: latestSlot?.plan.slotDurationMinutes || 720, earlyArrivalMinutes: latestSlot?.plan.earlyArrivalMinutes || 30, lateAlertMinutes: latestSlot?.plan.lateAlertMinutes || 15, nextPrimaryId, personnel } });
+});
+
+router.post('/shift-plans', protect, securityAdmin, [
+  body('title').isString().trim().notEmpty(), body('persianYear').isInt(), body('anchorAt').isISO8601(), body('generateUntil').isISO8601(),
+  body('slotDurationMinutes').isInt({ min: 60, max: 1440 }), body('earlyArrivalMinutes').isInt({ min: 0, max: 240 }), body('lateAlertMinutes').isInt({ min: 0, max: 240 }),
+  body('primaryPersonnelIds').isArray({ min: 3, max: 3 })
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'اطلاعات برنامه شیفت کامل نیست.', details: errors.array() });
+    const ids = req.body.primaryPersonnelIds as string[];
+    if (new Set(ids).size !== 3) return res.status(400).json({ success: false, error: 'سه نیروی اصلی باید متفاوت باشند.' });
+    const personnelCount = await prisma.securityPersonnel.count({ where: { id: { in: ids }, isActive: true } });
+    if (personnelCount !== 3) return res.status(400).json({ success: false, error: 'هر سه نیروی اصلی باید فعال باشند.' });
+    const anchorAt = new Date(req.body.anchorAt); const generateUntil = new Date(req.body.generateUntil); const duration = Number(req.body.slotDurationMinutes);
+    if (anchorAt >= generateUntil) return res.status(400).json({ success: false, error: 'پایان برنامه باید بعد از زمان شروع باشد.' });
+    const slotCount = Math.ceil((generateUntil.getTime() - anchorAt.getTime()) / (duration * 60_000));
+    if (slotCount > 1000) return res.status(400).json({ success: false, error: 'تعداد بازه‌های برنامه بیش از حد مجاز است.' });
+    const latestRevision = await prisma.securityShiftPlan.aggregate({ where: { persianYear: Number(req.body.persianYear) }, _max: { revision: true } });
+    const plan = await prisma.securityShiftPlan.create({
+      data: {
+        title: req.body.title.trim(), persianYear: Number(req.body.persianYear), revision: (latestRevision._max.revision || 0) + 1,
+        anchorAt, generateUntil, slotDurationMinutes: duration, earlyArrivalMinutes: Number(req.body.earlyArrivalMinutes), lateAlertMinutes: Number(req.body.lateAlertMinutes),
+        primaryAId: ids[0], primaryBId: ids[1], primaryCId: ids[2], replacesPlanId: req.body.replacesPlanId || null, createdBy: req.user!.id,
+        slots: { create: Array.from({ length: slotCount }, (_, sequence) => ({
+          sequence, startsAt: new Date(anchorAt.getTime() + sequence * duration * 60_000),
+          endsAt: new Date(Math.min(generateUntil.getTime(), anchorAt.getTime() + (sequence + 1) * duration * 60_000)), plannedPersonnelId: ids[sequence % 3]
+        })) }
+      }, include: shiftPlanInclude
+    });
+    res.status(201).json({ success: true, data: plan });
+  } catch (error: any) { res.status(500).json({ success: false, error: error.message || 'ساخت برنامه شیفت ناموفق بود.' }); }
+});
+
+router.post('/shift-plans/:id/publish', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const plan = await prisma.securityShiftPlan.findUnique({ where: { id: req.params.id } });
+    if (!plan || plan.status !== SecurityShiftPlanStatus.DRAFT) return res.status(409).json({ success: false, error: 'فقط برنامه پیش‌نویس قابل انتشار است.' });
+    const now = new Date();
+    if (plan.anchorAt < now) {
+      const started = await prisma.securityShiftPlanSlot.findFirst({ where: { planId: plan.id, startsAt: { lte: now } } });
+      if (started) return res.status(409).json({ success: false, error: 'برنامه دارای بازه شروع‌شده است و قابل انتشار نیست.' });
+    }
+    const published = await prisma.$transaction(async (tx) => {
+      await tx.securityShiftPlan.updateMany({ where: { id: { not: plan.id }, status: SecurityShiftPlanStatus.PUBLISHED, generateUntil: { gt: plan.anchorAt } }, data: { status: SecurityShiftPlanStatus.SUPERSEDED } });
+      return tx.securityShiftPlan.update({ where: { id: plan.id }, data: { status: SecurityShiftPlanStatus.PUBLISHED, publishedAt: new Date(), publishedBy: req.user!.id }, include: shiftPlanInclude });
+    });
+    res.json({ success: true, data: published });
+  } catch (error: any) { res.status(500).json({ success: false, error: error.message || 'انتشار برنامه ناموفق بود.' }); }
+});
+
+router.get('/shift-plan-slots', protect, securityView, async (req: AuthRequest, res: Response) => {
+  const from = req.query.from ? new Date(String(req.query.from)) : new Date(Date.now() - 7 * 86_400_000);
+  const to = req.query.to ? new Date(String(req.query.to)) : new Date(Date.now() + 40 * 86_400_000);
+  const self = req.query.mine === 'true' ? await getSelfPersonnel(req.user!.id) : null;
+  const slots = await prisma.securityShiftPlanSlot.findMany({
+    where: { startsAt: { lt: to }, endsAt: { gt: from }, plan: { status: SecurityShiftPlanStatus.PUBLISHED }, ...(self ? { OR: [{ plannedPersonnelId: self.id }, { replacementPersonnelId: self.id }, { temporaryCoverage: { some: { personnelId: self.id } } }] } : {}) },
+    include: slotInclude, orderBy: { startsAt: 'asc' }
+  });
+  res.json({ success: true, data: slots });
+});
+
+router.put('/shift-plan-slots/:id/replacement', protect, securityAdmin, [body('personnelId').isString().notEmpty(), body('overrideReason').optional().isString()], async (req: AuthRequest, res: Response) => {
+  try {
+    const slot = await prisma.securityShiftPlanSlot.findUnique({ where: { id: req.params.id }, include: { plan: true, session: true } });
+    if (!slot || slot.session) return res.status(409).json({ success: false, error: 'بازه شروع‌شده قابل جایگزینی نیست.' });
+    const replacement = await prisma.securityPersonnel.findFirst({ where: { id: req.body.personnelId, isActive: true } });
+    if (!replacement) return res.status(404).json({ success: false, error: 'نیروی جایگزین فعال پیدا نشد.' });
+    const restBoundary = slot.plan.slotDurationMinutes * 2 * 60_000;
+    const conflict = await prisma.securityShiftPlanSlot.findFirst({
+      where: { id: { not: slot.id }, plan: { status: SecurityShiftPlanStatus.PUBLISHED }, OR: [{ plannedPersonnelId: replacement.id }, { replacementPersonnelId: replacement.id }], startsAt: { lt: new Date(slot.endsAt.getTime() + restBoundary) }, endsAt: { gt: new Date(slot.startsAt.getTime() - restBoundary) } }
+    });
+    if (conflict && !String(req.body.overrideReason || '').trim()) return res.status(409).json({ success: false, error: 'این جایگزینی با شیفت یا زمان استراحت نیرو تداخل دارد؛ دلیل تأیید مدیر الزامی است.', data: { conflictSlotId: conflict.id } });
+    const updated = await prisma.securityShiftPlanSlot.update({
+      where: { id: slot.id },
+      data: { replacementPersonnelId: replacement.id, coverageStatus: SecurityShiftCoverageStatus.COVERED, overrideReason: String(req.body.overrideReason || '').trim() || null }, include: slotInclude
+    });
+    res.json({ success: true, data: updated });
+  } catch (error: any) { res.status(500).json({ success: false, error: error.message || 'ثبت جایگزین ناموفق بود.' }); }
+});
+
+router.put('/shift-plan-slots/:id/emergency-uncovered', protect, securityAdmin, [body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل وضعیت اضطراری الزامی است.' });
+  const updated = await prisma.securityShiftPlanSlot.update({ where: { id: req.params.id }, data: { coverageStatus: SecurityShiftCoverageStatus.EMERGENCY_UNCOVERED, overrideReason: req.body.reason.trim() }, include: slotInclude });
+  res.json({ success: true, data: updated });
+});
+
+router.post('/shift-plan-slots/:id/temporary-coverage', protect, securityAdmin, [body('personnelId').isString().notEmpty(), body('startsAt').isISO8601(), body('endsAt').isISO8601()], async (req: AuthRequest, res: Response) => {
+  const slot = await prisma.securityShiftPlanSlot.findUnique({ where: { id: req.params.id } });
+  if (!slot) return res.status(404).json({ success: false, error: 'بازه شیفت پیدا نشد.' });
+  const startsAt = new Date(req.body.startsAt); const endsAt = new Date(req.body.endsAt);
+  if (startsAt < slot.startsAt || endsAt > slot.endsAt || startsAt >= endsAt) return res.status(400).json({ success: false, error: 'بازه پوشش موقت باید داخل زمان شیفت باشد.' });
+  const coverage = await prisma.securityShiftTemporaryCoverage.create({ data: { slotId: slot.id, personnelId: req.body.personnelId, startsAt, endsAt, note: req.body.note || null, assignedBy: req.user!.id } });
+  await prisma.securityShiftPlanSlot.update({ where: { id: slot.id }, data: { coverageStatus: SecurityShiftCoverageStatus.COVERED } });
+  res.status(201).json({ success: true, data: coverage });
+});
+
+router.get('/shift-workflow/me', protect, securityView, async (req: AuthRequest, res: Response) => {
+  const personnel = await getSelfPersonnel(req.user!.id);
+  if (!personnel) return res.status(403).json({ success: false, error: 'کاربر جزو نفرات حراست نیست.' });
+  const now = new Date();
+  const slots = await prisma.securityShiftPlanSlot.findMany({
+    where: { plan: { status: SecurityShiftPlanStatus.PUBLISHED }, OR: [{ plannedPersonnelId: personnel.id }, { replacementPersonnelId: personnel.id }], endsAt: { gt: new Date(now.getTime() - 24 * 60 * 60_000) } },
+    include: slotInclude, orderBy: { startsAt: 'asc' }, take: 20
+  });
+  const activeSession = await prisma.securityShiftSession.findFirst({ where: { status: SecurityShiftSessionStatus.ACTIVE }, include: { slot: { include: slotInclude } } });
+  const decorated = slots.map((slot) => ({ ...slot, effectivePersonnelId: effectivePersonnelId(slot), lateAlert: !slot.attendance.length && now.getTime() > slot.startsAt.getTime() + slot.plan.lateAlertMinutes * 60_000 }));
+  res.json({ success: true, data: { personnel, slots: decorated, activeSession } });
+});
+
+router.post('/shift-plan-slots/:id/attendance', protect, securityEdit, async (req: AuthRequest, res: Response) => {
+  try {
+    const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات حراست لازم است.' });
+    const slot = await prisma.securityShiftPlanSlot.findUnique({ where: { id: req.params.id }, include: { plan: true } });
+    if (!slot || effectivePersonnelId(slot) !== personnel.id) return res.status(403).json({ success: false, error: 'این شیفت به شما تخصیص ندارد.' });
+    const now = new Date(); const earliest = new Date(slot.startsAt.getTime() - slot.plan.earlyArrivalMinutes * 60_000);
+    if (now < earliest) return res.status(409).json({ success: false, error: `ثبت حضور از ${slot.plan.earlyArrivalMinutes} دقیقه پیش از شروع شیفت مجاز است.` });
+    const delayMinutes = Math.max(0, Math.floor((now.getTime() - slot.startsAt.getTime()) / 60_000));
+    const attendance = await prisma.securityShiftAttendance.upsert({ where: { slotId_personnelId: { slotId: slot.id, personnelId: personnel.id } }, update: {}, create: { slotId: slot.id, personnelId: personnel.id, arrivedAt: now, delayMinutes } });
+    res.status(201).json({ success: true, data: attendance });
+  } catch (error: any) { res.status(500).json({ success: false, error: error.message || 'ثبت حضور ناموفق بود.' }); }
+});
+
+router.post('/shift-plan-slots/:id/start', protect, securityEdit, async (req: AuthRequest, res: Response) => {
+  try {
+    const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات حراست لازم است.' });
+    const result = await prisma.$transaction(async (tx) => {
+      const slot = await tx.securityShiftPlanSlot.findUnique({ where: { id: req.params.id }, include: { attendance: true } });
+      if (!slot || effectivePersonnelId(slot) !== personnel.id) throw new Error('این شیفت به شما تخصیص ندارد.');
+      if (slot.coverageStatus === SecurityShiftCoverageStatus.NEEDS_REPLACEMENT) throw new Error('این شیفت هنوز نیازمند جایگزین است.');
+      if (new Date() < slot.startsAt) throw new Error('شروع شیفت پیش از زمان برنامه‌ریزی‌شده مجاز نیست.');
+      if (!slot.attendance.some((item) => item.personnelId === personnel.id)) throw new Error('ابتدا حضور خود را ثبت کنید.');
+      const active = await tx.securityShiftSession.findFirst({ where: { status: SecurityShiftSessionStatus.ACTIVE } });
+      if (active) throw new Error('شیفت قبلی هنوز فعال است و باید تحویل داده شود.');
+      return tx.securityShiftSession.create({ data: { slotId: slot.id, personnelId: personnel.id } });
+    }, { isolationLevel: 'Serializable' });
+    res.status(201).json({ success: true, data: result });
+  } catch (error: any) { res.status(409).json({ success: false, error: error.message || 'شروع شیفت ناموفق بود.' }); }
+});
+
+router.post('/shift-plan-slots/:id/end', protect, securityEdit, async (req: AuthRequest, res: Response) => {
+  try {
+    const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات حراست لازم است.' });
+    const result = await prisma.$transaction(async (tx) => {
+      const slot = await tx.securityShiftPlanSlot.findUnique({ where: { id: req.params.id }, include: { session: true, report: true, temporaryCoverage: true } });
+      if (!slot?.session || slot.session.status !== SecurityShiftSessionStatus.ACTIVE || slot.session.personnelId !== personnel.id) throw new Error('شیفت فعال متعلق به شما پیدا نشد.');
+      if (!slot.report) throw new Error('پیش از پایان شیفت، گزارش شیفت را ثبت کنید.');
+      const now = new Date();
+      if (now < slot.endsAt && !slot.temporaryCoverage.some((coverage) => coverage.startsAt <= now && coverage.endsAt >= slot.endsAt)) throw new Error('پایان زودهنگام فقط پس از ثبت پوشش جایگزین تا انتهای شیفت مجاز است.');
+      return tx.securityShiftSession.update({ where: { id: slot.session.id }, data: { status: SecurityShiftSessionStatus.CLOSED, endedAt: now, overtimeMinutes: Math.max(0, Math.floor((now.getTime() - slot.endsAt.getTime()) / 60_000)), closureSummary: slot.report.summary } });
+    }, { isolationLevel: 'Serializable' });
+    res.json({ success: true, data: result });
+  } catch (error: any) { res.status(409).json({ success: false, error: error.message || 'پایان شیفت ناموفق بود.' }); }
+});
+
+router.post('/shift-sessions/:id/force-close', protect, securityAdmin, [body('reason').isString().trim().notEmpty(), body('summary').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل و خلاصه بستن اجباری الزامی است.' });
+    const result = await prisma.$transaction(async (tx) => {
+      const session = await tx.securityShiftSession.findUnique({ where: { id: req.params.id }, include: { slot: true } });
+      if (!session || session.status !== SecurityShiftSessionStatus.ACTIVE) throw new Error('شیفت فعال پیدا نشد.');
+      const report = await tx.securitySupervisorReport.upsert({ where: { planSlotId: session.slotId }, update: {}, create: { reportDate: new Date(), planSlotId: session.slotId, authorId: req.user!.id, summary: req.body.summary.trim(), followUpNotes: `ثبت توسط مدیر در بستن اجباری: ${req.body.reason.trim()}` } });
+      const now = new Date();
+      return tx.securityShiftSession.update({ where: { id: session.id }, data: { status: SecurityShiftSessionStatus.FORCE_CLOSED, endedAt: now, overtimeMinutes: Math.max(0, Math.floor((now.getTime() - session.slot.endsAt.getTime()) / 60_000)), forceClosedBy: req.user!.id, forceCloseReason: req.body.reason.trim(), closureSummary: report.summary } });
+    });
+    res.json({ success: true, data: result });
+  } catch (error: any) { res.status(409).json({ success: false, error: error.message || 'بستن اجباری ناموفق بود.' }); }
+});
+
+router.put('/shift-attendance/:id/correct', protect, securityAdmin, [body('arrivedAt').isISO8601(), body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+  const attendance = await prisma.securityShiftAttendance.findUnique({ where: { id: req.params.id }, include: { slot: true } });
+  if (!attendance) return res.status(404).json({ success: false, error: 'رکورد حضور پیدا نشد.' });
+  const arrivedAt = new Date(req.body.arrivedAt);
+  const updated = await prisma.securityShiftAttendance.update({ where: { id: attendance.id }, data: { originalArrivedAt: attendance.originalArrivedAt || attendance.arrivedAt, arrivedAt, delayMinutes: Math.max(0, Math.floor((arrivedAt.getTime() - attendance.slot.startsAt.getTime()) / 60_000)), correctedAt: new Date(), correctedBy: req.user!.id, correctionReason: req.body.reason.trim() } });
+  res.json({ success: true, data: updated });
+});
+
 router.get('/shifts', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_SHIFTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
     const shifts = await prisma.shift.findMany({
@@ -1589,6 +1808,18 @@ router.put('/exceptions/:id/approve', protect, authorize('ADMIN'), requireWorksp
         }
       }
     });
+
+    if (existingRequest) {
+      const personnel = await prisma.securityPersonnel.findUnique({ where: { userId: existingRequest.employeeId } });
+      if (personnel) {
+        const leaveEnd = existingRequest.endDate || new Date(existingRequest.startDate.getTime() + 24 * 60 * 60_000);
+        const now = new Date();
+        await prisma.securityShiftPlanSlot.updateMany({
+          where: { plan: { status: SecurityShiftPlanStatus.PUBLISHED }, plannedPersonnelId: personnel.id, startsAt: { gte: now, lt: leaveEnd }, endsAt: { gt: existingRequest.startDate }, session: null },
+          data: { coverageStatus: SecurityShiftCoverageStatus.NEEDS_REPLACEMENT, leaveRequestId: existingRequest.id }
+        });
+      }
+    }
 
     res.json({
       success: true,

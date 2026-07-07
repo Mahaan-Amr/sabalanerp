@@ -719,10 +719,26 @@ _Avoid_: storing trip-specific settlement truth only on the reusable driver/vehi
 A categorized photo or file attached to a حراست gate movement, such as vehicle/plate, driver/document, بارنامه, purchase invoice, cargo, or other evidence.
 _Avoid_: storing gate photos as uncategorized blobs that cannot later be filtered or audited by evidence type
 
-**گزارش سرپرست حراست**:
-A daily or shift-level report written by the security supervisor, with author, date/shift, summary, incidents, follow-up notes, and optional attachments. It may reference vehicle movements or personnel events but is not merely a tabular export.
-The supervisor-report workspace separates ثبت گزارش سرپرست, گزارش‌های سرپرست, پیگیری‌ها, and رخدادها when follow-ups or incidents need their own operational tracking. Attachments remain inside the report unless attachment management becomes a heavy workflow of its own.
-_Avoid_: reducing گزارش سرپرست to a filterable movement table, mixing supervisor narrative responsibility with automatic operational reports, or hiding follow-up ownership inside an untrackable text field once it needs status tracking
+**گزارش شیفت حراست**:
+A closure report written for one planned security shift, with author, summary, incidents, follow-up notes, and optional attachments. Normal shift closure requires at least a minimal report, even when its summary is بدون رخداد.
+The report workspace separates ثبت گزارش شیفت, گزارش‌های شیفت, پیگیری‌ها, and رخدادها when follow-ups or incidents need their own operational tracking.
+_Avoid_: گزارش سرپرست, reducing a shift report to a filterable movement table, or hiding follow-up ownership inside an untrackable text field once it needs status tracking
+
+**چرخه شیفت حراست**:
+A continuous three-person rotation of configurable-duration slots in A→B→C order. With slot duration D, each person works D hours and rests 2D hours; D defaults to 12 hours but is fixed for a plan once one of its slots starts.
+_Avoid_: hard-coding clock boundaries, assigning each person permanently to day or night, scheduling overlapping base slots, or changing a started plan's duration
+
+**برنامه سالانه شیفت حراست**:
+A generated schedule with an anchor datetime, configurable slot duration, early-arrival and lateness thresholds, and exactly three ordered primary guards. Mid-year primary changes create a future plan revision, while other eligible security personnel remain substitutes outside the base cycle.
+_Avoid_: rewriting started slots, placing one person in multiple primary positions, or silently inserting substitutes into the A→B→C rotation
+
+**جایگزینی شیفت حراست**:
+A slot-specific exception that preserves the annual A→B→C baseline while assigning another eligible security user as the actual worker for an absent planned guard. Later planned assignments do not shift, and rest or overlap conflicts require a manager override reason.
+_Avoid_: regenerating the rotation after leave, transferring ownership of later slots to the substitute, or hiding rest violations created by coverage
+
+**تحویل شیفت حراست**:
+The controlled boundary where the outgoing guard submits the shift report and ends the active session before the incoming assigned guard starts the next one. A manager may force-close an unclosable session only with an audited reason.
+_Avoid_: starting overlapping active shift sessions, closing a normal shift without its report, or silently correcting a forgotten shift end
 
 **نفرات حراست**:
 The حراست people area covers employee attendance, shifts, exceptions, missions, and security personnel workflows. Drivers are not managed here; they belong to خودرویی because their operational role is tied to vehicle movement.

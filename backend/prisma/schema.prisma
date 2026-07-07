@@ -224,10 +224,134 @@ model SecurityPersonnel {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   attendanceRecords AttendanceRecord[]
+  primaryAPlans     SecurityShiftPlan[] @relation("SecurityShiftPlanPrimaryA")
+  primaryBPlans     SecurityShiftPlan[] @relation("SecurityShiftPlanPrimaryB")
+  primaryCPlans     SecurityShiftPlan[] @relation("SecurityShiftPlanPrimaryC")
+  plannedSlots      SecurityShiftPlanSlot[] @relation("SecurityShiftPlannedPersonnel")
+  replacementSlots  SecurityShiftPlanSlot[] @relation("SecurityShiftReplacementPersonnel")
+  shiftAttendances  SecurityShiftAttendance[]
+  shiftSessions     SecurityShiftSession[]
+  temporaryCoverage SecurityShiftTemporaryCoverage[]
   shift             Shift              @relation(fields: [shiftId], references: [id], onDelete: Cascade)
   user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("security_personnel")
+}
+
+model SecurityShiftPlan {
+  id                  String                  @id @default(cuid())
+  title               String
+  persianYear         Int
+  revision            Int                     @default(1)
+  status              SecurityShiftPlanStatus @default(DRAFT)
+  anchorAt            DateTime
+  generateUntil       DateTime
+  slotDurationMinutes Int                     @default(720)
+  earlyArrivalMinutes Int                     @default(30)
+  lateAlertMinutes    Int                     @default(15)
+  primaryAId          String
+  primaryBId          String
+  primaryCId          String
+  replacesPlanId      String?
+  createdBy           String
+  publishedBy         String?
+  publishedAt         DateTime?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  primaryA            SecurityPersonnel       @relation("SecurityShiftPlanPrimaryA", fields: [primaryAId], references: [id], onDelete: Restrict)
+  primaryB            SecurityPersonnel       @relation("SecurityShiftPlanPrimaryB", fields: [primaryBId], references: [id], onDelete: Restrict)
+  primaryC            SecurityPersonnel       @relation("SecurityShiftPlanPrimaryC", fields: [primaryCId], references: [id], onDelete: Restrict)
+  slots               SecurityShiftPlanSlot[]
+
+  @@index([persianYear, status])
+  @@index([anchorAt, generateUntil])
+  @@map("security_shift_plans")
+}
+
+model SecurityShiftPlanSlot {
+  id                     String                          @id @default(cuid())
+  planId                 String
+  sequence               Int
+  startsAt               DateTime
+  endsAt                 DateTime
+  plannedPersonnelId     String
+  replacementPersonnelId String?
+  coverageStatus         SecurityShiftCoverageStatus    @default(COVERED)
+  leaveRequestId         String?
+  overrideReason         String?
+  createdAt              DateTime                        @default(now())
+  updatedAt              DateTime                        @updatedAt
+  plan                   SecurityShiftPlan               @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plannedPersonnel       SecurityPersonnel               @relation("SecurityShiftPlannedPersonnel", fields: [plannedPersonnelId], references: [id], onDelete: Restrict)
+  replacementPersonnel   SecurityPersonnel?              @relation("SecurityShiftReplacementPersonnel", fields: [replacementPersonnelId], references: [id], onDelete: Restrict)
+  attendance             SecurityShiftAttendance[]
+  session                SecurityShiftSession?
+  temporaryCoverage      SecurityShiftTemporaryCoverage[]
+  report                 SecuritySupervisorReport?
+
+  @@unique([planId, sequence])
+  @@index([startsAt, endsAt])
+  @@index([plannedPersonnelId, startsAt])
+  @@index([replacementPersonnelId, startsAt])
+  @@index([coverageStatus, startsAt])
+  @@map("security_shift_plan_slots")
+}
+
+model SecurityShiftAttendance {
+  id                  String            @id @default(cuid())
+  slotId              String
+  personnelId         String
+  arrivedAt           DateTime          @default(now())
+  delayMinutes        Int               @default(0)
+  originalArrivedAt   DateTime?
+  correctedAt         DateTime?
+  correctedBy         String?
+  correctionReason    String?
+  createdAt           DateTime          @default(now())
+  slot                SecurityShiftPlanSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  personnel           SecurityPersonnel @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+
+  @@unique([slotId, personnelId])
+  @@index([personnelId, arrivedAt])
+  @@map("security_shift_attendance")
+}
+
+model SecurityShiftSession {
+  id                String                     @id @default(cuid())
+  slotId            String                     @unique
+  personnelId       String
+  status            SecurityShiftSessionStatus @default(ACTIVE)
+  startedAt         DateTime                   @default(now())
+  endedAt           DateTime?
+  overtimeMinutes   Int                        @default(0)
+  forceClosedBy     String?
+  forceCloseReason  String?
+  closureSummary    String?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  slot              SecurityShiftPlanSlot      @relation(fields: [slotId], references: [id], onDelete: Restrict)
+  personnel         SecurityPersonnel           @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+
+  @@index([status, startedAt])
+  @@index([personnelId, startedAt])
+  @@map("security_shift_sessions")
+}
+
+model SecurityShiftTemporaryCoverage {
+  id          String                @id @default(cuid())
+  slotId      String
+  personnelId String
+  startsAt    DateTime
+  endsAt      DateTime
+  note        String?
+  assignedBy  String
+  createdAt   DateTime              @default(now())
+  slot        SecurityShiftPlanSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  personnel   SecurityPersonnel     @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+
+  @@index([slotId, startsAt])
+  @@index([personnelId, startsAt])
+  @@map("security_shift_temporary_coverage")
 }
 
 model AttendanceRecord {
@@ -825,6 +949,7 @@ model SecuritySupervisorReport {
   id            String   @id @default(cuid())
   reportDate    DateTime
   shiftId       String?
+  planSlotId    String?  @unique
   authorId      String
   summary       String
   incidents     String?
@@ -833,6 +958,7 @@ model SecuritySupervisorReport {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   shift         Shift?   @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  planSlot      SecurityShiftPlanSlot? @relation(fields: [planSlotId], references: [id], onDelete: SetNull)
 
   @@index([reportDate])
   @@index([shiftId])
@@ -1743,6 +1869,24 @@ enum SecurityDriverQueueTurnStatus {
   RESERVED
   DISPATCHED
   OUT_OF_QUEUE
+}
+
+enum SecurityShiftPlanStatus {
+  DRAFT
+  PUBLISHED
+  SUPERSEDED
+}
+
+enum SecurityShiftCoverageStatus {
+  COVERED
+  NEEDS_REPLACEMENT
+  EMERGENCY_UNCOVERED
+}
+
+enum SecurityShiftSessionStatus {
+  ACTIVE
+  CLOSED
+  FORCE_CLOSED
 }
 
 enum CorrectionRequestCategory {

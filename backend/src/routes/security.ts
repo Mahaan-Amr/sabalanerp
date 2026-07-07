@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
 import { body, validationResult } from 'express-validator';
-import { PrismaClient, SecurityVehiclePairPhotoCategory } from '@prisma/client';
+import { PrismaClient, SecurityDriverQueueTurnStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
@@ -55,12 +55,14 @@ const photoCreateData = (req: any) => uploadedFiles(req).filter((file) => catego
 const normalizedPairInput = (body: any) => ({
   firstName: String(body.firstName || '').trim(), lastName: String(body.lastName || '').trim(),
   vehiclePlate: normalizePlate(body.vehiclePlate), vehicleType: String(body.vehicleType || '').trim(),
+  vehiclePlateKind: body.vehiclePlateKind === SecurityVehiclePlateKind.SPECIAL ? SecurityVehiclePlateKind.SPECIAL : SecurityVehiclePlateKind.STANDARD,
   phone: normalizePhone(body.phone), nationalCode: normalizeNationalCode(body.nationalCode),
   homeAddress: String(body.homeAddress || '').trim(), relativePhone: normalizePhone(body.relativePhone),
   notes: String(body.notes || '').trim() || null
 });
 const validatePairInput = (data: ReturnType<typeof normalizedPairInput>) => {
   if (Object.entries(data).some(([key, value]) => key !== 'notes' && !value)) return 'تمام اطلاعات راننده و خودرو الزامی است.';
+  if (data.vehiclePlateKind === SecurityVehiclePlateKind.STANDARD && !/^\d{2} [بجدسصطقلمنوهی] \d{3} ایران \d{2}$/.test(data.vehiclePlate)) return 'پلاک استاندارد باید با قالب 17 ط 574 ایران 63 وارد شود.';
   if (!validNationalCode(data.nationalCode)) return 'کد ملی معتبر ۱۰ رقمی وارد کنید.';
   if (!/^09\d{9}$/.test(data.phone) || !/^09\d{9}$/.test(data.relativePhone)) return 'شماره موبایل باید با قالب 09xxxxxxxxx وارد شود.';
   if (data.phone === data.relativePhone) return 'شماره موبایل بستگان باید با موبایل راننده متفاوت باشد.';
@@ -127,12 +129,12 @@ router.get('/vehicle-pairs', protect, securityView, async (req: AuthRequest, res
         } : {})
       },
       orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
-      include: { photos: true, _count: { select: { loadings: true, movements: true } } }
+      include: { photos: true, _count: { select: { loadings: true, movements: true, queueTurns: true } } }
     });
     res.json({ success: true, data: pairs.map((pair) => ({
       ...pair,
       informationComplete: pairIsComplete(pair),
-      canDelete: pair._count.loadings + pair._count.movements === 0
+      canDelete: pair._count.loadings + pair._count.movements + pair._count.queueTurns === 0
     })) });
   } catch (error) {
     console.error('Security vehicle pairs list error:', error);
@@ -184,15 +186,30 @@ router.put('/vehicle-pairs/:id', protect, securityAdmin, async (req: AuthRequest
     if (!pairIsComplete(existing)) return res.status(400).json({ success: false, error: 'ابتدا تصاویر الزامی را تکمیل کنید.' });
     const duplicate = await prisma.securityVehiclePair.findFirst({ where: { nationalCode: data.nationalCode, vehiclePlate: data.vehiclePlate, id: { not: req.params.id } } });
     if (duplicate) return res.status(409).json({ success: false, error: duplicate.isActive ? 'این راننده و خودرو قبلاً ثبت شده است.' : 'زوج مشابه غیرفعال را فعال یا ویرایش کنید.' });
-    const pair = await prisma.securityVehiclePair.update({
-      where: { id: req.params.id },
-      data: { ...data, isActive: req.body.isActive, informationGraceEndsAt: null },
-      include: { photos: true }
-    });
+    if (existing.isActive && req.body.isActive === false) {
+      const reserved = await prisma.securityDriverQueueTurn.findFirst({ where: { vehiclePairId: existing.id, status: SecurityDriverQueueTurnStatus.RESERVED } });
+      if (reserved) return res.status(409).json({ success: false, error: 'راننده در یک بارگیری رزرو شده است؛ ابتدا رزرو را در لجستیک آزاد کنید.' });
+    }
+    const pair = await prisma.$transaction(async (tx) => {
+      if (existing.isActive && req.body.isActive === false) {
+        const reservation = await tx.securityDriverQueueTurn.findFirst({ where: { vehiclePairId: existing.id, status: SecurityDriverQueueTurnStatus.RESERVED } });
+        if (reservation) throw new Error('راننده در یک بارگیری رزرو شده است؛ ابتدا رزرو را در لجستیک آزاد کنید.');
+      }
+      const updated = await tx.securityVehiclePair.update({
+        where: { id: req.params.id }, data: { ...data, isActive: req.body.isActive, informationGraceEndsAt: null }, include: { photos: true }
+      });
+      if (existing.isActive && req.body.isActive === false) {
+        await tx.securityDriverQueueTurn.updateMany({
+          where: { vehiclePairId: existing.id, status: SecurityDriverQueueTurnStatus.WAITING },
+          data: { status: SecurityDriverQueueTurnStatus.OUT_OF_QUEUE, removedAt: new Date(), removedBy: req.user!.id, removalReason: 'غیرفعال‌شدن در رجیستر' }
+        });
+      }
+      return updated;
+    }, { isolationLevel: 'Serializable' });
     res.json({ success: true, data: pair });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Update security vehicle pair error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    res.status(409).json({ success: false, error: error.message || 'ویرایش راننده و خودرو ناموفق بود.' });
   }
 });
 
@@ -229,12 +246,64 @@ router.delete('/vehicle-pairs/:id/photos/:photoId', protect, securityAdmin, asyn
 });
 
 router.delete('/vehicle-pairs/:id', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
-  const pair = await prisma.securityVehiclePair.findUnique({ where: { id: req.params.id }, include: { photos: true, _count: { select: { loadings: true, movements: true } } } });
+  const pair = await prisma.securityVehiclePair.findUnique({ where: { id: req.params.id }, include: { photos: true, _count: { select: { loadings: true, movements: true, queueTurns: true } } } });
   if (!pair) return res.status(404).json({ success: false, error: 'رکورد پیدا نشد.' });
-  if (pair._count.loadings + pair._count.movements > 0) return res.status(409).json({ success: false, error: 'رکورد استفاده‌شده قابل حذف نیست؛ آن را غیرفعال کنید.' });
+  if (pair._count.loadings + pair._count.movements + pair._count.queueTurns > 0) return res.status(409).json({ success: false, error: 'رکورد استفاده‌شده قابل حذف نیست؛ آن را غیرفعال کنید.' });
   await prisma.securityVehiclePair.delete({ where: { id: pair.id } });
   pair.photos.forEach((photo) => { try { fs.unlinkSync(path.join(vehiclePhotoDir, photo.storageName)); } catch { /* best effort */ } });
   res.json({ success: true });
+});
+
+router.get('/driver-queue', protect, securityView, async (req: AuthRequest, res: Response) => {
+  try {
+    const history = req.query.history === 'true';
+    const turns = await prisma.securityDriverQueueTurn.findMany({
+      where: history ? undefined : { status: { in: [SecurityDriverQueueTurnStatus.WAITING, SecurityDriverQueueTurnStatus.RESERVED] } },
+      include: { vehiclePair: true, loading: { select: { id: true, loadingNumber: true } } },
+      orderBy: history ? [{ enteredAt: 'desc' }, { id: 'desc' }] : [{ enteredAt: 'asc' }, { id: 'asc' }],
+      take: history ? 250 : undefined
+    });
+    res.json({ success: true, data: turns });
+  } catch (error) {
+    console.error('Driver queue list error:', error);
+    res.status(500).json({ success: false, error: 'دریافت صف رانندگان ناموفق بود.' });
+  }
+});
+
+router.post('/driver-queue', protect, securityEdit, [body('vehiclePairId').isString().notEmpty()], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'راننده و خودرو الزامی است.' });
+    const turn = await prisma.$transaction(async (tx) => {
+      const pair = await tx.securityVehiclePair.findFirst({ where: { id: req.body.vehiclePairId, isActive: true }, include: { photos: true } });
+      if (!pair || !pairIsComplete(pair)) throw new Error('فقط راننده و خودروی فعال و کامل قابل نوبت‌دهی است.');
+      const current = await tx.securityDriverQueueTurn.findFirst({ where: { vehiclePairId: pair.id, status: { in: [SecurityDriverQueueTurnStatus.WAITING, SecurityDriverQueueTurnStatus.RESERVED] } } });
+      if (current) throw new Error('این راننده و خودرو هم‌اکنون در صف است.');
+      return tx.securityDriverQueueTurn.create({ data: { vehiclePairId: pair.id, enteredBy: req.user!.id }, include: { vehiclePair: true } });
+    }, { isolationLevel: 'Serializable' });
+    res.status(201).json({ success: true, data: turn });
+  } catch (error: any) {
+    res.status(409).json({ success: false, error: error.message || 'ثبت نوبت ناموفق بود.' });
+  }
+});
+
+router.post('/driver-queue/:id/remove', protect, securityEdit, [body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل خروج از صف الزامی است.' });
+    const turn = await prisma.securityDriverQueueTurn.findUnique({ where: { id: req.params.id } });
+    if (!turn) return res.status(404).json({ success: false, error: 'نوبت پیدا نشد.' });
+    if (turn.status === SecurityDriverQueueTurnStatus.RESERVED) return res.status(409).json({ success: false, error: 'نوبت رزرو شده را ابتدا از بارگیری آزاد کنید.' });
+    if (turn.status !== SecurityDriverQueueTurnStatus.WAITING) return res.status(409).json({ success: false, error: 'فقط نوبت در انتظار قابل خروج از صف است.' });
+    const updated = await prisma.securityDriverQueueTurn.updateMany({
+      where: { id: turn.id, status: SecurityDriverQueueTurnStatus.WAITING },
+      data: { status: SecurityDriverQueueTurnStatus.OUT_OF_QUEUE, removedAt: new Date(), removedBy: req.user!.id, removalReason: req.body.reason.trim() }
+    });
+    if (updated.count !== 1) return res.status(409).json({ success: false, error: 'وضعیت نوبت هم‌زمان تغییر کرده است؛ صف را به‌روزرسانی کنید.' });
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'خروج از صف ناموفق بود.' });
+  }
 });
 
 // @desc    Get finalized logistics loadings waiting for gate exit

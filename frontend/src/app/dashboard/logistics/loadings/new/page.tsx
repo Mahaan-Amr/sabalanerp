@@ -308,7 +308,7 @@ export default function NewLoadingPage() {
           customerId: loadingDraft.customerId,
         }]);
         setNotes(loadingDraft.notes || '');
-        setDriverId(loadingDraft.vehiclePairId || loadingDraft.driverSnapshot?.vehiclePairId || '');
+        setDriverId(loadingDraft.driverQueueTurn?.id || '');
         setDriverSnapshot(loadingDraft.driverSnapshot || emptyDriver);
         setLines((loadingDraft.lines || []).map(lineFromLoadingLine));
         await loadRemaining(loadingDraft.projectId);
@@ -326,8 +326,8 @@ export default function NewLoadingPage() {
   useEffect(() => {
     if (selectedDriver) {
       setDriverSnapshot({
-        driverId: selectedDriver.id,
-        vehiclePairId: selectedDriver.id,
+        driverId: selectedDriver.vehiclePairId,
+        vehiclePairId: selectedDriver.vehiclePairId,
         firstName: selectedDriver.firstName,
         lastName: selectedDriver.lastName,
         vehiclePlate: selectedDriver.vehiclePlate,
@@ -350,7 +350,7 @@ export default function NewLoadingPage() {
       const loadingDraft = response.data.data;
       setDraft(loadingDraft);
       setNotes(loadingDraft.notes || '');
-      setDriverId(loadingDraft.vehiclePairId || loadingDraft.driverSnapshot?.vehiclePairId || '');
+      setDriverId(loadingDraft.driverQueueTurn?.id || '');
       setDriverSnapshot(loadingDraft.driverSnapshot || emptyDriver);
       setLines((loadingDraft.lines || []).map(lineFromLoadingLine));
       await loadRemaining(projectId);
@@ -788,7 +788,7 @@ export default function NewLoadingPage() {
   );
 
   const renderDriverStep = () => (
-    <ErpSection title="انتخاب راننده و خودرو" description="لجستیک فقط از راننده/خودروی فعال‌شده توسط حراست انتخاب می‌کند.">
+    <ErpSection title="انتخاب راننده و خودرو" description="لجستیک راننده را از صف نوبت‌دهی حراست انتخاب می‌کند؛ ترتیب نمایش بر اساس زمان ورود است.">
       <input
         className={inputClass}
         value={driverSearch}
@@ -802,7 +802,8 @@ export default function NewLoadingPage() {
             <button
               key={driver.id}
               type="button"
-              onClick={() => setDriverId(driver.id)}
+              onClick={() => driver.queueStatus === 'WAITING' && setDriverId(driver.id)}
+              disabled={driver.queueStatus !== 'WAITING' && !selected}
               className={`rounded-lg border bg-white p-4 text-right shadow-sm transition hover:border-[#074747]/40 dark:bg-slate-900/70 ${
                 selected ? 'border-[#074747]' : 'border-slate-200 dark:border-slate-700'
               }`}
@@ -812,12 +813,12 @@ export default function NewLoadingPage() {
                   <p className="font-semibold text-slate-900 dark:text-white">{driver.firstName} {driver.lastName}</p>
                   <p className="mt-1 text-xs leading-5 text-slate-500">{[driver.vehiclePlate, driver.vehicleType, driver.phone, driver.nationalCode].filter(Boolean).join(' · ')}</p>
                 </div>
-                <ErpBadge tone={selected ? 'success' : 'neutral'}>{selected ? 'انتخاب شده' : 'فعال حراست'}</ErpBadge>
+                <div className="flex flex-col items-end gap-1"><ErpBadge tone={selected ? 'success' : driver.queueStatus === 'RESERVED' ? 'warning' : 'neutral'}>{selected ? 'انتخاب شده' : driver.queueStatus === 'RESERVED' ? 'رزرو شده' : `نوبت ${driver.queuePosition.toLocaleString('fa-IR')}`}</ErpBadge><span className="text-xs text-slate-500">{new Date(driver.enteredAt).toLocaleString('fa-IR')}</span></div>
               </div>
             </button>
           );
         })}
-        {!filteredDrivers.length && <ErpEmptyState icon={FaUsers} title="راننده فعال پیدا نشد" />}
+        {!filteredDrivers.length && <ErpEmptyState icon={FaUsers} title="راننده حاضر در صف پیدا نشد" />}
       </div>
       {driverId && (
         <ErpCard className="mt-4 p-4" tone="info">

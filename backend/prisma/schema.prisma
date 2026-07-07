@@ -703,6 +703,7 @@ model SecurityVehiclePair {
   firstName     String
   lastName      String
   vehiclePlate  String
+  vehiclePlateKind SecurityVehiclePlateKind @default(STANDARD)
   vehicleType   String
   phone         String
   nationalCode  String
@@ -718,10 +719,36 @@ model SecurityVehiclePair {
   loadings      LogisticsLoading[]
   movements     SecurityVehicleMovement[]
   photos        SecurityVehiclePairPhoto[]
+  queueTurns    SecurityDriverQueueTurn[]
 
   @@index([createdBy])
   @@index([isActive])
   @@map("security_vehicle_pairs")
+}
+
+model SecurityDriverQueueTurn {
+  id               String                        @id @default(cuid())
+  vehiclePairId    String
+  status           SecurityDriverQueueTurnStatus @default(WAITING)
+  enteredAt        DateTime                      @default(now())
+  enteredBy        String
+  reservedAt       DateTime?
+  reservedBy       String?
+  reservedPosition Int?
+  loadingId        String?                       @unique
+  dispatchedAt     DateTime?
+  dispatchedBy     String?
+  removedAt        DateTime?
+  removedBy        String?
+  removalReason    String?
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+  vehiclePair      SecurityVehiclePair           @relation(fields: [vehiclePairId], references: [id], onDelete: Restrict)
+  loading          LogisticsLoading?             @relation(fields: [loadingId], references: [id], onDelete: SetNull)
+
+  @@index([status, enteredAt])
+  @@index([vehiclePairId, status])
+  @@map("security_driver_queue_turns")
 }
 
 model SecurityVehiclePairPhoto {
@@ -839,6 +866,7 @@ model LogisticsLoading {
   lines                    LogisticsLoadingLine[]
   corrections              LogisticsLoadingCorrection[]
   securityVehicleMovements SecurityVehicleMovement[]
+  driverQueueTurn          SecurityDriverQueueTurn?
 
   @@index([customerId])
   @@index([projectId])
@@ -1703,6 +1731,18 @@ enum SecurityVehiclePairPhotoCategory {
   DRIVER_LICENSE
   VEHICLE_CARD
   DRIVER_PHOTO
+}
+
+enum SecurityVehiclePlateKind {
+  STANDARD
+  SPECIAL
+}
+
+enum SecurityDriverQueueTurnStatus {
+  WAITING
+  RESERVED
+  DISPATCHED
+  OUT_OF_QUEUE
 }
 
 enum CorrectionRequestCategory {

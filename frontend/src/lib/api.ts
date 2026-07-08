@@ -526,6 +526,9 @@ export const logisticsAPI = {
   deleteLoading: (id: string) => api.delete(`/logistics/loadings/${id}`),
   finalizeLoading: (id: string) => api.post(`/logistics/loadings/${id}/finalize`),
   cancelLoading: (id: string, reason: string) => api.post(`/logistics/loadings/${id}/cancel`, { reason }),
+  getDriverRequest: (id: string) => api.get(`/logistics/loadings/${id}/driver-request`),
+  requestDriver: (id: string) => api.post(`/logistics/loadings/${id}/driver-request`),
+  cancelDriverRequest: (id: string) => api.post(`/logistics/loadings/${id}/driver-request/cancel`),
   createCorrection: (id: string, data: any) => api.post(`/logistics/loadings/${id}/corrections`, data),
   getDrivers: (params?: any) => api.get('/logistics/drivers', { params }),
 };
@@ -731,6 +734,8 @@ export const securityAPI = {
   getDriverQueue: (history = false) => api.get('/security/driver-queue', { params: { history } }),
   enqueueDriver: (vehiclePairId: string) => api.post('/security/driver-queue', { vehiclePairId }),
   removeDriverFromQueue: (id: string, reason: string) => api.post(`/security/driver-queue/${id}/remove`, { reason }),
+  getLoadingDriverRequests: () => api.get('/security/loading-driver-requests'),
+  assignLoadingDriverRequest: (id: string, queueTurnId: string) => api.post(`/security/loading-driver-requests/${id}/assign`, { queueTurnId }),
   getVehicleMovements: (params?: any) => api.get('/security/vehicle-movements', { params }),
   getReadyExitLoadings: () => api.get('/security/vehicle-movements/ready-exit'),
   createInboundVehicleMovement: (data: any) => api.post('/security/vehicle-movements/inbound', data),

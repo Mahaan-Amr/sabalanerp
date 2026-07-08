@@ -49,6 +49,9 @@ model User {
   updatedCrmCustomers       CrmCustomer[]         @relation("CrmCustomerUpdatedBy")
   logisticsDrivers          LogisticsDriver[]     @relation("LogisticsDriverCreatedBy")
   securityVehiclePairs      SecurityVehiclePair[] @relation("SecurityVehiclePairCreatedBy")
+  requestedLoadingDrivers   LogisticsDriverRequest[] @relation("LogisticsDriverRequestRequestedBy")
+  fulfilledLoadingDrivers   LogisticsDriverRequest[] @relation("LogisticsDriverRequestFulfilledBy")
+  cancelledLoadingDrivers   LogisticsDriverRequest[] @relation("LogisticsDriverRequestCancelledBy")
 
   @@map("users")
 }
@@ -862,6 +865,7 @@ model SecurityDriverQueueTurn {
   reservedBy       String?
   reservedPosition Int?
   loadingId        String?                       @unique
+  driverRequestId  String?                       @unique
   dispatchedAt     DateTime?
   dispatchedBy     String?
   removedAt        DateTime?
@@ -871,9 +875,11 @@ model SecurityDriverQueueTurn {
   updatedAt        DateTime                      @updatedAt
   vehiclePair      SecurityVehiclePair           @relation(fields: [vehiclePairId], references: [id], onDelete: Restrict)
   loading          LogisticsLoading?             @relation(fields: [loadingId], references: [id], onDelete: SetNull)
+  driverRequest    LogisticsDriverRequest?       @relation(fields: [driverRequestId], references: [id], onDelete: SetNull)
 
   @@index([status, enteredAt])
   @@index([vehiclePairId, status])
+  @@index([driverRequestId])
   @@map("security_driver_queue_turns")
 }
 
@@ -995,6 +1001,7 @@ model LogisticsLoading {
   corrections              LogisticsLoadingCorrection[]
   securityVehicleMovements SecurityVehicleMovement[]
   driverQueueTurn          SecurityDriverQueueTurn?
+  driverRequests           LogisticsDriverRequest[]
 
   @@index([customerId])
   @@index([projectId])
@@ -1003,6 +1010,32 @@ model LogisticsLoading {
   @@index([vehiclePairId])
   @@index([loadingDate])
   @@map("logistics_loadings")
+}
+
+model LogisticsDriverRequest {
+  id              String                      @id @default(cuid())
+  loadingId       String
+  status          LogisticsDriverRequestStatus @default(PENDING_SECURITY)
+  contextSnapshot Json?
+  requestedBy     String
+  requestedAt     DateTime                    @default(now())
+  fulfilledBy     String?
+  fulfilledAt     DateTime?
+  cancelledBy     String?
+  cancelledAt     DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+  loading         LogisticsLoading            @relation(fields: [loadingId], references: [id], onDelete: Cascade)
+  requester       User                        @relation("LogisticsDriverRequestRequestedBy", fields: [requestedBy], references: [id], onDelete: Cascade)
+  fulfiller       User?                       @relation("LogisticsDriverRequestFulfilledBy", fields: [fulfilledBy], references: [id], onDelete: SetNull)
+  canceller       User?                       @relation("LogisticsDriverRequestCancelledBy", fields: [cancelledBy], references: [id], onDelete: SetNull)
+  queueTurn       SecurityDriverQueueTurn?
+
+  @@index([loadingId, status])
+  @@index([status, requestedAt])
+  @@index([requestedBy])
+  @@map("logistics_driver_requests")
 }
 
 model LogisticsLoadingLine {
@@ -1871,6 +1904,13 @@ enum SecurityDriverQueueTurnStatus {
   RESERVED
   DISPATCHED
   OUT_OF_QUEUE
+}
+
+enum LogisticsDriverRequestStatus {
+  PENDING_SECURITY
+  DRIVER_ENTERED
+  CANCELLED
+  COMPLETED
 }
 
 enum SecurityShiftPlanStatus {

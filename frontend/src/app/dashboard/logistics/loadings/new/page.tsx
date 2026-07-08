@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   FaArrowLeft,
@@ -31,7 +31,7 @@ import {
 import { logisticsAPI } from '@/lib/api';
 import { inputClass, labelClass, numberFa, unitLabels } from '../../logistics-ui';
 
-type WizardStep = 'customer' | 'project' | 'contracts' | 'quantities' | 'driver' | 'review';
+type WizardStep = 'customer' | 'project' | 'contracts' | 'driver' | 'quantities' | 'review';
 type QuantityMode = 'linear' | 'direct';
 
 type DraftLine = {
@@ -62,8 +62,8 @@ const steps: Array<{ id: WizardStep; label: string }> = [
   { id: 'customer', label: 'مشتری' },
   { id: 'project', label: 'پروژه' },
   { id: 'contracts', label: 'قراردادها' },
-  { id: 'quantities', label: 'مقدار' },
   { id: 'driver', label: 'راننده' },
+  { id: 'quantities', label: 'مقدار' },
   { id: 'review', label: 'بازبینی' },
 ];
 
@@ -162,7 +162,8 @@ const lineFromLoadingLine = (line: any): DraftLine => {
   };
 };
 
-const normalizeSearch = (value: string) => value.trim().toLowerCase();
+const activeDriverRequestFrom = (loading: any) => (loading?.driverRequests || []).find((request: any) => ['PENDING_SECURITY', 'DRIVER_ENTERED'].includes(request.status)) || null;
+const requestOverrideUnset = Symbol('requestOverrideUnset');
 
 export default function NewLoadingPage() {
   const router = useRouter();
@@ -179,10 +180,9 @@ export default function NewLoadingPage() {
   const [expandedContracts, setExpandedContracts] = useState<Record<string, boolean>>({});
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [lines, setLines] = useState<DraftLine[]>([]);
-  const [drivers, setDrivers] = useState<any[]>([]);
-  const [driverSearch, setDriverSearch] = useState('');
   const [driverId, setDriverId] = useState('');
   const [driverSnapshot, setDriverSnapshot] = useState<any>(emptyDriver);
+  const [driverRequest, setDriverRequest] = useState<any>(null);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -190,7 +190,6 @@ export default function NewLoadingPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
-  const selectedDriver = useMemo(() => drivers.find((driver) => driver.id === driverId), [drivers, driverId]);
   const selectedSourceIds = useMemo(() => new Set(lines.map((line) => line.source.contractItemId)), [lines]);
 
   const contracts = useMemo(() => {
@@ -231,19 +230,6 @@ export default function NewLoadingPage() {
     return Array.from(groups.values());
   }, [lines]);
 
-  const filteredDrivers = useMemo(() => {
-    const search = normalizeSearch(driverSearch);
-    if (!search) return drivers;
-    return drivers.filter((driver) => [
-      driver.firstName,
-      driver.lastName,
-      driver.phone,
-      driver.nationalCode,
-      driver.vehiclePlate,
-      driver.vehicleType,
-    ].some((value) => String(value || '').toLowerCase().includes(search)));
-  }, [drivers, driverSearch]);
-
   const loadCustomers = async () => {
     setError('');
     try {
@@ -270,20 +256,47 @@ export default function NewLoadingPage() {
     }
   };
 
-  const loadDrivers = async () => {
-    const response = await logisticsAPI.getDrivers();
-    if (response.data.success) setDrivers(response.data.data);
-  };
-
   const loadRemaining = async (projectId: string) => {
     const response = await logisticsAPI.getRemaining(projectId);
     if (response.data.success) setRemaining(response.data.data);
   };
 
+  const syncDriverState = (loadingDraft: any, requestOverride: any = requestOverrideUnset) => {
+    const request = requestOverride === requestOverrideUnset ? activeDriverRequestFrom(loadingDraft) : requestOverride;
+    setDriverRequest(request || null);
+    const queueTurn = request?.queueTurn || loadingDraft?.driverQueueTurn;
+    setDriverId(queueTurn?.id || '');
+    setDriverSnapshot(loadingDraft?.driverSnapshot || request?.loading?.driverSnapshot || emptyDriver);
+  };
+
+  const refreshDriverRequest = useCallback(async () => {
+    if (!draft?.id) return;
+    try {
+      const response = await logisticsAPI.getDriverRequest(draft.id);
+      if (response.data.success) {
+        const request = response.data.data;
+        setDriverRequest(request || null);
+        setDriverId(request?.queueTurn?.id || '');
+        setDriverSnapshot(request?.loading?.driverSnapshot || emptyDriver);
+        if (request?.loading?.driverSnapshot) {
+          setDraft((current: any) => current ? { ...current, driverSnapshot: request.loading.driverSnapshot, vehiclePairId: request.loading.vehiclePairId } : current);
+        }
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'به‌روزرسانی درخواست راننده ناموفق بود.');
+    }
+  }, [draft?.id]);
+
   useEffect(() => {
     loadCustomers();
-    loadDrivers();
   }, []);
+
+  useEffect(() => {
+    if (!draft?.id || step !== 'driver') return undefined;
+    void refreshDriverRequest();
+    const handle = window.setInterval(() => { void refreshDriverRequest(); }, 5000);
+    return () => window.clearInterval(handle);
+  }, [draft?.id, step, refreshDriverRequest]);
 
   useEffect(() => {
     if (!draftId) return;
@@ -308,12 +321,11 @@ export default function NewLoadingPage() {
           customerId: loadingDraft.customerId,
         }]);
         setNotes(loadingDraft.notes || '');
-        setDriverId(loadingDraft.driverQueueTurn?.id || '');
-        setDriverSnapshot(loadingDraft.driverSnapshot || emptyDriver);
+        syncDriverState(loadingDraft);
         setLines((loadingDraft.lines || []).map(lineFromLoadingLine));
         await loadRemaining(loadingDraft.projectId);
         setMessage('پیش‌نویس بارگیری برای ویرایش باز شد.');
-        setStep((loadingDraft.lines || []).length ? 'quantities' : 'contracts');
+        setStep((loadingDraft.lines || []).length ? (loadingDraft.vehiclePairId ? 'quantities' : 'driver') : 'contracts');
       } catch (err: any) {
         setError(err.response?.data?.error || 'دریافت پیش‌نویس ناموفق بود.');
       } finally {
@@ -322,23 +334,6 @@ export default function NewLoadingPage() {
     };
     loadDraft();
   }, [draftId]);
-
-  useEffect(() => {
-    if (selectedDriver) {
-      setDriverSnapshot({
-        driverId: selectedDriver.vehiclePairId,
-        vehiclePairId: selectedDriver.vehiclePairId,
-        firstName: selectedDriver.firstName,
-        lastName: selectedDriver.lastName,
-        vehiclePlate: selectedDriver.vehiclePlate,
-        vehicleType: selectedDriver.vehicleType,
-        phone: selectedDriver.phone,
-        nationalCode: selectedDriver.nationalCode,
-      });
-    } else if (!driverId) {
-      setDriverSnapshot(emptyDriver);
-    }
-  }, [selectedDriver, driverId]);
 
   const selectProject = async (projectId: string, forceNew = false) => {
     setError('');
@@ -350,8 +345,7 @@ export default function NewLoadingPage() {
       const loadingDraft = response.data.data;
       setDraft(loadingDraft);
       setNotes(loadingDraft.notes || '');
-      setDriverId(loadingDraft.driverQueueTurn?.id || '');
-      setDriverSnapshot(loadingDraft.driverSnapshot || emptyDriver);
+      syncDriverState(loadingDraft);
       setLines((loadingDraft.lines || []).map(lineFromLoadingLine));
       await loadRemaining(projectId);
       setMessage(response.data.resumed ? 'پیش‌نویس فعال این پروژه ادامه داده شد.' : 'پیش‌نویس بارگیری ساخته شد.');
@@ -404,8 +398,6 @@ export default function NewLoadingPage() {
   const buildPayload = () => ({
     projectId: draft?.projectId,
     notes,
-    driverId: selectedDriver ? selectedDriver.id : null,
-    driverSnapshot,
     lines: lines.map((line) => ({
       sourceContractItemId: line.source.contractItemId,
       unit: line.source.unit,
@@ -446,13 +438,52 @@ export default function NewLoadingPage() {
     return false;
   };
 
+  const requestDriverFromSecurity = async () => {
+    if (!draft?.id) return;
+    const saved = await saveDraft();
+    if (!saved) return;
+    setSaving(true);
+    setError('');
+    try {
+      const response = await logisticsAPI.requestDriver(draft.id);
+      if (response.data.success) {
+        setDriverRequest(response.data.data);
+        setMessage('درخواست راننده برای حراست ثبت شد.');
+        await refreshDriverRequest();
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'ثبت درخواست راننده ناموفق بود.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cancelDriverRequest = async () => {
+    if (!draft?.id || !driverRequest) return;
+    setSaving(true);
+    setError('');
+    try {
+      const response = await logisticsAPI.cancelDriverRequest(draft.id);
+      if (response.data.success) {
+        const loadingDraft = response.data.data;
+        setDraft(loadingDraft);
+        syncDriverState(loadingDraft, null);
+        setMessage('درخواست راننده لغو شد.');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'لغو درخواست راننده ناموفق بود.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const hasValidLineQuantities = lines.length > 0 && lines.every((line) => calculateLineQuantity(line) > 0);
   const blockers = useMemo(() => {
     const items: string[] = [];
     if (!draft?.projectId) items.push('پروژه انتخاب نشده است.');
     if (!lines.length) items.push('حداقل یک ردیف بارگیری لازم است.');
     if (lines.some((line) => calculateLineQuantity(line) <= 0)) items.push('مقدار همه ردیف‌ها باید بیشتر از صفر باشد.');
-    if (!driverId) items.push('راننده و خودروی فعال حراست انتخاب نشده است.');
+    if (!driverId) items.push('راننده هنوز توسط حراست برای بارگیری وارد نشده است.');
     return items;
   }, [draft, lines, driverId]);
 
@@ -460,8 +491,8 @@ export default function NewLoadingPage() {
     if (target === 'customer') return true;
     if (target === 'project') return Boolean(selectedCustomer);
     if (target === 'contracts') return Boolean(draft?.id);
-    if (target === 'quantities') return Boolean(draft?.id && lines.length);
-    if (target === 'driver') return Boolean(draft?.id && hasValidLineQuantities);
+    if (target === 'driver') return Boolean(draft?.id && lines.length);
+    if (target === 'quantities') return Boolean(draft?.id && lines.length && driverId);
     return Boolean(draft?.id);
   };
 
@@ -498,7 +529,7 @@ export default function NewLoadingPage() {
       return;
     }
     if (step === 'driver' && !driverId) {
-      setError('راننده و خودروی فعال حراست را انتخاب کنید.');
+      setError('منتظر ورود راننده توسط حراست بمانید.');
       return;
     }
     setError('');
@@ -787,53 +818,62 @@ export default function NewLoadingPage() {
     </ErpSection>
   );
 
-  const renderDriverStep = () => (
-    <ErpSection title="انتخاب راننده و خودرو" description="لجستیک راننده را از صف نوبت‌دهی حراست انتخاب می‌کند؛ ترتیب نمایش بر اساس زمان ورود است.">
-      <input
-        className={inputClass}
-        value={driverSearch}
-        onChange={(event) => setDriverSearch(event.target.value)}
-        placeholder="جستجوی راننده، تلفن، کد ملی، پلاک یا نوع خودرو"
-      />
-      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {filteredDrivers.map((driver) => {
-          const selected = driver.id === driverId;
-          return (
-            <button
-              key={driver.id}
-              type="button"
-              onClick={() => driver.queueStatus === 'WAITING' && setDriverId(driver.id)}
-              disabled={driver.queueStatus !== 'WAITING' && !selected}
-              className={`rounded-lg border bg-white p-4 text-right shadow-sm transition hover:border-[#074747]/40 dark:bg-slate-900/70 ${
-                selected ? 'border-[#074747]' : 'border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-slate-900 dark:text-white">{driver.firstName} {driver.lastName}</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-500">{[driver.vehiclePlate, driver.vehicleType, driver.phone, driver.nationalCode].filter(Boolean).join(' · ')}</p>
-                </div>
-                <div className="flex flex-col items-end gap-1"><ErpBadge tone={selected ? 'success' : driver.queueStatus === 'RESERVED' ? 'warning' : 'neutral'}>{selected ? 'انتخاب شده' : driver.queueStatus === 'RESERVED' ? 'رزرو شده' : `نوبت ${driver.queuePosition.toLocaleString('fa-IR')}`}</ErpBadge><span className="text-xs text-slate-500">{new Date(driver.enteredAt).toLocaleString('fa-IR')}</span></div>
-              </div>
-            </button>
-          );
-        })}
-        {!filteredDrivers.length && <ErpEmptyState icon={FaUsers} title="راننده حاضر در صف پیدا نشد" />}
-      </div>
-      {driverId && (
-        <ErpCard className="mt-4 p-4" tone="info">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            {driverFields.map(([field, label]) => (
-              <div key={field}>
-                <p className="text-xs text-slate-500">{label}</p>
-                <p className="mt-1 font-semibold text-slate-900 dark:text-white">{driverSnapshot[field] || '—'}</p>
-              </div>
-            ))}
+  const renderDriverStep = () => {
+    const requestStatus = driverRequest?.status;
+    const waiting = requestStatus === 'PENDING_SECURITY';
+    const entered = requestStatus === 'DRIVER_ENTERED' || Boolean(driverId);
+
+    return (
+      <ErpSection title="درخواست راننده از حراست" description="لجستیک فقط درخواست می‌دهد؛ حراست از صف نوبت‌دهی راننده را با «ورود برای بارگیری» وارد می‌کند. این بخش هر ۵ ثانیه به‌روزرسانی می‌شود.">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/70">
+          <div>
+            <p className="font-semibold text-slate-900 dark:text-white">
+              {entered ? 'راننده توسط حراست وارد شد' : waiting ? 'در انتظار حراست' : 'درخواست راننده هنوز ثبت نشده است'}
+            </p>
+            <p className="mt-1 text-sm text-slate-500">
+              {driverRequest?.requestedAt ? `زمان درخواست: ${new Date(driverRequest.requestedAt).toLocaleString('fa-IR')}` : 'پس از انتخاب قراردادها، درخواست را برای حراست ارسال کنید.'}
+            </p>
           </div>
-        </ErpCard>
-      )}
-    </ErpSection>
-  );
+          <div className="flex flex-wrap gap-2">
+            <ErpButton label="به‌روزرسانی" icon={FaSearch} variant="soft" onClick={() => { void refreshDriverRequest(); }} />
+            {!driverRequest && <ErpButton label="درخواست راننده از حراست" icon={FaTruck} onClick={() => { void requestDriverFromSecurity(); }} disabled={saving} />}
+            {driverRequest && !entered && <ErpButton label="لغو درخواست" icon={FaTrash} tone="danger" variant="soft" onClick={() => { void cancelDriverRequest(); }} disabled={saving} />}
+            {entered && draft?.status === 'DRAFT' && <ErpButton label="لغو درخواست و آزادسازی راننده" icon={FaTrash} tone="danger" variant="soft" onClick={() => { void cancelDriverRequest(); }} disabled={saving} />}
+          </div>
+        </div>
+
+        {driverRequest && (
+          <ErpCard className="mt-4 p-4" tone={entered ? 'success' : 'warning'}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold">{entered ? 'وضعیت: راننده وارد شد' : 'وضعیت: در انتظار حراست'}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {driverRequest.requester ? `درخواست‌دهنده: ${driverRequest.requester.firstName || ''} ${driverRequest.requester.lastName || driverRequest.requester.username || ''}` : ''}
+                  {driverRequest.fulfilledAt ? ` · ورود: ${new Date(driverRequest.fulfilledAt).toLocaleString('fa-IR')}` : ''}
+                </p>
+              </div>
+              <ErpBadge tone={entered ? 'success' : 'warning'}>{entered ? 'راننده وارد شد' : 'در انتظار حراست'}</ErpBadge>
+            </div>
+          </ErpCard>
+        )}
+
+        {entered && (
+          <ErpCard className="mt-4 p-4" tone="info">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              {driverFields.map(([field, label]) => (
+                <div key={field}>
+                  <p className="text-xs text-slate-500">{label}</p>
+                  <p className="mt-1 font-semibold text-slate-900 dark:text-white">{driverSnapshot[field] || '—'}</p>
+                </div>
+              ))}
+            </div>
+          </ErpCard>
+        )}
+
+        {!entered && <ErpEmptyState icon={FaTruck} title="منتظر ورود راننده توسط حراست" description="پس از کلیک حراست روی «ورود برای بارگیری»، راننده اینجا نمایش داده می‌شود و می‌توانید به مرحله مقدار بروید." />}
+      </ErpSection>
+    );
+  };
 
   const renderReviewStep = () => (
     <ErpSection title="بازبینی و نهایی‌سازی">

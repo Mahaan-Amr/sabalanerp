@@ -1,6 +1,6 @@
 import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
-import { Prisma, PrismaClient, SecurityDriverQueueTurnStatus } from '@prisma/client';
+import { LogisticsDriverRequestStatus, Prisma, PrismaClient, SecurityDriverQueueTurnStatus } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
@@ -372,36 +372,51 @@ const validateDriverSnapshot = (snapshot: any) => {
   return required.every((field) => String(snapshot?.[field] || '').trim().length > 0);
 };
 
-const reserveQueueTurn = async (tx: Prisma.TransactionClient, queueTurnId: string | null | undefined, loadingId: string, actorId: string) => {
-  const previous = await tx.securityDriverQueueTurn.findFirst({ where: { loadingId } });
-  if (previous && previous.id !== queueTurnId) {
-    await tx.securityDriverQueueTurn.update({
-      where: { id: previous.id },
-      data: { status: SecurityDriverQueueTurnStatus.WAITING, loadingId: null, reservedAt: null, reservedBy: null, reservedPosition: null }
-    });
-  }
-  if (!queueTurnId) return null;
-  const turn = await tx.securityDriverQueueTurn.findUnique({ where: { id: queueTurnId }, include: { vehiclePair: { include: { photos: true } } } });
-  if (!turn || !turn.vehiclePair.isActive) throw new Error('Selected driver queue turn is not active');
-  if (turn.status === SecurityDriverQueueTurnStatus.RESERVED && turn.loadingId !== loadingId) throw new Error('Selected driver is reserved for another loading');
-  if (turn.status !== SecurityDriverQueueTurnStatus.WAITING && turn.status !== SecurityDriverQueueTurnStatus.RESERVED) throw new Error('Selected driver is no longer waiting in the queue');
-  const complete = Boolean(turn.vehiclePair.homeAddress && turn.vehiclePair.relativePhone && ['DRIVER_LICENSE', 'VEHICLE_CARD', 'DRIVER_PHOTO'].every((category) => turn.vehiclePair.photos.some((photo) => photo.category === category)));
-  if (!complete && (!turn.vehiclePair.informationGraceEndsAt || turn.vehiclePair.informationGraceEndsAt <= new Date())) throw new Error('Selected driver registry information must be completed by security');
-  const position = await tx.securityDriverQueueTurn.count({ where: { status: SecurityDriverQueueTurnStatus.WAITING, enteredAt: { lte: turn.enteredAt } } });
-  if (turn.status === SecurityDriverQueueTurnStatus.WAITING) {
-    const claimed = await tx.securityDriverQueueTurn.updateMany({
-      where: { id: turn.id, status: SecurityDriverQueueTurnStatus.WAITING },
-      data: { status: SecurityDriverQueueTurnStatus.RESERVED, loadingId, reservedAt: new Date(), reservedBy: actorId, reservedPosition: Math.max(position, 1) }
-    });
-    if (claimed.count !== 1) throw new Error('Selected driver was reserved or removed by another user');
-  }
-  return turn.vehiclePair;
-};
-
 const releaseQueueTurn = async (tx: Prisma.TransactionClient, loadingId: string) => {
   await tx.securityDriverQueueTurn.updateMany({
     where: { loadingId, status: SecurityDriverQueueTurnStatus.RESERVED },
-    data: { status: SecurityDriverQueueTurnStatus.WAITING, loadingId: null, reservedAt: null, reservedBy: null, reservedPosition: null }
+    data: { status: SecurityDriverQueueTurnStatus.WAITING, loadingId: null, driverRequestId: null, reservedAt: null, reservedBy: null, reservedPosition: null }
+  });
+};
+
+const activeDriverRequestWhere = (loadingId: string) => ({
+  loadingId,
+  status: { in: [LogisticsDriverRequestStatus.PENDING_SECURITY, LogisticsDriverRequestStatus.DRIVER_ENTERED] }
+});
+
+const buildDriverRequestContext = (loading: any) => ({
+  loadingId: loading.id,
+  loadingNumber: loading.loadingNumber,
+  customerName: `${loading.customer?.firstName || ''} ${loading.customer?.lastName || ''}`.trim() || loading.customer?.companyName || '',
+  projectName: loading.project?.projectName || loading.project?.address || '',
+  projectAddress: loading.project?.address || '',
+  contractNumbers: Array.from(new Set((loading.lines || []).map((line: any) => line.sourceContract?.contractNumber || line.sourceSnapshot?.contractNumber).filter(Boolean))),
+  cargoSummary: (loading.lines || []).map((line: any) => {
+    const snapshot = line.productSnapshot || {};
+    return {
+      productName: snapshot.name || line.product?.name || '',
+      productType: snapshot.productType || line.product?.type || '',
+      unit: line.unit,
+      dimensions: {
+        width: snapshot.width || null,
+        thickness: snapshot.thickness || null,
+        length: snapshot.length || null,
+        lengthUnit: snapshot.lengthUnit || null
+      },
+      notes: line.notes || snapshot.description || null
+    };
+  })
+});
+
+const cancelActiveDriverRequest = async (tx: Prisma.TransactionClient, loadingId: string, actorId: string | null = null) => {
+  await releaseQueueTurn(tx, loadingId);
+  await tx.logisticsLoading.update({
+    where: { id: loadingId },
+    data: { vehiclePairId: null, driverSnapshot: Prisma.JsonNull }
+  });
+  await tx.logisticsDriverRequest.updateMany({
+    where: activeDriverRequestWhere(loadingId),
+    data: { status: LogisticsDriverRequestStatus.CANCELLED, cancelledAt: new Date(), cancelledBy: actorId }
   });
 };
 
@@ -496,6 +511,14 @@ const loadLoading = (id: string) => {
       driver: true,
       vehiclePair: true,
       driverQueueTurn: true,
+      driverRequests: {
+        include: {
+          requester: { select: { id: true, firstName: true, lastName: true, username: true } },
+          fulfiller: { select: { id: true, firstName: true, lastName: true, username: true } },
+          queueTurn: { include: { vehiclePair: true } }
+        },
+        orderBy: { requestedAt: 'desc' }
+      },
       lines: {
         include: {
           product: true,
@@ -826,13 +849,8 @@ router.post('/loadings', canEdit, canCreateLoadings, [
     }
 
     const loading = await prisma.$transaction(async (tx) => {
-      const created = await tx.logisticsLoading.create({
+      return tx.logisticsLoading.create({
         data: { loadingNumber, customerId: project.customerId, projectId: project.id, loadingDate: req.body.loadingDate ? new Date(req.body.loadingDate) : new Date(), notes: req.body.notes || null, createdBy: req.user.id, lines: { create: lineCreates } }
-      });
-      const driver = await reserveQueueTurn(tx, req.body.driverId, created.id, req.user.id);
-      return tx.logisticsLoading.update({
-        where: { id: created.id },
-        data: { vehiclePairId: driver?.id || null, driverSnapshot: driver ? buildDriverSnapshot(driver) : Prisma.JsonNull }
       });
     }, { isolationLevel: 'Serializable' });
 
@@ -854,6 +872,69 @@ router.get('/loadings/:id', canView, canViewLoadings, async (req: any, res: Resp
   }
 });
 
+router.get('/loadings/:id/driver-request', canView, canViewLoadings, async (req: any, res: Response) => {
+  try {
+    const request = await prisma.logisticsDriverRequest.findFirst({
+      where: activeDriverRequestWhere(req.params.id),
+      include: {
+        requester: { select: { id: true, firstName: true, lastName: true, username: true } },
+        fulfiller: { select: { id: true, firstName: true, lastName: true, username: true } },
+        queueTurn: { include: { vehiclePair: true } },
+        loading: { select: { id: true, loadingNumber: true, vehiclePairId: true, driverSnapshot: true } }
+      },
+      orderBy: { requestedAt: 'desc' }
+    });
+    res.json({ success: true, data: request });
+  } catch (error) {
+    console.error('Get driver request error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+router.post('/loadings/:id/driver-request', canEdit, canEditLoadings, async (req: any, res: Response) => {
+  try {
+    const loading = await loadLoading(req.params.id);
+    if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
+    if (loading.status !== EDITABLE_STATUS) return res.status(400).json({ success: false, error: 'Only draft loadings can request a driver' });
+    if (!loading.lines.length) return res.status(400).json({ success: false, error: 'Select contract rows before requesting a driver' });
+
+    const existing = await prisma.logisticsDriverRequest.findFirst({
+      where: activeDriverRequestWhere(loading.id),
+      include: { queueTurn: { include: { vehiclePair: true } }, requester: { select: { id: true, firstName: true, lastName: true, username: true } }, fulfiller: { select: { id: true, firstName: true, lastName: true, username: true } } },
+      orderBy: { requestedAt: 'desc' }
+    });
+    if (existing) return res.json({ success: true, data: existing });
+
+    const request = await prisma.logisticsDriverRequest.create({
+      data: {
+        loadingId: loading.id,
+        requestedBy: req.user.id,
+        contextSnapshot: buildDriverRequestContext(loading) as Prisma.InputJsonValue
+      },
+      include: { requester: { select: { id: true, firstName: true, lastName: true, username: true } }, fulfiller: { select: { id: true, firstName: true, lastName: true, username: true } }, queueTurn: { include: { vehiclePair: true } } }
+    });
+    res.status(201).json({ success: true, data: request });
+  } catch (error: any) {
+    console.error('Create driver request error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Server error' });
+  }
+});
+
+router.post('/loadings/:id/driver-request/cancel', canEdit, canEditLoadings, async (req: any, res: Response) => {
+  try {
+    const loading = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id } });
+    if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
+    if (loading.status !== EDITABLE_STATUS) return res.status(400).json({ success: false, error: 'Only draft loading requests can be cancelled' });
+    await prisma.$transaction(async (tx) => {
+      await cancelActiveDriverRequest(tx, loading.id, req.user.id);
+    });
+    res.json({ success: true, data: await loadLoading(loading.id) });
+  } catch (error: any) {
+    console.error('Cancel driver request error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Server error' });
+  }
+});
+
 router.put('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: Response) => {
   try {
     const existing = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id } });
@@ -866,19 +947,22 @@ router.put('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: Resp
     }
 
     await prisma.$transaction(async (tx) => {
-      const driver = await reserveQueueTurn(tx, req.body.driverId, existing.id, req.user.id);
       await tx.logisticsLoadingLine.deleteMany({ where: { loadingId: existing.id } });
       await tx.logisticsLoading.update({
         where: { id: existing.id },
         data: {
           loadingDate: req.body.loadingDate ? new Date(req.body.loadingDate) : existing.loadingDate,
           notes: req.body.notes ?? existing.notes,
-          vehiclePairId: driver?.id || null,
-          driverSnapshot: driver ? buildDriverSnapshot(driver) : Prisma.JsonNull,
           lines: { create: lineCreates }
         }
       });
     }, { isolationLevel: 'Serializable' });
+
+    const updated = await loadLoading(existing.id);
+    await prisma.logisticsDriverRequest.updateMany({
+      where: activeDriverRequestWhere(existing.id),
+      data: { contextSnapshot: buildDriverRequestContext(updated) as Prisma.InputJsonValue }
+    });
 
     res.json({ success: true, data: await loadLoading(existing.id) });
   } catch (error: any) {
@@ -894,7 +978,7 @@ router.delete('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: R
     if (existing.status !== EDITABLE_STATUS) return res.status(400).json({ success: false, error: 'Only draft loadings can be deleted' });
 
     await prisma.$transaction(async (tx) => {
-      await releaseQueueTurn(tx, existing.id);
+      await cancelActiveDriverRequest(tx, existing.id, req.user.id);
       await tx.logisticsLoading.delete({ where: { id: existing.id } });
     });
     res.json({ success: true });
@@ -910,9 +994,10 @@ router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: 
     if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
     if (loading.status !== EDITABLE_STATUS) return res.status(400).json({ success: false, error: 'Only draft loadings can be finalized' });
     if (!loading.lines.length) return res.status(400).json({ success: false, error: 'At least one loading line is required' });
+    if (loading.lines.some((line: any) => toNumber(line.quantity) <= 0)) return res.status(400).json({ success: false, error: 'All loading quantities must be greater than zero before finalization' });
     if (!loading.vehiclePairId) return res.status(400).json({ success: false, error: 'Select a waiting security driver and vehicle before finalization' });
     const queueTurn = await prisma.securityDriverQueueTurn.findFirst({ where: { loadingId: loading.id, status: SecurityDriverQueueTurnStatus.RESERVED } });
-    if (!queueTurn) return res.status(400).json({ success: false, error: 'The selected driver queue turn is not reserved for this loading' });
+    if (!queueTurn) return res.status(400).json({ success: false, error: 'No security-entered driver queue turn is reserved for this loading' });
     if (!validateDriverSnapshot(loading.driverSnapshot)) return res.status(400).json({ success: false, error: 'Complete driver snapshot is required before finalization' });
 
     await validateLineRemaining(loading.lines.map((line: any) => ({
@@ -924,6 +1009,10 @@ router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: 
     const updated = await prisma.$transaction(async (tx) => {
       const saved = await tx.logisticsLoading.update({ where: { id: loading.id }, data: { status: FINALIZED_STATUS as any, finalizedAt: new Date(), finalizedBy: req.user.id } });
       await tx.securityDriverQueueTurn.update({ where: { id: queueTurn.id }, data: { status: SecurityDriverQueueTurnStatus.DISPATCHED, dispatchedAt: new Date(), dispatchedBy: req.user.id } });
+      await tx.logisticsDriverRequest.updateMany({
+        where: { loadingId: loading.id, status: LogisticsDriverRequestStatus.DRIVER_ENTERED },
+        data: { status: LogisticsDriverRequestStatus.COMPLETED, completedAt: new Date() }
+      });
       return saved;
     });
 
@@ -946,7 +1035,7 @@ router.post('/loadings/:id/cancel', canEdit, canCancelLoadings, [
     if (loading.status === CANCELLED_STATUS) return res.status(400).json({ success: false, error: 'Loading is already cancelled' });
 
     const updated = await prisma.$transaction(async (tx) => {
-      await releaseQueueTurn(tx, loading.id);
+      await cancelActiveDriverRequest(tx, loading.id, req.user.id);
       return tx.logisticsLoading.update({ where: { id: loading.id }, data: { status: CANCELLED_STATUS as any, cancelledAt: new Date(), cancelledBy: req.user.id, cancellationReason: req.body.reason } });
     });
 

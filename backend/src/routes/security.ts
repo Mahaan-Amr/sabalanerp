@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
 import { body, validationResult } from 'express-validator';
-import { PrismaClient, SecurityDriverQueueTurnStatus, SecurityShiftCoverageStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
+import { LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityShiftCoverageStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
@@ -303,6 +303,93 @@ router.post('/driver-queue/:id/remove', protect, securityEdit, [body('reason').i
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'خروج از صف ناموفق بود.' });
+  }
+});
+
+router.get('/loading-driver-requests', protect, securityView, async (_req: AuthRequest, res: Response) => {
+  try {
+    const requests = await prisma.logisticsDriverRequest.findMany({
+      where: { status: { in: [LogisticsDriverRequestStatus.PENDING_SECURITY, LogisticsDriverRequestStatus.DRIVER_ENTERED] } },
+      include: {
+        requester: { select: { id: true, firstName: true, lastName: true, username: true } },
+        fulfiller: { select: { id: true, firstName: true, lastName: true, username: true } },
+        queueTurn: { include: { vehiclePair: true } },
+        loading: {
+          include: {
+            customer: true,
+            project: true,
+            lines: { include: { sourceContract: true, product: true }, orderBy: { createdAt: 'asc' } }
+          }
+        }
+      },
+      orderBy: { requestedAt: 'asc' }
+    });
+    res.json({ success: true, data: requests });
+  } catch (error) {
+    console.error('Loading driver requests error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+router.post('/loading-driver-requests/:id/assign', protect, securityEdit, [body('queueTurnId').isString().notEmpty()], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+
+    await prisma.$transaction(async (tx) => {
+      const request = await tx.logisticsDriverRequest.findUnique({
+        where: { id: req.params.id },
+        include: { loading: true }
+      });
+      if (!request) throw new Error('درخواست راننده پیدا نشد.');
+      if (request.status !== LogisticsDriverRequestStatus.PENDING_SECURITY) throw new Error('فقط درخواست در انتظار حراست قابل ورود راننده است.');
+      if (request.loading.status !== 'DRAFT') throw new Error('راننده فقط برای پیش‌نویس بارگیری قابل ورود است.');
+
+      const turn = await tx.securityDriverQueueTurn.findUnique({
+        where: { id: req.body.queueTurnId },
+        include: { vehiclePair: { include: { photos: true } } }
+      });
+      if (!turn || !turn.vehiclePair.isActive) throw new Error('نوبت راننده فعال پیدا نشد.');
+      if (turn.status !== SecurityDriverQueueTurnStatus.WAITING) throw new Error('فقط راننده در انتظار قابل ورود برای بارگیری است.');
+      if (!pairIsComplete(turn.vehiclePair)) throw new Error('اطلاعات رجیستر راننده و خودرو باید کامل باشد.');
+
+      const position = await tx.securityDriverQueueTurn.count({ where: { status: SecurityDriverQueueTurnStatus.WAITING, enteredAt: { lte: turn.enteredAt } } });
+      const claimed = await tx.securityDriverQueueTurn.updateMany({
+        where: { id: turn.id, status: SecurityDriverQueueTurnStatus.WAITING },
+        data: {
+          status: SecurityDriverQueueTurnStatus.RESERVED,
+          loadingId: request.loadingId,
+          driverRequestId: request.id,
+          reservedAt: new Date(),
+          reservedBy: req.user!.id,
+          reservedPosition: Math.max(position, 1)
+        }
+      });
+      if (claimed.count !== 1) throw new Error('نوبت راننده هم‌زمان تغییر کرده است؛ صف را به‌روزرسانی کنید.');
+
+      await tx.logisticsLoading.update({
+        where: { id: request.loadingId },
+        data: { vehiclePairId: turn.vehiclePairId, driverSnapshot: pairSnapshot(turn.vehiclePair) }
+      });
+      await tx.logisticsDriverRequest.update({
+        where: { id: request.id },
+        data: { status: LogisticsDriverRequestStatus.DRIVER_ENTERED, fulfilledAt: new Date(), fulfilledBy: req.user!.id }
+      });
+    }, { isolationLevel: 'Serializable' });
+
+    const updated = await prisma.logisticsDriverRequest.findUnique({
+      where: { id: req.params.id },
+      include: {
+        requester: { select: { id: true, firstName: true, lastName: true, username: true } },
+        fulfiller: { select: { id: true, firstName: true, lastName: true, username: true } },
+        queueTurn: { include: { vehiclePair: true } },
+        loading: { include: { customer: true, project: true, lines: { include: { sourceContract: true, product: true } } } }
+      }
+    });
+    res.json({ success: true, data: updated });
+  } catch (error: any) {
+    console.error('Assign loading driver error:', error);
+    res.status(409).json({ success: false, error: error.message || 'ورود راننده برای بارگیری ناموفق بود.' });
   }
 });
 

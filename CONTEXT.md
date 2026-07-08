@@ -585,6 +585,7 @@ _Avoid_: forcing logistics users to know the project name when the operational c
 **شروع پیش‌نویس بارگیری**:
 A draft بارگیری starts when logistics selects the customer project, so the in-progress shipment can be resumed before rows, driver, or vehicle details are complete.
 Customer search before project selection is only navigation/filtering and does not start a draft.
+The new-loading wizard sequence is مشتری، پروژه، قراردادها، راننده، مقدار، بازبینی so حراست can authorize driver entry after cargo identity is known but before final loaded quantities are entered.
 _Avoid_: treating بارگیری creation as only the final submit action, or keeping meaningful loading progress as a browser-only form
 
 **ادامه پیش‌نویس بارگیری**:
@@ -640,8 +641,14 @@ After project selection starts or resumes a draft, wizard changes are saved on s
 _Avoid_: reducing remaining from draft loading entries, deleting cancelled logistics history, or using draft CRUD semantics for finalized loading records
 
 **انتخاب راننده بارگیری**:
-Logistics selects a driver/vehicle only from the current حراست-owned driver queue. The loading wizard uses a searchable queued driver/vehicle picker matching driver name, phone, national code, plate, and vehicle type; logistics cannot manage registry eligibility or queue presence.
-_Avoid_: showing every registry-active driver to logistics, using a long unsearchable dropdown, or letting logistics manage the registry or queue from بارگیری
+Logistics requests a driver for a specific draft بارگیری, and حراست fulfills that request by assigning one waiting driver queue turn through ورود برای بارگیری. Logistics cannot pick directly from the queue or continue past the driver step until حراست has assigned the queue turn to that loading draft.
+_Avoid_: showing every registry-active driver to logistics, letting logistics choose directly from the driver queue, sending a driver into loading without tying the decision to a specific draft بارگیری, or letting logistics manage the registry or queue from بارگیری
+
+**درخواست راننده بارگیری**:
+A logistics-owned request for حراست to assign a driver to one specific draft بارگیری. The request carries the loading draft identity, customer/project context, selected contract/cargo identity or product hints when available, and the request time so حراست can make the gate decision without guessing; final loaded quantities are entered later by Logistics.
+Its statuses are در انتظار حراست, راننده وارد شد, لغو شده, and تکمیل شده. Draft context changes after request are audit timeline events rather than blocking workflow statuses.
+Logistics may cancel the request while the loading is still a draft, which releases any assigned queue turn back to its original waiting priority; حراست fulfills requests but does not cancel them because the request belongs to the loading draft.
+_Avoid_: creating multiple open driver requests for the same loading draft, treating a generic radio/phone call as system assignment, allowing driver assignment that cannot be audited back to the بارگیری draft that requested it, or making حراست the owner of cancelling a logistics draft request
 
 **قفل بارگیری نهایی‌شده**:
 A finalized بارگیری is immutable because it affects remaining amounts and accounting visibility. Mistakes after finalization are handled through cancellation or correction records rather than silent edits.
@@ -656,7 +663,7 @@ Correction records follow the same unit, remaining, and tolerance rules as norma
 _Avoid_: using corrections to bypass loading tolerance or unit compatibility rules
 
 **راننده بارگیری**:
-Logistics selects the driver and vehicle for بارگیری from the حراست-owned current driver queue, while every بارگیری still saves its own driver and vehicle snapshot for historical accuracy.
+حراست assigns the driver and vehicle for بارگیری from the current driver queue after Logistics requests one for a draft, while every بارگیری still saves its own driver and vehicle snapshot for historical accuracy.
 _Avoid_: letting logistics own the reusable driver registry, making old loading documents depend on the current editable driver profile, or treating gate approval as approval of loading quantities
 
 **راننده در نهایی‌سازی بارگیری**:
@@ -675,7 +682,7 @@ A حراست-owned time-ordered queue of registry-active driver/vehicle pairs th
 _Avoid_: راننده فعال for a merely present driver, treating FIFO as a hard selection rule, manually reordering entry priority, or exposing absent registry drivers to Logistics
 
 **نوبت راننده**:
-One historical occurrence of a registry-active driver/vehicle pair joining the queue. Its statuses are در انتظار, رزرو شده, اعزام شده, and خارج از صف; releasing a loading reservation returns the same turn to its original waiting priority, while an explicit حراست removal ends it as خارج از صف.
+One historical occurrence of a registry-active driver/vehicle pair joining the queue. Its statuses are در انتظار, رزرو شده, اعزام شده, and خارج از صف; حراست moves a waiting turn to رزرو شده through ورود برای بارگیری against a specific driver request, releasing a loading reservation returns the same turn to its original waiting priority, and an explicit حراست removal ends it as خارج از صف.
 The same pair cannot hold two current turns, but may receive a new turn after dispatch or after leaving and physically returning.
 _Avoid_: calling reservation release a cancellation, overwriting an earlier turn when a driver returns, allowing one turn to be reserved by multiple loadings, or losing original queue priority when a draft releases its reservation
 

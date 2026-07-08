@@ -609,6 +609,31 @@ const slotInclude = {
 };
 const effectivePersonnelId = (slot: any) => slot.replacementPersonnelId || slot.plannedPersonnelId;
 const getSelfPersonnel = (userId: string) => prisma.securityPersonnel.findUnique({ where: { userId } });
+const markProbableNoShows = async () => {
+  const now = new Date();
+  const candidates = await prisma.securityShiftPlanSlot.findMany({
+    where: {
+      plan: { status: SecurityShiftPlanStatus.PUBLISHED },
+      startsAt: { lt: now },
+      endsAt: { gt: now },
+      probableNoShowAt: null,
+      attendance: { none: {} },
+      session: null,
+      coverageStatus: { not: SecurityShiftCoverageStatus.NEEDS_REPLACEMENT }
+    },
+    include: { plan: true },
+    take: 100
+  });
+  const overdueIds = candidates
+    .filter((slot) => now.getTime() >= slot.startsAt.getTime() + slot.plan.lateAlertMinutes * 60_000)
+    .map((slot) => slot.id);
+  if (overdueIds.length) {
+    await prisma.securityShiftPlanSlot.updateMany({
+      where: { id: { in: overdueIds }, probableNoShowAt: null },
+      data: { probableNoShowAt: now }
+    });
+  }
+};
 
 router.get('/shift-plans', protect, securityView, async (req: AuthRequest, res: Response) => {
   const mayViewDrafts = req.query.includeDrafts === 'true' && (req.user!.role === 'ADMIN' || (req as any).workspacePermission === WORKSPACE_PERMISSIONS.ADMIN);
@@ -679,6 +704,7 @@ router.post('/shift-plans/:id/publish', protect, securityAdmin, async (req: Auth
 });
 
 router.get('/shift-plan-slots', protect, securityView, async (req: AuthRequest, res: Response) => {
+  await markProbableNoShows();
   const from = req.query.from ? new Date(String(req.query.from)) : new Date(Date.now() - 7 * 86_400_000);
   const to = req.query.to ? new Date(String(req.query.to)) : new Date(Date.now() + 40 * 86_400_000);
   const self = req.query.mine === 'true' ? await getSelfPersonnel(req.user!.id) : null;
@@ -725,6 +751,7 @@ router.post('/shift-plan-slots/:id/temporary-coverage', protect, securityAdmin, 
 });
 
 router.get('/shift-workflow/me', protect, securityView, async (req: AuthRequest, res: Response) => {
+  await markProbableNoShows();
   const personnel = await getSelfPersonnel(req.user!.id);
   if (!personnel) return res.status(403).json({ success: false, error: 'کاربر جزو نفرات حراست نیست.' });
   const now = new Date();

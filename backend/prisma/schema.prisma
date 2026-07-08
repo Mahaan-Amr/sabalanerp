@@ -279,6 +279,7 @@ model SecurityShiftPlanSlot {
   coverageStatus         SecurityShiftCoverageStatus    @default(COVERED)
   leaveRequestId         String?
   overrideReason         String?
+  probableNoShowAt       DateTime?
   createdAt              DateTime                        @default(now())
   updatedAt              DateTime                        @updatedAt
   plan                   SecurityShiftPlan               @relation(fields: [planId], references: [id], onDelete: Cascade)
@@ -294,6 +295,7 @@ model SecurityShiftPlanSlot {
   @@index([plannedPersonnelId, startsAt])
   @@index([replacementPersonnelId, startsAt])
   @@index([coverageStatus, startsAt])
+  @@index([probableNoShowAt])
   @@map("security_shift_plan_slots")
 }
 

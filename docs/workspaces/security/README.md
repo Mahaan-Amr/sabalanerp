@@ -27,6 +27,7 @@ The Security and Enforcement Workspace manages all security operations in Soblan
 - **Coverage exceptions**: approved leave marks affected future slots as needing replacement. A manager may assign a full-slot replacement, add hourly temporary coverage, or record emergency uncovered coverage with a mandatory reason.
 - **Self-service handover**: guards register their own arrival, start only their assigned/replacement shift after the scheduled boundary, submit a minimal shift report, and end the active session before the next shift can start.
 - **Audited manager corrections**: managers cannot impersonate guards; force-close, attendance correction, replacement assignment, and emergency uncovered coverage are explicit audited actions with reasons.
+- **Coverage visibility**: manager and guard screens show Persian-labeled statuses for covered, needs replacement, probable no-show, active, completed, force-closed, and historical coverage/correction records.
 
 #### Digital Attendance System
 - **Check-in/Check-out**: Digital attendance tracking

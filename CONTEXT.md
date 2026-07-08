@@ -740,6 +740,10 @@ _Avoid_: regenerating the rotation after leave, transferring ownership of later 
 The controlled boundary where the outgoing guard submits the shift report and ends the active session before the incoming assigned guard starts the next one. A manager may force-close an unclosable session only with an audited reason.
 _Avoid_: starting overlapping active shift sessions, closing a normal shift without its report, or silently correcting a forgotten shift end
 
+**عدم حضور احتمالی شیفت حراست**:
+A coverage alert when the assigned or replacement guard has not registered arrival after the plan's lateness threshold. It remains visible for manager review until the slot is covered, corrected, force-closed, or completed.
+_Avoid_: treating this as final absence before manager action, hiding the alert because the person later arrived, or using color without a Persian label
+
 **نفرات حراست**:
 The حراست people area covers employee attendance, shifts, exceptions, missions, and security personnel workflows. Drivers are not managed here; they belong to خودرویی because their operational role is tied to vehicle movement.
 _Avoid_: mixing driver/vehicle registry work into personnel attendance workflows

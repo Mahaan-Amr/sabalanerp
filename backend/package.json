@@ -17,6 +17,7 @@
     "migrate:legacy-customers:apply": "tsx scripts/migrate-legacy-customers-to-crm.ts --apply",
     "backfill:crm-customer-owners:dry": "tsx scripts/backfill-crm-customer-owners.ts",
     "backfill:crm-customer-owners:apply": "tsx scripts/backfill-crm-customer-owners.ts --apply",
+    "verify:security-shifts": "tsx scripts/verify-security-shift-planning.ts",
     "sync:opc-products:dry": "node scripts/sync-products-from-opc.js",
     "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"
   },

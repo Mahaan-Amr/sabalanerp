@@ -1,22 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useCallback, useEffect, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { FaBan, FaCheck, FaEdit, FaPlus, FaPrint, FaSync, FaTrash } from 'react-icons/fa';
 import { ErpButton, ErpCard, ErpLoading, ErpPage, ErpSection, ErpSummaryGrid, ErpTwoColumn } from '@/components/erp';
 import { logisticsAPI } from '@/lib/api';
-import { StatusBadge, dateFa, driverName, inputClass, labelClass, numberFa, unitLabels } from '../../logistics-ui';
+import { StatusBadge, dateFa, inputClass, labelClass, loadingDriversName, numberFa, unitLabels } from '../../logistics-ui';
 
 export default function LoadingDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [actionError, setActionError] = useState('');
   const [cancelReason, setCancelReason] = useState('');
   const [correction, setCorrection] = useState({ sourceContractItemId: '', loadingLineId: '', deltaQuantity: '', reason: '' });
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setIsLoading(true);
       const response = await logisticsAPI.getLoading(params.id);
@@ -24,11 +25,17 @@ export default function LoadingDetailPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [params.id]);
 
   useEffect(() => {
     load();
-  }, [params.id]);
+  }, [load]);
+
+  useEffect(() => {
+    if (!isLoading && loading && searchParams.get('print') === '1') {
+      window.setTimeout(() => window.print(), 250);
+    }
+  }, [isLoading, loading, searchParams]);
 
   const runAction = async (action: () => Promise<any>) => {
     setActionError('');
@@ -54,6 +61,17 @@ export default function LoadingDetailPage() {
   if (!loading) return <ErpPage title="بارگیری پیدا نشد" backHref="/dashboard/logistics/loadings"><div /></ErpPage>;
 
   const driver = loading.driverSnapshot || {};
+  const assignedDrivers = loading.driverAssignments || [];
+  const driverSummary = loadingDriversName(loading);
+  const plateSummary = assignedDrivers.length
+    ? assignedDrivers.map((assignment: any) => assignment.driverSnapshot?.vehiclePlate || assignment.vehiclePair?.vehiclePlate).filter(Boolean).join('، ')
+    : driver.vehiclePlate || '—';
+  const vehicleTypeSummary = assignedDrivers.length
+    ? assignedDrivers.map((assignment: any) => assignment.driverSnapshot?.vehicleType || assignment.vehiclePair?.vehicleType).filter(Boolean).join('، ')
+    : driver.vehicleType || '—';
+  const phoneSummary = assignedDrivers.length
+    ? assignedDrivers.map((assignment: any) => assignment.driverSnapshot?.phone || assignment.vehiclePair?.phone).filter(Boolean).join('، ')
+    : driver.phone || '—';
   const canFinalize = loading.status === 'DRAFT';
   const canDeleteDraft = loading.status === 'DRAFT';
   const canCancel = loading.status !== 'CANCELLED';
@@ -85,10 +103,10 @@ export default function LoadingDetailPage() {
                 items={[
                   { label: 'وضعیت', value: <StatusBadge status={loading.status} /> },
                   { label: 'تاریخ بارگیری', value: dateFa(loading.loadingDate) },
-                  { label: 'راننده', value: driverName(driver) },
-                  { label: 'پلاک', value: driver.vehiclePlate || '—' },
-                  { label: 'نوع ماشین', value: driver.vehicleType || '—' },
-                  { label: 'شماره تماس', value: driver.phone || '—' },
+                  { label: 'راننده', value: driverSummary },
+                  { label: 'پلاک', value: plateSummary },
+                  { label: 'نوع ماشین', value: vehicleTypeSummary },
+                  { label: 'شماره تماس', value: phoneSummary },
                 ]}
               />
             </ErpSection>
@@ -131,7 +149,7 @@ export default function LoadingDetailPage() {
                   <p>{dateFa(loading.finalizedAt || loading.loadingDate)}</p>
                 </div>
                 <p>مشتری / پروژه: {loading.customer?.companyName || `${loading.customer?.firstName || ''} ${loading.customer?.lastName || ''}`} · {loading.project?.projectName || loading.project?.address}</p>
-                <p>راننده: {driverName(driver)} · پلاک: {driver.vehiclePlate || '—'} · ماشین: {driver.vehicleType || '—'}</p>
+                <p>راننده: {driverSummary} · پلاک: {plateSummary} · ماشین: {vehicleTypeSummary}</p>
                 <div className="mt-4 space-y-2">
                   {loading.lines.map((line: any, index: number) => (
                     <div key={line.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 border-b border-slate-200 py-2">

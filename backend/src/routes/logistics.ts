@@ -886,7 +886,13 @@ router.get('/loadings', canView, canViewLoadings, async (req: any, res: Response
         ...(status ? { status: status as any } : {}),
         ...(projectId ? { projectId } : {})
       },
-      include: { customer: true, project: true, lines: true, corrections: true },
+      include: {
+        customer: true,
+        project: true,
+        lines: true,
+        corrections: true,
+        driverAssignments: { include: { vehiclePair: true, queueTurn: true } }
+      },
       orderBy: { updatedAt: 'desc' },
       take: 100
     });
@@ -905,7 +911,18 @@ router.get('/loadings', canView, canViewLoadings, async (req: any, res: Response
         projectId: loading.projectId,
         lineCount: loading.lines.length,
         correctionCount: loading.corrections.length,
-        driverSnapshot: loading.driverSnapshot
+        driverSnapshot: loading.driverSnapshot,
+        drivers: loading.driverAssignments.map((assignment) => ({
+          id: assignment.id,
+          queueTurnId: assignment.queueTurnId,
+          vehiclePairId: assignment.vehiclePairId,
+          snapshot: assignment.driverSnapshot,
+          firstName: assignment.vehiclePair.firstName,
+          lastName: assignment.vehiclePair.lastName,
+          vehiclePlate: assignment.vehiclePair.vehiclePlate,
+          vehicleType: assignment.vehiclePair.vehicleType,
+          queueStatus: assignment.queueTurn.status
+        }))
       }))
     });
   } catch (error) {

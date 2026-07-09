@@ -84,7 +84,8 @@ const statusLabel: Record<string, string> = {
   EXITED: 'خارج شد',
   EXIT_VOIDED: 'لغو خروج',
 };
-const queueStatusLabel: Record<string, string> = { WAITING: 'در انتظار', RESERVED: 'رزرو شده', DISPATCHED: 'اعزام شده', OUT_OF_QUEUE: 'خارج از صف' };
+const queueStatusLabel: Record<string, string> = { WAITING: 'در انتظار', ENTERED_LOADING_AREA: 'وارد محوطه بارگیری', RESERVED: 'رزرو شده', DISPATCHED: 'اعزام شده', OUT_OF_QUEUE: 'خارج از صف' };
+const returnToQueueReasons = ['بارگیری آماده نبود', 'اشتباه در ورود', 'تغییر برنامه بارگیری', 'راننده موقتاً برگشت به صف'];
 
 const statusTone = (status: string) => {
   if (status === 'EXITED' || status === 'INFO_COMPLETED') return 'success' as const;
@@ -101,7 +102,6 @@ export default function SecurityVehiclesPage() {
   const [readyExit, setReadyExit] = useState<any[]>([]);
   const [queueTurns, setQueueTurns] = useState<any[]>([]);
   const [queueHistory, setQueueHistory] = useState<any[]>([]);
-  const [driverRequests, setDriverRequests] = useState<any[]>([]);
   const [showQueueHistory, setShowQueueHistory] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [customers, setCustomers] = useState<any[]>([]);
@@ -119,7 +119,7 @@ export default function SecurityVehiclesPage() {
   const [activeSection, setActiveSection] = useState<VehicleSection>('movements');
 
   const activePairs = useMemo(() => pairs.filter((pair) => pair.isActive), [pairs]);
-  const queuedPairIds = useMemo(() => new Set(queueTurns.filter((turn) => ['WAITING', 'RESERVED'].includes(turn.status)).map((turn) => turn.vehiclePairId)), [queueTurns]);
+  const queuedPairIds = useMemo(() => new Set(queueTurns.filter((turn) => ['WAITING', 'ENTERED_LOADING_AREA', 'RESERVED'].includes(turn.status)).map((turn) => turn.vehiclePairId)), [queueTurns]);
   const editingPair = useMemo(() => pairs.find((pair) => pair.id === editingPairId), [pairs, editingPairId]);
   const canSavePair = useMemo(() => {
     const fieldsComplete = Object.entries(pairForm).every(([field, value]) => field === 'notes' || value.trim().length > 0);
@@ -132,20 +132,18 @@ export default function SecurityVehiclesPage() {
     setLoading(true);
     setError('');
     try {
-      const [pairResponse, movementResponse, readyResponse, queueResponse, queueHistoryResponse, requestResponse] = await Promise.all([
+      const [pairResponse, movementResponse, readyResponse, queueResponse, queueHistoryResponse] = await Promise.all([
         securityAPI.getVehiclePairs({ includeInactive: true }),
         securityAPI.getVehicleMovements({ limit: 50 }),
         securityAPI.getReadyExitLoadings(),
         securityAPI.getDriverQueue(),
         securityAPI.getDriverQueue(true),
-        securityAPI.getLoadingDriverRequests(),
       ]);
       if (pairResponse.data.success) setPairs(pairResponse.data.data);
       if (movementResponse.data.success) setMovements(movementResponse.data.data);
       if (readyResponse.data.success) setReadyExit(readyResponse.data.data);
       if (queueResponse.data.success) setQueueTurns(queueResponse.data.data);
       if (queueHistoryResponse.data.success) setQueueHistory(queueHistoryResponse.data.data);
-      if (requestResponse.data.success) setDriverRequests(requestResponse.data.data);
     } catch (err: any) {
       setError(err.response?.data?.error || 'دریافت اطلاعات خودرویی ناموفق بود.');
     } finally {
@@ -229,13 +227,25 @@ export default function SecurityVehiclesPage() {
     catch (err: any) { setError(err.response?.data?.error || 'خروج از صف ناموفق بود.'); }
   };
 
-  const assignDriverToRequest = async (request: any, turn: any) => {
+  const enterLoadingArea = async (turn: any) => {
     try {
-      await securityAPI.assignLoadingDriverRequest(request.id, turn.id);
-      setMessage('راننده برای بارگیری وارد شد.');
+      await securityAPI.enterDriverLoadingArea(turn.id);
+      setMessage('راننده وارد محوطه بارگیری شد.');
       await loadData();
     } catch (err: any) {
       setError(err.response?.data?.error || 'ورود راننده برای بارگیری ناموفق بود.');
+    }
+  };
+
+  const returnToWaiting = async (turn: any) => {
+    const picked = window.prompt(`دلیل بازگشت به صف را وارد کنید:\n${returnToQueueReasons.join('\n')}`, returnToQueueReasons[0]);
+    if (!picked?.trim()) return;
+    try {
+      await securityAPI.returnDriverToWaiting(turn.id, picked.trim());
+      setMessage('راننده به ابتدای صف انتظار برگشت.');
+      await loadData();
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'بازگشت راننده به صف ناموفق بود.');
     }
   };
 
@@ -335,60 +345,9 @@ export default function SecurityVehiclesPage() {
       />
 
       {activeSection === 'queue' && (
-        <ErpSection title="نوبت‌دهی رانندگان" description="رانندگان حاضر بر اساس زمان ورود مرتب می‌شوند؛ حراست درخواست‌های لجستیک را با ورود راننده از صف پاسخ می‌دهد.">
+        <ErpSection title="نوبت‌دهی رانندگان" description="رانندگان حاضر بر اساس اولویت صف مدیریت می‌شوند؛ حراست می‌تواند آن‌ها را وارد محوطه بارگیری کند تا لجستیک از میان رانندگان آماده انتخاب کند.">
           <div className="mb-4"><ErpButton label={showQueueHistory ? 'نمایش صف جاری' : 'تاریخچه نوبت‌ها'} icon={FaClipboardList} variant="soft" onClick={() => setShowQueueHistory((value) => !value)} /></div>
-          {!showQueueHistory && (
-            <div className="mb-6 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">درخواست‌های راننده برای بارگیری</h3>
-                  <p className="text-sm text-slate-500">هر ۵ ثانیه به‌روزرسانی می‌شود؛ برای هر درخواست یک راننده در انتظار را با «ورود برای بارگیری» وارد کنید.</p>
-                </div>
-                <ErpButton label="به‌روزرسانی" icon={FaRedo} variant="soft" onClick={() => { void loadData(); }} />
-              </div>
-              {driverRequests.map((request) => {
-                const context = request.contextSnapshot || {};
-                const waitingTurns = queueTurns.filter((turn) => turn.status === 'WAITING');
-                return (
-                  <ErpCard key={request.id} className="p-4" tone={request.status === 'DRIVER_ENTERED' ? 'success' : 'warning'}>
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold text-slate-900 dark:text-white">بارگیری {request.loading?.loadingNumber || context.loadingNumber || '—'}</p>
-                        <p className="mt-1 text-sm text-slate-500">{context.customerName || `${request.loading?.customer?.firstName || ''} ${request.loading?.customer?.lastName || ''}`.trim()} · {context.projectName || request.loading?.project?.projectName || request.loading?.project?.address || 'پروژه'}</p>
-                        <p className="mt-1 text-xs text-slate-500">درخواست: {new Date(request.requestedAt).toLocaleString('fa-IR')} · انتظار: {Math.max(0, Math.floor((now - new Date(request.requestedAt).getTime()) / 60000)).toLocaleString('fa-IR')} دقیقه</p>
-                        {context.contractNumbers?.length ? <p className="mt-1 text-xs text-slate-500">قراردادها: {context.contractNumbers.join('، ')}</p> : null}
-                      </div>
-                      <ErpBadge tone={request.status === 'DRIVER_ENTERED' ? 'success' : 'warning'}>{request.status === 'DRIVER_ENTERED' ? 'راننده وارد شد' : 'در انتظار حراست'}</ErpBadge>
-                    </div>
-                    <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-                      {(context.cargoSummary || []).slice(0, 4).map((item: any, index: number) => (
-                        <div key={`${request.id}-cargo-${index}`} className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                          <span className="font-semibold">{item.productName || 'محصول'}</span>
-                          <span className="block mt-1">{[item.productType, item.unit, item.notes].filter(Boolean).join(' · ')}</span>
-                        </div>
-                      ))}
-                    </div>
-                    {request.status === 'PENDING_SECURITY' && (
-                      <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
-                        {waitingTurns.map((turn) => (
-                          <button key={`${request.id}-${turn.id}`} type="button" onClick={() => { void assignDriverToRequest(request, turn); }} className="rounded-lg border border-slate-200 p-3 text-right hover:border-teal-500 dark:border-slate-700">
-                            <span className="font-semibold">{turn.vehiclePair.firstName} {turn.vehiclePair.lastName}</span>
-                            <span className="block text-xs text-slate-500">{turn.vehiclePair.vehiclePlate} · {turn.vehiclePair.vehicleType}</span>
-                            <span className="mt-2 block text-xs font-semibold text-teal-700">ورود برای بارگیری</span>
-                          </button>
-                        ))}
-                        {!waitingTurns.length && <ErpEmptyState icon={FaClock} title="راننده‌ای در انتظار نیست" />}
-                      </div>
-                    )}
-                    {request.status === 'DRIVER_ENTERED' && request.queueTurn?.vehiclePair && (
-                      <p className="mt-3 text-sm font-semibold text-emerald-700">راننده واردشده: {request.queueTurn.vehiclePair.firstName} {request.queueTurn.vehiclePair.lastName} · {request.queueTurn.vehiclePair.vehiclePlate}</p>
-                    )}
-                  </ErpCard>
-                );
-              })}
-              {!driverRequests.length && <ErpEmptyState icon={FaTruck} title="درخواست راننده‌ای از لجستیک وجود ندارد" />}
-            </div>
-          )}
+          {!showQueueHistory && <div className="mb-4 flex justify-end"><ErpButton label="به‌روزرسانی" icon={FaRedo} variant="soft" onClick={() => { void loadData(); }} /></div>}
           {!showQueueHistory && <>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
             {activePairs.filter((pair) => pair.informationComplete && !queuedPairIds.has(pair.id)).map((pair) => (
@@ -400,7 +359,7 @@ export default function SecurityVehiclesPage() {
           <div className="mt-5 space-y-3">
             {queueTurns.map((turn, index) => (
               <ErpCard key={turn.id} className="p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-semibold">نوبت {(index + 1).toLocaleString('fa-IR')} · {turn.vehiclePair.firstName} {turn.vehiclePair.lastName}</p><p className="mt-1 text-sm text-slate-500">{turn.vehiclePair.vehiclePlate} · {turn.vehiclePair.vehicleType}</p><p className="mt-1 text-xs text-slate-500">ورود: {new Date(turn.enteredAt).toLocaleString('fa-IR')} · انتظار: {Math.max(0, Math.floor((now - new Date(turn.enteredAt).getTime()) / 60000)).toLocaleString('fa-IR')} دقیقه</p></div><div className="flex gap-2"><ErpBadge tone={turn.status === 'WAITING' ? 'success' : 'warning'}>{turn.status === 'WAITING' ? 'در انتظار' : 'رزرو شده'}</ErpBadge>{turn.status === 'WAITING' && <ErpButton label="خارج از صف" icon={FaBan} tone="danger" variant="soft" onClick={() => removeFromQueue(turn)} />}</div></div>
+                <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-semibold">نوبت {(index + 1).toLocaleString('fa-IR')} · {turn.vehiclePair.firstName} {turn.vehiclePair.lastName}</p><p className="mt-1 text-sm text-slate-500">{turn.vehiclePair.vehiclePlate} · {turn.vehiclePair.vehicleType}</p><p className="mt-1 text-xs text-slate-500">ورود: {new Date(turn.enteredAt).toLocaleString('fa-IR')} · انتظار: {Math.max(0, Math.floor((now - new Date(turn.enteredAt).getTime()) / 60000)).toLocaleString('fa-IR')} دقیقه{turn.loadingAreaEnteredAt ? ` · ورود برای بارگیری: ${new Date(turn.loadingAreaEnteredAt).toLocaleString('fa-IR')}` : ''}{turn.returnToQueueReason ? ` · بازگشت: ${turn.returnToQueueReason}` : ''}</p></div><div className="flex flex-wrap gap-2"><ErpBadge tone={turn.status === 'WAITING' ? 'success' : turn.status === 'ENTERED_LOADING_AREA' ? 'info' : 'warning'}>{queueStatusLabel[turn.status] || turn.status}</ErpBadge>{turn.status === 'WAITING' && <ErpButton label="ورود برای بارگیری" icon={FaTruck} tone="success" variant="soft" onClick={() => enterLoadingArea(turn)} />}{turn.status === 'ENTERED_LOADING_AREA' && <ErpButton label="بازگشت به صف" icon={FaRedo} tone="neutral" variant="soft" onClick={() => returnToWaiting(turn)} />}{turn.status !== 'RESERVED' && <ErpButton label="خارج از صف" icon={FaBan} tone="danger" variant="soft" onClick={() => removeFromQueue(turn)} />}</div></div>
               </ErpCard>
             ))}
             {!queueTurns.length && <ErpEmptyState icon={FaClock} title="راننده‌ای در صف نیست" />}

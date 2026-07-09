@@ -277,10 +277,10 @@ interface MissionAssignment {
 ### Vehicle Gate Operations
 - **Security Manager / Supervisor**: can create, edit, activate/deactivate driver+vehicle registry pairs; void inbound/outbound movement records; and write supervisor shift reports.
 - **Security Personnel**: can record inbound loaded-vehicle entries, complete inbound information, record outbound gate exit time, add categorized movement attachments, and view active registry pairs.
-- **Logistics**: requests a driver for a specific draft بارگیری and waits for Security to assign one; logistics cannot directly select from the driver queue or create, edit, delete, or deactivate the registry.
+- **Logistics**: selects one or more drivers only after Security has moved them into وارد محوطه بارگیری; logistics cannot select drivers who are merely waiting in the Security queue or create, edit, delete, or deactivate the registry.
 - **Boundary**: حراست approves driver/vehicle eligibility and physical gate movement. لجستیک remains responsible for بارگیری rows, quantities, and remaining shipment calculations.
 - **Registry completeness**: new pairs require driver identity/contact details, vehicle details, home and relative contact information, and at least one license, vehicle-card, and driver photo. Existing incomplete pairs have a 30-day completion grace period.
-- **Driver queue**: active, complete registry pairs enter a persistent time-ordered queue when Security confirms physical arrival. Security fulfills a logistics driver request by clicking ورود برای بارگیری on a waiting turn, which reserves that turn for the draft and is dispatched on loading finalization; releasing/cancelling the logistics request restores the original entry priority.
+- **Driver queue**: active, complete registry pairs enter a persistent time-ordered queue when Security confirms physical arrival. Security clicks ورود برای بارگیری to move a waiting turn into the shared loading-area pool; Logistics can then reserve one or more of those turns for a draft, with per-driver quantity allocations, and finalization dispatches the selected turns.
 - **Queue audit**: server entry times are immutable, explicit queue removal requires a reason, and repeat trips create new historical turns rather than overwriting earlier ones.
 
 ### Viewer

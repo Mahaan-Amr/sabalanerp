@@ -615,15 +615,15 @@ In the new-loading wizard, selecting contract product rows only marks them as ca
 _Avoid_: mixing product-row selection with loaded-quantity entry in the contract inspection step
 
 **مقداردهی بارگیری**:
-Selected rows enter the مقدار step with blank loaded quantities. The logistics operator intentionally enters the actually loaded amount, while the available مانده بارگیری is shown beside the input; optional fill-from-remaining actions must be explicit per source row.
-_Avoid_: automatically defaulting a selected row to its full remaining amount
+Selected rows enter the مقدار step grouped by selected driver. The logistics operator enters the amount each driver carries for each selected row; blank or zero means that driver does not carry that row. A row is valid only when its summed allocation across drivers is positive and within remaining/tolerance rules, and each selected driver must carry at least one positive allocation.
+_Avoid_: automatically defaulting a selected row to its full remaining amount, finalizing a selected row with no carried quantity, or selecting a driver who carries nothing
 
 **تخصیص منبع بارگیری**:
 When a grouped remaining line contains multiple source contract rows, the logistics user manually chooses how much the بارگیری consumes from each source row before finalization.
 _Avoid_: automatically consuming contract rows behind the user's back, even when the grouped remaining amount is compatible
 
 **خط راس بارگیری**:
-A logistics calculation input for length-based loading that represents the common or average piece length used with a piece count to calculate loaded متر طول.
+A logistics calculation input for length-based loading that represents the common or average piece length used with a piece count to calculate loaded متر طول. In multi-driver loading, خط راس, تعداد, اضافه, and کسر belong to each driver-row allocation, and product-row totals are summed from those allocation calculations.
 _Avoid_: treating خط راس as a contract dimension, product catalog field, or separate unit of measure
 
 **اضافه و کسر بارگیری طولی**:
@@ -641,14 +641,15 @@ After project selection starts or resumes a draft, wizard changes are saved on s
 _Avoid_: reducing remaining from draft loading entries, deleting cancelled logistics history, or using draft CRUD semantics for finalized loading records
 
 **انتخاب راننده بارگیری**:
-Logistics requests a driver for a specific draft بارگیری, and حراست fulfills that request by assigning one waiting driver queue turn through ورود برای بارگیری. Logistics cannot pick directly from the queue or continue past the driver step until حراست has assigned the queue turn to that loading draft.
-_Avoid_: showing every registry-active driver to logistics, letting logistics choose directly from the driver queue, sending a driver into loading without tying the decision to a specific draft بارگیری, or letting logistics manage the registry or queue from بارگیری
+حراست sends a physically present queued driver into the loading area through ورود برای بارگیری, making that queue turn visible to Logistics as an available loading driver. Logistics may then select one or more available loading drivers for a draft بارگیری; selecting a driver reserves that queue turn for the draft.
+At least one available loading driver must be selected before Logistics can continue to مقدار or finalize the loading.
+While the loading remains a draft, Logistics may return to the راننده step to add or remove selected drivers. Added drivers become رزرو شده, removed drivers return to وارد محوطه بارگیری, and finalized driver evidence is locked.
+Logistics does not see available loading drivers as a queue-ranked list; it chooses based on operational suitability such as driver identity, plate, and vehicle type. Drivers reserved for another draft remain visible but disabled with the reserved loading number.
+_Avoid_: showing every registry-active driver to logistics, letting logistics select drivers who are still merely waiting in the حراست queue, requiring a system request from Logistics before حراست can send drivers into loading, or letting logistics manage the registry or queue from بارگیری
 
-**درخواست راننده بارگیری**:
-A logistics-owned request for حراست to assign a driver to one specific draft بارگیری. The request carries the loading draft identity, customer/project context, selected contract/cargo identity or product hints when available, and the request time so حراست can make the gate decision without guessing; final loaded quantities are entered later by Logistics.
-Its statuses are در انتظار حراست, راننده وارد شد, لغو شده, and تکمیل شده. Draft context changes after request are audit timeline events rather than blocking workflow statuses.
-Logistics may cancel the request while the loading is still a draft, which releases any assigned queue turn back to its original waiting priority; حراست fulfills requests but does not cancel them because the request belongs to the loading draft.
-_Avoid_: creating multiple open driver requests for the same loading draft, treating a generic radio/phone call as system assignment, allowing driver assignment that cannot be audited back to the بارگیری draft that requested it, or making حراست the owner of cancelling a logistics draft request
+**راننده آماده بارگیری**:
+A driver queue turn that حراست has moved from در انتظار to وارد محوطه بارگیری. The driver is physically allowed toward loading and is visible to Logistics, but is not attached to a specific بارگیری until Logistics selects it.
+_Avoid_: treating وارد محوطه بارگیری as a reservation for a particular loading draft, or treating every waiting queued driver as available to Logistics
 
 **قفل بارگیری نهایی‌شده**:
 A finalized بارگیری is immutable because it affects remaining amounts and accounting visibility. Mistakes after finalization are handled through cancellation or correction records rather than silent edits.
@@ -663,8 +664,9 @@ Correction records follow the same unit, remaining, and tolerance rules as norma
 _Avoid_: using corrections to bypass loading tolerance or unit compatibility rules
 
 **راننده بارگیری**:
-حراست assigns the driver and vehicle for بارگیری from the current driver queue after Logistics requests one for a draft, while every بارگیری still saves its own driver and vehicle snapshot for historical accuracy.
-_Avoid_: letting logistics own the reusable driver registry, making old loading documents depend on the current editable driver profile, or treating gate approval as approval of loading quantities
+Logistics selects the driver and vehicle for بارگیری only from queue turns that حراست has already moved into وارد محوطه بارگیری, while every بارگیری still saves its own driver and vehicle snapshot for historical accuracy.
+One بارگیری may include multiple driver/vehicle queue turns when one delivery needs more than one vehicle. Loading quantities are allocated per selected driver, and the loading's product-row totals are derived from the sum of those driver allocations.
+_Avoid_: letting logistics own the reusable driver registry, making old loading documents depend on the current editable driver profile, treating gate approval as approval of loading quantities, or recording multi-driver loading quantities without preserving which driver carried which allocation
 
 **راننده در نهایی‌سازی بارگیری**:
 A draft بارگیری may exist without driver information, but finalization requires a complete driver and vehicle snapshot.
@@ -679,12 +681,15 @@ _Avoid_: رجیستر راننده و خودرو, treating registry activation a
 
 **صف نوبت‌دهی رانندگان**:
 A حراست-owned time-ordered queue of registry-active driver/vehicle pairs that are physically present and waiting for loading. Queue presence makes a pair selectable by Logistics, while entry time determines display priority rather than restricting selection because a product may require a specific driver or vehicle.
+Queue priority is shown in حراست's waiting queue, not as ordering guidance in Logistics. Drivers returned from وارد محوطه بارگیری back to در انتظار appear first to preserve their turn rights.
 _Avoid_: راننده فعال for a merely present driver, treating FIFO as a hard selection rule, manually reordering entry priority, or exposing absent registry drivers to Logistics
 
 **نوبت راننده**:
-One historical occurrence of a registry-active driver/vehicle pair joining the queue. Its statuses are در انتظار, رزرو شده, اعزام شده, and خارج از صف; حراست moves a waiting turn to رزرو شده through ورود برای بارگیری against a specific driver request, releasing a loading reservation returns the same turn to its original waiting priority, and an explicit حراست removal ends it as خارج از صف.
+One historical occurrence of a registry-active driver/vehicle pair joining the queue. Its statuses are در انتظار, وارد محوطه بارگیری, رزرو شده, اعزام شده, and خارج از صف; حراست moves a waiting turn into the loading area through ورود برای بارگیری, Logistics may reserve an available loading turn for a draft بارگیری, releasing a loading reservation returns the same turn to وارد محوطه بارگیری, and an explicit حراست removal ends it as خارج از صف.
 The same pair cannot hold two current turns, but may receive a new turn after dispatch or after leaving and physically returning.
-_Avoid_: calling reservation release a cancellation, overwriting an earlier turn when a driver returns, allowing one turn to be reserved by multiple loadings, or losing original queue priority when a draft releases its reservation
+حراست may also return a driver from وارد محوطه بارگیری back to در انتظار when the driver should no longer be in the loading area; that turn keeps priority rights and appears first among waiting turns. This rollback requires a short reason, with preset choices for common reasons such as بارگیری آماده نبود, اشتباه در ورود, تغییر برنامه بارگیری, and راننده موقتاً برگشت به صف.
+حراست cannot return a رزرو شده turn directly to در انتظار; Logistics must first release it from the draft so it returns to وارد محوطه بارگیری.
+_Avoid_: calling reservation release a cancellation, overwriting an earlier turn when a driver returns, allowing one turn to be reserved by multiple loadings, returning a Logistics-released loading driver all the way to در انتظار, or losing original queue priority when a draft releases its reservation
 
 **خودرویی حراست**:
 The حراست vehicle area is a workflow hub whose ordered operational tabs are تردد خودرو, تراکنش خروجی, تراکنش ورودی, نوبت‌دهی رانندگان, and ثبت راننده و خودرو, while shared counters may remain on a dashboard.

@@ -529,6 +529,7 @@ model SalesContract {
   publicConfirmations   ContractPublicConfirmation[]
   confirmationAuditLogs ContractConfirmationAuditLog[]
   logisticsLoadingLines LogisticsLoadingLine[]
+  logisticsLoadingDriverAllocations LogisticsLoadingDriverAllocation[]
   isSigned              Boolean                        @default(false)
   signedByPhoneNumber   String?
   verificationCodeId    String?                        @unique
@@ -741,6 +742,7 @@ model Product {
   contractItems                    ContractItem[]
   deliveryProducts                 DeliveryProduct[]
   logisticsLoadingLines            LogisticsLoadingLine[]
+  logisticsLoadingDriverAllocations LogisticsLoadingDriverAllocation[]
   logisticsLoadingCorrections      LogisticsLoadingCorrection[]
 
   @@map("products")
@@ -767,6 +769,7 @@ model ContractItem {
   contract                    SalesContract                @relation(fields: [contractId], references: [id], onDelete: Cascade)
   product                     Product                      @relation(fields: [productId], references: [id], onDelete: Cascade)
   logisticsLoadingLines       LogisticsLoadingLine[]
+  logisticsLoadingDriverAllocations LogisticsLoadingDriverAllocation[]
   logisticsLoadingCorrections LogisticsLoadingCorrection[]
 
   @@map("contract_items")
@@ -849,6 +852,7 @@ model SecurityVehiclePair {
   movements     SecurityVehicleMovement[]
   photos        SecurityVehiclePairPhoto[]
   queueTurns    SecurityDriverQueueTurn[]
+  loadingDriverAssignments LogisticsLoadingDriverAssignment[]
 
   @@index([createdBy])
   @@index([isActive])
@@ -864,7 +868,12 @@ model SecurityDriverQueueTurn {
   reservedAt       DateTime?
   reservedBy       String?
   reservedPosition Int?
-  loadingId        String?                       @unique
+  loadingAreaEnteredAt DateTime?
+  loadingAreaEnteredBy String?
+  returnedToQueueAt DateTime?
+  returnedToQueueBy String?
+  returnToQueueReason String?
+  loadingId        String?
   driverRequestId  String?                       @unique
   dispatchedAt     DateTime?
   dispatchedBy     String?
@@ -876,9 +885,11 @@ model SecurityDriverQueueTurn {
   vehiclePair      SecurityVehiclePair           @relation(fields: [vehiclePairId], references: [id], onDelete: Restrict)
   loading          LogisticsLoading?             @relation(fields: [loadingId], references: [id], onDelete: SetNull)
   driverRequest    LogisticsDriverRequest?       @relation(fields: [driverRequestId], references: [id], onDelete: SetNull)
+  loadingDriverAssignment LogisticsLoadingDriverAssignment?
 
   @@index([status, enteredAt])
   @@index([vehiclePairId, status])
+  @@index([loadingId])
   @@index([driverRequestId])
   @@map("security_driver_queue_turns")
 }
@@ -1000,8 +1011,9 @@ model LogisticsLoading {
   lines                    LogisticsLoadingLine[]
   corrections              LogisticsLoadingCorrection[]
   securityVehicleMovements SecurityVehicleMovement[]
-  driverQueueTurn          SecurityDriverQueueTurn?
+  driverQueueTurns         SecurityDriverQueueTurn[]
   driverRequests           LogisticsDriverRequest[]
+  driverAssignments        LogisticsLoadingDriverAssignment[]
 
   @@index([customerId])
   @@index([projectId])
@@ -1010,6 +1022,54 @@ model LogisticsLoading {
   @@index([vehiclePairId])
   @@index([loadingDate])
   @@map("logistics_loadings")
+}
+
+model LogisticsLoadingDriverAssignment {
+  id             String                         @id @default(cuid())
+  loadingId      String
+  queueTurnId    String                         @unique
+  vehiclePairId  String
+  driverSnapshot Json
+  createdBy      String
+  createdAt      DateTime                       @default(now())
+  updatedAt      DateTime                       @updatedAt
+  loading        LogisticsLoading               @relation(fields: [loadingId], references: [id], onDelete: Cascade)
+  queueTurn      SecurityDriverQueueTurn        @relation(fields: [queueTurnId], references: [id], onDelete: Restrict)
+  vehiclePair    SecurityVehiclePair            @relation(fields: [vehiclePairId], references: [id], onDelete: Restrict)
+  allocations    LogisticsLoadingDriverAllocation[]
+
+  @@index([loadingId])
+  @@index([vehiclePairId])
+  @@map("logistics_loading_driver_assignments")
+}
+
+model LogisticsLoadingDriverAllocation {
+  id                   String                           @id @default(cuid())
+  assignmentId         String
+  sourceContractId     String
+  sourceContractItemId String
+  productId            String
+  quantity             Decimal                          @db.Decimal(12, 3)
+  unit                 String
+  khatRas              Decimal?                         @db.Decimal(12, 3)
+  pieceCount           Decimal?                         @db.Decimal(12, 3)
+  plus                 Decimal?                         @db.Decimal(12, 3)
+  minus                Decimal?                         @db.Decimal(12, 3)
+  productSnapshot      Json?
+  sourceSnapshot       Json?
+  calculationSnapshot  Json?
+  notes                String?
+  createdAt            DateTime                         @default(now())
+  updatedAt            DateTime                         @updatedAt
+  assignment           LogisticsLoadingDriverAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  sourceContract       SalesContract                    @relation(fields: [sourceContractId], references: [id], onDelete: Cascade)
+  sourceContractItem   ContractItem                     @relation(fields: [sourceContractItemId], references: [id], onDelete: Cascade)
+  product              Product                          @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([assignmentId])
+  @@index([sourceContractItemId])
+  @@index([productId])
+  @@map("logistics_loading_driver_allocations")
 }
 
 model LogisticsDriverRequest {
@@ -1901,6 +1961,7 @@ enum SecurityVehiclePlateKind {
 
 enum SecurityDriverQueueTurnStatus {
   WAITING
+  ENTERED_LOADING_AREA
   RESERVED
   DISPATCHED
   OUT_OF_QUEUE

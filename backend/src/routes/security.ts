@@ -258,9 +258,9 @@ router.get('/driver-queue', protect, securityView, async (req: AuthRequest, res:
   try {
     const history = req.query.history === 'true';
     const turns = await prisma.securityDriverQueueTurn.findMany({
-      where: history ? undefined : { status: { in: [SecurityDriverQueueTurnStatus.WAITING, SecurityDriverQueueTurnStatus.RESERVED] } },
+      where: history ? undefined : { status: { in: [SecurityDriverQueueTurnStatus.WAITING, SecurityDriverQueueTurnStatus.ENTERED_LOADING_AREA, SecurityDriverQueueTurnStatus.RESERVED] } },
       include: { vehiclePair: true, loading: { select: { id: true, loadingNumber: true } } },
-      orderBy: history ? [{ enteredAt: 'desc' }, { id: 'desc' }] : [{ enteredAt: 'asc' }, { id: 'asc' }],
+      orderBy: history ? [{ enteredAt: 'desc' }, { id: 'desc' }] : [{ returnedToQueueAt: 'desc' }, { enteredAt: 'asc' }, { id: 'asc' }],
       take: history ? 250 : undefined
     });
     res.json({ success: true, data: turns });
@@ -277,7 +277,7 @@ router.post('/driver-queue', protect, securityEdit, [body('vehiclePairId').isStr
     const turn = await prisma.$transaction(async (tx) => {
       const pair = await tx.securityVehiclePair.findFirst({ where: { id: req.body.vehiclePairId, isActive: true }, include: { photos: true } });
       if (!pair || !pairIsComplete(pair)) throw new Error('فقط راننده و خودروی فعال و کامل قابل نوبت‌دهی است.');
-      const current = await tx.securityDriverQueueTurn.findFirst({ where: { vehiclePairId: pair.id, status: { in: [SecurityDriverQueueTurnStatus.WAITING, SecurityDriverQueueTurnStatus.RESERVED] } } });
+      const current = await tx.securityDriverQueueTurn.findFirst({ where: { vehiclePairId: pair.id, status: { in: [SecurityDriverQueueTurnStatus.WAITING, SecurityDriverQueueTurnStatus.ENTERED_LOADING_AREA, SecurityDriverQueueTurnStatus.RESERVED] } } });
       if (current) throw new Error('این راننده و خودرو هم‌اکنون در صف است.');
       return tx.securityDriverQueueTurn.create({ data: { vehiclePairId: pair.id, enteredBy: req.user!.id }, include: { vehiclePair: true } });
     }, { isolationLevel: 'Serializable' });
@@ -294,15 +294,51 @@ router.post('/driver-queue/:id/remove', protect, securityEdit, [body('reason').i
     const turn = await prisma.securityDriverQueueTurn.findUnique({ where: { id: req.params.id } });
     if (!turn) return res.status(404).json({ success: false, error: 'نوبت پیدا نشد.' });
     if (turn.status === SecurityDriverQueueTurnStatus.RESERVED) return res.status(409).json({ success: false, error: 'نوبت رزرو شده را ابتدا از بارگیری آزاد کنید.' });
-    if (turn.status !== SecurityDriverQueueTurnStatus.WAITING) return res.status(409).json({ success: false, error: 'فقط نوبت در انتظار قابل خروج از صف است.' });
+    if (turn.status !== SecurityDriverQueueTurnStatus.WAITING && turn.status !== SecurityDriverQueueTurnStatus.ENTERED_LOADING_AREA) return res.status(409).json({ success: false, error: 'فقط نوبت جاری قابل خروج از صف است.' });
     const updated = await prisma.securityDriverQueueTurn.updateMany({
-      where: { id: turn.id, status: SecurityDriverQueueTurnStatus.WAITING },
+      where: { id: turn.id, status: { in: [SecurityDriverQueueTurnStatus.WAITING, SecurityDriverQueueTurnStatus.ENTERED_LOADING_AREA] } },
       data: { status: SecurityDriverQueueTurnStatus.OUT_OF_QUEUE, removedAt: new Date(), removedBy: req.user!.id, removalReason: req.body.reason.trim() }
     });
     if (updated.count !== 1) return res.status(409).json({ success: false, error: 'وضعیت نوبت هم‌زمان تغییر کرده است؛ صف را به‌روزرسانی کنید.' });
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message || 'خروج از صف ناموفق بود.' });
+  }
+});
+
+router.post('/driver-queue/:id/enter-loading-area', protect, securityEdit, async (req: AuthRequest, res: Response) => {
+  try {
+    const turn = await prisma.securityDriverQueueTurn.findUnique({ where: { id: req.params.id }, include: { vehiclePair: { include: { photos: true } } } });
+    if (!turn) return res.status(404).json({ success: false, error: 'نوبت پیدا نشد.' });
+    if (turn.status !== SecurityDriverQueueTurnStatus.WAITING) return res.status(409).json({ success: false, error: 'فقط راننده در انتظار قابل ورود برای بارگیری است.' });
+    if (!turn.vehiclePair.isActive || !pairIsComplete(turn.vehiclePair)) return res.status(409).json({ success: false, error: 'اطلاعات راننده و خودرو باید کامل و فعال باشد.' });
+    const updated = await prisma.securityDriverQueueTurn.updateMany({
+      where: { id: turn.id, status: SecurityDriverQueueTurnStatus.WAITING },
+      data: { status: SecurityDriverQueueTurnStatus.ENTERED_LOADING_AREA, loadingAreaEnteredAt: new Date(), loadingAreaEnteredBy: req.user!.id, returnedToQueueAt: null, returnedToQueueBy: null, returnToQueueReason: null }
+    });
+    if (updated.count !== 1) return res.status(409).json({ success: false, error: 'وضعیت نوبت هم‌زمان تغییر کرده است؛ صف را به‌روزرسانی کنید.' });
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'ورود راننده برای بارگیری ناموفق بود.' });
+  }
+});
+
+router.post('/driver-queue/:id/return-to-waiting', protect, securityEdit, [body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل بازگشت به صف الزامی است.' });
+    const turn = await prisma.securityDriverQueueTurn.findUnique({ where: { id: req.params.id } });
+    if (!turn) return res.status(404).json({ success: false, error: 'نوبت پیدا نشد.' });
+    if (turn.status === SecurityDriverQueueTurnStatus.RESERVED) return res.status(409).json({ success: false, error: 'راننده رزرو شده را ابتدا لجستیک از بارگیری آزاد کند.' });
+    if (turn.status !== SecurityDriverQueueTurnStatus.ENTERED_LOADING_AREA) return res.status(409).json({ success: false, error: 'فقط راننده وارد محوطه بارگیری قابل بازگشت به صف است.' });
+    const updated = await prisma.securityDriverQueueTurn.updateMany({
+      where: { id: turn.id, status: SecurityDriverQueueTurnStatus.ENTERED_LOADING_AREA },
+      data: { status: SecurityDriverQueueTurnStatus.WAITING, returnedToQueueAt: new Date(), returnedToQueueBy: req.user!.id, returnToQueueReason: req.body.reason.trim(), loadingAreaEnteredAt: null, loadingAreaEnteredBy: null }
+    });
+    if (updated.count !== 1) return res.status(409).json({ success: false, error: 'وضعیت نوبت هم‌زمان تغییر کرده است؛ صف را به‌روزرسانی کنید.' });
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'بازگشت راننده به صف ناموفق بود.' });
   }
 });
 
@@ -2430,4 +2466,3 @@ router.post('/signature/validate', protect, requireWorkspaceAccess(WORKSPACES.SE
 });
 
 export default router;
-

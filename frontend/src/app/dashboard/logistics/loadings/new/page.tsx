@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   FaArrowLeft,
@@ -162,8 +162,7 @@ const lineFromLoadingLine = (line: any): DraftLine => {
   };
 };
 
-const activeDriverRequestFrom = (loading: any) => (loading?.driverRequests || []).find((request: any) => ['PENDING_SECURITY', 'DRIVER_ENTERED'].includes(request.status)) || null;
-const requestOverrideUnset = Symbol('requestOverrideUnset');
+const normalizeSearch = (value: string) => value.trim().toLowerCase();
 
 export default function NewLoadingPage() {
   const router = useRouter();
@@ -180,9 +179,10 @@ export default function NewLoadingPage() {
   const [expandedContracts, setExpandedContracts] = useState<Record<string, boolean>>({});
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [lines, setLines] = useState<DraftLine[]>([]);
-  const [driverId, setDriverId] = useState('');
-  const [driverSnapshot, setDriverSnapshot] = useState<any>(emptyDriver);
-  const [driverRequest, setDriverRequest] = useState<any>(null);
+  const [drivers, setDrivers] = useState<any[]>([]);
+  const [driverSearch, setDriverSearch] = useState('');
+  const [selectedDriverIds, setSelectedDriverIds] = useState<string[]>([]);
+  const [driverLineInputs, setDriverLineInputs] = useState<Record<string, Record<string, Partial<DraftLine>>>>({});
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -191,6 +191,7 @@ export default function NewLoadingPage() {
   const [error, setError] = useState('');
 
   const selectedSourceIds = useMemo(() => new Set(lines.map((line) => line.source.contractItemId)), [lines]);
+  const selectedDrivers = useMemo(() => selectedDriverIds.map((id) => drivers.find((driver) => driver.id === id)).filter(Boolean), [drivers, selectedDriverIds]);
 
   const contracts = useMemo(() => {
     const byContract = new Map<string, any>();
@@ -230,6 +231,21 @@ export default function NewLoadingPage() {
     return Array.from(groups.values());
   }, [lines]);
 
+  const filteredDrivers = useMemo(() => {
+    const search = normalizeSearch(driverSearch);
+    const visible = drivers.filter((driver) => driver.queueStatus === 'ENTERED_LOADING_AREA' || driver.queueStatus === 'RESERVED' || selectedDriverIds.includes(driver.id));
+    if (!search) return visible;
+    return visible.filter((driver) => [
+      driver.firstName,
+      driver.lastName,
+      driver.phone,
+      driver.nationalCode,
+      driver.vehiclePlate,
+      driver.vehicleType,
+      driver.reservedLoading?.loadingNumber,
+    ].some((value) => String(value || '').toLowerCase().includes(search)));
+  }, [drivers, driverSearch, selectedDriverIds]);
+
   const loadCustomers = async () => {
     setError('');
     try {
@@ -261,42 +277,27 @@ export default function NewLoadingPage() {
     if (response.data.success) setRemaining(response.data.data);
   };
 
-  const syncDriverState = (loadingDraft: any, requestOverride: any = requestOverrideUnset) => {
-    const request = requestOverride === requestOverrideUnset ? activeDriverRequestFrom(loadingDraft) : requestOverride;
-    setDriverRequest(request || null);
-    const queueTurn = request?.queueTurn || loadingDraft?.driverQueueTurn;
-    setDriverId(queueTurn?.id || '');
-    setDriverSnapshot(loadingDraft?.driverSnapshot || request?.loading?.driverSnapshot || emptyDriver);
+  const loadDrivers = async () => {
+    const response = await logisticsAPI.getDrivers();
+    if (response.data.success) setDrivers(response.data.data);
   };
 
-  const refreshDriverRequest = useCallback(async () => {
-    if (!draft?.id) return;
-    try {
-      const response = await logisticsAPI.getDriverRequest(draft.id);
-      if (response.data.success) {
-        const request = response.data.data;
-        setDriverRequest(request || null);
-        setDriverId(request?.queueTurn?.id || '');
-        setDriverSnapshot(request?.loading?.driverSnapshot || emptyDriver);
-        if (request?.loading?.driverSnapshot) {
-          setDraft((current: any) => current ? { ...current, driverSnapshot: request.loading.driverSnapshot, vehiclePairId: request.loading.vehiclePairId } : current);
-        }
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'به‌روزرسانی درخواست راننده ناموفق بود.');
-    }
-  }, [draft?.id]);
+  const syncDriverState = (loadingDraft: any) => {
+    const assignmentIds = (loadingDraft?.driverAssignments || []).map((assignment: any) => assignment.queueTurnId).filter(Boolean);
+    setSelectedDriverIds(assignmentIds);
+  };
 
   useEffect(() => {
     loadCustomers();
+    loadDrivers();
   }, []);
 
   useEffect(() => {
     if (!draft?.id || step !== 'driver') return undefined;
-    void refreshDriverRequest();
-    const handle = window.setInterval(() => { void refreshDriverRequest(); }, 5000);
+    void loadDrivers();
+    const handle = window.setInterval(() => { void loadDrivers(); }, 5000);
     return () => window.clearInterval(handle);
-  }, [draft?.id, step, refreshDriverRequest]);
+  }, [draft?.id, step]);
 
   useEffect(() => {
     if (!draftId) return;
@@ -384,6 +385,27 @@ export default function NewLoadingPage() {
     return Number(line.quantity || 0);
   };
 
+  const lineWithDriverInput = (driverIdValue: string, line: DraftLine): DraftLine => ({
+    ...line,
+    ...(driverLineInputs[driverIdValue]?.[line.key] || {}),
+  });
+
+  const calculateDriverLineQuantity = (driverIdValue: string, line: DraftLine) => calculateLineQuantity(lineWithDriverInput(driverIdValue, line));
+
+  const calculateTotalLineQuantity = (line: DraftLine) => selectedDriverIds.reduce((sum, id) => sum + calculateDriverLineQuantity(id, line), 0);
+
+  const driverCarriesAny = (driverIdValue: string) => lines.some((line) => calculateDriverLineQuantity(driverIdValue, line) > 0);
+
+  const updateDriverLineInput = (driverIdValue: string, lineKey: string, patch: Partial<DraftLine>) => {
+    setDriverLineInputs((current) => ({
+      ...current,
+      [driverIdValue]: {
+        ...(current[driverIdValue] || {}),
+        [lineKey]: { ...(current[driverIdValue]?.[lineKey] || {}), ...patch },
+      },
+    }));
+  };
+
   const fillLineWithRemaining = (line: DraftLine) => {
     updateLine(line.key, {
       mode: 'direct',
@@ -398,24 +420,31 @@ export default function NewLoadingPage() {
   const buildPayload = () => ({
     projectId: draft?.projectId,
     notes,
-    lines: lines.map((line) => ({
-      sourceContractItemId: line.source.contractItemId,
-      unit: line.source.unit,
-      quantity: calculateLineQuantity(line),
-      khatRas: line.mode === 'linear' ? line.khatRas : null,
-      pieceCount: line.mode === 'linear' ? line.pieceCount : null,
-      plus: line.mode === 'linear' ? line.plus : 0,
-      minus: line.mode === 'linear' ? line.minus : 0,
-      productSnapshot: line.source.productSnapshot,
-      sourceSnapshot: {
-        contractId: line.source.contractId,
-        contractNumber: line.source.contractNumber,
-        contractItemId: line.source.contractItemId,
-        contractedQuantity: line.source.contractedQuantity,
-        remainingQuantity: line.source.remainingQuantity,
-        groupKey: line.groupKey,
-      },
-      notes: line.notes,
+    driverTurnIds: selectedDriverIds,
+    driverAllocations: selectedDriverIds.map((queueTurnId) => ({
+      queueTurnId,
+      lines: lines.map((line) => {
+        const driverLine = lineWithDriverInput(queueTurnId, line);
+        return {
+          sourceContractItemId: line.source.contractItemId,
+          unit: line.source.unit,
+          quantity: calculateLineQuantity(driverLine),
+          khatRas: driverLine.mode === 'linear' ? driverLine.khatRas : null,
+          pieceCount: driverLine.mode === 'linear' ? driverLine.pieceCount : null,
+          plus: driverLine.mode === 'linear' ? driverLine.plus : 0,
+          minus: driverLine.mode === 'linear' ? driverLine.minus : 0,
+          productSnapshot: line.source.productSnapshot,
+          sourceSnapshot: {
+            contractId: line.source.contractId,
+            contractNumber: line.source.contractNumber,
+            contractItemId: line.source.contractItemId,
+            contractedQuantity: line.source.contractedQuantity,
+            remainingQuantity: line.source.remainingQuantity,
+            groupKey: line.groupKey,
+          },
+          notes: driverLine.notes,
+        };
+      }),
     })),
   });
 
@@ -438,61 +467,36 @@ export default function NewLoadingPage() {
     return false;
   };
 
-  const requestDriverFromSecurity = async () => {
-    if (!draft?.id) return;
-    const saved = await saveDraft();
-    if (!saved) return;
-    setSaving(true);
-    setError('');
-    try {
-      const response = await logisticsAPI.requestDriver(draft.id);
-      if (response.data.success) {
-        setDriverRequest(response.data.data);
-        setMessage('درخواست راننده برای حراست ثبت شد.');
-        await refreshDriverRequest();
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'ثبت درخواست راننده ناموفق بود.');
-    } finally {
-      setSaving(false);
+  const toggleSelectedDriver = (driver: any) => {
+    const selected = selectedDriverIds.includes(driver.id);
+    if (!selected && driver.queueStatus === 'RESERVED' && driver.reservedLoading?.id !== draft?.id) return;
+    setSelectedDriverIds((current) => selected ? current.filter((id) => id !== driver.id) : [...current, driver.id]);
+    if (selected) {
+      setDriverLineInputs((current) => {
+        const next = { ...current };
+        delete next[driver.id];
+        return next;
+      });
     }
   };
 
-  const cancelDriverRequest = async () => {
-    if (!draft?.id || !driverRequest) return;
-    setSaving(true);
-    setError('');
-    try {
-      const response = await logisticsAPI.cancelDriverRequest(draft.id);
-      if (response.data.success) {
-        const loadingDraft = response.data.data;
-        setDraft(loadingDraft);
-        syncDriverState(loadingDraft, null);
-        setMessage('درخواست راننده لغو شد.');
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'لغو درخواست راننده ناموفق بود.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const hasValidLineQuantities = lines.length > 0 && lines.every((line) => calculateLineQuantity(line) > 0);
+  const hasValidLineQuantities = lines.length > 0 && selectedDriverIds.length > 0 && lines.every((line) => calculateTotalLineQuantity(line) > 0) && selectedDriverIds.every((id) => driverCarriesAny(id));
   const blockers = useMemo(() => {
     const items: string[] = [];
     if (!draft?.projectId) items.push('پروژه انتخاب نشده است.');
     if (!lines.length) items.push('حداقل یک ردیف بارگیری لازم است.');
-    if (lines.some((line) => calculateLineQuantity(line) <= 0)) items.push('مقدار همه ردیف‌ها باید بیشتر از صفر باشد.');
-    if (!driverId) items.push('راننده هنوز توسط حراست برای بارگیری وارد نشده است.');
+    if (!selectedDriverIds.length) items.push('حداقل یک راننده وارد محوطه بارگیری باید انتخاب شود.');
+    if (selectedDriverIds.length && lines.some((line) => calculateTotalLineQuantity(line) <= 0)) items.push('جمع مقدار هر ردیف بین رانندگان باید بیشتر از صفر باشد.');
+    if (selectedDriverIds.some((id) => !driverCarriesAny(id))) items.push('هر راننده انتخاب‌شده باید حداقل یک مقدار مثبت حمل کند.');
     return items;
-  }, [draft, lines, driverId]);
+  }, [draft, lines, selectedDriverIds, driverLineInputs]);
 
   const canEnterStep = (target: WizardStep) => {
     if (target === 'customer') return true;
     if (target === 'project') return Boolean(selectedCustomer);
     if (target === 'contracts') return Boolean(draft?.id);
     if (target === 'driver') return Boolean(draft?.id && lines.length);
-    if (target === 'quantities') return Boolean(draft?.id && lines.length && driverId);
+    if (target === 'quantities') return Boolean(draft?.id && lines.length && selectedDriverIds.length);
     return Boolean(draft?.id);
   };
 
@@ -528,8 +532,8 @@ export default function NewLoadingPage() {
       setError('مقدار همه ردیف‌ها باید بیشتر از صفر باشد.');
       return;
     }
-    if (step === 'driver' && !driverId) {
-      setError('منتظر ورود راننده توسط حراست بمانید.');
+    if (step === 'driver' && !selectedDriverIds.length) {
+      setError('حداقل یک راننده وارد محوطه بارگیری را انتخاب کنید.');
       return;
     }
     setError('');
@@ -780,100 +784,147 @@ export default function NewLoadingPage() {
     </div>
   );
 
+  const renderDriverLineQuantityInputs = (driver: any, line: DraftLine) => {
+    const driverLine = lineWithDriverInput(driver.id, line);
+    const update = (patch: Partial<DraftLine>) => updateDriverLineInput(driver.id, line.key, patch);
+    return (
+      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-slate-900 dark:text-white">قرارداد {line.source.contractNumber}</p>
+            <p className="mt-1 text-xs text-slate-500">مانده قابل بارگیری: {numberFa(line.source.remainingQuantity)} {line.source.unitLabel}</p>
+          </div>
+          <ErpBadge tone={calculateDriverLineQuantity(driver.id, line) > 0 ? 'success' : 'neutral'}>
+            مقدار این راننده: {numberFa(calculateDriverLineQuantity(driver.id, line))} {unitLabels[line.source.unit] || line.source.unit}
+          </ErpBadge>
+        </div>
+        {line.source.unit === 'meter' && (
+          <div className="mt-3">
+            <ErpSegmentedControl<QuantityMode>
+              value={driverLine.mode}
+              onChange={(value) => update({ mode: value })}
+              options={[
+                { value: 'linear', label: 'خط راس' },
+                { value: 'direct', label: 'مقدار مستقیم' },
+              ]}
+            />
+          </div>
+        )}
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
+          {driverLine.mode === 'linear' ? (
+            <>
+              <label><span className={labelClass}>خط راس</span><input className={inputClass} value={driverLine.khatRas} onChange={(event) => update({ khatRas: event.target.value })} /></label>
+              <label><span className={labelClass}>تعداد</span><input className={inputClass} value={driverLine.pieceCount} onChange={(event) => update({ pieceCount: event.target.value })} /></label>
+              <label><span className={labelClass}>اضافه</span><input className={inputClass} value={driverLine.plus} onChange={(event) => update({ plus: event.target.value })} /></label>
+              <label><span className={labelClass}>کسر</span><input className={inputClass} value={driverLine.minus} onChange={(event) => update({ minus: event.target.value })} /></label>
+            </>
+          ) : (
+            <label><span className={labelClass}>مقدار مستقیم</span><input className={inputClass} value={driverLine.quantity} onChange={(event) => update({ quantity: event.target.value })} /></label>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderQuantitiesStep = () => (
-    <ErpSection title="مقداردهی ردیف‌های انتخاب‌شده" description="ردیف‌های مشابه به صورت خلاصه گروهی نمایش داده می‌شوند، اما مقدار هر منبع قراردادی جداگانه وارد می‌شود.">
+    <ErpSection title="مقداردهی بر اساس راننده" description="برای هر راننده مشخص کنید چه مقدار از هر ردیف را حمل می‌کند. خالی یا صفر یعنی آن راننده آن ردیف را حمل نمی‌کند.">
       {groupedLines.length === 0 ? (
         <ErpEmptyState icon={FaClipboardList} title="هنوز ردیفی انتخاب نشده است" action={{ label: 'رفتن به قراردادها', onClick: () => setStep('contracts'), icon: FaPlus }} />
+      ) : selectedDrivers.length === 0 ? (
+        <ErpEmptyState icon={FaTruck} title="راننده‌ای انتخاب نشده است" action={{ label: 'رفتن به راننده', onClick: () => setStep('driver'), icon: FaTruck }} />
       ) : (
-        <div className="space-y-3">
-          {groupedLines.map((group) => {
-            const total = group.lines.reduce((sum, line) => sum + calculateLineQuantity(line), 0);
-            const remainingTotal = group.lines.reduce((sum, line) => sum + Number(line.source.remainingQuantity || 0), 0);
-            const isOpen = expandedGroups[group.key] ?? true;
-            return (
-              <ErpCard key={group.key} className="p-4">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div>
+        <div className="space-y-4">
+          {selectedDrivers.map((driver) => (
+            <ErpCard key={driver.id} className="p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-900 dark:text-white">{driver.firstName} {driver.lastName}</p>
+                  <p className="mt-1 text-xs text-slate-500">{driver.vehiclePlate} · {driver.vehicleType}</p>
+                </div>
+                <ErpBadge tone={driverCarriesAny(driver.id) ? 'success' : 'warning'}>{driverCarriesAny(driver.id) ? 'دارای مقدار' : 'بدون مقدار'}</ErpBadge>
+              </div>
+              <div className="mt-3 space-y-3">
+                {groupedLines.map((group) => (
+                  <div key={`${driver.id}-${group.key}`} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
                     <p className="font-semibold text-slate-900 dark:text-white">{group.displayName}</p>
                     <p className="mt-1 text-xs text-slate-500">{productIdentityParts(group.snapshot).join(' · ') || 'بدون مشخصات'}</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <ErpBadge tone={total > 0 ? 'success' : 'warning'}>جمع مقدار: {numberFa(total)} {group.unitLabel}</ErpBadge>
-                      <ErpBadge tone="neutral">مانده کل: {numberFa(remainingTotal)} {group.unitLabel}</ErpBadge>
-                      <ErpBadge tone="info">{numberFa(group.lines.length, 0)} منبع قراردادی</ErpBadge>
-                    </div>
+                    {group.lines.map((line) => <div key={`${driver.id}-${line.key}`}>{renderDriverLineQuantityInputs(driver, line)}</div>)}
                   </div>
-                  <ErpButton
-                    label={isOpen ? 'بستن جزئیات' : 'جزئیات'}
-                    icon={isOpen ? FaChevronUp : FaChevronDown}
-                    onClick={() => setExpandedGroups((current) => ({ ...current, [group.key]: !isOpen }))}
-                    tone="neutral"
-                  />
+                ))}
+              </div>
+            </ErpCard>
+          ))}
+          <ErpCard className="p-4" tone="info">
+            <p className="mb-3 font-semibold text-slate-900 dark:text-white">جمع ردیف‌ها</p>
+            <div className="space-y-2">
+              {lines.map((line) => (
+                <div key={line.key} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white p-3 text-sm dark:bg-slate-900">
+                  <span>قرارداد {line.source.contractNumber} · {line.groupDisplayName}</span>
+                  <span className="font-semibold text-[#074747] dark:text-teal-200">{numberFa(calculateTotalLineQuantity(line))} {unitLabels[line.source.unit] || line.source.unit}</span>
                 </div>
-                {isOpen && <div>{group.lines.map((line) => <div key={line.key}>{renderLineQuantityInputs(line)}</div>)}</div>}
-              </ErpCard>
-            );
-          })}
+              ))}
+            </div>
+          </ErpCard>
         </div>
       )}
     </ErpSection>
   );
 
-  const renderDriverStep = () => {
-    const requestStatus = driverRequest?.status;
-    const waiting = requestStatus === 'PENDING_SECURITY';
-    const entered = requestStatus === 'DRIVER_ENTERED' || Boolean(driverId);
-
-    return (
-      <ErpSection title="درخواست راننده از حراست" description="لجستیک فقط درخواست می‌دهد؛ حراست از صف نوبت‌دهی راننده را با «ورود برای بارگیری» وارد می‌کند. این بخش هر ۵ ثانیه به‌روزرسانی می‌شود.">
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/70">
-          <div>
-            <p className="font-semibold text-slate-900 dark:text-white">
-              {entered ? 'راننده توسط حراست وارد شد' : waiting ? 'در انتظار حراست' : 'درخواست راننده هنوز ثبت نشده است'}
-            </p>
-            <p className="mt-1 text-sm text-slate-500">
-              {driverRequest?.requestedAt ? `زمان درخواست: ${new Date(driverRequest.requestedAt).toLocaleString('fa-IR')}` : 'پس از انتخاب قراردادها، درخواست را برای حراست ارسال کنید.'}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <ErpButton label="به‌روزرسانی" icon={FaSearch} variant="soft" onClick={() => { void refreshDriverRequest(); }} />
-            {!driverRequest && <ErpButton label="درخواست راننده از حراست" icon={FaTruck} onClick={() => { void requestDriverFromSecurity(); }} disabled={saving} />}
-            {driverRequest && !entered && <ErpButton label="لغو درخواست" icon={FaTrash} tone="danger" variant="soft" onClick={() => { void cancelDriverRequest(); }} disabled={saving} />}
-            {entered && draft?.status === 'DRAFT' && <ErpButton label="لغو درخواست و آزادسازی راننده" icon={FaTrash} tone="danger" variant="soft" onClick={() => { void cancelDriverRequest(); }} disabled={saving} />}
-          </div>
-        </div>
-
-        {driverRequest && (
-          <ErpCard className="mt-4 p-4" tone={entered ? 'success' : 'warning'}>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="font-semibold">{entered ? 'وضعیت: راننده وارد شد' : 'وضعیت: در انتظار حراست'}</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {driverRequest.requester ? `درخواست‌دهنده: ${driverRequest.requester.firstName || ''} ${driverRequest.requester.lastName || driverRequest.requester.username || ''}` : ''}
-                  {driverRequest.fulfilledAt ? ` · ورود: ${new Date(driverRequest.fulfilledAt).toLocaleString('fa-IR')}` : ''}
-                </p>
-              </div>
-              <ErpBadge tone={entered ? 'success' : 'warning'}>{entered ? 'راننده وارد شد' : 'در انتظار حراست'}</ErpBadge>
-            </div>
-          </ErpCard>
-        )}
-
-        {entered && (
-          <ErpCard className="mt-4 p-4" tone="info">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              {driverFields.map(([field, label]) => (
-                <div key={field}>
-                  <p className="text-xs text-slate-500">{label}</p>
-                  <p className="mt-1 font-semibold text-slate-900 dark:text-white">{driverSnapshot[field] || '—'}</p>
+  const renderDriverStep = () => (
+    <ErpSection title="انتخاب رانندگان آماده بارگیری" description="فقط رانندگانی نمایش داده می‌شوند که حراست با «ورود برای بارگیری» وارد محوطه بارگیری کرده است. می‌توانید چند راننده انتخاب کنید.">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <input
+          className={inputClass}
+          value={driverSearch}
+          onChange={(event) => setDriverSearch(event.target.value)}
+          placeholder="جستجوی راننده، موبایل، کد ملی، پلاک یا نوع خودرو"
+        />
+        <ErpButton label="به‌روزرسانی" icon={FaSearch} variant="soft" onClick={() => { void loadDrivers(); }} />
+      </div>
+      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {filteredDrivers.map((driver) => {
+          const selected = selectedDriverIds.includes(driver.id);
+          const reservedForOther = driver.queueStatus === 'RESERVED' && driver.reservedLoading?.id !== draft?.id && !selected;
+          return (
+            <button
+              key={driver.id}
+              type="button"
+              onClick={() => toggleSelectedDriver(driver)}
+              disabled={reservedForOther}
+              className={`rounded-lg border bg-white p-4 text-right shadow-sm transition hover:border-[#074747]/40 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-900/70 ${
+                selected ? 'border-[#074747]' : 'border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-900 dark:text-white">{driver.firstName} {driver.lastName}</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">{[driver.vehiclePlate, driver.vehicleType, driver.phone, driver.nationalCode].filter(Boolean).join(' · ')}</p>
+                  {driver.enteredLoadingAreaAt && <p className="mt-1 text-xs text-slate-500">ورود برای بارگیری: {new Date(driver.enteredLoadingAreaAt).toLocaleString('fa-IR')}</p>}
                 </div>
-              ))}
-            </div>
-          </ErpCard>
-        )}
-
-        {!entered && <ErpEmptyState icon={FaTruck} title="منتظر ورود راننده توسط حراست" description="پس از کلیک حراست روی «ورود برای بارگیری»، راننده اینجا نمایش داده می‌شود و می‌توانید به مرحله مقدار بروید." />}
-      </ErpSection>
-    );
-  };
+                <ErpBadge tone={selected ? 'success' : reservedForOther ? 'warning' : 'neutral'}>
+                  {selected ? 'انتخاب شده' : reservedForOther ? `رزرو شده برای ${driver.reservedLoading?.loadingNumber || 'بارگیری دیگر'}` : 'آماده بارگیری'}
+                </ErpBadge>
+              </div>
+            </button>
+          );
+        })}
+        {!filteredDrivers.length && <ErpEmptyState icon={FaUsers} title="راننده آماده بارگیری وجود ندارد" description="حراست باید از نوبت‌دهی روی «ورود برای بارگیری» کلیک کند." />}
+      </div>
+      {selectedDrivers.length > 0 && (
+        <ErpCard className="mt-4 p-4" tone="info">
+          <p className="mb-3 font-semibold text-slate-900 dark:text-white">رانندگان انتخاب‌شده</p>
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            {selectedDrivers.map((driver) => (
+              <div key={driver.id} className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800">
+                <span className="font-semibold">{driver.firstName} {driver.lastName}</span>
+                <span className="block text-xs text-slate-500">{driver.vehiclePlate} · {driver.vehicleType}</span>
+              </div>
+            ))}
+          </div>
+        </ErpCard>
+      )}
+    </ErpSection>
+  );
 
   const renderReviewStep = () => (
     <ErpSection title="بازبینی و نهایی‌سازی">
@@ -885,9 +936,16 @@ export default function NewLoadingPage() {
             <p className="mt-1 text-xs text-slate-500">{remaining?.project?.projectName || remaining?.project?.address || draft?.project?.projectName || ''}</p>
           </ErpCard>
           <ErpCard className="p-4">
-            <p className="text-sm text-slate-500">راننده</p>
-            <p className="mt-1 font-semibold text-slate-900 dark:text-white">{driverSnapshot.firstName || 'بدون نام'} {driverSnapshot.lastName || ''}</p>
-            <p className="mt-1 text-xs text-slate-500">{driverSnapshot.vehicleType || 'نوع ماشین'} · {driverSnapshot.vehiclePlate || 'پلاک'}</p>
+            <p className="text-sm text-slate-500">رانندگان</p>
+            <div className="mt-2 space-y-2">
+              {selectedDrivers.map((driver) => (
+                <div key={driver.id} className="rounded-lg bg-slate-50 p-2 text-sm dark:bg-slate-800">
+                  <span className="font-semibold text-slate-900 dark:text-white">{driver.firstName} {driver.lastName}</span>
+                  <span className="block text-xs text-slate-500">{driver.vehicleType} · {driver.vehiclePlate}</span>
+                </div>
+              ))}
+              {!selectedDrivers.length && <p className="text-sm text-slate-500">انتخاب نشده</p>}
+            </div>
           </ErpCard>
           <ErpCard className="p-4">
             <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">خلاصه ردیف‌ها</p>
@@ -897,10 +955,10 @@ export default function NewLoadingPage() {
                   <div className="flex items-start justify-between gap-3">
                     <span>
                       {group.displayName}
-                      <span className="mt-1 block text-xs text-slate-500">{group.lines.map((line) => `قرارداد ${line.source.contractNumber}: ${numberFa(calculateLineQuantity(line))}`).join(' · ')}</span>
+                      <span className="mt-1 block text-xs text-slate-500">{group.lines.map((line) => `قرارداد ${line.source.contractNumber}: ${numberFa(calculateTotalLineQuantity(line))}`).join(' · ')}</span>
                     </span>
                     <span className="font-semibold text-[#074747] dark:text-teal-200">
-                      {numberFa(group.lines.reduce((sum, line) => sum + calculateLineQuantity(line), 0))} {group.unitLabel}
+                      {numberFa(group.lines.reduce((sum, line) => sum + calculateTotalLineQuantity(line), 0))} {group.unitLabel}
                     </span>
                   </div>
                 </div>

@@ -34,8 +34,10 @@ interface SecurityPersonnel {
     startTime: string;
     endTime: string;
   };
+  position: string;
   isActive: boolean;
-  assignedAt: string;
+  assignedAt?: string;
+  createdAt?: string;
   lastActivity?: string;
 }
 
@@ -70,7 +72,8 @@ export default function PersonnelPage() {
   const [showAssignForm, setShowAssignForm] = useState(false);
   const [assignFormData, setAssignFormData] = useState({
     userId: '',
-    shiftId: ''
+    shiftId: '',
+    position: 'نگهبان'
   });
 
   useEffect(() => {
@@ -84,7 +87,7 @@ export default function PersonnelPage() {
       
       const [personnelResponse, shiftsResponse] = await Promise.all([
         securityAPI.getPersonnel(),
-        securityAPI.getShifts()
+        securityAPI.getShifts(),
       ]);
       
       if (personnelResponse.data.success) {
@@ -93,6 +96,10 @@ export default function PersonnelPage() {
       
       if (shiftsResponse.data.success) {
         setShifts(shiftsResponse.data.data);
+      }
+      const usersResponse = await securityAPI.getEligiblePersonnelUsers();
+      if (usersResponse.data.success) {
+        setUsers(usersResponse.data.data);
       }
     } catch (error: any) {
       console.error('Error fetching personnel data:', error);
@@ -108,7 +115,7 @@ export default function PersonnelPage() {
       const response = await securityAPI.assignPersonnel(assignFormData);
       if (response.data.success) {
         setShowAssignForm(false);
-        setAssignFormData({ userId: '', shiftId: '' });
+        setAssignFormData({ userId: '', shiftId: '', position: 'نگهبان' });
         fetchPersonnelData();
         alert('نیرو با موفقیت ثبت شد');
       }
@@ -120,9 +127,8 @@ export default function PersonnelPage() {
 
   const handleToggleActive = async (personnelId: string, isActive: boolean) => {
     try {
-      // This would need a new API endpoint
-      // const response = await securityAPI.togglePersonnelStatus(personnelId, !isActive);
-      alert('وضعیت نیرو تغییر کرد');
+      await securityAPI.updatePersonnelStatus(personnelId, !isActive);
+      await fetchPersonnelData();
     } catch (error: any) {
       console.error('Error toggling personnel status:', error);
       alert(error.response?.data?.error || 'خطا در تغییر وضعیت نیرو');
@@ -262,6 +268,9 @@ export default function PersonnelPage() {
                     </div>
                   </td>
                   <td className="py-3 px-4 text-secondary">
+                    {person.position || '-'}
+                  </td>
+                  <td className="py-3 px-4 text-secondary">
                     {person.user.department?.namePersian || '-'}
                   </td>
                   <td className="py-3 px-4">
@@ -292,7 +301,7 @@ export default function PersonnelPage() {
                     </button>
                   </td>
                   <td className="py-3 px-4 text-secondary">
-                    {new Date(person.assignedAt).toLocaleDateString('fa-IR')}
+                    {person.assignedAt || person.createdAt ? new Date(person.assignedAt || person.createdAt || '').toLocaleDateString('fa-IR') : '-'}
                   </td>
                   <td className="py-3 px-4">
                     <div className="flex space-x-2 space-x-reverse">
@@ -321,7 +330,7 @@ export default function PersonnelPage() {
       {showAssignForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="glass-liquid-card p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold text-primary mb-4">نیروهای این شیفت</h2>
+              <h2 className="text-xl font-bold text-primary mb-4">نیروهای این شیفت</h2>
             <form onSubmit={handleAssignPersonnel} className="space-y-4">
               <div>
                 <label className="block text-sm text-secondary mb-2">کاربر</label>
@@ -332,20 +341,32 @@ export default function PersonnelPage() {
                   required
                 >
                   <option value="">کارمند را انتخاب کنید</option>
-                  {/* This would need to fetch available users */}
-                  <option value="user1">کاربر نمونه ۱</option>
-                  <option value="user2">کاربر نمونه ۲</option>
+                  {users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.firstName} {user.lastName} ({user.department?.namePersian || user.role})
+                    </option>
+                  ))}
                 </select>
+                {users.length === 0 && <p className="mt-2 text-xs text-secondary">کاربر واجد شرایط حراست برای افزودن وجود ندارد.</p>}
               </div>
               <div>
                 <label className="block text-sm text-secondary mb-2">سمت</label>
+                <input
+                  value={assignFormData.position}
+                  onChange={(e) => setAssignFormData({ ...assignFormData, position: e.target.value })}
+                  className="glass-liquid-input w-full"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-secondary mb-2">شیفت</label>
                 <select
                   value={assignFormData.shiftId}
                   onChange={(e) => setAssignFormData({ ...assignFormData, shiftId: e.target.value })}
                   className="glass-liquid-input w-full"
                   required
                 >
-                  <option value="">خطا در ذخیره اطلاعات</option>
+                  <option value="">شیفت را انتخاب کنید</option>
                   {shifts.map((shift) => (
                     <option key={shift.id} value={shift.id}>
                       {shift.namePersian} ({formatTime(shift.startTime)} - {formatTime(shift.endTime)})
@@ -358,7 +379,7 @@ export default function PersonnelPage() {
                   type="submit"
                   className="flex-1 glass-liquid-btn-primary px-4 py-2"
                 >
-                  گزارش روزانه
+                  ثبت نیرو
                 </button>
                 <button
                   type="button"

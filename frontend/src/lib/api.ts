@@ -712,13 +712,18 @@ export const securityAPI = {
   recordException: (data: any) => api.post('/security/attendance/exception', data),
   
   // Reports and dashboard
-  getDailyAttendance: (date?: string) => 
-    api.get(`/security/attendance/daily${date ? `?date=${date}` : ''}`),
-  getDashboardStats: () => api.get('/security/dashboard/stats'),
+  getDailyAttendance: (dateOrParams?: string | Record<string, any>) => {
+    const params = typeof dateOrParams === 'string' ? { date: dateOrParams } : dateOrParams;
+    return api.get('/security/attendance/daily', { params });
+  },
+  getDashboardStats: (params?: any) => api.get('/security/dashboard/stats', { params }),
+  getSecurityReportSummary: (params?: any) => api.get('/security/reports/summary', { params }),
   
   // Personnel management
   getPersonnel: () => api.get('/security/personnel'),
+  getEligiblePersonnelUsers: () => api.get('/security/personnel/eligible-users'),
   assignPersonnel: (data: any) => api.post('/security/personnel', data),
+  updatePersonnelStatus: (id: string, isActive: boolean) => api.put(`/security/personnel/${id}/status`, { isActive }),
 
   // Vehicle gate operations
   getVehiclePairs: (params?: any) => api.get('/security/vehicle-pairs', { params }),

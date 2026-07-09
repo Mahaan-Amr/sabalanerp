@@ -39,13 +39,8 @@ export default function AdminSecurityPage() {
   const loadSecurityData = async () => {
     try {
       setLoading(true);
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      setStats({ totalLogins: 156, failedLogins: 12, activeUsers: 8, suspiciousActivities: 3 });
-      setSecurityLogs([
-        { id: '1', userId: 'user1', userName: 'مدیر سیستم', action: 'ورود به سیستم', ipAddress: '192.168.1.100', userAgent: 'Chrome/120.0.0.0', timestamp: '2025-01-20T10:30:00Z', status: 'success' },
-        { id: '2', userId: 'user2', userName: 'Sales User', action: 'ورود ناموفق', ipAddress: '192.168.1.101', userAgent: 'Firefox/121.0.0.0', timestamp: '2025-01-20T09:15:00Z', status: 'failed' },
-        { id: '3', userId: 'user3', userName: 'کاربر فروش', action: 'مشاهده قراردادها', ipAddress: '192.168.1.102', userAgent: 'Safari/17.2.0', timestamp: '2025-01-20T08:45:00Z', status: 'success' },
-      ]);
+      setStats({ totalLogins: 0, failedLogins: 0, activeUsers: 0, suspiciousActivities: 0 });
+      setSecurityLogs([]);
     } catch (error) {
       console.error('Error loading security data:', error);
     } finally {

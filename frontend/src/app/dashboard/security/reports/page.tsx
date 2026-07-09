@@ -11,18 +11,19 @@ import {
   FaFilePdf,
   FaFileExcel
 } from 'react-icons/fa';
-import { securityAPI } from '@/lib/api';
+import { departmentsAPI, securityAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 
 interface ReportData {
   attendance: {
-    totalEmployees: number;
+    totalEmployeeDays: number;
     present: number;
     absent: number;
     late: number;
     mission: number;
     leave: number;
+    signed: number;
     attendanceRate: number;
   };
   exceptions: {
@@ -39,10 +40,15 @@ interface ReportData {
     completionRate: number;
   };
   shifts: {
-    totalShifts: number;
+    totalSessions: number;
+    completedShifts: number;
     activeShifts: number;
     totalPersonnel: number;
     activePersonnel: number;
+  };
+  signatures: {
+    signed: number;
+    unsignedRecords: number;
   };
 }
 
@@ -51,7 +57,20 @@ interface AttendanceTrend {
   present: number;
   absent: number;
   late: number;
+  mission: number;
+  leave: number;
+  signed: number;
   total: number;
+}
+
+interface Department {
+  id: string;
+  namePersian: string;
+}
+
+interface Shift {
+  id: string;
+  namePersian: string;
 }
 
 export default function ReportsPage() {
@@ -64,61 +83,48 @@ export default function ReportsPage() {
     endDate: PersianCalendar.now()
   });
   const [reportType, setReportType] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const [departmentId, setDepartmentId] = useState('');
+  const [shiftId, setShiftId] = useState('');
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [shifts, setShifts] = useState<Shift[]>([]);
 
   useEffect(() => {
     fetchReportsData();
-  }, [dateRange, reportType]);
+  }, [dateRange, reportType, departmentId, shiftId]);
+
+  useEffect(() => {
+    const loadFilters = async () => {
+      try {
+        const [departmentsResponse, shiftsResponse] = await Promise.all([
+          departmentsAPI.getDepartments(),
+          securityAPI.getShifts()
+        ]);
+        if (departmentsResponse.data.success) setDepartments(departmentsResponse.data.data || []);
+        if (shiftsResponse.data.success) setShifts(shiftsResponse.data.data || []);
+      } catch (error) {
+        console.error('Error loading report filters:', error);
+      }
+    };
+    loadFilters();
+  }, []);
 
   const fetchReportsData = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      // This would need new API endpoints for reports
-      // For now, we'll simulate the data structure
-      const mockData: ReportData = {
-        attendance: {
-          totalEmployees: 45,
-          present: 38,
-          absent: 4,
-          late: 2,
-          mission: 1,
-          leave: 0,
-          attendanceRate: 84.4
-        },
-        exceptions: {
-          totalRequests: 12,
-          approved: 8,
-          rejected: 2,
-          pending: 2,
-          approvalRate: 80.0
-        },
-        missions: {
-          totalMissions: 5,
-          completed: 4,
-          pending: 1,
-          completionRate: 80.0
-        },
-        shifts: {
-          totalShifts: 2,
-          activeShifts: 1,
-          totalPersonnel: 8,
-          activePersonnel: 6
-        }
-      };
+      const response = await securityAPI.getSecurityReportSummary({
+        startDate: PersianCalendar.toGregorian(dateRange.startDate).toISOString(),
+        endDate: PersianCalendar.toGregorian(dateRange.endDate).toISOString(),
+        departmentId: departmentId || undefined,
+        shiftId: shiftId || undefined,
+        reportType
+      });
 
-      const mockTrend: AttendanceTrend[] = [
-        { date: '1403/07/01', present: 40, absent: 3, late: 2, total: 45 },
-        { date: '1403/07/02', present: 38, absent: 5, late: 2, total: 45 },
-        { date: '1403/07/03', present: 42, absent: 2, late: 1, total: 45 },
-        { date: '1403/07/04', present: 39, absent: 4, late: 2, total: 45 },
-        { date: '1403/07/05', present: 41, absent: 3, late: 1, total: 45 },
-        { date: '1403/07/06', present: 37, absent: 6, late: 2, total: 45 },
-        { date: '1403/07/07', present: 40, absent: 3, late: 2, total: 45 }
-      ];
-
-      setReportData(mockData);
-      setAttendanceTrend(mockTrend);
+      if (response.data.success) {
+        setReportData(response.data.data);
+        setAttendanceTrend(response.data.data.attendanceTrend || []);
+      }
     } catch (error: any) {
       console.error('Error fetching reports data:', error);
       setError(error.response?.data?.error || 'خطا در دریافت اطلاعات');
@@ -128,8 +134,7 @@ export default function ReportsPage() {
   };
 
   const handleExportReport = (format: 'pdf' | 'excel') => {
-    // This would trigger the actual export functionality
-    alert(`خروجی ${format.toUpperCase()} در حال آماده‌سازی است...`);
+    alert(`خروجی ${format.toUpperCase()} هنوز API واقعی ندارد.`);
   };
 
   if (loading) {
@@ -190,13 +195,13 @@ export default function ReportsPage() {
 
       {/* Filters */}
       <div className="glass-liquid-card p-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <div>
             <label className="block text-sm text-secondary mb-2">تاریخ شروع</label>
             <PersianCalendarComponent
               value={dateRange.startDate}
               onChange={(date) => setDateRange({ ...dateRange, startDate: date })}
-              placeholder="خروجی اکسل"
+              placeholder="تاریخ شروع"
             />
           </div>
           <div>
@@ -217,6 +222,20 @@ export default function ReportsPage() {
               <option value="daily">روزانه</option>
               <option value="weekly">هفتگی</option>
               <option value="monthly">ماهانه</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-secondary mb-2">بخش</label>
+            <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} className="glass-liquid-input w-full">
+              <option value="">همه بخش‌ها</option>
+              {departments.map((department) => <option key={department.id} value={department.id}>{department.namePersian}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-secondary mb-2">شیفت</label>
+            <select value={shiftId} onChange={(e) => setShiftId(e.target.value)} className="glass-liquid-input w-full">
+              <option value="">همه شیفت‌ها</option>
+              {shifts.map((shift) => <option key={shift.id} value={shift.id}>{shift.namePersian}</option>)}
             </select>
           </div>
           <div className="flex items-end">
@@ -242,19 +261,19 @@ export default function ReportsPage() {
             </div>
             <div className="space-y-2">
               <div className="flex justify-between">
-                <span className="text-secondary">کل روزها:</span>
-                <span className="text-primary">{reportData.attendance.totalEmployees}</span>
+                <span className="text-secondary">کل نفر-روز:</span>
+                <span className="text-primary">{reportData.attendance.totalEmployeeDays}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">خروج:</span>
+                <span className="text-secondary">حاضر:</span>
                 <span className="text-green-500">{reportData.attendance.present}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">خروج:</span>
+                <span className="text-secondary">غایب:</span>
                 <span className="text-red-500">{reportData.attendance.absent}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">ورود:</span>
+                <span className="text-secondary">نرخ حضور:</span>
                 <span className="text-teal-500">{reportData.attendance.attendanceRate}%</span>
               </div>
             </div>
@@ -276,11 +295,11 @@ export default function ReportsPage() {
                 <span className="text-green-500">{reportData.exceptions.approved}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">کل روزها:</span>
+                <span className="text-secondary">رد شده:</span>
                 <span className="text-red-500">{reportData.exceptions.rejected}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">ساعت پایان:</span>
+                <span className="text-secondary">نرخ تایید:</span>
                 <span className="text-teal-500">{reportData.exceptions.approvalRate}%</span>
               </div>
             </div>
@@ -302,11 +321,11 @@ export default function ReportsPage() {
                 <span className="text-green-500">{reportData.missions.completed}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">کل درخواست‌ها:</span>
+                <span className="text-secondary">در انتظار:</span>
                 <span className="text-yellow-500">{reportData.missions.pending}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">ساعت پایان:</span>
+                <span className="text-secondary">نرخ تکمیل:</span>
                 <span className="text-teal-500">{reportData.missions.completionRate}%</span>
               </div>
             </div>
@@ -315,24 +334,24 @@ export default function ReportsPage() {
           {/* Shifts Summary */}
           <div className="glass-liquid-card p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-primary">امضاها</h3>
+              <h3 className="text-lg font-bold text-primary">شیفت و امضا</h3>
               <FaClock className="h-6 w-6 text-orange-500" />
             </div>
             <div className="space-y-2">
               <div className="flex justify-between">
-                <span className="text-secondary">کل روزها:</span>
-                <span className="text-primary">{reportData.shifts.totalShifts}</span>
+                <span className="text-secondary">جلسه شیفت:</span>
+                <span className="text-primary">{reportData.shifts.totalSessions}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">خروج:</span>
+                <span className="text-secondary">شیفت فعال:</span>
                 <span className="text-green-500">{reportData.shifts.activeShifts}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">کل درخواست‌ها:</span>
-                <span className="text-primary">{reportData.shifts.totalPersonnel}</span>
+                <span className="text-secondary">امضا شده:</span>
+                <span className="text-primary">{reportData.signatures.signed}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-secondary">تایید شده:</span>
+                <span className="text-secondary">نیروی فعال:</span>
                 <span className="text-teal-500">{reportData.shifts.activePersonnel}</span>
               </div>
             </div>
@@ -357,15 +376,14 @@ export default function ReportsPage() {
             </thead>
             <tbody>
               {attendanceTrend.map((day, index) => {
-                const attendanceRate = ((day.present / day.total) * 100).toFixed(1);
                 return (
                   <tr key={index} className="border-b border-gray-800 hover:bg-white/5">
-                    <td className="py-3 px-4 text-primary">{day.date}</td>
+                    <td className="py-3 px-4 text-primary">{new Date(day.date).toLocaleDateString('fa-IR')}</td>
                     <td className="py-3 px-4 text-green-500">{day.present}</td>
                     <td className="py-3 px-4 text-red-500">{day.absent}</td>
                     <td className="py-3 px-4 text-yellow-500">{day.late}</td>
-                    <td className="py-3 px-4 text-primary">{day.total}</td>
-                    <td className="py-3 px-4 text-teal-500">{attendanceRate}%</td>
+                    <td className="py-3 px-4 text-primary">{day.mission}</td>
+                    <td className="py-3 px-4 text-teal-500">{day.leave}</td>
                   </tr>
                 );
               })}

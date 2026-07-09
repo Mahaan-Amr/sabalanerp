@@ -11,7 +11,7 @@ import {
   FaDownload,
   FaSignature
 } from 'react-icons/fa';
-import { securityAPI } from '@/lib/api';
+import { departmentsAPI, securityAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 
@@ -34,6 +34,10 @@ interface AttendanceRecord {
   notes: string | null;
   digitalSignature: string | null;
   createdAt: string;
+  shift?: {
+    id: string;
+    namePersian: string;
+  } | null;
 }
 
 interface AttendanceStats {
@@ -43,6 +47,19 @@ interface AttendanceStats {
   late: number;
   mission: number;
   leave: number;
+  exception?: number;
+}
+
+interface Department {
+  id: string;
+  namePersian: string;
+}
+
+interface Shift {
+  id: string;
+  namePersian: string;
+  startTime: string;
+  endTime: string;
 }
 
 export default function AttendancePage() {
@@ -53,27 +70,45 @@ export default function AttendancePage() {
   const [selectedDate, setSelectedDate] = useState<string>(PersianCalendar.now());
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [departmentId, setDepartmentId] = useState('');
+  const [shiftId, setShiftId] = useState('');
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [shifts, setShifts] = useState<Shift[]>([]);
 
   useEffect(() => {
     fetchAttendanceData();
-  }, [selectedDate]);
+  }, [selectedDate, departmentId, shiftId]);
+
+  useEffect(() => {
+    const loadFilters = async () => {
+      try {
+        const [departmentsResponse, shiftsResponse] = await Promise.all([
+          departmentsAPI.getDepartments(),
+          securityAPI.getShifts()
+        ]);
+        if (departmentsResponse.data.success) setDepartments(departmentsResponse.data.data || []);
+        if (shiftsResponse.data.success) setShifts(shiftsResponse.data.data || []);
+      } catch (error) {
+        console.error('Error loading attendance filters:', error);
+      }
+    };
+    loadFilters();
+  }, []);
 
   const fetchAttendanceData = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      const [attendanceResponse, statsResponse] = await Promise.all([
-        securityAPI.getDailyAttendance(PersianCalendar.toGregorian(selectedDate).toISOString()),
-        securityAPI.getDashboardStats()
-      ]);
+      const attendanceResponse = await securityAPI.getDailyAttendance({
+        date: PersianCalendar.toGregorian(selectedDate).toISOString(),
+        departmentId: departmentId || undefined,
+        shiftId: shiftId || undefined
+      });
       
       if (attendanceResponse.data.success) {
         setAttendanceRecords(attendanceResponse.data.data.attendanceSummary || []);
-      }
-      
-      if (statsResponse.data.success) {
-        setStats(statsResponse.data.data.todayStats);
+        setStats(attendanceResponse.data.data.stats);
       }
     } catch (error: any) {
       console.error('Error fetching attendance data:', error);
@@ -159,9 +194,9 @@ export default function AttendancePage() {
               placeholder="انتخاب تاریخ"
               className="w-64"
             />
-            <button className="glass-liquid-btn-primary px-4 py-2 flex items-center space-x-2 space-x-reverse">
+            <button onClick={fetchAttendanceData} className="glass-liquid-btn-primary px-4 py-2 flex items-center space-x-2 space-x-reverse">
               <FaDownload />
-              <span>فیلتر</span>
+              <span>به‌روزرسانی</span>
             </button>
           </div>
         </div>
@@ -200,7 +235,7 @@ export default function AttendancePage() {
           <div className="glass-liquid-card p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-secondary">استثنا</p>
+                <p className="text-sm text-secondary">تاخیر</p>
                 <p className="text-xl font-bold text-yellow-500">{stats.late}</p>
               </div>
               <FaClock className="h-6 w-6 text-yellow-500" />
@@ -209,7 +244,7 @@ export default function AttendancePage() {
           <div className="glass-liquid-card p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-secondary">تاخیر</p>
+                <p className="text-sm text-secondary">ماموریت</p>
                 <p className="text-xl font-bold text-blue-500">{stats.mission}</p>
               </div>
               <FaClock className="h-6 w-6 text-blue-500" />
@@ -218,7 +253,7 @@ export default function AttendancePage() {
           <div className="glass-liquid-card p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-secondary">ماموریت</p>
+                <p className="text-sm text-secondary">مرخصی</p>
                 <p className="text-xl font-bold text-purple-500">{stats.leave}</p>
               </div>
               <FaClock className="h-6 w-6 text-purple-500" />
@@ -245,6 +280,26 @@ export default function AttendancePage() {
           <div className="flex items-center space-x-2 space-x-reverse">
             <FaFilter className="text-gray-400" />
             <select
+              value={departmentId}
+              onChange={(e) => setDepartmentId(e.target.value)}
+              className="glass-liquid-input"
+            >
+              <option value="">همه بخش‌ها</option>
+              {departments.map((department) => (
+                <option key={department.id} value={department.id}>{department.namePersian}</option>
+              ))}
+            </select>
+            <select
+              value={shiftId}
+              onChange={(e) => setShiftId(e.target.value)}
+              className="glass-liquid-input"
+            >
+              <option value="">همه شیفت‌ها</option>
+              {shifts.map((shift) => (
+                <option key={shift.id} value={shift.id}>{shift.namePersian}</option>
+              ))}
+            </select>
+            <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               className="glass-liquid-input"
@@ -267,12 +322,13 @@ export default function AttendancePage() {
             <thead>
               <tr className="border-b border-gray-700">
                 <th className="text-right py-3 px-4 text-secondary">کارمند</th>
+                <th className="text-right py-3 px-4 text-secondary">بخش</th>
                 <th className="text-right py-3 px-4 text-secondary">وضعیت</th>
                 <th className="text-right py-3 px-4 text-secondary">ورود</th>
                 <th className="text-right py-3 px-4 text-secondary">خروج</th>
-                <th className="text-right py-3 px-4 text-secondary">نوع استثنا</th>
+                <th className="text-right py-3 px-4 text-secondary">شیفت ثبت</th>
                 <th className="text-right py-3 px-4 text-secondary">یادداشت</th>
-                <th className="text-right py-3 px-4 text-secondary">عملیات</th>
+                <th className="text-right py-3 px-4 text-secondary">امضا</th>
               </tr>
             </thead>
             <tbody>
@@ -291,16 +347,19 @@ export default function AttendancePage() {
                   <td className="py-3 px-4 text-secondary">
                     {record.employee.department?.namePersian || '-'}
                   </td>
-                  <td className="py-3 px-4 text-primary">
-                    {record.entryTime ? new Date(record.entryTime).toLocaleTimeString('fa-IR') : '-'}
-                  </td>
-                  <td className="py-3 px-4 text-primary">
-                    {record.exitTime ? new Date(record.exitTime).toLocaleTimeString('fa-IR') : '-'}
-                  </td>
                   <td className="py-3 px-4">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(record.status)}`}>
                       {getStatusLabel(record.status)}
                     </span>
+                  </td>
+                  <td className="py-3 px-4 text-primary">
+                    {record.entryTime || '-'}
+                  </td>
+                  <td className="py-3 px-4 text-primary">
+                    {record.exitTime || '-'}
+                  </td>
+                  <td className="py-3 px-4 text-secondary">
+                    {record.shift?.namePersian || '-'}
                   </td>
                   <td className="py-3 px-4 text-secondary text-sm">
                     {record.notes || record.exceptionType || '-'}

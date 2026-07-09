@@ -736,6 +736,15 @@ A closure report written for one planned security shift, with author, summary, i
 The report workspace separates ثبت گزارش شیفت, گزارش‌های شیفت, پیگیری‌ها, and رخدادها when follow-ups or incidents need their own operational tracking.
 _Avoid_: گزارش سرپرست, reducing a shift report to a filterable movement table, or hiding follow-up ownership inside an untrackable text field once it needs status tracking
 
+**گزارش‌های حراست**:
+A reporting workspace for aggregate operational data such as attendance, exceptions, missions, shift sessions, and signatures over a selected date range. It is separate from گزارش شیفت حراست and should be filterable by date range, department, shift, and personnel when those dimensions apply.
+Across a date range, absence is derived per day from active users in scope minus users with an attendance record for that day; it is not limited to stored ABSENT rows.
+_Avoid_: using mock analytics, mixing narrative shift closure reports into aggregate KPIs, or showing labels that do not match the underlying metric
+
+**داده واقعی حراست**:
+Core حراست surfaces use persisted operational data or an honest empty state when no records exist. Missing core sources should be backed by explicit API contracts, while non-core admin-wide security audit widgets stay empty or hidden until a real audit-log model exists.
+_Avoid_: simulated counts, delayed fake loading, hard-coded sample users, or admin security metrics that imply audit coverage the system does not actually record
+
 **چرخه شیفت حراست**:
 A continuous three-person rotation of configurable-duration slots in A→B→C order. With slot duration D, each person works D hours and rests 2D hours; D defaults to 12 hours but is fixed for a plan once one of its slots starts.
 _Avoid_: hard-coding clock boundaries, assigning each person permanently to day or night, scheduling overlapping base slots, or changing a started plan's duration
@@ -759,6 +768,14 @@ _Avoid_: treating this as final absence before manager action, hiding the alert 
 **نفرات حراست**:
 The حراست people area covers employee attendance, shifts, exceptions, missions, and security personnel workflows. Drivers are not managed here; they belong to خودرویی because their operational role is tied to vehicle movement.
 _Avoid_: mixing driver/vehicle registry work into personnel attendance workflows
+
+**کاربر واجد شرایط حراست**:
+An active user who already has a security workspace permission or security role and can therefore be assigned into نفرات حراست. General active employees are visible in attendance workflows but are not selectable as security personnel unless they first receive security access.
+_Avoid_: offering every active user in security personnel assignment, or using placeholder sample users when no eligible user exists
+
+**حضور و غیاب کارکنان در حراست**:
+A حراست-facing attendance view over all active project users, filterable by department, shift, and date. It is not limited to the logged-in guard's department or current security shift.
+_Avoid_: showing only the current guard's department, treating security shift assignment as the employee population boundary, or using mock attendance summaries
 
 **خرید بیرونی در ورود خودروی پر**:
 An inbound loaded-vehicle purpose for purchased cargo arriving from outside Sabalan. It may have a purchase invoice and may have a بارنامه.

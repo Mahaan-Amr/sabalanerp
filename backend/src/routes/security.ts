@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
 import { body, validationResult } from 'express-validator';
-import { LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityShiftCoverageStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
+import { AttendanceStatus, LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityShiftCoverageStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
@@ -14,6 +14,119 @@ const prisma = new PrismaClient();
 const securityView = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW);
 const securityEdit = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT);
 const securityAdmin = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN);
+const presentLikeStatuses: AttendanceStatus[] = [
+  AttendanceStatus.PRESENT,
+  AttendanceStatus.LATE,
+  AttendanceStatus.MISSION,
+  AttendanceStatus.HOURLY_LEAVE,
+  AttendanceStatus.SICK_LEAVE,
+  AttendanceStatus.VACATION
+];
+const leaveStatuses: AttendanceStatus[] = [
+  AttendanceStatus.HOURLY_LEAVE,
+  AttendanceStatus.SICK_LEAVE,
+  AttendanceStatus.VACATION
+];
+
+const startOfDay = (date: Date) => {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+};
+
+const addDays = (date: Date, days: number) => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
+const parseDayQuery = (value: unknown, fallback = new Date()) => {
+  const parsed = value ? new Date(String(value)) : fallback;
+  return startOfDay(Number.isNaN(parsed.getTime()) ? fallback : parsed);
+};
+
+const scopedEmployeeWhere = (departmentId?: unknown, employeeId?: unknown) => ({
+  isActive: true,
+  ...(departmentId ? { departmentId: String(departmentId) } : {}),
+  ...(employeeId ? { id: String(employeeId) } : {})
+});
+
+const attendanceInclude = {
+  employee: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      username: true,
+      email: true,
+      department: { select: { id: true, name: true, namePersian: true } }
+    }
+  },
+  shift: true
+};
+
+const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: unknown; shiftId?: unknown; employeeId?: unknown }) => {
+  const targetDate = parseDayQuery(filters.date);
+  const nextDay = addDays(targetDate, 1);
+  const employeeWhere = scopedEmployeeWhere(filters.departmentId, filters.employeeId);
+  const attendanceWhere = {
+    date: { gte: targetDate, lt: nextDay },
+    ...(filters.shiftId ? { shiftId: String(filters.shiftId) } : {}),
+    employee: employeeWhere
+  };
+
+  const [attendanceRecords, allEmployees] = await Promise.all([
+    prisma.attendanceRecord.findMany({
+      where: attendanceWhere,
+      include: attendanceInclude,
+      orderBy: { createdAt: 'asc' }
+    }),
+    prisma.user.findMany({
+      where: employeeWhere,
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        username: true,
+        email: true,
+        department: { select: { id: true, name: true, namePersian: true } }
+      },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }]
+    })
+  ]);
+
+  const recordsByEmployee = new Map(attendanceRecords.map((record) => [record.employeeId, record]));
+  const attendanceSummary = allEmployees.map((employee) => {
+    const record = recordsByEmployee.get(employee.id);
+    return {
+      id: record?.id || `absent-${employee.id}-${targetDate.toISOString()}`,
+      employee,
+      attendance: record || null,
+      entryTime: record?.entryTime || null,
+      exitTime: record?.exitTime || null,
+      status: record?.status || AttendanceStatus.ABSENT,
+      exceptionType: record?.exceptionType || null,
+      notes: record?.notes || null,
+      digitalSignature: record?.digitalSignature || null,
+      createdAt: record?.createdAt || null,
+      shift: record?.shift || null
+    };
+  });
+
+  const countedPresent = attendanceRecords.filter((record) => presentLikeStatuses.includes(record.status)).length;
+  const stats = {
+    totalEmployees: allEmployees.length,
+    present: attendanceRecords.filter((record) => record.status === AttendanceStatus.PRESENT).length,
+    absent: allEmployees.length - countedPresent,
+    late: attendanceRecords.filter((record) => record.status === AttendanceStatus.LATE).length,
+    mission: attendanceRecords.filter((record) => record.status === AttendanceStatus.MISSION).length,
+    leave: attendanceRecords.filter((record) => leaveStatuses.includes(record.status)).length,
+    exception: attendanceRecords.filter((record) => record.status !== AttendanceStatus.PRESENT).length,
+    signed: attendanceRecords.filter((record) => Boolean(record.digitalSignature)).length
+  };
+
+  return { targetDate, nextDay, attendanceRecords, attendanceSummary, stats };
+};
 
 const vehiclePhotoDir = path.join(process.cwd(), 'uploads', 'security-vehicle-pairs');
 const categoryByField: Record<string, SecurityVehiclePairPhotoCategory> = {
@@ -1444,100 +1557,18 @@ router.post('/attendance/exception', protect, requireWorkspaceAccess(WORKSPACES.
 // @access  Private/Security Personnel
 router.get('/attendance/daily', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_ATTENDANCE_DAILY_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
-    const { date } = req.query;
-    let targetDate: Date;
-    
-    if (date) {
-      // If date is provided, use it directly (should be ISO string from frontend)
-      targetDate = new Date(date as string);
-    } else {
-      // Default to today
-      targetDate = new Date();
-    }
-    
-    targetDate.setHours(0, 0, 0, 0);
-    
-    const nextDay = new Date(targetDate);
-    nextDay.setDate(nextDay.getDate() + 1);
-
-    // Check if user is security personnel
-    const securityPersonnel = await prisma.securityPersonnel.findUnique({
-      where: { userId: req.user!.id },
-      include: { 
-        shift: true,
-        user: {
-          select: {
-            departmentId: true
-          }
-        }
-      }
-    });
-
-    if (!securityPersonnel) {
-      return res.status(403).json({
-        success: false,
-        error: 'User is not authorized as security personnel'
-      });
-    }
-
-    const attendanceRecords = await prisma.attendanceRecord.findMany({
-      where: {
-        date: {
-          gte: targetDate,
-          lt: nextDay
-        },
-        shiftId: securityPersonnel.shiftId
-      },
-      include: {
-        employee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            username: true
-          }
-        },
-        shift: true
-      },
-      orderBy: {
-        createdAt: 'asc'
-      }
-    });
-
-    // Get all employees for comparison
-    const allEmployees = await prisma.user.findMany({
-      where: {
-        isActive: true,
-        departmentId: securityPersonnel.user.departmentId
-      },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        username: true
-      }
-    });
-
-    // Create attendance summary
-    const attendanceSummary = allEmployees.map(employee => {
-      const record = attendanceRecords.find(r => r.employeeId === employee.id);
-      return {
-        employee,
-        attendance: record || null,
-        status: record ? record.status : 'ABSENT'
-      };
-    });
+    const { targetDate, attendanceSummary, stats } = await buildDailyAttendance(req.query);
 
     res.json({
       success: true,
       data: {
         date: targetDate.toISOString(),
-        shift: securityPersonnel.shift,
         attendanceSummary,
-        totalEmployees: allEmployees.length,
-        presentCount: attendanceRecords.filter(r => r.status === 'PRESENT').length,
-        absentCount: allEmployees.length - attendanceRecords.filter(r => r.status === 'PRESENT').length,
-        exceptionCount: attendanceRecords.filter(r => r.status !== 'PRESENT' && r.status !== 'ABSENT').length
+        totalEmployees: stats.totalEmployees,
+        presentCount: stats.present,
+        absentCount: stats.absent,
+        exceptionCount: stats.exception,
+        stats
       }
     });
     return;
@@ -1556,8 +1587,8 @@ router.get('/attendance/daily', protect, requireWorkspaceAccess(WORKSPACES.SECUR
 // @access  Private/Security Personnel
 router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
-    // Check if user is security personnel
-    const securityPersonnel = await prisma.securityPersonnel.findUnique({
+    const [securityPersonnel, daily] = await Promise.all([
+      prisma.securityPersonnel.findUnique({
       where: { userId: req.user!.id },
       include: { 
         shift: true,
@@ -1574,55 +1605,19 @@ router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SECURI
           }
         }
       }
-    });
-
-    if (!securityPersonnel) {
-      return res.status(403).json({
-        success: false,
-        error: 'User is not authorized as security personnel'
-      });
-    }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    // Get today's attendance stats
-    const todayAttendance = await prisma.attendanceRecord.findMany({
-      where: {
-        date: {
-          gte: today,
-          lt: tomorrow
-        },
-        shiftId: securityPersonnel.shiftId
-      }
-    });
-
-    // Get total employees in department
-    const totalEmployees = await prisma.user.count({
-      where: {
-        isActive: true,
-        departmentId: securityPersonnel.user.departmentId
-      }
-    });
+      }),
+      buildDailyAttendance(req.query)
+    ]);
 
     const stats = {
-      currentShift: securityPersonnel.shift,
-      securityPersonnel: {
+      currentShift: securityPersonnel?.shift || null,
+      securityPersonnel: securityPersonnel ? {
         name: `${securityPersonnel.user.firstName} ${securityPersonnel.user.lastName}`,
         position: securityPersonnel.position,
         department: securityPersonnel.user.department?.namePersian
-      },
-      todayStats: {
-        totalEmployees,
-        present: todayAttendance.filter(r => r.status === 'PRESENT').length,
-        absent: totalEmployees - todayAttendance.filter(r => r.status === 'PRESENT').length,
-        late: todayAttendance.filter(r => r.status === 'LATE').length,
-        mission: todayAttendance.filter(r => r.status === 'MISSION').length,
-        leave: todayAttendance.filter(r => r.status === 'HOURLY_LEAVE').length
-      },
-      recentActivity: todayAttendance.slice(-5).map(record => ({
+      } : null,
+      todayStats: daily.stats,
+      recentActivity: daily.attendanceRecords.slice(-5).map(record => ({
         employeeId: record.employeeId,
         entryTime: record.entryTime,
         exitTime: record.exitTime,
@@ -1651,8 +1646,9 @@ router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SECURI
 // @access  Private/Admin
 router.get('/personnel', protect, authorize('ADMIN'), requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_PERSONNEL_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
+    const includeInactive = req.query.includeInactive !== 'false';
     const personnel = await prisma.securityPersonnel.findMany({
-      where: { isActive: true },
+      where: includeInactive ? undefined : { isActive: true },
       include: {
         user: {
           select: {
@@ -1690,6 +1686,45 @@ router.get('/personnel', protect, authorize('ADMIN'), requireWorkspaceAccess(WOR
   }
 });
 
+// @desc    Get active users eligible for security personnel assignment
+// @route   GET /api/security/personnel/eligible-users
+// @access  Private/Admin
+router.get('/personnel/eligible-users', protect, authorize('ADMIN'), securityAdmin, async (_req: AuthRequest, res: Response) => {
+  try {
+    const now = new Date();
+    const rolePermissions = await prisma.roleWorkspacePermission.findMany({
+      where: { workspace: WORKSPACES.SECURITY, isActive: true },
+      select: { role: true }
+    });
+    const eligibleRoles = rolePermissions.map((permission) => permission.role);
+    const users = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        securityPersonnel: null,
+        OR: [
+          { workspacePermissions: { some: { workspace: WORKSPACES.SECURITY, isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] } } },
+          ...(eligibleRoles.length ? [{ role: { in: eligibleRoles as any[] } }] : [])
+        ]
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        username: true,
+        email: true,
+        role: true,
+        department: { select: { id: true, name: true, namePersian: true } }
+      },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }]
+    });
+
+    res.json({ success: true, data: users });
+  } catch (error) {
+    console.error('Get eligible security users error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
 // @desc    Assign security personnel
 // @route   POST /api/security/personnel
 // @access  Private/Admin
@@ -1710,15 +1745,25 @@ router.post('/personnel', protect, authorize('ADMIN'), requireWorkspaceAccess(WO
 
     const { userId, shiftId, position } = req.body;
 
-    // Check if user is already assigned as security personnel
-    const existingPersonnel = await prisma.securityPersonnel.findUnique({
-      where: { userId }
-    });
+    const now = new Date();
+    const [existingPersonnel, userPermission, rolePermissions] = await Promise.all([
+      prisma.securityPersonnel.findUnique({ where: { userId } }),
+      prisma.workspacePermission.findFirst({ where: { userId, workspace: WORKSPACES.SECURITY, isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] } }),
+      prisma.roleWorkspacePermission.findMany({ where: { workspace: WORKSPACES.SECURITY, isActive: true }, select: { role: true } })
+    ]);
 
     if (existingPersonnel) {
       return res.status(400).json({
         success: false,
         error: 'User is already assigned as security personnel'
+      });
+    }
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true, isActive: true } });
+    const hasSecurityRole = Boolean(user && rolePermissions.some((permission) => permission.role === user.role));
+    if (!user?.isActive || (!userPermission && !hasSecurityRole)) {
+      return res.status(400).json({
+        success: false,
+        error: 'این کاربر دسترسی حراست ندارد و نمی‌تواند به نفرات حراست اضافه شود.'
       });
     }
 
@@ -1759,6 +1804,156 @@ router.post('/personnel', protect, authorize('ADMIN'), requireWorkspaceAccess(WO
       error: 'Server error'
     });
     return;
+  }
+});
+
+// @desc    Activate/deactivate security personnel
+// @route   PUT /api/security/personnel/:id/status
+// @access  Private/Admin
+router.put('/personnel/:id/status', protect, authorize('ADMIN'), securityAdmin, [
+  body('isActive').isBoolean().withMessage('isActive must be boolean')
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    const personnel = await prisma.securityPersonnel.update({
+      where: { id: req.params.id },
+      data: { isActive: Boolean(req.body.isActive) },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            username: true,
+            email: true,
+            department: { select: { id: true, namePersian: true } }
+          }
+        },
+        shift: true
+      }
+    });
+    res.json({ success: true, data: personnel });
+  } catch (error) {
+    console.error('Toggle security personnel status error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// @desc    Aggregate security reports
+// @route   GET /api/security/reports/summary
+// @access  Private/Security Workspace
+router.get('/reports/summary', protect, securityView, async (req: AuthRequest, res: Response) => {
+  try {
+    const startDate = parseDayQuery(req.query.startDate);
+    const requestedEnd = parseDayQuery(req.query.endDate, startDate);
+    const endDate = requestedEnd < startDate ? startDate : requestedEnd;
+    const days = Math.min(92, Math.floor((endDate.getTime() - startDate.getTime()) / 86_400_000) + 1);
+    const rangeEnd = addDays(startDate, days);
+    const { departmentId, shiftId, employeeId } = req.query;
+    const employeeWhere = scopedEmployeeWhere(departmentId, employeeId);
+
+    const trend: Array<{ date: string; total: number; present: number; absent: number; late: number; mission: number; leave: number; signed: number }> = [];
+    for (let index = 0; index < days; index += 1) {
+      const date = addDays(startDate, index);
+      const daily = await buildDailyAttendance({ date: date.toISOString(), departmentId, shiftId, employeeId });
+      trend.push({
+        date: date.toISOString(),
+        total: daily.stats.totalEmployees,
+        present: daily.stats.present,
+        absent: daily.stats.absent,
+        late: daily.stats.late,
+        mission: daily.stats.mission,
+        leave: daily.stats.leave,
+        signed: daily.stats.signed
+      });
+    }
+
+    const attendanceTotals = trend.reduce((totals, day) => ({
+      totalEmployeeDays: totals.totalEmployeeDays + day.total,
+      present: totals.present + day.present,
+      absent: totals.absent + day.absent,
+      late: totals.late + day.late,
+      mission: totals.mission + day.mission,
+      leave: totals.leave + day.leave,
+      signed: totals.signed + day.signed
+    }), { totalEmployeeDays: 0, present: 0, absent: 0, late: 0, mission: 0, leave: 0, signed: 0 });
+
+    const [exceptions, missions, shifts] = await Promise.all([
+      prisma.exceptionRequest.groupBy({
+        by: ['status'],
+        where: {
+          startDate: { lt: rangeEnd },
+          OR: [{ endDate: null }, { endDate: { gte: startDate } }],
+          employee: employeeWhere
+        },
+        _count: { _all: true }
+      }),
+      prisma.missionAssignment.groupBy({
+        by: ['status'],
+        where: {
+          startDate: { lt: rangeEnd },
+          OR: [{ endDate: null }, { endDate: { gte: startDate } }],
+          employee: employeeWhere
+        },
+        _count: { _all: true }
+      }),
+      prisma.securityShiftSession.findMany({
+        where: {
+          startedAt: { lt: rangeEnd },
+          OR: [{ endedAt: null }, { endedAt: { gte: startDate } }],
+          ...(shiftId ? { slot: { plannedPersonnel: { shiftId: String(shiftId) } } } : {})
+        },
+        select: { status: true, personnelId: true }
+      })
+    ]);
+
+    const countByStatus = (items: Array<{ status: string; _count: { _all: number } }>, status: string) =>
+      items.find((item) => item.status === status)?._count._all || 0;
+    const activePersonnel = await prisma.securityPersonnel.count({ where: { isActive: true, ...(shiftId ? { shiftId: String(shiftId) } : {}) } });
+    const totalPersonnel = await prisma.securityPersonnel.count({ where: shiftId ? { shiftId: String(shiftId) } : undefined });
+    const completedShifts = shifts.filter((shift) => shift.status === SecurityShiftSessionStatus.CLOSED || shift.status === SecurityShiftSessionStatus.FORCE_CLOSED).length;
+    const activeShifts = shifts.filter((shift) => shift.status === SecurityShiftSessionStatus.ACTIVE).length;
+
+    res.json({
+      success: true,
+      data: {
+        range: { startDate: startDate.toISOString(), endDate: addDays(rangeEnd, -1).toISOString(), days },
+        attendance: {
+          ...attendanceTotals,
+          attendanceRate: attendanceTotals.totalEmployeeDays ? Number(((attendanceTotals.present / attendanceTotals.totalEmployeeDays) * 100).toFixed(1)) : 0
+        },
+        exceptions: {
+          totalRequests: exceptions.reduce((sum, item) => sum + item._count._all, 0),
+          approved: countByStatus(exceptions, 'APPROVED'),
+          rejected: countByStatus(exceptions, 'REJECTED'),
+          pending: countByStatus(exceptions, 'PENDING'),
+          approvalRate: exceptions.length ? Number(((countByStatus(exceptions, 'APPROVED') / Math.max(1, exceptions.reduce((sum, item) => sum + item._count._all, 0))) * 100).toFixed(1)) : 0
+        },
+        missions: {
+          totalMissions: missions.reduce((sum, item) => sum + item._count._all, 0),
+          completed: countByStatus(missions, 'APPROVED'),
+          pending: countByStatus(missions, 'PENDING'),
+          rejected: countByStatus(missions, 'REJECTED'),
+          completionRate: missions.length ? Number(((countByStatus(missions, 'APPROVED') / Math.max(1, missions.reduce((sum, item) => sum + item._count._all, 0))) * 100).toFixed(1)) : 0
+        },
+        shifts: {
+          totalSessions: shifts.length,
+          completedShifts,
+          activeShifts,
+          totalPersonnel,
+          activePersonnel
+        },
+        signatures: {
+          signed: attendanceTotals.signed,
+          unsignedRecords: Math.max(0, attendanceTotals.present + attendanceTotals.late + attendanceTotals.mission + attendanceTotals.leave - attendanceTotals.signed)
+        },
+        attendanceTrend: trend
+      }
+    });
+  } catch (error) {
+    console.error('Get security report summary error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
   }
 });
 

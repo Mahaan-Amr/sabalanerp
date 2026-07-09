@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
 import { body, validationResult } from 'express-validator';
-import { AttendanceStatus, LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityShiftCoverageStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
+import { AttendanceStatus, LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityPatrolStatus, SecurityShiftCoverageStatus, SecurityShiftLogStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
@@ -845,6 +845,21 @@ const slotInclude = {
 };
 const effectivePersonnelId = (slot: any) => slot.replacementPersonnelId || slot.plannedPersonnelId;
 const getSelfPersonnel = (userId: string) => prisma.securityPersonnel.findUnique({ where: { userId } });
+const activeShiftLogInclude = {
+  logEntries: { include: { reportType: true }, orderBy: { rowNumber: 'asc' as const } },
+  patrolSessions: { orderBy: { startedAt: 'desc' as const } },
+  slot: { include: slotInclude },
+  personnel: { include: { user: true } }
+};
+const getActiveShiftSessionForUser = async (userId: string) => {
+  const personnel = await getSelfPersonnel(userId);
+  if (!personnel) return { personnel: null, session: null };
+  const session = await prisma.securityShiftSession.findFirst({
+    where: { personnelId: personnel.id, status: SecurityShiftSessionStatus.ACTIVE },
+    include: activeShiftLogInclude
+  });
+  return { personnel, session };
+};
 const markProbableNoShows = async () => {
   const now = new Date();
   const candidates = await prisma.securityShiftPlanSlot.findMany({
@@ -1000,6 +1015,168 @@ router.get('/shift-workflow/me', protect, securityView, async (req: AuthRequest,
   res.json({ success: true, data: { personnel, slots: decorated, activeSession } });
 });
 
+router.get('/instant-report-types', protect, securityView, async (req: AuthRequest, res: Response) => {
+  try {
+    const includeInactive = req.query.includeInactive === 'true' && (req.user!.role === 'ADMIN' || (req as any).workspacePermission === WORKSPACE_PERMISSIONS.ADMIN);
+    const types = await prisma.securityInstantReportType.findMany({
+      where: includeInactive ? undefined : { isActive: true },
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }]
+    });
+    res.json({ success: true, data: types });
+  } catch (error) {
+    console.error('List instant report types error:', error);
+    res.status(500).json({ success: false, error: 'دریافت انواع گزارش ناموفق بود.' });
+  }
+});
+
+router.post('/instant-report-types', protect, securityAdmin, [
+  body('name').isString().trim().notEmpty(),
+  body('description').optional({ values: 'falsy' }).isString(),
+  body('displayOrder').optional().isInt({ min: 0 }),
+  body('isActive').optional().isBoolean()
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'نام نوع گزارش الزامی است.', details: errors.array() });
+    const type = await prisma.securityInstantReportType.create({
+      data: {
+        name: req.body.name.trim(),
+        description: String(req.body.description || '').trim() || null,
+        displayOrder: Number(req.body.displayOrder || 0),
+        isActive: req.body.isActive ?? true,
+        createdBy: req.user!.id
+      }
+    });
+    res.status(201).json({ success: true, data: type });
+  } catch (error: any) {
+    console.error('Create instant report type error:', error);
+    res.status(500).json({ success: false, error: error.code === 'P2002' ? 'این نوع گزارش قبلاً ثبت شده است.' : 'ثبت نوع گزارش ناموفق بود.' });
+  }
+});
+
+router.put('/instant-report-types/:id', protect, securityAdmin, [
+  body('name').isString().trim().notEmpty(),
+  body('description').optional({ values: 'falsy' }).isString(),
+  body('displayOrder').optional().isInt({ min: 0 }),
+  body('isActive').isBoolean()
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'اطلاعات نوع گزارش کامل نیست.', details: errors.array() });
+    const type = await prisma.securityInstantReportType.update({
+      where: { id: req.params.id },
+      data: {
+        name: req.body.name.trim(),
+        description: String(req.body.description || '').trim() || null,
+        displayOrder: Number(req.body.displayOrder || 0),
+        isActive: Boolean(req.body.isActive)
+      }
+    });
+    res.json({ success: true, data: type });
+  } catch (error: any) {
+    console.error('Update instant report type error:', error);
+    res.status(500).json({ success: false, error: error.code === 'P2002' ? 'این نوع گزارش قبلاً ثبت شده است.' : 'ویرایش نوع گزارش ناموفق بود.' });
+  }
+});
+
+router.get('/shift-log/active', protect, securityView, async (req: AuthRequest, res: Response) => {
+  try {
+    const { personnel, session } = await getActiveShiftSessionForUser(req.user!.id);
+    if (!personnel) return res.status(403).json({ success: false, error: 'کاربر جزو نفرات حراست نیست.' });
+    res.json({ success: true, data: { personnel, session } });
+  } catch (error) {
+    console.error('Get active shift log error:', error);
+    res.status(500).json({ success: false, error: 'دریافت گزارش شیفت ناموفق بود.' });
+  }
+});
+
+router.post('/shift-log/entries', protect, securityEdit, [
+  body('reportTypeId').isString().trim().notEmpty(),
+  body('description').isString().trim().notEmpty()
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'نوع گزارش و توضیحات الزامی است.', details: errors.array() });
+    const { session } = await getActiveShiftSessionForUser(req.user!.id);
+    if (!session) return res.status(409).json({ success: false, error: 'شیفت فعال برای ثبت گزارش پیدا نشد.' });
+    const type = await prisma.securityInstantReportType.findFirst({ where: { id: req.body.reportTypeId, isActive: true } });
+    if (!type) return res.status(404).json({ success: false, error: 'نوع گزارش فعال پیدا نشد.' });
+    const entry = await prisma.$transaction(async (tx) => {
+      const last = await tx.securityShiftLogEntry.findFirst({ where: { sessionId: session.id }, orderBy: { rowNumber: 'desc' } });
+      return tx.securityShiftLogEntry.create({
+        data: {
+          sessionId: session.id,
+          reportTypeId: type.id,
+          rowNumber: (last?.rowNumber || 0) + 1,
+          description: req.body.description.trim(),
+          createdBy: req.user!.id
+        },
+        include: { reportType: true }
+      });
+    }, { isolationLevel: 'Serializable' });
+    res.status(201).json({ success: true, data: entry });
+  } catch (error: any) {
+    console.error('Create shift log entry error:', error);
+    res.status(500).json({ success: false, error: error.message || 'ثبت گزارش لحظه‌ای ناموفق بود.' });
+  }
+});
+
+router.put('/shift-log/entries/:id/void', protect, securityEdit, [
+  body('reason').isString().trim().notEmpty()
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل ابطال الزامی است.', details: errors.array() });
+    const entry = await prisma.securityShiftLogEntry.findUnique({ where: { id: req.params.id }, include: { reportType: true } });
+    if (!entry) return res.status(404).json({ success: false, error: 'گزارش پیدا نشد.' });
+    if (entry.status === SecurityShiftLogStatus.VOIDED) return res.status(409).json({ success: false, error: 'این گزارش قبلاً باطل شده است.' });
+    const updated = await prisma.securityShiftLogEntry.update({
+      where: { id: entry.id },
+      data: { status: SecurityShiftLogStatus.VOIDED, voidReason: req.body.reason.trim(), voidedAt: new Date(), voidedBy: req.user!.id },
+      include: { reportType: true }
+    });
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Void shift log entry error:', error);
+    res.status(500).json({ success: false, error: 'ابطال گزارش ناموفق بود.' });
+  }
+});
+
+router.post('/shift-log/patrols/start', protect, securityEdit, async (req: AuthRequest, res: Response) => {
+  try {
+    const { personnel, session } = await getActiveShiftSessionForUser(req.user!.id);
+    if (!personnel || !session) return res.status(409).json({ success: false, error: 'شیفت فعال برای شروع گشت‌زنی پیدا نشد.' });
+    const active = await prisma.securityPatrolSession.findFirst({ where: { personnelId: personnel.id, status: SecurityPatrolStatus.ACTIVE } });
+    if (active) return res.status(409).json({ success: false, error: 'یک گشت‌زنی فعال برای شما وجود دارد.' });
+    const patrol = await prisma.securityPatrolSession.create({ data: { sessionId: session.id, personnelId: personnel.id } });
+    res.status(201).json({ success: true, data: patrol });
+  } catch (error) {
+    console.error('Start patrol error:', error);
+    res.status(500).json({ success: false, error: 'شروع گشت‌زنی ناموفق بود.' });
+  }
+});
+
+router.put('/shift-log/patrols/:id/finish', protect, securityEdit, [
+  body('description').isString().trim().notEmpty()
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'توضیحات پایان گشت‌زنی الزامی است.', details: errors.array() });
+    const { personnel } = await getActiveShiftSessionForUser(req.user!.id);
+    if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات حراست لازم است.' });
+    const patrol = await prisma.securityPatrolSession.findUnique({ where: { id: req.params.id } });
+    if (!patrol || patrol.personnelId !== personnel.id || patrol.status !== SecurityPatrolStatus.ACTIVE) return res.status(404).json({ success: false, error: 'گشت‌زنی فعال متعلق به شما پیدا نشد.' });
+    const updated = await prisma.securityPatrolSession.update({
+      where: { id: patrol.id },
+      data: { status: SecurityPatrolStatus.FINISHED, endedAt: new Date(), description: req.body.description.trim() }
+    });
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Finish patrol error:', error);
+    res.status(500).json({ success: false, error: 'پایان گشت‌زنی ناموفق بود.' });
+  }
+});
+
 router.post('/shift-plan-slots/:id/attendance', protect, securityEdit, async (req: AuthRequest, res: Response) => {
   try {
     const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات حراست لازم است.' });
@@ -1030,16 +1207,20 @@ router.post('/shift-plan-slots/:id/start', protect, securityEdit, async (req: Au
   } catch (error: any) { res.status(409).json({ success: false, error: error.message || 'شروع شیفت ناموفق بود.' }); }
 });
 
-router.post('/shift-plan-slots/:id/end', protect, securityEdit, async (req: AuthRequest, res: Response) => {
+router.post('/shift-plan-slots/:id/end', protect, securityEdit, [
+  body('closureSummary').optional({ values: 'falsy' }).isString().trim()
+], async (req: AuthRequest, res: Response) => {
   try {
+    const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'توضیح پایان شیفت معتبر نیست.', details: errors.array() });
     const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات حراست لازم است.' });
     const result = await prisma.$transaction(async (tx) => {
-      const slot = await tx.securityShiftPlanSlot.findUnique({ where: { id: req.params.id }, include: { session: true, report: true, temporaryCoverage: true } });
+      const slot = await tx.securityShiftPlanSlot.findUnique({ where: { id: req.params.id }, include: { session: true, temporaryCoverage: true } });
       if (!slot?.session || slot.session.status !== SecurityShiftSessionStatus.ACTIVE || slot.session.personnelId !== personnel.id) throw new Error('شیفت فعال متعلق به شما پیدا نشد.');
-      if (!slot.report) throw new Error('پیش از پایان شیفت، گزارش شیفت را ثبت کنید.');
+      const activePatrol = await tx.securityPatrolSession.findFirst({ where: { sessionId: slot.session.id, status: SecurityPatrolStatus.ACTIVE } });
+      if (activePatrol) throw new Error('پیش از پایان شیفت، گشت‌زنی فعال را با توضیحات پایان دهید.');
       const now = new Date();
       if (now < slot.endsAt && !slot.temporaryCoverage.some((coverage) => coverage.startsAt <= now && coverage.endsAt >= slot.endsAt)) throw new Error('پایان زودهنگام فقط پس از ثبت پوشش جایگزین تا انتهای شیفت مجاز است.');
-      return tx.securityShiftSession.update({ where: { id: slot.session.id }, data: { status: SecurityShiftSessionStatus.CLOSED, endedAt: now, overtimeMinutes: Math.max(0, Math.floor((now.getTime() - slot.endsAt.getTime()) / 60_000)), closureSummary: slot.report.summary } });
+      return tx.securityShiftSession.update({ where: { id: slot.session.id }, data: { status: SecurityShiftSessionStatus.CLOSED, endedAt: now, overtimeMinutes: Math.max(0, Math.floor((now.getTime() - slot.endsAt.getTime()) / 60_000)), closureSummary: String(req.body.closureSummary || '').trim() || 'بدون مورد دیگر' } });
     }, { isolationLevel: 'Serializable' });
     res.json({ success: true, data: result });
   } catch (error: any) { res.status(409).json({ success: false, error: error.message || 'پایان شیفت ناموفق بود.' }); }

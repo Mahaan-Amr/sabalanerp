@@ -732,9 +732,27 @@ A categorized photo or file attached to a حراست gate movement, such as vehi
 _Avoid_: storing gate photos as uncategorized blobs that cannot later be filtered or audited by evidence type
 
 **گزارش شیفت حراست**:
-A closure report written for one planned security shift, with author, summary, incidents, follow-up notes, and optional attachments. Normal shift closure requires at least a minimal report, even when its summary is بدون رخداد.
-The report workspace separates ثبت گزارش شیفت, گزارش‌های شیفت, پیگیری‌ها, and رخدادها when follow-ups or incidents need their own operational tracking.
-_Avoid_: گزارش سرپرست, reducing a shift report to a filterable movement table, or hiding follow-up ownership inside an untrackable text field once it needs status tracking
+An append-only operational log for one planned security shift, made of immutable گزارش لحظه‌ای rows and گشت‌زنی sessions. Ending a shift remains a deliberate closure action, but the main shift content lives in timestamped log entries rather than one free-text summary form.
+New entries and patrols are recorded only against the currently active planned shift session for the authenticated security user in the first version; manager backfill is intentionally out of scope.
+_Avoid_: گزارش سرپرست, deleting log rows, forcing duplicate final-summary text when the log already records the shift, or hiding patrol sessions inside unstructured notes
+
+**نوع گزارش لحظه‌ای حراست**:
+A manager-defined active/inactive category for shift log rows, with name, optional description, and display order. It classifies a mandatory timestamped گزارش لحظه‌ای description without adding severity or workflow behavior yet.
+Report types are managed in تنظیمات حراست, a workspace-local manager/admin page for حراست-owned settings.
+_Avoid_: hard-coded report type dropdowns, optional row descriptions, or treating type configuration as patrol workflow rules
+
+**شماره ردیف گزارش شیفت**:
+A server-generated sequence number scoped to one planned security shift. Each shift starts at row 1 and guards never manually enter or edit the row number.
+_Avoid_: global report numbering, client-generated row numbers, or reusing a voided row number for a later entry
+
+**ابطال گزارش لحظه‌ای حراست**:
+A visible audit state for a mistaken shift log row, requiring a reason, the voiding user, and the exact void timestamp. Any حراست user with edit access may void any row, and voided rows remain in the normal shift log clearly marked باطل شده.
+_Avoid_: deleting shift log rows, hiding voided rows by default, or voiding without a reason
+
+**گشت‌زنی حراست**:
+A timestamped patrol session inside a security shift. It starts with one click and a server timestamp, ends with a required description and server timestamp, may happen multiple times in one shift, and one user cannot have overlapping active patrol sessions.
+Shift closure is blocked while any patrol session in that shift is still active.
+_Avoid_: requiring patrol notes before the patrol happens, storing patrols as free-text shift notes, allowing accidental overlapping active patrols for the same user, or auto-ending patrols during shift closure
 
 **گزارش‌های حراست**:
 A reporting workspace for aggregate operational data such as attendance, exceptions, missions, shift sessions, and signatures over a selected date range. It is separate from گزارش شیفت حراست and should be filterable by date range, department, shift, and personnel when those dimensions apply.
@@ -744,6 +762,12 @@ _Avoid_: using mock analytics, mixing narrative shift closure reports into aggre
 **داده واقعی حراست**:
 Core حراست surfaces use persisted operational data or an honest empty state when no records exist. Missing core sources should be backed by explicit API contracts, while non-core admin-wide security audit widgets stay empty or hidden until a real audit-log model exists.
 _Avoid_: simulated counts, delayed fake loading, hard-coded sample users, or admin security metrics that imply audit coverage the system does not actually record
+
+**تقویم سالیانه سبلان**:
+A company-wide calendar authority for marking days as holidays and recording events. It is informational until a specific workflow explicitly chooses to consume it, so existing attendance, shift, contract, and delivery behavior does not change implicitly.
+Each calendar entry has a date, holiday flag, title, description, event type, and active/inactive state; first-version event types are تعطیل رسمی, تعطیل شرکت, رویداد داخلی, یادآوری, and سایر.
+One date may have multiple active entries, and the date is considered a holiday if at least one active entry for that date is marked as a holiday.
+_Avoid_: hidden side effects on operational workflows, treating admin calendar events as shift reports, recurring rules, half-day schedules, or scattering company holiday definitions across workspaces
 
 **چرخه شیفت حراست**:
 A continuous three-person rotation of configurable-duration slots in A→B→C order. With slot duration D, each person works D hours and rests 2D hours; D defaults to 12 hours but is fixed for a plan once one of its slots starts.

@@ -177,12 +177,9 @@ export default function SecurityShiftsPage() {
   );
 
   const closeShift = async (slot: any) => {
-    if (!slot.report) {
-      const summary = window.prompt('خلاصه گزارش شیفت را وارد کنید (مثلاً بدون رخداد):');
-      if (!summary?.trim()) return;
-      await securityAPI.createSupervisorReport({ reportDate: new Date().toISOString(), planSlotId: slot.id, summary: summary.trim() });
-    }
-    await run(() => securityAPI.endPlannedShift(slot.id), 'شیفت پایان یافت و خروج ثبت شد.');
+    const closureSummary = window.prompt('\u062a\u0648\u0636\u06cc\u062d \u067e\u0627\u06cc\u0627\u0646 \u0634\u06cc\u0641\u062a \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f:', '\u0628\u062f\u0648\u0646 \u0645\u0648\u0631\u062f \u062f\u06cc\u06af\u0631');
+    if (closureSummary === null) return;
+    await run(() => securityAPI.endPlannedShift(slot.id, closureSummary.trim() || '\u0628\u062f\u0648\u0646 \u0645\u0648\u0631\u062f \u062f\u06cc\u06af\u0631'), '\u0634\u06cc\u0641\u062a \u067e\u0627\u06cc\u0627\u0646 \u06cc\u0627\u0641\u062a.');
   };
 
   const viewOptions = useMemo(() => {

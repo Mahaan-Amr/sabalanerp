@@ -234,6 +234,7 @@ model SecurityPersonnel {
   replacementSlots  SecurityShiftPlanSlot[] @relation("SecurityShiftReplacementPersonnel")
   shiftAttendances  SecurityShiftAttendance[]
   shiftSessions     SecurityShiftSession[]
+  patrolSessions    SecurityPatrolSession[]
   temporaryCoverage SecurityShiftTemporaryCoverage[]
   shift             Shift              @relation(fields: [shiftId], references: [id], onDelete: Cascade)
   user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -336,6 +337,8 @@ model SecurityShiftSession {
   updatedAt         DateTime                   @updatedAt
   slot              SecurityShiftPlanSlot      @relation(fields: [slotId], references: [id], onDelete: Restrict)
   personnel         SecurityPersonnel           @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  logEntries        SecurityShiftLogEntry[]
+  patrolSessions    SecurityPatrolSession[]
 
   @@index([status, startedAt])
   @@index([personnelId, startedAt])
@@ -964,6 +967,60 @@ model SecurityVehicleAttachment {
   @@map("security_vehicle_attachments")
 }
 
+model SecurityInstantReportType {
+  id           String                  @id @default(cuid())
+  name         String
+  description  String?
+  displayOrder Int                     @default(0)
+  isActive     Boolean                 @default(true)
+  createdBy    String
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  logEntries   SecurityShiftLogEntry[]
+
+  @@unique([name])
+  @@index([isActive, displayOrder])
+  @@map("security_instant_report_types")
+}
+
+model SecurityShiftLogEntry {
+  id            String                   @id @default(cuid())
+  sessionId     String
+  reportTypeId  String
+  rowNumber     Int
+  description   String
+  status        SecurityShiftLogStatus   @default(ACTIVE)
+  createdBy     String
+  createdAt     DateTime                 @default(now())
+  voidedBy      String?
+  voidedAt      DateTime?
+  voidReason    String?
+  session       SecurityShiftSession     @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  reportType    SecurityInstantReportType @relation(fields: [reportTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([sessionId, rowNumber])
+  @@index([sessionId, createdAt])
+  @@index([reportTypeId])
+  @@index([status])
+  @@map("security_shift_log_entries")
+}
+
+model SecurityPatrolSession {
+  id          String                     @id @default(cuid())
+  sessionId   String
+  personnelId String
+  status      SecurityPatrolStatus       @default(ACTIVE)
+  startedAt   DateTime                   @default(now())
+  endedAt     DateTime?
+  description String?
+  session     SecurityShiftSession       @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  personnel   SecurityPersonnel          @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+
+  @@index([sessionId, startedAt])
+  @@index([personnelId, status])
+  @@map("security_patrol_sessions")
+}
+
 model SecuritySupervisorReport {
   id            String   @id @default(cuid())
   reportDate    DateTime
@@ -983,6 +1040,24 @@ model SecuritySupervisorReport {
   @@index([shiftId])
   @@index([authorId])
   @@map("security_supervisor_reports")
+}
+
+model SabalanCalendarEntry {
+  id          String                   @id @default(cuid())
+  date        DateTime
+  isHoliday   Boolean                  @default(false)
+  title       String
+  description String?
+  eventType   SabalanCalendarEventType
+  isActive    Boolean                  @default(true)
+  createdBy   String
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+
+  @@index([date])
+  @@index([isHoliday])
+  @@index([isActive])
+  @@map("sabalan_calendar_entries")
 }
 
 model LogisticsLoading {
@@ -1990,6 +2065,24 @@ enum SecurityShiftSessionStatus {
   ACTIVE
   CLOSED
   FORCE_CLOSED
+}
+
+enum SecurityShiftLogStatus {
+  ACTIVE
+  VOIDED
+}
+
+enum SecurityPatrolStatus {
+  ACTIVE
+  FINISHED
+}
+
+enum SabalanCalendarEventType {
+  OFFICIAL_HOLIDAY
+  COMPANY_HOLIDAY
+  INTERNAL_EVENT
+  REMINDER
+  OTHER
 }
 
 enum CorrectionRequestCategory {

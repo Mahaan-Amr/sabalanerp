@@ -700,7 +700,7 @@ export const securityAPI = {
   getMyShiftWorkflow: () => api.get('/security/shift-workflow/me'),
   registerShiftAttendance: (slotId: string) => api.post(`/security/shift-plan-slots/${slotId}/attendance`),
   startPlannedShift: (slotId: string) => api.post(`/security/shift-plan-slots/${slotId}/start`),
-  endPlannedShift: (slotId: string) => api.post(`/security/shift-plan-slots/${slotId}/end`),
+  endPlannedShift: (slotId: string, closureSummary?: string) => api.post(`/security/shift-plan-slots/${slotId}/end`, { closureSummary }),
   forceCloseShift: (sessionId: string, reason: string, summary: string) => api.post(`/security/shift-sessions/${sessionId}/force-close`, { reason, summary }),
   correctShiftAttendance: (attendanceId: string, arrivedAt: string, reason: string) => api.put(`/security/shift-attendance/${attendanceId}/correct`, { arrivedAt, reason }),
   
@@ -747,6 +747,14 @@ export const securityAPI = {
   addVehicleMovementAttachment: (id: string, data: any) => api.post(`/security/vehicle-movements/${id}/attachments`, data),
   getSupervisorReports: (params?: any) => api.get('/security/supervisor-reports', { params }),
   createSupervisorReport: (data: any) => api.post('/security/supervisor-reports', data),
+  getInstantReportTypes: (includeInactive = false) => api.get('/security/instant-report-types', { params: { includeInactive } }),
+  createInstantReportType: (data: any) => api.post('/security/instant-report-types', data),
+  updateInstantReportType: (id: string, data: any) => api.put(`/security/instant-report-types/${id}`, data),
+  getActiveShiftLog: () => api.get('/security/shift-log/active'),
+  createShiftLogEntry: (data: any) => api.post('/security/shift-log/entries', data),
+  voidShiftLogEntry: (id: string, reason: string) => api.put(`/security/shift-log/entries/${id}/void`, { reason }),
+  startPatrol: () => api.post('/security/shift-log/patrols/start'),
+  finishPatrol: (id: string, description: string) => api.put(`/security/shift-log/patrols/${id}/finish`, { description }),
 
   // Exception handling system
   createExceptionRequest: (data: any) => api.post('/security/exceptions/request', data),
@@ -767,6 +775,12 @@ export const securityAPI = {
   getAttendanceSignature: (id: string) => api.get(`/security/attendance/${id}/signature`),
   validateSignature: (signatureData: string, employeeId: string) => 
     api.post('/security/signature/validate', { signatureData, employeeId }),
+};
+
+export const sabalanCalendarAPI = {
+  getEntries: (params?: any) => api.get('/sabalan-calendar', { params }),
+  createEntry: (data: any) => api.post('/sabalan-calendar', data),
+  updateEntry: (id: string, data: any) => api.put(`/sabalan-calendar/${id}`, data),
 };
 
 // Permissions API

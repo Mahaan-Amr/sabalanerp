@@ -207,6 +207,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             show: true
           },
           {
+            name: 'Sabalan Calendar',
+            namePersian: 'تقویم سالیانه سبلان',
+            href: '/dashboard/admin/sabalan-calendar',
+            icon: FaCalendarAlt,
+            show: currentUser?.role === 'ADMIN'
+          },
+          {
             name: 'Security',
             namePersian: 'امنیت سامانه',
             href: '/dashboard/admin/security',
@@ -624,6 +631,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             namePersian: 'گزارش‌های حراست',
             href: '/dashboard/security/reports',
             icon: FaChartLine,
+            show: true
+          },
+          {
+            name: 'Settings',
+            namePersian: 'تنظیمات حراست',
+            href: '/dashboard/security/settings',
+            icon: FaCog,
             show: true
           }
         ];

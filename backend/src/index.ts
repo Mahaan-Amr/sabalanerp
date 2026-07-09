@@ -19,6 +19,7 @@ import customerRoutes from './routes/customers';
 import departmentRoutes from './routes/departments';
 import dashboardRoutes from './routes/dashboard';
 import securityRoutes from './routes/security';
+import sabalanCalendarRoutes from './routes/sabalan-calendar';
 
 // Import workspace routes
 import salesRoutes from './routes/sales';
@@ -114,6 +115,7 @@ app.use('/api/contract-templates', contractTemplateRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/sabalan-calendar', sabalanCalendarRoutes);
 
 // Workspace-specific routes
 app.use('/api/security', securityRoutes);

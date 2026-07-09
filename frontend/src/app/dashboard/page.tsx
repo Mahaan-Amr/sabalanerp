@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   FaBuilding,
+  FaCalendarAlt,
   FaChartLine,
   FaCheck,
   FaClock,
@@ -245,6 +246,7 @@ export default function DashboardPage() {
                     { title: 'مدیریت بخش‌ها', description: 'واحدهای سازمانی و ارتباط آنها با کاربران', href: '/dashboard/departments', icon: FaBuilding, tone: 'success' },
                     { title: 'تنظیمات سیستم', description: 'پیکربندی عمومی ERP', href: '/dashboard/admin/settings', icon: FaCog, tone: 'warning' },
                     { title: 'تنظیمات تخفیف قرارداد', description: 'تعریف بازه‌ها و سقف درصد تخفیف فروش', href: '/dashboard/admin/discount-settings', icon: FaPercent, tone: 'success' },
+                    { title: 'تقویم سالیانه سبلان', description: 'تعریف تعطیلی‌ها و رویدادهای شرکت', href: '/dashboard/admin/sabalan-calendar', icon: FaCalendarAlt, tone: 'info' },
                     { title: 'امنیت سیستم', description: 'نظارت بر امنیت و فعالیت‌ها', href: '/dashboard/admin/security', icon: FaUserShield, tone: 'danger' },
                     { title: 'گزارشات مدیریتی', description: 'گزارش‌های جامع و تحلیل‌های سیستم', href: '/dashboard/admin/reports', icon: FaChartLine, tone: 'primary' },
                   ]}

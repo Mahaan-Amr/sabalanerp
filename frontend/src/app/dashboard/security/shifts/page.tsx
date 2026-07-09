@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FaCalendarAlt, FaCheck, FaClock, FaExclamationTriangle, FaHistory, FaPlay, FaRedo, FaStop, FaUserEdit, FaUsers } from 'react-icons/fa';
+import { FaCalendarAlt, FaCheck, FaClock, FaExclamationTriangle, FaHistory, FaPlay, FaRedo, FaStop, FaTrash, FaUserEdit, FaUsers } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpSegmentedControl } from '@/components/erp';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -38,6 +38,7 @@ export default function SecurityShiftsPage() {
   const currentYear = Number(PersianCalendar.now().split('/')[0]);
   const [view, setView] = useState<ShiftView>('mine');
   const [workflow, setWorkflow] = useState<any>(null);
+  const [currentShift, setCurrentShift] = useState<any>(null);
   const [plans, setPlans] = useState<any[]>([]);
   const [slots, setSlots] = useState<any[]>([]);
   const [defaults, setDefaults] = useState<any>(null);
@@ -77,6 +78,8 @@ export default function SecurityShiftsPage() {
       if (workflowResult.status === 'fulfilled') setWorkflow(workflowResult.value.data.data);
       if (plansResult.status === 'fulfilled') setPlans(plansResult.value.data.data || []);
       if (slotsResult.status === 'fulfilled') setSlots(slotsResult.value.data.data || []);
+      const currentResult = await securityAPI.getCurrentShiftWorkflow();
+      setCurrentShift(currentResult.data.data);
       try {
         const defaultsResult = await securityAPI.getShiftPlanDefaults();
         const data = defaultsResult.data.data;
@@ -121,6 +124,8 @@ export default function SecurityShiftsPage() {
     return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
   }, [monthSlots]);
   const historySlots = useMemo(() => slots.filter((slot) => slot.session || slot.report || slot.attendance?.length || slot.temporaryCoverage?.length || slot.replacementPersonnelId || slot.probableNoShowAt), [slots]);
+  const activeShiftWorker = currentShift?.activeSession?.personnel || (currentShift?.activeSession?.slot ? slotWorker(currentShift.activeSession.slot) : null);
+  const scheduledCurrentWorker = currentShift?.currentSlot ? slotWorker(currentShift.currentSlot) : null;
 
   const run = async (action: () => Promise<any>, success: string) => {
     try {
@@ -135,9 +140,14 @@ export default function SecurityShiftsPage() {
   };
 
   const createPlan = async () => {
-    const anchorAt = PersianCalendar.toGregorian(`${form.anchorDate} ${form.anchorTime}`, 'jYYYY/jMM/jDD HH:mm');
-    const generateUntil = PersianCalendar.toGregorian(`${form.untilDate} 23:59`, 'jYYYY/jMM/jDD HH:mm');
+    const anchorAt = PersianCalendar.toGregorian(`${form.anchorDate} 07:00`, 'jYYYY/jMM/jDD HH:mm');
+    const generateUntil = PersianCalendar.toGregorian(`${form.untilDate} 19:00`, 'jYYYY/jMM/jDD HH:mm');
     await run(() => securityAPI.createShiftPlan({ ...form, anchorAt: anchorAt.toISOString(), generateUntil: generateUntil.toISOString() }), 'پیش‌نویس برنامه سالانه ساخته شد.');
+  };
+
+  const deletePlan = (plan: any) => {
+    if (!window.confirm('\u0627\u06cc\u0646 \u067e\u06cc\u0634\u200c\u0646\u0648\u06cc\u0633 \u0628\u0631\u0646\u0627\u0645\u0647 \u062d\u0630\u0641 \u0634\u0648\u062f\u061f')) return;
+    run(() => securityAPI.deleteShiftPlan(plan.id), '\u067e\u06cc\u0634\u200c\u0646\u0648\u06cc\u0633 \u0628\u0631\u0646\u0627\u0645\u0647 \u062d\u0630\u0641 \u0634\u062f.');
   };
 
   const openDraft = (mode: DraftMode, slot: any) => {
@@ -219,6 +229,34 @@ export default function SecurityShiftsPage() {
       {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{message}</div>}
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
       <ErpSegmentedControl<ShiftView> value={view} onChange={setView} options={viewOptions} />
+
+      <ErpCard className="p-4" tone={currentShift?.activeSession ? 'success' : currentShift?.currentSlot ? 'warning' : 'neutral'}>
+        {currentShift?.activeSession ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-bold text-slate-900 dark:text-white">شیفت فعال: {personName(activeShiftWorker)}</p>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">از {dateTimeFa(currentShift.activeSession.startedAt)} · بازه برنامه {dateTimeFa(currentShift.activeSession.slot.startsAt)} تا {dateTimeFa(currentShift.activeSession.slot.endsAt)}</p>
+            </div>
+            <ErpBadge tone="success">فعال</ErpBadge>
+          </div>
+        ) : currentShift?.currentSlot ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-bold text-slate-900 dark:text-white">مسئول برنامه‌ریزی‌شده اکنون: {personName(scheduledCurrentWorker)}</p>
+              <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">برای بازه {dateTimeFa(currentShift.currentSlot.startsAt)} تا {dateTimeFa(currentShift.currentSlot.endsAt)} هنوز شیفت فعال شروع نشده است.</p>
+            </div>
+            <ErpBadge tone="warning">شروع نشده</ErpBadge>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-bold text-slate-900 dark:text-white">شیفت فعال وجود ندارد</p>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">برای زمان فعلی بازه برنامه‌ریزی‌شده‌ای پیدا نشد.</p>
+            </div>
+            <ErpBadge tone="neutral">بدون شیفت</ErpBadge>
+          </div>
+        )}
+      </ErpCard>
 
       {view === 'mine' && (
         <ErpSection title="برنامه من" description="نمای سال/ماه از شیفت‌ها، مرخصی، جایگزینی، حضور، تأخیر و شمارش انتظار">
@@ -343,7 +381,7 @@ export default function SecurityShiftsPage() {
 
       {view === 'plans' && defaults && (
         <ErpSection title="برنامه سالانه شیفت" description="تولید پیش‌نویس از نقطه شروع قابل تنظیم و انتشار پس از بازبینی">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3 [&>label:nth-child(4)]:hidden [&>label:nth-child(6)]:hidden">
             <label><span className={labelClass}>عنوان</span><input className={inputClass} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
             <label><span className={labelClass}>سال شمسی</span><input className={inputClass} type="number" value={form.persianYear} onChange={(e) => setForm({ ...form, persianYear: Number(e.target.value) })} /></label>
             <label><span className={labelClass}>تاریخ شروع</span><PersianCalendarComponent value={form.anchorDate} onChange={(anchorDate) => setForm({ ...form, anchorDate })} /></label>
@@ -373,7 +411,8 @@ export default function SecurityShiftsPage() {
                     <p className="font-semibold">{plan.title} · بازنگری {plan.revision.toLocaleString('fa-IR')}</p>
                     <p className="mt-1 text-xs text-slate-500">{personName(plan.primaryA)} ← {personName(plan.primaryB)} ← {personName(plan.primaryC)} · {plan._count.slots.toLocaleString('fa-IR')} بازه</p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    {plan.status === 'DRAFT' && <ErpButton label="حذف پیش‌نویس" icon={FaTrash} tone="danger" variant="outline" onClick={() => deletePlan(plan)} />}
                     <ErpBadge tone={plan.status === 'PUBLISHED' ? 'success' : 'warning'}>{plan.status === 'PUBLISHED' ? 'منتشر شده' : plan.status === 'DRAFT' ? 'پیش‌نویس' : 'جایگزین شده'}</ErpBadge>
                     {plan.status === 'DRAFT' && <ErpButton label="انتشار" icon={FaCheck} tone="success" onClick={() => run(() => securityAPI.publishShiftPlan(plan.id), 'برنامه منتشر شد.')} />}
                   </div>

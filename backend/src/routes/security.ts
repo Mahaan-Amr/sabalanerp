@@ -905,6 +905,24 @@ router.get('/shift-plans/defaults', protect, securityAdmin, async (_req: AuthReq
   res.json({ success: true, data: { anchorAt: latestSlot?.endsAt || null, slotDurationMinutes: latestSlot?.plan.slotDurationMinutes || 720, earlyArrivalMinutes: latestSlot?.plan.earlyArrivalMinutes || 30, lateAlertMinutes: latestSlot?.plan.lateAlertMinutes || 15, nextPrimaryId, personnel } });
 });
 
+router.get('/shift-workflow/current', protect, securityView, async (_req: AuthRequest, res: Response) => {
+  await markProbableNoShows();
+  const now = new Date();
+  const [activeSession, currentSlot] = await Promise.all([
+    prisma.securityShiftSession.findFirst({
+      where: { status: SecurityShiftSessionStatus.ACTIVE },
+      include: { personnel: { include: { user: true } }, slot: { include: slotInclude } },
+      orderBy: { startedAt: 'desc' }
+    }),
+    prisma.securityShiftPlanSlot.findFirst({
+      where: { plan: { status: SecurityShiftPlanStatus.PUBLISHED }, startsAt: { lte: now }, endsAt: { gt: now } },
+      include: slotInclude,
+      orderBy: { startsAt: 'desc' }
+    })
+  ]);
+  res.json({ success: true, data: { activeSession, currentSlot } });
+});
+
 router.post('/shift-plans', protect, securityAdmin, [
   body('title').isString().trim().notEmpty(), body('persianYear').isInt(), body('anchorAt').isISO8601(), body('generateUntil').isISO8601(),
   body('slotDurationMinutes').isInt({ min: 60, max: 1440 }), body('earlyArrivalMinutes').isInt({ min: 0, max: 240 }), body('lateAlertMinutes').isInt({ min: 0, max: 240 }),
@@ -917,7 +935,7 @@ router.post('/shift-plans', protect, securityAdmin, [
     if (new Set(ids).size !== 3) return res.status(400).json({ success: false, error: 'سه نیروی اصلی باید متفاوت باشند.' });
     const personnelCount = await prisma.securityPersonnel.count({ where: { id: { in: ids }, isActive: true } });
     if (personnelCount !== 3) return res.status(400).json({ success: false, error: 'هر سه نیروی اصلی باید فعال باشند.' });
-    const anchorAt = new Date(req.body.anchorAt); const generateUntil = new Date(req.body.generateUntil); const duration = Number(req.body.slotDurationMinutes);
+    const anchorAt = new Date(req.body.anchorAt); const generateUntil = new Date(req.body.generateUntil); const duration = 720;
     if (anchorAt >= generateUntil) return res.status(400).json({ success: false, error: 'پایان برنامه باید بعد از زمان شروع باشد.' });
     const slotCount = Math.ceil((generateUntil.getTime() - anchorAt.getTime()) / (duration * 60_000));
     if (slotCount > 1000) return res.status(400).json({ success: false, error: 'تعداد بازه‌های برنامه بیش از حد مجاز است.' });
@@ -942,16 +960,41 @@ router.post('/shift-plans/:id/publish', protect, securityAdmin, async (req: Auth
     const plan = await prisma.securityShiftPlan.findUnique({ where: { id: req.params.id } });
     if (!plan || plan.status !== SecurityShiftPlanStatus.DRAFT) return res.status(409).json({ success: false, error: 'فقط برنامه پیش‌نویس قابل انتشار است.' });
     const now = new Date();
-    if (plan.anchorAt < now) {
-      const started = await prisma.securityShiftPlanSlot.findFirst({ where: { planId: plan.id, startsAt: { lte: now } } });
-      if (started) return res.status(409).json({ success: false, error: 'برنامه دارای بازه شروع‌شده است و قابل انتشار نیست.' });
-    }
     const published = await prisma.$transaction(async (tx) => {
+      const currentSlot = await tx.securityShiftPlanSlot.findFirst({ where: { planId: plan.id, startsAt: { lte: now }, endsAt: { gt: now } } });
+      if (currentSlot) {
+        const active = await tx.securityShiftSession.findFirst({ where: { status: SecurityShiftSessionStatus.ACTIVE } });
+        if (active) throw new Error('یک شیفت فعال باز وجود دارد؛ ابتدا آن را ببندید یا با حسابرسی مدیر ببندید.');
+      }
       await tx.securityShiftPlan.updateMany({ where: { id: { not: plan.id }, status: SecurityShiftPlanStatus.PUBLISHED, generateUntil: { gt: plan.anchorAt } }, data: { status: SecurityShiftPlanStatus.SUPERSEDED } });
-      return tx.securityShiftPlan.update({ where: { id: plan.id }, data: { status: SecurityShiftPlanStatus.PUBLISHED, publishedAt: new Date(), publishedBy: req.user!.id }, include: shiftPlanInclude });
+      const updated = await tx.securityShiftPlan.update({ where: { id: plan.id }, data: { status: SecurityShiftPlanStatus.PUBLISHED, publishedAt: now, publishedBy: req.user!.id }, include: shiftPlanInclude });
+      if (currentSlot) {
+        await tx.securityShiftAttendance.upsert({
+          where: { slotId_personnelId: { slotId: currentSlot.id, personnelId: currentSlot.plannedPersonnelId } },
+          update: {},
+          create: {
+            slotId: currentSlot.id,
+            personnelId: currentSlot.plannedPersonnelId,
+            arrivedAt: now,
+            delayMinutes: Math.max(0, Math.floor((now.getTime() - currentSlot.startsAt.getTime()) / 60_000))
+          }
+        });
+        await tx.securityShiftSession.create({ data: { slotId: currentSlot.id, personnelId: currentSlot.plannedPersonnelId, startedAt: now } });
+      }
+      return updated;
     });
     res.json({ success: true, data: published });
-  } catch (error: any) { res.status(500).json({ success: false, error: error.message || 'انتشار برنامه ناموفق بود.' }); }
+  } catch (error: any) { res.status(error.message?.includes('شیفت فعال') ? 409 : 500).json({ success: false, error: error.message || 'انتشار برنامه ناموفق بود.' }); }
+});
+
+router.delete('/shift-plans/:id', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const plan = await prisma.securityShiftPlan.findUnique({ where: { id: req.params.id } });
+    if (!plan) return res.status(404).json({ success: false, error: 'برنامه شیفت پیدا نشد.' });
+    if (plan.status !== SecurityShiftPlanStatus.DRAFT) return res.status(409).json({ success: false, error: 'فقط برنامه پیش‌نویس قابل حذف است.' });
+    await prisma.securityShiftPlan.delete({ where: { id: plan.id } });
+    res.json({ success: true, data: { id: plan.id } });
+  } catch (error: any) { res.status(500).json({ success: false, error: error.message || 'حذف برنامه شیفت ناموفق بود.' }); }
 });
 
 router.get('/shift-plan-slots', protect, securityView, async (req: AuthRequest, res: Response) => {

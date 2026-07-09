@@ -770,19 +770,19 @@ One date may have multiple active entries, and the date is considered a holiday 
 _Avoid_: hidden side effects on operational workflows, treating admin calendar events as shift reports, recurring rules, half-day schedules, or scattering company holiday definitions across workspaces
 
 **چرخه شیفت حراست**:
-A continuous three-person rotation of configurable-duration slots in A→B→C order. With slot duration D, each person works D hours and rests 2D hours; D defaults to 12 hours but is fixed for a plan once one of its slots starts.
-_Avoid_: hard-coding clock boundaries, assigning each person permanently to day or night, scheduling overlapping base slots, or changing a started plan's duration
+A continuous three-person rotation in A→B→C order using fixed 12-hour slots that start at 07:00 and 19:00. Each person works one slot and then rests for two slots before their next planned slot.
+_Avoid_: asking managers to manually tune shift duration for the normal annual plan, assigning each person permanently to day or night, scheduling overlapping base slots, or changing a started plan's timing
 
 **برنامه سالانه شیفت حراست**:
-A generated schedule with an anchor datetime, configurable slot duration, early-arrival and lateness thresholds, and exactly three ordered primary guards. Mid-year primary changes create a future plan revision, while other eligible security personnel remain substitutes outside the base cycle.
-_Avoid_: rewriting started slots, placing one person in multiple primary positions, or silently inserting substitutes into the A→B→C rotation
+A generated schedule with a date range and exactly three ordered primary guards. The normal annual plan uses fixed 07:00/19:00 shift boundaries and 12-hour slots; managers define the A/B/C order and generation dates, not the slot duration. Publishing a plan is an operational activation event: if the published schedule contains the current time, the current slot's assigned guard becomes the active shift worker immediately and their attendance is recorded with the server timestamp. If a plan is published mid-slot, the slot keeps its scheduled 07:00/19:00 boundary while the session start and attendance time remain the real publish timestamp. Mid-year primary changes create a future plan revision, while other eligible security personnel remain substitutes outside the base cycle. Draft plans may be deleted by a manager before publication, but published plans are retained as operational history and should be replaced, superseded, or explicitly cancelled rather than physically deleted.
+_Avoid_: exposing normal annual-plan timing as free-form manager inputs, publishing a current schedule that still waits for manual shift start, rewriting started slots, placing one person in multiple primary positions, or silently inserting substitutes into the A→B→C rotation
 
 **جایگزینی شیفت حراست**:
 A slot-specific exception that preserves the annual A→B→C baseline while assigning another eligible security user as the actual worker for an absent planned guard. Later planned assignments do not shift, and rest or overlap conflicts require a manager override reason.
 _Avoid_: regenerating the rotation after leave, transferring ownership of later slots to the substitute, or hiding rest violations created by coverage
 
 **تحویل شیفت حراست**:
-The controlled boundary where the outgoing guard submits the shift report and ends the active session before the incoming assigned guard starts the next one. A manager may force-close an unclosable session only with an audited reason.
+The controlled boundary where the outgoing guard submits the shift report and ends the active session before the incoming assigned guard starts the next one. The first active session of a newly published current plan may be opened by publication itself; later boundaries are not auto-started in the first version and still require deliberate closure/start handling. A manager may force-close an unclosable session only with an audited reason.
 _Avoid_: starting overlapping active shift sessions, closing a normal shift without its report, or silently correcting a forgotten shift end
 
 **عدم حضور احتمالی شیفت حراست**:

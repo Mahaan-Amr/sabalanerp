@@ -779,6 +779,18 @@ _Avoid_: protecting detailed personnel performance only by hidden interface cont
 The first portable manager-performance export contains the selected filter context, aggregate KPIs, and structured performance tables only. Narrative operational evidence remains inside the secured application.
 _Avoid_: exporting shift-log descriptions, patrol notes, or closure summaries before their sharing and audit rules are defined
 
+**تاریخچه تفصیلی شیفت نیروی حراست**:
+A manager/admin-only dedicated page for chronological review of one Security guard's shifts in the selected range. Each expandable shift keeps scheduled and actual coverage, attendance and session timing, exceptions, patrols, closure data, and the complete instant-report audit trail together.
+_Avoid_: flattening evidence from different shifts into one unscoped activity feed, showing detailed history to ordinary guards, or losing the report date context when navigating to the history
+
+**گزارش لحظه‌ای باطل‌شده حراست**:
+An instant report that remains visible in the shift audit trail with a clear voided state, void time, and void reason. It is historical evidence rather than active shift content.
+_Avoid_: deleting voided reports, or presenting them as active without their void context
+
+**نمایش تاریخچه تفصیلی شیفت**:
+The detailed shift-history page orders the selected guard's shifts newest first. Each shift begins with a compact status and timing header, while its complete audit evidence is revealed in an expandable section.
+_Avoid_: loading every shift's full narrative by default, or making a manager search through an unstructured event stream
+
 **داده واقعی حراست**:
 Core حراست surfaces use persisted operational data or an honest empty state when no records exist. Missing core sources should be backed by explicit API contracts, while non-core admin-wide security audit widgets stay empty or hidden until a real audit-log model exists.
 _Avoid_: simulated counts, delayed fake loading, hard-coded sample users, or admin security metrics that imply audit coverage the system does not actually record

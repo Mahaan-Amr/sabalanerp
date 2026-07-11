@@ -699,7 +699,7 @@ export const securityAPI = {
   markShiftEmergencyUncovered: (id: string, reason: string) => api.put(`/security/shift-plan-slots/${id}/emergency-uncovered`, { reason }),
   addTemporaryShiftCoverage: (id: string, data: any) => api.post(`/security/shift-plan-slots/${id}/temporary-coverage`, data),
   getCurrentShiftWorkflow: () => api.get('/security/shift-workflow/current'),
-  getMyShiftWorkflow: () => api.get('/security/shift-workflow/me'),
+  getMyShiftWorkflow: (params?: { from?: string; to?: string }) => api.get('/security/shift-workflow/me', { params }),
   registerShiftAttendance: (slotId: string) => api.post(`/security/shift-plan-slots/${slotId}/attendance`),
   startPlannedShift: (slotId: string) => api.post(`/security/shift-plan-slots/${slotId}/start`),
   endPlannedShift: (slotId: string, closureSummary?: string) => api.post(`/security/shift-plan-slots/${slotId}/end`, { closureSummary }),
@@ -720,6 +720,7 @@ export const securityAPI = {
   },
   getDashboardStats: (params?: any) => api.get('/security/dashboard/stats', { params }),
   getSecurityReportSummary: (params?: any) => api.get('/security/reports/summary', { params }),
+  exportSecurityReport: (format: 'pdf' | 'excel', params?: any) => api.get('/security/reports/export', { params: { ...params, format }, responseType: 'blob' }),
   
   // Personnel management
   getPersonnel: () => api.get('/security/personnel'),

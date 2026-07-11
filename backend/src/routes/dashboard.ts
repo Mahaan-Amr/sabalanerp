@@ -193,7 +193,9 @@ router.get('/stats', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_STATS
 // @desc    Get user profile with department info
 // @route   GET /api/dashboard/profile
 // @access  Private
-router.get('/profile', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_PROFILE_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res) => {
+// A user's own profile is a core self-service resource; workspace permissions
+// must not prevent a Security-only (or other single-workspace) user signing in.
+router.get('/profile', protect, async (req: any, res) => {
   try {
     const userId = req.user.id;
 

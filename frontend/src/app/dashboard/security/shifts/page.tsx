@@ -46,7 +46,7 @@ export default function SecurityShiftsPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [now, setNow] = useState(Date.now());
-  const [visibleMonth, setVisibleMonth] = useState(PersianCalendar.now('jYYYY/jMM'));
+  const [visibleMonth, setVisibleMonth] = useState(() => PersianCalendar.now().slice(0, 7));
   const [draft, setDraft] = useState<{ mode: DraftMode; slotId: string }>({ mode: null, slotId: '' });
   const [replacement, setReplacement] = useState({ personnelId: '', overrideReason: '' });
   const [temporary, setTemporary] = useState({ personnelId: '', startsDate: PersianCalendar.now(), startsTime: '07:00', endsDate: PersianCalendar.now(), endsTime: '19:00', note: '' });
@@ -106,6 +106,16 @@ export default function SecurityShiftsPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const [year, month] = visibleMonth.split('/').map(Number);
+    if (!year || !month) return;
+    const from = PersianCalendar.toGregorian(`${visibleMonth}/01`, 'jYYYY/jMM/jDD');
+    const nextMonth = month === 12 ? `${year + 1}/01/01` : `${year}/${String(month + 1).padStart(2, '0')}/01`;
+    const to = PersianCalendar.toGregorian(nextMonth, 'jYYYY/jMM/jDD');
+    securityAPI.getMyShiftWorkflow({ from: from.toISOString(), to: to.toISOString() })
+      .then((result) => setWorkflow(result.data.data))
+      .catch((err) => setError(err.response?.data?.error || 'دریافت برنامه من ناموفق بود.'));
+  }, [visibleMonth]);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
@@ -263,7 +273,17 @@ export default function SecurityShiftsPage() {
           <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[220px_minmax(0,1fr)]">
             <label>
               <span className={labelClass}>ماه برنامه</span>
-              <input className={inputClass} value={visibleMonth} onChange={(e) => setVisibleMonth(e.target.value)} placeholder="1405/04" />
+              <select className={inputClass} value={visibleMonth} onChange={(e) => setVisibleMonth(e.target.value)}>
+                {Array.from({ length: 36 }, (_, index) => {
+                  const [baseYear, baseMonth] = PersianCalendar.now().slice(0, 7).split('/').map(Number);
+                  const offset = index - 12;
+                  const absolute = baseYear * 12 + (baseMonth - 1) + offset;
+                  const year = Math.floor(absolute / 12);
+                  const month = (absolute % 12) + 1;
+                  const value = `${year}/${String(month).padStart(2, '0')}`;
+                  return <option key={value} value={value}>{value}</option>;
+                })}
+              </select>
             </label>
             {workflow?.activeSession && (
               <ErpCard className="p-4" tone="success">

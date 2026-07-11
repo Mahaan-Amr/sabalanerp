@@ -763,6 +763,30 @@ _Avoid_: using mock analytics, mixing narrative shift closure reports into aggre
 Core حراست surfaces use persisted operational data or an honest empty state when no records exist. Missing core sources should be backed by explicit API contracts, while non-core admin-wide security audit widgets stay empty or hidden until a real audit-log model exists.
 _Avoid_: simulated counts, delayed fake loading, hard-coded sample users, or admin security metrics that imply audit coverage the system does not actually record
 
+**پروفایل شخصی کاربر**:
+The authenticated user's own identity and department profile, available as a core self-service capability independently of workspace membership. It does not grant access to any workspace-owned operational data.
+_Avoid_: making self-profile access depend on Sales access, or treating it as a shortcut to workspace permissions
+
+**برنامه من حراست**:
+The month-selectable personal view of a security user's published shift duties: planned assignment, replacement duty, and temporary coverage. It spans past, current, and future Jalali months, while full rota and coverage visibility remains manager-only.
+_Avoid_: using a static date input, showing a guard the entire team's rota, or omitting temporary coverage from the user's own schedule
+
+**بازخورد عملیاتی حراست**:
+The workspace feedback pattern: inline validation for field-level corrections, non-blocking in-app notices for routine outcomes, and explicit in-app confirmation or reason dialogs for destructive or audited actions.
+_Avoid_: native browser alerts or prompts, generic errors detached from their operation, or confirmations for harmless navigation
+
+**خروجی گزارش‌های حراست**:
+A PDF or Excel rendition of the currently filtered aggregate security report, containing its summary metrics and daily attendance breakdown. It is not an export of shift logs, personal schedules, or other operational records whose report layouts have not been defined.
+_Avoid_: placeholder export buttons, ignoring active report filters, or exporting sensitive operational data under an ambiguous report name
+
+**صادرکننده گزارش حراست**:
+A security manager, supervisor, or explicitly authorized read-only report viewer who may generate aggregate security report exports. A regular guard may use personal scheduling and shift-report workflows but cannot export aggregate reports.
+_Avoid_: granting aggregate-report export to every user who can work a security shift, or relying only on hidden front-end buttons to protect report data
+
+**محتوای خروجی گزارش حراست**:
+The privacy-minimized first export layout: selected date range and filters, generation time, aggregate KPIs, and the daily attendance breakdown without employee names.
+_Avoid_: a report with no filter context, exposing individual personnel data when aggregate data answers the reporting need, or a file that differs materially from the on-screen report
+
 **تقویم سالیانه سبلان**:
 A company-wide calendar authority for marking days as holidays and recording events. It is informational until a specific workflow explicitly chooses to consume it, so existing attendance, shift, contract, and delivery behavior does not change implicitly.
 Each calendar entry has a date, holiday flag, title, description, event type, and active/inactive state; first-version event types are تعطیل رسمی, تعطیل شرکت, رویداد داخلی, یادآوری, and سایر.

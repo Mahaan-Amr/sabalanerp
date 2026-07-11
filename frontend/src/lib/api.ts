@@ -720,6 +720,7 @@ export const securityAPI = {
   },
   getDashboardStats: (params?: any) => api.get('/security/dashboard/stats', { params }),
   getSecurityReportSummary: (params?: any) => api.get('/security/reports/summary', { params }),
+  getSecurityPersonnelPerformance: (params?: any) => api.get('/security/reports/security-personnel-performance', { params }),
   exportSecurityReport: (format: 'pdf' | 'excel', params?: any) => api.get('/security/reports/export', { params: { ...params, format }, responseType: 'blob' }),
   
   // Personnel management
@@ -876,4 +877,3 @@ export const servicesAPI = {
 };
 
 export default api;
-

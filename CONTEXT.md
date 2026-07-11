@@ -759,6 +759,26 @@ A reporting workspace for aggregate operational data such as attendance, excepti
 Across a date range, absence is derived per day from active users in scope minus users with an attendance record for that day; it is not limited to stored ABSENT rows.
 _Avoid_: using mock analytics, mixing narrative shift closure reports into aggregate KPIs, or showing labels that do not match the underlying metric
 
+**عملکرد نیروهای حراست**:
+The manager-only reporting view of assigned Security personnel over a selected date range, covering their planned duties, attendance, sessions, coverage exceptions, patrols, and timestamped shift-log activity. It is separate from company-wide attendance reporting.
+_Avoid_: treating all employees as Security personnel, or reducing guard performance to only a company attendance percentage
+
+**شواهد عملیاتی نیروی حراست**:
+The timestamped shift-log descriptions, patrol completion notes, and shift closure summaries for a Security guard within a selected report date range. Managers may inspect them after narrowing the report; they are not default dashboard content.
+_Avoid_: exposing operational narratives without report context, or replacing evidence with counts alone
+
+**فیلتر زمینه‌مند گزارش‌های حراست**:
+A report filter set whose controls follow the selected reporting scope: quick or custom Jalali date range and common identity filters, with attendance filters for employee reporting and operational-status/activity filters for Security-personnel performance.
+_Avoid_: one static filter form that exposes irrelevant controls, or losing the selected filters when the report scope changes
+
+**دسترسی گزارش عملکرد نیروهای حراست**:
+Manager-level Security workspace access to the detailed performance view and its operational narratives. This access is distinct from ordinary guard self-service and aggregate report viewing.
+_Avoid_: protecting detailed personnel performance only by hidden interface controls, or exposing guard narratives to generic workspace viewers
+
+**خروجی عملکرد نیروهای حراست**:
+The first portable manager-performance export contains the selected filter context, aggregate KPIs, and structured performance tables only. Narrative operational evidence remains inside the secured application.
+_Avoid_: exporting shift-log descriptions, patrol notes, or closure summaries before their sharing and audit rules are defined
+
 **داده واقعی حراست**:
 Core حراست surfaces use persisted operational data or an honest empty state when no records exist. Missing core sources should be backed by explicit API contracts, while non-core admin-wide security audit widgets stay empty or hidden until a real audit-log model exists.
 _Avoid_: simulated counts, delayed fake loading, hard-coded sample users, or admin security metrics that imply audit coverage the system does not actually record

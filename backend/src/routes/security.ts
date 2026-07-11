@@ -2190,6 +2190,41 @@ router.get('/reports/summary', protect, securityView, async (req: AuthRequest, r
   }
 });
 
+// Manager-only operational performance view. Narrative evidence is returned only
+// when a single Security person is selected within the already-bounded date range.
+router.get('/reports/security-personnel-performance', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const startDate = parseDayQuery(req.query.startDate);
+    const requestedEnd = parseDayQuery(req.query.endDate, startDate);
+    const endDate = requestedEnd < startDate ? startDate : requestedEnd;
+    const rangeEnd = addDays(endDate, 1);
+    const personnelId = String(req.query.personnelId || '').trim() || undefined;
+    const shiftId = String(req.query.shiftId || '').trim() || undefined;
+    const sessionStatus = String(req.query.sessionStatus || '').trim() || undefined;
+    const coverageStatus = String(req.query.coverageStatus || '').trim() || undefined;
+    const activityType = String(req.query.activityType || '').trim() || undefined;
+    const personnel = await prisma.securityPersonnel.findMany({ where: { isActive: true, ...(personnelId ? { id: personnelId } : {}), ...(shiftId ? { shiftId } : {}) }, include: { user: { select: { firstName: true, lastName: true, username: true } }, shift: { select: { namePersian: true } } }, orderBy: { user: { firstName: 'asc' } } });
+    const ids = personnel.map((item) => item.id);
+    const slots = await prisma.securityShiftPlanSlot.findMany({ where: { startsAt: { lt: rangeEnd }, endsAt: { gt: startDate }, ...(coverageStatus ? { coverageStatus: coverageStatus as any } : {}), OR: [{ plannedPersonnelId: { in: ids } }, { replacementPersonnelId: { in: ids } }, { temporaryCoverage: { some: { personnelId: { in: ids } } } }] }, include: { attendance: true, session: { include: { patrolSessions: true, logEntries: { include: { reportType: true }, orderBy: { createdAt: 'asc' } } }, }, temporaryCoverage: true }, orderBy: { startsAt: 'asc' } });
+    const summaries = personnel.map((person) => {
+      const assigned = slots.filter((slot) => slot.plannedPersonnelId === person.id || slot.replacementPersonnelId === person.id || slot.temporaryCoverage.some((coverage) => coverage.personnelId === person.id));
+      const sessions = assigned.map((slot) => slot.session).filter(Boolean).filter((session: any) => !sessionStatus || session.status === sessionStatus) as any[];
+      const attendance = assigned.flatMap((slot) => slot.attendance.filter((item) => item.personnelId === person.id));
+      const patrols = sessions.flatMap((session) => session.patrolSessions.filter((patrol: any) => patrol.personnelId === person.id));
+      const logs = sessions.flatMap((session) => session.logEntries);
+      return { id: person.id, name: `${person.user.firstName} ${person.user.lastName}`.trim() || person.user.username, shift: person.shift.namePersian, plannedSlots: assigned.length, attended: attendance.length, late: attendance.filter((item) => item.delayMinutes > 0).length, noShows: assigned.filter((slot) => !!slot.probableNoShowAt).length, completed: sessions.filter((session) => session.status === SecurityShiftSessionStatus.CLOSED).length, forceClosed: sessions.filter((session) => session.status === SecurityShiftSessionStatus.FORCE_CLOSED).length, active: sessions.filter((session) => session.status === SecurityShiftSessionStatus.ACTIVE).length, patrols: patrols.length, logEntries: logs.length, coverageExceptions: assigned.filter((slot) => slot.coverageStatus !== SecurityShiftCoverageStatus.COVERED).length };
+    });
+    const selected = personnelId ? slots.flatMap((slot) => (slot.session ? [{ slot, session: slot.session }] : [])).flatMap(({ slot, session }) => {
+      const evidence: any[] = [];
+      if (!activityType || activityType === 'log') evidence.push(...session.logEntries.map((entry: any) => ({ kind: 'گزارش لحظه‌ای', at: entry.createdAt, title: entry.reportType.name, description: entry.description, status: entry.status, slotId: slot.id })));
+      if (!activityType || activityType === 'patrol') evidence.push(...session.patrolSessions.filter((patrol: any) => patrol.personnelId === personnelId).map((patrol: any) => ({ kind: 'گشت‌زنی', at: patrol.startedAt, title: patrol.status === 'ACTIVE' ? 'فعال' : 'پایان‌یافته', description: patrol.description || '', status: patrol.status, slotId: slot.id })));
+      if ((!activityType || activityType === 'closure') && session.closureSummary) evidence.push({ kind: 'پایان شیفت', at: session.endedAt || session.updatedAt, title: session.status, description: session.closureSummary, status: session.status, slotId: slot.id });
+      return evidence;
+    }).sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()) : [];
+    res.json({ success: true, data: { range: { startDate, endDate }, summaries, evidence: selected } });
+  } catch (error: any) { console.error('Get security personnel performance error:', error); res.status(500).json({ success: false, error: error.message || 'دریافت عملکرد نیروهای حراست ناموفق بود.' }); }
+});
+
 // Aggregate exports are intentionally limited to operational report users (edit/admin).
 // Guards retain their self-service schedule and shift-log views without bulk export access.
 router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, res: Response) => {

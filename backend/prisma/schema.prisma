@@ -20,6 +20,7 @@ model User {
   createdAt                 DateTime              @default(now())
   updatedAt                 DateTime              @updatedAt
   departmentId              String?
+  personnelId               String?               @unique
   attendanceRecords         AttendanceRecord[]
   comments                  Comment[]
   createdTemplates          ContractTemplate[]
@@ -40,6 +41,7 @@ model User {
   signedSalesContracts      SalesContract[]       @relation("SalesContractSignedBy")
   securityPersonnel         SecurityPersonnel?
   department                Department?           @relation(fields: [departmentId], references: [id])
+  personnel                 Personnel?            @relation(fields: [personnelId], references: [id], onDelete: SetNull)
   grantedPermissions        WorkspacePermission[] @relation("PermissionGranter")
   workspacePermissions      WorkspacePermission[]
   grantedFeaturePermissions FeaturePermission[]   @relation("FeaturePermissionGranter")
@@ -55,6 +57,23 @@ model User {
   instantReportParticipants SecurityShiftLogParticipant[]
 
   @@map("users")
+}
+
+model Personnel {
+  id                String             @id @default(cuid())
+  firstName         String
+  lastName          String
+  departmentId      String?
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  attendanceRecords AttendanceRecord[]
+  user              User?
+  department        Department?        @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  @@index([isActive, departmentId])
+  @@index([lastName, firstName])
+  @@map("personnel")
 }
 
 model Profile {
@@ -124,6 +143,7 @@ model Department {
   contracts      Contract[]
   salesContracts SalesContract[] @relation("SalesContractDepartment")
   users          User[]
+  personnel      Personnel[]
 
   @@map("departments")
 }
@@ -365,7 +385,8 @@ model SecurityShiftTemporaryCoverage {
 
 model AttendanceRecord {
   id                  String            @id @default(cuid())
-  employeeId          String
+  employeeId          String?
+  personnelId         String?
   securityPersonnelId String
   date                DateTime
   shiftId             String
@@ -377,12 +398,20 @@ model AttendanceRecord {
   exceptionDuration   Int?
   digitalSignature    String?
   notes               String?
+  personnelFirstName  String?
+  personnelLastName   String?
+  departmentId        String?
+  departmentName      String?
+  departmentNamePersian String?
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
-  employee            User              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee            User?             @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  personnel           Personnel?        @relation(fields: [personnelId], references: [id], onDelete: Restrict)
   securityPersonnel   SecurityPersonnel @relation(fields: [securityPersonnelId], references: [id], onDelete: Cascade)
   shift               Shift             @relation(fields: [shiftId], references: [id], onDelete: Cascade)
 
+  @@index([personnelId, date])
+  @@index([employeeId, date])
   @@map("attendance_records")
 }
 

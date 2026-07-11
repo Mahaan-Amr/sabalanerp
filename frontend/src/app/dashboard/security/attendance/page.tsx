@@ -21,7 +21,9 @@ interface AttendanceRecord {
     id: string;
     firstName: string;
     lastName: string;
-    username: string;
+    username?: string;
+    hasUser?: boolean;
+    userId?: string | null;
     department?: {
       name: string;
       namePersian: string;
@@ -145,7 +147,7 @@ export default function AttendancePage() {
   const filteredRecords = attendanceRecords.filter(record => {
     const matchesSearch = record.employee.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          record.employee.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         record.employee.username.toLowerCase().includes(searchTerm.toLowerCase());
+                         (record.employee.username || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'ALL' || record.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -339,9 +341,11 @@ export default function AttendancePage() {
                       <div className="font-medium text-primary">
                         {record.employee.firstName} {record.employee.lastName}
                       </div>
-                      <div className="text-sm text-secondary">
-                        @{record.employee.username}
-                      </div>
+                      {record.employee.username && (
+                        <div className="text-sm text-secondary">
+                          @{record.employee.username}
+                        </div>
+                      )}
                     </div>
                   </td>
                   <td className="py-3 px-4 text-secondary">

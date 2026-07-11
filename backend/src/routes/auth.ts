@@ -64,24 +64,37 @@ router.post('/register', [
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Create user
-    const user = await prisma.user.create({
-      data: {
-        email,
-        username,
-        password: hashedPassword,
-        firstName,
-        lastName,
-      },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        createdAt: true,
-      }
+    // Create user and linked organizational personnel
+    const user = await prisma.$transaction(async (tx) => {
+      const personnel = await tx.personnel.create({
+        data: {
+          firstName,
+          lastName,
+          departmentId: null,
+          isActive: true
+        },
+        select: { id: true }
+      });
+
+      return tx.user.create({
+        data: {
+          email,
+          username,
+          password: hashedPassword,
+          firstName,
+          lastName,
+          personnelId: personnel.id
+        },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          createdAt: true,
+        }
+      });
     });
 
     // Generate token
@@ -215,6 +228,15 @@ router.get('/me', protect, async (req: any, res) => {
         createdAt: true,
         updatedAt: true,
         profile: true,
+        personnel: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            isActive: true,
+            department: { select: { id: true, name: true, namePersian: true } }
+          }
+        },
       }
     });
 

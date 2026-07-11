@@ -186,6 +186,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             show: true
           },
           {
+            name: 'Personnel Management',
+            namePersian: 'مدیریت پرسنل',
+            href: '/dashboard/personnel',
+            icon: FaUserTie,
+            show: true
+          },
+          {
             name: 'Permissions',
             namePersian: 'سطوح دسترسی',
             href: '/dashboard/admin/permissions',

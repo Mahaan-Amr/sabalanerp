@@ -79,6 +79,8 @@ export const usersAPI = {
     role?: string;
     departmentId?: string;
     isActive?: boolean;
+    personnelMode?: 'auto' | 'existing';
+    personnelId?: string;
     workspacePermissions?: Array<{
       workspace: string;
       permissionLevel: string;
@@ -96,6 +98,15 @@ export const usersAPI = {
     api.put(`/users/${id}`, userData),
   
   deleteUser: (id: string) => api.delete(`/users/${id}`),
+};
+
+export const personnelAPI = {
+  getPersonnel: (params?: { includeInactive?: boolean; search?: string; departmentId?: string }) =>
+    api.get('/personnel', { params }),
+  getPerson: (id: string) => api.get(`/personnel/${id}`),
+  createPerson: (data: any) => api.post('/personnel', data),
+  updatePerson: (id: string, data: any) => api.put(`/personnel/${id}`, data),
+  deletePerson: (id: string) => api.delete(`/personnel/${id}`),
 };
 
 // Posts API

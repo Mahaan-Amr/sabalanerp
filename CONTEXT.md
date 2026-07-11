@@ -799,6 +799,42 @@ _Avoid_: simulated counts, delayed fake loading, hard-coded sample users, or adm
 The authenticated user's own identity and department profile, available as a core self-service capability independently of workspace membership. It does not grant access to any workspace-owned operational data.
 _Avoid_: making self-profile access depend on Sales access, or treating it as a shortcut to workspace permissions
 
+**پرسنل سازمانی**:
+A real person who belongs to a Sabalan department and may appear in operational workflows such as attendance even when they do not have a system login. A system user may be linked to one organizational personnel record, but login access is not required for someone to be personnel.
+_Avoid_: treating every personnel record as a login account, hiding non-user personnel from operational attendance, or using system permissions as proof that a person belongs to the workforce
+
+**مدیریت پرسنل**:
+An Admin-owned company workforce registry for creating and maintaining organizational personnel independently of login access. Operational workspaces such as حراست consume this registry but do not own the company-wide personnel list.
+_Avoid_: hiding company personnel management inside حراست, duplicating the workforce list per workspace, or mixing personnel registry work with user permission management
+
+**اطلاعات پایه پرسنل سازمانی**:
+The first personnel registry records only first name, last name, related department, and active/inactive state. Phone, email, national code, payroll data, and identity documents are outside the first version unless a later workflow explicitly needs them.
+_Avoid_: forcing login-style contact fields onto non-user personnel, collecting sensitive identity fields before a workflow requires them, or blocking attendance setup on HR/payroll completeness
+
+**تشخیص تکراری پرسنل سازمانی**:
+An exact duplicate full name inside the same department is treated as a likely duplicate and should be blocked or require explicit admin confirmation, while the same full name may exist in different departments. User-to-personnel migration should link to an existing matching personnel record instead of creating a duplicate.
+_Avoid_: silently creating same-name same-department duplicates, globally blocking common names across departments, or duplicating personnel records during user migration
+
+**غیرفعال‌سازی پرسنل سازمانی**:
+The normal way to remove personnel from active operational selection while preserving their historical attendance, mission, exception, report, and future workflow records. Hard deletion is reserved for accidental records with no operational history.
+_Avoid_: deleting personnel with history, showing inactive personnel in normal daily attendance lists, or losing historical names because someone left the company
+
+**سوابق تاریخی پرسنل**:
+Operational records that report on personnel should preserve the relevant identity and department as they were at the time of the operation. A later department change updates the current personnel profile but does not rewrite historical attendance or report context.
+_Avoid_: recalculating old attendance under a person's current department, or making historical reports depend only on mutable personnel profile fields
+
+**مهاجرت پرسنل سازمانی**:
+Introducing organizational personnel should preserve existing user-based attendance and related history through an incremental compatibility migration. Existing users receive linked personnel records, existing attendance links are backfilled to personnel, and new attendance code reads and writes personnel while temporary legacy user links may remain only for compatibility.
+_Avoid_: rewriting the visible meaning of historical attendance, dropping old user attendance during migration, or blocking non-user personnel until every legacy relation is removed
+
+**کاربر سیستم**:
+A login identity for accessing Sabalan ERP. Every system user should be linked to an organizational personnel record, while many personnel records may have no system user.
+_Avoid_: using user accounts as the workforce roster, creating login access just to record operational attendance, or keeping user-only people outside the personnel roster
+
+**اتصال کاربر به پرسنل**:
+Creating a system user should default to creating or linking the corresponding organizational personnel from the user's name and department, while also allowing admins to attach the user to an existing personnel record. One personnel record may be linked to at most one system user.
+_Avoid_: creating duplicate personnel when a matching same-department person already exists, forcing a login account for existing non-user personnel, or allowing multiple users to represent the same personnel record
+
 **برنامه من حراست**:
 The month-selectable personal view of a security user's published shift duties: planned assignment, replacement duty, and temporary coverage. It spans past, current, and future Jalali months, while full rota and coverage visibility remains manager-only.
 _Avoid_: using a static date input, showing a guard the entire team's rota, or omitting temporary coverage from the user's own schedule
@@ -850,12 +886,16 @@ The حراست people area covers employee attendance, shifts, exceptions, missi
 _Avoid_: mixing driver/vehicle registry work into personnel attendance workflows
 
 **کاربر واجد شرایط حراست**:
-An active user who already has a security workspace permission or security role and can therefore be assigned into نفرات حراست. General active employees are visible in attendance workflows but are not selectable as security personnel unless they first receive security access.
-_Avoid_: offering every active user in security personnel assignment, or using placeholder sample users when no eligible user exists
+An active system user linked to organizational personnel who already has a security workspace permission or security role and can therefore be assigned into نفرات حراست. General active personnel are visible in attendance workflows but are not selectable for security shift plans, patrol ownership, shift logs, or replacement coverage unless they have linked user access to حراست.
+_Avoid_: offering every active personnel record in security personnel assignment, assigning non-login personnel to authenticated shift work, or using placeholder sample users when no eligible user exists
 
 **حضور و غیاب کارکنان در حراست**:
-A حراست-facing attendance view over all active project users, filterable by department, shift, and date. It is not limited to the logged-in guard's department or current security shift.
-_Avoid_: showing only the current guard's department, treating security shift assignment as the employee population boundary, or using mock attendance summaries
+A حراست-facing attendance view over all active organizational personnel, including personnel without system login accounts, filterable by department, shift, and date. It is not limited to the logged-in guard's department or current security shift.
+_Avoid_: showing only the current guard's department, treating security shift assignment or system-user membership as the employee population boundary, or using mock attendance summaries
+
+**برابری پرسنل در حضور و غیاب**:
+In daily security attendance, user-linked and non-user personnel behave the same from the acting guard's perspective: both can be searched, filtered, checked in, checked out, marked with exceptions, and signed. Permissions belong to the acting system user, not to the personnel record being attended.
+_Avoid_: exposing login-account status as an attendance concern, hiding non-user personnel from security actions, or requiring attended personnel to have system permissions
 
 **خرید بیرونی در ورود خودروی پر**:
 An inbound loaded-vehicle purpose for purchased cargo arriving from outside Sabalan. It may have a purchase invoice and may have a بارنامه.

@@ -47,6 +47,11 @@ const parseDayQuery = (value: unknown, fallback = new Date()) => {
   return startOfDay(Number.isNaN(parsed.getTime()) ? fallback : parsed);
 };
 
+const scopedPersonnelWhere = (departmentId?: unknown, personnelId?: unknown) => ({
+  isActive: true,
+  ...(departmentId ? { departmentId: String(departmentId) } : {}),
+  ...(personnelId ? { id: String(personnelId) } : {})
+});
 const scopedEmployeeWhere = (departmentId?: unknown, employeeId?: unknown) => ({
   isActive: true,
   ...(departmentId ? { departmentId: String(departmentId) } : {}),
@@ -57,6 +62,7 @@ const attendanceInclude = {
   employee: {
     select: {
       id: true,
+      personnelId: true,
       firstName: true,
       lastName: true,
       username: true,
@@ -64,45 +70,82 @@ const attendanceInclude = {
       department: { select: { id: true, name: true, namePersian: true } }
     }
   },
+  personnel: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      isActive: true,
+      department: { select: { id: true, name: true, namePersian: true } },
+      user: { select: { id: true, username: true, email: true } }
+    }
+  },
   shift: true
 };
 
-const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: unknown; shiftId?: unknown; employeeId?: unknown }) => {
+const personnelSnapshot = (personnel: any) => ({
+  personnelFirstName: personnel.firstName,
+  personnelLastName: personnel.lastName,
+  departmentId: personnel.department?.id || null,
+  departmentName: personnel.department?.name || null,
+  departmentNamePersian: personnel.department?.namePersian || null
+});
+
+const attendancePerson = (personnel: any, record?: any) => {
+  const department = personnel?.department || (record?.departmentId ? {
+    id: record.departmentId,
+    name: record.departmentName,
+    namePersian: record.departmentNamePersian
+  } : record?.employee?.department);
+  return {
+    id: personnel?.id || record?.personnelId || record?.employee?.id,
+    firstName: personnel?.firstName || record?.personnelFirstName || record?.employee?.firstName || '',
+    lastName: personnel?.lastName || record?.personnelLastName || record?.employee?.lastName || '',
+    username: personnel?.user?.username || record?.employee?.username || '',
+    hasUser: Boolean(personnel?.user || record?.employee),
+    userId: personnel?.user?.id || record?.employee?.id || null,
+    department
+  };
+};
+
+const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: unknown; shiftId?: unknown; employeeId?: unknown; personnelId?: unknown }) => {
   const targetDate = parseDayQuery(filters.date);
   const nextDay = addDays(targetDate, 1);
-  const employeeWhere = scopedEmployeeWhere(filters.departmentId, filters.employeeId);
+  const targetPersonnelId = filters.personnelId || filters.employeeId;
+  const personnelWhere = scopedPersonnelWhere(filters.departmentId, targetPersonnelId);
   const attendanceWhere = {
     date: { gte: targetDate, lt: nextDay },
     ...(filters.shiftId ? { shiftId: String(filters.shiftId) } : {}),
-    employee: employeeWhere
+    personnel: personnelWhere
   };
 
-  const [attendanceRecords, allEmployees] = await Promise.all([
+  const [attendanceRecords, allPersonnel] = await Promise.all([
     prisma.attendanceRecord.findMany({
       where: attendanceWhere,
       include: attendanceInclude,
       orderBy: { createdAt: 'asc' }
     }),
-    prisma.user.findMany({
-      where: employeeWhere,
+    prisma.personnel.findMany({
+      where: personnelWhere,
       select: {
         id: true,
         firstName: true,
         lastName: true,
-        username: true,
-        email: true,
-        department: { select: { id: true, name: true, namePersian: true } }
+        department: { select: { id: true, name: true, namePersian: true } },
+        user: { select: { id: true, username: true, email: true } }
       },
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }]
     })
   ]);
 
-  const recordsByEmployee = new Map(attendanceRecords.map((record) => [record.employeeId, record]));
-  const attendanceSummary = allEmployees.map((employee) => {
-    const record = recordsByEmployee.get(employee.id);
+  const recordsByPersonnel = new Map(attendanceRecords.map((record) => [record.personnelId || record.employee?.personnelId || record.employeeId, record]));
+  const attendanceSummary = allPersonnel.map((personnel) => {
+    const record = recordsByPersonnel.get(personnel.id);
     return {
-      id: record?.id || `absent-${employee.id}-${targetDate.toISOString()}`,
-      employee,
+      id: record?.id || `absent-${personnel.id}-${targetDate.toISOString()}`,
+      personnel,
+      personnelId: personnel.id,
+      employee: attendancePerson(personnel, record),
       attendance: record || null,
       entryTime: record?.entryTime || null,
       exitTime: record?.exitTime || null,
@@ -117,9 +160,9 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
 
   const countedPresent = attendanceRecords.filter((record) => presentLikeStatuses.includes(record.status)).length;
   const stats = {
-    totalEmployees: allEmployees.length,
+    totalEmployees: allPersonnel.length,
     present: attendanceRecords.filter((record) => record.status === AttendanceStatus.PRESENT).length,
-    absent: allEmployees.length - countedPresent,
+    absent: allPersonnel.length - countedPresent,
     late: attendanceRecords.filter((record) => record.status === AttendanceStatus.LATE).length,
     mission: attendanceRecords.filter((record) => record.status === AttendanceStatus.MISSION).length,
     leave: attendanceRecords.filter((record) => leaveStatuses.includes(record.status)).length,
@@ -1502,7 +1545,8 @@ router.post('/shifts/end', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, 
 // @route   POST /api/security/attendance/checkin
 // @access  Private/Security Workspace
 router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_ATTENDANCE_CHECKIN, FEATURE_PERMISSIONS.EDIT), [
-  body('employeeId').notEmpty().withMessage('Employee ID is required'),
+  body('employeeId').optional().isString().withMessage('Employee ID must be a string'),
+  body('personnelId').optional().isString().withMessage('Personnel ID must be a string'),
   body('entryTime').optional().isString().withMessage('Entry time must be a string'),
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -1528,7 +1572,14 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
       });
     }
 
-    const { employeeId, entryTime } = req.body;
+    const { entryTime } = req.body;
+    const personnelId = String(req.body.personnelId || req.body.employeeId || '').trim();
+    if (!personnelId) return res.status(400).json({ success: false, error: 'پرسنل الزامی است.' });
+    const personnel = await prisma.personnel.findUnique({
+      where: { id: personnelId },
+      include: { department: true, user: { select: { id: true } } }
+    });
+    if (!personnel?.isActive) return res.status(404).json({ success: false, error: 'پرسنل فعال پیدا نشد.' });
     const currentTime = entryTime || new Date().toLocaleTimeString('fa-IR', { 
       hour: '2-digit', 
       minute: '2-digit',
@@ -1543,7 +1594,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
 
     const existingRecord = await prisma.attendanceRecord.findFirst({
       where: {
-        employeeId,
+        personnelId: personnel.id,
         date: {
           gte: today,
           lt: tomorrow
@@ -1565,42 +1616,25 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
         where: { id: existingRecord.id },
         data: {
           entryTime: currentTime,
-          status: 'PRESENT'
+          status: 'PRESENT',
+          ...personnelSnapshot(personnel)
         },
-        include: {
-          employee: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              username: true
-            }
-          },
-          shift: true
-        }
+        include: attendanceInclude
       });
     } else {
       // Create new record
       attendanceRecord = await prisma.attendanceRecord.create({
         data: {
-          employeeId,
+          employeeId: personnel.user?.id || null,
+          personnelId: personnel.id,
           securityPersonnelId: securityPersonnel.id,
           shiftId: securityPersonnel.shiftId,
           date: today,
           entryTime: currentTime,
-          status: 'PRESENT'
+          status: 'PRESENT',
+          ...personnelSnapshot(personnel)
         },
-        include: {
-          employee: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              username: true
-            }
-          },
-          shift: true
-        }
+        include: attendanceInclude
       });
     }
 
@@ -1624,7 +1658,8 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
 // @route   POST /api/security/attendance/checkout
 // @access  Private/Security Personnel
 router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_ATTENDANCE_CHECKOUT, FEATURE_PERMISSIONS.EDIT), [
-  body('employeeId').notEmpty().withMessage('Employee ID is required'),
+  body('employeeId').optional().isString().withMessage('Employee ID must be a string'),
+  body('personnelId').optional().isString().withMessage('Personnel ID must be a string'),
   body('exitTime').optional().isString().withMessage('Exit time must be a string'),
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -1650,7 +1685,9 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
       });
     }
 
-    const { employeeId, exitTime } = req.body;
+    const { exitTime } = req.body;
+    const personnelId = String(req.body.personnelId || req.body.employeeId || '').trim();
+    if (!personnelId) return res.status(400).json({ success: false, error: 'پرسنل الزامی است.' });
     const currentTime = exitTime || new Date().toLocaleTimeString('fa-IR', { 
       hour: '2-digit', 
       minute: '2-digit',
@@ -1665,7 +1702,7 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
 
     const attendanceRecord = await prisma.attendanceRecord.findFirst({
       where: {
-        employeeId,
+        personnelId,
         date: {
           gte: today,
           lt: tomorrow
@@ -1692,17 +1729,7 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
       data: {
         exitTime: currentTime
       },
-      include: {
-        employee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            username: true
-          }
-        },
-        shift: true
-      }
+      include: attendanceInclude
     });
 
     res.json({
@@ -1725,7 +1752,8 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
 // @route   POST /api/security/attendance/exception
 // @access  Private/Security Personnel
 router.post('/attendance/exception', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_ATTENDANCE_EXCEPTION, FEATURE_PERMISSIONS.EDIT), [
-  body('employeeId').notEmpty().withMessage('Employee ID is required'),
+  body('employeeId').optional().isString().withMessage('Employee ID must be a string'),
+  body('personnelId').optional().isString().withMessage('Personnel ID must be a string'),
   body('exceptionType').notEmpty().withMessage('Exception type is required'),
   body('exceptionTime').optional().isString().withMessage('Exception time must be a string'),
   body('exceptionDuration').optional().isInt({ min: 1 }).withMessage('Exception duration must be a positive integer'),
@@ -1754,7 +1782,14 @@ router.post('/attendance/exception', protect, requireWorkspaceAccess(WORKSPACES.
       });
     }
 
-    const { employeeId, exceptionType, exceptionTime, exceptionDuration, notes } = req.body;
+    const { exceptionType, exceptionTime, exceptionDuration, notes } = req.body;
+    const personnelId = String(req.body.personnelId || req.body.employeeId || '').trim();
+    if (!personnelId) return res.status(400).json({ success: false, error: 'پرسنل الزامی است.' });
+    const personnel = await prisma.personnel.findUnique({
+      where: { id: personnelId },
+      include: { department: true, user: { select: { id: true } } }
+    });
+    if (!personnel?.isActive) return res.status(404).json({ success: false, error: 'پرسنل فعال پیدا نشد.' });
 
     // Determine status based on exception type
     let status = 'PRESENT';
@@ -1767,7 +1802,8 @@ router.post('/attendance/exception', protect, requireWorkspaceAccess(WORKSPACES.
 
     const attendanceRecord = await prisma.attendanceRecord.create({
       data: {
-        employeeId,
+        employeeId: personnel.user?.id || null,
+        personnelId: personnel.id,
         securityPersonnelId: securityPersonnel.id,
         shiftId: securityPersonnel.shiftId,
         date: today,
@@ -1775,19 +1811,10 @@ router.post('/attendance/exception', protect, requireWorkspaceAccess(WORKSPACES.
         exceptionType,
         exceptionTime,
         exceptionDuration: exceptionDuration ? parseInt(exceptionDuration) : null,
-        notes
+        notes,
+        ...personnelSnapshot(personnel)
       },
-      include: {
-        employee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            username: true
-          }
-        },
-        shift: true
-      }
+      include: attendanceInclude
     });
 
     res.status(201).json({
@@ -1872,7 +1899,8 @@ router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SECURI
       } : null,
       todayStats: daily.stats,
       recentActivity: daily.attendanceRecords.slice(-5).map(record => ({
-        employeeId: record.employeeId,
+        employeeId: record.personnelId || record.employeeId,
+        personnelId: record.personnelId,
         entryTime: record.entryTime,
         exitTime: record.exitTime,
         status: record.status,
@@ -2956,7 +2984,8 @@ router.get('/attendance/:id/signature', protect, requireWorkspaceAccess(WORKSPAC
 // @access  Private/Security Personnel
 router.post('/signature/validate', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_SIGNATURE_VALIDATE, FEATURE_PERMISSIONS.VIEW), [
   body('signatureData').notEmpty().withMessage('Signature data is required'),
-  body('employeeId').notEmpty().withMessage('Employee ID is required')
+  body('employeeId').optional().isString().withMessage('Employee ID must be a string'),
+  body('personnelId').optional().isString().withMessage('Personnel ID must be a string')
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -2968,7 +2997,8 @@ router.post('/signature/validate', protect, requireWorkspaceAccess(WORKSPACES.SE
       });
     }
 
-    const { signatureData, employeeId } = req.body;
+    const { signatureData } = req.body;
+    const personnelId = String(req.body.personnelId || req.body.employeeId || '').trim();
 
     // Basic signature validation
     const validation = {
@@ -2981,12 +3011,12 @@ router.post('/signature/validate', protect, requireWorkspaceAccess(WORKSPACES.SE
       confidence: 85 // Could be enhanced with ML-based validation
     };
 
-    // Check if employee exists
-    const employee = await prisma.user.findUnique({
-      where: { id: employeeId }
-    });
+    // Check if personnel exists
+    const personnel = personnelId ? await prisma.personnel.findUnique({
+      where: { id: personnelId }
+    }) : null;
 
-    if (!employee) {
+    if (!personnel) {
       validation.checks.employee = false;
       validation.isValid = false;
       validation.confidence = 0;

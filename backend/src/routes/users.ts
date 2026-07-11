@@ -33,6 +33,89 @@ const normalizePhone = (value?: string | null) => {
     .replace(/[\s\-().]/g, '');
 };
 
+const personnelSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  isActive: true,
+  department: {
+    select: {
+      id: true,
+      name: true,
+      namePersian: true,
+    }
+  }
+};
+
+const samePersonnelWhere = (firstName: string, lastName: string, departmentId?: string | null) => ({
+  firstName,
+  lastName,
+  departmentId: departmentId || null
+});
+
+const ensurePersonnelForUser = async (
+  tx: any,
+  input: {
+    firstName: string;
+    lastName: string;
+    departmentId?: string | null;
+    isActive: boolean;
+    personnelMode?: string;
+    personnelId?: string;
+    currentUserId?: string;
+  }
+) => {
+  const firstName = String(input.firstName || '').trim();
+  const lastName = String(input.lastName || '').trim();
+  const departmentId = input.departmentId || null;
+
+  if (input.personnelMode === 'existing' && input.personnelId) {
+    const existing = await tx.personnel.findUnique({
+      where: { id: input.personnelId },
+      include: { user: { select: { id: true } } }
+    });
+    if (!existing) throw new Error('پرسنل انتخاب‌شده پیدا نشد.');
+    if (existing.user && existing.user.id !== input.currentUserId) throw new Error('این پرسنل قبلاً به کاربر دیگری متصل شده است.');
+    return tx.personnel.update({
+      where: { id: existing.id },
+      data: { firstName, lastName, departmentId, isActive: input.isActive },
+      select: { id: true }
+    });
+  }
+
+  if (input.personnelId) {
+    const linked = await tx.personnel.findUnique({
+      where: { id: input.personnelId },
+      include: { user: { select: { id: true } } }
+    });
+    if (linked && (!linked.user || linked.user.id === input.currentUserId)) {
+      return tx.personnel.update({
+        where: { id: linked.id },
+        data: { firstName, lastName, departmentId, isActive: input.isActive },
+        select: { id: true }
+      });
+    }
+  }
+
+  const matching = await tx.personnel.findFirst({
+    where: samePersonnelWhere(firstName, lastName, departmentId),
+    include: { user: { select: { id: true } } }
+  });
+  if (matching) {
+    if (matching.user && matching.user.id !== input.currentUserId) throw new Error('پرسنل هم‌نام در همین بخش قبلاً به کاربر دیگری متصل شده است.');
+    return tx.personnel.update({
+      where: { id: matching.id },
+      data: { firstName, lastName, departmentId, isActive: input.isActive },
+      select: { id: true }
+    });
+  }
+
+  return tx.personnel.create({
+    data: { firstName, lastName, departmentId, isActive: input.isActive },
+    select: { id: true }
+  });
+};
+
 // @desc    Get all users
 // @route   GET /api/users
 // @access  Private/Admin
@@ -68,6 +151,7 @@ router.get('/', protect, authorize('ADMIN', 'MANAGER'), async (req: AuthRequest,
           }
         },
         profile: true,
+        personnel: { select: personnelSelect },
       },
       orderBy: {
         createdAt: 'desc'
@@ -112,6 +196,8 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
     .custom((value) => CUID_REGEX.test(value))
     .withMessage('Invalid department ID'),
   body('isActive').optional().isBoolean(),
+  body('personnelMode').optional().isIn(['auto', 'existing']),
+  body('personnelId').optional({ values: 'falsy' }).isString(),
   body('workspacePermissions').optional().isArray(),
   body('workspacePermissions.*.workspace')
     .optional()
@@ -163,6 +249,8 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
       role = 'USER',
       departmentId,
       isActive = true,
+      personnelMode = 'auto',
+      personnelId,
       workspacePermissions = [],
       featurePermissions = []
     } = req.body;
@@ -252,6 +340,15 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
     const normalizedPhone = normalizePhone(phone);
 
     const user = await prisma.$transaction(async (tx) => {
+      const personnel = await ensurePersonnelForUser(tx, {
+        firstName,
+        lastName,
+        departmentId: departmentId || null,
+        isActive,
+        personnelMode,
+        personnelId
+      });
+
       const createdUser = await tx.user.create({
         data: {
           email,
@@ -261,6 +358,7 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
           lastName,
           role,
           departmentId: departmentId || null,
+          personnelId: personnel.id,
           isActive,
           ...(normalizedPhone && {
             profile: {
@@ -288,6 +386,7 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
             }
           },
           profile: true,
+          personnel: { select: personnelSelect },
         }
       });
 
@@ -329,11 +428,11 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
       success: true,
       data: user
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Create user error:', error);
-    res.status(500).json({
+    res.status(error.message?.includes('پرسنل') ? 409 : 500).json({
       success: false,
-      error: 'Server error during user creation'
+      error: error.message?.includes('پرسنل') ? error.message : 'Server error during user creation'
     });
   }
 });
@@ -363,6 +462,7 @@ router.get('/:id', protect, async (req: AuthRequest, res: Response) => {
           }
         },
         profile: true,
+        personnel: { select: personnelSelect },
       }
     });
 
@@ -417,6 +517,8 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
     .custom((value) => CUID_REGEX.test(value))
     .withMessage('Invalid department ID'),
   body('isActive').optional().isBoolean(),
+  body('personnelMode').optional().isIn(['auto', 'existing']),
+  body('personnelId').optional({ values: 'falsy' }).isString(),
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -428,7 +530,7 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
-    const { firstName, lastName, email, username, phone, role, departmentId, isActive } = req.body;
+    const { firstName, lastName, email, username, phone, role, departmentId, isActive, personnelMode, personnelId } = req.body;
 
     if (departmentId) {
       const department = await prisma.department.findUnique({
@@ -446,7 +548,8 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
 
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
-      where: { id: req.params.id }
+      where: { id: req.params.id },
+      include: { personnel: true }
     });
 
     if (!existingUser) {
@@ -507,55 +610,74 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
 
     const normalizedPhone = phone !== undefined ? normalizePhone(phone) : undefined;
 
-    const updatedUser = await prisma.user.update({
-      where: { id: req.params.id },
-      data: {
-        ...(firstName && { firstName }),
-        ...(lastName && { lastName }),
-        ...(email && { email }),
-        ...(username && { username }),
-        ...(role && { role }),
-        ...(departmentId !== undefined && { departmentId: departmentId || null }),
-        ...(isActive !== undefined && { isActive }),
-        ...(normalizedPhone !== undefined && {
-          profile: {
-            upsert: {
-              create: { phone: normalizedPhone },
-              update: { phone: normalizedPhone }
+    const updatedUser = await prisma.$transaction(async (tx) => {
+      const nextFirstName = firstName || existingUser.firstName;
+      const nextLastName = lastName || existingUser.lastName;
+      const nextDepartmentId = departmentId !== undefined ? departmentId || null : existingUser.departmentId;
+      const nextIsActive = isActive !== undefined ? Boolean(isActive) : existingUser.isActive;
+      const shouldRelink = personnelMode === 'existing' && personnelId;
+      const linkedPersonnel = await ensurePersonnelForUser(tx, {
+        firstName: nextFirstName,
+        lastName: nextLastName,
+        departmentId: nextDepartmentId,
+        isActive: nextIsActive,
+        personnelMode: shouldRelink ? 'existing' : 'auto',
+        personnelId: shouldRelink ? personnelId : existingUser.personnelId || undefined,
+        currentUserId: existingUser.id
+      });
+
+      return tx.user.update({
+        where: { id: req.params.id },
+        data: {
+          ...(firstName && { firstName }),
+          ...(lastName && { lastName }),
+          ...(email && { email }),
+          ...(username && { username }),
+          ...(role && { role }),
+          personnelId: linkedPersonnel.id,
+          ...(departmentId !== undefined && { departmentId: departmentId || null }),
+          ...(isActive !== undefined && { isActive }),
+          ...(normalizedPhone !== undefined && {
+            profile: {
+              upsert: {
+                create: { phone: normalizedPhone },
+                update: { phone: normalizedPhone }
+              }
             }
-          }
-        }),
-      },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
-        department: {
-          select: {
-            id: true,
-            name: true,
-            namePersian: true,
-          }
+          }),
         },
-        profile: true,
-      }
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+          department: {
+            select: {
+              id: true,
+              name: true,
+              namePersian: true,
+            }
+          },
+          profile: true,
+          personnel: { select: personnelSelect },
+        }
+      });
     });
 
     res.json({
       success: true,
       data: updatedUser
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Update user error:', error);
-    res.status(500).json({
+    res.status(error.message?.includes('پرسنل') ? 409 : 500).json({
       success: false,
-      error: 'Server error'
+      error: error.message?.includes('پرسنل') ? error.message : 'Server error'
     });
   }
 });

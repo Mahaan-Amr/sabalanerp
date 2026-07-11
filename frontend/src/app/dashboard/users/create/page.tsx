@@ -13,7 +13,7 @@ import {
   FaEye,
   FaEyeSlash
 } from 'react-icons/fa';
-import { authAPI, usersAPI, departmentsAPI } from '@/lib/api';
+import { authAPI, usersAPI, departmentsAPI, personnelAPI } from '@/lib/api';
 
 interface Department {
   id: string;
@@ -26,6 +26,21 @@ interface Department {
 interface WorkspacePermission {
   workspace: string;
   permissionLevel: string;
+}
+
+interface Personnel {
+  id: string;
+  firstName: string;
+  lastName: string;
+  isActive: boolean;
+  department?: {
+    id: string;
+    namePersian: string;
+  } | null;
+  user?: {
+    id: string;
+    username: string;
+  } | null;
 }
 
 const WORKSPACES = {
@@ -167,6 +182,7 @@ const PERMISSION_PRESETS: Array<{
 export default function CreateUserPage() {
   const router = useRouter();
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [personnel, setPersonnel] = useState<Personnel[]>([]);
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -187,6 +203,8 @@ export default function CreateUserPage() {
   });
 
   const [workspacePermissions, setWorkspacePermissions] = useState<WorkspacePermission[]>([]);
+  const [personnelMode, setPersonnelMode] = useState<'auto' | 'existing'>('auto');
+  const [selectedPersonnelId, setSelectedPersonnelId] = useState('');
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const selectedPreset = PERMISSION_PRESETS.find(item => item.id === selectedPresetId) || null;
   const canGrantAdminPermissions = currentUserRole !== 'MANAGER';
@@ -199,6 +217,7 @@ export default function CreateUserPage() {
 
   useEffect(() => {
     fetchDepartments();
+    fetchPersonnel();
     fetchCurrentUser();
   }, []);
 
@@ -257,6 +276,17 @@ export default function CreateUserPage() {
         return prev;
       }
     });
+  };
+
+  const fetchPersonnel = async () => {
+    try {
+      const response = await personnelAPI.getPersonnel({ includeInactive: true });
+      if (response.data.success) {
+        setPersonnel(response.data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching personnel:', error);
+    }
   };
 
   const applyPermissionPreset = (presetId: string) => {
@@ -320,6 +350,10 @@ export default function CreateUserPage() {
       setError('مدیر نمی‌تواند سطح دسترسی مدیریت را اعطا کند');
       return false;
     }
+    if (personnelMode === 'existing' && !selectedPersonnelId) {
+      setError('برای اتصال به پرسنل موجود، یک پرسنل را انتخاب کنید');
+      return false;
+    }
     return true;
   };
 
@@ -345,6 +379,8 @@ export default function CreateUserPage() {
         role: formData.role,
         departmentId: formData.departmentId,
         isActive: formData.isActive,
+        personnelMode,
+        personnelId: personnelMode === 'existing' ? selectedPersonnelId : undefined,
         workspacePermissions
       });
 
@@ -656,6 +692,57 @@ export default function CreateUserPage() {
           </div>
         </div>
 
+        {/* Personnel Link */}
+        <div className="glass-liquid-card p-6">
+          <h2 className="text-xl font-bold text-primary mb-4">پرسنل مرتبط</h2>
+          <p className="text-secondary mb-4">
+            حساب کاربری برای ورود به سیستم است؛ پرسنل برای حضور و غیاب و عملیات سازمانی استفاده می‌شود.
+          </p>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <label className={`rounded-lg border p-4 transition ${personnelMode === 'auto' ? 'border-[#074747]/50 bg-[#074747]/10 dark:border-teal-500/50 dark:bg-teal-500/15' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/40'}`}>
+              <span className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  checked={personnelMode === 'auto'}
+                  onChange={() => setPersonnelMode('auto')}
+                  className="text-[#074747] focus:ring-[#074747]"
+                />
+                <span className="font-semibold text-primary">ساخت پرسنل از اطلاعات کاربر</span>
+              </span>
+              <span className="mt-2 block text-sm text-secondary">گزینه پیش‌فرض؛ نام، نام خانوادگی و دپارتمان کاربر برای پرسنل هم ثبت می‌شود.</span>
+            </label>
+            <label className={`rounded-lg border p-4 transition ${personnelMode === 'existing' ? 'border-[#074747]/50 bg-[#074747]/10 dark:border-teal-500/50 dark:bg-teal-500/15' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/40'}`}>
+              <span className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  checked={personnelMode === 'existing'}
+                  onChange={() => setPersonnelMode('existing')}
+                  className="text-[#074747] focus:ring-[#074747]"
+                />
+                <span className="font-semibold text-primary">اتصال به پرسنل موجود</span>
+              </span>
+              <span className="mt-2 block text-sm text-secondary">برای فردی که قبلاً در مدیریت پرسنل ثبت شده است.</span>
+            </label>
+          </div>
+          {personnelMode === 'existing' && (
+            <div className="mt-4">
+              <label className="block text-sm text-secondary mb-2">پرسنل موجود</label>
+              <select
+                value={selectedPersonnelId}
+                onChange={(event) => setSelectedPersonnelId(event.target.value)}
+                className="glass-liquid-input w-full"
+              >
+                <option value="">انتخاب پرسنل</option>
+                {personnel.filter((person) => !person.user || person.id === selectedPersonnelId).map((person) => (
+                  <option key={person.id} value={person.id}>
+                    {person.firstName} {person.lastName} - {person.department?.namePersian || 'بدون بخش'}{person.user ? ' (متصل)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
         {/* Review */}
         <div className="glass-liquid-card p-6">
           <h2 className="text-xl font-bold text-primary mb-4">بازبینی نهایی</h2>
@@ -667,6 +754,9 @@ export default function CreateUserPage() {
               </p>
               <p className="text-secondary mt-1">{formData.email || 'ایمیل وارد نشده'}</p>
               <p className="text-secondary mt-2">نقش انتخاب‌شده: {formData.role}</p>
+              <p className="text-secondary mt-2">
+                پرسنل مرتبط: {personnelMode === 'auto' ? 'ساخت/اتصال خودکار' : personnel.find((person) => person.id === selectedPersonnelId) ? `${personnel.find((person) => person.id === selectedPersonnelId)?.firstName} ${personnel.find((person) => person.id === selectedPersonnelId)?.lastName}` : 'انتخاب نشده'}
+              </p>
               {selectedPreset && selectedPreset.recommendedRole !== formData.role && (
                 <p className="mt-2 font-medium text-amber-700 dark:text-amber-300">
                   نقش پیشنهادی این الگو: {selectedPreset.recommendedRole}

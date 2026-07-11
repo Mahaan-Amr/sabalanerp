@@ -217,6 +217,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           show: true
         },
         {
+          name: 'مدیریت پرسنل',
+          href: '/dashboard/personnel',
+          icon: FaUsers,
+          show: true
+        },
+        {
           name: 'سطوح دسترسی',
           href: '/dashboard/admin/permissions',
           icon: FaShieldAlt,

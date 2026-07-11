@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { FaBan, FaClipboardCheck, FaClock, FaPlus, FaRedo, FaRoute, FaStop } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
 import { securityAPI } from '@/lib/api';
+import { askSecurityAction } from '@/components/SecurityNoticeHost';
 
 const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
 const labelClass = 'mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200';
@@ -68,7 +69,7 @@ export default function SecuritySupervisorReportsPage() {
   };
 
   const voidEntry = async (entry: any) => {
-    const reason = window.prompt(`دلیل ابطال ردیف ${entry.rowNumber.toLocaleString('fa-IR')} را وارد کنید:`);
+    const reason = await askSecurityAction({ title: 'ابطال گزارش', inputLabel: `دلیل ابطال ردیف ${entry.rowNumber.toLocaleString('fa-IR')}` });
     if (!reason?.trim()) return;
     setSaving(true);
     setError('');

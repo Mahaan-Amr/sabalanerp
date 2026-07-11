@@ -12,6 +12,7 @@ import {
   FaTimesCircle
 } from 'react-icons/fa';
 import { securityAPI } from '@/lib/api';
+import { notifySecurity } from '@/components/SecurityNoticeHost';
 
 interface SecurityPersonnel {
   id: string;
@@ -117,11 +118,11 @@ export default function PersonnelPage() {
         setShowAssignForm(false);
         setAssignFormData({ userId: '', shiftId: '', position: 'نگهبان' });
         fetchPersonnelData();
-        alert('نیرو با موفقیت ثبت شد');
+        notifySecurity('نیرو با موفقیت ثبت شد');
       }
     } catch (error: any) {
       console.error('Error assigning personnel:', error);
-      alert(error.response?.data?.error || 'خطا در ثبت اطلاعات');
+      notifySecurity(error.response?.data?.error || 'خطا در ثبت اطلاعات', 'error');
     }
   };
 
@@ -131,7 +132,7 @@ export default function PersonnelPage() {
       await fetchPersonnelData();
     } catch (error: any) {
       console.error('Error toggling personnel status:', error);
-      alert(error.response?.data?.error || 'خطا در تغییر وضعیت نیرو');
+      notifySecurity(error.response?.data?.error || 'خطا در تغییر وضعیت نیرو', 'error');
     }
   };
 

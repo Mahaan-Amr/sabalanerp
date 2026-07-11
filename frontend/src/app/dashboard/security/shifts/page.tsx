@@ -6,6 +6,7 @@ import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSe
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
 import { securityAPI } from '@/lib/api';
+import { askSecurityAction } from '@/components/SecurityNoticeHost';
 
 type ShiftView = 'mine' | 'coverage' | 'plans' | 'history';
 type DraftMode = 'replacement' | 'temporary' | 'force-close' | 'correction' | null;
@@ -155,8 +156,8 @@ export default function SecurityShiftsPage() {
     await run(() => securityAPI.createShiftPlan({ ...form, anchorAt: anchorAt.toISOString(), generateUntil: generateUntil.toISOString() }), 'پیش‌نویس برنامه سالانه ساخته شد.');
   };
 
-  const deletePlan = (plan: any) => {
-    if (!window.confirm('\u0627\u06cc\u0646 \u067e\u06cc\u0634\u200c\u0646\u0648\u06cc\u0633 \u0628\u0631\u0646\u0627\u0645\u0647 \u062d\u0630\u0641 \u0634\u0648\u062f\u061f')) return;
+  const deletePlan = async (plan: any) => {
+    if (!await askSecurityAction({ title: 'حذف پیش‌نویس', description: 'این پیش‌نویس برنامه حذف شود؟' })) return;
     run(() => securityAPI.deleteShiftPlan(plan.id), '\u067e\u06cc\u0634\u200c\u0646\u0648\u06cc\u0633 \u0628\u0631\u0646\u0627\u0645\u0647 \u062d\u0630\u0641 \u0634\u062f.');
   };
 
@@ -197,7 +198,7 @@ export default function SecurityShiftsPage() {
   );
 
   const closeShift = async (slot: any) => {
-    const closureSummary = window.prompt('\u062a\u0648\u0636\u06cc\u062d \u067e\u0627\u06cc\u0627\u0646 \u0634\u06cc\u0641\u062a \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f:', '\u0628\u062f\u0648\u0646 \u0645\u0648\u0631\u062f \u062f\u06cc\u06af\u0631');
+    const closureSummary = await askSecurityAction({ title: 'پایان شیفت', inputLabel: 'توضیح پایان شیفت', defaultValue: 'بدون مورد دیگر' });
     if (closureSummary === null) return;
     await run(() => securityAPI.endPlannedShift(slot.id, closureSummary.trim() || '\u0628\u062f\u0648\u0646 \u0645\u0648\u0631\u062f \u062f\u06cc\u06af\u0631'), '\u0634\u06cc\u0641\u062a \u067e\u0627\u06cc\u0627\u0646 \u06cc\u0627\u0641\u062a.');
   };
@@ -351,7 +352,7 @@ export default function SecurityShiftsPage() {
                       <ErpButton label="جایگزین" icon={FaUserEdit} onClick={() => openDraft('replacement', slot)} />
                       <ErpButton label="پوشش موقت" onClick={() => openDraft('temporary', slot)} />
                       {slot.attendance?.length ? <ErpButton label="اصلاح حضور" onClick={() => openDraft('correction', slot)} /> : null}
-                      {slot.coverageStatus === 'NEEDS_REPLACEMENT' && <ErpButton label="اضطراری بدون پوشش" tone="danger" onClick={() => { const reason = prompt('دلیل اضطراری:'); if (reason) run(() => securityAPI.markShiftEmergencyUncovered(slot.id, reason), 'وضعیت اضطراری ثبت شد.'); }} />}
+                      {slot.coverageStatus === 'NEEDS_REPLACEMENT' && <ErpButton label="اضطراری بدون پوشش" tone="danger" onClick={async () => { const reason = await askSecurityAction({ title: 'پوشش اضطراری', inputLabel: 'دلیل وضعیت اضطراری' }); if (reason) run(() => securityAPI.markShiftEmergencyUncovered(slot.id, reason), 'وضعیت اضطراری ثبت شد.'); }} />}
                       {slot.session?.status === 'ACTIVE' && <ErpButton label="بستن اجباری" tone="danger" onClick={() => openDraft('force-close', slot)} />}
                     </div>
                   </div>

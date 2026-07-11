@@ -2224,7 +2224,7 @@ router.get('/reports/security-personnel-performance', protect, securityAdmin, as
     const sessionStatus = String(req.query.sessionStatus || '').trim() || undefined;
     const coverageStatus = String(req.query.coverageStatus || '').trim() || undefined;
     const activityType = String(req.query.activityType || '').trim() || undefined;
-    const personnel = await prisma.securityPersonnel.findMany({ where: { isActive: true, ...(personnelId ? { id: personnelId } : {}), ...(shiftId ? { shiftId } : {}) }, include: { user: { select: { firstName: true, lastName: true, username: true } }, shift: { select: { namePersian: true } } }, orderBy: { user: { firstName: 'asc' } } });
+    const personnel = await prisma.securityPersonnel.findMany({ where: { ...(personnelId ? { id: personnelId } : {}), ...(shiftId ? { shiftId } : {}) }, include: { user: { select: { firstName: true, lastName: true, username: true } }, shift: { select: { namePersian: true } } }, orderBy: { user: { firstName: 'asc' } } });
     const ids = personnel.map((item) => item.id);
     const slots = await prisma.securityShiftPlanSlot.findMany({ where: { startsAt: { lt: rangeEnd }, endsAt: { gt: startDate }, ...(coverageStatus ? { coverageStatus: coverageStatus as any } : {}), OR: [{ plannedPersonnelId: { in: ids } }, { replacementPersonnelId: { in: ids } }, { temporaryCoverage: { some: { personnelId: { in: ids } } } }] }, include: { attendance: true, session: { include: { patrolSessions: true, logEntries: { include: { reportType: true }, orderBy: { createdAt: 'asc' } } }, }, temporaryCoverage: true }, orderBy: { startsAt: 'asc' } });
     const summaries = personnel.map((person) => {
@@ -2250,11 +2250,11 @@ router.get('/reports/security-personnel/:id/shift-history', protect, securityAdm
   try {
     const personnel = await prisma.securityPersonnel.findUnique({ where: { id: req.params.id }, include: { user: { select: { firstName: true, lastName: true, username: true } }, shift: { select: { namePersian: true } } } });
     if (!personnel) return res.status(404).json({ success: false, error: 'نیروی حراست پیدا نشد.' });
-    const startDate = parseDayQuery(req.query.startDate);
-    const requestedEnd = parseDayQuery(req.query.endDate, startDate);
-    const endDate = requestedEnd < startDate ? startDate : requestedEnd;
+    const startDate = req.query.startDate ? parseDayQuery(req.query.startDate) : undefined;
+    const requestedEnd = req.query.endDate ? parseDayQuery(req.query.endDate, startDate) : undefined;
+    const endDate = startDate && requestedEnd && requestedEnd < startDate ? startDate : requestedEnd;
     const slots = await prisma.securityShiftPlanSlot.findMany({
-      where: { startsAt: { lt: addDays(endDate, 1) }, endsAt: { gt: startDate }, OR: [{ plannedPersonnelId: personnel.id }, { replacementPersonnelId: personnel.id }, { temporaryCoverage: { some: { personnelId: personnel.id } } }] },
+      where: { ...(startDate && endDate ? { startsAt: { lt: addDays(endDate, 1) }, endsAt: { gt: startDate } } : {}), OR: [{ plannedPersonnelId: personnel.id }, { replacementPersonnelId: personnel.id }, { temporaryCoverage: { some: { personnelId: personnel.id } } }] },
       include: { plan: { select: { title: true } }, plannedPersonnel: { include: { user: true } }, replacementPersonnel: { include: { user: true } }, attendance: { where: { personnelId: personnel.id } }, temporaryCoverage: { include: { personnel: { include: { user: true } } } }, session: { include: { logEntries: { include: { reportType: true, participants: { include: { user: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' } }, patrolSessions: { orderBy: { startedAt: 'asc' } } } } },
       orderBy: { startsAt: 'desc' }
     });

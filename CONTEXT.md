@@ -788,8 +788,8 @@ An instant report that remains visible in the shift audit trail with a clear voi
 _Avoid_: deleting voided reports, or presenting them as active without their void context
 
 **نمایش تاریخچه تفصیلی شیفت**:
-The detailed shift-history page orders the selected guard's shifts newest first. Each shift begins with a compact status and timing header, while its complete audit evidence is revealed in an expandable section.
-_Avoid_: loading every shift's full narrative by default, or making a manager search through an unstructured event stream
+The detailed shift-history page defaults to the selected guard's entire record, including inactive/former Security personnel, and orders shifts newest first. A date range is an optional narrowing filter; each shift begins with a compact status and timing header, while its complete audit evidence is revealed in an expandable section.
+_Avoid_: inheriting an arbitrary reporting date as a required history boundary, omitting former personnel, loading every shift's full narrative by default, or making a manager search through an unstructured event stream
 
 **داده واقعی حراست**:
 Core حراست surfaces use persisted operational data or an honest empty state when no records exist. Missing core sources should be backed by explicit API contracts, while non-core admin-wide security audit widgets stay empty or hidden until a real audit-log model exists.

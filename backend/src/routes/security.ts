@@ -2254,9 +2254,9 @@ router.get('/reports/security-personnel/:id/shift-history', protect, securityAdm
     const requestedEnd = req.query.endDate ? parseDayQuery(req.query.endDate, startDate) : undefined;
     const endDate = startDate && requestedEnd && requestedEnd < startDate ? startDate : requestedEnd;
     const slots = await prisma.securityShiftPlanSlot.findMany({
-      where: { ...(startDate && endDate ? { startsAt: { lt: addDays(endDate, 1) }, endsAt: { gt: startDate } } : {}), OR: [{ plannedPersonnelId: personnel.id }, { replacementPersonnelId: personnel.id }, { temporaryCoverage: { some: { personnelId: personnel.id } } }] },
+      where: { ...(startDate && endDate ? { startsAt: { lt: addDays(endDate, 1) }, endsAt: { gt: startDate } } : {}), session: { status: { in: [SecurityShiftSessionStatus.CLOSED, SecurityShiftSessionStatus.FORCE_CLOSED] } }, OR: [{ plannedPersonnelId: personnel.id }, { replacementPersonnelId: personnel.id }, { temporaryCoverage: { some: { personnelId: personnel.id } } }] },
       include: { plan: { select: { title: true } }, plannedPersonnel: { include: { user: true } }, replacementPersonnel: { include: { user: true } }, attendance: { where: { personnelId: personnel.id } }, temporaryCoverage: { include: { personnel: { include: { user: true } } } }, session: { include: { logEntries: { include: { reportType: true, participants: { include: { user: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' } }, patrolSessions: { orderBy: { startedAt: 'asc' } } } } },
-      orderBy: { startsAt: 'desc' }
+      orderBy: { session: { endedAt: 'desc' } }
     });
     res.json({ success: true, data: { personnel: { id: personnel.id, name: `${personnel.user.firstName} ${personnel.user.lastName}`.trim() || personnel.user.username, shift: personnel.shift.namePersian }, shifts: slots } });
   } catch (error: any) { res.status(500).json({ success: false, error: error.message || 'دریافت تاریخچه شیفت ناموفق بود.' }); }

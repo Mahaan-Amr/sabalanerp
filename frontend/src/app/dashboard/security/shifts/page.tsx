@@ -288,8 +288,13 @@ export default function SecurityShiftsPage() {
             </label>
             {workflow?.activeSession && (
               <ErpCard className="p-4" tone="success">
-                <p className="font-bold">شیفت فعال از {dateTimeFa(workflow.activeSession.startedAt)}</p>
-                <p className="mt-1 text-sm">تا پایان و ثبت گزارش این شیفت، شیفت بعدی آغاز نمی‌شود.</p>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-bold">شیفت فعال از {dateTimeFa(workflow.activeSession.startedAt)}</p>
+                    <p className="mt-1 text-sm">تا پایان و ثبت گزارش این شیفت، شیفت بعدی آغاز نمی‌شود.</p>
+                  </div>
+                  {workflow.activeSession.personnelId === workflow.personnel?.id && workflow.activeSession.slot && <ErpButton label="گزارش و پایان شیفت" icon={FaStop} tone="danger" onClick={() => closeShift(workflow.activeSession.slot)} />}
+                </div>
               </ErpCard>
             )}
           </div>

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { FaBan, FaClipboardCheck, FaClock, FaPlus, FaRedo, FaRoute, FaStop } from 'react-icons/fa';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { FaBan, FaCheck, FaChevronDown, FaClipboardCheck, FaClock, FaPaperclip, FaPlus, FaRedo, FaRoute, FaStop, FaTimes, FaUserPlus } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
 import { securityAPI } from '@/lib/api';
 import { askSecurityAction } from '@/components/SecurityNoticeHost';
@@ -15,6 +15,8 @@ const durationMinutes = (start?: string, end?: string | null) => {
   const to = end ? new Date(end).getTime() : Date.now();
   return Math.max(0, Math.floor((to - new Date(start).getTime()) / 60000));
 };
+const participantName = (user: any) => `${user.firstName} ${user.lastName}`;
+const participantMeta = (user: any) => user.department?.namePersian || user.position || '';
 
 export default function SecuritySupervisorReportsPage() {
   const [types, setTypes] = useState<any[]>([]);
@@ -28,8 +30,23 @@ export default function SecuritySupervisorReportsPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [participantPickerOpen, setParticipantPickerOpen] = useState(false);
+  const participantPickerRef = useRef<HTMLDivElement>(null);
 
   const activePatrol = useMemo(() => session?.patrolSessions?.find((patrol: any) => patrol.status === 'ACTIVE'), [session]);
+  const selectedParticipants = useMemo(
+    () => participants.filter((user) => form.participantIds.includes(user.id)),
+    [form.participantIds, participants]
+  );
+
+  useEffect(() => {
+    if (!participantPickerOpen) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!participantPickerRef.current?.contains(event.target as Node)) setParticipantPickerOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick);
+  }, [participantPickerOpen]);
 
   const loadData = async () => {
     setLoading(true);
@@ -123,6 +140,15 @@ export default function SecuritySupervisorReportsPage() {
     }
   };
 
+  const toggleParticipant = (participantId: string) => {
+    setForm((current) => ({
+      ...current,
+      participantIds: current.participantIds.includes(participantId)
+        ? current.participantIds.filter((id) => id !== participantId)
+        : [...current.participantIds, participantId],
+    }));
+  };
+
   if (loading) return <ErpLoading />;
 
   return (
@@ -143,29 +169,99 @@ export default function SecuritySupervisorReportsPage() {
         <ErpEmptyState icon={FaClock} title="شیفت فعال برای شما پیدا نشد" description={personnel ? 'برای ثبت گزارش، ابتدا شیفت برنامه‌ریزی‌شده خود را شروع کنید.' : 'کاربر فعلی جزو نفرات حراست نیست.'} />
       ) : (
         <>
-          <ErpSection title="ثبت گزارش لحظه‌ای">
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              <label>
+          <ErpSection title="ثبت گزارش لحظه‌ای" description="هر ردیف به شیفت فعال اضافه می‌شود و افراد مرتبط به صورت انتخابی کنار همان گزارش ذخیره می‌شوند.">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+              <div className="space-y-4">
+                <label className="block">
                 <span className={labelClass}>نوع گزارش لحظه‌ای</span>
                 <select className={inputClass} value={form.reportTypeId} onChange={(event) => setForm((current) => ({ ...current, reportTypeId: event.target.value }))}>
                   <option value="">انتخاب کنید</option>
                   {types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
                 </select>
               </label>
-              <label>
-                <span className={labelClass}>افراد مرتبط</span>
-                <select multiple className={`${inputClass} min-h-28`} value={form.participantIds} onChange={(event) => setForm((current) => ({ ...current, participantIds: Array.from(event.target.selectedOptions).map((option) => option.value) }))}>
-                  {participants.map((user) => <option key={user.id} value={user.id}>{user.firstName} {user.lastName} {user.department?.namePersian ? `· ${user.department.namePersian}` : ''}</option>)}
-                </select>
-                <span className="mt-1 block text-xs text-slate-500">برای انتخاب چند نفر، کلید Ctrl یا ⌘ را نگه دارید.</span>
-              </label>
-              <label>
+                <label className="block">
                 <span className={labelClass}>توضیحات (اختیاری)</span>
-                <textarea className={`${inputClass} min-h-12`} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
+                <textarea className={`${inputClass} min-h-28 resize-y`} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
               </label>
+                <label className="block">
+                  <span className={labelClass}>افزودن عکس</span>
+                  <div className="flex min-h-12 items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600 transition hover:border-[#074747]/40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    <FaPaperclip className="h-4 w-4 text-[#074747] dark:text-teal-200" />
+                    <span className="font-medium">{images.length ? `${images.length.toLocaleString('fa-IR')} عکس انتخاب شده` : 'انتخاب عکس‌ها'}</span>
+                    <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => setImages(Array.from(event.target.files || []))} className="sr-only" />
+                  </div>
+                </label>
+              </div>
+
+              <div className="space-y-3">
+                <div ref={participantPickerRef} className="relative">
+                  <span className={labelClass}>افراد مرتبط</span>
+                  <button
+                    type="button"
+                    onClick={() => setParticipantPickerOpen((current) => !current)}
+                    className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none transition hover:border-[#074747]/40 focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900"
+                    aria-expanded={participantPickerOpen}
+                  >
+                    <span className="flex items-center gap-2">
+                      <FaUserPlus className="h-4 w-4 text-[#074747] dark:text-teal-200" />
+                      <span>{selectedParticipants.length ? `${selectedParticipants.length.toLocaleString('fa-IR')} نفر انتخاب شده` : 'انتخاب افراد مرتبط'}</span>
+                    </span>
+                    <FaChevronDown className={`h-3.5 w-3.5 text-slate-400 transition ${participantPickerOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {participantPickerOpen && (
+                    <div className="absolute z-20 mt-2 max-h-72 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                      {participants.length === 0 ? (
+                        <p className="px-3 py-4 text-center text-sm text-slate-500">فردی برای انتخاب وجود ندارد.</p>
+                      ) : (
+                        participants.map((user) => {
+                          const selected = form.participantIds.includes(user.id);
+                          return (
+                            <button
+                              key={user.id}
+                              type="button"
+                              onClick={() => toggleParticipant(user.id)}
+                              className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-right text-sm transition ${selected ? 'bg-[#074747]/10 text-[#074747] dark:bg-teal-900/30 dark:text-teal-100' : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+                            >
+                              <span className="min-w-0">
+                                <span className="block font-semibold">{participantName(user)}</span>
+                                {participantMeta(user) && <span className="mt-0.5 block truncate text-xs opacity-70">{participantMeta(user)}</span>}
+                              </span>
+                              <span className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border ${selected ? 'border-[#074747] bg-[#074747] text-white dark:border-teal-300 dark:bg-teal-500' : 'border-slate-300 text-transparent dark:border-slate-600'}`}>
+                                <FaCheck className="h-3 w-3" />
+                              </span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="min-h-28 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900/70">
+                  {selectedParticipants.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedParticipants.map((user) => (
+                        <button
+                          key={user.id}
+                          type="button"
+                          onClick={() => toggleParticipant(user.id)}
+                          className="inline-flex items-center gap-2 rounded-full border border-[#074747]/20 bg-[#074747]/10 px-3 py-1.5 text-xs font-semibold text-[#074747] transition hover:bg-[#074747]/15 dark:border-teal-700 dark:bg-teal-900/30 dark:text-teal-100"
+                          title="حذف از گزارش"
+                        >
+                          <span>{participantName(user)}</span>
+                          <FaTimes className="h-3 w-3" />
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">روی انتخاب افراد مرتبط بزنید و هر نفر را جداگانه به گزارش اضافه کنید.</p>
+                  )}
+                </div>
+              </div>
             </div>
-            <div className="mt-3 flex flex-wrap items-end gap-3"><label className="min-w-64 flex-1"><span className={labelClass}>افزودن عکس</span><input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => setImages(Array.from(event.target.files || []))} className="block w-full text-sm" /></label><ErpButton label="ثبت گزارش" icon={FaPlus} onClick={createEntry} disabled={saving || !form.reportTypeId} variant="solid" /></div>
             {images.length > 0 && <div className="mt-3 flex flex-wrap gap-3">{images.map((image, index) => <div key={`${image.name}-${index}`} className="relative"><img src={URL.createObjectURL(image)} alt={image.name} className="h-20 w-20 rounded-lg object-cover" /><button type="button" className="absolute -right-2 -top-2 rounded-full bg-red-600 px-2 py-1 text-xs text-white" onClick={() => setImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>}
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <ErpButton label="ثبت گزارش" icon={FaPlus} onClick={createEntry} disabled={saving || !form.reportTypeId} variant="solid" />
+            </div>
             {types.length === 0 && <p className="mt-3 text-sm text-amber-700">ابتدا نوع گزارش لحظه‌ای را در تنظیمات حراست تعریف کنید.</p>}
           </ErpSection>
 

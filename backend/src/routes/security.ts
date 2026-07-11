@@ -2246,6 +2246,22 @@ router.get('/reports/security-personnel-performance', protect, securityAdmin, as
   } catch (error: any) { console.error('Get security personnel performance error:', error); res.status(500).json({ success: false, error: error.message || 'دریافت عملکرد نیروهای حراست ناموفق بود.' }); }
 });
 
+router.get('/reports/security-personnel/:id/shift-history', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const personnel = await prisma.securityPersonnel.findUnique({ where: { id: req.params.id }, include: { user: { select: { firstName: true, lastName: true, username: true } }, shift: { select: { namePersian: true } } } });
+    if (!personnel) return res.status(404).json({ success: false, error: 'نیروی حراست پیدا نشد.' });
+    const startDate = parseDayQuery(req.query.startDate);
+    const requestedEnd = parseDayQuery(req.query.endDate, startDate);
+    const endDate = requestedEnd < startDate ? startDate : requestedEnd;
+    const slots = await prisma.securityShiftPlanSlot.findMany({
+      where: { startsAt: { lt: addDays(endDate, 1) }, endsAt: { gt: startDate }, OR: [{ plannedPersonnelId: personnel.id }, { replacementPersonnelId: personnel.id }, { temporaryCoverage: { some: { personnelId: personnel.id } } }] },
+      include: { plan: { select: { title: true } }, plannedPersonnel: { include: { user: true } }, replacementPersonnel: { include: { user: true } }, attendance: { where: { personnelId: personnel.id } }, temporaryCoverage: { include: { personnel: { include: { user: true } } } }, session: { include: { logEntries: { include: { reportType: true, participants: { include: { user: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' } }, patrolSessions: { orderBy: { startedAt: 'asc' } } } } },
+      orderBy: { startsAt: 'desc' }
+    });
+    res.json({ success: true, data: { personnel: { id: personnel.id, name: `${personnel.user.firstName} ${personnel.user.lastName}`.trim() || personnel.user.username, shift: personnel.shift.namePersian }, shifts: slots } });
+  } catch (error: any) { res.status(500).json({ success: false, error: error.message || 'دریافت تاریخچه شیفت ناموفق بود.' }); }
+});
+
 // Aggregate exports are intentionally limited to operational report users (edit/admin).
 // Guards retain their self-service schedule and shift-log views without bulk export access.
 router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, res: Response) => {

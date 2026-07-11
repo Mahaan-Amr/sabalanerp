@@ -13,6 +13,7 @@ import {
   FaBatteryEmpty
 } from 'react-icons/fa';
 import { securityAPI } from '@/lib/api';
+import { notifySecurity } from './SecurityNoticeHost';
 import DigitalSignature from './DigitalSignature';
 import SignatureDisplay from './SignatureDisplay';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -101,7 +102,7 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
       fetchAttendanceRecords(); // Refresh data
     } catch (error: any) {
       console.error('Error saving signature:', error);
-      alert(`خطا در ثبت عملیات: ${error.response?.data?.error || error.message}`);
+      notifySecurity(`خطا در ثبت عملیات: ${error.response?.data?.error || error.message}`, 'error');
     }
   };
 
@@ -199,7 +200,7 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
               setSelectedRecord(record);
               setShowSignatureModal(true);
             } else {
-              alert('رکوردی برای ثبت خروج انتخاب نشده است');
+              notifySecurity('رکوردی برای ثبت خروج انتخاب نشده است', 'error');
             }
           }}
           className="glass-liquid-btn-primary p-4 text-center"
@@ -216,7 +217,7 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
               setSelectedRecord(record);
               setShowSignatureModal(true);
             } else {
-              alert('رکوردی برای ثبت امضا انتخاب نشده است');
+              notifySecurity('رکوردی برای ثبت امضا انتخاب نشده است', 'error');
             }
           }}
           className="glass-liquid-btn p-4 text-center"

@@ -2,11 +2,13 @@
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
+import * as XLSX from 'xlsx';
 import { body, validationResult } from 'express-validator';
 import { AttendanceStatus, LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityPatrolStatus, SecurityShiftCoverageStatus, SecurityShiftLogStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
+import { generatePdfFromHtml } from '../utils/pdf';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -1049,9 +1051,16 @@ router.get('/shift-workflow/me', protect, securityView, async (req: AuthRequest,
   const personnel = await getSelfPersonnel(req.user!.id);
   if (!personnel) return res.status(403).json({ success: false, error: 'کاربر جزو نفرات حراست نیست.' });
   const now = new Date();
+  const from = req.query.from ? new Date(String(req.query.from)) : new Date(now.getTime() - 24 * 60 * 60_000);
+  const to = req.query.to ? new Date(String(req.query.to)) : undefined;
   const slots = await prisma.securityShiftPlanSlot.findMany({
-    where: { plan: { status: SecurityShiftPlanStatus.PUBLISHED }, OR: [{ plannedPersonnelId: personnel.id }, { replacementPersonnelId: personnel.id }], endsAt: { gt: new Date(now.getTime() - 24 * 60 * 60_000) } },
-    include: slotInclude, orderBy: { startsAt: 'asc' }, take: 20
+    where: {
+      plan: { status: SecurityShiftPlanStatus.PUBLISHED },
+      OR: [{ plannedPersonnelId: personnel.id }, { replacementPersonnelId: personnel.id }, { temporaryCoverage: { some: { personnelId: personnel.id } } }],
+      endsAt: { gt: from },
+      ...(to ? { startsAt: { lt: to } } : {})
+    },
+    include: slotInclude, orderBy: { startsAt: 'asc' }
   });
   const activeSession = await prisma.securityShiftSession.findFirst({ where: { status: SecurityShiftSessionStatus.ACTIVE }, include: { slot: { include: slotInclude } } });
   const decorated = slots.map((slot) => ({ ...slot, effectivePersonnelId: effectivePersonnelId(slot), lateAlert: !slot.attendance.length && now.getTime() > slot.startsAt.getTime() + slot.plan.lateAlertMinutes * 60_000 }));
@@ -2178,6 +2187,48 @@ router.get('/reports/summary', protect, securityView, async (req: AuthRequest, r
   } catch (error) {
     console.error('Get security report summary error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// Aggregate exports are intentionally limited to operational report users (edit/admin).
+// Guards retain their self-service schedule and shift-log views without bulk export access.
+router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, res: Response) => {
+  try {
+    const format = req.query.format === 'pdf' ? 'pdf' : 'excel';
+    const startDate = parseDayQuery(req.query.startDate);
+    const requestedEnd = parseDayQuery(req.query.endDate, startDate);
+    const endDate = requestedEnd < startDate ? startDate : requestedEnd;
+    const days = Math.min(92, Math.floor((endDate.getTime() - startDate.getTime()) / 86_400_000) + 1);
+    const trend: Array<Record<string, string | number>> = [];
+    for (let index = 0; index < days; index += 1) {
+      const date = addDays(startDate, index);
+      const daily = await buildDailyAttendance({ date: date.toISOString(), departmentId: req.query.departmentId, shiftId: req.query.shiftId });
+      trend.push({
+        'تاریخ': date.toLocaleDateString('fa-IR'), 'کل': daily.stats.totalEmployees, 'حاضر': daily.stats.present,
+        'غایب': daily.stats.absent, 'تأخیر': daily.stats.late, 'ماموریت': daily.stats.mission,
+        'مرخصی': daily.stats.leave, 'امضاشده': daily.stats.signed
+      });
+    }
+    const totals = trend.reduce<{ total: number; present: number; absent: number; late: number }>((sum, day) => ({
+      total: sum.total + Number(day['کل']), present: sum.present + Number(day['حاضر']), absent: sum.absent + Number(day['غایب']), late: sum.late + Number(day['تأخیر'])
+    }), { total: 0, present: 0, absent: 0, late: 0 });
+    const title = `گزارش حراست ${startDate.toLocaleDateString('fa-IR')} تا ${addDays(startDate, days - 1).toLocaleDateString('fa-IR')}`;
+    const generatedAt = new Date().toLocaleString('fa-IR');
+    if (format === 'excel') {
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([[title], [`زمان تولید: ${generatedAt}`], [], ['کل نفر-روز', totals.total, 'حاضر', totals.present, 'غایب', totals.absent, 'تأخیر', totals.late]]), 'خلاصه');
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(trend), 'روزانه');
+      const file = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename="security-report.xlsx"');
+      return res.send(file);
+    }
+    const rows = trend.map((day) => `<tr>${Object.values(day).map((value) => `<td>${value}</td>`).join('')}</tr>`).join('');
+    const pdfPath = await generatePdfFromHtml({ fileName: `security-report-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: `<style>body{font-size:12px;color:#172033}h1{color:#074747}table{width:100%;border-collapse:collapse}td,th{border:1px solid #d8dee9;padding:6px;text-align:center}</style><h1>${title}</h1><p>زمان تولید: ${generatedAt}</p><p>کل نفر-روز: ${totals.total} | حاضر: ${totals.present} | غایب: ${totals.absent} | تأخیر: ${totals.late}</p><table><thead><tr>${Object.keys(trend[0] || {}).map((key) => `<th>${key}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>` });
+    res.download(pdfPath, 'security-report.pdf', () => fs.unlink(pdfPath, () => undefined));
+  } catch (error) {
+    console.error('Export security report error:', error);
+    res.status(500).json({ success: false, error: 'ساخت خروجی گزارش ناموفق بود.' });
   }
 });
 

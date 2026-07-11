@@ -6,6 +6,7 @@ import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSe
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
 import { securityAPI } from '@/lib/api';
+import { askSecurityAction } from '@/components/SecurityNoticeHost';
 
 type ShiftView = 'mine' | 'coverage' | 'plans' | 'history';
 type DraftMode = 'replacement' | 'temporary' | 'force-close' | 'correction' | null;
@@ -46,7 +47,7 @@ export default function SecurityShiftsPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [now, setNow] = useState(Date.now());
-  const [visibleMonth, setVisibleMonth] = useState(PersianCalendar.now('jYYYY/jMM'));
+  const [visibleMonth, setVisibleMonth] = useState(() => PersianCalendar.now().slice(0, 7));
   const [draft, setDraft] = useState<{ mode: DraftMode; slotId: string }>({ mode: null, slotId: '' });
   const [replacement, setReplacement] = useState({ personnelId: '', overrideReason: '' });
   const [temporary, setTemporary] = useState({ personnelId: '', startsDate: PersianCalendar.now(), startsTime: '07:00', endsDate: PersianCalendar.now(), endsTime: '19:00', note: '' });
@@ -107,6 +108,16 @@ export default function SecurityShiftsPage() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
+    const [year, month] = visibleMonth.split('/').map(Number);
+    if (!year || !month) return;
+    const from = PersianCalendar.toGregorian(`${visibleMonth}/01`, 'jYYYY/jMM/jDD');
+    const nextMonth = month === 12 ? `${year + 1}/01/01` : `${year}/${String(month + 1).padStart(2, '0')}/01`;
+    const to = PersianCalendar.toGregorian(nextMonth, 'jYYYY/jMM/jDD');
+    securityAPI.getMyShiftWorkflow({ from: from.toISOString(), to: to.toISOString() })
+      .then((result) => setWorkflow(result.data.data))
+      .catch((err) => setError(err.response?.data?.error || 'دریافت برنامه من ناموفق بود.'));
+  }, [visibleMonth]);
+  useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
@@ -145,8 +156,8 @@ export default function SecurityShiftsPage() {
     await run(() => securityAPI.createShiftPlan({ ...form, anchorAt: anchorAt.toISOString(), generateUntil: generateUntil.toISOString() }), 'پیش‌نویس برنامه سالانه ساخته شد.');
   };
 
-  const deletePlan = (plan: any) => {
-    if (!window.confirm('\u0627\u06cc\u0646 \u067e\u06cc\u0634\u200c\u0646\u0648\u06cc\u0633 \u0628\u0631\u0646\u0627\u0645\u0647 \u062d\u0630\u0641 \u0634\u0648\u062f\u061f')) return;
+  const deletePlan = async (plan: any) => {
+    if (!await askSecurityAction({ title: 'حذف پیش‌نویس', description: 'این پیش‌نویس برنامه حذف شود؟' })) return;
     run(() => securityAPI.deleteShiftPlan(plan.id), '\u067e\u06cc\u0634\u200c\u0646\u0648\u06cc\u0633 \u0628\u0631\u0646\u0627\u0645\u0647 \u062d\u0630\u0641 \u0634\u062f.');
   };
 
@@ -187,7 +198,7 @@ export default function SecurityShiftsPage() {
   );
 
   const closeShift = async (slot: any) => {
-    const closureSummary = window.prompt('\u062a\u0648\u0636\u06cc\u062d \u067e\u0627\u06cc\u0627\u0646 \u0634\u06cc\u0641\u062a \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f:', '\u0628\u062f\u0648\u0646 \u0645\u0648\u0631\u062f \u062f\u06cc\u06af\u0631');
+    const closureSummary = await askSecurityAction({ title: 'پایان شیفت', inputLabel: 'توضیح پایان شیفت', defaultValue: 'بدون مورد دیگر' });
     if (closureSummary === null) return;
     await run(() => securityAPI.endPlannedShift(slot.id, closureSummary.trim() || '\u0628\u062f\u0648\u0646 \u0645\u0648\u0631\u062f \u062f\u06cc\u06af\u0631'), '\u0634\u06cc\u0641\u062a \u067e\u0627\u06cc\u0627\u0646 \u06cc\u0627\u0641\u062a.');
   };
@@ -263,7 +274,17 @@ export default function SecurityShiftsPage() {
           <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[220px_minmax(0,1fr)]">
             <label>
               <span className={labelClass}>ماه برنامه</span>
-              <input className={inputClass} value={visibleMonth} onChange={(e) => setVisibleMonth(e.target.value)} placeholder="1405/04" />
+              <select className={inputClass} value={visibleMonth} onChange={(e) => setVisibleMonth(e.target.value)}>
+                {Array.from({ length: 36 }, (_, index) => {
+                  const [baseYear, baseMonth] = PersianCalendar.now().slice(0, 7).split('/').map(Number);
+                  const offset = index - 12;
+                  const absolute = baseYear * 12 + (baseMonth - 1) + offset;
+                  const year = Math.floor(absolute / 12);
+                  const month = (absolute % 12) + 1;
+                  const value = `${year}/${String(month).padStart(2, '0')}`;
+                  return <option key={value} value={value}>{value}</option>;
+                })}
+              </select>
             </label>
             {workflow?.activeSession && (
               <ErpCard className="p-4" tone="success">
@@ -331,7 +352,7 @@ export default function SecurityShiftsPage() {
                       <ErpButton label="جایگزین" icon={FaUserEdit} onClick={() => openDraft('replacement', slot)} />
                       <ErpButton label="پوشش موقت" onClick={() => openDraft('temporary', slot)} />
                       {slot.attendance?.length ? <ErpButton label="اصلاح حضور" onClick={() => openDraft('correction', slot)} /> : null}
-                      {slot.coverageStatus === 'NEEDS_REPLACEMENT' && <ErpButton label="اضطراری بدون پوشش" tone="danger" onClick={() => { const reason = prompt('دلیل اضطراری:'); if (reason) run(() => securityAPI.markShiftEmergencyUncovered(slot.id, reason), 'وضعیت اضطراری ثبت شد.'); }} />}
+                      {slot.coverageStatus === 'NEEDS_REPLACEMENT' && <ErpButton label="اضطراری بدون پوشش" tone="danger" onClick={async () => { const reason = await askSecurityAction({ title: 'پوشش اضطراری', inputLabel: 'دلیل وضعیت اضطراری' }); if (reason) run(() => securityAPI.markShiftEmergencyUncovered(slot.id, reason), 'وضعیت اضطراری ثبت شد.'); }} />}
                       {slot.session?.status === 'ACTIVE' && <ErpButton label="بستن اجباری" tone="danger" onClick={() => openDraft('force-close', slot)} />}
                     </div>
                   </div>

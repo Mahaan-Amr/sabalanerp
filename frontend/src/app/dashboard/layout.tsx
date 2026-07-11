@@ -25,6 +25,7 @@ import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
 import { WorkspaceNavigation } from '@/components/WorkspaceNavigation';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import { dashboardAPI } from '@/lib/api';
+import { SecurityNoticeHost } from '@/components/SecurityNoticeHost';
 
 interface User {
   id: string;
@@ -260,6 +261,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   return (
     <div className="dashboard-shell min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+      <SecurityNoticeHost />
       {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
         <div 

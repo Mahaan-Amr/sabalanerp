@@ -34,6 +34,7 @@ import MissionAssignmentForm from '@/components/MissionAssignmentForm';
 import MobileSecurityDashboard from '@/components/MobileSecurityDashboard';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { securityAPI } from '@/lib/api';
+import { notifySecurity } from '@/components/SecurityNoticeHost';
 import PersianCalendar from '@/lib/persian-calendar';
 
 interface SecurityStats {
@@ -221,7 +222,7 @@ export default function SecurityDashboardPage() {
 
   const handleCheckIn = async () => {
     if (!selectedEmployee) {
-      alert('لطفا کارمند را انتخاب کنید');
+      notifySecurity('لطفا کارمند را انتخاب کنید', 'error');
       return;
     }
 
@@ -229,13 +230,13 @@ export default function SecurityDashboardPage() {
       setActionLoading(true);
       const response = await securityAPI.checkIn(selectedEmployee);
       if (response.data.success) {
-        alert('ورود با موفقیت ثبت شد');
+        notifySecurity('ورود با موفقیت ثبت شد');
         setSelectedEmployee('');
         fetchSecurityData();
       }
     } catch (requestError: any) {
       console.error('Check-in error:', requestError);
-      alert(requestError.response?.data?.error || 'خطا در ثبت عملیات');
+      notifySecurity(requestError.response?.data?.error || 'خطا در ثبت عملیات', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -243,7 +244,7 @@ export default function SecurityDashboardPage() {
 
   const handleCheckOut = async () => {
     if (!selectedEmployee) {
-      alert('لطفا کارمند را انتخاب کنید');
+      notifySecurity('لطفا کارمند را انتخاب کنید', 'error');
       return;
     }
 
@@ -251,13 +252,13 @@ export default function SecurityDashboardPage() {
       setActionLoading(true);
       const response = await securityAPI.checkOut(selectedEmployee);
       if (response.data.success) {
-        alert('خروج با موفقیت ثبت شد');
+        notifySecurity('خروج با موفقیت ثبت شد');
         setSelectedEmployee('');
         fetchSecurityData();
       }
     } catch (requestError: any) {
       console.error('Check-out error:', requestError);
-      alert(requestError.response?.data?.error || 'خطا در ثبت عملیات');
+      notifySecurity(requestError.response?.data?.error || 'خطا در ثبت عملیات', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -267,11 +268,11 @@ export default function SecurityDashboardPage() {
     try {
       setActionLoading(true);
       await securityAPI.createExceptionRequest(data);
-      alert('درخواست با موفقیت ثبت شد');
+      notifySecurity('درخواست با موفقیت ثبت شد');
       setShowExceptionForm(false);
       fetchExceptionRequests();
     } catch (requestError: any) {
-      alert(`خطا در ثبت عملیات: ${requestError.response?.data?.error || requestError.message}`);
+      notifySecurity(`خطا در ثبت عملیات: ${requestError.response?.data?.error || requestError.message}`, 'error');
     } finally {
       setActionLoading(false);
     }
@@ -281,11 +282,11 @@ export default function SecurityDashboardPage() {
     try {
       setActionLoading(true);
       await securityAPI.createMissionAssignment(data);
-      alert('ماموریت با موفقیت ثبت شد');
+      notifySecurity('ماموریت با موفقیت ثبت شد');
       setShowMissionForm(false);
       fetchMissionAssignments();
     } catch (requestError: any) {
-      alert(`خطا در ثبت عملیات: ${requestError.response?.data?.error || requestError.message}`);
+      notifySecurity(`خطا در ثبت عملیات: ${requestError.response?.data?.error || requestError.message}`, 'error');
     } finally {
       setActionLoading(false);
     }
@@ -301,7 +302,7 @@ export default function SecurityDashboardPage() {
       fetchSecurityData();
     } catch (requestError: any) {
       console.error('Error saving signature:', requestError);
-      alert(`خطا در ثبت عملیات: ${requestError.response?.data?.error || requestError.message}`);
+      notifySecurity(`خطا در ثبت عملیات: ${requestError.response?.data?.error || requestError.message}`, 'error');
     }
   };
 

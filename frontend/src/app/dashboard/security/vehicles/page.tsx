@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { FaBan, FaCamera, FaCarSide, FaCheck, FaClipboardList, FaClock, FaEdit, FaPlus, FaRedo, FaSearch, FaTrash, FaTruck, FaUserShield } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpSegmentedControl } from '@/components/erp';
 import { crmAPI, securityAPI } from '@/lib/api';
+import { askSecurityAction } from '@/components/SecurityNoticeHost';
 
 const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
 const labelClass = 'mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200';
@@ -221,7 +222,7 @@ export default function SecurityVehiclesPage() {
   };
 
   const removeFromQueue = async (turn: any) => {
-    const reason = window.prompt('دلیل خروج راننده از صف را وارد کنید:');
+    const reason = await askSecurityAction({ title: 'خروج از صف', inputLabel: 'دلیل خروج راننده از صف' });
     if (!reason?.trim()) return;
     try { await securityAPI.removeDriverFromQueue(turn.id, reason.trim()); await loadData(); }
     catch (err: any) { setError(err.response?.data?.error || 'خروج از صف ناموفق بود.'); }
@@ -238,7 +239,7 @@ export default function SecurityVehiclesPage() {
   };
 
   const returnToWaiting = async (turn: any) => {
-    const picked = window.prompt(`دلیل بازگشت به صف را وارد کنید:\n${returnToQueueReasons.join('\n')}`, returnToQueueReasons[0]);
+    const picked = await askSecurityAction({ title: 'بازگشت به صف', description: 'دلیل بازگشت را انتخاب کنید.', options: returnToQueueReasons });
     if (!picked?.trim()) return;
     try {
       await securityAPI.returnDriverToWaiting(turn.id, picked.trim());
@@ -250,7 +251,7 @@ export default function SecurityVehiclesPage() {
   };
 
   const deletePair = async (pair: any) => {
-    if (!window.confirm('این رکورد و تمام تصاویر آن حذف شود؟')) return;
+    if (!await askSecurityAction({ title: 'حذف رکورد', description: 'این رکورد و تمام تصاویر آن حذف شود؟' })) return;
     try { await securityAPI.deleteVehiclePair(pair.id); await loadData(); }
     catch (err: any) { setError(err.response?.data?.error || 'حذف رکورد ناموفق بود.'); }
   };

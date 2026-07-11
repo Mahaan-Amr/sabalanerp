@@ -12,6 +12,7 @@ import {
   FaEye
 } from 'react-icons/fa';
 import { securityAPI } from '@/lib/api';
+import { notifySecurity, askSecurityAction } from '@/components/SecurityNoticeHost';
 
 interface ExceptionRequest {
   id: string;
@@ -109,12 +110,12 @@ export default function ExceptionsPage() {
     try {
       const response = await securityAPI.approveExceptionRequest(id, notes);
       if (response.data.success) {
-        alert('درخواست با موفقیت تایید شد');
+        notifySecurity('درخواست با موفقیت تایید شد');
         fetchExceptionsData();
       }
     } catch (error: any) {
       console.error('Error approving exception:', error);
-      alert(error.response?.data?.error || 'خطا در ذخیره اطلاعات');
+      notifySecurity(error.response?.data?.error || 'خطا در ذخیره اطلاعات', 'error');
     }
   };
 
@@ -122,12 +123,12 @@ export default function ExceptionsPage() {
     try {
       const response = await securityAPI.rejectExceptionRequest(id, rejectionReason);
       if (response.data.success) {
-        alert('درخواست با موفقیت رد شد');
+        notifySecurity('درخواست با موفقیت رد شد');
         fetchExceptionsData();
       }
     } catch (error: any) {
       console.error('Error rejecting exception:', error);
-      alert(error.response?.data?.error || 'خطا در رد درخواست');
+      notifySecurity(error.response?.data?.error || 'خطا در رد درخواست', 'error');
     }
   };
 
@@ -135,12 +136,12 @@ export default function ExceptionsPage() {
     try {
       const response = await securityAPI.approveMissionAssignment(id);
       if (response.data.success) {
-        alert('ماموریت با موفقیت تایید شد');
+        notifySecurity('ماموریت با موفقیت تایید شد');
         fetchExceptionsData();
       }
     } catch (error: any) {
       console.error('Error approving mission:', error);
-      alert(error.response?.data?.error || 'خطا در ذخیره اطلاعات');
+      notifySecurity(error.response?.data?.error || 'خطا در ذخیره اطلاعات', 'error');
     }
   };
 
@@ -316,8 +317,8 @@ export default function ExceptionsPage() {
                               <FaCheck />
                             </button>
                             <button
-                              onClick={() => {
-                                const reason = prompt('دلیل رد:');
+                              onClick={async () => {
+                                const reason = await askSecurityAction({ title: 'رد درخواست', inputLabel: 'دلیل رد' });
                                 if (reason) handleRejectException(request.id, reason);
                               }}
                               className="glass-liquid-btn p-2 text-red-400"

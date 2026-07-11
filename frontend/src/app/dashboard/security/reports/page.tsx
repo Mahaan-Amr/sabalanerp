@@ -87,6 +87,7 @@ export default function ReportsPage() {
   const [shiftId, setShiftId] = useState('');
   const [departments, setDepartments] = useState<Department[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
+  const [exporting, setExporting] = useState<'pdf' | 'excel' | null>(null);
 
   useEffect(() => {
     fetchReportsData();
@@ -133,8 +134,27 @@ export default function ReportsPage() {
     }
   };
 
-  const handleExportReport = (format: 'pdf' | 'excel') => {
-    alert(`خروجی ${format.toUpperCase()} هنوز API واقعی ندارد.`);
+  const handleExportReport = async (format: 'pdf' | 'excel') => {
+    try {
+      setExporting(format);
+      const response = await securityAPI.exportSecurityReport(format, {
+        startDate: PersianCalendar.toGregorian(dateRange.startDate).toISOString(),
+        endDate: PersianCalendar.toGregorian(dateRange.endDate).toISOString(),
+        departmentId: departmentId || undefined,
+        shiftId: shiftId || undefined,
+        reportType
+      });
+      const url = URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = format === 'pdf' ? 'security-report.pdf' : 'security-report.xlsx';
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (requestError: any) {
+      setError(requestError.response?.data?.error || 'دریافت خروجی گزارش ناموفق بود.');
+    } finally {
+      setExporting(null);
+    }
   };
 
   if (loading) {
@@ -180,14 +200,14 @@ export default function ReportsPage() {
               className="glass-liquid-btn-primary px-4 py-2 flex items-center space-x-2 space-x-reverse"
             >
               <FaFilePdf />
-              <span>PDF</span>
+              <span>{exporting === 'pdf' ? 'در حال آماده‌سازی…' : 'PDF'}</span>
             </button>
             <button
               onClick={() => handleExportReport('excel')}
               className="glass-liquid-btn px-4 py-2 flex items-center space-x-2 space-x-reverse"
             >
               <FaFileExcel />
-              <span>Excel</span>
+              <span>{exporting === 'excel' ? 'در حال آماده‌سازی…' : 'Excel'}</span>
             </button>
           </div>
         </div>

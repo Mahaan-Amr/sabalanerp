@@ -131,6 +131,7 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
 };
 
 const vehiclePhotoDir = path.join(process.cwd(), 'uploads', 'security-vehicle-pairs');
+const shiftLogPhotoDir = path.join(process.cwd(), 'uploads', 'security-shift-log');
 const categoryByField: Record<string, SecurityVehiclePairPhotoCategory> = {
   driverLicensePhotos: SecurityVehiclePairPhotoCategory.DRIVER_LICENSE,
   vehicleCardPhotos: SecurityVehiclePairPhotoCategory.VEHICLE_CARD,
@@ -162,6 +163,10 @@ const vehiclePhotoUpload = multer({
   }),
   fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype) && ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(file.originalname).toLowerCase())),
   limits: { fileSize: 10 * 1024 * 1024 }
+});
+const shiftLogPhotoUpload = multer({
+  storage: multer.diskStorage({ destination: (_req, _file, cb) => { fs.mkdirSync(shiftLogPhotoDir, { recursive: true }); cb(null, shiftLogPhotoDir); }, filename: (_req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`) }),
+  fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)), limits: { fileSize: 10 * 1024 * 1024, files: 8 }
 });
 const uploadedFiles = (req: any) => (Array.isArray(req.files) ? req.files : Object.values(req.files || {}).flat()) as Express.Multer.File[];
 const photoCreateData = (req: any) => uploadedFiles(req).filter((file) => categoryByField[file.fieldname]).map((file) => ({
@@ -848,7 +853,7 @@ const slotInclude = {
 const effectivePersonnelId = (slot: any) => slot.replacementPersonnelId || slot.plannedPersonnelId;
 const getSelfPersonnel = (userId: string) => prisma.securityPersonnel.findUnique({ where: { userId } });
 const activeShiftLogInclude = {
-  logEntries: { include: { reportType: true }, orderBy: { rowNumber: 'asc' as const } },
+  logEntries: { include: { reportType: true, participants: { include: { user: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' as const } },
   patrolSessions: { orderBy: { startedAt: 'desc' as const } },
   slot: { include: slotInclude },
   personnel: { include: { user: true } }
@@ -1142,17 +1147,31 @@ router.get('/shift-log/active', protect, securityView, async (req: AuthRequest, 
   }
 });
 
-router.post('/shift-log/entries', protect, securityEdit, [
-  body('reportTypeId').isString().trim().notEmpty(),
-  body('description').isString().trim().notEmpty()
-], async (req: AuthRequest, res: Response) => {
+router.get('/shift-log/participants', protect, securityView, async (_req: AuthRequest, res: Response) => {
+  const users = await prisma.user.findMany({ where: { isActive: true }, select: { id: true, firstName: true, lastName: true, username: true, department: { select: { namePersian: true } } }, orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }] });
+  res.json({ success: true, data: users });
+});
+
+router.get('/shift-log/attachments/:id', protect, securityView, async (req: AuthRequest, res: Response) => {
+  const attachment = await prisma.securityShiftLogAttachment.findUnique({ where: { id: req.params.id }, include: { entry: { include: { session: true } } } });
+  if (!attachment) return res.status(404).json({ success: false, error: 'تصویر پیدا نشد.' });
+  const self = await getSelfPersonnel(req.user!.id);
+  const isOwner = self?.id === attachment.entry.session.personnelId;
+  if (!isOwner && req.user!.role !== 'ADMIN' && (req as any).workspacePermission !== WORKSPACE_PERMISSIONS.ADMIN) return res.status(403).json({ success: false, error: 'دسترسی به تصویر مجاز نیست.' });
+  res.type(attachment.mimeType).sendFile(path.join(shiftLogPhotoDir, attachment.storageName));
+});
+
+router.post('/shift-log/entries', protect, securityEdit, shiftLogPhotoUpload.array('images', 8), [body('reportTypeId').isString().trim().notEmpty(), body('description').optional({ values: 'falsy' }).isString()], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'نوع گزارش و توضیحات الزامی است.', details: errors.array() });
+    if (!errors.isEmpty()) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'نوع گزارش الزامی است.', details: errors.array() }); }
     const { session } = await getActiveShiftSessionForUser(req.user!.id);
-    if (!session) return res.status(409).json({ success: false, error: 'شیفت فعال برای ثبت گزارش پیدا نشد.' });
+    if (!session) { removeStoredFiles(uploadedFiles(req)); return res.status(409).json({ success: false, error: 'شیفت فعال برای ثبت گزارش پیدا نشد.' }); }
     const type = await prisma.securityInstantReportType.findFirst({ where: { id: req.body.reportTypeId, isActive: true } });
-    if (!type) return res.status(404).json({ success: false, error: 'نوع گزارش فعال پیدا نشد.' });
+    if (!type) { removeStoredFiles(uploadedFiles(req)); return res.status(404).json({ success: false, error: 'نوع گزارش فعال پیدا نشد.' }); }
+    const participantIds = [...new Set(JSON.parse(String(req.body.participantIds || '[]')))].filter((id: any) => typeof id === 'string');
+    const validParticipants = participantIds.length ? await prisma.user.count({ where: { id: { in: participantIds }, isActive: true } }) : 0;
+    if (validParticipants !== participantIds.length) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'یکی از کاربران انتخاب‌شده معتبر نیست.' }); }
     const entry = await prisma.$transaction(async (tx) => {
       const last = await tx.securityShiftLogEntry.findFirst({ where: { sessionId: session.id }, orderBy: { rowNumber: 'desc' } });
       return tx.securityShiftLogEntry.create({
@@ -1160,14 +1179,16 @@ router.post('/shift-log/entries', protect, securityEdit, [
           sessionId: session.id,
           reportTypeId: type.id,
           rowNumber: (last?.rowNumber || 0) + 1,
-          description: req.body.description.trim(),
-          createdBy: req.user!.id
+          description: String(req.body.description || '').trim() || null,
+          createdBy: req.user!.id,
+          participants: { create: participantIds.map((userId: string) => ({ userId })) },
+          attachments: { create: uploadedFiles(req).map((file) => ({ storageName: file.filename, originalName: file.originalname, mimeType: file.mimetype, size: file.size })) }
         },
-        include: { reportType: true }
+        include: { reportType: true, participants: { include: { user: true } }, attachments: true }
       });
     }, { isolationLevel: 'Serializable' });
     res.status(201).json({ success: true, data: entry });
-  } catch (error: any) {
+  } catch (error: any) { removeStoredFiles(uploadedFiles(req));
     console.error('Create shift log entry error:', error);
     res.status(500).json({ success: false, error: error.message || 'ثبت گزارش لحظه‌ای ناموفق بود.' });
   }

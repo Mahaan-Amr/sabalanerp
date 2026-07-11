@@ -20,7 +20,9 @@ export default function SecuritySupervisorReportsPage() {
   const [types, setTypes] = useState<any[]>([]);
   const [session, setSession] = useState<any>(null);
   const [personnel, setPersonnel] = useState<any>(null);
-  const [form, setForm] = useState({ reportTypeId: '', description: '' });
+  const [form, setForm] = useState({ reportTypeId: '', description: '', participantIds: [] as string[] });
+  const [participants, setParticipants] = useState<any[]>([]);
+  const [images, setImages] = useState<File[]>([]);
   const [patrolDescription, setPatrolDescription] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -33,15 +35,16 @@ export default function SecuritySupervisorReportsPage() {
     setLoading(true);
     setError('');
     try {
-      const [typesResponse, logResponse] = await Promise.all([
+      const [typesResponse, logResponse, participantResponse] = await Promise.all([
         securityAPI.getInstantReportTypes(false),
-        securityAPI.getActiveShiftLog(),
+        securityAPI.getActiveShiftLog(), securityAPI.getShiftLogParticipants(),
       ]);
       if (typesResponse.data.success) setTypes(typesResponse.data.data || []);
       if (logResponse.data.success) {
         setSession(logResponse.data.data.session);
         setPersonnel(logResponse.data.data.personnel);
       }
+      if (participantResponse.data.success) setParticipants(participantResponse.data.data || []);
     } catch (err: any) {
       setError(err.response?.data?.error || 'دریافت گزارش شیفت ناموفق بود.');
     } finally {
@@ -57,8 +60,14 @@ export default function SecuritySupervisorReportsPage() {
     setSaving(true);
     setError('');
     try {
-      await securityAPI.createShiftLogEntry(form);
-      setForm({ reportTypeId: '', description: '' });
+      const payload = new FormData();
+      payload.append('reportTypeId', form.reportTypeId);
+      payload.append('description', form.description);
+      payload.append('participantIds', JSON.stringify(form.participantIds));
+      images.forEach((image) => payload.append('images', image));
+      await securityAPI.createShiftLogEntry(payload);
+      setForm({ reportTypeId: '', description: '', participantIds: [] });
+      setImages([]);
       setMessage('گزارش لحظه‌ای ثبت شد.');
       await loadData();
     } catch (err: any) {
@@ -135,7 +144,7 @@ export default function SecuritySupervisorReportsPage() {
       ) : (
         <>
           <ErpSection title="ثبت گزارش لحظه‌ای">
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] lg:items-end">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               <label>
                 <span className={labelClass}>نوع گزارش لحظه‌ای</span>
                 <select className={inputClass} value={form.reportTypeId} onChange={(event) => setForm((current) => ({ ...current, reportTypeId: event.target.value }))}>
@@ -144,11 +153,19 @@ export default function SecuritySupervisorReportsPage() {
                 </select>
               </label>
               <label>
-                <span className={labelClass}>توضیحات</span>
+                <span className={labelClass}>افراد مرتبط</span>
+                <select multiple className={`${inputClass} min-h-28`} value={form.participantIds} onChange={(event) => setForm((current) => ({ ...current, participantIds: Array.from(event.target.selectedOptions).map((option) => option.value) }))}>
+                  {participants.map((user) => <option key={user.id} value={user.id}>{user.firstName} {user.lastName} {user.department?.namePersian ? `· ${user.department.namePersian}` : ''}</option>)}
+                </select>
+                <span className="mt-1 block text-xs text-slate-500">برای انتخاب چند نفر، کلید Ctrl یا ⌘ را نگه دارید.</span>
+              </label>
+              <label>
+                <span className={labelClass}>توضیحات (اختیاری)</span>
                 <textarea className={`${inputClass} min-h-12`} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
               </label>
-              <ErpButton label="ثبت گزارش" icon={FaPlus} onClick={createEntry} disabled={saving || !form.reportTypeId || !form.description.trim()} variant="solid" />
             </div>
+            <div className="mt-3 flex flex-wrap items-end gap-3"><label className="min-w-64 flex-1"><span className={labelClass}>افزودن عکس</span><input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => setImages(Array.from(event.target.files || []))} className="block w-full text-sm" /></label><ErpButton label="ثبت گزارش" icon={FaPlus} onClick={createEntry} disabled={saving || !form.reportTypeId} variant="solid" /></div>
+            {images.length > 0 && <div className="mt-3 flex flex-wrap gap-3">{images.map((image, index) => <div key={`${image.name}-${index}`} className="relative"><img src={URL.createObjectURL(image)} alt={image.name} className="h-20 w-20 rounded-lg object-cover" /><button type="button" className="absolute -right-2 -top-2 rounded-full bg-red-600 px-2 py-1 text-xs text-white" onClick={() => setImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>}
             {types.length === 0 && <p className="mt-3 text-sm text-amber-700">ابتدا نوع گزارش لحظه‌ای را در تنظیمات حراست تعریف کنید.</p>}
           </ErpSection>
 
@@ -195,7 +212,9 @@ export default function SecuritySupervisorReportsPage() {
                           <span className="font-semibold text-slate-900 dark:text-white">ردیف {entry.rowNumber.toLocaleString('fa-IR')}</span>
                           <ErpBadge tone={entry.status === 'VOIDED' ? 'danger' : 'info'}>{entry.status === 'VOIDED' ? 'باطل شده' : entry.reportType?.name}</ErpBadge>
                         </div>
-                        <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{entry.description}</p>
+                        {entry.description && <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{entry.description}</p>}
+                        {entry.participants?.length > 0 && <p className="mt-2 text-xs text-slate-500">افراد مرتبط: {entry.participants.map((item: any) => `${item.user.firstName} ${item.user.lastName}`).join('، ')}</p>}
+                        {entry.attachments?.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{entry.attachments.map((attachment: any) => <img key={attachment.id} src={`/api/security/shift-log/attachments/${attachment.id}`} alt={attachment.originalName} className="h-20 w-20 rounded-lg object-cover" />)}</div>}
                         <p className="mt-2 text-xs text-slate-500">ثبت: {dateTimeFa(entry.createdAt)}</p>
                         {entry.status === 'VOIDED' && <p className="mt-2 text-sm text-red-700 dark:text-red-300">دلیل ابطال: {entry.voidReason} · زمان ابطال: {dateTimeFa(entry.voidedAt)}</p>}
                       </div>

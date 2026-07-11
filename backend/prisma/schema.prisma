@@ -52,6 +52,7 @@ model User {
   requestedLoadingDrivers   LogisticsDriverRequest[] @relation("LogisticsDriverRequestRequestedBy")
   fulfilledLoadingDrivers   LogisticsDriverRequest[] @relation("LogisticsDriverRequestFulfilledBy")
   cancelledLoadingDrivers   LogisticsDriverRequest[] @relation("LogisticsDriverRequestCancelledBy")
+  instantReportParticipants SecurityShiftLogParticipant[]
 
   @@map("users")
 }
@@ -988,7 +989,7 @@ model SecurityShiftLogEntry {
   sessionId     String
   reportTypeId  String
   rowNumber     Int
-  description   String
+  description   String?
   status        SecurityShiftLogStatus   @default(ACTIVE)
   createdBy     String
   createdAt     DateTime                 @default(now())
@@ -997,12 +998,41 @@ model SecurityShiftLogEntry {
   voidReason    String?
   session       SecurityShiftSession     @relation(fields: [sessionId], references: [id], onDelete: Restrict)
   reportType    SecurityInstantReportType @relation(fields: [reportTypeId], references: [id], onDelete: Restrict)
+  participants  SecurityShiftLogParticipant[]
+  attachments   SecurityShiftLogAttachment[]
 
   @@unique([sessionId, rowNumber])
   @@index([sessionId, createdAt])
   @@index([reportTypeId])
   @@index([status])
   @@map("security_shift_log_entries")
+}
+
+model SecurityShiftLogParticipant {
+  id        String                @id @default(cuid())
+  entryId   String
+  userId    String
+  createdAt DateTime              @default(now())
+  entry     SecurityShiftLogEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([entryId, userId])
+  @@index([userId])
+  @@map("security_shift_log_participants")
+}
+
+model SecurityShiftLogAttachment {
+  id           String                @id @default(cuid())
+  entryId      String
+  storageName  String
+  originalName String
+  mimeType     String
+  size         Int
+  createdAt    DateTime              @default(now())
+  entry        SecurityShiftLogEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId])
+  @@map("security_shift_log_attachments")
 }
 
 model SecurityPatrolSession {

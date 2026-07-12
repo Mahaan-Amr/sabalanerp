@@ -136,6 +136,8 @@ export const WORKSPACE_CONFIG: Record<WORKSPACES, WorkspaceInfo> = {
   }
 };
 
+export const LAST_WORKSPACE_STORAGE_KEY = 'sabalan:lastWorkspace';
+
 // Context Types
 interface WorkspaceContextType {
   currentWorkspace: WORKSPACES | null;
@@ -264,8 +266,10 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
     
     if (workspace) {
       const workspaceConfig = WORKSPACE_CONFIG[workspace];
+      localStorage.setItem(LAST_WORKSPACE_STORAGE_KEY, workspace);
       router.push(workspaceConfig.path);
     } else {
+      localStorage.removeItem(LAST_WORKSPACE_STORAGE_KEY);
       router.push('/dashboard');
     }
   };
@@ -304,6 +308,7 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
   useEffect(() => {
     const workspace = determineCurrentWorkspace();
     setCurrentWorkspaceState(workspace);
+    if (workspace) localStorage.setItem(LAST_WORKSPACE_STORAGE_KEY, workspace);
 
     if (pathname.startsWith('/dashboard') && localStorage.getItem('token')) {
       loadUserPermissions();

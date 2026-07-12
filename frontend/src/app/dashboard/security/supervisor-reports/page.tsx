@@ -170,29 +170,21 @@ export default function SecuritySupervisorReportsPage() {
       ) : (
         <>
           <ErpSection title="ثبت گزارش لحظه‌ای" description="هر ردیف به شیفت فعال اضافه می‌شود و افراد مرتبط به صورت انتخابی کنار همان گزارش ذخیره می‌شوند.">
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-              <div className="space-y-4">
-                <label className="block">
+            {activePatrol && (
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+                <p className="text-sm font-semibold text-amber-800 dark:text-amber-100">
+                  گشت‌زنی فعال است؛ عکس‌ها را از همین گزارش لحظه‌ای به عنوان شواهد همان بازه ثبت کنید.
+                </p>
+              </div>
+            )}
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
+              <label className="block">
                 <span className={labelClass}>نوع گزارش لحظه‌ای</span>
                 <select className={inputClass} value={form.reportTypeId} onChange={(event) => setForm((current) => ({ ...current, reportTypeId: event.target.value }))}>
                   <option value="">انتخاب کنید</option>
                   {types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
                 </select>
               </label>
-                <label className="block">
-                <span className={labelClass}>توضیحات (اختیاری)</span>
-                <textarea className={`${inputClass} min-h-28 resize-y`} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
-              </label>
-                <label className="block">
-                  <span className={labelClass}>افزودن عکس</span>
-                  <div className="flex min-h-12 items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600 transition hover:border-[#074747]/40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                    <FaPaperclip className="h-4 w-4 text-[#074747] dark:text-teal-200" />
-                    <span className="font-medium">{images.length ? `${images.length.toLocaleString('fa-IR')} عکس انتخاب شده` : 'انتخاب عکس‌ها'}</span>
-                    <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => setImages(Array.from(event.target.files || []))} className="sr-only" />
-                  </div>
-                </label>
-              </div>
-
               <div className="space-y-3">
                 <div ref={participantPickerRef} className="relative">
                   <span className={labelClass}>افراد مرتبط</span>
@@ -257,6 +249,20 @@ export default function SecuritySupervisorReportsPage() {
                   )}
                 </div>
               </div>
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-4">
+              <label className="block">
+                <span className={labelClass}>توضیحات (اختیاری)</span>
+                <textarea className={`${inputClass} min-h-28 resize-y`} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
+              </label>
+              <label className="block">
+                <span className={labelClass}>افزودن عکس</span>
+                <div className="flex min-h-12 items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600 transition hover:border-[#074747]/40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                  <FaPaperclip className="h-4 w-4 text-[#074747] dark:text-teal-200" />
+                  <span className="font-medium">{images.length ? `${images.length.toLocaleString('fa-IR')} عکس انتخاب شده` : 'انتخاب عکس‌ها'}</span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => setImages(Array.from(event.target.files || []))} className="sr-only" />
+                </div>
+              </label>
             </div>
             {images.length > 0 && <div className="mt-3 flex flex-wrap gap-3">{images.map((image, index) => <div key={`${image.name}-${index}`} className="relative"><img src={URL.createObjectURL(image)} alt={image.name} className="h-20 w-20 rounded-lg object-cover" /><button type="button" className="absolute -right-2 -top-2 rounded-full bg-red-600 px-2 py-1 text-xs text-white" onClick={() => setImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>}
             <div className="mt-4 flex flex-wrap justify-end gap-2">

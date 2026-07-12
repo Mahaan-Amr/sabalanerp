@@ -442,7 +442,7 @@ export function ErpSegmentedControl<T extends string>({ options, value, onChange
 }) {
   if (!options.length) return null;
   return (
-    <div className="flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800">
+    <div className="flex gap-1 overflow-x-auto rounded-lg border border-slate-200 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800 sm:flex-wrap">
       {options.map((option) => {
         const Icon = option.icon;
         const active = option.value === value;
@@ -453,7 +453,7 @@ export function ErpSegmentedControl<T extends string>({ options, value, onChange
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
             className={cx(
-              'inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
+              'inline-flex min-h-10 flex-shrink-0 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
               active
                 ? 'bg-white text-[#074747] shadow-sm dark:bg-slate-900 dark:text-teal-200'
                 : 'text-slate-600 hover:bg-white/70 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/70 dark:hover:text-white'

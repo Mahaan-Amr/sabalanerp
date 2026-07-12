@@ -87,10 +87,11 @@ The Security and Enforcement Workspace manages all security operations in Soblan
 - **Settings**: Workspace-specific settings
 
 ### Workspace Theme
-- **Primary Color**: Red (#ef4444)
-- **Secondary Color**: Rose (#f43f5e)
-- **Accent Color**: Pink (#ec4899)
-- **Design**: Glass morphism with security-focused elements
+- **Design System**: Sabalan ERP shared components (`ErpPage`, `ErpSection`, `ErpCard`)
+- **Primary Action Color**: Sabalan teal
+- **Surfaces**: Neutral light/dark surfaces with RTL mobile-first spacing
+- **Status Colors**: Semantic tones only, such as green for present/success, red for danger/absence, and amber for pending/late
+- **Design**: Consistent with the shared Sabalan ERP workspace shell; older red/rose/pink and glass-only security styling is deprecated
 
 ## 🔗 Integration Points
 

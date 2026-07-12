@@ -25,7 +25,7 @@ import {
 } from 'react-icons/fa';
 import { ErpActionGrid, ErpBadge, ErpEmptyState, ErpFieldView, ErpLoading, ErpPage, ErpSection, ErpTwoColumn, type ErpMetric, type ErpTone } from '@/components/erp';
 import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
-import { useWorkspace, WORKSPACE_CONFIG } from '@/contexts/WorkspaceContext';
+import { LAST_WORKSPACE_STORAGE_KEY, useWorkspace, WORKSPACE_CONFIG, WORKSPACES } from '@/contexts/WorkspaceContext';
 import { dashboardAPI } from '@/lib/api';
 import { formatPrice } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -115,12 +115,26 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!currentUser || workspaceLoading) return;
 
-    if (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANAGER') {
-      const firstWorkspace = accessibleWorkspaces[0];
-      if (firstWorkspace) {
-        router.replace(firstWorkspace.path);
+    if (accessibleWorkspaces.length === 1) {
+      router.replace(accessibleWorkspaces[0].path);
+      return;
+    }
+
+    if (accessibleWorkspaces.length > 1) {
+      const lastWorkspace = localStorage.getItem(LAST_WORKSPACE_STORAGE_KEY) as WORKSPACES | null;
+      const lastAccessibleWorkspace = accessibleWorkspaces.find((workspace) => workspace.id === lastWorkspace);
+      if (lastAccessibleWorkspace) {
+        router.replace(lastAccessibleWorkspace.path);
         return;
       }
+
+      if (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANAGER') {
+        router.replace(accessibleWorkspaces[0].path);
+        return;
+      }
+    }
+
+    if (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANAGER') {
       setLoading(false);
       return;
     }

@@ -843,6 +843,10 @@ _Avoid_: using a static date input, showing a guard the entire team's rota, or o
 The workspace feedback pattern: inline validation for field-level corrections, non-blocking in-app notices for routine outcomes, and explicit in-app confirmation or reason dialogs for destructive or audited actions.
 _Avoid_: native browser alerts or prompts, generic errors detached from their operation, or confirmations for harmless navigation
 
+**طراحی عملیاتی موبایل حراست**:
+Core حراست operational pages must follow Sabalan ERP's shared design system, mobile-first RTL layout, teal primary actions, neutral surfaces, and semantic status tones. The deepest mobile-first treatment belongs to داشبورد حراست, حضور و غیاب, گزارش شیفت, خودرویی, and شیفت‌ها; manager/config/report pages remain responsive and consistent without becoming one-handed field workflows.
+_Avoid_: reviving the older red/rose security theme, table-only mobile attendance, cramped side-by-side fields that break Persian labels, or hiding the core action list behind horizontal scrolling
+
 **خروجی گزارش‌های حراست**:
 A PDF or Excel rendition of the currently filtered aggregate security report, containing its summary metrics and daily attendance breakdown. It is not an export of shift logs, personal schedules, or other operational records whose report layouts have not been defined.
 _Avoid_: placeholder export buttons, ignoring active report filters, or exporting sensitive operational data under an ambiguous report name

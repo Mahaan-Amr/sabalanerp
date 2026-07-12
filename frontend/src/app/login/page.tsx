@@ -65,13 +65,7 @@ export default function LoginPage() {
         localStorage.setItem('token', data.data.token);
         localStorage.setItem('user', JSON.stringify(data.data.user));
         
-        // Role-based redirection
-        const userRole = data.data.user.role;
-        if (userRole === 'SALES') {
-          router.push('/dashboard/sales');
-        } else {
-          router.push('/dashboard');
-        }
+        router.push('/dashboard');
       } else {
         setErrors({ general: data.error || 'ورود ناموفق بود' });
       }

@@ -31,7 +31,6 @@ import {
 import DigitalSignature from '@/components/DigitalSignature';
 import ExceptionRequestForm from '@/components/ExceptionRequestForm';
 import MissionAssignmentForm from '@/components/MissionAssignmentForm';
-import MobileSecurityDashboard from '@/components/MobileSecurityDashboard';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { securityAPI } from '@/lib/api';
 import { notifySecurity } from '@/components/SecurityNoticeHost';
@@ -164,7 +163,6 @@ export default function SecurityDashboardPage() {
   const [missionAssignments, setMissionAssignments] = useState<any[]>([]);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<any>(null);
-  const [isMobile, setIsMobile] = useState(false);
 
   const fetchSecurityData = async () => {
     try {
@@ -203,13 +201,6 @@ export default function SecurityDashboardPage() {
       console.error('Error fetching mission assignments:', requestError);
     }
   };
-
-  useEffect(() => {
-    const updateMobileState = () => setIsMobile(window.innerWidth < 768);
-    updateMobileState();
-    window.addEventListener('resize', updateMobileState);
-    return () => window.removeEventListener('resize', updateMobileState);
-  }, []);
 
   useEffect(() => {
     fetchSecurityData();
@@ -325,8 +316,6 @@ export default function SecurityDashboardPage() {
       </ErpPage>
     );
   }
-
-  if (isMobile) return <MobileSecurityDashboard />;
 
   const attendanceRows = dailyAttendance?.attendanceSummary || [];
   const currentShift = stats?.currentShift;

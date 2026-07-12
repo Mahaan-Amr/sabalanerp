@@ -28,6 +28,8 @@ model User {
   createdContracts          Contract[]            @relation("ContractCreatedBy")
   signedContracts           Contract[]            @relation("ContractSignedBy")
   approvedExceptions        ExceptionRequest[]    @relation("ExceptionApprover")
+  cancelledExceptions       ExceptionRequest[]    @relation("ExceptionCanceller")
+  createdExceptionRequests  ExceptionRequest[]    @relation("ExceptionCreatedBy")
   exceptionRequests         ExceptionRequest[]    @relation("ExceptionEmployee")
   rejectedExceptions        ExceptionRequest[]    @relation("ExceptionRejecter")
   approvedMissions          MissionAssignment[]   @relation("MissionApprover")
@@ -74,6 +76,7 @@ model Personnel {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   attendanceRecords AttendanceRecord[]
+  instantReportParticipants SecurityShiftLogParticipant[]
   user              User?
   department        Department?        @relation(fields: [departmentId], references: [id], onDelete: SetNull)
 
@@ -424,6 +427,8 @@ model AttendanceRecord {
 model ExceptionRequest {
   id                 String          @id @default(cuid())
   employeeId         String
+  requestedBy        String?
+  leaveType          String?
   exceptionType      ExceptionType
   status             ExceptionStatus @default(PENDING)
   startDate          DateTime
@@ -440,12 +445,19 @@ model ExceptionRequest {
   approvedAt         DateTime?
   rejectedAt         DateTime?
   rejectionReason    String?
+  cancelledBy        String?
+  cancelledAt        DateTime?
+  cancellationReason String?
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
   approver           User?           @relation("ExceptionApprover", fields: [approvedBy], references: [id])
+  canceller          User?           @relation("ExceptionCanceller", fields: [cancelledBy], references: [id])
+  creator            User?           @relation("ExceptionCreatedBy", fields: [requestedBy], references: [id])
   employee           User            @relation("ExceptionEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
   rejecter           User?           @relation("ExceptionRejecter", fields: [rejectedBy], references: [id])
 
+  @@index([requestedBy])
+  @@index([status, startDate])
   @@map("exception_requests")
 }
 
@@ -1165,13 +1177,17 @@ model SecurityShiftLogEntry {
 model SecurityShiftLogParticipant {
   id        String                @id @default(cuid())
   entryId   String
-  userId    String
+  userId    String?
+  personnelId String?
   createdAt DateTime              @default(now())
   entry     SecurityShiftLogEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
-  user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User?                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  personnel Personnel?            @relation(fields: [personnelId], references: [id], onDelete: Cascade)
 
   @@unique([entryId, userId])
+  @@unique([entryId, personnelId])
   @@index([userId])
+  @@index([personnelId])
   @@map("security_shift_log_participants")
 }
 
@@ -2002,6 +2018,7 @@ enum ExceptionStatus {
   PENDING
   APPROVED
   REJECTED
+  CANCELLED
   EXPIRED
 }
 

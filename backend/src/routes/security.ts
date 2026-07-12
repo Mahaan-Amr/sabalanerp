@@ -896,7 +896,7 @@ const slotInclude = {
 const effectivePersonnelId = (slot: any) => slot.replacementPersonnelId || slot.plannedPersonnelId;
 const getSelfPersonnel = (userId: string) => prisma.securityPersonnel.findUnique({ where: { userId } });
 const activeShiftLogInclude = {
-  logEntries: { include: { reportType: true, participants: { include: { user: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' as const } },
+  logEntries: { include: { reportType: true, participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' as const } },
   patrolSessions: { orderBy: { startedAt: 'desc' as const } },
   slot: { include: slotInclude },
   personnel: { include: { user: true } }
@@ -1191,8 +1191,12 @@ router.get('/shift-log/active', protect, securityView, async (req: AuthRequest, 
 });
 
 router.get('/shift-log/participants', protect, securityView, async (_req: AuthRequest, res: Response) => {
-  const users = await prisma.user.findMany({ where: { isActive: true }, select: { id: true, firstName: true, lastName: true, username: true, department: { select: { namePersian: true } } }, orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }] });
-  res.json({ success: true, data: users });
+  const personnel = await prisma.personnel.findMany({
+    where: { isActive: true },
+    select: { id: true, firstName: true, lastName: true, department: { select: { namePersian: true } }, user: { select: { username: true } } },
+    orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }]
+  });
+  res.json({ success: true, data: personnel });
 });
 
 router.get('/shift-log/attachments/:id', protect, securityView, async (req: AuthRequest, res: Response) => {
@@ -1213,8 +1217,8 @@ router.post('/shift-log/entries', protect, securityEdit, shiftLogPhotoUpload.arr
     const type = await prisma.securityInstantReportType.findFirst({ where: { id: req.body.reportTypeId, isActive: true } });
     if (!type) { removeStoredFiles(uploadedFiles(req)); return res.status(404).json({ success: false, error: 'نوع گزارش فعال پیدا نشد.' }); }
     const participantIds = [...new Set(JSON.parse(String(req.body.participantIds || '[]')))].filter((id: any) => typeof id === 'string');
-    const validParticipants = participantIds.length ? await prisma.user.count({ where: { id: { in: participantIds }, isActive: true } }) : 0;
-    if (validParticipants !== participantIds.length) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'یکی از کاربران انتخاب‌شده معتبر نیست.' }); }
+    const validParticipants = participantIds.length ? await prisma.personnel.count({ where: { id: { in: participantIds }, isActive: true } }) : 0;
+    if (validParticipants !== participantIds.length) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'یکی از پرسنل انتخاب‌شده معتبر نیست.' }); }
     const entry = await prisma.$transaction(async (tx) => {
       const last = await tx.securityShiftLogEntry.findFirst({ where: { sessionId: session.id }, orderBy: { rowNumber: 'desc' } });
       return tx.securityShiftLogEntry.create({
@@ -1224,10 +1228,10 @@ router.post('/shift-log/entries', protect, securityEdit, shiftLogPhotoUpload.arr
           rowNumber: (last?.rowNumber || 0) + 1,
           description: String(req.body.description || '').trim() || null,
           createdBy: req.user!.id,
-          participants: { create: participantIds.map((userId: string) => ({ userId })) },
+          participants: { create: participantIds.map((personnelId: string) => ({ personnelId })) },
           attachments: { create: uploadedFiles(req).map((file) => ({ storageName: file.filename, originalName: file.originalname, mimeType: file.mimetype, size: file.size })) }
         },
-        include: { reportType: true, participants: { include: { user: true } }, attachments: true }
+        include: { reportType: true, participants: { include: { user: true, personnel: true } }, attachments: true }
       });
     }, { isolationLevel: 'Serializable' });
     res.status(201).json({ success: true, data: entry });
@@ -2283,11 +2287,172 @@ router.get('/reports/security-personnel/:id/shift-history', protect, securityAdm
     const endDate = startDate && requestedEnd && requestedEnd < startDate ? startDate : requestedEnd;
     const slots = await prisma.securityShiftPlanSlot.findMany({
       where: { ...(startDate && endDate ? { startsAt: { lt: addDays(endDate, 1) }, endsAt: { gt: startDate } } : {}), session: { status: { in: [SecurityShiftSessionStatus.CLOSED, SecurityShiftSessionStatus.FORCE_CLOSED] } }, OR: [{ plannedPersonnelId: personnel.id }, { replacementPersonnelId: personnel.id }, { temporaryCoverage: { some: { personnelId: personnel.id } } }] },
-      include: { plan: { select: { title: true } }, plannedPersonnel: { include: { user: true } }, replacementPersonnel: { include: { user: true } }, attendance: { where: { personnelId: personnel.id } }, temporaryCoverage: { include: { personnel: { include: { user: true } } } }, session: { include: { logEntries: { include: { reportType: true, participants: { include: { user: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' } }, patrolSessions: { orderBy: { startedAt: 'asc' } } } } },
+      include: { plan: { select: { title: true } }, plannedPersonnel: { include: { user: true } }, replacementPersonnel: { include: { user: true } }, attendance: { where: { personnelId: personnel.id } }, temporaryCoverage: { include: { personnel: { include: { user: true } } } }, session: { include: { logEntries: { include: { reportType: true, participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' } }, patrolSessions: { orderBy: { startedAt: 'asc' } } } } },
       orderBy: { session: { endedAt: 'desc' } }
     });
     res.json({ success: true, data: { personnel: { id: personnel.id, name: `${personnel.user.firstName} ${personnel.user.lastName}`.trim() || personnel.user.username, shift: personnel.shift.namePersian }, shifts: slots } });
   } catch (error: any) { res.status(500).json({ success: false, error: error.message || 'دریافت تاریخچه شیفت ناموفق بود.' }); }
+});
+
+const securityEscapeHtml = (value: unknown) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
+
+const securityPublicAssetPath = (...segments: string[]) => {
+  const candidates = [
+    path.resolve(process.cwd(), 'public', ...segments),
+    path.resolve(process.cwd(), 'backend', 'public', ...segments),
+    path.resolve(process.cwd(), '..', 'backend', 'public', ...segments)
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
+};
+
+const securityFileToDataUri = (filePath: string, mimeType: string) =>
+  fs.existsSync(filePath) ? `data:${mimeType};base64,${fs.readFileSync(filePath).toString('base64')}` : '';
+
+const securityPdfStyles = () => {
+  const yekanRegular = securityFileToDataUri(securityPublicAssetPath('yekan-bakh', 'YekanBakh-Regular.woff2'), 'font/woff2');
+  const yekanBold = securityFileToDataUri(securityPublicAssetPath('yekan-bakh', 'YekanBakh-Bold.woff2'), 'font/woff2');
+  return `
+    <style>
+      @font-face{font-family:'Yekan Bakh';src:url('${yekanRegular}') format('woff2');font-weight:400}
+      @font-face{font-family:'Yekan Bakh';src:url('${yekanBold}') format('woff2');font-weight:700}
+      *{box-sizing:border-box}
+      body{margin:0;color:#172033;font-family:'Yekan Bakh',Tahoma,Arial,sans-serif;direction:rtl;font-size:11px;line-height:1.75}
+      .sheet{padding:6mm}
+      .header{border:1px solid #d8dee9;border-radius:8px;padding:10px 12px;margin-bottom:10px;display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+      h1{margin:0;color:#074747;font-size:18px}
+      h2{margin:12px 0 7px;color:#074747;font-size:13px}
+      h3{margin:8px 0 5px;font-size:11px}
+      .meta{color:#475569;font-size:10px}
+      .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px}
+      .card{border:1px solid #e2e8f0;border-radius:8px;padding:7px;background:#f8fafc}
+      .card strong{display:block;color:#074747;font-size:14px}
+      table{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:8px}
+      th,td{border:1px solid #d1d5db;padding:5px;vertical-align:top;word-break:break-word}
+      th{background:#edf7f6;font-weight:700;color:#074747}
+      .shift{border:1px solid #d8dee9;border-radius:8px;padding:8px;margin-bottom:9px;break-inside:avoid}
+      .muted{color:#64748b}
+      .badge{display:inline-block;border-radius:999px;padding:2px 7px;background:#e2e8f0;color:#334155;font-size:9px}
+      .badge.force{background:#fee2e2;color:#991b1b}
+      .note{background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px;margin:5px 0}
+    </style>
+  `;
+};
+
+const securityName = (value: any) => `${value?.firstName || ''} ${value?.lastName || ''}`.trim() || value?.username || '-';
+const participantDisplayName = (participant: any) => securityName(participant.personnel || participant.user);
+const formatSecurityDateTime = (value: unknown) => value ? new Date(String(value)).toLocaleString('fa-IR') : '-';
+
+router.get('/reports/security-personnel-performance.pdf', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const startDate = parseDayQuery(req.query.startDate);
+    const requestedEnd = parseDayQuery(req.query.endDate, startDate);
+    const endDate = requestedEnd < startDate ? startDate : requestedEnd;
+    const rangeEnd = addDays(endDate, 1);
+    const personnelId = String(req.query.personnelId || '').trim() || undefined;
+    const shiftId = String(req.query.shiftId || '').trim() || undefined;
+    const coverageStatus = String(req.query.coverageStatus || '').trim() || undefined;
+
+    const slots = await prisma.securityShiftPlanSlot.findMany({
+      where: {
+        startsAt: { lt: rangeEnd },
+        endsAt: { gt: startDate },
+        ...(coverageStatus ? { coverageStatus: coverageStatus as any } : {}),
+        session: { status: { in: [SecurityShiftSessionStatus.CLOSED, SecurityShiftSessionStatus.FORCE_CLOSED] } },
+        ...(shiftId ? { plannedPersonnel: { shiftId } } : {}),
+        ...(personnelId ? { OR: [{ plannedPersonnelId: personnelId }, { replacementPersonnelId: personnelId }, { temporaryCoverage: { some: { personnelId } } }] } : {})
+      },
+      include: {
+        plan: { select: { title: true } },
+        plannedPersonnel: { include: { user: true, shift: true } },
+        replacementPersonnel: { include: { user: true, shift: true } },
+        attendance: true,
+        temporaryCoverage: { include: { personnel: { include: { user: true, shift: true } } } },
+        session: {
+          include: {
+            personnel: { include: { user: true, shift: true } },
+            logEntries: {
+              include: { reportType: true, participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } } },
+              orderBy: { rowNumber: 'asc' }
+            },
+            patrolSessions: { include: { personnel: { include: { user: true } } }, orderBy: { startedAt: 'asc' } }
+          }
+        }
+      },
+      orderBy: { startsAt: 'asc' }
+    });
+
+    const totals = {
+      shifts: slots.length,
+      forceClosed: slots.filter((slot) => slot.session?.status === SecurityShiftSessionStatus.FORCE_CLOSED).length,
+      logs: slots.reduce((sum, slot) => sum + (slot.session?.logEntries.length || 0), 0),
+      patrols: slots.reduce((sum, slot) => sum + (slot.session?.patrolSessions.length || 0), 0)
+    };
+
+    const rangeLabel = `${startDate.toLocaleDateString('fa-IR')} تا ${endDate.toLocaleDateString('fa-IR')}`;
+    const shiftHtml = slots.map((slot) => {
+      const session = slot.session;
+      const attendance = slot.attendance.find((item) => item.personnelId === session?.personnelId);
+      const statusLabel = session?.status === SecurityShiftSessionStatus.FORCE_CLOSED ? 'بسته‌شده توسط مدیر' : 'تکمیل‌شده';
+      const temporaryNames = slot.temporaryCoverage.map((coverage) => securityName(coverage.personnel.user)).join('، ') || '-';
+      const logs = session?.logEntries.map((entry) => `
+        <tr>
+          <td>${entry.rowNumber.toLocaleString('fa-IR')}</td>
+          <td>${securityEscapeHtml(entry.reportType.name)}${entry.reportType.description ? `<div class="muted">${securityEscapeHtml(entry.reportType.description)}</div>` : ''}</td>
+          <td>${securityEscapeHtml(entry.description || '-')}</td>
+          <td>${entry.participants.map(participantDisplayName).map(securityEscapeHtml).join('، ') || '-'}</td>
+          <td>${formatSecurityDateTime(entry.createdAt)}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="5" class="muted">گزارش لحظه‌ای ثبت نشده است.</td></tr>';
+      const patrols = session?.patrolSessions.map((patrol) => `
+        <tr><td>${securityName(patrol.personnel.user)}</td><td>${formatSecurityDateTime(patrol.startedAt)}</td><td>${formatSecurityDateTime(patrol.endedAt)}</td><td>${securityEscapeHtml(patrol.description || '-')}</td></tr>
+      `).join('') || '<tr><td colspan="4" class="muted">گشت‌زنی ثبت نشده است.</td></tr>';
+
+      return `
+        <section class="shift">
+          <h2>${securityEscapeHtml(securityName(session?.personnel.user))} <span class="badge ${session?.status === SecurityShiftSessionStatus.FORCE_CLOSED ? 'force' : ''}">${statusLabel}</span></h2>
+          <table>
+            <tbody>
+              <tr><th>بازه برنامه</th><td>${formatSecurityDateTime(slot.startsAt)} تا ${formatSecurityDateTime(slot.endsAt)}</td><th>بازه واقعی</th><td>${formatSecurityDateTime(session?.startedAt)} تا ${formatSecurityDateTime(session?.endedAt)}</td></tr>
+              <tr><th>شیفت</th><td>${securityEscapeHtml(slot.plannedPersonnel.shift.namePersian)}</td><th>برنامه</th><td>${securityEscapeHtml(slot.plan.title)}</td></tr>
+              <tr><th>نیروی برنامه‌ریزی‌شده</th><td>${securityEscapeHtml(securityName(slot.plannedPersonnel.user))}</td><th>جایگزین</th><td>${securityEscapeHtml(securityName(slot.replacementPersonnel?.user))}</td></tr>
+              <tr><th>پوشش موقت</th><td>${securityEscapeHtml(temporaryNames)}</td><th>تاخیر</th><td>${(attendance?.delayMinutes || 0).toLocaleString('fa-IR')} دقیقه</td></tr>
+            </tbody>
+          </table>
+          ${session?.closureSummary ? `<div class="note"><strong>خلاصه پایان:</strong> ${securityEscapeHtml(session.closureSummary)}</div>` : ''}
+          <h3>گزارش‌های لحظه‌ای</h3>
+          <table><thead><tr><th>ردیف</th><th>نوع گزارش</th><th>شرح رویداد</th><th>افراد مرتبط</th><th>زمان ثبت</th></tr></thead><tbody>${logs}</tbody></table>
+          <h3>گشت‌زنی‌ها</h3>
+          <table><thead><tr><th>نیرو</th><th>شروع</th><th>پایان</th><th>توضیحات</th></tr></thead><tbody>${patrols}</tbody></table>
+        </section>
+      `;
+    }).join('') || '<p class="muted">شیفت پایان‌یافته‌ای در این بازه وجود ندارد.</p>';
+
+    const html = `
+      ${securityPdfStyles()}
+      <div class="sheet">
+        <header class="header">
+          <div><h1>گزارش عملکرد نیروهای حراست</h1><div class="meta">بازه: ${securityEscapeHtml(rangeLabel)} | زمان تولید: ${formatSecurityDateTime(new Date())}</div></div>
+          <div class="meta">فقط شیفت‌های پایان‌یافته در این خروجی آمده‌اند.</div>
+        </header>
+        <div class="cards">
+          <div class="card"><span>شیفت پایان‌یافته</span><strong>${totals.shifts.toLocaleString('fa-IR')}</strong></div>
+          <div class="card"><span>بسته‌شده مدیر</span><strong>${totals.forceClosed.toLocaleString('fa-IR')}</strong></div>
+          <div class="card"><span>گزارش لحظه‌ای</span><strong>${totals.logs.toLocaleString('fa-IR')}</strong></div>
+          <div class="card"><span>گشت‌زنی</span><strong>${totals.patrols.toLocaleString('fa-IR')}</strong></div>
+        </div>
+        ${shiftHtml}
+      </div>
+    `;
+    const pdfPath = await generatePdfFromHtml({ fileName: `security-personnel-performance-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
+    res.download(pdfPath, 'security-personnel-performance.pdf', () => fs.unlink(pdfPath, () => undefined));
+  } catch (error) {
+    console.error('Export security personnel performance PDF error:', error);
+    res.status(500).json({ success: false, error: 'ساخت PDF عملکرد نیروهای حراست ناموفق بود.' });
+  }
 });
 
 // Aggregate exports are intentionally limited to operational report users (edit/admin).
@@ -2323,8 +2488,24 @@ router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, re
       res.setHeader('Content-Disposition', 'attachment; filename="security-report.xlsx"');
       return res.send(file);
     }
-    const rows = trend.map((day) => `<tr>${Object.values(day).map((value) => `<td>${value}</td>`).join('')}</tr>`).join('');
-    const pdfPath = await generatePdfFromHtml({ fileName: `security-report-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: `<style>body{font-size:12px;color:#172033}h1{color:#074747}table{width:100%;border-collapse:collapse}td,th{border:1px solid #d8dee9;padding:6px;text-align:center}</style><h1>${title}</h1><p>زمان تولید: ${generatedAt}</p><p>کل نفر-روز: ${totals.total} | حاضر: ${totals.present} | غایب: ${totals.absent} | تأخیر: ${totals.late}</p><table><thead><tr>${Object.keys(trend[0] || {}).map((key) => `<th>${key}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>` });
+    const rows = trend.map((day) => `<tr>${Object.values(day).map((value) => `<td>${securityEscapeHtml(value)}</td>`).join('')}</tr>`).join('');
+    const htmlContent = `
+      ${securityPdfStyles()}
+      <div class="sheet">
+        <header class="header">
+          <div><h1>${securityEscapeHtml(title)}</h1><div class="meta">زمان تولید: ${securityEscapeHtml(generatedAt)}</div></div>
+          <div class="meta">خروجی حضور و غیاب کارکنان</div>
+        </header>
+        <div class="cards">
+          <div class="card"><span>کل نفر-روز</span><strong>${totals.total.toLocaleString('fa-IR')}</strong></div>
+          <div class="card"><span>حاضر</span><strong>${totals.present.toLocaleString('fa-IR')}</strong></div>
+          <div class="card"><span>غایب</span><strong>${totals.absent.toLocaleString('fa-IR')}</strong></div>
+          <div class="card"><span>تأخیر</span><strong>${totals.late.toLocaleString('fa-IR')}</strong></div>
+        </div>
+        <table><thead><tr>${Object.keys(trend[0] || {}).map((key) => `<th>${securityEscapeHtml(key)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
+      </div>
+    `;
+    const pdfPath = await generatePdfFromHtml({ fileName: `security-report-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent, margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
     res.download(pdfPath, 'security-report.pdf', () => fs.unlink(pdfPath, () => undefined));
   } catch (error) {
     console.error('Export security report error:', error);

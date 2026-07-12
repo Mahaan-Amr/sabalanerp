@@ -19,6 +19,7 @@ import customerRoutes from './routes/customers';
 import departmentRoutes from './routes/departments';
 import personnelRoutes from './routes/personnel';
 import dashboardRoutes from './routes/dashboard';
+import personalRoutes from './routes/personal';
 import securityRoutes from './routes/security';
 import sabalanCalendarRoutes from './routes/sabalan-calendar';
 
@@ -117,6 +118,7 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/personnel', personnelRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/personal', personalRoutes);
 app.use('/api/sabalan-calendar', sabalanCalendarRoutes);
 
 // Workspace-specific routes

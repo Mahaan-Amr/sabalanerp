@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FaBan, FaCheck, FaChevronDown, FaClipboardCheck, FaClock, FaPaperclip, FaPlus, FaRedo, FaRoute, FaStop, FaTimes, FaUserPlus } from 'react-icons/fa';
+import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
 import { securityAPI } from '@/lib/api';
 import { askSecurityAction } from '@/components/SecurityNoticeHost';
@@ -15,8 +16,9 @@ const durationMinutes = (start?: string, end?: string | null) => {
   const to = end ? new Date(end).getTime() : Date.now();
   return Math.max(0, Math.floor((to - new Date(start).getTime()) / 60000));
 };
-const participantName = (user: any) => `${user.firstName} ${user.lastName}`;
-const participantMeta = (user: any) => user.department?.namePersian || user.position || '';
+const participantName = (person: any) => `${person.firstName} ${person.lastName}`.trim() || person.username || '-';
+const participantMeta = (person: any) => person.department?.namePersian || person.position || person.user?.username || '';
+const logParticipantName = (participant: any) => participantName(participant.personnel || participant.user);
 
 export default function SecuritySupervisorReportsPage() {
   const [types, setTypes] = useState<any[]>([]);
@@ -34,6 +36,7 @@ export default function SecuritySupervisorReportsPage() {
   const participantPickerRef = useRef<HTMLDivElement>(null);
 
   const activePatrol = useMemo(() => session?.patrolSessions?.find((patrol: any) => patrol.status === 'ACTIVE'), [session]);
+  const selectedType = useMemo(() => types.find((type) => type.id === form.reportTypeId), [types, form.reportTypeId]);
   const selectedParticipants = useMemo(
     () => participants.filter((user) => form.participantIds.includes(user.id)),
     [form.participantIds, participants]
@@ -180,10 +183,15 @@ export default function SecuritySupervisorReportsPage() {
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
               <label className="block">
                 <span className={labelClass}>نوع گزارش لحظه‌ای</span>
-                <select className={inputClass} value={form.reportTypeId} onChange={(event) => setForm((current) => ({ ...current, reportTypeId: event.target.value }))}>
-                  <option value="">انتخاب کنید</option>
-                  {types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
-                </select>
+                <EnhancedDropdown
+                  value={form.reportTypeId}
+                  onChange={(reportTypeId) => setForm((current) => ({ ...current, reportTypeId }))}
+                  placeholder="انتخاب کنید"
+                  options={types.map((type) => ({ value: type.id, label: type.name }))}
+                  searchable
+                  required
+                />
+                {selectedType?.description && <p className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">{selectedType.description}</p>}
               </label>
               <div className="space-y-3">
                 <div ref={participantPickerRef} className="relative">
@@ -314,8 +322,9 @@ export default function SecuritySupervisorReportsPage() {
                           <span className="font-semibold text-slate-900 dark:text-white">ردیف {entry.rowNumber.toLocaleString('fa-IR')}</span>
                           <ErpBadge tone={entry.status === 'VOIDED' ? 'danger' : 'info'}>{entry.status === 'VOIDED' ? 'باطل شده' : entry.reportType?.name}</ErpBadge>
                         </div>
+                        {entry.reportType?.description && <p className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">توضیح نوع گزارش: {entry.reportType.description}</p>}
                         {entry.description && <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{entry.description}</p>}
-                        {entry.participants?.length > 0 && <p className="mt-2 text-xs text-slate-500">افراد مرتبط: {entry.participants.map((item: any) => `${item.user.firstName} ${item.user.lastName}`).join('، ')}</p>}
+                        {entry.participants?.length > 0 && <p className="mt-2 text-xs text-slate-500">افراد مرتبط: {entry.participants.map(logParticipantName).join('، ')}</p>}
                         {entry.attachments?.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{entry.attachments.map((attachment: any) => <img key={attachment.id} src={`/api/security/shift-log/attachments/${attachment.id}`} alt={attachment.originalName} className="h-20 w-20 rounded-lg object-cover" />)}</div>}
                         <p className="mt-2 text-xs text-slate-500">ثبت: {dateTimeFa(entry.createdAt)}</p>
                         {entry.status === 'VOIDED' && <p className="mt-2 text-sm text-red-700 dark:text-red-300">دلیل ابطال: {entry.voidReason} · زمان ابطال: {dateTimeFa(entry.voidedAt)}</p>}

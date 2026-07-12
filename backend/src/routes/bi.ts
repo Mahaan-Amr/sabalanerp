@@ -69,6 +69,10 @@ const resolvePeriod = (query: any) => {
         from = today;
         to = endOfDay(today);
         break;
+      case 'yesterday':
+        from = addDays(today, -1);
+        to = endOfDay(addDays(today, -1));
+        break;
       case 'week':
         from = addDays(today, -6);
         to = endOfDay(today);

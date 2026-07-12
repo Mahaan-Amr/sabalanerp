@@ -420,6 +420,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               <p className="font-medium">{user.firstName} {user.lastName}</p>
               <p className="text-xs text-slate-500">@{user.username}</p>
             </div>
+            <Link
+              href="/dashboard/personal"
+              onClick={() => setProfileDropdownOpen(false)}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-slate-600 transition-colors hover:bg-[#074747]/10 hover:text-[#074747] dark:text-slate-300 dark:hover:bg-teal-500/20 dark:hover:text-teal-200"
+            >
+              <FaUser className="h-4 w-4" />
+              امور شخص
+            </Link>
             <button
               onClick={handleLogout}
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-slate-600 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-slate-300 dark:hover:bg-red-500/20 dark:hover:text-red-300"

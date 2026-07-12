@@ -66,6 +66,7 @@ const tabs = [
 
 const rangeOptions = [
   { id: 'today', label: 'امروز' },
+  { id: 'yesterday', label: 'دیروز' },
   { id: 'week', label: 'این هفته' },
   { id: 'month', label: 'این ماه' },
   { id: 'quarter', label: 'این فصل' },
@@ -92,6 +93,10 @@ function resolveRange(range: string, customFrom: string, customTo: string) {
   let to = moment().endOf('day');
 
   if (range === 'today') from = moment().startOf('day');
+  if (range === 'yesterday') {
+    from = moment().subtract(1, 'day').startOf('day');
+    to = moment().subtract(1, 'day').endOf('day');
+  }
   if (range === 'week') from = moment().subtract(6, 'day').startOf('day');
   if (range === 'quarter') {
     const quarterStartMonth = Math.floor(now.jMonth() / 3) * 3;

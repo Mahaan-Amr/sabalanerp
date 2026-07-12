@@ -747,6 +747,7 @@ export const securityAPI = {
   getDashboardStats: (params?: any) => api.get('/security/dashboard/stats', { params }),
   getSecurityReportSummary: (params?: any) => api.get('/security/reports/summary', { params }),
   getSecurityPersonnelPerformance: (params?: any) => api.get('/security/reports/security-personnel-performance', { params }),
+  downloadSecurityPersonnelPerformancePdf: (params?: any) => api.get('/security/reports/security-personnel-performance.pdf', { params, responseType: 'blob' }),
   getSecurityPersonnelShiftHistory: (id: string, params?: any) => api.get(`/security/reports/security-personnel/${id}/shift-history`, { params }),
   exportSecurityReport: (format: 'pdf' | 'excel', params?: any) => api.get('/security/reports/export', { params: { ...params, format }, responseType: 'blob' }),
   
@@ -807,6 +808,16 @@ export const securityAPI = {
   getAttendanceSignature: (id: string) => api.get(`/security/attendance/${id}/signature`),
   validateSignature: (signatureData: string, employeeId: string) => 
     api.post('/security/signature/validate', { signatureData, employeeId }),
+};
+
+export const personalAPI = {
+  getLeaveRequests: (params?: any) => api.get('/personal/leave-requests', { params }),
+  getLeaveUsers: () => api.get('/personal/leave-users'),
+  createLeaveRequest: (data: any) => api.post('/personal/leave-requests', data),
+  updateLeaveRequest: (id: string, data: any) => api.put(`/personal/leave-requests/${id}`, data),
+  approveLeaveRequest: (id: string) => api.put(`/personal/leave-requests/${id}/approve`),
+  rejectLeaveRequest: (id: string, rejectionReason: string) => api.put(`/personal/leave-requests/${id}/reject`, { rejectionReason }),
+  cancelLeaveRequest: (id: string, reason?: string) => api.put(`/personal/leave-requests/${id}/cancel`, { reason }),
 };
 
 export const sabalanCalendarAPI = {

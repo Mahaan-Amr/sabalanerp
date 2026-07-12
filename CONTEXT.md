@@ -467,6 +467,10 @@ _Avoid_: using approval time as the only pipeline date
 The set of sales data a BI viewer may analyze: admins see all sales data, managers with BI view access see department-scoped sales data, and managers with BI admin access see all sales data.
 _Avoid_: allowing normal users into BI, or treating every manager as automatically company-wide
 
+**فیلتر دیروز در BI فروش**:
+A BI sales period preset for the complete previous calendar day in Tehran/Jalali terms, shown as دیروز beside امروز. Its comparison period is the day before yesterday, not a rolling previous 24-hour window.
+_Avoid_: calculating دیروز as the last 24 hours or comparing it to an unrelated date range.
+
 **مانده قابل دریافت در BI فروش**:
 The outstanding amount for realized sales, calculated as realized sales value minus completed payments and paid installments.
 _Avoid_: reducing receivables for pending checks, pending installments, cancelled payments, or unsigned pipeline contracts
@@ -860,10 +864,15 @@ An append-only operational log for one planned security shift, made of immutable
 New entries and patrols are recorded only against the currently active planned shift session for the authenticated security user in the first version; manager backfill is intentionally out of scope.
 _Avoid_: گزارش سرپرست, deleting log rows, forcing duplicate final-summary text when the log already records the shift, or hiding patrol sessions inside unstructured notes
 
+**افراد مرتبط در گزارش لحظه‌ای حراست**:
+The reporter of a گزارش لحظه‌ای is always the authenticated security user who owns the active shift session, but the related people attached to the report are active organizational personnel. New report participants should support پرسنل سازمانی, including people without a system login, while old user-based participants remain visible for historical compatibility.
+_Avoid_: limiting related people to users with login accounts, changing the report author into a personnel record, or losing old user-based participant history during migration.
+
 **نوع گزارش لحظه‌ای حراست**:
 A manager-defined active/inactive category for shift log rows, with name, optional description, and display order. It classifies a mandatory timestamped گزارش لحظه‌ای description without adding severity or workflow behavior yet.
 Report types are managed in تنظیمات حراست, a workspace-local manager/admin page for حراست-owned settings.
-_Avoid_: hard-coded report type dropdowns, optional row descriptions, or treating type configuration as patrol workflow rules
+When a report type is selected in the create form, its configured description appears as helper text below the dropdown. Shift log lists, history, and detailed PDFs show the report type name and configured type description separately from the guard-written event description; empty type descriptions are omitted.
+_Avoid_: hard-coded report type dropdowns, optional row descriptions, treating type configuration as patrol workflow rules, or merging the configured type description with the actual event description.
 
 **شماره ردیف گزارش شیفت**:
 A server-generated sequence number scoped to one planned security shift. Each shift starts at row 1 and guards never manually enter or edit the row number.
@@ -900,8 +909,8 @@ Manager-level Security workspace access to the detailed performance view and its
 _Avoid_: protecting detailed personnel performance only by hidden interface controls, or exposing guard narratives to generic workspace viewers
 
 **خروجی عملکرد نیروهای حراست**:
-The first portable manager-performance export contains the selected filter context, aggregate KPIs, and structured performance tables only. Narrative operational evidence remains inside the secured application.
-_Avoid_: exporting shift-log descriptions, patrol notes, or closure summaries before their sharing and audit rules are defined
+The manager-only performance PDF may include detailed operational evidence from finished security shifts in the selected date range: shift date/time and status, planned/replacement/temporary coverage person, attendance and delay, closure summary, instant report rows with report type names and descriptions, and patrol sessions. Active shifts are excluded. Both CLOSED and FORCE_CLOSED sessions count as finished, with force-closed shifts clearly labeled.
+_Avoid_: exporting active shifts, hiding force-closed status, or exposing detailed operational narratives outside the manager/admin performance export.
 
 **تاریخچه تفصیلی شیفت نیروی حراست**:
 A manager/admin-only dedicated page for chronological review of one Security guard's shifts in the selected range. Each expandable shift keeps scheduled and actual coverage, attendance and session timing, exceptions, patrols, closure data, and the complete instant-report audit trail together.
@@ -922,6 +931,19 @@ _Avoid_: simulated counts, delayed fake loading, hard-coded sample users, or adm
 **پروفایل شخصی کاربر**:
 The authenticated user's own identity and department profile, available as a core self-service capability independently of workspace membership. It does not grant access to any workspace-owned operational data.
 _Avoid_: making self-profile access depend on Sales access, or treating it as a shortcut to workspace permissions
+
+**امور شخص**:
+A personal self-service area opened from the user's profile menu, available to every authenticated user independently of workspace permissions. It contains user-owned actions such as submitting personal leave requests, and is separate from organizational personnel management.
+_Avoid_: presenting امور شخص as a workspace, confusing it with پرسنل سازمانی, or requiring workspace access before a user can use their own self-service actions.
+
+**درخواست مرخصی کاربر**:
+A personal leave request submitted by an authenticated user from امور شخص, using the same business concept as the existing exception-request workflow so approvals, rejections, attendance effects, and security shift coverage can share one leave truth. V1 requests require leave type, start date, end date, and reason; description is optional. Pending requests may be cancelled by the requester, approved by a global admin or global manager, or rejected with a required reason. Global admins and global managers may also create a leave request for a specific user when needed; manager-created requests are approved immediately by default and keep creator, target user, approval, and reason audit fields visible.
+Leave requests are not hard-deleted in normal V1 use. Users may edit or cancel their own pending requests, admins and global managers may edit pending requests, and approved requests may be cancelled by admins or global managers only with a required reason.
+_Avoid_: creating a separate leave-request object that competes with existing exception requests, making personal leave submission depend on membership in the حراست workspace, treating workspace managers as approvers by default, requiring manager-created requests to go through a pointless self-approval step, hard-deleting leave history, or rejecting/cancelling a leave request without a visible reason.
+
+**نوع مرخصی کاربر**:
+The user-facing leave classification for درخواست مرخصی کاربر: استحقاقی, استعلاجی, استعلاجی سازمانی, or بدون حقوق. مرخصی روزانه is the default request shape, not a separate user-facing leave type.
+_Avoid_: exposing technical exception names such as VACATION or SICK_LEAVE to users, or mixing hourly leave and mission categories into the first personal leave-request flow.
 
 **پرسنل سازمانی**:
 A real person who belongs to a Sabalan department and may appear in operational workflows such as attendance even when they do not have a system login. A system user may be linked to one organizational personnel record, but login access is not required for someone to be personnel.
@@ -974,6 +996,10 @@ _Avoid_: reviving the older red/rose security theme, table-only mobile attendanc
 **خروجی گزارش‌های حراست**:
 A PDF or Excel rendition of the currently filtered aggregate security report, containing its summary metrics and daily attendance breakdown. It is not an export of shift logs, personal schedules, or other operational records whose report layouts have not been defined.
 _Avoid_: placeholder export buttons, ignoring active report filters, or exporting sensitive operational data under an ambiguous report name
+
+**دو نوع خروجی گزارش حراست**:
+Security reporting has two distinct export families. The حضور و غیاب کارکنان scope exports aggregate attendance PDF/Excel. The عملکرد نیروهای حراست scope has its own manager-only detailed PDF for finished security shifts and operational evidence.
+_Avoid_: one ambiguous PDF button that sometimes exports attendance aggregates and sometimes exports detailed shift narratives.
 
 **صادرکننده گزارش حراست**:
 A security manager, supervisor, or explicitly authorized read-only report viewer who may generate aggregate security report exports. A regular guard may use personal scheduling and shift-report workflows but cannot export aggregate reports.

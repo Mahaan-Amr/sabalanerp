@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FaArrowRight, FaSearch } from 'react-icons/fa';
+import EnhancedDropdown from '@/components/EnhancedDropdown';
 
 type IconType = React.ComponentType<{ className?: string }>;
 
@@ -631,17 +632,17 @@ export function ErpFilters({ filters }: { filters: ErpFilter[] }) {
                 />
               </div>
             ) : (
-              <select
+              <EnhancedDropdown
                 value={filter.value}
-                onChange={(event) => filter.onChange(event.target.value)}
-                className="min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900"
-              >
-                {filter.options.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}{option.count != null ? ` (${option.count})` : ''}
-                  </option>
-                ))}
-              </select>
+                onChange={filter.onChange}
+                placeholder={filter.label}
+                options={filter.options.map((option) => ({
+                  value: option.value,
+                  label: `${option.label}${option.count != null ? ` (${option.count})` : ''}`,
+                }))}
+                searchable
+                clearable
+              />
             )}
           </label>
         ))}

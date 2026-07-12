@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { FaMapMarkerAlt, FaUser, FaCalendarAlt, FaClock, FaFileAlt } from 'react-icons/fa';
 import PersianCalendarComponent from './PersianCalendar';
+import EnhancedDropdown from './EnhancedDropdown';
 
 interface MissionAssignmentFormProps {
   onSubmit: (data: any) => void;
@@ -85,18 +86,19 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
           <label className="block text-sm font-medium text-primary mb-2 text-right">
             کارمند *
           </label>
-          <select
+          <EnhancedDropdown
             value={formData.employeeId}
-            onChange={(e) => handleInputChange('employeeId', e.target.value)}
-            className={`glass-liquid-input w-full ${errors.employeeId ? 'border-red-500' : ''}`}
-          >
-            <option value="">انتخاب کارمند</option>
-            {employees.map(employee => (
-              <option key={employee.id} value={employee.id}>
-                {employee.firstName} {employee.lastName} ({employee.department?.namePersian || 'نامشخص'})
-              </option>
-            ))}
-          </select>
+            onChange={(value) => handleInputChange('employeeId', value)}
+            placeholder="انتخاب کارمند"
+            options={employees.map((employee) => ({
+              value: employee.id,
+              label: `${employee.firstName} ${employee.lastName} (${employee.department?.namePersian || 'نامشخص'})`,
+            }))}
+            searchable
+            required
+            error={errors.employeeId}
+            noOptionsText="کارمندی پیدا نشد"
+          />
           {errors.employeeId && (
             <p className="text-red-500 text-sm mt-1 text-right">{errors.employeeId}</p>
           )}
@@ -107,18 +109,15 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
           <label className="block text-sm font-medium text-primary mb-2 text-right">
             نوع ماموریت *
           </label>
-          <select
+          <EnhancedDropdown
             value={formData.missionType}
-            onChange={(e) => handleInputChange('missionType', e.target.value)}
-            className={`glass-liquid-input w-full ${errors.missionType ? 'border-red-500' : ''}`}
-          >
-            <option value="">انتخاب نوع ماموریت</option>
-            {missionTypes.map(type => (
-              <option key={type.value} value={type.value}>
-                {type.label}
-              </option>
-            ))}
-          </select>
+            onChange={(value) => handleInputChange('missionType', value)}
+            placeholder="انتخاب نوع ماموریت"
+            options={missionTypes}
+            searchable
+            required
+            error={errors.missionType}
+          />
           {errors.missionType && (
             <p className="text-red-500 text-sm mt-1 text-right">{errors.missionType}</p>
           )}

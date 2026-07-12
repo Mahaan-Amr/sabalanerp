@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { FaCalendarAlt, FaClock, FaFileAlt, FaUser, FaPhone } from 'react-icons/fa';
 import PersianCalendarComponent from './PersianCalendar';
+import EnhancedDropdown from './EnhancedDropdown';
 
 interface ExceptionRequestFormProps {
   onSubmit: (data: any) => void;
@@ -82,18 +83,15 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
           <label className="block text-sm font-medium text-primary mb-2 text-right">
             نوع استثناء *
           </label>
-          <select
+          <EnhancedDropdown
             value={formData.exceptionType}
-            onChange={(e) => handleInputChange('exceptionType', e.target.value)}
-            className={`glass-liquid-input w-full ${errors.exceptionType ? 'border-red-500' : ''}`}
-          >
-            <option value="">انتخاب نوع استثناء</option>
-            {exceptionTypes.map(type => (
-              <option key={type.value} value={type.value}>
-                {type.label}
-              </option>
-            ))}
-          </select>
+            onChange={(value) => handleInputChange('exceptionType', value)}
+            placeholder="انتخاب نوع استثناء"
+            options={exceptionTypes}
+            searchable
+            required
+            error={errors.exceptionType}
+          />
           {errors.exceptionType && (
             <p className="text-red-500 text-sm mt-1 text-right">{errors.exceptionType}</p>
           )}

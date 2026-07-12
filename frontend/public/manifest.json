@@ -2,7 +2,7 @@
   "name": "سبلان ERP - سیستم برنامه‌ریزی منابع سازمانی",
   "short_name": "Sablan ERP",
   "description": "سامانه یکپارچه مدیریت فرایندهای سازمانی سبلان",
-  "start_url": "/dashboard/sales/contracts/create",
+  "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#074747",
   "theme_color": "#074747",

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { FaTimes } from 'react-icons/fa';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import PersianCalendarComponent from '@/components/PersianCalendar';
+import EnhancedDropdown from '@/components/EnhancedDropdown';
 import PersianCalendar from '@/lib/persian-calendar';
 import { ErpButton } from '@/components/erp';
 import { toFiniteNumber } from '@/lib/numberFormat';
@@ -23,6 +24,7 @@ export type AccountingActionField =
       type: 'select';
       required?: boolean;
       options: Array<{ label: string; value: string }>;
+      placeholder?: string;
       defaultValue?: string;
     };
 
@@ -147,17 +149,15 @@ export default function AccountingActionModal({
                     className={fieldClass(invalid)}
                   />
                 ) : field.type === 'select' ? (
-                  <select
+                  <EnhancedDropdown
                     value={String(value)}
-                    onChange={(event) => setValue(field.id, event.target.value)}
-                    className={fieldClass(invalid)}
-                  >
-                    {field.options.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(next) => setValue(field.id, next)}
+                    options={field.options}
+                    placeholder={field.placeholder || field.label}
+                    searchable
+                    required={field.required}
+                    error={invalid ? 'این فیلد الزامی است.' : undefined}
+                  />
                 ) : (
                   <input
                     value={String(value)}

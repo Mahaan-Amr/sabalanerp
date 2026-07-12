@@ -207,9 +207,9 @@ export class PersianCalendar {
     
     
     // If it's a string, check if it's already a Persian date format
-    if (typeof date === 'string' && date.match(/^\d{4}\/\d{2}\/\d{2}$/)) {
-      // It's already a Persian date, parse it correctly
-      momentDate = moment(date, 'jYYYY/jMM/jDD');
+    if (typeof date === 'string' && date.match(/^\d{4}\/\d{2}\/\d{2}(?:\s+\d{2}:\d{2})?$/)) {
+      // It's already a Persian date, optionally with time, parse it correctly.
+      momentDate = moment(date, date.includes(' ') ? 'jYYYY/jMM/jDD HH:mm' : 'jYYYY/jMM/jDD');
     } else {
       // It's a regular date, convert to Persian
       momentDate = moment(date);

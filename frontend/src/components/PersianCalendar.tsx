@@ -31,10 +31,17 @@ export default function PersianCalendarComponent({
   maxYear = 1410, // Default maximum year (2031 CE)
   disablePastDates = false
 }: PersianCalendarProps) {
+  const splitDateTime = (raw?: string) => {
+    if (!raw) return { date: '', time: '' };
+    const [datePart, timePart = ''] = raw.trim().split(/\s+/, 2);
+    return { date: datePart, time: timePart };
+  };
+
+  const initialValue = splitDateTime(value);
   const [isOpen, setIsOpen] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(PersianCalendar.now('jYYYY/jMM'));
-  const [selectedDate, setSelectedDate] = useState(value || PersianCalendar.now('jYYYY/jMM/jDD'));
-  const [selectedTime, setSelectedTime] = useState('');
+  const [selectedDate, setSelectedDate] = useState(initialValue.date);
+  const [selectedTime, setSelectedTime] = useState(initialValue.time);
   const [showYearSelector, setShowYearSelector] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
   const [portalPosition, setPortalPosition] = useState({ top: 0, left: 0, width: 0, maxHeight: 0 });
@@ -54,13 +61,10 @@ export default function PersianCalendarComponent({
         value !== lastValueRef.current && 
         !isUserSelecting.current && 
         value !== selectedDate) {
-      setSelectedDate(value);
+      const nextValue = splitDateTime(value);
+      setSelectedDate(nextValue.date);
+      setSelectedTime(nextValue.time);
       lastValueRef.current = value;
-      
-      if (showTime && value.includes(' ')) {
-        const [date, time] = value.split(' ');
-        setSelectedTime(time);
-      }
     }
   }, [value, showTime]);
 
@@ -95,7 +99,7 @@ export default function PersianCalendarComponent({
     setSelectedDate(newDate);
     lastValueRef.current = newDate;
     
-    const fullDate = showTime ? `${newDate} ${selectedTime}` : newDate;
+    const fullDate = showTime && selectedTime ? `${newDate} ${selectedTime}` : newDate;
     console.log('Calling onChange with:', fullDate);
     onChange(fullDate);
     setIsOpen(false);
@@ -112,7 +116,7 @@ export default function PersianCalendarComponent({
   const handleTimeChange = (time: string) => {
     setSelectedTime(time);
     if (selectedDate) {
-      onChange(`${selectedDate} ${time}`);
+      onChange(time ? `${selectedDate} ${time}` : selectedDate);
     }
   };
 
@@ -450,7 +454,7 @@ export default function PersianCalendarComponent({
                   const today = PersianCalendar.now();
                   setSelectedDate(today);
                   lastValueRef.current = today; // Update the last value reference
-                  onChange(today);
+                  onChange(showTime && selectedTime ? `${today} ${selectedTime}` : today);
                   setIsOpen(false);
                   setTimeout(() => {
                     isUserSelecting.current = false;

@@ -3,326 +3,218 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
-  FaBuilding,
-  FaBullhorn,
+  FaBell,
+  FaCalendarDay,
   FaChartLine,
-  FaEnvelope,
+  FaCheckCircle,
+  FaClock,
   FaExclamationTriangle,
-  FaHandshake,
-  FaPhone,
+  FaFileContract,
+  FaHistory,
   FaPlus,
-  FaUser,
+  FaProjectDiagram,
+  FaTasks,
+  FaUserPlus,
   FaUsers,
 } from 'react-icons/fa';
-import { ErpActionGrid, ErpBadge, ErpEmptyState, ErpFieldView, ErpLoading, ErpPage, ErpSection, ErpTwoColumn, type ErpMetric, type ErpTone } from '@/components/erp';
-import { dashboardAPI } from '@/lib/api';
-import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
+import { CrmGuide } from '@/components/crm/CrmGuide';
+import { ErpActionGrid, ErpBadge, ErpEmptyState, ErpFieldView, ErpLoading, ErpPage, ErpSection, ErpTwoColumn, type ErpMetric } from '@/components/erp';
+import { crmAPI } from '@/lib/api';
+import { crmPersonName, crmUserName, formatToman, isActionOverdue, potentialProjectStatusTone } from '@/lib/crmPipeline';
 import PersianCalendar from '@/lib/persian-calendar';
 
-interface CrmStats {
-  customers: {
+type DashboardData = {
+  permissions: { canManage: boolean };
+  customers: { total: number; active: number };
+  projects: {
     total: number;
-    active: number;
-    inactive: number;
+    byStatus: Array<{ status: string; count: number }>;
+    bySeller: Array<{ sellerId: string; sellerName: string; count: number }>;
+    won: number;
+    lost: number;
+    dormant: number;
+    estimatedPipelineValue: number | string;
   };
-  contacts: {
-    total: number;
-    primary: number;
-  };
-  leads: {
-    total: number;
-    new: number;
-    qualified: number;
-    converted: number;
-  };
-  communications: {
-    total: number;
-    thisMonth: number;
+  nextActions: {
+    overdue: any[];
+    today: any[];
+    upcoming: any[];
   };
   recentCustomers: any[];
-  recentLeads: any[];
-}
-
-const leadStatusLabels = {
-  NEW: 'جدید',
-  CONTACTED: 'تماس گرفته شد',
-  QUALIFIED: 'واجد شرایط',
-  PROPOSAL: 'پیشنهاد',
-  NEGOTIATION: 'مذاکره',
-  CONVERTED: 'تبدیل شده',
-  LOST: 'از دست رفته',
+  recentProjects: any[];
+  recentTimeline: any[];
 };
 
-const leadStatusTone: Record<string, ErpTone> = {
-  NEW: 'info',
-  CONTACTED: 'warning',
-  QUALIFIED: 'success',
-  PROPOSAL: 'purple',
-  NEGOTIATION: 'warning',
-  CONVERTED: 'primary',
-  LOST: 'danger',
-};
-
-interface User extends PermissionUser {}
+const guideSteps = [
+  {
+    targetId: 'crm-work-queue',
+    title: 'صف پیگیری‌های امروز',
+    body: 'این بخش کارهای عملیاتی فروشنده را نشان می‌دهد. موارد سررسیدشده و امروز باید قبل از پیگیری‌های آینده بررسی شوند.',
+    fields: ['سررسید اقدام بعدی', 'مخاطب یا پروژه مرتبط', 'نوع ارتباط بعدی'],
+    mistakes: ['اتکا به حافظه شخصی به‌جای ثبت اقدام بعدی', 'بستن پیگیری فعال بدون تاریخ بعدی'],
+  },
+  {
+    targetId: 'crm-pipeline-summary',
+    title: 'خلاصه پروژه‌های احتمالی',
+    body: 'اینجا وضعیت فرصت‌های قبل از قرارداد دیده می‌شود. مدیر CRM نمای تیمی می‌بیند و فروشنده نمای کارهای خودش را.',
+    fields: ['وضعیت پروژه', 'فروشنده مسئول', 'ارزش برآوردی اختیاری'],
+  },
+  {
+    targetId: 'crm-quick-actions',
+    title: 'اقدام‌های سریع',
+    body: 'برای ثبت مخاطب، پروژه احتمالی یا گزارش پیگیری از این میانبرها استفاده کنید. همه فرم‌ها موبایل‌پسند طراحی شده‌اند.',
+    mistakes: ['ساخت مشتری تکراری به‌جای افزودن پروژه احتمالی به مخاطب موجود'],
+  },
+];
 
 export default function CrmWorkspacePage() {
-  const [stats, setStats] = useState<CrmStats | null>(null);
-  const [crmPermissions, setCrmPermissions] = useState({
-    canViewCustomers: false,
-    canCreateCustomers: false,
-    canEditCustomers: false,
-    canDeleteCustomers: false,
-  });
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchCrmData();
-    loadCurrentUser();
+    fetchDashboard();
   }, []);
 
-  const loadCurrentUser = async () => {
-    try {
-      const response = await dashboardAPI.getProfile();
-      if (response.data.success) {
-        const user: User = response.data.data;
-        setCrmPermissions(getCrmPermissions(user));
-      }
-    } catch (error) {
-      console.error('Error loading user profile:', error);
-    }
-  };
-
-  const fetchCrmData = async () => {
+  const fetchDashboard = async () => {
     try {
       setLoading(true);
       setError(null);
-
-      const mockStats: CrmStats = {
-        customers: {
-          total: 45,
-          active: 38,
-          inactive: 7,
-        },
-        contacts: {
-          total: 120,
-          primary: 45,
-        },
-        leads: {
-          total: 23,
-          new: 8,
-          qualified: 12,
-          converted: 3,
-        },
-        communications: {
-          total: 156,
-          thisMonth: 23,
-        },
-        recentCustomers: [
-          {
-            id: '1',
-            companyName: 'شرکت آسمان سازه',
-            customerType: 'BUSINESS',
-            status: 'ACTIVE',
-            primaryContact: {
-              firstName: 'احمد',
-              lastName: 'محمدی',
-              email: 'ahmad@aseman.com',
-              phone: '09123456789',
-            },
-            createdAt: new Date().toISOString(),
-          },
-          {
-            id: '2',
-            companyName: 'شرکت پارس سنگ',
-            customerType: 'BUSINESS',
-            status: 'ACTIVE',
-            primaryContact: {
-              firstName: 'فاطمه',
-              lastName: 'کریمی',
-              email: 'fateme@pars.com',
-              phone: '09187654321',
-            },
-            createdAt: new Date(Date.now() - 86400000).toISOString(),
-          },
-        ],
-        recentLeads: [
-          {
-            id: '1',
-            companyName: 'شرکت نوین سنگ',
-            contactName: 'علی رضایی',
-            email: 'ali@novin.com',
-            phone: '09111111111',
-            status: 'NEW',
-            expectedValue: 50000000,
-            probability: 25,
-            createdAt: new Date().toISOString(),
-          },
-          {
-            id: '2',
-            companyName: 'شرکت تهران سنگ',
-            contactName: 'مریم حسینی',
-            email: 'maryam@tehran.com',
-            phone: '09222222222',
-            status: 'QUALIFIED',
-            expectedValue: 75000000,
-            probability: 60,
-            createdAt: new Date(Date.now() - 172800000).toISOString(),
-          },
-        ],
-      };
-
-      setStats(mockStats);
-    } catch (error: any) {
-      console.error('Error fetching CRM data:', error);
-      setError('خطا در بارگذاری اطلاعات CRM');
+      const response = await crmAPI.getCrmStats();
+      if (response.data.success) {
+        setData(response.data.data);
+      } else {
+        setError('بارگذاری داشبورد CRM ناموفق بود.');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'بارگذاری داشبورد CRM ناموفق بود.');
     } finally {
       setLoading(false);
     }
   };
 
-  const formatAmount = (amount: number) => `${amount.toLocaleString('fa-IR')} تومان`;
-  const formatDate = (dateString: string) => PersianCalendar.formatForDisplay(dateString);
-
-  if (loading) {
-    return <ErpLoading />;
-  }
-
-  if (error) {
-    return (
-      <ErpEmptyState
-        icon={FaExclamationTriangle}
-        title="خطا در بارگذاری داده‌ها"
-        description={error}
-        action={{ label: 'تلاش دوباره', onClick: fetchCrmData, variant: 'solid', tone: 'primary' }}
-      />
-    );
-  }
-
-  if (!stats) {
-    return <ErpEmptyState icon={FaUsers} title="داده‌ای موجود نیست" description="اطلاعات CRM برای نمایش موجود نیست." />;
-  }
+  if (loading) return <ErpLoading />;
+  if (error) return <ErpEmptyState icon={FaExclamationTriangle} title="خطا در داشبورد CRM" description={error} action={{ label: 'تلاش دوباره', onClick: fetchDashboard, tone: 'primary', variant: 'solid' }} />;
+  if (!data) return <ErpEmptyState icon={FaUsers} title="داده‌ای برای نمایش وجود ندارد" />;
 
   const metrics: ErpMetric[] = [
-    { label: 'کل مشتریان', value: stats.customers.total.toLocaleString('fa-IR'), hint: `${stats.customers.active.toLocaleString('fa-IR')} فعال`, icon: FaUsers, tone: 'info' },
-    { label: 'مخاطبین', value: stats.contacts.total.toLocaleString('fa-IR'), hint: `${stats.contacts.primary.toLocaleString('fa-IR')} مخاطب اصلی`, icon: FaUser, tone: 'success' },
-    { label: 'سرنخ‌ها', value: stats.leads.total.toLocaleString('fa-IR'), hint: `${stats.leads.qualified.toLocaleString('fa-IR')} واجد شرایط`, icon: FaBullhorn, tone: 'warning' },
-    { label: 'ارتباطات', value: stats.communications.total.toLocaleString('fa-IR'), hint: `${stats.communications.thisMonth.toLocaleString('fa-IR')} مورد این ماه`, icon: FaHandshake, tone: 'purple' },
+    { label: 'مخاطبین CRM', value: data.customers.total.toLocaleString('fa-IR'), hint: `${data.customers.active.toLocaleString('fa-IR')} فعال`, icon: FaUsers, tone: 'info' },
+    { label: 'پروژه‌های احتمالی', value: data.projects.total.toLocaleString('fa-IR'), hint: data.permissions.canManage ? 'نمای تیمی' : 'نمای فروشنده', icon: FaProjectDiagram, tone: 'primary' },
+    { label: 'سررسیدشده', value: data.nextActions.overdue.length.toLocaleString('fa-IR'), hint: 'اقدام‌های عقب‌افتاده', icon: FaBell, tone: data.nextActions.overdue.length ? 'danger' : 'success' },
+    { label: 'ارزش برآوردی', value: formatToman(data.projects.estimatedPipelineValue), hint: 'فقط پروژه‌های فعال', icon: FaChartLine, tone: 'warning' },
   ];
+
+  const actionRow = (action: any) => (
+    <Link key={action.id} href={action.potentialProject?.id ? `/dashboard/crm/potential-projects/${action.potentialProject.id}` : `/dashboard/crm/customers/${action.customer.id}`} className="block rounded-lg border border-slate-200 bg-slate-50 p-3 transition hover:border-[#074747]/40 hover:bg-white dark:border-slate-800 dark:bg-slate-800/50">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{action.title}</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{action.potentialProject?.title || crmPersonName(action.customer)}</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{PersianCalendar.formatForDisplay(action.dueAt)}</p>
+        </div>
+        <ErpBadge tone={isActionOverdue(action.dueAt, action.status) ? 'danger' : 'info'}>
+          {action.communicationType}
+        </ErpBadge>
+      </div>
+    </Link>
+  );
 
   return (
     <ErpPage
       eyebrow="CRM"
-      title="مدیریت ارتباط با مشتری"
-      description="نمای عملیاتی مشتریان، مخاطبین، سرنخ‌ها و ارتباطات تجاری."
+      title="مدیریت ارتباط و پیگیری مشتری"
+      description="مخاطبین، پروژه‌های احتمالی، گزارش‌های پیگیری و اقدام‌های بعدی فروشندگان."
       metrics={metrics}
-      actions={crmPermissions.canCreateCustomers ? [{ label: 'مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaPlus, tone: 'primary', variant: 'solid' }] : []}
+      actions={[{ label: 'مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaUserPlus, tone: 'primary', variant: 'solid' }]}
     >
-      <ErpSection title="اقدامات سریع" description="دسترسی به بخش‌های اصلی CRM با همان الگوی ERP جدید.">
+      <div className="flex justify-end">
+        <CrmGuide steps={guideSteps} />
+      </div>
+
+      <div data-crm-guide="crm-quick-actions">
         <ErpActionGrid
           columns={4}
           items={[
-            { title: 'مشتریان', description: 'فهرست مشتریان و وضعیت همکاری', href: '/dashboard/crm/customers', icon: FaUsers, tone: 'primary' },
-            { title: 'مخاطبین', description: 'افراد کلیدی و راه‌های تماس', href: '/dashboard/crm/contacts', icon: FaUser, tone: 'success' },
-            { title: 'سرنخ‌ها', description: 'پیگیری فرصت‌های فروش', href: '/dashboard/crm/leads', icon: FaBullhorn, tone: 'warning' },
-            { title: 'گزارش‌ها', description: 'تحلیل عملکرد CRM', href: '/dashboard/crm/reports', icon: FaChartLine, tone: 'info' },
+            { title: 'ثبت پروژه احتمالی', description: 'فرصت یا پروژه قبل از قرارداد', href: '/dashboard/crm/potential-projects/create', icon: FaProjectDiagram, tone: 'primary' },
+            { title: 'ثبت گزارش پیگیری', description: 'تماس، جلسه، بازدید و اقدام بعدی', href: '/dashboard/crm/follow-ups/create', icon: FaTasks, tone: 'success' },
+            { title: 'فهرست پروژه‌ها', description: 'وضعیت، مسئول و ارزش برآوردی', href: '/dashboard/crm/potential-projects', icon: FaChartLine, tone: 'info' },
+            { title: 'مشتریان', description: 'مخاطبین و سوابق CRM', href: '/dashboard/crm/customers', icon: FaUsers, tone: 'neutral' },
           ]}
         />
-      </ErpSection>
+      </div>
 
       <ErpTwoColumn
         main={
           <>
-            <ErpSection
-              title="مشتریان اخیر"
-              description="آخرین مشتریان اضافه‌شده یا فعال‌شده."
-              actions={[{ label: 'مشاهده همه', href: '/dashboard/crm/customers', variant: 'outline', tone: 'neutral' }]}
-            >
-              <div className="space-y-3">
-                {stats.recentCustomers.map((customer) => (
-                  <Link
-                    key={customer.id}
-                    href={`/dashboard/crm/customers/${customer.id}`}
-                    className="block rounded-lg border border-slate-200 bg-slate-50 p-4 transition hover:border-[#074747]/40 hover:bg-white dark:border-slate-800 dark:bg-slate-800/50 dark:hover:border-teal-700 dark:hover:bg-slate-800"
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="flex min-w-0 items-start gap-3">
-                        <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">
-                          <FaBuilding className="h-4 w-4" />
-                        </span>
-                        <div className="min-w-0">
-                          <h3 className="truncate text-sm font-semibold text-slate-900 dark:text-white">{customer.companyName}</h3>
-                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                            {customer.primaryContact.firstName} {customer.primaryContact.lastName}
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-                            <span className="inline-flex items-center gap-1"><FaEnvelope className="h-3 w-3" />{customer.primaryContact.email}</span>
-                            <span className="inline-flex items-center gap-1"><FaPhone className="h-3 w-3" />{customer.primaryContact.phone}</span>
-                          </div>
-                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{formatDate(customer.createdAt)}</p>
-                        </div>
-                      </div>
-                      <ErpBadge tone={customer.status === 'ACTIVE' ? 'success' : 'neutral'}>
-                        {customer.status === 'ACTIVE' ? 'فعال' : 'غیرفعال'}
-                      </ErpBadge>
+            <div data-crm-guide="crm-work-queue">
+              <ErpSection title={data.permissions.canManage ? 'صف پیگیری تیم' : 'صف پیگیری من'} description="اقدام‌های سررسیدشده و امروز باید اولویت کار روزانه باشند.">
+                <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                  <div>
+                    <h3 className="mb-2 flex items-center gap-2 text-sm font-bold text-red-700 dark:text-red-200"><FaExclamationTriangle /> سررسیدشده</h3>
+                    <div className="space-y-2">
+                      {data.nextActions.overdue.length ? data.nextActions.overdue.slice(0, 6).map(actionRow) : <ErpFieldView label="وضعیت" value="مورد عقب‌افتاده ندارید" tone="success" />}
                     </div>
-                  </Link>
+                  </div>
+                  <div>
+                    <h3 className="mb-2 flex items-center gap-2 text-sm font-bold text-[#074747] dark:text-teal-200"><FaCalendarDay /> امروز</h3>
+                    <div className="space-y-2">
+                      {data.nextActions.today.length ? data.nextActions.today.slice(0, 6).map(actionRow) : <ErpFieldView label="وضعیت" value="برای امروز اقدامی ثبت نشده" tone="neutral" />}
+                    </div>
+                  </div>
+                </div>
+              </ErpSection>
+            </div>
+
+            <div data-crm-guide="crm-pipeline-summary">
+              <ErpSection title="پروژه‌های احتمالی اخیر" actions={[{ label: 'مشاهده همه', href: '/dashboard/crm/potential-projects', tone: 'neutral', variant: 'outline' }]}>
+                <div className="space-y-3">
+                  {data.recentProjects.map((project) => (
+                    <Link key={project.id} href={`/dashboard/crm/potential-projects/${project.id}`} className="block rounded-lg border border-slate-200 bg-slate-50 p-4 transition hover:border-[#074747]/40 hover:bg-white dark:border-slate-800 dark:bg-slate-800/50">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900 dark:text-white">{project.title}</p>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{crmPersonName(project.customer)} · {crmUserName(project.responsibleSeller)}</p>
+                        </div>
+                        <ErpBadge tone={potentialProjectStatusTone(project.status)}>{project.status}</ErpBadge>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </ErpSection>
+            </div>
+          </>
+        }
+        aside={
+          <>
+            <ErpSection title="وضعیت پروژه‌ها">
+              <div className="space-y-2">
+                {data.projects.byStatus.map((row) => (
+                  <ErpFieldView key={row.status} label={row.status} value={row.count.toLocaleString('fa-IR')} tone={potentialProjectStatusTone(row.status)} />
                 ))}
               </div>
             </ErpSection>
 
-            <ErpSection
-              title="سرنخ‌های اخیر"
-              description="فرصت‌های تازه و واجد شرایط برای پیگیری فروش."
-              actions={[{ label: 'مشاهده همه', href: '/dashboard/crm/leads', variant: 'outline', tone: 'neutral' }]}
-            >
+            {data.permissions.canManage && (
+              <ErpSection title="نمای فروشنده‌ها">
+                <div className="space-y-2">
+                  {data.projects.bySeller.slice(0, 8).map((row) => (
+                    <ErpFieldView key={row.sellerId} label={row.sellerName} value={`${row.count.toLocaleString('fa-IR')} پروژه فعال`} />
+                  ))}
+                </div>
+              </ErpSection>
+            )}
+
+            <ErpSection title="آخرین رخدادها">
               <div className="space-y-3">
-                {stats.recentLeads.map((lead) => (
-                  <div key={lead.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="flex min-w-0 items-start gap-3">
-                        <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
-                          <FaBullhorn className="h-4 w-4" />
-                        </span>
-                        <div className="min-w-0">
-                          <h3 className="truncate text-sm font-semibold text-slate-900 dark:text-white">{lead.companyName}</h3>
-                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{lead.contactName}</p>
-                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-                            <span className="inline-flex items-center gap-1"><FaEnvelope className="h-3 w-3" />{lead.email}</span>
-                            <span className="inline-flex items-center gap-1"><FaPhone className="h-3 w-3" />{lead.phone}</span>
-                          </div>
-                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{formatDate(lead.createdAt)}</p>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:text-left">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900 dark:text-white">{formatAmount(lead.expectedValue)}</p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400">{lead.probability.toLocaleString('fa-IR')}٪ احتمال</p>
-                        </div>
-                        <ErpBadge tone={leadStatusTone[lead.status] || 'neutral'}>
-                          {leadStatusLabels[lead.status as keyof typeof leadStatusLabels] || lead.status}
-                        </ErpBadge>
-                      </div>
-                    </div>
+                {data.recentTimeline.map((event) => (
+                  <div key={event.id} className="rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-800">
+                    <p className="font-semibold text-slate-900 dark:text-white"><FaHistory className="ml-2 inline h-3 w-3" />{event.title}</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">{event.potentialProject?.title || crmPersonName(event.customer)} · {crmUserName(event.actor)}</p>
                   </div>
                 ))}
               </div>
             </ErpSection>
           </>
-        }
-        aside={
-          <ErpSection title="قیف تبدیل سرنخ" description="نمای خلاصه تبدیل سرنخ‌ها به مشتری.">
-            <div className="grid grid-cols-1 gap-3">
-              <ErpFieldView label="جدید" value={stats.leads.new.toLocaleString('fa-IR')} tone="info" />
-              <ErpFieldView label="واجد شرایط" value={stats.leads.qualified.toLocaleString('fa-IR')} tone="warning" />
-              <ErpFieldView label="تبدیل شده" value={stats.leads.converted.toLocaleString('fa-IR')} tone="success" />
-              <ErpFieldView
-                label="نرخ تبدیل"
-                value={`${(stats.leads.total > 0 ? Math.round((stats.leads.converted / stats.leads.total) * 100) : 0).toLocaleString('fa-IR')}٪`}
-                tone="primary"
-              />
-            </div>
-          </ErpSection>
         }
       />
     </ErpPage>

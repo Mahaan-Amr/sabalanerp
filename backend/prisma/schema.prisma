@@ -49,6 +49,12 @@ model User {
   ownedCrmCustomers         CrmCustomer[]         @relation("CrmCustomerOwner")
   createdCrmCustomers       CrmCustomer[]         @relation("CrmCustomerCreatedBy")
   updatedCrmCustomers       CrmCustomer[]         @relation("CrmCustomerUpdatedBy")
+  responsibleCrmPotentialProjects CrmPotentialProject[] @relation("CrmPotentialProjectResponsibleSeller")
+  createdCrmPotentialProjects CrmPotentialProject[] @relation("CrmPotentialProjectCreatedBy")
+  crmFollowUpReports        CrmFollowUpReport[]   @relation("CrmFollowUpSeller")
+  assignedCrmNextActions    CrmNextAction[]       @relation("CrmNextActionAssignee")
+  completedCrmNextActions   CrmNextAction[]       @relation("CrmNextActionCompletedBy")
+  crmTimelineEvents         CrmTimelineEvent[]     @relation("CrmTimelineActor")
   logisticsDrivers          LogisticsDriver[]     @relation("LogisticsDriverCreatedBy")
   securityVehiclePairs      SecurityVehiclePair[] @relation("SecurityVehiclePairCreatedBy")
   requestedLoadingDrivers   LogisticsDriverRequest[] @relation("LogisticsDriverRequestRequestedBy")
@@ -563,6 +569,7 @@ model SalesContract {
   confirmationAuditLogs ContractConfirmationAuditLog[]
   logisticsLoadingLines LogisticsLoadingLine[]
   logisticsLoadingDriverAllocations LogisticsLoadingDriverAllocation[]
+  wonCrmPotentialProject CrmPotentialProject? @relation("CrmPotentialProjectWonContract")
   isSigned              Boolean                        @default(false)
   signedByPhoneNumber   String?
   verificationCodeId    String?                        @unique
@@ -621,6 +628,10 @@ model CrmCustomer {
   updatedByUser            User?                     @relation("CrmCustomerUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
   phoneNumbers             PhoneNumber[]
   projectAddresses         ProjectAddress[]
+  potentialProjects        CrmPotentialProject[]
+  followUpReports          CrmFollowUpReport[]
+  nextActions              CrmNextAction[]
+  timelineEvents           CrmTimelineEvent[]
   salesContracts           SalesContract[]
   logisticsLoadings        LogisticsLoading[]
   securityVehicleMovements SecurityVehicleMovement[]
@@ -727,6 +738,120 @@ model CrmCommunication {
   customer    CrmCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@map("crm_communications")
+}
+
+model CrmPotentialProject {
+  id                 String              @id @default(cuid())
+  customerId         String
+  responsibleSellerId String
+  createdBy          String?
+  title              String
+  status             String              @default("جدید")
+  workType           String
+  address            String?
+  estimatedValue     Decimal?            @db.Decimal(15, 2)
+  probability        Int?
+  expectedCloseDate  DateTime?
+  description        String?
+  source             String?
+  lostReason         String?
+  dormantReason      String?
+  revisitDate        DateTime?
+  wonSalesContractId String?             @unique
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  customer           CrmCustomer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  responsibleSeller  User                @relation("CrmPotentialProjectResponsibleSeller", fields: [responsibleSellerId], references: [id], onDelete: Cascade)
+  createdByUser      User?               @relation("CrmPotentialProjectCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  wonSalesContract   SalesContract?      @relation("CrmPotentialProjectWonContract", fields: [wonSalesContractId], references: [id], onDelete: SetNull)
+  followUpReports    CrmFollowUpReport[]
+  nextActions        CrmNextAction[]
+  timelineEvents     CrmTimelineEvent[]
+
+  @@index([customerId])
+  @@index([responsibleSellerId])
+  @@index([status])
+  @@index([workType])
+  @@index([expectedCloseDate])
+  @@map("crm_potential_projects")
+}
+
+model CrmFollowUpReport {
+  id                 String               @id @default(cuid())
+  customerId         String
+  potentialProjectId String?
+  sellerId           String
+  communicationType  String
+  workType           String
+  happenedAt         DateTime
+  summary            String
+  outcome            String
+  hasNextAction      Boolean              @default(true)
+  noNextActionReason String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  customer           CrmCustomer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  potentialProject   CrmPotentialProject? @relation(fields: [potentialProjectId], references: [id], onDelete: SetNull)
+  seller             User                 @relation("CrmFollowUpSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  nextAction         CrmNextAction?
+
+  @@index([customerId])
+  @@index([potentialProjectId])
+  @@index([sellerId])
+  @@index([happenedAt])
+  @@map("crm_follow_up_reports")
+}
+
+model CrmNextAction {
+  id                 String               @id @default(cuid())
+  customerId         String
+  potentialProjectId String?
+  followUpReportId   String?              @unique
+  assignedToId       String
+  title              String
+  communicationType  String
+  workType           String?
+  dueAt              DateTime
+  instructions       String
+  status             String               @default("باز")
+  completedAt        DateTime?
+  completedBy        String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  customer           CrmCustomer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  potentialProject   CrmPotentialProject? @relation(fields: [potentialProjectId], references: [id], onDelete: SetNull)
+  followUpReport     CrmFollowUpReport?   @relation(fields: [followUpReportId], references: [id], onDelete: SetNull)
+  assignedTo         User                 @relation("CrmNextActionAssignee", fields: [assignedToId], references: [id], onDelete: Cascade)
+  completedByUser    User?                @relation("CrmNextActionCompletedBy", fields: [completedBy], references: [id], onDelete: SetNull)
+
+  @@index([customerId])
+  @@index([potentialProjectId])
+  @@index([assignedToId])
+  @@index([dueAt])
+  @@index([status])
+  @@map("crm_next_actions")
+}
+
+model CrmTimelineEvent {
+  id                 String               @id @default(cuid())
+  customerId         String
+  potentialProjectId String?
+  actorId            String?
+  eventType          String
+  title              String
+  description        String?
+  metadata           Json?
+  createdAt          DateTime             @default(now())
+  customer           CrmCustomer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  potentialProject   CrmPotentialProject? @relation(fields: [potentialProjectId], references: [id], onDelete: SetNull)
+  actor              User?                @relation("CrmTimelineActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([customerId])
+  @@index([potentialProjectId])
+  @@index([actorId])
+  @@index([eventType])
+  @@map("crm_timeline_events")
 }
 
 model Product {

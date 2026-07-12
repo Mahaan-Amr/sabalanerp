@@ -180,6 +180,14 @@ const getFeatureWorkspace = (feature: string): string => {
     'crm_customers_create': 'crm',
     'crm_customers_delete': 'crm',
     'crm_customers_assign_owner': 'crm',
+    'crm_potential_projects_view': 'crm',
+    'crm_potential_projects_create': 'crm',
+    'crm_potential_projects_edit': 'crm',
+    'crm_potential_projects_reassign': 'crm',
+    'crm_follow_ups_view': 'crm',
+    'crm_follow_ups_create': 'crm',
+    'crm_next_actions_view': 'crm',
+    'crm_next_actions_edit': 'crm',
     
     // Inventory Master Data Features
     'inventory_cut_types_view': 'inventory',
@@ -263,6 +271,14 @@ export const getCrmPermissions = (user: User | null) => {
     canAssignCustomerOwner:
       hasFeatureAccess(user, 'crm_customers_assign_owner', 'edit') ||
       hasFeatureAccess(user, 'sales_customers_assign_owner', 'edit'),
+    canViewPotentialProjects: hasFeatureAccess(user, 'crm_potential_projects_view', 'view'),
+    canCreatePotentialProjects: hasFeatureAccess(user, 'crm_potential_projects_create', 'edit'),
+    canEditPotentialProjects: hasFeatureAccess(user, 'crm_potential_projects_edit', 'edit'),
+    canReassignPotentialProjects: hasFeatureAccess(user, 'crm_potential_projects_reassign', 'edit'),
+    canViewFollowUps: hasFeatureAccess(user, 'crm_follow_ups_view', 'view'),
+    canCreateFollowUps: hasFeatureAccess(user, 'crm_follow_ups_create', 'edit'),
+    canViewNextActions: hasFeatureAccess(user, 'crm_next_actions_view', 'view'),
+    canEditNextActions: hasFeatureAccess(user, 'crm_next_actions_edit', 'edit'),
   };
 };
 

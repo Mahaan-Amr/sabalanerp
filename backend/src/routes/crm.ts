@@ -99,6 +99,162 @@ const canAssignCustomerOwner = async (req: any): Promise<boolean> =>
     'edit'
   );
 
+const canManageCrmPipeline = async (req: any): Promise<boolean> => {
+  if (!req.user) return false;
+  if (req.user.role === 'ADMIN') return true;
+  if (await hasFeaturePermission(req.user, [FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN], 'edit')) return true;
+
+  const userWorkspacePermission = await prisma.workspacePermission.findUnique({
+    where: { userId_workspace: { userId: req.user.id, workspace: WORKSPACES.CRM } }
+  });
+  const roleWorkspacePermission = await prisma.roleWorkspacePermission.findUnique({
+    where: { role_workspace: { role: req.user.role, workspace: WORKSPACES.CRM } }
+  });
+  const permission = userWorkspacePermission?.isActive ? userWorkspacePermission.permissionLevel : roleWorkspacePermission?.isActive ? roleWorkspacePermission.permissionLevel : null;
+  return permission === WORKSPACE_PERMISSIONS.ADMIN;
+};
+
+const parseOptionalDate = (value: unknown): Date | null => {
+  if (!value) return null;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const parseOptionalDecimal = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const parseOptionalInt = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  return Number.isInteger(numeric) ? numeric : null;
+};
+
+const fullName = (user: any) => [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || user?.username || 'نامشخص';
+
+const projectInclude = {
+  customer: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      companyName: true,
+      phoneNumbers: {
+        where: { isActive: true },
+        take: 2,
+        select: { number: true, isPrimary: true }
+      }
+    }
+  },
+  responsibleSeller: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      username: true
+    }
+  },
+  wonSalesContract: {
+    select: {
+      id: true,
+      contractNumber: true,
+      status: true
+    }
+  },
+  _count: {
+    select: {
+      followUpReports: true,
+      nextActions: true
+    }
+  }
+} as const;
+
+const followUpInclude = {
+  customer: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      companyName: true
+    }
+  },
+  potentialProject: {
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      responsibleSellerId: true
+    }
+  },
+  seller: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      username: true
+    }
+  },
+  nextAction: true
+} as const;
+
+const nextActionInclude = {
+  customer: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      companyName: true
+    }
+  },
+  potentialProject: {
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      responsibleSellerId: true
+    }
+  },
+  assignedTo: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      username: true
+    }
+  }
+} as const;
+
+const ensureProjectAccessOrDeny = async (
+  req: any,
+  res: Response,
+  projectId: string,
+  options: { allowSummaryOnly?: boolean } = {}
+) => {
+  const project = await prisma.crmPotentialProject.findUnique({
+    where: { id: projectId },
+    include: projectInclude
+  });
+
+  if (!project) {
+    res.status(404).json({ success: false, error: 'پروژه احتمالی پیدا نشد.' });
+    return null;
+  }
+
+  if (req.user?.role === 'ADMIN' || project.responsibleSellerId === req.user?.id || (await canManageCrmPipeline(req))) {
+    return project;
+  }
+
+  if (options.allowSummaryOnly) return project;
+
+  res.status(403).json({
+    success: false,
+    error: 'جزئیات این پروژه احتمالی فقط برای فروشنده مسئول، مدیر CRM یا مدیر سیستم قابل مشاهده است.'
+  });
+  return null;
+};
+
 const customerSuggestionSelect = {
   id: true,
   firstName: true,
@@ -140,6 +296,11 @@ const customerSuggestionSelect = {
       marketerLastName: true,
       marketerPhoneNumber: true,
       isActive: true
+    }
+  },
+  _count: {
+    select: {
+      potentialProjects: true
     }
   }
 } as const;
@@ -294,6 +455,30 @@ router.get('/customer-owners', protect, async (req: any, res: Response): Promise
       success: false,
       error: 'Server error'
     });
+  }
+});
+
+router.get('/sellers', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.CRM_POTENTIAL_PROJECTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {
+  try {
+    const users = await prisma.user.findMany({
+      where: { isActive: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        username: true,
+        role: true,
+        department: {
+          select: { id: true, name: true, namePersian: true }
+        }
+      },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }]
+    });
+
+    res.json({ success: true, data: users });
+  } catch (error) {
+    console.error('Get CRM sellers error:', error);
+    res.status(500).json({ success: false, error: 'خطا در دریافت فهرست فروشنده‌ها' });
   }
 });
 
@@ -465,6 +650,11 @@ router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
         },
         leads: {
           orderBy: { createdAt: 'desc' }
+        },
+        potentialProjects: {
+          where: { isActive: true },
+          include: projectInclude,
+          orderBy: { updatedAt: 'desc' }
         },
         communications: {
           orderBy: { createdAt: 'desc' },
@@ -1827,6 +2017,465 @@ router.post('/leads', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_
   }
 });
 
+// ==================== CRM POTENTIAL PROJECTS ====================
+
+router.get('/potential-projects', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.CRM_POTENTIAL_PROJECTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {
+  try {
+    const page = Math.max(parseInt(req.query.page as string) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
+    const skip = (page - 1) * limit;
+    const search = String(req.query.search || '').trim();
+    const status = String(req.query.status || '').trim();
+    const sellerId = String(req.query.sellerId || '').trim();
+    const workType = String(req.query.workType || '').trim();
+    const scope = String(req.query.scope || '').trim();
+    const canManage = await canManageCrmPipeline(req);
+
+    const where: any = { isActive: true };
+    if (status) where.status = status;
+    if (workType) where.workType = workType;
+    if (sellerId && canManage) where.responsibleSellerId = sellerId;
+    if (scope === 'mine' || (!canManage && req.user?.role !== 'ADMIN')) where.responsibleSellerId = req.user.id;
+    if (search) {
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { address: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { customer: { firstName: { contains: search, mode: 'insensitive' } } },
+        { customer: { lastName: { contains: search, mode: 'insensitive' } } },
+        { customer: { companyName: { contains: search, mode: 'insensitive' } } }
+      ];
+    }
+
+    const [projects, total] = await Promise.all([
+      prisma.crmPotentialProject.findMany({
+        where,
+        skip,
+        take: limit,
+        include: projectInclude,
+        orderBy: { updatedAt: 'desc' }
+      }),
+      prisma.crmPotentialProject.count({ where })
+    ]);
+
+    res.json({
+      success: true,
+      data: projects,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+      permissions: { canManage }
+    });
+  } catch (error) {
+    console.error('Get CRM potential projects error:', error);
+    res.status(500).json({ success: false, error: 'خطا در دریافت پروژه‌های احتمالی' });
+  }
+});
+
+router.get('/potential-projects/:id', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.CRM_POTENTIAL_PROJECTS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {
+  try {
+    const project = await ensureProjectAccessOrDeny(req, res, req.params.id);
+    if (!project) return;
+
+    const [followUps, nextActions, timeline] = await Promise.all([
+      prisma.crmFollowUpReport.findMany({
+        where: { potentialProjectId: project.id },
+        include: followUpInclude,
+        orderBy: { happenedAt: 'desc' },
+        take: 25
+      }),
+      prisma.crmNextAction.findMany({
+        where: { potentialProjectId: project.id },
+        include: nextActionInclude,
+        orderBy: [{ status: 'asc' }, { dueAt: 'asc' }],
+        take: 25
+      }),
+      prisma.crmTimelineEvent.findMany({
+        where: { potentialProjectId: project.id },
+        include: {
+          actor: { select: { id: true, firstName: true, lastName: true, username: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 30
+      })
+    ]);
+
+    res.json({ success: true, data: { project, followUps, nextActions, timeline } });
+  } catch (error) {
+    console.error('Get CRM potential project error:', error);
+    res.status(500).json({ success: false, error: 'خطا در دریافت جزئیات پروژه احتمالی' });
+  }
+});
+
+router.post('/potential-projects', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_POTENTIAL_PROJECTS_CREATE, FEATURE_PERMISSIONS.EDIT), [
+  body('customerId').notEmpty().withMessage('انتخاب مخاطب/مشتری الزامی است'),
+  body('title').notEmpty().withMessage('عنوان پروژه الزامی است'),
+  body('responsibleSellerId').notEmpty().withMessage('فروشنده مسئول الزامی است'),
+  body('status').notEmpty().withMessage('وضعیت پروژه الزامی است'),
+  body('workType').notEmpty().withMessage('نوع کار/معامله الزامی است')
+], async (req: any, res: Response): Promise<void> => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+      return;
+    }
+
+    const canManage = await canManageCrmPipeline(req);
+    const responsibleSellerId = String(req.body.responsibleSellerId);
+    if (responsibleSellerId !== req.user.id && req.user.role !== 'ADMIN' && !canManage) {
+      res.status(403).json({ success: false, error: 'فقط مدیر CRM می‌تواند پروژه را برای فروشنده دیگری ثبت کند.' });
+      return;
+    }
+
+    const customer = await prisma.crmCustomer.findUnique({ where: { id: req.body.customerId }, select: { id: true } });
+    if (!customer) {
+      res.status(404).json({ success: false, error: 'مخاطب/مشتری پیدا نشد.' });
+      return;
+    }
+
+    const project = await prisma.$transaction(async (tx) => {
+      const created = await tx.crmPotentialProject.create({
+        data: {
+          customerId: req.body.customerId,
+          responsibleSellerId,
+          createdBy: req.user.id,
+          title: String(req.body.title).trim(),
+          status: String(req.body.status || 'جدید'),
+          workType: String(req.body.workType),
+          address: normalizeNullableText(req.body.address),
+          estimatedValue: parseOptionalDecimal(req.body.estimatedValue),
+          probability: parseOptionalInt(req.body.probability),
+          expectedCloseDate: parseOptionalDate(req.body.expectedCloseDate),
+          description: normalizeNullableText(req.body.description),
+          source: normalizeNullableText(req.body.source)
+        },
+        include: projectInclude
+      });
+
+      await tx.crmTimelineEvent.create({
+        data: {
+          customerId: created.customerId,
+          potentialProjectId: created.id,
+          actorId: req.user.id,
+          eventType: 'created',
+          title: 'ایجاد پروژه احتمالی',
+          description: created.title
+        }
+      });
+
+      return created;
+    });
+
+    res.status(201).json({ success: true, data: project });
+  } catch (error) {
+    console.error('Create CRM potential project error:', error);
+    res.status(500).json({ success: false, error: 'خطا در ایجاد پروژه احتمالی' });
+  }
+});
+
+router.put('/potential-projects/:id', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_POTENTIAL_PROJECTS_EDIT, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response): Promise<void> => {
+  try {
+    const project = await ensureProjectAccessOrDeny(req, res, req.params.id);
+    if (!project) return;
+
+    const data: any = {
+      title: req.body.title !== undefined ? String(req.body.title).trim() : undefined,
+      status: req.body.status !== undefined ? String(req.body.status) : undefined,
+      workType: req.body.workType !== undefined ? String(req.body.workType) : undefined,
+      address: req.body.address !== undefined ? normalizeNullableText(req.body.address) : undefined,
+      estimatedValue: req.body.estimatedValue !== undefined ? parseOptionalDecimal(req.body.estimatedValue) : undefined,
+      probability: req.body.probability !== undefined ? parseOptionalInt(req.body.probability) : undefined,
+      expectedCloseDate: req.body.expectedCloseDate !== undefined ? parseOptionalDate(req.body.expectedCloseDate) : undefined,
+      description: req.body.description !== undefined ? normalizeNullableText(req.body.description) : undefined,
+      source: req.body.source !== undefined ? normalizeNullableText(req.body.source) : undefined,
+      lostReason: req.body.lostReason !== undefined ? normalizeNullableText(req.body.lostReason) : undefined,
+      dormantReason: req.body.dormantReason !== undefined ? normalizeNullableText(req.body.dormantReason) : undefined,
+      revisitDate: req.body.revisitDate !== undefined ? parseOptionalDate(req.body.revisitDate) : undefined,
+      wonSalesContractId: req.body.wonSalesContractId !== undefined ? normalizeNullableText(req.body.wonSalesContractId) : undefined
+    };
+
+    if (data.status === 'از دست رفته' && !data.lostReason && !project.lostReason) {
+      res.status(400).json({ success: false, error: 'ثبت دلیل از دست رفتن پروژه الزامی است.' });
+      return;
+    }
+    if (data.status === 'راکد' && !data.dormantReason && !project.dormantReason) {
+      res.status(400).json({ success: false, error: 'ثبت دلیل راکد شدن پروژه الزامی است.' });
+      return;
+    }
+    if (data.status === 'برنده شده' && !data.wonSalesContractId && !project.wonSalesContractId) {
+      res.status(400).json({ success: false, error: 'پروژه فقط با اتصال به قرارداد فروش می‌تواند برنده شده شود.' });
+      return;
+    }
+
+    Object.keys(data).forEach((key) => data[key] === undefined && delete data[key]);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const next = await tx.crmPotentialProject.update({
+        where: { id: project.id },
+        data,
+        include: projectInclude
+      });
+
+      await tx.crmTimelineEvent.create({
+        data: {
+          customerId: next.customerId,
+          potentialProjectId: next.id,
+          actorId: req.user.id,
+          eventType: 'updated',
+          title: 'به‌روزرسانی پروژه احتمالی',
+          description: next.status !== project.status ? `تغییر وضعیت از ${project.status} به ${next.status}` : next.title
+        }
+      });
+
+      return next;
+    });
+
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Update CRM potential project error:', error);
+    res.status(500).json({ success: false, error: 'خطا در به‌روزرسانی پروژه احتمالی' });
+  }
+});
+
+router.put('/potential-projects/:id/reassign', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN, FEATURE_PERMISSIONS.EDIT), [
+  body('responsibleSellerId').notEmpty().withMessage('فروشنده مسئول جدید الزامی است'),
+  body('reason').notEmpty().withMessage('دلیل تغییر مسئول الزامی است')
+], async (req: any, res: Response): Promise<void> => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+      return;
+    }
+
+    const project = await ensureProjectAccessOrDeny(req, res, req.params.id);
+    if (!project) return;
+
+    const nextSeller = await prisma.user.findUnique({
+      where: { id: req.body.responsibleSellerId },
+      select: { id: true, firstName: true, lastName: true, username: true, isActive: true }
+    });
+    if (!nextSeller || !nextSeller.isActive) {
+      res.status(404).json({ success: false, error: 'فروشنده جدید پیدا نشد یا غیرفعال است.' });
+      return;
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const next = await tx.crmPotentialProject.update({
+        where: { id: project.id },
+        data: { responsibleSellerId: nextSeller.id },
+        include: projectInclude
+      });
+      await tx.crmTimelineEvent.create({
+        data: {
+          customerId: next.customerId,
+          potentialProjectId: next.id,
+          actorId: req.user.id,
+          eventType: 'reassigned',
+          title: 'تغییر فروشنده مسئول پروژه احتمالی',
+          description: `از ${fullName(project.responsibleSeller)} به ${fullName(nextSeller)} - ${req.body.reason}`,
+          metadata: {
+            previousSellerId: project.responsibleSellerId,
+            nextSellerId: nextSeller.id,
+            reason: req.body.reason
+          }
+        }
+      });
+      return next;
+    });
+
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Reassign CRM potential project error:', error);
+    res.status(500).json({ success: false, error: 'خطا در تغییر مسئول پروژه احتمالی' });
+  }
+});
+
+// ==================== CRM FOLLOW-UPS AND NEXT ACTIONS ====================
+
+router.get('/follow-ups', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.CRM_FOLLOW_UPS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {
+  try {
+    const page = Math.max(parseInt(req.query.page as string) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
+    const skip = (page - 1) * limit;
+    const canManage = await canManageCrmPipeline(req);
+    const where: any = {};
+    if (req.query.customerId) where.customerId = String(req.query.customerId);
+    if (req.query.potentialProjectId) where.potentialProjectId = String(req.query.potentialProjectId);
+    if (!canManage && req.user?.role !== 'ADMIN') where.sellerId = req.user.id;
+
+    const [followUps, total] = await Promise.all([
+      prisma.crmFollowUpReport.findMany({
+        where,
+        include: followUpInclude,
+        skip,
+        take: limit,
+        orderBy: { happenedAt: 'desc' }
+      }),
+      prisma.crmFollowUpReport.count({ where })
+    ]);
+
+    res.json({ success: true, data: followUps, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+  } catch (error) {
+    console.error('Get CRM follow-ups error:', error);
+    res.status(500).json({ success: false, error: 'خطا در دریافت گزارش‌های پیگیری' });
+  }
+});
+
+router.post('/follow-ups', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_FOLLOW_UPS_CREATE, FEATURE_PERMISSIONS.EDIT), [
+  body('customerId').notEmpty().withMessage('انتخاب مخاطب/مشتری الزامی است'),
+  body('communicationType').notEmpty().withMessage('نوع ارتباط الزامی است'),
+  body('workType').notEmpty().withMessage('نوع کار/معامله الزامی است'),
+  body('happenedAt').notEmpty().withMessage('زمان پیگیری الزامی است'),
+  body('summary').notEmpty().withMessage('خلاصه اتفاقات الزامی است'),
+  body('outcome').notEmpty().withMessage('نتیجه پیگیری الزامی است')
+], async (req: any, res: Response): Promise<void> => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+      return;
+    }
+
+    const hasNextAction = req.body.hasNextAction !== false;
+    if (hasNextAction && (!req.body.nextAction?.title || !req.body.nextAction?.dueAt || !req.body.nextAction?.communicationType || !req.body.nextAction?.instructions)) {
+      res.status(400).json({ success: false, error: 'اقدام بعدی برای پیگیری فعال الزامی است.' });
+      return;
+    }
+
+    const customer = await prisma.crmCustomer.findUnique({ where: { id: req.body.customerId }, select: { id: true } });
+    if (!customer) {
+      res.status(404).json({ success: false, error: 'مخاطب/مشتری پیدا نشد.' });
+      return;
+    }
+
+    let project: any = null;
+    if (req.body.potentialProjectId) {
+      project = await ensureProjectAccessOrDeny(req, res, String(req.body.potentialProjectId));
+      if (!project) return;
+      if (project.customerId !== customer.id) {
+        res.status(400).json({ success: false, error: 'پروژه احتمالی به مخاطب انتخاب‌شده تعلق ندارد.' });
+        return;
+      }
+    }
+
+    const report = await prisma.$transaction(async (tx) => {
+      const created = await tx.crmFollowUpReport.create({
+        data: {
+          customerId: customer.id,
+          potentialProjectId: project?.id || null,
+          sellerId: req.user.id,
+          communicationType: String(req.body.communicationType),
+          workType: String(req.body.workType),
+          happenedAt: parseOptionalDate(req.body.happenedAt) || new Date(),
+          summary: String(req.body.summary).trim(),
+          outcome: String(req.body.outcome).trim(),
+          hasNextAction,
+          noNextActionReason: hasNextAction ? null : normalizeNullableText(req.body.noNextActionReason)
+        },
+        include: followUpInclude
+      });
+
+      if (hasNextAction) {
+        await tx.crmNextAction.create({
+          data: {
+            customerId: customer.id,
+            potentialProjectId: project?.id || null,
+            followUpReportId: created.id,
+            assignedToId: project?.responsibleSellerId || req.user.id,
+            title: String(req.body.nextAction.title).trim(),
+            communicationType: String(req.body.nextAction.communicationType),
+            workType: normalizeNullableText(req.body.nextAction.workType || req.body.workType),
+            dueAt: parseOptionalDate(req.body.nextAction.dueAt) || new Date(),
+            instructions: String(req.body.nextAction.instructions).trim()
+          }
+        });
+      }
+
+      await tx.crmTimelineEvent.create({
+        data: {
+          customerId: customer.id,
+          potentialProjectId: project?.id || null,
+          actorId: req.user.id,
+          eventType: 'follow_up',
+          title: 'ثبت گزارش پیگیری',
+          description: created.outcome
+        }
+      });
+
+      return created;
+    });
+
+    const fullReport = await prisma.crmFollowUpReport.findUnique({
+      where: { id: report.id },
+      include: followUpInclude
+    });
+
+    res.status(201).json({ success: true, data: fullReport });
+  } catch (error) {
+    console.error('Create CRM follow-up error:', error);
+    res.status(500).json({ success: false, error: 'خطا در ثبت گزارش پیگیری' });
+  }
+});
+
+router.get('/next-actions', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.CRM_NEXT_ACTIONS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {
+  try {
+    const canManage = await canManageCrmPipeline(req);
+    const where: any = {};
+    if (req.query.status) where.status = String(req.query.status);
+    if (req.query.customerId) where.customerId = String(req.query.customerId);
+    if (req.query.potentialProjectId) where.potentialProjectId = String(req.query.potentialProjectId);
+    if (!canManage && req.user?.role !== 'ADMIN') where.assignedToId = req.user.id;
+
+    const actions = await prisma.crmNextAction.findMany({
+      where,
+      include: nextActionInclude,
+      orderBy: [{ status: 'asc' }, { dueAt: 'asc' }],
+      take: 100
+    });
+
+    res.json({ success: true, data: actions });
+  } catch (error) {
+    console.error('Get CRM next actions error:', error);
+    res.status(500).json({ success: false, error: 'خطا در دریافت اقدام‌های بعدی' });
+  }
+});
+
+router.put('/next-actions/:id/complete', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_NEXT_ACTIONS_EDIT, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response): Promise<void> => {
+  try {
+    const action = await prisma.crmNextAction.findUnique({ where: { id: req.params.id }, include: nextActionInclude });
+    if (!action) {
+      res.status(404).json({ success: false, error: 'اقدام بعدی پیدا نشد.' });
+      return;
+    }
+    if (req.user?.role !== 'ADMIN' && action.assignedToId !== req.user.id && !(await canManageCrmPipeline(req))) {
+      res.status(403).json({ success: false, error: 'فقط مسئول اقدام، مدیر CRM یا مدیر سیستم می‌تواند آن را تکمیل کند.' });
+      return;
+    }
+
+    const updated = await prisma.crmNextAction.update({
+      where: { id: action.id },
+      data: { status: 'انجام شده', completedAt: new Date(), completedBy: req.user.id },
+      include: nextActionInclude
+    });
+
+    await prisma.crmTimelineEvent.create({
+      data: {
+        customerId: action.customerId,
+        potentialProjectId: action.potentialProjectId,
+        actorId: req.user.id,
+        eventType: 'next_action_completed',
+        title: 'تکمیل اقدام بعدی',
+        description: action.title
+      }
+    });
+
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Complete CRM next action error:', error);
+    res.status(500).json({ success: false, error: 'خطا در تکمیل اقدام بعدی' });
+  }
+});
+
 // ==================== CRM DASHBOARD ====================
 
 // @desc    Get CRM dashboard statistics
@@ -1834,18 +2483,53 @@ router.post('/leads', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_
 // @access  Private/CRM Workspace
 router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.CRM_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
+    const canManage = await canManageCrmPipeline(req);
+    const now = new Date();
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    const endOfToday = new Date(now);
+    endOfToday.setHours(23, 59, 59, 999);
+    const projectScope: any = canManage || req.user?.role === 'ADMIN' ? {} : { responsibleSellerId: req.user.id };
+    const actionScope: any = canManage || req.user?.role === 'ADMIN' ? {} : { assignedToId: req.user.id };
+
     const [
       totalCustomers,
       activeCustomers,
-      totalLeads,
-      newLeads,
+      totalProjects,
+      overdueActions,
+      todayActions,
+      upcomingActions,
       recentCustomers,
-      recentLeads
+      recentProjects,
+      projectsByStatus,
+      projectsBySeller,
+      wonProjects,
+      lostProjects,
+      dormantProjects,
+      pipelineValue,
+      recentTimeline
     ] = await Promise.all([
       prisma.crmCustomer.count(),
       prisma.crmCustomer.count({ where: { status: 'Active' } }),
-      prisma.crmLead.count(),
-      prisma.crmLead.count({ where: { status: 'New' } }),
+      prisma.crmPotentialProject.count({ where: { isActive: true, ...projectScope } }),
+      prisma.crmNextAction.findMany({
+        where: { status: 'باز', dueAt: { lt: startOfToday }, ...actionScope },
+        include: nextActionInclude,
+        orderBy: { dueAt: 'asc' },
+        take: 20
+      }),
+      prisma.crmNextAction.findMany({
+        where: { status: 'باز', dueAt: { gte: startOfToday, lte: endOfToday }, ...actionScope },
+        include: nextActionInclude,
+        orderBy: { dueAt: 'asc' },
+        take: 20
+      }),
+      prisma.crmNextAction.findMany({
+        where: { status: 'باز', dueAt: { gt: endOfToday }, ...actionScope },
+        include: nextActionInclude,
+        orderBy: { dueAt: 'asc' },
+        take: 20
+      }),
       prisma.crmCustomer.findMany({
         take: 5,
         orderBy: { createdAt: 'desc' },
@@ -1858,21 +2542,81 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
           }
         }
       }),
-      prisma.crmLead.findMany({
+      prisma.crmPotentialProject.findMany({
+        where: { isActive: true, ...projectScope },
         take: 5,
-        orderBy: { createdAt: 'desc' }
+        orderBy: { updatedAt: 'desc' },
+        include: projectInclude
+      }),
+      prisma.crmPotentialProject.groupBy({
+        by: ['status'],
+        where: { isActive: true, ...projectScope },
+        _count: { _all: true }
+      }),
+      prisma.crmPotentialProject.groupBy({
+        by: ['responsibleSellerId'],
+        where: { isActive: true, ...projectScope },
+        _count: { _all: true }
+      }),
+      prisma.crmPotentialProject.count({ where: { isActive: true, status: 'برنده شده', ...projectScope } }),
+      prisma.crmPotentialProject.count({ where: { isActive: true, status: 'از دست رفته', ...projectScope } }),
+      prisma.crmPotentialProject.count({ where: { isActive: true, status: 'راکد', ...projectScope } }),
+      prisma.crmPotentialProject.aggregate({
+        where: { isActive: true, status: { notIn: ['برنده شده', 'از دست رفته'] }, ...projectScope },
+        _sum: { estimatedValue: true }
+      }),
+      prisma.crmTimelineEvent.findMany({
+        where: projectScope.responsibleSellerId
+          ? { potentialProject: { responsibleSellerId: projectScope.responsibleSellerId } }
+          : {},
+        include: {
+          actor: { select: { id: true, firstName: true, lastName: true, username: true } },
+          customer: { select: { id: true, firstName: true, lastName: true, companyName: true } },
+          potentialProject: { select: { id: true, title: true, status: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10
       })
     ]);
+
+    const sellerIds = projectsBySeller.map((row) => row.responsibleSellerId).filter(Boolean);
+    const sellers = sellerIds.length
+      ? await prisma.user.findMany({
+          where: { id: { in: sellerIds } },
+          select: { id: true, firstName: true, lastName: true, username: true }
+        })
+      : [];
+    const sellerMap = new Map(sellers.map((seller) => [seller.id, fullName(seller)]));
 
     res.json({
       success: true,
       data: {
-        totalCustomers,
-        activeCustomers,
-        totalLeads,
-        newLeads,
+        permissions: { canManage },
+        customers: {
+          total: totalCustomers,
+          active: activeCustomers
+        },
+        projects: {
+          total: totalProjects,
+          byStatus: projectsByStatus.map((row) => ({ status: row.status, count: row._count._all })),
+          bySeller: projectsBySeller.map((row) => ({
+            sellerId: row.responsibleSellerId,
+            sellerName: sellerMap.get(row.responsibleSellerId) || 'نامشخص',
+            count: row._count._all
+          })),
+          won: wonProjects,
+          lost: lostProjects,
+          dormant: dormantProjects,
+          estimatedPipelineValue: pipelineValue._sum.estimatedValue || 0
+        },
+        nextActions: {
+          overdue: overdueActions,
+          today: todayActions,
+          upcoming: upcomingActions
+        },
         recentCustomers,
-        recentLeads
+        recentProjects,
+        recentTimeline
       }
     });
   } catch (error) {

@@ -80,6 +80,126 @@ _Avoid_: adding a normal-vs-collaboration choice as a required step in every con
 A CRM customer whose relationship to a sales contract is collaborative rather than a normal project customer. A مشتری همکاری can be selected for فروش همکاری without requiring project-address selection.
 _Avoid_: creating a separate non-CRM buyer record for collaborators
 
+**فضای کاری CRM**:
+The workspace for both customer registry management and pre-contract sales pipeline management, covering customer profiles, project addresses, contacts, ownership, leads, opportunities, follow-up tasks, and handoff into sales contracts.
+_Avoid_: limiting CRM to customer CRUD only, or moving pre-contract sales pipeline work into the sales contract workspace.
+
+**مخاطب در حال پیگیری**:
+A person or organization recorded in CRM because Sabalan sellers are pursuing possible work with them, even when they have not made a final purchase or signed a sales contract.
+_Avoid_: treating every CRM person as a finalized buyer, or requiring a sales contract before seller follow-up can be recorded.
+
+**هشدار تکراری CRM**:
+When a seller tries to create a CRM person/customer that matches an existing record, the system warns them and shows a limited summary such as name, matched phone, active potential-project count, and responsible seller or managed-by-CRM-team indicator. Creating a duplicate despite the match requires CRM manager or admin approval.
+_Avoid_: silently creating duplicate CRM people, or exposing detailed follow-up history during duplicate checking.
+
+**افزودن پروژه احتمالی به مخاطب موجود**:
+When a seller finds an existing CRM person/customer but has a genuinely new potential project for them, the seller should add or request a new potential project under the existing CRM record instead of creating a duplicate person. If permitted, the seller can create the project directly and become responsible for it; otherwise they submit a CRM manager/admin request to attach it.
+_Avoid_: duplicating the person/customer record just because a new seller or new project appears.
+
+**پروژه احتمالی**:
+A potential customer project being pursued by sellers before it becomes a priced sales contract. It belongs in CRM while the work is still being discovered, followed up, or negotiated.
+_Avoid_: creating a sales contract just to track an unconfirmed project, or losing the project context inside generic customer notes.
+
+**فیلدهای پروژه احتمالی**:
+A potential project requires project title, CRM person/customer, responsible seller, project status, and work/deal type. Address or location, estimated value, probability, expected close date, description, source or referrer, and next follow-up are optional at creation.
+_Avoid_: blocking early project capture with forecasting or location details that the seller may not know yet.
+
+**برآورد پروژه احتمالی**:
+Optional CRM forecasting fields on a potential project, such as estimated value, probability, and expected close date or month. They help managers forecast pipeline value but should not block sellers when early project details are unknown.
+_Avoid_: requiring estimated value or probability before a seller can start tracking a real potential project.
+
+**وضعیت پروژه احتمالی**:
+The Persian-first lifecycle status of a potential project in CRM before or during conversion to sales work: جدید, در حال پیگیری, نیازمند پیشنهاد, آماده قرارداد, برنده شده, از دست رفته, and راکد.
+_Avoid_: exposing English status labels to operators, or treating every paused project as permanently lost.
+
+**قوانین پایان پروژه احتمالی**:
+A potential project becomes برنده شده only when a Sales Contract is created from it or explicitly linked as the winning contract. It becomes از دست رفته when a seller or CRM manager marks it lost with a required reason. It becomes راکد when there is no active follow-up for now but the project is not truly lost; راکد requires a reason and may include a revisit date. برنده شده and از دست رفته do not require a next action; راکد makes next action optional while a revisit date is recommended.
+_Avoid_: marking projects as won without a linked sales contract, marking projects lost without a reason, or treating راکد as the same as از دست رفته.
+
+**تبدیل پروژه احتمالی به قرارداد فروش**:
+When a potential project reaches آماده قرارداد, the responsible seller may create a draft Sales Contract from it. Approval remains in the existing Sales and Accounting contract workflow rather than adding a separate CRM approval gate.
+_Avoid_: requiring CRM-manager approval just to start a draft contract, or bypassing the normal Sales and Accounting approval controls after the draft exists.
+
+**فروشنده مسئول پروژه احتمالی**:
+The seller responsible for following up one specific potential project. The same CRM contact can have multiple potential projects with different responsible sellers, and one seller can follow multiple projects for the same contact.
+_Avoid_: assuming customer ownership and project ownership are always the same, or forcing all of a contact's potential projects to belong to one seller.
+
+**تغییر مسئول پروژه احتمالی**:
+CRM managers and admins can reassign a potential project to another seller with a required reason. The current responsible seller can request or suggest reassignment but cannot silently transfer ownership without manager-level permission.
+_Avoid_: quiet seller-to-seller handoffs without accountability, or blocking legitimate manager-driven reassignment when workloads or relationships change.
+
+**تاریخچه پروژه احتمالی پس از تغییر مسئول**:
+Potential-project follow-up history stays attached to the project after reassignment. The new responsible seller can see prior project-level reports for context, each report keeps its author and timestamp, and the reassignment reason appears in the project timeline.
+_Avoid_: hiding prior project context from the new seller, rewriting authorship, or treating reassignment as an invisible metadata change.
+
+**گزارش پیگیری CRM**:
+A dated record of a seller's follow-up activity for a CRM contact, customer, or possible project, such as a call, office visit, message, meeting, or other communication attempt and its outcome.
+_Avoid_: storing follow-up history only as free-text customer fields, or mixing pre-contract follow-up reports with approved sales contract events.
+
+**فیلدهای گزارش پیگیری CRM**:
+A CRM follow-up report requires the related customer/person, seller/reporter, communication type, work/deal type, follow-up date/time, summary of what happened, and outcome. A related potential project is optional when the follow-up is a general customer-level follow-up rather than project-specific.
+_Avoid_: recording follow-up reports without a clear event summary, outcome, author, date/time, communication type, or business context.
+
+**نوع ارتباط پیگیری CRM**:
+The Persian-first communication type recorded on a CRM follow-up report or next action. V1 types are تماس تلفنی, پیامک / پیام‌رسان, مراجعه حضوری به دفتر سبلان, بازدید از پروژه, جلسه حضوری, ارسال پیش‌فاکتور / پیشنهاد, پیگیری مالی, and سایر.
+_Avoid_: using only free-text communication types, or exposing English activity labels to operators.
+
+**نوع کار/معامله پیگیری CRM**:
+The Persian-first business opportunity type recorded separately from communication type on a CRM follow-up report or next action. V1 types are فروش سنگ پروژه ساختمانی, فروش همکاری, خدمات / ابزار / فرآوری, بارگیری یا تحویل مرتبط با فروش قبلی, استعلام قیمت, and سایر.
+_Avoid_: mixing how the seller contacted the person with what business opportunity is being pursued.
+
+**اقدام بعدی پیگیری CRM**:
+The next required action created from a CRM follow-up report, including a due date, communication type, intended deal/work type, and clear Persian instructions for what the seller should do next. A follow-up report should normally have a next action unless there is no next follow-up or the tracked customer/project work is finished.
+_Avoid_: recording follow-up history without an actionable next step when the pursuit is still active, or leaving the next step as vague free text without date and action type.
+
+**فیلدهای اقدام بعدی پیگیری CRM**:
+When a CRM follow-up report needs a next action, the next action requires title or action type, due date, next communication type, and clear Persian instructions.
+_Avoid_: creating vague reminders that only say follow up without explaining what the seller should do next.
+
+**نمای پیگیری‌های سررسیدشده CRM**:
+Sellers see their own overdue and upcoming CRM next actions, while CRM managers and admins see team-level overdue and upcoming follow-ups for oversight.
+_Avoid_: relying only on individual seller memory for follow-up discipline, or exposing team-level task oversight to sellers without management responsibility.
+
+**یادآوری پیگیری CRM در نسخه اول**:
+V1 CRM reminders appear on the CRM dashboard and as in-app notification badges or counts. Due and overdue items are calculated automatically from the next-action due date/time, and the manager dashboard highlights overdue follow-ups by seller. V1 does not send SMS, email, WhatsApp, or repeated noisy alerts.
+_Avoid_: launching external-message reminders before the in-app follow-up discipline is stable.
+
+**داشبورد فروشنده CRM**:
+The seller CRM dashboard shows today's follow-ups, overdue follow-ups, upcoming follow-ups, the seller's active potential projects by status, recently updated customers or projects, and quick actions to add a follow-up, add a potential project, or create a customer.
+_Avoid_: making sellers search through manager-level analytics before seeing their own next work.
+
+**داشبورد مدیر CRM**:
+The CRM manager/admin dashboard shows team overdue follow-ups, follow-ups due today, active projects by seller and status, dormant projects, won/lost counts, estimated pipeline value, recent reassignment/activity timeline, and quick filters by seller, status, and work/deal type.
+_Avoid_: giving managers only individual task lists without team-level pipeline and follow-up oversight.
+
+**دسترسی گزارش پیگیری CRM**:
+Project-level CRM follow-up reports are visible by default to the responsible seller, CRM manager, and admins. Other sellers can see enough customer and potential-project summary to avoid duplicate pursuit, but not detailed follow-up reports unless assigned to that project or explicitly granted access.
+_Avoid_: making all seller follow-up details globally visible, or hiding potential project existence so completely that sellers unknowingly pursue the same work twice.
+
+**راهنمای بخش CRM**:
+A Persian user-facing guide attached to each CRM section so operators can open it from that section and understand the purpose, fields, workflow, permissions, and expected usage of the section.
+_Avoid_: relying only on training outside the application, or placing one generic CRM manual that does not explain each section in its own context.
+
+**راهنمای متمرکز CRM**:
+A contextual CRM guide mode where the rest of the page is visually de-emphasized while the relevant field, table, action, or section stays clear and the Persian explanation appears beside or near it.
+_Avoid_: showing detached help text that is not visually connected to the part of the page being explained.
+
+**محتوای راهنمای CRM**:
+CRM guide text is static product content shipped with the codebase for V1, so each UI change can update the matching Persian guide in the same code change.
+_Avoid_: making guide content admin-editable before the guided UI patterns and section workflows are stable.
+
+**ساختار راهنمای CRM**:
+Each CRM guide section should explain what the section is for, who should use it, required fields, optional fields, what happens after saving, who can see or edit it, common mistakes, and mobile usage notes when relevant.
+_Avoid_: inconsistent guide content where some sections explain workflow and others only define fields.
+
+**طراحی CRM موبایل‌پسند**:
+All CRM section implementations must work on mobile and follow Sabalan ERP's existing design system, shared components, RTL layout behavior, and Persian-first visual language.
+_Avoid_: building desktop-only CRM tables, introducing a separate visual style, or bypassing existing ERP components without a concrete reason.
+
+**خارج از محدوده CRM نسخه اول**:
+CRM V1 excludes external reminders such as SMS, email, or WhatsApp; admin-editable guide content; AI lead scoring; marketing campaigns; complex sales forecasting; commission management; a separate mobile app; and Excel import for CRM data.
+_Avoid_: expanding CRM V1 beyond customer/person records, potential projects, follow-up reports, next actions, dashboards, permissions, guided help, and Sales Contract conversion.
+
 **معرف مشتری**:
 A person who referred or introduced a CRM customer. The referrer belongs to the customer profile, not to one specific project address or contract.
 _Avoid_: storing the same referrer separately on every project address

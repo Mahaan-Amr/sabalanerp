@@ -14,6 +14,15 @@ The CRM (Customer Relationship Management) Workspace is the **central hub** for 
 
 ## 📋 Core Features
 
+### CRM V1 Pipeline and Follow-up Scope
+- **مخاطب در حال پیگیری**: CRM includes people and organizations being pursued by Sabalan sellers before any final purchase.
+- **پروژه احتمالی**: A customer can have multiple potential projects, and each project can have its own responsible seller.
+- **گزارش پیگیری CRM**: Calls, visits, meetings, proposal sends, financial follow-ups, and other contact history are recorded as dated follow-up reports.
+- **اقدام بعدی**: Active follow-up reports normally create a next action with due date, communication type, and clear Persian instructions.
+- **Dashboards**: Sellers see their own due, overdue, upcoming work and active projects; CRM managers/admins see team-level overdue work, pipeline status, seller breakdowns, and estimated pipeline value.
+- **Guides**: Each CRM section has static Persian guided help in code, with contextual focus behavior.
+- **V1 Exclusions**: SMS/email/WhatsApp reminders, AI scoring, campaigns, complex forecasting, commission management, a separate mobile app, admin-editable guide content, and CRM Excel import are out of scope for V1.
+
 ### ✅ Completed Features
 
 #### ✅ Customer Management (100% Complete)

@@ -308,6 +308,7 @@ export const crmAPI = {
     api.get('/crm/customers', { params }),
 
   getCustomerOwners: () => api.get('/crm/customer-owners'),
+  getSellers: () => api.get('/crm/sellers'),
   
   getCustomer: (id: string) => api.get(`/crm/customers/${id}`),
 
@@ -395,7 +396,21 @@ export const crmAPI = {
   deleteCommunication: (id: string) => api.delete(`/crm/communications/${id}`),
   
   // Dashboard
-  getCrmStats: () => api.get('/crm/dashboard/stats'),
+  getCrmStats: () => api.get('/crm/dashboard'),
+
+  // Potential Projects
+  getPotentialProjects: (params?: any) => api.get('/crm/potential-projects', { params }),
+  getPotentialProject: (id: string) => api.get(`/crm/potential-projects/${id}`),
+  createPotentialProject: (data: any) => api.post('/crm/potential-projects', data),
+  updatePotentialProject: (id: string, data: any) => api.put(`/crm/potential-projects/${id}`, data),
+  reassignPotentialProject: (id: string, data: { responsibleSellerId: string; reason: string }) =>
+    api.put(`/crm/potential-projects/${id}/reassign`, data),
+
+  // Follow-up reports and next actions
+  getFollowUps: (params?: any) => api.get('/crm/follow-ups', { params }),
+  createFollowUp: (data: any) => api.post('/crm/follow-ups', data),
+  getNextActions: (params?: any) => api.get('/crm/next-actions', { params }),
+  completeNextAction: (id: string) => api.put(`/crm/next-actions/${id}/complete`),
 };
 
 // Inventory Workspace API

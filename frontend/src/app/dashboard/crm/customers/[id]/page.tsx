@@ -29,6 +29,7 @@ import PersianCalendar from '@/lib/persian-calendar';
 import { formatPrice } from '@/lib/numberFormat';
 import { getCrmPermissions } from '@/lib/permissions';
 import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
+import EnhancedDropdown from '@/components/EnhancedDropdown';
 
 interface CrmCustomer {
   id: string;
@@ -641,22 +642,22 @@ export default function CustomerDetailPage() {
                   <div>
                     <label className="block text-sm font-medium text-gray-400 mb-1">مسئول فروش</label>
                     {crmPermissions.canAssignCustomerOwner ? (
-                      <select
+                      <EnhancedDropdown
                         value={customer.ownerUserId || ''}
-                        onChange={(event) => handleOwnerChange(event.target.value)}
+                        onChange={handleOwnerChange}
                         disabled={ownerSaving}
-                        className="w-full rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-white outline-none focus:border-teal-400"
-                      >
-                        <option value="">بدون مسئول فروش</option>
-                        {ownerOptions.map((owner) => {
-                          const label = [owner.firstName, owner.lastName].filter(Boolean).join(' ').trim() || owner.username || owner.id;
-                          return (
-                            <option key={owner.id} value={owner.id} className="bg-slate-900 text-white">
-                              {label}
-                            </option>
-                          );
-                        })}
-                      </select>
+                        placeholder="بدون مسئول فروش"
+                        options={[
+                          { value: '', label: 'بدون مسئول فروش' },
+                          ...ownerOptions.map((owner) => ({
+                            value: owner.id,
+                            label: [owner.firstName, owner.lastName].filter(Boolean).join(' ').trim() || owner.username || owner.id,
+                          })),
+                        ]}
+                        searchable
+                        clearable
+                        noOptionsText="فروشنده‌ای پیدا نشد"
+                      />
                     ) : (
                       <p className="text-white">{getOwnerLabel(customer.ownerUser)}</p>
                     )}
@@ -1123,18 +1124,15 @@ export default function CustomerDetailPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">نوع پروژه</label>
-                <select
+                <EnhancedDropdown
                   value={projectFormData.projectType}
-                  onChange={(e) => setProjectFormData(prev => ({ ...prev, projectType: e.target.value }))}
-                  className="w-full px-4 py-3 min-h-[48px] bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
-                >
-                  <option value="" className="bg-gray-800 text-white">انتخاب نوع پروژه</option>
-                  {PROJECT_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value} className="bg-gray-800 text-white">
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(value) => setProjectFormData(prev => ({ ...prev, projectType: value }))}
+                  placeholder="انتخاب نوع پروژه"
+                  options={PROJECT_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                  searchable
+                  clearable
+                  noOptionsText="نوع پروژه‌ای پیدا نشد"
+                />
               </div>
 
               {/* Project Manager Information */}

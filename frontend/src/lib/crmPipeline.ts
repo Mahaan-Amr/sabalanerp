@@ -1,4 +1,5 @@
 import type { ErpTone } from '@/components/erp';
+import PersianCalendar from '@/lib/persian-calendar';
 
 export const POTENTIAL_PROJECT_STATUSES = [
   'جدید',
@@ -74,4 +75,22 @@ export const crmUserName = (user?: { firstName?: string | null; lastName?: strin
 export const isActionOverdue = (dueAt?: string | null, status?: string | null) => {
   if (!dueAt || status === NEXT_ACTION_DONE_STATUS) return false;
   return new Date(dueAt).getTime() < Date.now();
+};
+
+export const persianNowDateTime = () => `${PersianCalendar.now()} ${PersianCalendar.nowTime()}`;
+
+export const persianDateToApiDate = (value?: string | null) => {
+  if (!value) return null;
+  if (!value.includes('/')) return value;
+  return PersianCalendar.toGregorian(value.split(' ')[0]).toISOString();
+};
+
+export const persianDateTimeToApiDate = (value?: string | null) => {
+  if (!value) return null;
+  if (!value.includes('/')) return value;
+  const [datePart, timePart = '00:00'] = value.split(' ');
+  const date = PersianCalendar.toGregorian(datePart);
+  const [hours, minutes] = timePart.split(':').map((part) => Number(part) || 0);
+  date.setHours(hours, minutes, 0, 0);
+  return date.toISOString();
 };

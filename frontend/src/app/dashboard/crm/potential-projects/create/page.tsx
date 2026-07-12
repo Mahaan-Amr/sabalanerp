@@ -5,8 +5,10 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { FaSave } from 'react-icons/fa';
 import { CrmGuide } from '@/components/crm/CrmGuide';
 import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
+import EnhancedDropdown from '@/components/EnhancedDropdown';
+import PersianCalendarComponent from '@/components/PersianCalendar';
 import { crmAPI } from '@/lib/api';
-import { crmPersonName, CRM_WORK_TYPES, POTENTIAL_PROJECT_STATUSES } from '@/lib/crmPipeline';
+import { crmPersonName, CRM_WORK_TYPES, persianDateToApiDate, POTENTIAL_PROJECT_STATUSES } from '@/lib/crmPipeline';
 
 type Customer = { id: string; firstName?: string; lastName?: string; companyName?: string; phoneNumbers?: Array<{ number: string }> };
 type Seller = { id: string; firstName?: string; lastName?: string; username?: string };
@@ -85,7 +87,7 @@ export default function CreatePotentialProjectPage() {
         ...form,
         estimatedValue: form.estimatedValue || null,
         probability: form.probability || null,
-        expectedCloseDate: form.expectedCloseDate || null,
+        expectedCloseDate: persianDateToApiDate(form.expectedCloseDate),
       });
       if (response.data.success) router.push(`/dashboard/crm/potential-projects/${response.data.data.id}`);
     } catch (err: any) {
@@ -112,28 +114,37 @@ export default function CreatePotentialProjectPage() {
         <ErpSection title="اطلاعات اصلی" description="این فیلدها برای ایجاد پروژه احتمالی الزامی هستند." className="space-y-4">
           <div data-crm-guide="potential-project-required" className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className={labelClass}>مخاطب CRM
-              <select className={`${inputClass} mt-2`} value={form.customerId} onChange={(e) => update('customerId', e.target.value)} required>
-                <option value="">انتخاب مخاطب</option>
-                {customers.map((customer) => <option key={customer.id} value={customer.id}>{crmPersonName(customer)}</option>)}
-              </select>
+              <EnhancedDropdown
+                className="mt-2"
+                value={form.customerId}
+                onChange={(value) => update('customerId', value)}
+                placeholder="انتخاب مخاطب"
+                options={customers.map((customer) => ({ value: customer.id, label: crmPersonName(customer) }))}
+                searchable
+                required
+                noOptionsText="مخاطبی پیدا نشد"
+              />
             </label>
             <label className={labelClass}>عنوان پروژه
               <input className={`${inputClass} mt-2`} value={form.title} onChange={(e) => update('title', e.target.value)} required />
             </label>
             <label className={labelClass}>فروشنده مسئول
-              <select className={`${inputClass} mt-2`} value={form.responsibleSellerId} onChange={(e) => update('responsibleSellerId', e.target.value)} required>
-                {sellers.map((seller) => <option key={seller.id} value={seller.id}>{[seller.firstName, seller.lastName].filter(Boolean).join(' ') || seller.username}</option>)}
-              </select>
+              <EnhancedDropdown
+                className="mt-2"
+                value={form.responsibleSellerId}
+                onChange={(value) => update('responsibleSellerId', value)}
+                placeholder="انتخاب فروشنده"
+                options={sellers.map((seller) => ({ value: seller.id, label: [seller.firstName, seller.lastName].filter(Boolean).join(' ') || seller.username || 'نامشخص' }))}
+                searchable
+                required
+                noOptionsText="فروشنده‌ای پیدا نشد"
+              />
             </label>
             <label className={labelClass}>وضعیت
-              <select className={`${inputClass} mt-2`} value={form.status} onChange={(e) => update('status', e.target.value)} required>
-                {POTENTIAL_PROJECT_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-              </select>
+              <EnhancedDropdown className="mt-2" value={form.status} onChange={(value) => update('status', value)} options={POTENTIAL_PROJECT_STATUSES.map((status) => ({ value: status, label: status }))} searchable required />
             </label>
             <label className={`${labelClass} md:col-span-2`}>نوع کار/معامله
-              <select className={`${inputClass} mt-2`} value={form.workType} onChange={(e) => update('workType', e.target.value)} required>
-                {CRM_WORK_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
-              </select>
+              <EnhancedDropdown className="mt-2" value={form.workType} onChange={(value) => update('workType', value)} options={CRM_WORK_TYPES.map((type) => ({ value: type, label: type }))} searchable required />
             </label>
           </div>
         </ErpSection>
@@ -153,7 +164,9 @@ export default function CreatePotentialProjectPage() {
               <input className={`${inputClass} mt-2`} inputMode="numeric" min="0" max="100" value={form.probability} onChange={(e) => update('probability', e.target.value)} placeholder="۰ تا ۱۰۰" />
             </label>
             <label className={labelClass}>تاریخ احتمالی بستن
-              <input className={`${inputClass} mt-2`} type="date" value={form.expectedCloseDate} onChange={(e) => update('expectedCloseDate', e.target.value)} />
+              <div className="mt-2">
+                <PersianCalendarComponent value={form.expectedCloseDate} onChange={(value) => update('expectedCloseDate', value)} placeholder="انتخاب تاریخ" disablePastDates />
+              </div>
             </label>
             <label className={`${labelClass} md:col-span-2`}>توضیحات
               <textarea className={`${inputClass} mt-2 min-h-28`} value={form.description} onChange={(e) => update('description', e.target.value)} />

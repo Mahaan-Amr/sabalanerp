@@ -19,6 +19,7 @@ import {
 import { crmAPI, dashboardAPI } from '@/lib/api';
 import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
 import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
+import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { InlineFieldError, getBackendErrorMessage, mapBackendValidationErrors } from '@/lib/formErrors';
 import {
   normalizeIranianMobile,
@@ -549,21 +550,31 @@ export default function EditCustomerPage() {
           </div>
           <div>
             <label className={labelClass}>نوع مشتری</label>
-            <select className={inputClass} value={formData.customerType} onChange={(e) => updateField('customerType', e.target.value as CustomerType)}>
-              <option value="Individual">حقیقی</option>
-              <option value="Company">حقوقی</option>
-              <option value="Government">دولتی</option>
-              <option value="Collaborative">همکاری</option>
-            </select>
+            <EnhancedDropdown
+              value={formData.customerType}
+              onChange={(value) => updateField('customerType', value as CustomerType)}
+              options={[
+                { value: 'Individual', label: 'حقیقی' },
+                { value: 'Company', label: 'حقوقی' },
+                { value: 'Government', label: 'دولتی' },
+                { value: 'Collaborative', label: 'همکاری' },
+              ]}
+              searchable
+            />
           </div>
           <div>
             <label className={labelClass}>وضعیت</label>
-            <select className={inputClass} value={formData.status} onChange={(e) => updateField('status', e.target.value as CustomerStatus)}>
-              <option value="Active">فعال</option>
-              <option value="Inactive">غیرفعال</option>
-              <option value="Prospect">بالقوه</option>
-              <option value="Lead">سرنخ</option>
-            </select>
+            <EnhancedDropdown
+              value={formData.status}
+              onChange={(value) => updateField('status', value as CustomerStatus)}
+              options={[
+                { value: 'Active', label: 'فعال' },
+                { value: 'Inactive', label: 'غیرفعال' },
+                { value: 'Prospect', label: 'بالقوه' },
+                { value: 'Lead', label: 'سرنخ' },
+              ]}
+              searchable
+            />
           </div>
           <div>
             <label className={labelClass}>کد ملی</label>
@@ -656,14 +667,15 @@ export default function EditCustomerPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <input className={inputClass} placeholder="نام پروژه" value={project.projectName} onChange={(e) => updateProject(index, 'projectName', e.target.value)} />
                   <input className={inputClass} placeholder="شهر" value={project.city} onChange={(e) => updateProject(index, 'city', e.target.value)} />
-                  <select className={inputClass} value={project.projectType} onChange={(e) => updateProject(index, 'projectType', e.target.value)}>
-                    <option value="">انتخاب نوع پروژه</option>
-                    {PROJECT_TYPE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <EnhancedDropdown
+                    value={project.projectType}
+                    onChange={(value) => updateProject(index, 'projectType', value)}
+                    placeholder="انتخاب نوع پروژه"
+                    options={PROJECT_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    searchable
+                    clearable
+                    noOptionsText="نوع پروژه‌ای پیدا نشد"
+                  />
                   <input className={inputClass} placeholder="نام مدیر پروژه" value={project.projectManagerName} onChange={(e) => updateProject(index, 'projectManagerName', e.target.value)} />
                   <input className={inputClass} placeholder="شماره مدیر پروژه" value={project.projectManagerNumber} onChange={(e) => updateProject(index, 'projectManagerNumber', e.target.value)} />
                   <input className={inputClass} placeholder="نام بازاریاب" value={project.marketerFirstName} onChange={(e) => updateProject(index, 'marketerFirstName', e.target.value)} />
@@ -699,12 +711,17 @@ export default function EditCustomerPage() {
             return (
               <div key={phone.id || index} className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 rounded-lg bg-white/5 border border-white/10">
                 <input className={inputClass} placeholder="شماره تماس *" value={phone.number} onChange={(e) => updatePhone(index, 'number', e.target.value)} />
-                <select className={inputClass} value={phone.type} onChange={(e) => updatePhone(index, 'type', e.target.value as PhoneType)}>
-                  <option value="mobile">موبایل</option>
-                  <option value="home">منزل</option>
-                  <option value="work">محل کار</option>
-                  <option value="other">سایر</option>
-                </select>
+                <EnhancedDropdown
+                  value={phone.type}
+                  onChange={(value) => updatePhone(index, 'type', value as PhoneType)}
+                  options={[
+                    { value: 'mobile', label: 'موبایل' },
+                    { value: 'home', label: 'منزل' },
+                    { value: 'work', label: 'محل کار' },
+                    { value: 'other', label: 'سایر' },
+                  ]}
+                  searchable
+                />
                 <label className="flex items-center gap-2 text-gray-300">
                   <input type="checkbox" checked={phone.isPrimary} onChange={(e) => updatePhone(index, 'isPrimary', e.target.checked)} />
                   شماره اصلی

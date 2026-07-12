@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import { FaEye, FaPlus, FaProjectDiagram } from 'react-icons/fa';
 import { CrmGuide } from '@/components/crm/CrmGuide';
-import { ErpBadge, ErpEmptyState, ErpListPage, ErpPagination, type ErpColumn } from '@/components/erp';
+import { ErpBadge, ErpEmptyState, ErpListPage, ErpPagination, ErpSection, type ErpColumn } from '@/components/erp';
+import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { crmAPI } from '@/lib/api';
 import { crmPersonName, crmUserName, formatToman, potentialProjectStatusTone, POTENTIAL_PROJECT_STATUSES, CRM_WORK_TYPES } from '@/lib/crmPipeline';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -36,6 +37,9 @@ const guideSteps = [
   },
 ];
 
+const filterInputClass = 'mt-2 min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
+const filterLabelClass = 'block text-sm font-semibold text-slate-700 dark:text-slate-200';
+
 export default function PotentialProjectsPage() {
   const [rows, setRows] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,6 +70,8 @@ export default function PotentialProjectsPage() {
       setLoading(false);
     }
   };
+
+  const resetToFirstPage = () => setPagination((prev) => ({ ...prev, page: 1 }));
 
   const columns: ErpColumn<Project>[] = [
     {
@@ -101,18 +107,58 @@ export default function PotentialProjectsPage() {
       columns={columns}
       isLoading={loading}
       emptyState={<ErpEmptyState icon={FaProjectDiagram} title="پروژه احتمالی ثبت نشده است" action={{ label: 'ثبت پروژه جدید', href: '/dashboard/crm/potential-projects/create', icon: FaPlus, tone: 'primary', variant: 'solid' }} />}
-      filters={[
-        { id: 'search', label: 'جستجو', type: 'search', value: search, placeholder: 'نام پروژه، مخاطب یا توضیح', onChange: (value) => { setSearch(value); setPagination((prev) => ({ ...prev, page: 1 })); } },
-        { id: 'status', label: 'وضعیت', type: 'select', value: status, options: [{ label: 'همه وضعیت‌ها', value: '' }, ...POTENTIAL_PROJECT_STATUSES.map((item) => ({ label: item, value: item }))], onChange: (value) => { setStatus(value); setPagination((prev) => ({ ...prev, page: 1 })); } },
-        { id: 'workType', label: 'نوع کار', type: 'select', value: workType, options: [{ label: 'همه نوع‌ها', value: '' }, ...CRM_WORK_TYPES.map((item) => ({ label: item, value: item }))], onChange: (value) => { setWorkType(value); setPagination((prev) => ({ ...prev, page: 1 })); } },
-      ]}
       rowActions={(row) => [{ label: 'مشاهده', href: `/dashboard/crm/potential-projects/${row.id}`, icon: FaEye, tone: 'primary' }]}
       footer={<ErpPagination currentPage={pagination.page} totalPages={pagination.pages} totalItems={pagination.total} itemsPerPage={pagination.limit} onPageChange={(page) => setPagination((prev) => ({ ...prev, page }))} itemLabel="پروژه" />}
     >
       <div className="flex justify-end">
         <CrmGuide steps={guideSteps} />
       </div>
-      <div data-crm-guide="project-filters" />
+      <ErpSection className="p-4">
+        <div data-crm-guide="project-filters" className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <label className={filterLabelClass}>
+            جستجو
+            <input
+              className={filterInputClass}
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                resetToFirstPage();
+              }}
+              placeholder="نام پروژه، مخاطب یا توضیح"
+            />
+          </label>
+          <label className={filterLabelClass}>
+            وضعیت
+            <EnhancedDropdown
+              className="mt-2"
+              value={status}
+              onChange={(value) => {
+                setStatus(value);
+                resetToFirstPage();
+              }}
+              placeholder="همه وضعیت‌ها"
+              options={[{ label: 'همه وضعیت‌ها', value: '' }, ...POTENTIAL_PROJECT_STATUSES.map((item) => ({ label: item, value: item }))]}
+              searchable
+              clearable
+            />
+          </label>
+          <label className={filterLabelClass}>
+            نوع کار
+            <EnhancedDropdown
+              className="mt-2"
+              value={workType}
+              onChange={(value) => {
+                setWorkType(value);
+                resetToFirstPage();
+              }}
+              placeholder="همه نوع‌ها"
+              options={[{ label: 'همه نوع‌ها', value: '' }, ...CRM_WORK_TYPES.map((item) => ({ label: item, value: item }))]}
+              searchable
+              clearable
+            />
+          </label>
+        </div>
+      </ErpSection>
       <div data-crm-guide="project-list" />
     </ErpListPage>
   );

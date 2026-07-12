@@ -5,8 +5,16 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { FaSave } from 'react-icons/fa';
 import { CrmGuide } from '@/components/crm/CrmGuide';
 import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
+import EnhancedDropdown from '@/components/EnhancedDropdown';
+import PersianCalendarComponent from '@/components/PersianCalendar';
 import { crmAPI } from '@/lib/api';
-import { crmPersonName, CRM_COMMUNICATION_TYPES, CRM_WORK_TYPES } from '@/lib/crmPipeline';
+import {
+  crmPersonName,
+  CRM_COMMUNICATION_TYPES,
+  CRM_WORK_TYPES,
+  persianDateTimeToApiDate,
+  persianNowDateTime,
+} from '@/lib/crmPipeline';
 
 const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
 const labelClass = 'block text-sm font-semibold text-slate-700 dark:text-slate-200';
@@ -39,7 +47,7 @@ export default function CreateFollowUpPage() {
     potentialProjectId: searchParams.get('projectId') || '',
     communicationType: CRM_COMMUNICATION_TYPES[0],
     workType: CRM_WORK_TYPES[0],
-    happenedAt: new Date().toISOString().slice(0, 16),
+    happenedAt: persianNowDateTime(),
     summary: '',
     outcome: '',
     hasNextAction: true,
@@ -82,7 +90,7 @@ export default function CreateFollowUpPage() {
         potentialProjectId: form.potentialProjectId || null,
         communicationType: form.communicationType,
         workType: form.workType,
-        happenedAt: form.happenedAt,
+        happenedAt: persianDateTimeToApiDate(form.happenedAt),
         summary: form.summary,
         outcome: form.outcome,
         hasNextAction: form.hasNextAction,
@@ -91,7 +99,7 @@ export default function CreateFollowUpPage() {
           title: form.nextTitle,
           communicationType: form.nextCommunicationType,
           workType: form.workType,
-          dueAt: form.nextDueAt,
+          dueAt: persianDateTimeToApiDate(form.nextDueAt),
           instructions: form.nextInstructions,
         } : null,
       });
@@ -125,29 +133,42 @@ export default function CreateFollowUpPage() {
         <ErpSection title="گزارش پیگیری" description="ثبت کنید چه ارتباطی برقرار شد و نتیجه چه بود.">
           <div data-crm-guide="followup-event" className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className={labelClass}>مخاطب CRM
-              <select className={`${inputClass} mt-2`} value={form.customerId} onChange={(e) => { update('customerId', e.target.value); update('potentialProjectId', ''); }} required>
-                <option value="">انتخاب مخاطب</option>
-                {customers.map((customer) => <option key={customer.id} value={customer.id}>{crmPersonName(customer)}</option>)}
-              </select>
+              <EnhancedDropdown
+                className="mt-2"
+                value={form.customerId}
+                onChange={(value) => { update('customerId', value); update('potentialProjectId', ''); }}
+                placeholder="انتخاب مخاطب"
+                options={customers.map((customer) => ({ value: customer.id, label: crmPersonName(customer) }))}
+                searchable
+                required
+                noOptionsText="مخاطبی پیدا نشد"
+              />
             </label>
             <label className={labelClass}>پروژه احتمالی
-              <select className={`${inputClass} mt-2`} value={form.potentialProjectId} onChange={(e) => update('potentialProjectId', e.target.value)}>
-                <option value="">پیگیری عمومی مخاطب</option>
-                {visibleProjects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
-              </select>
+              <EnhancedDropdown
+                className="mt-2"
+                value={form.potentialProjectId}
+                onChange={(value) => update('potentialProjectId', value)}
+                placeholder="پیگیری عمومی مخاطب"
+                options={[
+                  { value: '', label: 'پیگیری عمومی مخاطب' },
+                  ...visibleProjects.map((project) => ({ value: project.id, label: project.title })),
+                ]}
+                searchable
+                clearable
+                noOptionsText="پروژه‌ای پیدا نشد"
+              />
             </label>
             <label className={labelClass}>نوع ارتباط
-              <select className={`${inputClass} mt-2`} value={form.communicationType} onChange={(e) => update('communicationType', e.target.value)} required>
-                {CRM_COMMUNICATION_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
-              </select>
+              <EnhancedDropdown className="mt-2" value={form.communicationType} onChange={(value) => update('communicationType', value)} options={CRM_COMMUNICATION_TYPES.map((type) => ({ value: type, label: type }))} searchable required />
             </label>
             <label className={labelClass}>نوع کار/معامله
-              <select className={`${inputClass} mt-2`} value={form.workType} onChange={(e) => update('workType', e.target.value)} required>
-                {CRM_WORK_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
-              </select>
+              <EnhancedDropdown className="mt-2" value={form.workType} onChange={(value) => update('workType', value)} options={CRM_WORK_TYPES.map((type) => ({ value: type, label: type }))} searchable required />
             </label>
             <label className={labelClass}>زمان پیگیری
-              <input className={`${inputClass} mt-2`} type="datetime-local" value={form.happenedAt} onChange={(e) => update('happenedAt', e.target.value)} required />
+              <div className="mt-2">
+                <PersianCalendarComponent value={form.happenedAt} onChange={(value) => update('happenedAt', value)} placeholder="انتخاب زمان" showTime disablePastDates />
+              </div>
             </label>
             <label className={`${labelClass} md:col-span-2`}>خلاصه اتفاقات
               <textarea className={`${inputClass} mt-2 min-h-28`} value={form.summary} onChange={(e) => update('summary', e.target.value)} required />
@@ -170,12 +191,12 @@ export default function CreateFollowUpPage() {
                   <input className={`${inputClass} mt-2`} value={form.nextTitle} onChange={(e) => update('nextTitle', e.target.value)} required={form.hasNextAction} />
                 </label>
                 <label className={labelClass}>نوع ارتباط بعدی
-                  <select className={`${inputClass} mt-2`} value={form.nextCommunicationType} onChange={(e) => update('nextCommunicationType', e.target.value)} required={form.hasNextAction}>
-                    {CRM_COMMUNICATION_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
-                  </select>
+                  <EnhancedDropdown className="mt-2" value={form.nextCommunicationType} onChange={(value) => update('nextCommunicationType', value)} options={CRM_COMMUNICATION_TYPES.map((type) => ({ value: type, label: type }))} searchable required={form.hasNextAction} />
                 </label>
                 <label className={labelClass}>زمان سررسید
-                  <input className={`${inputClass} mt-2`} type="datetime-local" value={form.nextDueAt} onChange={(e) => update('nextDueAt', e.target.value)} required={form.hasNextAction} />
+                  <div className="mt-2">
+                    <PersianCalendarComponent value={form.nextDueAt} onChange={(value) => update('nextDueAt', value)} placeholder="انتخاب زمان سررسید" showTime disablePastDates />
+                  </div>
                 </label>
                 <label className={`${labelClass} md:col-span-2`}>دستور کار اقدام بعدی
                   <textarea className={`${inputClass} mt-2 min-h-28`} value={form.nextInstructions} onChange={(e) => update('nextInstructions', e.target.value)} required={form.hasNextAction} />

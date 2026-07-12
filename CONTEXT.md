@@ -361,6 +361,10 @@ _Avoid_: calculating جلو from عرض/depth, or calculating چپ and راست 
 Geometry-driven stair cuts such as برش طولی and برش عرضی are برش rows, not ابزار rows. ابزار is reserved for user-selected edge operations such as نیم لول.
 _Avoid_: storing or printing automatic stair cuts as ابزار, automatically selecting a cutting catalog item as an ابزار, filtering real user-selected ابزار only because its name contains برش, or showing the same physical cut once as برش and again as ابزار
 
+**متراژ برش خودکار سنگ پله**:
+For a stair part cut from a wider and/or longer source stone, paid برش طولی follows the actual requested stair pieces produced, while برش کالیبر remains one extra paid longitudinal side cut per consumed source stone. Paid برش عرضی follows the full source width for each consumed source stone when the standard/source length is shortened to the requested actual length.
+_Avoid_: charging stair برش طولی only once per source stone when multiple requested pieces are produced from that source, charging برش عرضی only across the requested piece width, or changing material pricing/base-stone count while correcting cutting meters
+
 **کل دور ابزار پله**:
 For stair product tools, کل دور means all four stair-part edges: جلو، عقب، چپ، and راست.
 _Avoid_: treating کل دور as only three edges, or excluding عقب from the perimeter
@@ -372,6 +376,10 @@ _Avoid_: silently changing historical contract totals without an edit/save actio
 **باقی‌مانده عرضی سنگ پله**:
 When a stair part is cut narrower than the source stone width, the usable remaining width is based on the requested pieces actually consumed from each source stone, not the maximum number of pieces that could theoretically be cut from that source width. Material pricing, base-stone count, and cutting-charge policy remain separate from this remaining-stone geometry.
 _Avoid_: treating unrequested possible pieces as already consumed, hiding usable leftover width such as `20cm` from a `30cm` source when only one `10cm` stair piece was requested, or changing contract pricing just because remaining geometry is corrected
+
+**باقی‌مانده طولی سنگ پله**:
+When a stair part is shortened from a standard/source length to the actual requested length, the leftover length keeps the full source stone width for each consumed source stone. If the same row also has width cuts, the width leftovers belong only to the actual-length section, while the length leftovers remain separate full-source-width pieces.
+_Avoid_: calculating the leftover-length piece only at the requested stair width, or merging width-side leftovers from the actual-length section with the full-width leftover-length section
 
 **مصرف باقی‌مانده برای سنگ لایه**:
 When سنگ لایه uses سنگ اصلی, compatible remaining pieces from the same stair part are consumed before charging any additional سنگ اصلی. Only the layer demand that cannot be supplied from those remaining pieces should count as new main-stone material.

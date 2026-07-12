@@ -501,9 +501,11 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   assert.equal(totals.piecesPerStone, 2);
   assert.equal(totals.baseStoneQuantity, 5);
   approx(totals.toolsTotal, 1_600_000);
-  approx(totals.cuttingMetersLongitudinal, 12);
-  approx(totals.cuttingCost, 600_000);
-  approx(totals.partTotal, 4_600_000);
+  approx(totals.cuttingMetersLongitudinalProduction, 12);
+  approx(totals.cuttingMetersLongitudinalCalibration, 6);
+  approx(totals.cuttingMetersLongitudinal, 18);
+  approx(totals.cuttingCost, 900_000);
+  approx(totals.partTotal, 4_900_000);
   assert.equal(layerMetrics.layersFromRemainingStones, 2);
   assert.equal(layerMetrics.layersFromNewStones, 3);
   approx(layerMetrics.squareMetersFromRemaining || 0, 0.4);
@@ -568,6 +570,36 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
 }
 
 {
+  const stairProduct = product({ id: 'stair-cut-meters-35', widthValue: 35, thicknessValue: 3 });
+  const totals = computeTotalsV2('tread', {
+    stoneProduct: stairProduct,
+    lengthValue: 0.72,
+    lengthUnit: 'm',
+    standardLengthValue: 1.1,
+    standardLengthUnit: 'm',
+    widthCm: 10,
+    quantity: 7,
+    pricePerSquareMeter: 4_500_000,
+    useMandatory: false,
+    calibrationCutEnabled: true,
+    tools: []
+  }, () => 20_000);
+
+  assert.equal(totals.piecesPerStone, 3);
+  assert.equal(totals.baseStoneQuantity, 3);
+  assert.deepEqual(totals.remainingStoneGroups, [
+    { widthCm: 5, quantity: 2 },
+    { widthCm: 25, quantity: 1 }
+  ]);
+  approx(totals.cuttingMetersLongitudinalProduction, 5.04);
+  approx(totals.cuttingMetersLongitudinalCalibration, 2.16);
+  approx(totals.cuttingMetersLongitudinal, 7.2);
+  approx(totals.cuttingCostLongitudinal, 144_000);
+  approx(totals.cuttingMetersCross, 1.05);
+  approx(totals.cuttingCostCross, 21_000);
+}
+
+{
   const stairProduct = product({ id: 'mandatory-stair-stone', widthValue: 40, thicknessValue: 3 });
   const totals = computeTotalsV2('tread', {
     stoneProduct: stairProduct,
@@ -582,8 +614,10 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
     tools: []
   }, (code) => code === 'LONG' ? 50_000 : 25_000);
 
-  approx(totals.cuttingMetersLongitudinal, 12);
-  approx(totals.cuttingCostLongitudinal, 600_000);
+  approx(totals.cuttingMetersLongitudinalProduction, 12);
+  approx(totals.cuttingMetersLongitudinalCalibration, 6);
+  approx(totals.cuttingMetersLongitudinal, 18);
+  approx(totals.cuttingCostLongitudinal, 900_000);
   approx(totals.billableCuttingCostLongitudinal, 0);
   assert.equal(totals.shouldChargeCuttingCost, false);
 }

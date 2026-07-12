@@ -1296,6 +1296,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     cuttingCostLongitudinal: number;
     cuttingCostPerMeterLongitudinal: number;
     cuttingMetersLongitudinal: number;
+    cuttingMetersLongitudinalProduction: number;
+    cuttingMetersLongitudinalCalibration: number;
     cuttingCostCross: number;
     cuttingCostPerMeterCross: number;
     cuttingMetersCross: number;
@@ -1351,6 +1353,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     let cuttingCostLongitudinal = 0;
     let cuttingCostPerMeterLongitudinal = 0;
     let cuttingMetersLongitudinal = 0;
+    let cuttingMetersLongitudinalProduction = 0;
+    let cuttingMetersLongitudinalCalibration = 0;
     let cuttingCostCross = 0;
     let cuttingCostPerMeterCross = 0;
     let cuttingMetersCross = 0;
@@ -1360,9 +1364,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       pricingLengthM > 0 && actualLengthM > 0 && pricingLengthM - actualLengthM > 0.0001 && userWidthCm > 0;
 
     if (needsWidthCut && stoneQuantityForPricing > 0) {
-      const baseLongitudinalMeters = actualLengthM * stoneQuantityForPricing;
-      const calibrationCutMeters = (draft.calibrationCutEnabled ?? true) ? baseLongitudinalMeters : 0;
-      cuttingMetersLongitudinal = baseLongitudinalMeters + calibrationCutMeters;
+      cuttingMetersLongitudinalProduction = actualLengthM * (draft.quantity || 0);
+      cuttingMetersLongitudinalCalibration = (draft.calibrationCutEnabled ?? true)
+        ? actualLengthM * stoneQuantityForPricing
+        : 0;
+      cuttingMetersLongitudinal = cuttingMetersLongitudinalProduction + cuttingMetersLongitudinalCalibration;
       cuttingCostPerMeterLongitudinal =
         (draft.stoneProduct as any)?.cuttingCostPerMeter ??
         getCuttingTypePricePerMeter('LONG') ??
@@ -1379,9 +1385,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         getCuttingTypePricePerMeter('LONG') ??
         0;
       cuttingCostPerMeterCross = crossRateFromConfig;
+      const sourceWidthInMeters = originalWidthCm / 100;
+      cuttingMetersCross = sourceWidthInMeters * stoneQuantityForPricing;
       if (cuttingCostPerMeterCross > 0) {
-        const widthInMeters = userWidthCm / 100;
-        cuttingMetersCross = widthInMeters * stoneQuantityForPricing;
         cuttingCostCross = cuttingCostPerMeterCross * cuttingMetersCross;
       }
     }
@@ -1412,6 +1418,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       cuttingCostLongitudinal,
       cuttingCostPerMeterLongitudinal,
       cuttingMetersLongitudinal,
+      cuttingMetersLongitudinalProduction,
+      cuttingMetersLongitudinalCalibration,
       cuttingCostCross,
       cuttingCostPerMeterCross,
       cuttingMetersCross,
@@ -6207,11 +6215,16 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 {totals.billableCuttingCostLongitudinal > 0 && (
                                   <div>
                                     هزینه برش طولی: {formatPrice(totals.billableCuttingCostLongitudinal)} ({formatDisplayNumber(totals.cuttingMetersLongitudinal || (lengthMInfo * totals.baseStoneQuantity))} m × {formatPrice(totals.shouldChargeCuttingCost ? (totals.cuttingCostPerMeterLongitudinal || totals.cuttingCostPerMeter) : 0)})
+                                    {totals.cuttingMetersLongitudinalProduction > 0 && totals.cuttingMetersLongitudinalCalibration > 0 && (
+                                      <span className="block text-[11px] opacity-80">
+                                        {formatDisplayNumber(totals.cuttingMetersLongitudinalProduction)} m برش قطعه‌ها + {formatDisplayNumber(totals.cuttingMetersLongitudinalCalibration)} m برش کالیبر
+                                      </span>
+                                    )}
                                   </div>
                                 )}
                                 {totals.billableCuttingCostCross > 0 && (
                                   <div className="mt-1">
-                                    هزینه برش عرضی: {formatPrice(totals.billableCuttingCostCross)} ({formatDisplayNumber(totals.cuttingMetersCross || (((draft.widthCm || 0) / 100) * totals.baseStoneQuantity))} m × {formatPrice(totals.shouldChargeCuttingCost ? (totals.cuttingCostPerMeterCross || totals.cuttingCostPerMeter) : 0)})
+                                    هزینه برش عرضی: {formatPrice(totals.billableCuttingCostCross)} ({formatDisplayNumber(totals.cuttingMetersCross || (((draft.stoneProduct?.widthValue || 0) / 100) * totals.baseStoneQuantity))} m × {formatPrice(totals.shouldChargeCuttingCost ? (totals.cuttingCostPerMeterCross || totals.cuttingCostPerMeter) : 0)})
                                   </div>
                                 )}
                               </div>
@@ -7718,8 +7731,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   const basePrice = totals.baseMaterialPrice + mandatoryAmount;
                   const totalPrice = basePrice + toolsTotal + finishingCost + chargeableCuttingCost;
                   
-                  const hasWidthCut = totals.cuttingCostLongitudinal > 0;
-                  const hasLengthCut = totals.cuttingCostCross > 0;
+                  const hasWidthCut = totals.cuttingMetersLongitudinal > 0;
+                  const hasLengthCut = totals.cuttingMetersCross > 0;
                   
                   // Calculate remaining stone if product was cut
                   let remainingStones: RemainingStone[] = [];
@@ -7783,10 +7796,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     if (pricingLengthM > actualLengthM && baseStoneQuantity > 0) {
                       const remainingLength = pricingLengthM - actualLengthM;
                       const crossStoneId = `remaining_cross_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                      const widthMeters = userWidthCm / 100;
+                      const widthMeters = originalWidthCm / 100;
                       const crossRemaining: RemainingStone = {
                         id: crossStoneId,
-                        width: userWidthCm,
+                        width: originalWidthCm,
                         length: remainingLength,
                         squareMeters: widthMeters * remainingLength * baseStoneQuantity,
                         isAvailable: true,
@@ -7803,7 +7816,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           originalWidth: pricingLengthM * 100,
                           cutWidth: actualLengthM * 100,
                           remainingWidth: remainingLength * 100,
-                          length: userWidthCm * baseStoneQuantity,
+                          length: originalWidthCm * baseStoneQuantity,
                           cuttingCost: chargeableCuttingCostCross,
                           cuttingCostPerMeter: totals.shouldChargeCuttingCost
                             ? (totals.cuttingCostPerMeterCross || totals.cuttingCostPerMeter)
@@ -7814,7 +7827,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     }
                     cuttingBreakdown.push({
                       type: 'cross',
-                      meters: totals.cuttingMetersCross || ((userWidthCm / 100) * baseStoneQuantity),
+                      meters: totals.cuttingMetersCross || ((originalWidthCm / 100) * baseStoneQuantity),
                       rate: totals.shouldChargeCuttingCost
                         ? (totals.cuttingCostPerMeterCross || totals.cuttingCostPerMeter)
                         : 0,
@@ -7903,6 +7916,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         pricingSquareMeters: totals.pricingSquareMeters,
                         calibrationCutEnabled: draft.calibrationCutEnabled ?? true,
                         cuttingMetersLongitudinal: totals.cuttingMetersLongitudinal,
+                        cuttingMetersLongitudinalProduction: totals.cuttingMetersLongitudinalProduction,
+                        cuttingMetersLongitudinalCalibration: totals.cuttingMetersLongitudinalCalibration,
+                        cuttingMetersCross: totals.cuttingMetersCross,
                         standardLength: stairSystemV2.stairActivePart !== 'riser' && draft.standardLengthValue ? {
                           value: draft.standardLengthValue,
                           unit: draft.standardLengthUnit || draft.lengthUnit || 'm',

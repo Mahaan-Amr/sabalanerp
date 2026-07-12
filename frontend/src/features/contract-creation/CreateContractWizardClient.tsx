@@ -731,13 +731,40 @@ export default function CreateContractWizard({
 
     let piecesPerStone = 1;
     let leftoverWidthCm = 0;
+    let remainingStoneQuantity = 0;
 
     if (originalWidthCm > 0 && userWidthCm > 0) {
       piecesPerStone = Math.max(1, Math.floor(originalWidthCm / userWidthCm));
-      leftoverWidthCm = Math.max(0, originalWidthCm - piecesPerStone * userWidthCm);
     }
 
     const baseStoneQuantity = piecesPerStone > 0 ? Math.ceil(quantity / piecesPerStone) : quantity;
+    const remainingStoneGroups: Array<{ widthCm: number; quantity: number }> = [];
+    const addRemainingStoneGroup = (widthCm: number, groupQuantity: number) => {
+      if (widthCm <= 0 || groupQuantity <= 0) return;
+      const existing = remainingStoneGroups.find(group => Math.abs(group.widthCm - widthCm) < 0.000001);
+      if (existing) {
+        existing.quantity += groupQuantity;
+      } else {
+        remainingStoneGroups.push({ widthCm, quantity: groupQuantity });
+      }
+    };
+
+    if (originalWidthCm > 0 && userWidthCm > 0 && quantity > 0 && baseStoneQuantity > 0) {
+      const fullSourceStoneCount = Math.floor(quantity / piecesPerStone);
+      const remainingRequestedPieces = quantity % piecesPerStone;
+      const leftoverFromFullSourceWidth = Math.max(0, originalWidthCm - piecesPerStone * userWidthCm);
+      const leftoverFromPartialSourceWidth = remainingRequestedPieces > 0
+        ? Math.max(0, originalWidthCm - remainingRequestedPieces * userWidthCm)
+        : 0;
+
+      addRemainingStoneGroup(leftoverFromFullSourceWidth, fullSourceStoneCount);
+      addRemainingStoneGroup(leftoverFromPartialSourceWidth, remainingRequestedPieces > 0 ? 1 : 0);
+    }
+
+    if (remainingStoneGroups.length > 0) {
+      leftoverWidthCm = remainingStoneGroups[0].widthCm;
+      remainingStoneQuantity = remainingStoneGroups.reduce((sum, group) => sum + group.quantity, 0);
+    }
 
     return {
       originalWidthCm,
@@ -745,9 +772,19 @@ export default function CreateContractWizard({
       quantity,
       piecesPerStone,
       leftoverWidthCm,
+      remainingStoneQuantity,
+      remainingStoneGroups,
       baseStoneQuantity
     };
   };
+
+  const formatStairRemainingGroups = (
+    groups: Array<{ widthCm: number; quantity: number }> = []
+  ): string =>
+    groups
+      .filter(group => group.widthCm > 0 && group.quantity > 0)
+      .map(group => `${formatDisplayNumber(group.quantity)} عدد با عرض ${formatDisplayNumber(group.widthCm)}cm`)
+      .join('، ');
 
   const hasLengthMeasurement = (draft: StairPartDraftV2): boolean => {
     if (draft.lengthValue && draft.lengthValue > 0) return true;
@@ -1252,6 +1289,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     baseStoneQuantity: number;
     piecesPerStone: number;
     leftoverWidthCm: number;
+    remainingStoneQuantity: number;
+    remainingStoneGroups: Array<{ widthCm: number; quantity: number }>;
     cuttingCost: number;
     cuttingCostPerMeter: number;
     cuttingCostLongitudinal: number;
@@ -1285,7 +1324,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       userWidthCm,
       baseStoneQuantity,
       piecesPerStone,
-      leftoverWidthCm
+      leftoverWidthCm,
+      remainingStoneQuantity,
+      remainingStoneGroups
     } = calculateStairStoneUsage(draft);
     const actualLengthM = getActualLengthMeters(draft);
     const pricingLengthM = part === 'riser' ? actualLengthM : getPricingLengthMeters(draft);
@@ -1364,6 +1405,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       baseStoneQuantity: stoneQuantityForPricing,
       piecesPerStone,
       leftoverWidthCm,
+      remainingStoneQuantity,
+      remainingStoneGroups,
       cuttingCost,
       cuttingCostPerMeter,
       cuttingCostLongitudinal,
@@ -6032,11 +6075,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             <div className="md:col-span-2">
                               <div className="mt-2 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-4 py-3 text-xs leading-5 text-teal-700 dark:text-teal-200">
                                 <div>
-                                  از هر سنگ {formatDisplayNumber(totals.piecesPerStone)} قطعه با عرض {formatDisplayNumber(draft.widthCm ?? 0)} سانتی‌متر به دست می‌آید.
+                                  ظرفیت برش هر سنگ: تا {formatDisplayNumber(totals.piecesPerStone)} قطعه با عرض {formatDisplayNumber(draft.widthCm ?? 0)} سانتی‌متر.
                                 </div>
                                 <div>
                                   تعداد سنگ پایه مورد نیاز: {formatDisplayNumber(totals.baseStoneQuantity)} عدد
-                                  {totals.leftoverWidthCm > 0 ? ` ⬢ باقی‌مانده هر سنگ: ${formatDisplayNumber(totals.leftoverWidthCm)}cm` : ''}
+                                  {totals.remainingStoneGroups.length > 0
+                                    ? ` ⬢ باقی‌مانده قابل استفاده: ${formatStairRemainingGroups(totals.remainingStoneGroups)}`
+                                    : ''}
                                 </div>
                               </div>
                             </div>
@@ -6957,20 +7002,20 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 const edgeDemandsPreview = getLayerEdgeDemands(stairSystemV2.stairActivePart, draft);
                                 const previewMainRemainingStones: RemainingStone[] = (() => {
                                   const usagePreview = computeTotalsV2(stairSystemV2.stairActivePart, draft);
-                                  const leftoverWidthCm = usagePreview.leftoverWidthCm || 0;
-                                  const quantity = usagePreview.baseStoneQuantity || 0;
-                                  if (draft.layerUseDifferentStone || leftoverWidthCm <= 0 || stairLengthM <= 0 || quantity <= 0) {
+                                  if (draft.layerUseDifferentStone || stairLengthM <= 0) {
                                     return [];
                                   }
-                                  return [{
-                                    id: `preview_layer_source_${draft.stoneId || 'main'}`,
-                                    width: leftoverWidthCm,
-                                    length: stairLengthM,
-                                    squareMeters: (leftoverWidthCm / 100) * stairLengthM * quantity,
-                                    isAvailable: true,
-                                    sourceCutId: `preview_layer_source_${draft.stoneId || 'main'}`,
-                                    quantity
-                                  }];
+                                  return usagePreview.remainingStoneGroups
+                                    .filter(group => group.widthCm > 0 && group.quantity > 0)
+                                    .map((group, index) => ({
+                                      id: `preview_layer_source_${draft.stoneId || 'main'}_${index}`,
+                                      width: group.widthCm,
+                                      length: stairLengthM,
+                                      squareMeters: (group.widthCm / 100) * stairLengthM * group.quantity,
+                                      isAvailable: true,
+                                      sourceCutId: `preview_layer_source_${draft.stoneId || 'main'}_${index}`,
+                                      quantity: group.quantity
+                                    }));
                                 })();
                                 const previewAvailableRemainingStones = draft.layerUseDifferentStone
                                   ? []
@@ -7434,6 +7479,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             const baseStoneQuantity = stairMeta.baseStoneQuantity || 0;
                             const piecesPerStoneMeta = stairMeta.piecesPerStone || 0;
                             const leftoverWidthMeta = stairMeta.leftoverWidthCmPerStone || 0;
+                            const remainingStoneQuantityMeta = stairMeta.remainingStoneQuantity || 0;
+                            const remainingStoneGroupsMeta = Array.isArray(stairMeta.remainingStoneGroups)
+                              ? stairMeta.remainingStoneGroups
+                              : (leftoverWidthMeta > 0 && remainingStoneQuantityMeta > 0
+                                ? [{ widthCm: leftoverWidthMeta, quantity: remainingStoneQuantityMeta }]
+                                : []);
                             const finishing = normalizeProductFinishing(it);
                             
                             return (
@@ -7471,8 +7522,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           {baseStoneQuantity > 0 && (
                                             <div>
                                               سنگ پایه: {formatDisplayNumber(baseStoneQuantity)} عدد
-                                              {piecesPerStoneMeta > 0 ? ` ⬢ ${formatDisplayNumber(piecesPerStoneMeta)} قطعه از هر سنگ` : ''}
-                                              {leftoverWidthMeta > 0 ? ` ⬢ باقی‌مانده: ${formatDisplayNumber(leftoverWidthMeta)}cm` : ''}
+                                              {piecesPerStoneMeta > 0 ? ` ⬢ ظرفیت هر سنگ: ${formatDisplayNumber(piecesPerStoneMeta)} قطعه` : ''}
+                                              {remainingStoneGroupsMeta.length > 0
+                                                ? ` ⬢ باقی‌مانده قابل استفاده: ${formatStairRemainingGroups(remainingStoneGroupsMeta)}`
+                                                : ''}
                                             </div>
                                           )}
                                           {isLayer && layerInfo && (
@@ -7680,20 +7733,22 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   if (hasWidthCut) {
                     isCut = true;
                     cutType = 'longitudinal';
-                    const remainingWidth = totals.leftoverWidthCm;
-                    if (remainingWidth > 0 && actualLengthM > 0 && baseStoneQuantity > 0) {
-                      const remainingStoneId = `remaining_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                      const remainingWidthInMeters = remainingWidth / 100;
-                      const remainingStone: RemainingStone = {
-                        id: remainingStoneId,
-                        width: remainingWidth,
-                        length: actualLengthM,
-                        squareMeters: (remainingWidthInMeters * actualLengthM * baseStoneQuantity),
-                        isAvailable: remainingWidth > 0,
-                        sourceCutId: `cut_${draft.stoneId}_${Date.now()}`,
-                        quantity: baseStoneQuantity
-                      };
-                      remainingStones = [remainingStone];
+                    if (actualLengthM > 0 && totals.remainingStoneGroups.length > 0) {
+                      const baseRemainingSeed = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                      remainingStones = totals.remainingStoneGroups
+                        .filter(group => group.widthCm > 0 && group.quantity > 0)
+                        .map((group, index) => {
+                          const remainingWidthInMeters = group.widthCm / 100;
+                          return {
+                            id: `remaining_${baseRemainingSeed}_${index}`,
+                            width: group.widthCm,
+                            length: actualLengthM,
+                            squareMeters: remainingWidthInMeters * actualLengthM * group.quantity,
+                            isAvailable: true,
+                            sourceCutId: `cut_${draft.stoneId}_${baseRemainingSeed}_${index}`,
+                            quantity: group.quantity
+                          };
+                        });
                     }
                     
                     const cutId = `cut_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -7843,6 +7898,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         baseStoneQuantity: totals.baseStoneQuantity,
                         piecesPerStone: totals.piecesPerStone,
                         leftoverWidthCmPerStone: totals.leftoverWidthCm,
+                        remainingStoneQuantity: totals.remainingStoneQuantity,
+                        remainingStoneGroups: totals.remainingStoneGroups,
                         pricingSquareMeters: totals.pricingSquareMeters,
                         calibrationCutEnabled: draft.calibrationCutEnabled ?? true,
                         cuttingMetersLongitudinal: totals.cuttingMetersLongitudinal,

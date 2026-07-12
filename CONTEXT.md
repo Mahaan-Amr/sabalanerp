@@ -249,6 +249,10 @@ _Avoid_: treating کل دور as only three edges, or excluding عقب from the 
 Existing saved or printed contracts keep their saved stair tool totals until the contract is opened for editing and saved again. New contracts and edited-resaved contracts calculate stair tool edges using the current لبه‌های ابزار پله rules.
 _Avoid_: silently changing historical contract totals without an edit/save action
 
+**باقی‌مانده عرضی سنگ پله**:
+When a stair part is cut narrower than the source stone width, the usable remaining width is based on the requested pieces actually consumed from each source stone, not the maximum number of pieces that could theoretically be cut from that source width. Material pricing, base-stone count, and cutting-charge policy remain separate from this remaining-stone geometry.
+_Avoid_: treating unrequested possible pieces as already consumed, hiding usable leftover width such as `20cm` from a `30cm` source when only one `10cm` stair piece was requested, or changing contract pricing just because remaining geometry is corrected
+
 **مصرف باقی‌مانده برای سنگ لایه**:
 When سنگ لایه uses سنگ اصلی, compatible remaining pieces from the same stair part are consumed before charging any additional سنگ اصلی. Only the layer demand that cannot be supplied from those remaining pieces should count as new main-stone material.
 _Avoid_: charging all same-stone لایه as fresh stone while usable same-part remaining pieces exist

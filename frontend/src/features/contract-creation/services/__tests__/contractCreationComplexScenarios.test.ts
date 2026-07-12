@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { calculateSmartLongitudinalCutPlan, calculateSlabRemainingStones, hasLongitudinalGeometryChanged } from '../remainingStoneService';
 import { allocateRemainingStonePartitions } from '../remainingStonePartitionService';
 import { calculateSlabCut, validateCutDimensions } from '../stoneCuttingService';
-import { calculateLayerMetrics, computeTotalsV2 } from '../stairCalculationService';
+import { calculateLayerMetrics, calculateStairStoneUsage, computeTotalsV2 } from '../stairCalculationService';
 import { validatePayment, validateWizardStep } from '../validationService';
 import { calculateContractTotal, calculateFinalPrice } from '../pricingService';
 import { buildSlabCutDetails, calculateSlabMetrics, handleSmartCalculation } from '../../utils/productCalculations';
@@ -508,6 +508,63 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   assert.equal(layerMetrics.layersFromNewStones, 3);
   approx(layerMetrics.squareMetersFromRemaining || 0, 0.4);
   approx(layerMetrics.squareMetersFromNew || 0, 0.6);
+}
+
+{
+  const stairProduct = product({ id: 'stair-remainder-30', widthValue: 30, thicknessValue: 2 });
+  const usage = (quantity: number, widthCm = 10) => calculateStairStoneUsage({
+    stoneProduct: stairProduct,
+    lengthValue: 1.2,
+    lengthUnit: 'm',
+    widthCm,
+    quantity,
+    pricePerSquareMeter: 1_000_000
+  });
+
+  assert.equal(usage(1).piecesPerStone, 3);
+  assert.equal(usage(1).baseStoneQuantity, 1);
+  assert.equal(usage(1).leftoverWidthCm, 20);
+  assert.equal(usage(1).remainingStoneQuantity, 1);
+  assert.deepEqual(usage(1).remainingStoneGroups, [{ widthCm: 20, quantity: 1 }]);
+
+  assert.equal(usage(2).baseStoneQuantity, 1);
+  assert.equal(usage(2).leftoverWidthCm, 10);
+  assert.equal(usage(2).remainingStoneQuantity, 1);
+
+  assert.equal(usage(3).baseStoneQuantity, 1);
+  assert.equal(usage(3).leftoverWidthCm, 0);
+  assert.equal(usage(3).remainingStoneQuantity, 0);
+  assert.deepEqual(usage(3).remainingStoneGroups, []);
+
+  assert.equal(usage(4).baseStoneQuantity, 2);
+  assert.equal(usage(4).leftoverWidthCm, 20);
+  assert.equal(usage(4).remainingStoneQuantity, 1);
+
+  assert.equal(usage(5).baseStoneQuantity, 2);
+  assert.equal(usage(5).leftoverWidthCm, 10);
+  assert.equal(usage(5).remainingStoneQuantity, 1);
+
+  assert.equal(usage(2, 20).piecesPerStone, 1);
+  assert.equal(usage(2, 20).baseStoneQuantity, 2);
+  assert.equal(usage(2, 20).leftoverWidthCm, 10);
+  assert.equal(usage(2, 20).remainingStoneQuantity, 2);
+  assert.deepEqual(usage(2, 20).remainingStoneGroups, [{ widthCm: 10, quantity: 2 }]);
+
+  const mixedRemainderProduct = product({ id: 'stair-remainder-35', widthValue: 35, thicknessValue: 2 });
+  const mixedUsage = calculateStairStoneUsage({
+    stoneProduct: mixedRemainderProduct,
+    lengthValue: 1.2,
+    lengthUnit: 'm',
+    widthCm: 10,
+    quantity: 4,
+    pricePerSquareMeter: 1_000_000
+  });
+  assert.equal(mixedUsage.baseStoneQuantity, 2);
+  assert.equal(mixedUsage.remainingStoneQuantity, 2);
+  assert.deepEqual(mixedUsage.remainingStoneGroups, [
+    { widthCm: 5, quantity: 1 },
+    { widthCm: 25, quantity: 1 }
+  ]);
 }
 
 {

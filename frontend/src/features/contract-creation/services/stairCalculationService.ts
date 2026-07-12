@@ -47,13 +47,40 @@ export const calculateStairStoneUsage = (draft: StairPartDraftV2) => {
 
   let piecesPerStone = 1;
   let leftoverWidthCm = 0;
+  let remainingStoneQuantity = 0;
 
   if (originalWidthCm > 0 && userWidthCm > 0) {
     piecesPerStone = Math.max(1, Math.floor(originalWidthCm / userWidthCm));
-    leftoverWidthCm = Math.max(0, originalWidthCm - piecesPerStone * userWidthCm);
   }
 
   const baseStoneQuantity = piecesPerStone > 0 ? Math.ceil(quantity / piecesPerStone) : quantity;
+  const remainingStoneGroups: Array<{ widthCm: number; quantity: number }> = [];
+  const addRemainingStoneGroup = (widthCm: number, groupQuantity: number) => {
+    if (widthCm <= 0 || groupQuantity <= 0) return;
+    const existing = remainingStoneGroups.find(group => Math.abs(group.widthCm - widthCm) < 0.000001);
+    if (existing) {
+      existing.quantity += groupQuantity;
+    } else {
+      remainingStoneGroups.push({ widthCm, quantity: groupQuantity });
+    }
+  };
+
+  if (originalWidthCm > 0 && userWidthCm > 0 && quantity > 0 && baseStoneQuantity > 0) {
+    const fullSourceStoneCount = Math.floor(quantity / piecesPerStone);
+    const remainingRequestedPieces = quantity % piecesPerStone;
+    const leftoverFromFullSourceWidth = Math.max(0, originalWidthCm - piecesPerStone * userWidthCm);
+    const leftoverFromPartialSourceWidth = remainingRequestedPieces > 0
+      ? Math.max(0, originalWidthCm - remainingRequestedPieces * userWidthCm)
+      : 0;
+
+    addRemainingStoneGroup(leftoverFromFullSourceWidth, fullSourceStoneCount);
+    addRemainingStoneGroup(leftoverFromPartialSourceWidth, remainingRequestedPieces > 0 ? 1 : 0);
+  }
+
+  if (remainingStoneGroups.length > 0) {
+    leftoverWidthCm = remainingStoneGroups[0].widthCm;
+    remainingStoneQuantity = remainingStoneGroups.reduce((sum, group) => sum + group.quantity, 0);
+  }
 
   return {
     originalWidthCm,
@@ -61,6 +88,8 @@ export const calculateStairStoneUsage = (draft: StairPartDraftV2) => {
     quantity,
     piecesPerStone,
     leftoverWidthCm,
+    remainingStoneQuantity,
+    remainingStoneGroups,
     baseStoneQuantity
   };
 };
@@ -358,6 +387,8 @@ export const computeTotalsV2 = (
   baseStoneQuantity: number;
   piecesPerStone: number;
   leftoverWidthCm: number;
+  remainingStoneQuantity: number;
+  remainingStoneGroups: Array<{ widthCm: number; quantity: number }>;
   cuttingCost: number;
   cuttingCostPerMeter: number;
   cuttingCostLongitudinal: number;
@@ -391,7 +422,9 @@ export const computeTotalsV2 = (
     userWidthCm,
     baseStoneQuantity,
     piecesPerStone,
-    leftoverWidthCm
+    leftoverWidthCm,
+    remainingStoneQuantity,
+    remainingStoneGroups
   } = calculateStairStoneUsage(draft);
   const actualLengthM = getActualLengthMeters(draft);
   const pricingLengthM = part === 'riser' ? actualLengthM : getPricingLengthMeters(draft);
@@ -470,6 +503,8 @@ export const computeTotalsV2 = (
     baseStoneQuantity: stoneQuantityForPricing,
     piecesPerStone,
     leftoverWidthCm,
+    remainingStoneQuantity,
+    remainingStoneGroups,
     cuttingCost,
     cuttingCostPerMeter,
     cuttingCostLongitudinal,

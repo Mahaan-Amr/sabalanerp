@@ -59,6 +59,8 @@ model User {
   crmTimelineEvents         CrmTimelineEvent[]     @relation("CrmTimelineActor")
   logisticsDrivers          LogisticsDriver[]     @relation("LogisticsDriverCreatedBy")
   securityVehiclePairs      SecurityVehiclePair[] @relation("SecurityVehiclePairCreatedBy")
+  createdSecurityAttendanceRosterMemberships SecurityAttendanceRosterMembership[] @relation("SecurityAttendanceRosterCreatedBy")
+  endedSecurityAttendanceRosterMemberships SecurityAttendanceRosterMembership[] @relation("SecurityAttendanceRosterEndedBy")
   requestedLoadingDrivers   LogisticsDriverRequest[] @relation("LogisticsDriverRequestRequestedBy")
   fulfilledLoadingDrivers   LogisticsDriverRequest[] @relation("LogisticsDriverRequestFulfilledBy")
   cancelledLoadingDrivers   LogisticsDriverRequest[] @relation("LogisticsDriverRequestCancelledBy")
@@ -76,6 +78,7 @@ model Personnel {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   attendanceRecords AttendanceRecord[]
+  securityAttendanceRosterMemberships SecurityAttendanceRosterMembership[]
   instantReportParticipants SecurityShiftLogParticipant[]
   user              User?
   department        Department?        @relation(fields: [departmentId], references: [id], onDelete: SetNull)
@@ -422,6 +425,24 @@ model AttendanceRecord {
   @@index([personnelId, date])
   @@index([employeeId, date])
   @@map("attendance_records")
+}
+
+model SecurityAttendanceRosterMembership {
+  id            String    @id @default(cuid())
+  personnelId   String
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  createdBy     String
+  endedBy       String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  personnel     Personnel @relation(fields: [personnelId], references: [id], onDelete: Cascade)
+  creator       User      @relation("SecurityAttendanceRosterCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  ender         User?     @relation("SecurityAttendanceRosterEndedBy", fields: [endedBy], references: [id], onDelete: SetNull)
+
+  @@index([personnelId, effectiveFrom, effectiveTo])
+  @@index([effectiveFrom, effectiveTo])
+  @@map("security_attendance_roster_memberships")
 }
 
 model ExceptionRequest {

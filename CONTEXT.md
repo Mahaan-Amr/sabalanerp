@@ -1051,9 +1051,33 @@ _Avoid_: mixing driver/vehicle registry work into personnel attendance workflows
 An active system user linked to organizational personnel who already has a security workspace permission or security role and can therefore be assigned into نفرات حراست. General active personnel are visible in attendance workflows but are not selectable for security shift plans, patrol ownership, shift logs, or replacement coverage unless they have linked user access to حراست.
 _Avoid_: offering every active personnel record in security personnel assignment, assigning non-login personnel to authenticated shift work, or using placeholder sample users when no eligible user exists
 
-**حضور و غیاب کارکنان در حراست**:
-A حراست-facing attendance view over all active organizational personnel, including personnel without system login accounts, filterable by department, shift, and date. It is not limited to the logged-in guard's department or current security shift.
-_Avoid_: showing only the current guard's department, treating security shift assignment or system-user membership as the employee population boundary, or using mock attendance summaries
+**فهرست حضور و غیاب حراست**:
+A manager-maintained roster of active organizational personnel who should appear in حراست attendance, metrics, reports, and absence calculations. Personnel outside this roster remain normal Personnel records but are excluded from the حراست daily attendance population.
+_Avoid_: treating all active personnel as automatically in scope, using an exclusion list as the primary model, or counting people outside the roster in حراست attendance metrics
+
+**فهرست خالی حضور و غیاب حراست**:
+An empty فهرست حضور و غیاب حراست is an intentional empty attendance scope. حراست attendance pages and metrics should show no population and guide managers to configure the roster, rather than falling back to all active personnel.
+_Avoid_: silently loading all personnel when the roster is empty, calculating attendance percentages from an unconfigured population, or hiding the need for manager configuration
+
+**مالکیت فهرست حضور و غیاب حراست**:
+Only حراست manager/admin users maintain the attendance roster. Operational guards use the resulting roster for attendance work but do not add or remove personnel from it during daily operations.
+_Avoid_: letting guards quietly expand the metric population from the attendance screen, mixing roster governance with check-in/check-out actions, or making roster membership a personal preference
+
+**عضویت تاریخ‌دار در فهرست حضور و غیاب حراست**:
+Roster membership is effective-dated: adding or removing personnel changes the حراست attendance population from the effective date forward, while historical attendance reports keep the roster truth that applied on each past day.
+_Avoid_: recalculating old attendance rates from today's roster, using a current-only checkbox for a historical metric boundary, or erasing past roster membership when someone leaves the attendance scope
+
+**راه‌اندازی اولیه فهرست حضور و غیاب حراست**:
+On first rollout of the roster model, currently active personnel may be seeded into the فهرست حضور و غیاب حراست effective from the rollout date so daily operations do not go blank. This is a one-time transition; after rollout, an empty roster remains an intentional empty attendance scope.
+_Avoid_: treating the seed as a permanent fallback to all active personnel, backfilling old roster history without an explicit decision, or changing pre-rollout reports unexpectedly
+
+**حذف از فهرست حضور و غیاب حراست**:
+Removing personnel from the attendance roster ends their future attendance scope but does not delete or rewrite existing attendance records. If removal is effective for the current day, that person leaves the current day's roster population and metrics while their raw attendance record remains available for audit/history.
+_Avoid_: deleting attendance evidence, changing historical days where the person was in scope, or keeping removed personnel in current metrics because they had a record earlier that day
+
+**افزودن به فهرست حضور و غیاب حراست**:
+Adding personnel to the attendance roster is effective from the selected date. If the effective date is today, the person immediately appears in today's حراست attendance population and metrics, usually as غایب until ورود or an exception is recorded; managers can choose a future effective date to avoid changing today's metrics.
+_Avoid_: delaying today-effective additions until tomorrow, hiding newly scoped personnel from current attendance, or changing today's metrics without making the effective date explicit
 
 **برابری پرسنل در حضور و غیاب**:
 In daily security attendance, user-linked and non-user personnel behave the same from the acting guard's perspective: both can be searched, filtered, checked in, checked out, marked with exceptions, and signed. Permissions belong to the acting system user, not to the personnel record being attended.

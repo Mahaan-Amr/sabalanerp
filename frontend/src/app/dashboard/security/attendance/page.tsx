@@ -264,6 +264,8 @@ export default function AttendancePage() {
     );
   }
 
+  const rosterScopeEmpty = (stats?.totalEmployees || 0) === 0 && attendanceRecords.length === 0 && !searchTerm.trim() && statusFilter === 'ALL';
+
   return (
     <ErpPage
       eyebrow="حراست"
@@ -338,7 +340,13 @@ export default function AttendancePage() {
       </ErpSection>
 
       <ErpSection title="لیست حضور و غیاب" description={`${filteredRecords.length.toLocaleString('fa-IR')} نفر در فیلتر فعلی`}>
-        {filteredRecords.length === 0 ? (
+        {filteredRecords.length === 0 && rosterScopeEmpty ? (
+          <ErpEmptyState
+            icon={FaUsers}
+            title="فهرست حضور و غیاب حراست هنوز تنظیم نشده است"
+            description="مدیر حراست باید افراد قابل محاسبه در حضور و غیاب را از تنظیمات حراست انتخاب کند."
+          />
+        ) : filteredRecords.length === 0 ? (
           <ErpEmptyState icon={FaUsers} title="رکوردی برای نمایش وجود ندارد" description="فیلترها را تغییر دهید یا تاریخ دیگری انتخاب کنید." />
         ) : (
           <>

@@ -121,35 +121,74 @@ const attendancePerson = (personnel: any, record?: any) => {
   };
 };
 
+const rosterMembershipWhere = (targetDate: Date) => ({
+  effectiveFrom: { lte: targetDate },
+  OR: [{ effectiveTo: null }, { effectiveTo: { gt: targetDate } }]
+});
+
+const rosterRolloutDate = async () => {
+  const result = await prisma.securityAttendanceRosterMembership.aggregate({
+    _min: { effectiveFrom: true }
+  });
+  return result._min.effectiveFrom ? startOfDay(result._min.effectiveFrom) : null;
+};
+
+const personnelSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  isActive: true,
+  department: { select: { id: true, name: true, namePersian: true } },
+  user: { select: { id: true, username: true, email: true } }
+};
+
+const loadAttendancePopulation = async (targetDate: Date, filters: { departmentId?: unknown; employeeId?: unknown; personnelId?: unknown }) => {
+  const targetPersonnelId = filters.personnelId || filters.employeeId;
+  const personnelWhere = scopedPersonnelWhere(filters.departmentId, targetPersonnelId);
+  const rolloutDate = await rosterRolloutDate();
+
+  if (rolloutDate && targetDate < rolloutDate) {
+    return prisma.personnel.findMany({
+      where: personnelWhere,
+      select: personnelSelect,
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }]
+    });
+  }
+
+  if (!rolloutDate) return [];
+
+  const memberships = await prisma.securityAttendanceRosterMembership.findMany({
+    where: {
+      ...rosterMembershipWhere(targetDate),
+      personnel: personnelWhere
+    },
+    include: { personnel: { select: personnelSelect } },
+    orderBy: [{ personnel: { lastName: 'asc' } }, { personnel: { firstName: 'asc' } }, { effectiveFrom: 'desc' }]
+  });
+
+  const byPersonnel = new Map<string, any>();
+  memberships.forEach((membership) => {
+    if (!byPersonnel.has(membership.personnelId)) byPersonnel.set(membership.personnelId, membership.personnel);
+  });
+  return Array.from(byPersonnel.values());
+};
+
 const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: unknown; shiftId?: unknown; employeeId?: unknown; personnelId?: unknown }) => {
   const targetDate = parseDayQuery(filters.date);
   const nextDay = addDays(targetDate, 1);
-  const targetPersonnelId = filters.personnelId || filters.employeeId;
-  const personnelWhere = scopedPersonnelWhere(filters.departmentId, targetPersonnelId);
+  const allPersonnel = await loadAttendancePopulation(targetDate, filters);
+  const personnelIds = allPersonnel.map((personnel) => personnel.id);
   const attendanceWhere = {
     date: { gte: targetDate, lt: nextDay },
     ...(filters.shiftId ? { shiftId: String(filters.shiftId) } : {}),
-    personnel: personnelWhere
+    personnelId: { in: personnelIds }
   };
 
-  const [attendanceRecords, allPersonnel] = await Promise.all([
-    prisma.attendanceRecord.findMany({
-      where: attendanceWhere,
-      include: attendanceInclude,
-      orderBy: { createdAt: 'asc' }
-    }),
-    prisma.personnel.findMany({
-      where: personnelWhere,
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        department: { select: { id: true, name: true, namePersian: true } },
-        user: { select: { id: true, username: true, email: true } }
-      },
-      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }]
-    })
-  ]);
+  const attendanceRecords = await prisma.attendanceRecord.findMany({
+    where: attendanceWhere,
+    include: attendanceInclude,
+    orderBy: { createdAt: 'asc' }
+  });
 
   const recordsByPersonnel = new Map(attendanceRecords.map((record) => [record.personnelId || record.employee?.personnelId || record.employeeId, record]));
   const openPreviousRecords = await prisma.attendanceRecord.findMany({
@@ -1215,6 +1254,101 @@ router.put('/instant-report-types/:id', protect, securityAdmin, [
   }
 });
 
+router.get('/attendance-roster', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const targetDate = parseDayQuery(req.query.date);
+    const personnel = await prisma.personnel.findMany({
+      where: scopedPersonnelWhere(req.query.departmentId, undefined),
+      select: personnelSelect,
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }]
+    });
+    const memberships = await prisma.securityAttendanceRosterMembership.findMany({
+      where: {
+        ...rosterMembershipWhere(targetDate),
+        personnelId: { in: personnel.map((person) => person.id) }
+      },
+      orderBy: { effectiveFrom: 'desc' }
+    });
+    const membershipByPersonnel = new Map<string, any>();
+    memberships.forEach((membership) => {
+      if (!membershipByPersonnel.has(membership.personnelId)) membershipByPersonnel.set(membership.personnelId, membership);
+    });
+
+    res.json({
+      success: true,
+      date: targetDate.toISOString(),
+      data: personnel.map((person) => {
+        const membership = membershipByPersonnel.get(person.id);
+        return {
+          personnel: person,
+          isInRoster: Boolean(membership),
+          membership: membership ? {
+            id: membership.id,
+            effectiveFrom: membership.effectiveFrom,
+            effectiveTo: membership.effectiveTo
+          } : null
+        };
+      })
+    });
+  } catch (error) {
+    console.error('List attendance roster error:', error);
+    res.status(500).json({ success: false, error: 'دریافت فهرست حضور و غیاب حراست ناموفق بود.' });
+  }
+});
+
+router.post('/attendance-roster', protect, securityAdmin, [
+  body('personnelId').isString().trim().notEmpty(),
+  body('effectiveDate').isISO8601()
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'پرسنل و تاریخ اثرگذاری الزامی است.', details: errors.array() });
+    const personnelId = String(req.body.personnelId);
+    const effectiveDate = parseDayQuery(req.body.effectiveDate);
+    const personnel = await prisma.personnel.findUnique({ where: { id: personnelId } });
+    if (!personnel?.isActive) return res.status(404).json({ success: false, error: 'پرسنل فعال پیدا نشد.' });
+
+    const existing = await prisma.securityAttendanceRosterMembership.findFirst({
+      where: { personnelId, ...rosterMembershipWhere(effectiveDate) },
+      orderBy: { effectiveFrom: 'desc' }
+    });
+    if (existing) return res.json({ success: true, message: 'این فرد از قبل در فهرست حضور و غیاب حراست قرار دارد.', data: existing });
+
+    const membership = await prisma.securityAttendanceRosterMembership.create({
+      data: { personnelId, effectiveFrom: effectiveDate, createdBy: req.user!.id }
+    });
+    res.status(201).json({ success: true, message: 'فرد به فهرست حضور و غیاب حراست اضافه شد.', data: membership });
+  } catch (error) {
+    console.error('Add attendance roster member error:', error);
+    res.status(500).json({ success: false, error: 'افزودن به فهرست حضور و غیاب حراست ناموفق بود.' });
+  }
+});
+
+router.put('/attendance-roster/:personnelId/remove', protect, securityAdmin, [
+  body('effectiveDate').isISO8601()
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'تاریخ اثرگذاری الزامی است.', details: errors.array() });
+    const personnelId = String(req.params.personnelId);
+    const effectiveDate = parseDayQuery(req.body.effectiveDate);
+    const membership = await prisma.securityAttendanceRosterMembership.findFirst({
+      where: { personnelId, ...rosterMembershipWhere(effectiveDate) },
+      orderBy: { effectiveFrom: 'desc' }
+    });
+    if (!membership) return res.json({ success: true, message: 'این فرد در تاریخ انتخاب‌شده داخل فهرست نبود.' });
+
+    const updated = await prisma.securityAttendanceRosterMembership.update({
+      where: { id: membership.id },
+      data: { effectiveTo: effectiveDate, endedBy: req.user!.id }
+    });
+    res.json({ success: true, message: 'فرد از فهرست حضور و غیاب حراست حذف شد.', data: updated });
+  } catch (error) {
+    console.error('Remove attendance roster member error:', error);
+    res.status(500).json({ success: false, error: 'حذف از فهرست حضور و غیاب حراست ناموفق بود.' });
+  }
+});
+
 router.get('/shift-log/active', protect, securityView, async (req: AuthRequest, res: Response) => {
   try {
     const { personnel, session } = await getActiveShiftSessionForUser(req.user!.id);
@@ -1625,6 +1759,8 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
     const currentTime = entryTime || currentAttendanceTime();
     const targetDate = parseDayQuery(req.body.date);
     const nextDay = addDays(targetDate, 1);
+    const [rosterPerson] = await loadAttendancePopulation(targetDate, { personnelId: personnel.id });
+    if (!rosterPerson) return res.status(400).json({ success: false, error: 'این فرد در فهرست حضور و غیاب حراست برای این تاریخ نیست.' });
 
     const openPreviousRecord = await prisma.attendanceRecord.findFirst({
       where: {
@@ -1848,14 +1984,16 @@ router.post('/attendance/exception', protect, requireWorkspaceAccess(WORKSPACES.
     });
     if (!personnel?.isActive) return res.status(404).json({ success: false, error: 'پرسنل فعال پیدا نشد.' });
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const [rosterPerson] = await loadAttendancePopulation(today, { personnelId: personnel.id });
+    if (!rosterPerson) return res.status(400).json({ success: false, error: 'این فرد در فهرست حضور و غیاب حراست برای امروز نیست.' });
+
     // Determine status based on exception type
     let status = 'PRESENT';
     if (exceptionType === 'ماموریت') status = 'MISSION';
     else if (exceptionType === 'مرخصی ساعتی') status = 'HOURLY_LEAVE';
     else if (exceptionType === 'غیبت') status = 'ABSENT';
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
 
     const attendanceRecord = await prisma.attendanceRecord.create({
       data: {

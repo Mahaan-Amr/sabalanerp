@@ -273,12 +273,20 @@ Normal price cells in نرخ - تومان and مبلغ کل - تومان show nu
 _Avoid_: repeating تومان inside every normal price cell, showing ریال equivalents on every product/payment row, or hiding ریال from the final invoice total
 
 **تقسیم طول در برش هوشمند طولی**:
-در برش هوشمند سنگ طولی، طول درخواستی مشتری می‌تواند به عنوان تقاضای کل فهمیده شود و سیستم آن را با چند قطعه فیزیکی کوتاه‌تر از همان عرض تأمین کند، به شرطی که نتیجه قراردادی همان متراژ و عرض درخواستی باقی بماند.
-_Avoid_: نمایش قطعات فیزیکی کوتاه‌تر به عنوان تغییر در سفارش مشتری، یا تقسیم طول در حالتی که کاربر صریحاً قطعه یکپارچه می‌خواهد
+وقتی کاربر عرض و طول محصول طولی را صریحاً وارد می‌کند، هر دو بعد قید قطعه فیزیکی هستند و برش هوشمند باید هر قطعه را یکپارچه نگه دارد. تقسیم یک طول صریح به چند قطعه کوتاه‌تر فقط با انتخاب روشن «تقسیم فیزیکی مجاز» انجام می‌شود.
+_Avoid_: فهمیدن طول صریح به عنوان تقاضای کل قابل تقسیم، تبدیل خودکار یک قطعه به چند قطعه کوتاه‌تر، یا پنهان‌کردن مجوز تقسیم در تنظیمات فنی
+
+**بعد مشتق‌شده در برش هوشمند**:
+وقتی یکی از ابعاد محصول صفر یا خالی است و عرض، متراژ کل، تعداد یا اطلاعات دیگر برای محاسبه کافی هستند، برش هوشمند می‌تواند بعد نامشخص را برای چیدمان بهینه محاسبه کند. بعدی که کاربر صریحاً وارد کرده قید باقی می‌ماند و نتیجه محاسبه‌شده پیش از ذخیره به کاربر نشان داده می‌شود.
+_Avoid_: تغییر بی‌صدای یک بعد صریح، حدس‌زدن با اطلاعات ناکافی، یا ذخیره نتیجه بهینه‌سازی بدون نمایش ابعاد و قطعات فیزیکی محاسبه‌شده
+
+**ردیف تجاری و خروجی فیزیکی برش هوشمند**:
+ردیف تجاری قرارداد خواسته مشتری را نگه می‌دارد، اما نتیجه تأییدشده بهینه‌سازی نیز باید قابل ردیابی باشد: بعد مشتق‌شده به‌عنوان «محاسبه‌شده توسط سیستم» ذخیره و نمایش داده می‌شود، و تقسیم فیزیکی مجاز با breakdown روشن قطعات تحویلی کنار ردیف تجاری ثبت می‌شود. خروجی کارگاه همیشه ابعاد و تعداد دقیق قطعات فیزیکی را نشان می‌دهد.
+_Avoid_: جایگزین‌کردن بی‌صدای خواسته تجاری با قطعات تولید، پنهان‌کردن قطعات واقعی از مشتری، یا فرستادن مقدار تجاری تجمیعی به کارگاه به‌جای breakdown فیزیکی
 
 **باقی‌مانده برش هوشمند طولی**:
-باقی‌مانده سنگ طولی بر اساس بخش فیزیکی سنگ مصرف‌شده در برش هوشمند محاسبه می‌شود، نه بر اساس طول نمایشی سفارش مشتری. اگر تقاضای `18m × 20cm` از سنگ `40cm` با دو نوار فیزیکی `9m × 20cm` تأمین شود، بخش مصرفی `40cm × 9m` است و باقی‌مانده‌ای از همان برش ساخته نمی‌شود.
-_Avoid_: ساختن باقی‌مانده `18m × 20cm` وقتی تقاضا با دو نوار فیزیکی کوتاه‌تر کامل شده است
+باقی‌مانده سنگ طولی بر اساس بخش فیزیکی سنگ مصرف‌شده در برش هوشمند محاسبه می‌شود، نه فقط بر اساس متراژ تجاری سفارش. وقتی تقسیم فیزیکی مجاز است یا طول از اطلاعات دیگر مشتق شده و تقاضای `18m × 20cm` از سنگ `40cm` با دو نوار فیزیکی `9m × 20cm` تأمین می‌شود، بخش مصرفی `40cm × 9m` است و باقی‌مانده‌ای از همان برش ساخته نمی‌شود.
+_Avoid_: استفاده از این چیدمان برای طول صریح بدون مجوز تقسیم، یا ساختن باقی‌مانده `18m × 20cm` وقتی تقاضا با دو نوار فیزیکی کوتاه‌تر کامل شده است
 
 **عرض درخواستی ردیف قرارداد**:
 The customer-requested finished width of a contract product row, shown when delivery scheduling needs to distinguish the requested piece from the source stone consumed to make it.
@@ -393,6 +401,30 @@ _Avoid_: treating partition quantity as the count of source remaining stones con
 A remaining-stone demand may be fulfilled by multiple physical pieces from the same remaining stone when the requested width fits the source width and the total requested area fits the available capacity.
 _Avoid_: rejecting a demand only because its logical length is longer than one source piece when it can be split into valid physical pieces
 
+**بازپخش تخصیص باقی‌مانده پس از ویرایش محصول منبع**:
+When a source contract product is edited after its remaining stone has been allocated to child rows, the edit is one atomic change: the source and its remaining inventory are recalculated, then every existing child allocation is replayed in its original order against the new geometry. The edit succeeds only when every child still fits; otherwise nothing changes and the conflicting child allocations are identified.
+_Avoid_: silently deleting child rows, partially applying the source edit, preserving stale consumed geometry, changing replay order, or making the user reconstruct allocations that still fit
+
+**چرخه تخصیص محصولات باقی‌مانده**:
+Creating, editing, or deleting a remaining-stone child uses the same atomic replay rule as editing its source product. An edited allocation keeps its original order, a new allocation is appended after existing children, and deleting a child regenerates the source remainder before replaying every surviving allocation; if replay fails, nothing changes and conflicts are identified.
+_Avoid_: manually adding a deleted child's geometry back into the current remainder, patching only one child or one remaining piece, partially committing a replay, or maintaining separate allocation rules for create, edit, delete, and source edit
+
+**افزونه‌های محصول ساخته‌شده از باقی‌مانده**:
+A contract product created from remaining stone owns its own ابزار and پرداخت سنگ selections, quantities, and charges, calculated from that child product's geometry and quantity. It starts without add-ons and never inherits them implicitly from the source product; any future explicit copy action must create independently editable add-ons recalculated for the child.
+_Avoid_: copying source-product add-on metadata or charges into the child, pricing a child from the source product's dimensions, or keeping copied add-ons linked to later source-product changes
+
+**افزونه ارث‌رسیده قدیمی محصول باقی‌مانده**:
+An ابزار or پرداخت سنگ value found only in a legacy remaining-child metadata snapshot is historical ambiguous data, not an intentional child-owned selection. Finalized contracts preserve that saved history unchanged; when the contract is edited, the value must be explicitly removed or adopted as a child-owned add-on recalculated from the child's geometry.
+_Avoid_: rewriting finalized historical contracts, silently deleting legacy values, or silently converting inherited source-product metadata into intentional child charges
+
+**قیمت محصول ساخته‌شده از باقی‌مانده**:
+A contract product created from remaining stone has zero base material price because its stone was already charged through the source product. Its total contains only its own billable operations, such as newly required cutting, ابزار, and پرداخت سنگ, without inheriting the source product's حکمی percentage or material discount behavior.
+_Avoid_: charging the same stone material twice, inheriting the source product's حکمی charge, discounting the child as newly sold base stone, or omitting new operations performed on the child
+
+**بازمحاسبه افزونه پس از تغییر هندسه محصول باقی‌مانده**:
+When the geometry of a remaining-stone child changes, its selected add-on identities and saved unit prices remain unchanged while geometry-derived tool lengths are recalculated. A manually entered پرداخت سنگ quantity is preserved when it still fits the new geometry; if it no longer fits, the save is blocked and the conflicting add-on is identified.
+_Avoid_: silently clamping or deleting an add-on, silently changing its saved rate, preserving a stale geometry-derived tool amount, or committing a child geometry change with an invalid finishing quantity
+
 **وضعیت هنگام چاپ**:
 The contract status shown on customer-facing printed or PDF contract output at the moment the document is generated.
 _Avoid_: labeling printed status as the general contract status when the timing matters
@@ -418,6 +450,10 @@ _Avoid_: printing or charging حکمی from a default percentage when the produc
 **برش غیرقابل دریافت در حکمی**:
 A physical stone cut that remains part of the contract product's workshop and remaining-stone truth but has no separate billable cutting charge because the product is marked حکمی. The product may still show that it has a physical cut, but invoice-facing totals should not include a paid برش amount for that cut.
 _Avoid_: removing the cut geometry, hiding the workshop cut, charging both حکمی and برش for the same mandatory product row, or showing a priced برش line for a non-billable mandatory cut
+
+**هزینه فیزیکی برش و مبلغ قابل دریافت برش**:
+هزینه فیزیکی برش ارزش محاسبه‌شده عملیات واقعی برای برنامه تولید و کنترل داخلی است؛ مبلغ قابل دریافت برش بخشی از همان عملیات است که طبق قواعد فروش از مشتری دریافت می‌شود. در محصول حکمی، عملیات و هزینه فیزیکی باقی می‌ماند اما مبلغ قابل دریافت برش صفر است.
+_Avoid_: استفاده از یک مبلغ مشترک برای حقیقت تولید و مبلغ فاکتور، حذف عملیات فیزیکی به دلیل رایگان‌بودن آن برای مشتری، یا استفاده از هزینه فیزیکی در جمع قابل پرداخت
 
 **بازذخیره قیمت‌گذاری حکمی**:
 Opening an existing contract for editing and saving it again applies the current حکمی pricing rule to the saved product rows.

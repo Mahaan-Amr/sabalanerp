@@ -2,7 +2,7 @@
 // Mobile-first catalog-to-cart product selection for contract creation.
 
 import React, { useState } from 'react';
-import { FaSearch, FaPlus, FaCheck, FaEdit, FaTrash, FaTimes, FaChevronDown } from 'react-icons/fa';
+import { FaSearch, FaPlus, FaCheck, FaEdit, FaTrash, FaTimes, FaChevronDown, FaWrench } from 'react-icons/fa';
 import { formatPrice, formatSquareMeters, formatQuantity, formatDisplayNumber, parseFormattedNumber } from '@/lib/numberFormat';
 import { resolveBackendAssetUrl } from '@/lib/api';
 import { generateFullProductName } from '../../utils/productUtils';
@@ -18,6 +18,7 @@ import {
 import { getPreparedKindLabel, getPreparedQuantity, getPreparedUnit, getPreparedUnitLabel, isPreparedProductType } from '../../utils/preparedProductUtils';
 import { getPartDisplayLabel } from '../../utils/stairSystemHelpers';
 import { isMandatoryLongitudinalCuttingNonBillable } from '../../utils/mandatoryCuttingPricing';
+import { hasUnresolvedLegacyRemainingChildAddOns } from '../../services/remainingStoneChildAddOnService';
 import type { ContractProduct, ContractServiceRowSourceType } from '../../types/contract.types';
 import type { RemainingStone } from '../../types/contract.types';
 import type { ContractProductCartController } from '../../hooks/useContractProductCartController';
@@ -78,6 +79,24 @@ const getRemainingStoneUsageKeys = (stone: RemainingStone): string[] => {
 };
 
 const SERVICE_SOURCE_OPTIONS: ContractServiceRowSourceType[] = ['tool', 'cutting', 'finishing'];
+
+const LegacyRemainingAddOnReview: React.FC<{
+  onAdopt: () => void;
+  onRemove: () => void;
+}> = ({ onAdopt, onRemove }) => (
+  <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
+    <p className="font-semibold">افزونه‌های قدیمی این باقی‌مانده نیازمند تصمیم شما هستند.</p>
+    <p className="mt-1 leading-5">این داده‌ها خودکار از والد کپی نمی‌شوند. آن‌ها را حذف کنید یا به افزونه‌های مستقل این فرزند تبدیل و بر اساس هندسه‌ی خودش دوباره محاسبه کنید.</p>
+    <div className="mt-2 flex flex-wrap gap-2">
+      <button type="button" onClick={onAdopt} className="rounded-md bg-amber-700 px-3 py-1.5 font-semibold text-white hover:bg-amber-800">
+        پذیرش و محاسبه مجدد
+      </button>
+      <button type="button" onClick={onRemove} className="rounded-md border border-amber-400 bg-white px-3 py-1.5 font-semibold text-amber-800 hover:bg-amber-100 dark:bg-slate-900 dark:text-amber-200">
+        حذف از این فرزند
+      </button>
+    </div>
+  </div>
+);
 
 interface RowImageStripProps {
   images?: string[];
@@ -167,7 +186,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
       </div>
 
       {errors.products && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+        <div className="whitespace-pre-line rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
           {errors.products}
         </div>
       )}
@@ -487,6 +506,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                   : Number(product.cuttingCost || 0);
                 const isLayerProduct = Boolean((product.meta as any)?.isLayer);
                 const isRemainingStoneChild = Boolean((product.meta as any)?.remainingSource);
+                const needsLegacyAddOnReview = hasUnresolvedLegacyRemainingChildAddOns(product);
                 const shouldShowRemainingStones =
                   !isLayerProduct &&
                   (!isRemainingStoneChild || availableRemainingStones.length > 0) &&
@@ -537,6 +557,17 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                       </div>
 
                       <div className="flex flex-shrink-0 gap-1">
+                        {!isPreparedProductType(product.productType) && (
+                          <button
+                            type="button"
+                            onClick={() => cart.manageItemTools(index, product)}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-purple-600 transition hover:bg-purple-50 dark:text-purple-300 dark:hover:bg-purple-900/20"
+                            title="مدیریت ابزار"
+                            aria-label="مدیریت ابزار محصول"
+                          >
+                            <FaWrench className="h-4 w-4" />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => cart.duplicateItem(index)}
@@ -566,6 +597,13 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                         </button>
                       </div>
                     </div>
+
+                    {needsLegacyAddOnReview && (
+                      <LegacyRemainingAddOnReview
+                        onAdopt={() => cart.resolveLegacyRemainingAddOns(index, 'adopt')}
+                        onRemove={() => cart.resolveLegacyRemainingAddOns(index, 'remove')}
+                      />
+                    )}
 
                     <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
                       <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
@@ -828,6 +866,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                     : Number(product.cuttingCost || 0);
                   const isLayerProduct = Boolean((product.meta as any)?.isLayer);
                   const isRemainingStoneChild = Boolean((product.meta as any)?.remainingSource);
+                  const needsLegacyAddOnReview = hasUnresolvedLegacyRemainingChildAddOns(product);
                   const shouldShowRemainingStones =
                     !isLayerProduct &&
                     (!isRemainingStoneChild || availableRemainingStones.length > 0) &&
@@ -890,6 +929,17 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                             >
                               <FaChevronDown className={`h-3.5 w-3.5 transition ${isExpanded ? 'rotate-180' : ''}`} />
                             </button>
+                            {!isPreparedProductType(product.productType) && (
+                              <button
+                                type="button"
+                                onClick={() => cart.manageItemTools(index, product)}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-purple-600 transition hover:bg-purple-50 dark:text-purple-300 dark:hover:bg-purple-900/20"
+                                title="مدیریت ابزار"
+                                aria-label="مدیریت ابزار محصول"
+                              >
+                                <FaWrench className="h-4 w-4" />
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => cart.duplicateItem(index)}
@@ -932,6 +982,12 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                                   <span>نوع: {getContractRowTypeLabel(product)}</span>
                                   <span>{product.isCut ? 'برش دارد' : 'بدون برش'}</span>
                                 </div>
+                                {needsLegacyAddOnReview && (
+                                  <LegacyRemainingAddOnReview
+                                    onAdopt={() => cart.resolveLegacyRemainingAddOns(index, 'adopt')}
+                                    onRemove={() => cart.resolveLegacyRemainingAddOns(index, 'remove')}
+                                  />
+                                )}
                                 {smartCutPlan?.enabled && (
                                   <div className="mt-3 rounded-lg border border-teal-200 bg-teal-50 p-3 text-xs leading-5 dark:border-teal-800 dark:bg-teal-900/20">
                                     <p className="font-semibold text-teal-800 dark:text-teal-100">خلاصه برش هوشمند</p>

@@ -38,6 +38,15 @@ export const generateContractHTML = (data: any): string => {
     if (!hasSourceMaterial) return '';
     return `عرض ${formatDisplayNumber(sourceWidthCm)}cm × طول ${formatDisplayNumber(sourceLengthM)}m × ${formatDisplayNumber(sourceQuantity)} عدد، جمع ${formatSquareMeters(sourceAreaSqm)}${kerfNote}`;
   };
+  const getPhysicalProductionSummary = (product: any): string => {
+    const pieces = Array.isArray(product?.smartCutPlan?.productionPieces)
+      ? product.smartCutPlan.productionPieces
+      : [];
+    if (pieces.length === 0) return '';
+    return pieces.map((piece: any) =>
+      `${formatDisplayNumber(piece.quantity || 0)} عدد × عرض ${formatDisplayNumber(piece.widthCm || 0)}cm × طول ${formatDisplayNumber(piece.lengthM || 0)}m`
+    ).join('، ');
+  };
   const productsTable = data.products && data.products.length > 0 ? `
     <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
       <thead>
@@ -53,12 +62,16 @@ export const generateContractHTML = (data: any): string => {
       <tbody>
         ${data.products.map((product: any) => {
           const sourceMaterialSummary = getSourceMaterialSummary(product);
+          const physicalProductionSummary = getPhysicalProductionSummary(product);
           const productName = product.product?.namePersian || product.product?.name || product.namePersian || product.name || 'نامشخص';
           const kerfNote = product.sawKerfEnabled ? ' - خوراک اره لحاظ شده' : '';
+          const requestedDimensions = product.length && product.width
+            ? `${formatDisplayNumber(product.length)}${product.lengthUnit || ''} × ${formatDisplayNumber(product.width)}${product.widthUnit || ''}${product.smartCutDerivedDimension ? ' (محاسبه‌شده توسط سیستم)' : ''}`
+            : 'نامشخص';
           return `
           <tr>
             <td style="border: 1px solid #ddd; padding: 8px;">${productName}${product.description ? ` - ${product.description}` : ''}${kerfNote}</td>
-            <td style="border: 1px solid #ddd; padding: 8px;">${product.product?.widthValue && product.product?.thicknessValue ? `${product.product.widthValue} × ${product.product.thicknessValue}` : product.length && product.width ? `${product.length} × ${product.width}` : 'نامشخص'}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${requestedDimensions}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatQuantity(product.quantity || 0)}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatSquareMeters(product.product?.squareMeter || product.squareMeter || 0)}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${product.unitPrice ? formatPrice(product.unitPrice, product.currency || 'تومان') : 'نامشخص'}</td>
@@ -68,6 +81,16 @@ export const generateContractHTML = (data: any): string => {
             <tr>
               <td style="border: 1px solid #ddd; padding: 8px;">سنگ مصرفی برای ${productName}</td>
               <td style="border: 1px solid #ddd; padding: 8px;">${sourceMaterialSummary}</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">-</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">-</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">-</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">-</td>
+            </tr>
+          ` : ''}
+          ${physicalProductionSummary ? `
+            <tr>
+              <td style="border: 1px solid #ddd; padding: 8px;">خروجی فیزیکی تولید برای ${productName}</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">${physicalProductionSummary}</td>
               <td style="border: 1px solid #ddd; padding: 8px;">-</td>
               <td style="border: 1px solid #ddd; padding: 8px;">-</td>
               <td style="border: 1px solid #ddd; padding: 8px;">-</td>

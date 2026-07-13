@@ -197,6 +197,7 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
     enteredLength: 18,
     enteredLengthUnit: 'm',
     quantity: 1,
+    allowPhysicalSplitting: true,
     longitudinalRatePerMeter: 40_000,
     seed: 101
   });
@@ -248,13 +249,13 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
     seed: 103
   });
 
-  assert.deepEqual(plan.productionPieces, [{ widthCm: 15, lengthM: 9, quantity: 2 }]);
-  approx(plan.consumedAreaSqm, 3.6);
+  assert.deepEqual(plan.productionPieces, [{ widthCm: 15, lengthM: 18, quantity: 1 }]);
+  approx(plan.consumedAreaSqm, 7.2);
   approx(plan.requestedAreaSqm, 2.7);
   assert.equal(plan.remainingStones.length, 1);
-  approx(plan.remainingStones[0].width, 10);
-  approx(plan.remainingStones[0].length, 9);
-  approx(plan.remainingStones[0].squareMeters, 0.9);
+  approx(plan.remainingStones[0].width, 25);
+  approx(plan.remainingStones[0].length, 18);
+  approx(plan.remainingStones[0].squareMeters, 4.5);
 }
 
 {

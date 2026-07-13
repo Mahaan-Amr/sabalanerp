@@ -25,9 +25,14 @@ export const resolveLongitudinalWidth = (
 ): Partial<ContractProduct> => {
   const hasWidth = Number(draft.width || 0) > 0;
   const calculationNeedsWidth = Number(draft.length || 0) > 0 || Number(draft.squareMeters || 0) > 0;
+  const canDeriveWidth =
+    Number(draft.width || 0) <= 0 &&
+    Number(draft.length || 0) > 0 &&
+    Number(draft.squareMeters || 0) > 0 &&
+    Number(draft.quantity || 0) > 0;
   const originalWidth = getOriginalWidthForProduct(selectedProduct, draft, isEditMode);
 
-  if (hasWidth || !calculationNeedsWidth || originalWidth <= 0) {
+  if (hasWidth || canDeriveWidth || !calculationNeedsWidth || originalWidth <= 0) {
     return draft;
   }
 

@@ -59,6 +59,7 @@ export interface ProductCartController {
     totalQuantity: number;
   };
   editItem: (index: number) => void;
+  manageItemTools: (index: number, product: ContractProduct) => void;
   duplicateItem: (index: number) => void;
   removeItem: (index: number) => void;
   updateItemImages: (index: number, images: string[]) => void;
@@ -67,6 +68,7 @@ export interface ProductCartController {
   removeServiceRow: (rowId: string) => void;
   uploadImage: (file: File) => Promise<string>;
   useRemainingStone?: (remainingStone: RemainingStone, sourceProduct: ContractProduct) => void;
+  resolveLegacyRemainingAddOns: (index: number, action: 'adopt' | 'remove') => void;
 }
 
 export interface ServiceCatalogController {
@@ -104,6 +106,7 @@ interface UseContractProductCartControllerOptions {
   productsSummary: ProductCartController['summary'];
   selectProduct: (product: Product) => void;
   editProduct: (index: number) => void;
+  manageProductTools: (index: number, product: ContractProduct) => void;
   duplicateProduct: (index: number) => void;
   removeProduct: (index: number) => void;
   updateProductImages: (index: number, images: string[]) => void;
@@ -113,6 +116,7 @@ interface UseContractProductCartControllerOptions {
   removeServiceRow: (rowId: string) => void;
   uploadImage: (file: File) => Promise<string>;
   useRemainingStone?: (remainingStone: RemainingStone, sourceProduct: ContractProduct) => void;
+  resolveLegacyRemainingAddOns: (index: number, action: 'adopt' | 'remove') => void;
   createProduct: () => void;
 }
 
@@ -140,6 +144,7 @@ export const useContractProductCartController = ({
   productsSummary,
   selectProduct,
   editProduct,
+  manageProductTools,
   duplicateProduct,
   removeProduct,
   updateProductImages,
@@ -149,6 +154,7 @@ export const useContractProductCartController = ({
   removeServiceRow,
   uploadImage,
   useRemainingStone,
+  resolveLegacyRemainingAddOns,
   createProduct
 }: UseContractProductCartControllerOptions): ContractProductCartController => {
   const activeType = wizardData.selectedProductTypeForAddition;
@@ -234,6 +240,7 @@ export const useContractProductCartController = ({
       hasServiceRows: (wizardData.serviceRows || []).length > 0,
       summary: productsSummary,
       editItem: editProduct,
+      manageItemTools: manageProductTools,
       duplicateItem: duplicateProduct,
       removeItem: removeProduct,
       updateItemImages: updateProductImages,
@@ -241,7 +248,8 @@ export const useContractProductCartController = ({
       duplicateServiceRow,
       removeServiceRow,
       uploadImage,
-      useRemainingStone
+      useRemainingStone,
+      resolveLegacyRemainingAddOns
     },
     draft
   };

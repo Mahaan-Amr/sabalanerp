@@ -163,7 +163,8 @@ export const useContractSummary = (
       }
 
       // Cutting costs
-      if (product.isCut && (product.cuttingBreakdown?.length || product.cuttingCost)) {
+      const billableCuttingCost = toFiniteNumber(product.cuttingCost);
+      if (product.isCut && billableCuttingCost > 0) {
         const breakdown = product.cuttingBreakdown && product.cuttingBreakdown.length > 0
           ? product.cuttingBreakdown
           : [{
@@ -177,6 +178,7 @@ export const useContractSummary = (
         const crossCuts = breakdown.filter(cut => cut.type === 'cross');
         const hasOnlyOneCrossCut = crossCuts.length === 1 && breakdown.length === 1;
 
+        const physicalBreakdownTotal = breakdown.reduce((sum, cut) => sum + toFiniteNumber(cut.cost), 0);
         breakdown.forEach((cut, cutIndex) => {
           const metersLabel = `${formatDisplayNumber(cut.meters || 0)} متر`;
           // Use singular label if there is only one cross cut.
@@ -189,7 +191,9 @@ export const useContractSummary = (
             productName: productLabel,
             description: cutDescription,
             amountLabel: metersLabel,
-            cost: toFiniteNumber(cut.cost),
+            cost: physicalBreakdownTotal > 0
+              ? billableCuttingCost * (toFiniteNumber(cut.cost) / physicalBreakdownTotal)
+              : 0,
             meta: {
               rateLabel: cut.rate ? `${formatPrice(cut.rate, 'تومان')}/متر` : undefined
             }

@@ -8,18 +8,21 @@ import type {
   StonePartition,
   ContractWizardData
 } from '../types/contract.types';
-import { recalculateUsedRemainingDimensions } from '../utils/dimensionUtils';
 import {
   isUsableRemainingStone,
   mergeRemainingStoneCollection,
-  normalizeRemainingStoneCollection,
   sanitizeRemainingStoneEntry
 } from '../utils/remainingStoneGuards';
+import { createContractProductRowId, ensureContractProductRowIds } from '../utils/contractProductIdentity';
 import { SAW_KERF_CM } from '../utils/sawKerf';
 import {
-  allocateRemainingStonePartitions,
-  normalizeRemainingStock
+  allocateRemainingStonePartitions
 } from '../services/remainingStonePartitionService';
+import {
+  formatRemainingStoneReplayConflicts,
+  replayRemainingStoneAllocations,
+  resolveRemainingStoneSourceInventory
+} from '../services/remainingStoneAllocationReplayService';
 
 interface UseRemainingStoneModalOptions {
   wizardData: ContractWizardData;
@@ -245,16 +248,26 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
       return;
     }
 
-    const sourceProductIndex = wizardData.products.findIndex(p =>
-      p.stoneCode === sourceProduct.stoneCode &&
-      p.productId === sourceProduct.productId &&
-      p.productType === sourceProduct.productType
+    const productsWithRowIds = ensureContractProductRowIds(wizardData.products);
+    const sourceProductIndex = productsWithRowIds.findIndex((product, index) =>
+      (!!sourceProduct.rowId && product.rowId === sourceProduct.rowId) ||
+      wizardData.products[index] === sourceProduct ||
+      (product.remainingStones || []).some((stone) => stone.id === selectedRemainingStone.id)
     );
 
     if (sourceProductIndex < 0) {
       setErrors({ products: 'محصول منبع برای بروزرسانی پیدا نشد.' });
       return;
     }
+
+    const canonicalSourceProduct = productsWithRowIds[sourceProductIndex];
+    const sourceProductRowId = canonicalSourceProduct.rowId as string;
+    const existingAllocationOrders = productsWithRowIds
+      .filter((product) => product.parentProductRowId === sourceProductRowId)
+      .map((product, index) => Number(product.remainingStoneAllocationOrder ?? product.meta?.remainingSource?.allocationOrder ?? index));
+    const nextAllocationOrder = existingAllocationOrders.length > 0
+      ? Math.max(...existingAllocationOrders) + 1
+      : 0;
 
     const normalizedRows = partitions
       .filter(p => p.width > 0 && p.length > 0)
@@ -304,7 +317,6 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
       row.width < stockInfo.sanitized.width || row.length < stockInfo.sanitized.length
     );
 
-    const seed = Date.now();
     const childProducts: ContractProduct[] = normalizedRows.map((row, index) => {
       const physicalPieces = validation.physicalPiecesByRow.get(row.id) || [];
       const splitCount = physicalPieces.length;
@@ -317,6 +329,7 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
       const cutType: 'longitudinal' | 'cross' | null = lengthCut ? 'cross' : (widthCut ? 'longitudinal' : null);
 
       return {
+        rowId: createContractProductRowId(),
         productId: sourceProduct.productId,
         product: sourceProduct.product,
         productType: sourceProduct.productType,
@@ -344,6 +357,7 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
         originalWidth: stockInfo.sanitized.width,
         originalLength: stockInfo.sanitized.length,
         cuttingCost,
+        physicalCuttingCost: cuttingCost,
         cuttingCostPerMeter,
         cutDescription: widthCut || lengthCut
           ? 'هزینه برش بر اساس پارتیشن سنگ باقی‌مانده محاسبه شد.'
@@ -354,17 +368,21 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
         totalUsedRemainingWidth: 0,
         totalUsedRemainingLength: 0,
         parentProductIndex: sourceProductIndex,
+        parentProductRowId: sourceProductRowId,
+        remainingStoneAllocationOrder: nextAllocationOrder + index,
         appliedSubServices: [],
         totalSubServiceCost: 0,
         usedLengthForSubServices: 0,
         usedSquareMetersForSubServices: 0,
         meta: {
-          ...(sourceProduct.meta || {}),
           remainingSource: {
+            sourceProductRowId,
             sourceProductIndex,
             sourceRemainingStoneId: selectedRemainingStone.id,
             sourceRemainingStone: stockInfo.sanitized,
             partitionId: row.id,
+            allocationId: row.id,
+            allocationOrder: nextAllocationOrder + index,
             allocatedQuantity: row.quantity,
             generatedRemainingStoneIds: remainingAreas.map(area => area.id),
             physicalPieces: physicalPieces.map(piece => ({
@@ -389,72 +407,30 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
       };
     });
 
-    const consumedFromRemaining: RemainingStone[] = normalizedRows.map((row, index) => {
-      const widthCut = row.width < stockInfo.sanitized.width;
-      const lengthCut = row.length < stockInfo.sanitized.length;
-      const physicalPieces = validation.physicalPiecesByRow.get(row.id) || [];
-      return {
-        id: `used_partition_${seed}_${row.id}`,
-        width: row.width,
-        length: row.length,
-        squareMeters: row.squareMeters,
-        isAvailable: false,
-        sourceCutId: stockInfo.sanitized.sourceCutId,
-        quantity: row.quantity,
-        physicalPieces: physicalPieces.map(piece => ({
-          width: piece.width,
-          length: piece.length,
-          quantity: piece.quantity,
-          squareMeters: piece.squareMeters
-        })),
-        cutType: lengthCut ? 'cross' : (widthCut ? 'longitudinal' : null),
-        cuttingCostPerMeter,
-        cuttingCost: childProducts[index]?.cuttingCost || 0
-      };
+    const sourceInventory = resolveRemainingStoneSourceInventory(canonicalSourceProduct);
+    const productsForReplay = [
+      ...productsWithRowIds.map((product, index) => index === sourceProductIndex
+        ? { ...product, remainingStoneSourceInventory: sourceInventory }
+        : product),
+      ...childProducts
+    ];
+    const replay = replayRemainingStoneAllocations({
+      products: productsForReplay,
+      sourceRowId: sourceProductRowId,
+      sourceInventory
     });
 
-    const updatedProducts = wizardData.products.map((product, idx) => {
-      if (idx !== sourceProductIndex) return product;
-
-      const currentRemaining = (product.remainingStones || []).filter(rs => rs.id !== selectedRemainingStone.id);
-      const remainingQuantityAfterUse = Math.max(0, stockInfo.quantity - validation.consumedSourcePieces);
-      const retainedSourceStone: RemainingStone[] = remainingQuantityAfterUse > 0
-        ? [{
-            ...stockInfo.sanitized,
-            quantity: remainingQuantityAfterUse,
-            squareMeters: stockInfo.pieceArea > 0
-              ? stockInfo.pieceArea * remainingQuantityAfterUse
-              : stockInfo.sanitized.squareMeters
-          }]
-        : [];
-      const updatedUsedStones = [
-        ...(product.usedRemainingStones || []),
-        ...consumedFromRemaining
-      ];
-      const recalculated = recalculateUsedRemainingDimensions(updatedUsedStones);
-
-      return {
-        ...product,
-        usedRemainingStones: updatedUsedStones,
-        remainingStones: normalizeRemainingStoneCollection([
-          ...currentRemaining,
-          ...retainedSourceStone,
-          ...remainingAreas.map(area => ({
-            ...area,
-            sourceCutId: stockInfo.sanitized.sourceCutId
-          }))
-        ]),
-        totalUsedRemainingWidth: recalculated.totalUsedWidth,
-        totalUsedRemainingLength: recalculated.totalUsedLength
-      };
-    });
+    if (!replay.ok) {
+      setErrors({ products: formatRemainingStoneReplayConflicts(replay.conflicts) });
+      return;
+    }
 
     const warningMessage = hasAnyCut && cuttingCostPerMeter <= 0
       ? 'برش هندسی شناسایی شد اما نرخ برش در دسترس نیست؛ هزینه برش با صفر ثبت شد.'
       : undefined;
 
     updateWizardData({
-      products: [...updatedProducts, ...childProducts]
+      products: replay.products
     });
 
     if (warningMessage) {
@@ -486,7 +462,8 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     setErrors,
     validateRowsAgainstStock,
     resolveSourceProduct,
-    remainingStoneSawKerfEnabled
+    remainingStoneSawKerfEnabled,
+    wizardData.products
   ]);
 
   return {

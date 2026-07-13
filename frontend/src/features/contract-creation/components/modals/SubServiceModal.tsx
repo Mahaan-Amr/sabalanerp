@@ -82,8 +82,8 @@ export const SubServiceModal: React.FC<SubServiceModalProps> = ({
                   if (!currentProduct) return null;
                   
                   const lengthInMeters = currentProduct.lengthUnit === 'm' ? currentProduct.length : (currentProduct.length / 100);
-                  const availableLength = lengthInMeters - (currentProduct.usedLengthForSubServices || 0);
-                  const availableSquareMeters = currentProduct.squareMeters - (currentProduct.usedSquareMetersForSubServices || 0);
+                  const availableLength = lengthInMeters * Math.max(1, currentProduct.quantity || 1);
+                  const availableSquareMeters = currentProduct.squareMeters;
                   
                   return (
                     <div className="mb-6 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
@@ -179,8 +179,8 @@ export const SubServiceModal: React.FC<SubServiceModalProps> = ({
                       if (!currentProduct) return null;
                       
                       const lengthInMeters = currentProduct.lengthUnit === 'm' ? currentProduct.length : (currentProduct.length / 100);
-                      const availableLength = lengthInMeters - (currentProduct.usedLengthForSubServices || 0);
-                      const availableSquareMeters = currentProduct.squareMeters - (currentProduct.usedSquareMetersForSubServices || 0);
+                      const availableLength = lengthInMeters * Math.max(1, currentProduct.quantity || 1);
+                      const availableSquareMeters = currentProduct.squareMeters;
                       
                       // Get selected calculation base (user can override default)
                       const selectedCalculationBase = subServiceCalculationBases[subService.id] || subService.calculationBase;
@@ -313,8 +313,8 @@ export const SubServiceModal: React.FC<SubServiceModalProps> = ({
                       // Validate all meter values
                       let isValid = true;
                       const lengthInMeters = currentProduct.lengthUnit === 'm' ? currentProduct.length : (currentProduct.length / 100);
-                      const availableLength = lengthInMeters - (currentProduct.usedLengthForSubServices || 0);
-                      const availableSquareMeters = currentProduct.squareMeters - (currentProduct.usedSquareMetersForSubServices || 0);
+                      const availableLength = lengthInMeters * Math.max(1, currentProduct.quantity || 1);
+                      const availableSquareMeters = currentProduct.squareMeters;
                       
                       selectedSubServices.forEach(subService => {
                         const selectedCalculationBase = subServiceCalculationBases[subService.id] || subService.calculationBase;
@@ -363,6 +363,7 @@ export const SubServiceModal: React.FC<SubServiceModalProps> = ({
                       
                       // Calculate base price without sub-services (preserve it)
                       const basePriceWithoutSubServices = toFiniteNumber(currentProduct.totalPrice) - toFiniteNumber(currentProduct.totalSubServiceCost);
+                      const nextTotalPrice = basePriceWithoutSubServices + totalSubServiceCost;
                       
                       // Update product with sub-services
                       const updatedProducts = [...wizardData.products];
@@ -372,7 +373,26 @@ export const SubServiceModal: React.FC<SubServiceModalProps> = ({
                         totalSubServiceCost: totalSubServiceCost,
                         usedLengthForSubServices: usedLength,
                         usedSquareMetersForSubServices: usedSquareMeters,
-                        totalPrice: basePriceWithoutSubServices + totalSubServiceCost // Base price + all sub-service costs
+                        totalPrice: nextTotalPrice,
+                        meta: {
+                          ...(currentProduct.meta || {}),
+                          tools: allAppliedSubServices.map((applied) => ({
+                            toolId: applied.subServiceId,
+                            id: applied.subServiceId,
+                            name: applied.subService?.namePersian || applied.subService?.name || '',
+                            pricePerMeter: applied.subService?.pricePerMeter || 0,
+                            calculationBase: applied.calculationBase,
+                            quantity: applied.meter,
+                            computedMeters: applied.meter,
+                            totalPrice: applied.cost,
+                            edges: applied.edges || {}
+                          })),
+                          pricing: {
+                            ...(currentProduct.meta?.pricing || {}),
+                            toolsCost: totalSubServiceCost,
+                            totalPrice: nextTotalPrice
+                          }
+                        }
                       };
                       
                       updateWizardData({ products: updatedProducts });

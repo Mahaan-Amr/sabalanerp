@@ -235,6 +235,8 @@ export interface SmartLongitudinalCutPlan {
   sourceLengthConsumedM: number;
   consumedAreaSqm: number;
   requestedAreaSqm: number;
+  derivedDimension?: 'width' | 'length' | null;
+  physicalSplittingAllowed?: boolean;
   sawKerfEnabled?: boolean;
   sawKerfCm?: number | null;
   calibrationCutEnabled?: boolean;
@@ -380,6 +382,8 @@ export interface StairSystemConfig {
 }
 
 export interface ContractProduct {
+  /** Stable identity of this contract row; independent from catalog identity and array position. */
+  rowId?: string;
   productId: string;
   product: Product;
   // Product type
@@ -433,6 +437,8 @@ export interface ContractProduct {
   originalWidth: number; // ?? ?? ?? ?? ? ??
   originalLength: number; // original length before cutting in meters
   cuttingCost: number; // cutting cost
+  /** Physical/internal cutting cost. Customer totals use cuttingCost as the billable charge. */
+  physicalCuttingCost?: number;
   cuttingCostPerMeter: number; // cutting cost per meter
   cutDescription: string; // ?? ??
   remainingStones: RemainingStone[]; // remaining stones
@@ -462,6 +468,9 @@ export interface ContractProduct {
   totalUsedRemainingLength: number; // total used remaining length in meters
   // Parent-child relationship (explicit reference instead of stoneCode parsing)
   parentProductIndex?: number; // Index of parent product in wizardData.products array (for remaining stone relationships)
+  parentProductRowId?: string; // Stable parent row identity for remaining-stone and related child rows
+  remainingStoneSourceInventory?: RemainingStone[]; // Canonical generated inventory before child allocations are replayed
+  remainingStoneAllocationOrder?: number; // Stable replay order for a remaining-stone child
   // SubService tracking
   appliedSubServices: AppliedSubService[]; // applied sub-services
   totalSubServiceCost: number; // total sub-service cost
@@ -469,6 +478,9 @@ export interface ContractProduct {
   usedSquareMetersForSubServices: number; // square meters used for sub-services
   cuttingBreakdown?: CuttingBreakdownEntry[];
   smartCutPlan?: SmartLongitudinalCutPlan | null;
+  smartCutAllowPhysicalSplitting?: boolean;
+  smartCutDerivedDimension?: 'width' | 'length' | null;
+  legacyRemainingAddOnResolution?: 'adopted' | 'removed';
   // Stair-specific fields (for backward compatibility and display)
   treadWidth?: number;
   treadDepth?: number;

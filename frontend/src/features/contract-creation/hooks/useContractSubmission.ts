@@ -13,6 +13,7 @@ import { normalizeProductFinishing } from '../utils/finishingUtils';
 import { getPreparedQuantity, getPreparedUnit, isPreparedProductType, normalizeContractProductType } from '../utils/preparedProductUtils';
 import { getDeliverableProductEntries } from '../utils/deliveryScheduleController';
 import { normalizeMandatoryLongitudinalCuttingPricing } from '../utils/mandatoryCuttingPricing';
+import { hasUnresolvedLegacyRemainingChildAddOns } from '../services/remainingStoneChildAddOnService';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
@@ -109,6 +110,15 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       }
       if (validateAllSteps && !validateAllSteps()) return;
     } else if (!validateCurrentStep()) {
+      return;
+    }
+
+    const unresolvedLegacyAddOnRows = wizardData.products.filter(hasUnresolvedLegacyRemainingChildAddOns);
+    if (unresolvedLegacyAddOnRows.length > 0) {
+      setErrors({
+        products: `${unresolvedLegacyAddOnRows.length} محصول باقی‌مانده دارای افزونه قدیمی تعیین‌تکلیف‌نشده است. در مرحله انتخاب محصولات، برای هر مورد «پذیرش و محاسبه مجدد» یا «حذف» را انتخاب کنید.`
+      });
+      setCurrentStep(5);
       return;
     }
     

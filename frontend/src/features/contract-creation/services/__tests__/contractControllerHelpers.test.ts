@@ -8,6 +8,7 @@ import {
 } from '../../utils/deliveryScheduleController';
 import {
   clampContractDraftStep,
+  CONTRACT_DRAFT_TTL_MS,
   createContractAutosaveDraft,
   isContractDraftExpired,
   parseContractAutosaveDraft
@@ -132,6 +133,10 @@ assert.deepEqual(
   resolveLongitudinalWidth({ squareMeters: 4, width: 0 }, product, 'm', false),
   { squareMeters: 4, width: 0.4 }
 );
+assert.deepEqual(
+  resolveLongitudinalWidth({ length: 10, squareMeters: 2, quantity: 1, width: 0 }, product, 'cm', false),
+  { length: 10, squareMeters: 2, quantity: 1, width: 0 }
+);
 
 const usedStone: RemainingStone = {
   id: 'used-1',
@@ -229,10 +234,10 @@ assert.equal(validateOptionalIranianMobile('\u06F0\u06F2\u06F1\u06F1\u06F2\u06F3
     wizardData: makeWizardData()
   }, now);
 
-  assert.equal(isContractDraftExpired(draft, now + 14 * 60 * 1000), false);
-  assert.equal(isContractDraftExpired(draft, now + 16 * 60 * 1000), true);
-  assert.equal(parseContractAutosaveDraft(JSON.stringify(draft), now + 14 * 60 * 1000)?.currentStep, 4);
-  assert.equal(parseContractAutosaveDraft(JSON.stringify(draft), now + 16 * 60 * 1000), null);
+  assert.equal(isContractDraftExpired(draft, now + CONTRACT_DRAFT_TTL_MS - 1), false);
+  assert.equal(isContractDraftExpired(draft, now + CONTRACT_DRAFT_TTL_MS + 1), true);
+  assert.equal(parseContractAutosaveDraft(JSON.stringify(draft), now + CONTRACT_DRAFT_TTL_MS - 1)?.currentStep, 4);
+  assert.equal(parseContractAutosaveDraft(JSON.stringify(draft), now + CONTRACT_DRAFT_TTL_MS + 1), null);
   assert.equal(clampContractDraftStep(4, 7), 4);
   assert.equal(clampContractDraftStep('8', 7), 7);
   assert.equal(clampContractDraftStep(0, 7), 1);

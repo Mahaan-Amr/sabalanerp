@@ -107,16 +107,33 @@ export const calculateSmartLongitudinalCutPlan = ({
   calibrationCutEnabled = true,
   longitudinalRatePerMeter = 0,
   optimizationEnabled = true,
+  requestedAreaSqm = 0,
+  allowPhysicalSplitting = false,
   seed
 }: LongitudinalRemainingInput & {
   longitudinalRatePerMeter?: number;
   crossRatePerMeter?: number;
   optimizationEnabled?: boolean;
+  requestedAreaSqm?: number;
+  allowPhysicalSplitting?: boolean;
 }): SmartLongitudinalCutPlan => {
   const sourceWidthCm = Math.max(0, Number(originalWidthCm) || 0);
-  const requestedWidthCm = toCentimeters(Number(enteredWidth) || 0, enteredWidthUnit);
-  const requestedLengthM = toMeters(Number(enteredLength) || 0, enteredLengthUnit);
+  const explicitWidthCm = toCentimeters(Number(enteredWidth) || 0, enteredWidthUnit);
+  const explicitLengthM = toMeters(Number(enteredLength) || 0, enteredLengthUnit);
   const requestedQuantity = Math.max(0, Number(quantity) || 0);
+  const safeRequestedAreaSqm = Math.max(0, Number(requestedAreaSqm) || 0);
+  const derivedDimension: SmartLongitudinalCutPlan['derivedDimension'] =
+    explicitWidthCm <= 0 && explicitLengthM > 0 && safeRequestedAreaSqm > 0 && requestedQuantity > 0
+      ? 'width'
+      : explicitLengthM <= 0 && explicitWidthCm > 0 && safeRequestedAreaSqm > 0 && requestedQuantity > 0
+        ? 'length'
+        : null;
+  const requestedWidthCm = derivedDimension === 'width'
+    ? (safeRequestedAreaSqm * 100) / (explicitLengthM * requestedQuantity)
+    : explicitWidthCm;
+  const requestedLengthM = derivedDimension === 'length'
+    ? safeRequestedAreaSqm / ((explicitWidthCm / 100) * requestedQuantity)
+    : explicitLengthM;
   const kerfCm = resolveSawKerfCm(sawKerfEnabled, sawKerfCm);
   const shouldApplyKerfToWidth = sawKerfEnabled && requestedWidthCm > 0 && requestedWidthCm < sourceWidthCm;
   const consumedWidthCm = shouldApplyKerfToWidth ? requestedWidthCm + kerfCm : requestedWidthCm;
@@ -139,6 +156,8 @@ export const calculateSmartLongitudinalCutPlan = ({
       sourceLengthConsumedM: 0,
       consumedAreaSqm: 0,
       requestedAreaSqm: 0,
+      derivedDimension,
+      physicalSplittingAllowed: false,
       sawKerfEnabled,
       sawKerfCm: sawKerfEnabled ? kerfCm : null,
       calibrationCutEnabled,
@@ -168,6 +187,8 @@ export const calculateSmartLongitudinalCutPlan = ({
       sourceLengthConsumedM: 0,
       consumedAreaSqm: 0,
       requestedAreaSqm: 0,
+      derivedDimension,
+      physicalSplittingAllowed: false,
       sawKerfEnabled,
       sawKerfCm: sawKerfEnabled ? kerfCm : null,
       calibrationCutEnabled,
@@ -180,7 +201,8 @@ export const calculateSmartLongitudinalCutPlan = ({
   }
 
   const possibleStrips = Math.max(1, Math.floor(sourceWidthCm / consumedWidthCm));
-  const shouldSplitSingleLogicalLength = optimizationEnabled && requestedQuantity === 1 && possibleStrips > 1;
+  const physicalSplittingAllowed = allowPhysicalSplitting || derivedDimension !== null;
+  const shouldSplitSingleLogicalLength = optimizationEnabled && physicalSplittingAllowed && requestedQuantity === 1 && possibleStrips > 1;
   const stripsPerSource = optimizationEnabled
     ? (shouldSplitSingleLogicalLength ? possibleStrips : Math.min(possibleStrips, requestedQuantity))
     : 1;
@@ -189,7 +211,7 @@ export const calculateSmartLongitudinalCutPlan = ({
     ? requestedLengthM / stripsPerSource
     : requestedLengthM * sourceBandsNeeded;
   const consumedAreaSqm = (sourceWidthCm / 100) * sourceLengthConsumedM;
-  const requestedAreaSqm = (requestedWidthCm / 100) * totalRequestedLengthM;
+  const calculatedRequestedAreaSqm = (requestedWidthCm / 100) * totalRequestedLengthM;
   const mode: SmartLongitudinalCutPlan['mode'] = optimizationEnabled && stripsPerSource > 1 ? 'optimized' : 'single-strip';
 
   if (!longitudinalRatePerMeter) {
@@ -268,7 +290,9 @@ export const calculateSmartLongitudinalCutPlan = ({
     stripsPerSource,
     sourceLengthConsumedM,
     consumedAreaSqm,
-    requestedAreaSqm,
+    requestedAreaSqm: calculatedRequestedAreaSqm,
+    derivedDimension,
+    physicalSplittingAllowed,
     sawKerfEnabled,
     sawKerfCm: sawKerfEnabled ? kerfCm : null,
     calibrationCutEnabled,

@@ -6,6 +6,7 @@ import type { ContractWizardData } from '../types/contract.types';
 import { validateWizardStep } from '../services/validationService';
 import PersianCalendar from '@/lib/persian-calendar';
 import { sumNumericValues } from '@/lib/numberFormat';
+import { ensureContractProductRowIds } from '../utils/contractProductIdentity';
 
 const getCurrentPersianDate = () => {
   try {
@@ -156,7 +157,11 @@ export const useContractWizard = () => {
 
   // Update wizard data
   const updateWizardData = useCallback((updates: Partial<ContractWizardData>) => {
-    setWizardData(prev => ({ ...prev, ...updates }));
+    setWizardData(prev => ({
+      ...prev,
+      ...updates,
+      products: updates.products ? ensureContractProductRowIds(updates.products) : prev.products
+    }));
   }, []);
 
   // Validate current step
@@ -232,5 +237,4 @@ export const useContractWizard = () => {
     totalSteps: WIZARD_STEPS.length
   };
 };
-
 

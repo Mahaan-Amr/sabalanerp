@@ -623,6 +623,20 @@ const lengthValueToMeters = (value: unknown, unit: unknown): number => {
   return unit === 'cm' ? numeric / 100 : numeric;
 };
 
+const buildPhysicalProductionNote = (product: any): string => {
+  const pieces = Array.isArray(product?.smartCutPlan?.productionPieces)
+    ? product.smartCutPlan.productionPieces
+    : [];
+  if (pieces.length === 0) return '';
+  const breakdown = pieces.map((piece: any) =>
+    `${toFaNumber(piece?.quantity, 0)} عدد × عرض ${toFaNumber(piece?.widthCm, 4)}cm × طول ${toFaNumber(piece?.lengthM, 4)}m`
+  ).join('، ');
+  const derivedLabel = product?.smartCutDerivedDimension
+    ? `بعد ${product.smartCutDerivedDimension === 'width' ? 'عرض' : 'طول'} توسط سیستم محاسبه شده؛ `
+    : '';
+  return `${derivedLabel}خروجی فیزیکی تولید: ${breakdown}`;
+};
+
 const buildSourceMaterialRows = (product: any): NormalizedSourceMaterial[] => {
   const smartCutPlan = product?.smartCutPlan || {};
   const sourceWidthCm = toNumber(smartCutPlan?.sourceWidthCm || product?.originalWidth);
@@ -815,6 +829,12 @@ const normalizeProducts = (
       const sourceMaterialSummary = sourceMaterials.length > 0
         ? `${sourceMaterials[0].dimensionsOrAmount}، ${sourceMaterials[0].quantityOrArea}`
         : EMPTY;
+      const physicalProductionNote = buildPhysicalProductionNote(product);
+      const description = [
+        product?.description || relationItem?.description || '',
+        product?.sawKerfEnabled ? 'خوراک اره لحاظ شده' : '',
+        physicalProductionNote
+      ].filter(hasTextValue).join('، ') || EMPTY;
 
       return {
         id: `${product?.productId || 'product'}-${index}`,
@@ -834,7 +854,7 @@ const normalizeProducts = (
         isMandatory: Boolean(product?.isMandatory ?? relationItem?.isMandatory),
         mandatoryPercentage: toNumber(product?.mandatoryPercentage),
         totalPrice: toNumber(product?.totalPrice || relationItem?.totalPrice),
-        description: `${product?.description || relationItem?.description || EMPTY}${product?.sawKerfEnabled ? '، خوراک اره لحاظ شده' : ''}`,
+        description,
         cuts: [...cutsFromBreakdown, ...cutsFromDetails],
         services,
         tools: dedupedTools,
@@ -1062,7 +1082,10 @@ const normalizeFinancials = (
     return sum + services;
   }, 0);
   const standaloneServicesTotal = standaloneServices.reduce((sum, row) => sum + toNumber(row.totalPrice), 0);
-  const cutsTotal = products.reduce((sum, product) => sum + product.cuts.reduce((cutSum, cut) => cutSum + toNumber(cut.cost), 0), 0);
+  const cutsTotal = products.reduce((sum, product) => {
+    if (hasNonBillableMandatoryLongitudinalCuts(product)) return sum;
+    return sum + product.cuts.reduce((cutSum, cut) => cutSum + toNumber(cut.cost), 0);
+  }, 0);
   const finishingTotal = products.reduce((sum, product) => {
     const finishing = product.services
       .filter((service) => service.category === 'پرداخت سنگ')
@@ -1106,7 +1129,6 @@ const isMeaningfulCut = (cut: NormalizedCut): boolean =>
 const hasNonBillableMandatoryLongitudinalCuts = (
   product: Pick<NormalizedProduct, 'productTypeCode' | 'isMandatory' | 'mandatoryPercentage'>
 ): boolean =>
-  product.productTypeCode === 'longitudinal' &&
   product.isMandatory === true &&
   product.mandatoryPercentage > 0;
 

@@ -1059,6 +1059,18 @@ _Avoid_: showing only the current guard's department, treating security shift as
 In daily security attendance, user-linked and non-user personnel behave the same from the acting guard's perspective: both can be searched, filtered, checked in, checked out, marked with exceptions, and signed. Permissions belong to the acting system user, not to the personnel record being attended.
 _Avoid_: exposing login-account status as an attendance concern, hiding non-user personnel from security actions, or requiring attended personnel to have system permissions
 
+**ثبت ورود تکراری در حضور و غیاب حراست**:
+When حراست records ورود for a person and that same person already has an entry time for the selected attendance date, the operation should behave as a successful idempotent action and return the existing attendance truth to the operator. The visible daily list should then show the existing حاضر record instead of leaving the person as غایب.
+_Avoid_: showing English duplicate errors to operators, treating a successful earlier ورود as a failed action, or displaying غایب for a person whose same-day ورود already exists
+
+**زمان ثبت حضور و غیاب حراست**:
+ورود and خروج actions in حراست default to the current time, but the operator may change the time before submitting when the event was forgotten or recorded late. If the submitted time differs from the default current time, a short reason is required and should remain visible as attendance context.
+_Avoid_: forcing a separate manual-entry mode, blocking forgotten attendance correction, or allowing silent backdated times without a reason
+
+**حضور باز روز قبل**:
+If a person has an older attendance record with ورود and no خروج, حراست must close that previous record with an explicit خروج time and reason before registering a new ورود for a later date. The system should surface this open previous attendance state instead of silently creating a new day entry or auto-filling the old exit.
+_Avoid_: overwriting yesterday's record with today's action, creating automatic خروج without operator confirmation, or allowing overlapping open attendance records for the same person
+
 **خرید بیرونی در ورود خودروی پر**:
 An inbound loaded-vehicle purpose for purchased cargo arriving from outside Sabalan. It may have a purchase invoice and may have a بارنامه.
 Its completed entry information captures the driver/vehicle details, document presence for purchase invoice and بارنامه, and any trip-specific settlement details needed for بارنامه settlement.

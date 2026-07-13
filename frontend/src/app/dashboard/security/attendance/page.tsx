@@ -54,6 +54,16 @@ interface AttendanceRecord {
     id: string;
     namePersian: string;
   } | null;
+  openPreviousAttendance?: {
+    id: string;
+    date: string;
+    entryTime: string | null;
+    shift?: {
+      id: string;
+      namePersian: string;
+    } | null;
+    notes?: string | null;
+  } | null;
 }
 
 interface AttendanceStats {
@@ -122,6 +132,18 @@ const getStatusLabel = (status: string) => {
 const canCheckIn = (record: AttendanceRecord) => !record.entryTime && ['ABSENT', 'PRESENT'].includes(record.status);
 const canCheckOut = (record: AttendanceRecord) => Boolean(record.entryTime) && !record.exitTime && ['PRESENT', 'LATE'].includes(record.status);
 const isExceptionStatus = (status: string) => ['MISSION', 'HOURLY_LEAVE', 'SICK_LEAVE', 'VACATION'].includes(status);
+const currentTimeValue = () => new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+const selectedDateIso = (date: string) => PersianCalendar.toGregorian(date).toISOString();
+
+type AttendanceAction = 'checkin' | 'checkout' | 'close-previous';
+
+interface AttendanceDialogState {
+  action: AttendanceAction;
+  record: AttendanceRecord;
+  time: string;
+  defaultTime: string;
+  reason: string;
+}
 
 export default function AttendancePage() {
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
@@ -137,6 +159,7 @@ export default function AttendancePage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [attendanceDialog, setAttendanceDialog] = useState<AttendanceDialogState | null>(null);
 
   const fetchAttendanceData = async () => {
     try {
@@ -191,14 +214,32 @@ export default function AttendancePage() {
     return matchesSearch && matchesStatus;
   }), [attendanceRecords, searchTerm, statusFilter]);
 
-  const runAttendanceAction = async (record: AttendanceRecord, action: 'checkin' | 'checkout') => {
+  const openAttendanceDialog = (record: AttendanceRecord, action: AttendanceAction) => {
+    const defaultTime = currentTimeValue();
+    setAttendanceDialog({ action, record, time: defaultTime, defaultTime, reason: '' });
+  };
+
+  const submitAttendanceDialog = async () => {
+    if (!attendanceDialog) return;
+    const { action, record, time, defaultTime, reason } = attendanceDialog;
+    const requiresReason = time !== defaultTime;
+    if (requiresReason && !reason.trim()) {
+      notifySecurity('برای تغییر زمان، دلیل کوتاه الزامی است.', 'error');
+      return;
+    }
     setActionLoadingId(`${action}-${record.employee.id}`);
     try {
       const response = action === 'checkin'
-        ? await securityAPI.checkIn(record.employee.id)
-        : await securityAPI.checkOut(record.employee.id);
+        ? await securityAPI.checkIn(record.employee.id, { date: selectedDateIso(selectedDate), entryTime: time, reason: requiresReason ? reason.trim() : undefined })
+        : await securityAPI.checkOut(record.employee.id, {
+            date: action === 'close-previous' && record.openPreviousAttendance ? new Date(record.openPreviousAttendance.date).toISOString() : selectedDateIso(selectedDate),
+            attendanceId: action === 'close-previous' ? record.openPreviousAttendance?.id : undefined,
+            exitTime: time,
+            reason: requiresReason || action === 'close-previous' ? reason.trim() || 'ثبت خروج فراموش‌شده' : undefined,
+          });
       if (response.data.success) {
-        notifySecurity(action === 'checkin' ? 'ورود ثبت شد' : 'خروج ثبت شد');
+        notifySecurity(response.data.message || (action === 'checkin' ? 'ورود ثبت شد' : 'خروج ثبت شد'));
+        setAttendanceDialog(null);
         await fetchAttendanceData();
       }
     } catch (requestError: any) {
@@ -343,24 +384,34 @@ export default function AttendancePage() {
                     <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
                       {record.notes || record.exceptionType || 'بدون یادداشت'}
                     </p>
+                    {record.openPreviousAttendance && (
+                      <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+                        خروج روز قبل ثبت نشده است: {PersianCalendar.formatForDisplay(record.openPreviousAttendance.date)}، ورود {record.openPreviousAttendance.entryTime || '-'}
+                      </div>
+                    )}
 
                     <div className="mt-4 grid grid-cols-2 gap-2">
                       <ErpButton
                         label="ثبت ورود"
                         icon={FaSignInAlt}
-                        onClick={() => runAttendanceAction(record, 'checkin')}
-                        disabled={!canCheckIn(record) || Boolean(actionLoadingId)}
-                        variant={canCheckIn(record) ? 'solid' : 'soft'}
+                        onClick={() => openAttendanceDialog(record, 'checkin')}
+                        disabled={!canCheckIn(record) || Boolean(actionLoadingId) || Boolean(record.openPreviousAttendance)}
+                        variant={canCheckIn(record) && !record.openPreviousAttendance ? 'solid' : 'soft'}
                       />
                       <ErpButton
                         label="ثبت خروج"
                         icon={FaSignOutAlt}
-                        onClick={() => runAttendanceAction(record, 'checkout')}
+                        onClick={() => openAttendanceDialog(record, 'checkout')}
                         disabled={!canCheckOut(record) || Boolean(actionLoadingId)}
                         tone="neutral"
                         variant={canCheckOut(record) ? 'solid' : 'soft'}
                       />
                     </div>
+                    {record.openPreviousAttendance && (
+                      <div className="mt-2">
+                        <ErpButton label="ثبت خروج قبلی" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'close-previous')} tone="warning" variant="solid" disabled={Boolean(actionLoadingId)} />
+                      </div>
+                    )}
                     {(checkingIn || checkingOut) && <p className="mt-2 text-xs font-semibold text-[#074747] dark:text-teal-200">در حال ثبت...</p>}
                     {isExceptionStatus(record.status) && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">برای وضعیت‌های استثنا، ورود و خروج مستقیم از کارت پیشنهاد نمی‌شود.</p>}
                     {record.entryTime && record.exitTime && <p className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300"><FaCheckCircle /> تکمیل شده</p>}
@@ -395,11 +446,16 @@ export default function AttendancePage() {
                       <td className="px-3 py-4 text-slate-900 dark:text-white">{record.entryTime || '-'}</td>
                       <td className="px-3 py-4 text-slate-900 dark:text-white">{record.exitTime || '-'}</td>
                       <td className="px-3 py-4 text-slate-600 dark:text-slate-300">{record.shift?.namePersian || '-'}</td>
-                      <td className="px-3 py-4 text-slate-600 dark:text-slate-300">{record.notes || record.exceptionType || (record.digitalSignature ? 'امضا ثبت شده' : '-')}</td>
+                      <td className="px-3 py-4 text-slate-600 dark:text-slate-300">
+                        {record.openPreviousAttendance ? (
+                          <span className="font-semibold text-amber-700">خروج روز قبل ثبت نشده</span>
+                        ) : record.notes || record.exceptionType || (record.digitalSignature ? 'امضا ثبت شده' : '-')}
+                      </td>
                       <td className="px-3 py-4">
                         <div className="flex flex-wrap gap-2">
-                          <ErpButton label="ورود" icon={FaSignInAlt} onClick={() => runAttendanceAction(record, 'checkin')} disabled={!canCheckIn(record) || Boolean(actionLoadingId)} variant="soft" />
-                          <ErpButton label="خروج" icon={FaSignOutAlt} onClick={() => runAttendanceAction(record, 'checkout')} disabled={!canCheckOut(record) || Boolean(actionLoadingId)} tone="neutral" variant="soft" />
+                          <ErpButton label="ورود" icon={FaSignInAlt} onClick={() => openAttendanceDialog(record, 'checkin')} disabled={!canCheckIn(record) || Boolean(actionLoadingId) || Boolean(record.openPreviousAttendance)} variant="soft" />
+                          <ErpButton label="خروج" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'checkout')} disabled={!canCheckOut(record) || Boolean(actionLoadingId)} tone="neutral" variant="soft" />
+                          {record.openPreviousAttendance && <ErpButton label="خروج قبلی" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'close-previous')} disabled={Boolean(actionLoadingId)} tone="warning" variant="soft" />}
                         </div>
                       </td>
                     </tr>
@@ -410,6 +466,35 @@ export default function AttendancePage() {
           </>
         )}
       </ErpSection>
+      {attendanceDialog && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
+          <div role="dialog" aria-modal="true" className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+              {attendanceDialog.action === 'checkin' ? 'ثبت ورود' : attendanceDialog.action === 'checkout' ? 'ثبت خروج' : 'ثبت خروج قبلی'}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              {attendanceDialog.record.employee.firstName} {attendanceDialog.record.employee.lastName}
+            </p>
+            {attendanceDialog.action === 'close-previous' && attendanceDialog.record.openPreviousAttendance && (
+              <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+                این خروج برای {PersianCalendar.formatForDisplay(attendanceDialog.record.openPreviousAttendance.date)} ثبت می‌شود.
+              </p>
+            )}
+            <label className="mt-4 block">
+              <span className={labelClass}>زمان</span>
+              <input type="time" value={attendanceDialog.time} onChange={(event) => setAttendanceDialog((current) => current ? { ...current, time: event.target.value } : current)} className={inputClass} />
+            </label>
+            <label className="mt-4 block">
+              <span className={labelClass}>دلیل {attendanceDialog.time !== attendanceDialog.defaultTime || attendanceDialog.action === 'close-previous' ? '(الزامی)' : '(اختیاری)'}</span>
+              <textarea value={attendanceDialog.reason} onChange={(event) => setAttendanceDialog((current) => current ? { ...current, reason: event.target.value } : current)} className={`${inputClass} min-h-24`} placeholder="مثلاً فراموشی ثبت در زمان واقعی" />
+            </label>
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <ErpButton label="انصراف" onClick={() => setAttendanceDialog(null)} tone="neutral" variant="ghost" />
+              <ErpButton label="ثبت" onClick={submitAttendanceDialog} variant="solid" disabled={Boolean(actionLoadingId) || ((attendanceDialog.time !== attendanceDialog.defaultTime || attendanceDialog.action === 'close-previous') && !attendanceDialog.reason.trim())} />
+            </div>
+          </div>
+        </div>
+      )}
     </ErpPage>
   );
 }

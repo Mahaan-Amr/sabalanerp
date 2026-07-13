@@ -733,10 +733,10 @@ export const securityAPI = {
   correctShiftAttendance: (attendanceId: string, arrivedAt: string, reason: string) => api.put(`/security/shift-attendance/${attendanceId}/correct`, { arrivedAt, reason }),
   
   // Attendance management
-  checkIn: (employeeId: string, entryTime?: string) => 
-    api.post('/security/attendance/checkin', { employeeId, entryTime }),
-  checkOut: (employeeId: string, exitTime?: string) => 
-    api.post('/security/attendance/checkout', { employeeId, exitTime }),
+  checkIn: (employeeId: string, entryTimeOrData?: string | Record<string, any>) =>
+    api.post('/security/attendance/checkin', typeof entryTimeOrData === 'object' ? { employeeId, ...entryTimeOrData } : { employeeId, entryTime: entryTimeOrData }),
+  checkOut: (employeeId: string, exitTimeOrData?: string | Record<string, any>) =>
+    api.post('/security/attendance/checkout', typeof exitTimeOrData === 'object' ? { employeeId, ...exitTimeOrData } : { employeeId, exitTime: exitTimeOrData }),
   recordException: (data: any) => api.post('/security/attendance/exception', data),
   
   // Reports and dashboard

@@ -47,6 +47,19 @@ const parseDayQuery = (value: unknown, fallback = new Date()) => {
   return startOfDay(Number.isNaN(parsed.getTime()) ? fallback : parsed);
 };
 
+const currentAttendanceTime = () => new Date().toLocaleTimeString('fa-IR', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false
+});
+
+const appendManualAttendanceNote = (existingNote: string | null | undefined, actionLabel: string, reason?: unknown) => {
+  const trimmedReason = String(reason || '').trim();
+  if (!trimmedReason) return existingNote || null;
+  const note = `${actionLabel}: ${trimmedReason}`;
+  return existingNote ? `${existingNote}\n${note}` : note;
+};
+
 const scopedPersonnelWhere = (departmentId?: unknown, personnelId?: unknown) => ({
   isActive: true,
   ...(departmentId ? { departmentId: String(departmentId) } : {}),
@@ -139,8 +152,24 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
   ]);
 
   const recordsByPersonnel = new Map(attendanceRecords.map((record) => [record.personnelId || record.employee?.personnelId || record.employeeId, record]));
+  const openPreviousRecords = await prisma.attendanceRecord.findMany({
+    where: {
+      personnelId: { in: allPersonnel.map((personnel) => personnel.id) },
+      date: { lt: targetDate },
+      entryTime: { not: null },
+      exitTime: null
+    },
+    include: attendanceInclude,
+    orderBy: { date: 'desc' }
+  });
+  const openPreviousByPersonnel = new Map<string, any>();
+  openPreviousRecords.forEach((record) => {
+    if (record.personnelId && !openPreviousByPersonnel.has(record.personnelId)) openPreviousByPersonnel.set(record.personnelId, record);
+  });
+
   const attendanceSummary = allPersonnel.map((personnel) => {
     const record = recordsByPersonnel.get(personnel.id);
+    const openPreviousAttendance = openPreviousByPersonnel.get(personnel.id);
     return {
       id: record?.id || `absent-${personnel.id}-${targetDate.toISOString()}`,
       personnel,
@@ -154,7 +183,14 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
       notes: record?.notes || null,
       digitalSignature: record?.digitalSignature || null,
       createdAt: record?.createdAt || null,
-      shift: record?.shift || null
+      shift: record?.shift || null,
+      openPreviousAttendance: openPreviousAttendance ? {
+        id: openPreviousAttendance.id,
+        date: openPreviousAttendance.date,
+        entryTime: openPreviousAttendance.entryTime,
+        shift: openPreviousAttendance.shift,
+        notes: openPreviousAttendance.notes
+      } : null
     };
   });
 
@@ -1552,6 +1588,8 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
   body('employeeId').optional().isString().withMessage('Employee ID must be a string'),
   body('personnelId').optional().isString().withMessage('Personnel ID must be a string'),
   body('entryTime').optional().isString().withMessage('Entry time must be a string'),
+  body('date').optional().isISO8601().withMessage('Date must be ISO8601'),
+  body('reason').optional().isString().withMessage('Reason must be a string'),
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -1576,7 +1614,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
       });
     }
 
-    const { entryTime } = req.body;
+    const { entryTime, reason } = req.body;
     const personnelId = String(req.body.personnelId || req.body.employeeId || '').trim();
     if (!personnelId) return res.status(400).json({ success: false, error: 'پرسنل الزامی است.' });
     const personnel = await prisma.personnel.findUnique({
@@ -1584,32 +1622,45 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
       include: { department: true, user: { select: { id: true } } }
     });
     if (!personnel?.isActive) return res.status(404).json({ success: false, error: 'پرسنل فعال پیدا نشد.' });
-    const currentTime = entryTime || new Date().toLocaleTimeString('fa-IR', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false 
+    const currentTime = entryTime || currentAttendanceTime();
+    const targetDate = parseDayQuery(req.body.date);
+    const nextDay = addDays(targetDate, 1);
+
+    const openPreviousRecord = await prisma.attendanceRecord.findFirst({
+      where: {
+        personnelId: personnel.id,
+        date: { lt: targetDate },
+        entryTime: { not: null },
+        exitTime: null
+      },
+      orderBy: { date: 'desc' },
+      include: attendanceInclude
     });
 
-    // Check if employee already checked in today
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    if (openPreviousRecord) {
+      return res.status(409).json({
+        success: false,
+        error: 'ابتدا خروج ثبت‌نشده قبلی را ثبت کنید.',
+        data: { openPreviousAttendance: openPreviousRecord }
+      });
+    }
 
     const existingRecord = await prisma.attendanceRecord.findFirst({
       where: {
         personnelId: personnel.id,
         date: {
-          gte: today,
-          lt: tomorrow
+          gte: targetDate,
+          lt: nextDay
         }
-      }
+      },
+      include: attendanceInclude
     });
 
     if (existingRecord && existingRecord.entryTime) {
-      return res.status(400).json({
-        success: false,
-        error: 'Employee has already checked in today'
+      return res.json({
+        success: true,
+        message: 'ورود قبلاً ثبت شده است.',
+        data: existingRecord
       });
     }
 
@@ -1621,6 +1672,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
         data: {
           entryTime: currentTime,
           status: 'PRESENT',
+          notes: appendManualAttendanceNote(existingRecord.notes, 'ثبت دستی ورود', reason),
           ...personnelSnapshot(personnel)
         },
         include: attendanceInclude
@@ -1633,9 +1685,10 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
           personnelId: personnel.id,
           securityPersonnelId: securityPersonnel.id,
           shiftId: securityPersonnel.shiftId,
-          date: today,
+          date: targetDate,
           entryTime: currentTime,
           status: 'PRESENT',
+          notes: appendManualAttendanceNote(null, 'ثبت دستی ورود', reason),
           ...personnelSnapshot(personnel)
         },
         include: attendanceInclude
@@ -1644,7 +1697,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
 
     res.status(201).json({
       success: true,
-      message: 'Employee checked in successfully',
+      message: 'ورود ثبت شد.',
       data: attendanceRecord
     });
     return;
@@ -1665,6 +1718,9 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
   body('employeeId').optional().isString().withMessage('Employee ID must be a string'),
   body('personnelId').optional().isString().withMessage('Personnel ID must be a string'),
   body('exitTime').optional().isString().withMessage('Exit time must be a string'),
+  body('date').optional().isISO8601().withMessage('Date must be ISO8601'),
+  body('attendanceId').optional().isString().withMessage('Attendance ID must be a string'),
+  body('reason').optional().isString().withMessage('Reason must be a string'),
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -1689,56 +1745,53 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
       });
     }
 
-    const { exitTime } = req.body;
+    const { exitTime, reason } = req.body;
     const personnelId = String(req.body.personnelId || req.body.employeeId || '').trim();
     if (!personnelId) return res.status(400).json({ success: false, error: 'پرسنل الزامی است.' });
-    const currentTime = exitTime || new Date().toLocaleTimeString('fa-IR', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false 
-    });
+    const currentTime = exitTime || currentAttendanceTime();
+    const targetDate = parseDayQuery(req.body.date);
+    const nextDay = addDays(targetDate, 1);
 
-    // Find today's attendance record
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    const attendanceRecord = await prisma.attendanceRecord.findFirst({
-      where: {
-        personnelId,
-        date: {
-          gte: today,
-          lt: tomorrow
-        }
-      }
-    });
+    const attendanceRecord = req.body.attendanceId
+      ? await prisma.attendanceRecord.findFirst({ where: { id: String(req.body.attendanceId), personnelId }, include: attendanceInclude })
+      : await prisma.attendanceRecord.findFirst({
+          where: {
+            personnelId,
+            date: {
+              gte: targetDate,
+              lt: nextDay
+            }
+          },
+          include: attendanceInclude
+        });
 
     if (!attendanceRecord) {
       return res.status(400).json({
         success: false,
-        error: 'Employee has not checked in today'
+        error: 'برای این تاریخ ورود ثبت نشده است.'
       });
     }
 
     if (attendanceRecord.exitTime) {
-      return res.status(400).json({
-        success: false,
-        error: 'Employee has already checked out today'
+      return res.json({
+        success: true,
+        message: 'خروج قبلاً ثبت شده است.',
+        data: attendanceRecord
       });
     }
 
     const updatedRecord = await prisma.attendanceRecord.update({
       where: { id: attendanceRecord.id },
       data: {
-        exitTime: currentTime
+        exitTime: currentTime,
+        notes: appendManualAttendanceNote(attendanceRecord.notes, 'ثبت دستی خروج', reason)
       },
       include: attendanceInclude
     });
 
     res.json({
       success: true,
-      message: 'Employee checked out successfully',
+      message: 'خروج ثبت شد.',
       data: updatedRecord
     });
     return;

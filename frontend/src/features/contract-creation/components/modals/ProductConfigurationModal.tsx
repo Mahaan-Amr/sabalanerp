@@ -30,6 +30,10 @@ import {
   getFinishingUnitPrice
 } from '../../utils/finishingUtils';
 import { SAW_KERF_CM } from '../../utils/sawKerf';
+import {
+  calculateLongitudinalMaterialPricing,
+  calculateSmartLongitudinalCutPlan
+} from '../../services/remainingStoneService';
 
 // Comprehensive props interface for Product Configuration Modal
 interface ProductConfigurationModalProps {
@@ -3744,13 +3748,6 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                         
                         {/* Price Preview */}
                         {(() => {
-                          console.log('🔍 Price Preview Calculation:', {
-                            productConfigWidth: productConfig.width,
-                            length: productConfig.length,
-                            quantity: productConfig.quantity,
-                            pricePerSquareMeter: productConfig.pricePerSquareMeter
-                          });
-                          
                           // Use productConfig.originalWidth when editing, otherwise use selectedProduct.widthValue
                           const originalWidthForCalculation = (isEditMode && productConfig.originalWidth) 
                             ? productConfig.originalWidth 
@@ -3770,21 +3767,51 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                             originalWidth: originalWidthForCalculation,
                             cuttingCostPerMeter: productConfig.cuttingCostPerMeter || 0
                           });
-                          
-                          console.log('🔍 Price Preview Result:', {
-                            originalTotalPrice: calculated.originalTotalPrice,
-                            totalPrice: calculated.totalPrice,
-                            squareMeters: calculated.squareMeters
+                          const smartCutPlan = calculateSmartLongitudinalCutPlan({
+                            originalWidthCm: Number(originalWidthForCalculation) || 0,
+                            enteredWidth: Number(productConfig.width) || 0,
+                            enteredWidthUnit: widthUnit,
+                            enteredLength: Number(productConfig.length) || 0,
+                            enteredLengthUnit: lengthUnit,
+                            quantity: Number(productConfig.quantity) || getEffectiveQuantity(),
+                            requestedAreaSqm: Number(productConfig.squareMeters || calculated.squareMeters || 0),
+                            allowPhysicalSplitting: !!productConfig.smartCutAllowPhysicalSplitting,
+                            sawKerfEnabled: !!productConfig.sawKerfEnabled,
+                            sawKerfCm: productConfig.sawKerfEnabled ? (productConfig.sawKerfCm || SAW_KERF_CM) : null,
+                            calibrationCutEnabled: productConfig.calibrationCutEnabled ?? true,
+                            optimizationEnabled: true,
+                            seed: 0
                           });
-                          
-                          if (calculated.originalTotalPrice > 0) {
+                          const pricePerSquareMeter = Number(productConfig.pricePerSquareMeter) || 0;
+                          const pricing = calculateLongitudinalMaterialPricing({
+                            plan: smartCutPlan,
+                            fallbackPricingSquareMeters: pricePerSquareMeter > 0
+                              ? calculated.originalTotalPrice / pricePerSquareMeter
+                              : calculated.squareMeters,
+                            pricePerSquareMeter,
+                            isMandatory,
+                            mandatoryPercentage
+                          });
+
+                          if (pricing.originalTotalPrice > 0) {
                             return (
                               <div className="mt-3 p-2 bg-white dark:bg-gray-800 rounded border border-yellow-300 dark:border-yellow-600">
+                                {smartCutPlan.mode !== 'none' && (
+                                  <div className="mb-2 space-y-1 border-b border-yellow-200 pb-2 text-xs text-gray-600 dark:border-yellow-700 dark:text-gray-300">
+                                    <div>متراژ درخواستی: {formatSquareMeters(smartCutPlan.requestedAreaSqm)}</div>
+                                    <div>متراژ مصرفی سنگ اصلی: {formatSquareMeters(pricing.pricingSquareMeters)}</div>
+                                    <div>
+                                      ظرفیت هر ردیف سنگ: {formatDisplayNumber(smartCutPlan.stripsPerSource)} قطعه
+                                      {' • '}
+                                      تعداد ردیف مصرفی: {formatDisplayNumber(smartCutPlan.sourceBandsNeeded)}
+                                    </div>
+                                  </div>
+                                )}
                                 <div className="text-xs text-gray-600 dark:text-gray-400">
-                                  قیمت اصلی: {formatPrice(calculated.originalTotalPrice, 'تومان')}
+                                  قیمت اصلی: {formatPrice(pricing.originalTotalPrice, 'تومان')}
                                 </div>
                                 <div className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                                  قیمت نهایی: {formatPrice(calculated.totalPrice, 'تومان')}
+                                  قیمت نهایی: {formatPrice(pricing.totalPrice, 'تومان')}
                                 </div>
                               </div>
                             );

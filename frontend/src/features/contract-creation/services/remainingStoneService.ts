@@ -304,6 +304,36 @@ export const calculateSmartLongitudinalCutPlan = ({
   };
 };
 
+export const calculateLongitudinalMaterialPricing = ({
+  plan,
+  fallbackPricingSquareMeters = 0,
+  pricePerSquareMeter = 0,
+  isMandatory = false,
+  mandatoryPercentage = 0
+}: {
+  plan: SmartLongitudinalCutPlan;
+  fallbackPricingSquareMeters?: number;
+  pricePerSquareMeter?: number;
+  isMandatory?: boolean;
+  mandatoryPercentage?: number;
+}) => {
+  const optimizedPricingSquareMeters = plan.mode !== 'none' && plan.consumedAreaSqm > 0
+    ? plan.consumedAreaSqm
+    : 0;
+  const pricingSquareMeters = optimizedPricingSquareMeters || Math.max(0, Number(fallbackPricingSquareMeters) || 0);
+  const originalTotalPrice = pricingSquareMeters * Math.max(0, Number(pricePerSquareMeter) || 0);
+  const safeMandatoryPercentage = isMandatory
+    ? Math.max(0, Number(mandatoryPercentage) || 0)
+    : 0;
+  const totalPrice = originalTotalPrice * (1 + safeMandatoryPercentage / 100);
+
+  return {
+    pricingSquareMeters,
+    originalTotalPrice,
+    totalPrice
+  };
+};
+
 export const calculateSlabRemainingStones = ({
   requestedWidthCm,
   requestedLengthCm,

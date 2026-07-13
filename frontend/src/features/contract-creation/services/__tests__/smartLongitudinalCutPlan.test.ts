@@ -1,9 +1,42 @@
 import assert from 'node:assert/strict';
-import { calculateSmartLongitudinalCutPlan } from '../remainingStoneService';
+import {
+  calculateLongitudinalMaterialPricing,
+  calculateSmartLongitudinalCutPlan
+} from '../remainingStoneService';
 
 const approx = (actual: number, expected: number) => {
   assert.equal(Number(actual.toFixed(6)), Number(expected.toFixed(6)));
 };
+
+{
+  const plan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 13,
+    enteredWidthUnit: 'cm',
+    enteredLength: 0.8,
+    enteredLengthUnit: 'm',
+    quantity: 308,
+    sawKerfEnabled: false,
+    calibrationCutEnabled: false,
+    seed: 308
+  });
+  const pricing = calculateLongitudinalMaterialPricing({
+    plan,
+    fallbackPricingSquareMeters: 98.56,
+    pricePerSquareMeter: 1_500_000,
+    isMandatory: true,
+    mandatoryPercentage: 20
+  });
+
+  assert.equal(plan.stripsPerSource, 3);
+  assert.equal(plan.sourceBandsNeeded, 103);
+  approx(plan.requestedAreaSqm, 32.032);
+  approx(plan.consumedAreaSqm, 32.96);
+  approx(plan.remainingStones.reduce((total, stone) => total + stone.squareMeters, 0), 0.928);
+  approx(pricing.pricingSquareMeters, 32.96);
+  approx(pricing.originalTotalPrice, 49_440_000);
+  approx(pricing.totalPrice, 59_328_000);
+}
 
 {
   const plan = calculateSmartLongitudinalCutPlan({

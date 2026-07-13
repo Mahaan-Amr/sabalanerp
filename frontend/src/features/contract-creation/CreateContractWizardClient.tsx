@@ -99,6 +99,7 @@ import {
   clearDraftFieldError
 } from '@/features/contract-creation/services/stairValidationService';
 import {
+  calculateLongitudinalMaterialPricing,
   calculateSmartLongitudinalCutPlan,
   calculateSlabRemainingStones,
   hasLongitudinalGeometryChanged,
@@ -4945,6 +4946,16 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       sawKerfCm,
       calibrationCutEnabled
     });
+    const longitudinalPricePerSquareMeter = Number(productConfig.pricePerSquareMeter) || 0;
+    const longitudinalMaterialPricing = calculateLongitudinalMaterialPricing({
+      plan: smartCutPlan,
+      fallbackPricingSquareMeters: longitudinalPricePerSquareMeter > 0
+        ? calculated.originalTotalPrice / longitudinalPricePerSquareMeter
+        : calculated.squareMeters,
+      pricePerSquareMeter: longitudinalPricePerSquareMeter,
+      isMandatory,
+      mandatoryPercentage
+    });
     const shouldCutByGeometry = smartCutPlan.enabled;
     const longitudinalGeometryChanged = hasLongitudinalGeometryChanged({
       previousProduct: previousLongitudinalProduct
@@ -4999,9 +5010,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       pricePerSquareMeter: editingRemainingStoneChild ? 0 : (productConfig.pricePerSquareMeter || 0),
       totalPrice: editingRemainingStoneChild
         ? 0
-        : smartCutPlan.enabled
-        ? smartCutPlan.consumedAreaSqm * (productConfig.pricePerSquareMeter || 0) * (isMandatory && mandatoryPercentage > 0 ? (1 + mandatoryPercentage / 100) : 1)
-        : calculated.totalPrice,
+        : longitudinalMaterialPricing.totalPrice,
       description: productConfig.description || '',
       images: Array.isArray(productConfig.images) ? [...productConfig.images] : [...(selectedProduct.images || [])],
       sawKerfEnabled,
@@ -5027,9 +5036,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       mandatoryPercentage: editingRemainingStoneChild ? 0 : mandatoryPercentage,
       originalTotalPrice: editingRemainingStoneChild
         ? 0
-        : smartCutPlan.enabled
-        ? smartCutPlan.consumedAreaSqm * (productConfig.pricePerSquareMeter || 0)
-        : calculated.originalTotalPrice,
+        : longitudinalMaterialPricing.originalTotalPrice,
       // Stone cutting is geometry-driven; pricing can be unavailable while cut still exists.
       isCut: shouldCutByGeometry,
       cutType: shouldCutByGeometry ? 'longitudinal' : null,

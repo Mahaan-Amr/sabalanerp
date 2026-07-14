@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { FaCalendarAlt, FaCog, FaPlus, FaSave, FaSearch, FaUserMinus, FaUserPlus, FaUsers } from 'react-icons/fa';
+import { FaCalendarAlt, FaCog, FaFolderOpen, FaPlus, FaSave, FaSearch, FaUserMinus, FaUserPlus, FaUsers } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { departmentsAPI, securityAPI } from '@/lib/api';
@@ -10,12 +10,22 @@ import { PersianCalendar } from '@/lib/persian-calendar';
 const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
 const labelClass = 'mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200';
 
-const emptyForm = { id: '', name: '', description: '', displayOrder: 0, isActive: true };
+const emptyCategoryForm = { id: '', name: '', description: '', displayOrder: 0, isActive: true };
+const emptyTypeForm = { id: '', categoryId: '', name: '', description: '', displayOrder: 0, isActive: true };
 
 interface Department {
   id: string;
   name: string;
   namePersian?: string;
+}
+
+interface ReportCategory {
+  id: string;
+  name: string;
+  description?: string | null;
+  displayOrder: number;
+  isActive: boolean;
+  reportTypes?: any[];
 }
 
 interface RosterRow {
@@ -38,8 +48,10 @@ const toIsoDate = (persianDate: string) => PersianCalendar.toGregorian(persianDa
 const personName = (row: RosterRow) => `${row.personnel.firstName} ${row.personnel.lastName}`.trim();
 
 export default function SecuritySettingsPage() {
+  const [categories, setCategories] = useState<ReportCategory[]>([]);
   const [types, setTypes] = useState<any[]>([]);
-  const [form, setForm] = useState(emptyForm);
+  const [categoryForm, setCategoryForm] = useState(emptyCategoryForm);
+  const [typeForm, setTypeForm] = useState(emptyTypeForm);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [rosterRows, setRosterRows] = useState<RosterRow[]>([]);
   const [rosterDate, setRosterDate] = useState(PersianCalendar.now());
@@ -52,9 +64,13 @@ export default function SecuritySettingsPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
-  const loadTypes = async () => {
-    const response = await securityAPI.getInstantReportTypes(true);
-    if (response.data.success) setTypes(response.data.data || []);
+  const loadReportSettings = async () => {
+    const [categoryResponse, typeResponse] = await Promise.all([
+      securityAPI.getInstantReportCategories(true),
+      securityAPI.getInstantReportTypes(true)
+    ]);
+    if (categoryResponse.data.success) setCategories(categoryResponse.data.data || []);
+    if (typeResponse.data.success) setTypes(typeResponse.data.data || []);
   };
 
   const loadRoster = async () => {
@@ -76,7 +92,7 @@ export default function SecuritySettingsPage() {
     setLoading(true);
     setError('');
     try {
-      const [departmentsResponse] = await Promise.all([departmentsAPI.getDepartments(), loadTypes()]);
+      const [departmentsResponse] = await Promise.all([departmentsAPI.getDepartments(), loadReportSettings()]);
       if (departmentsResponse.data.success) setDepartments(departmentsResponse.data.data || []);
     } catch (err: any) {
       setError(err.response?.data?.error || 'دریافت تنظیمات حراست ناموفق بود.');
@@ -107,20 +123,41 @@ export default function SecuritySettingsPage() {
     selected: rosterRows.filter((row) => row.isInRoster).length
   }), [rosterRows]);
 
+  const saveCategory = async () => {
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      if (categoryForm.id) {
+        await securityAPI.updateInstantReportCategory(categoryForm.id, categoryForm);
+        setMessage('دسته‌بندی گزارش ویرایش شد.');
+      } else {
+        await securityAPI.createInstantReportCategory(categoryForm);
+        setMessage('دسته‌بندی گزارش ثبت شد.');
+      }
+      setCategoryForm(emptyCategoryForm);
+      await loadReportSettings();
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'ذخیره دسته‌بندی گزارش ناموفق بود.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveType = async () => {
     setSaving(true);
     setError('');
     setMessage('');
     try {
-      if (form.id) {
-        await securityAPI.updateInstantReportType(form.id, form);
+      if (typeForm.id) {
+        await securityAPI.updateInstantReportType(typeForm.id, typeForm);
         setMessage('نوع گزارش ویرایش شد.');
       } else {
-        await securityAPI.createInstantReportType(form);
+        await securityAPI.createInstantReportType(typeForm);
         setMessage('نوع گزارش ثبت شد.');
       }
-      setForm(emptyForm);
-      await loadTypes();
+      setTypeForm(emptyTypeForm);
+      await loadReportSettings();
     } catch (err: any) {
       setError(err.response?.data?.error || 'ذخیره نوع گزارش ناموفق بود.');
     } finally {
@@ -152,11 +189,11 @@ export default function SecuritySettingsPage() {
     <ErpPage
       eyebrow="حراست"
       title="تنظیمات حراست"
-      description="مدیریت نوع گزارش‌های لحظه‌ای و فهرست حضور و غیاب حراست."
+      description="مدیریت دسته‌بندی و نوع گزارش‌های لحظه‌ای و فهرست حضور و غیاب حراست."
       metrics={[
+        { label: 'دسته‌بندی گزارش', value: categories.length.toLocaleString('fa-IR'), icon: FaFolderOpen, tone: 'info' },
         { label: 'نوع گزارش', value: types.length.toLocaleString('fa-IR'), icon: FaCog, tone: 'info' },
-        { label: 'داخل فهرست حضور', value: rosterCounts.selected.toLocaleString('fa-IR'), icon: FaUsers, tone: 'success' },
-        { label: 'پرسنل قابل انتخاب', value: rosterCounts.total.toLocaleString('fa-IR'), icon: FaUsers, tone: 'neutral' }
+        { label: 'داخل فهرست حضور', value: rosterCounts.selected.toLocaleString('fa-IR'), icon: FaUsers, tone: 'success' }
       ]}
     >
       {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-100">{message}</div>}
@@ -229,28 +266,86 @@ export default function SecuritySettingsPage() {
         )}
       </ErpSection>
 
-      <ErpSection title={form.id ? 'ویرایش نوع گزارش' : 'نوع گزارش جدید'}>
+      <ErpSection title={categoryForm.id ? 'ویرایش دسته‌بندی گزارش' : 'دسته‌بندی گزارش جدید'}>
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_160px_auto] lg:items-end">
           <label>
-            <span className={labelClass}>نام</span>
-            <input className={inputClass} value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
+            <span className={labelClass}>نام دسته‌بندی</span>
+            <input className={inputClass} value={categoryForm.name} onChange={(event) => setCategoryForm((current) => ({ ...current, name: event.target.value }))} />
           </label>
           <label>
             <span className={labelClass}>توضیحات</span>
-            <input className={inputClass} value={form.description || ''} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
+            <input className={inputClass} value={categoryForm.description || ''} onChange={(event) => setCategoryForm((current) => ({ ...current, description: event.target.value }))} />
           </label>
           <label>
             <span className={labelClass}>ترتیب نمایش</span>
-            <input className={inputClass} type="number" min={0} value={form.displayOrder} onChange={(event) => setForm((current) => ({ ...current, displayOrder: Number(event.target.value || 0) }))} />
+            <input className={inputClass} type="number" min={0} value={categoryForm.displayOrder} onChange={(event) => setCategoryForm((current) => ({ ...current, displayOrder: Number(event.target.value || 0) }))} />
           </label>
           <label className="flex min-h-12 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 dark:border-slate-700 dark:bg-slate-800">
-            <input type="checkbox" checked={form.isActive} onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))} />
+            <input type="checkbox" checked={categoryForm.isActive} onChange={(event) => setCategoryForm((current) => ({ ...current, isActive: event.target.checked }))} />
             <span className="text-sm text-slate-700 dark:text-slate-200">فعال</span>
           </label>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
-          <ErpButton label={form.id ? 'ذخیره تغییرات' : 'ثبت نوع گزارش'} icon={form.id ? FaSave : FaPlus} onClick={saveType} disabled={saving || !form.name.trim()} variant="solid" />
-          {form.id && <ErpButton label="انصراف" onClick={() => setForm(emptyForm)} tone="neutral" variant="outline" />}
+          <ErpButton label={categoryForm.id ? 'ذخیره دسته‌بندی' : 'ثبت دسته‌بندی'} icon={categoryForm.id ? FaSave : FaPlus} onClick={saveCategory} disabled={saving || !categoryForm.name.trim()} variant="solid" />
+          {categoryForm.id && <ErpButton label="انصراف" onClick={() => setCategoryForm(emptyCategoryForm)} tone="neutral" variant="outline" />}
+        </div>
+      </ErpSection>
+
+      <ErpSection title="دسته‌بندی‌های گزارش لحظه‌ای">
+        {categories.length === 0 ? (
+          <ErpEmptyState icon={FaFolderOpen} title="دسته‌بندی گزارش تعریف نشده است" />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            {categories.map((category) => (
+              <ErpCard key={category.id} className="p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-slate-900 dark:text-white">{category.name}</p>
+                      <ErpBadge tone={category.isActive ? 'success' : 'neutral'}>{category.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500">ترتیب: {category.displayOrder.toLocaleString('fa-IR')} · نوع‌ها: {(category.reportTypes?.length || 0).toLocaleString('fa-IR')}</p>
+                    {category.description && <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{category.description}</p>}
+                  </div>
+                  <ErpButton label="ویرایش" onClick={() => setCategoryForm({ id: category.id, name: category.name, description: category.description || '', displayOrder: category.displayOrder || 0, isActive: category.isActive })} tone="neutral" variant="outline" />
+                </div>
+              </ErpCard>
+            ))}
+          </div>
+        )}
+      </ErpSection>
+
+      <ErpSection title={typeForm.id ? 'ویرایش نوع گزارش' : 'نوع گزارش جدید'}>
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[220px_minmax(0,1fr)_minmax(0,1.5fr)_160px_auto] lg:items-end">
+          <label>
+            <span className={labelClass}>دسته‌بندی</span>
+            <select className={inputClass} value={typeForm.categoryId} onChange={(event) => setTypeForm((current) => ({ ...current, categoryId: event.target.value }))}>
+              <option value="">انتخاب دسته‌بندی</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>{category.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span className={labelClass}>نام</span>
+            <input className={inputClass} value={typeForm.name} onChange={(event) => setTypeForm((current) => ({ ...current, name: event.target.value }))} />
+          </label>
+          <label>
+            <span className={labelClass}>توضیحات</span>
+            <input className={inputClass} value={typeForm.description || ''} onChange={(event) => setTypeForm((current) => ({ ...current, description: event.target.value }))} />
+          </label>
+          <label>
+            <span className={labelClass}>ترتیب نمایش</span>
+            <input className={inputClass} type="number" min={0} value={typeForm.displayOrder} onChange={(event) => setTypeForm((current) => ({ ...current, displayOrder: Number(event.target.value || 0) }))} />
+          </label>
+          <label className="flex min-h-12 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 dark:border-slate-700 dark:bg-slate-800">
+            <input type="checkbox" checked={typeForm.isActive} onChange={(event) => setTypeForm((current) => ({ ...current, isActive: event.target.checked }))} />
+            <span className="text-sm text-slate-700 dark:text-slate-200">فعال</span>
+          </label>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <ErpButton label={typeForm.id ? 'ذخیره تغییرات' : 'ثبت نوع گزارش'} icon={typeForm.id ? FaSave : FaPlus} onClick={saveType} disabled={saving || !typeForm.categoryId || !typeForm.name.trim()} variant="solid" />
+          {typeForm.id && <ErpButton label="انصراف" onClick={() => setTypeForm(emptyTypeForm)} tone="neutral" variant="outline" />}
         </div>
       </ErpSection>
 
@@ -266,11 +361,17 @@ export default function SecuritySettingsPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-semibold text-slate-900 dark:text-white">{type.name}</p>
                       <ErpBadge tone={type.isActive ? 'success' : 'neutral'}>{type.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge>
+                      {type.category && <ErpBadge tone={type.category.isActive ? 'info' : 'warning'}>{type.category.name}</ErpBadge>}
                     </div>
                     <p className="mt-1 text-sm text-slate-500">ترتیب: {type.displayOrder.toLocaleString('fa-IR')}</p>
                     {type.description && <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{type.description}</p>}
                   </div>
-                  <ErpButton label="ویرایش" onClick={() => setForm({ id: type.id, name: type.name, description: type.description || '', displayOrder: type.displayOrder || 0, isActive: type.isActive })} tone="neutral" variant="outline" />
+                  <ErpButton
+                    label="ویرایش"
+                    onClick={() => setTypeForm({ id: type.id, categoryId: type.categoryId || type.category?.id || '', name: type.name, description: type.description || '', displayOrder: type.displayOrder || 0, isActive: type.isActive })}
+                    tone="neutral"
+                    variant="outline"
+                  />
                 </div>
               </ErpCard>
             ))}

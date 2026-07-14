@@ -934,6 +934,21 @@ Report types are managed in تنظیمات حراست, a workspace-local manager
 When a report type is selected in the create form, its configured description appears as helper text below the dropdown. Shift log lists, history, and detailed PDFs show the report type name and configured type description separately from the guard-written event description; empty type descriptions are omitted.
 _Avoid_: hard-coded report type dropdowns, optional row descriptions, treating type configuration as patrol workflow rules, or merging the configured type description with the actual event description.
 
+**دسته‌بندی گزارش لحظه‌ای حراست**:
+A manager-defined parent grouping for instant report types. It helps guards first choose the operational area of the event before selecting the specific نوع گزارش لحظه‌ای.
+Categories have manager-controlled name, optional description, display order, and active/inactive state; inactive categories are hidden from new guard report entry while historical reports remain readable.
+_Avoid_: using دسته‌بندی as the final report type, making it free text during report entry, deleting categories to hide old history, or mixing it with severity/approval state
+
+**نوع گزارش لحظه‌ای حراست - دسته‌بندی‌شده**:
+A manager-defined active/inactive type inside one دسته‌بندی گزارش لحظه‌ای, with name, optional description, and display order. Existing uncategorized types should be migrated into a default عمومی category until managers reorganize them.
+If the parent category is inactive, its types are hidden from new گزارش لحظه‌ای creation even when the type itself is active; managers can still see and edit them in settings, and historical reports keep showing both category and type.
+Managers may move a type between categories; historical report rows follow the current type/category configuration in this pass rather than snapshotting old category names.
+_Avoid_: leaving a type without a category, showing active types from an inactive category in guard entry, hard-coding the category/type choices in the UI, adding category snapshots without a separate audit decision, or merging the configured type description with the actual event description
+
+**انتخاب دسته‌بندی در ثبت گزارش لحظه‌ای**:
+During guard report entry, category is selected before type. The type selector is disabled until a category is chosen, shows only active types in that active category, and changing the category clears the previously selected type.
+_Avoid_: submitting a stale type from a previous category, showing all types in one long mobile dropdown, or allowing report submission without a selected type
+
 **شماره ردیف گزارش شیفت**:
 A server-generated sequence number scoped to one planned security shift. Each shift starts at row 1 and guards never manually enter or edit the row number.
 _Avoid_: global report numbering, client-generated row numbers, or reusing a voided row number for a later entry

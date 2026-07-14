@@ -1155,18 +1155,37 @@ model SecurityVehicleAttachment {
   @@map("security_vehicle_attachments")
 }
 
-model SecurityInstantReportType {
-  id           String                  @id @default(cuid())
+model SecurityInstantReportCategory {
+  id           String                      @id @default(cuid())
   name         String
   description  String?
-  displayOrder Int                     @default(0)
-  isActive     Boolean                 @default(true)
+  displayOrder Int                         @default(0)
+  isActive     Boolean                     @default(true)
   createdBy    String
-  createdAt    DateTime                @default(now())
-  updatedAt    DateTime                @updatedAt
-  logEntries   SecurityShiftLogEntry[]
+  createdAt    DateTime                    @default(now())
+  updatedAt    DateTime                    @updatedAt
+  reportTypes  SecurityInstantReportType[]
 
   @@unique([name])
+  @@index([isActive, displayOrder])
+  @@map("security_instant_report_categories")
+}
+
+model SecurityInstantReportType {
+  id           String                         @id @default(cuid())
+  categoryId   String
+  name         String
+  description  String?
+  displayOrder Int                            @default(0)
+  isActive     Boolean                        @default(true)
+  createdBy    String
+  createdAt    DateTime                       @default(now())
+  updatedAt    DateTime                       @updatedAt
+  category     SecurityInstantReportCategory  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  logEntries   SecurityShiftLogEntry[]
+
+  @@unique([categoryId, name])
+  @@index([categoryId, isActive, displayOrder])
   @@index([isActive, displayOrder])
   @@map("security_instant_report_types")
 }

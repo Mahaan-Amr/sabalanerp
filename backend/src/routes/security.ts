@@ -968,10 +968,11 @@ const slotInclude = {
   report: true,
   temporaryCoverage: { include: { personnel: { include: { user: true } } } }
 };
+const shiftLogReportTypeInclude = { include: { category: true } } as const;
 const effectivePersonnelId = (slot: any) => slot.replacementPersonnelId || slot.plannedPersonnelId;
 const getSelfPersonnel = (userId: string) => prisma.securityPersonnel.findUnique({ where: { userId } });
 const activeShiftLogInclude = {
-  logEntries: { include: { reportType: true, participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' as const } },
+  logEntries: { include: { reportType: shiftLogReportTypeInclude, participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' as const } },
   patrolSessions: { orderBy: { startedAt: 'desc' as const } },
   slot: { include: slotInclude },
   personnel: { include: { user: true } }
@@ -1190,12 +1191,87 @@ router.get('/shift-workflow/me', protect, securityView, async (req: AuthRequest,
   res.json({ success: true, data: { personnel, slots: decorated, activeSession } });
 });
 
+router.get('/instant-report-categories', protect, securityView, async (req: AuthRequest, res: Response) => {
+  try {
+    const includeInactive = req.query.includeInactive === 'true' && (req.user!.role === 'ADMIN' || (req as any).workspacePermission === WORKSPACE_PERMISSIONS.ADMIN);
+    const categories = await prisma.securityInstantReportCategory.findMany({
+      where: includeInactive ? undefined : { isActive: true },
+      include: {
+        reportTypes: {
+          where: includeInactive ? undefined : { isActive: true },
+          orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }]
+        }
+      },
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }]
+    });
+    res.json({ success: true, data: categories });
+  } catch (error) {
+    console.error('List instant report categories error:', error);
+    res.status(500).json({ success: false, error: 'دریافت دسته‌بندی‌های گزارش ناموفق بود.' });
+  }
+});
+
+router.post('/instant-report-categories', protect, securityAdmin, [
+  body('name').isString().trim().notEmpty(),
+  body('description').optional({ values: 'falsy' }).isString(),
+  body('displayOrder').optional().isInt({ min: 0 }),
+  body('isActive').optional().isBoolean()
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'نام دسته‌بندی الزامی است.', details: errors.array() });
+    const category = await prisma.securityInstantReportCategory.create({
+      data: {
+        name: req.body.name.trim(),
+        description: String(req.body.description || '').trim() || null,
+        displayOrder: Number(req.body.displayOrder || 0),
+        isActive: req.body.isActive ?? true,
+        createdBy: req.user!.id
+      }
+    });
+    res.status(201).json({ success: true, data: category });
+  } catch (error: any) {
+    console.error('Create instant report category error:', error);
+    res.status(500).json({ success: false, error: error.code === 'P2002' ? 'این دسته‌بندی قبلاً ثبت شده است.' : 'ثبت دسته‌بندی گزارش ناموفق بود.' });
+  }
+});
+
+router.put('/instant-report-categories/:id', protect, securityAdmin, [
+  body('name').isString().trim().notEmpty(),
+  body('description').optional({ values: 'falsy' }).isString(),
+  body('displayOrder').optional().isInt({ min: 0 }),
+  body('isActive').isBoolean()
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'اطلاعات دسته‌بندی کامل نیست.', details: errors.array() });
+    const category = await prisma.securityInstantReportCategory.update({
+      where: { id: req.params.id },
+      data: {
+        name: req.body.name.trim(),
+        description: String(req.body.description || '').trim() || null,
+        displayOrder: Number(req.body.displayOrder || 0),
+        isActive: Boolean(req.body.isActive)
+      }
+    });
+    res.json({ success: true, data: category });
+  } catch (error: any) {
+    console.error('Update instant report category error:', error);
+    res.status(500).json({ success: false, error: error.code === 'P2002' ? 'این دسته‌بندی قبلاً ثبت شده است.' : 'ویرایش دسته‌بندی گزارش ناموفق بود.' });
+  }
+});
+
 router.get('/instant-report-types', protect, securityView, async (req: AuthRequest, res: Response) => {
   try {
     const includeInactive = req.query.includeInactive === 'true' && (req.user!.role === 'ADMIN' || (req as any).workspacePermission === WORKSPACE_PERMISSIONS.ADMIN);
+    const categoryId = String(req.query.categoryId || '').trim();
     const types = await prisma.securityInstantReportType.findMany({
-      where: includeInactive ? undefined : { isActive: true },
-      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }]
+      where: {
+        ...(categoryId ? { categoryId } : {}),
+        ...(includeInactive ? {} : { isActive: true, category: { isActive: true } })
+      },
+      include: { category: true },
+      orderBy: [{ category: { displayOrder: 'asc' } }, { displayOrder: 'asc' }, { createdAt: 'asc' }]
     });
     res.json({ success: true, data: types });
   } catch (error) {
@@ -1205,6 +1281,7 @@ router.get('/instant-report-types', protect, securityView, async (req: AuthReque
 });
 
 router.post('/instant-report-types', protect, securityAdmin, [
+  body('categoryId').isString().trim().notEmpty(),
   body('name').isString().trim().notEmpty(),
   body('description').optional({ values: 'falsy' }).isString(),
   body('displayOrder').optional().isInt({ min: 0 }),
@@ -1213,14 +1290,18 @@ router.post('/instant-report-types', protect, securityAdmin, [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'نام نوع گزارش الزامی است.', details: errors.array() });
+    const category = await prisma.securityInstantReportCategory.findUnique({ where: { id: req.body.categoryId } });
+    if (!category) return res.status(404).json({ success: false, error: 'دسته‌بندی گزارش پیدا نشد.' });
     const type = await prisma.securityInstantReportType.create({
       data: {
+        categoryId: req.body.categoryId,
         name: req.body.name.trim(),
         description: String(req.body.description || '').trim() || null,
         displayOrder: Number(req.body.displayOrder || 0),
         isActive: req.body.isActive ?? true,
         createdBy: req.user!.id
-      }
+      },
+      include: { category: true }
     });
     res.status(201).json({ success: true, data: type });
   } catch (error: any) {
@@ -1230,6 +1311,7 @@ router.post('/instant-report-types', protect, securityAdmin, [
 });
 
 router.put('/instant-report-types/:id', protect, securityAdmin, [
+  body('categoryId').isString().trim().notEmpty(),
   body('name').isString().trim().notEmpty(),
   body('description').optional({ values: 'falsy' }).isString(),
   body('displayOrder').optional().isInt({ min: 0 }),
@@ -1238,14 +1320,18 @@ router.put('/instant-report-types/:id', protect, securityAdmin, [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'اطلاعات نوع گزارش کامل نیست.', details: errors.array() });
+    const category = await prisma.securityInstantReportCategory.findUnique({ where: { id: req.body.categoryId } });
+    if (!category) return res.status(404).json({ success: false, error: 'دسته‌بندی گزارش پیدا نشد.' });
     const type = await prisma.securityInstantReportType.update({
       where: { id: req.params.id },
       data: {
+        categoryId: req.body.categoryId,
         name: req.body.name.trim(),
         description: String(req.body.description || '').trim() || null,
         displayOrder: Number(req.body.displayOrder || 0),
         isActive: Boolean(req.body.isActive)
-      }
+      },
+      include: { category: true }
     });
     res.json({ success: true, data: type });
   } catch (error: any) {
@@ -1384,7 +1470,7 @@ router.post('/shift-log/entries', protect, securityEdit, shiftLogPhotoUpload.arr
     if (!errors.isEmpty()) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'نوع گزارش الزامی است.', details: errors.array() }); }
     const { session } = await getActiveShiftSessionForUser(req.user!.id);
     if (!session) { removeStoredFiles(uploadedFiles(req)); return res.status(409).json({ success: false, error: 'شیفت فعال برای ثبت گزارش پیدا نشد.' }); }
-    const type = await prisma.securityInstantReportType.findFirst({ where: { id: req.body.reportTypeId, isActive: true } });
+    const type = await prisma.securityInstantReportType.findFirst({ where: { id: req.body.reportTypeId, isActive: true, category: { isActive: true } } });
     if (!type) { removeStoredFiles(uploadedFiles(req)); return res.status(404).json({ success: false, error: 'نوع گزارش فعال پیدا نشد.' }); }
     const participantIds = [...new Set(JSON.parse(String(req.body.participantIds || '[]')))].filter((id: any) => typeof id === 'string');
     const validParticipants = participantIds.length ? await prisma.personnel.count({ where: { id: { in: participantIds }, isActive: true } }) : 0;
@@ -1401,7 +1487,7 @@ router.post('/shift-log/entries', protect, securityEdit, shiftLogPhotoUpload.arr
           participants: { create: participantIds.map((personnelId: string) => ({ personnelId })) },
           attachments: { create: uploadedFiles(req).map((file) => ({ storageName: file.filename, originalName: file.originalname, mimeType: file.mimetype, size: file.size })) }
         },
-        include: { reportType: true, participants: { include: { user: true, personnel: true } }, attachments: true }
+        include: { reportType: shiftLogReportTypeInclude, participants: { include: { user: true, personnel: true } }, attachments: true }
       });
     }, { isolationLevel: 'Serializable' });
     res.status(201).json({ success: true, data: entry });
@@ -1417,13 +1503,13 @@ router.put('/shift-log/entries/:id/void', protect, securityEdit, [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل ابطال الزامی است.', details: errors.array() });
-    const entry = await prisma.securityShiftLogEntry.findUnique({ where: { id: req.params.id }, include: { reportType: true } });
+    const entry = await prisma.securityShiftLogEntry.findUnique({ where: { id: req.params.id }, include: { reportType: shiftLogReportTypeInclude } });
     if (!entry) return res.status(404).json({ success: false, error: 'گزارش پیدا نشد.' });
     if (entry.status === SecurityShiftLogStatus.VOIDED) return res.status(409).json({ success: false, error: 'این گزارش قبلاً باطل شده است.' });
     const updated = await prisma.securityShiftLogEntry.update({
       where: { id: entry.id },
       data: { status: SecurityShiftLogStatus.VOIDED, voidReason: req.body.reason.trim(), voidedAt: new Date(), voidedBy: req.user!.id },
-      include: { reportType: true }
+      include: { reportType: shiftLogReportTypeInclude }
     });
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -2449,7 +2535,7 @@ router.get('/reports/security-personnel-performance', protect, securityAdmin, as
     const activityType = String(req.query.activityType || '').trim() || undefined;
     const personnel = await prisma.securityPersonnel.findMany({ where: { ...(personnelId ? { id: personnelId } : {}), ...(shiftId ? { shiftId } : {}) }, include: { user: { select: { firstName: true, lastName: true, username: true } }, shift: { select: { namePersian: true } } }, orderBy: { user: { firstName: 'asc' } } });
     const ids = personnel.map((item) => item.id);
-    const slots = await prisma.securityShiftPlanSlot.findMany({ where: { startsAt: { lt: rangeEnd }, endsAt: { gt: startDate }, ...(coverageStatus ? { coverageStatus: coverageStatus as any } : {}), OR: [{ plannedPersonnelId: { in: ids } }, { replacementPersonnelId: { in: ids } }, { temporaryCoverage: { some: { personnelId: { in: ids } } } }] }, include: { attendance: true, session: { include: { patrolSessions: true, logEntries: { include: { reportType: true }, orderBy: { createdAt: 'asc' } } }, }, temporaryCoverage: true }, orderBy: { startsAt: 'asc' } });
+    const slots = await prisma.securityShiftPlanSlot.findMany({ where: { startsAt: { lt: rangeEnd }, endsAt: { gt: startDate }, ...(coverageStatus ? { coverageStatus: coverageStatus as any } : {}), OR: [{ plannedPersonnelId: { in: ids } }, { replacementPersonnelId: { in: ids } }, { temporaryCoverage: { some: { personnelId: { in: ids } } } }] }, include: { attendance: true, session: { include: { patrolSessions: true, logEntries: { include: { reportType: shiftLogReportTypeInclude }, orderBy: { createdAt: 'asc' } } }, }, temporaryCoverage: true }, orderBy: { startsAt: 'asc' } });
     const summaries = personnel.map((person) => {
       const assigned = slots.filter((slot) => slot.plannedPersonnelId === person.id || slot.replacementPersonnelId === person.id || slot.temporaryCoverage.some((coverage) => coverage.personnelId === person.id));
       const sessions = assigned.map((slot) => slot.session).filter(Boolean).filter((session: any) => !sessionStatus || session.status === sessionStatus) as any[];
@@ -2460,7 +2546,7 @@ router.get('/reports/security-personnel-performance', protect, securityAdmin, as
     });
     const selected = personnelId ? slots.flatMap((slot) => (slot.session ? [{ slot, session: slot.session }] : [])).flatMap(({ slot, session }) => {
       const evidence: any[] = [];
-      if (!activityType || activityType === 'log') evidence.push(...session.logEntries.map((entry: any) => ({ kind: 'گزارش لحظه‌ای', at: entry.createdAt, title: entry.reportType.name, description: entry.description, status: entry.status, slotId: slot.id })));
+      if (!activityType || activityType === 'log') evidence.push(...session.logEntries.map((entry: any) => ({ kind: 'گزارش لحظه‌ای', at: entry.createdAt, title: `${entry.reportType.category?.name ? `${entry.reportType.category.name} / ` : ''}${entry.reportType.name}`, description: entry.description, status: entry.status, slotId: slot.id })));
       if (!activityType || activityType === 'patrol') evidence.push(...session.patrolSessions.filter((patrol: any) => patrol.personnelId === personnelId).map((patrol: any) => ({ kind: 'گشت‌زنی', at: patrol.startedAt, title: patrol.status === 'ACTIVE' ? 'فعال' : 'پایان‌یافته', description: patrol.description || '', status: patrol.status, slotId: slot.id })));
       if ((!activityType || activityType === 'closure') && session.closureSummary) evidence.push({ kind: 'پایان شیفت', at: session.endedAt || session.updatedAt, title: session.status, description: session.closureSummary, status: session.status, slotId: slot.id });
       return evidence;
@@ -2478,7 +2564,7 @@ router.get('/reports/security-personnel/:id/shift-history', protect, securityAdm
     const endDate = startDate && requestedEnd && requestedEnd < startDate ? startDate : requestedEnd;
     const slots = await prisma.securityShiftPlanSlot.findMany({
       where: { ...(startDate && endDate ? { startsAt: { lt: addDays(endDate, 1) }, endsAt: { gt: startDate } } : {}), session: { status: { in: [SecurityShiftSessionStatus.CLOSED, SecurityShiftSessionStatus.FORCE_CLOSED] } }, OR: [{ plannedPersonnelId: personnel.id }, { replacementPersonnelId: personnel.id }, { temporaryCoverage: { some: { personnelId: personnel.id } } }] },
-      include: { plan: { select: { title: true } }, plannedPersonnel: { include: { user: true } }, replacementPersonnel: { include: { user: true } }, attendance: { where: { personnelId: personnel.id } }, temporaryCoverage: { include: { personnel: { include: { user: true } } } }, session: { include: { logEntries: { include: { reportType: true, participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' } }, patrolSessions: { orderBy: { startedAt: 'asc' } } } } },
+      include: { plan: { select: { title: true } }, plannedPersonnel: { include: { user: true } }, replacementPersonnel: { include: { user: true } }, attendance: { where: { personnelId: personnel.id } }, temporaryCoverage: { include: { personnel: { include: { user: true } } } }, session: { include: { logEntries: { include: { reportType: shiftLogReportTypeInclude, participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' } }, patrolSessions: { orderBy: { startedAt: 'asc' } } } } },
       orderBy: { session: { endedAt: 'desc' } }
     });
     res.json({ success: true, data: { personnel: { id: personnel.id, name: `${personnel.user.firstName} ${personnel.user.lastName}`.trim() || personnel.user.username, shift: personnel.shift.namePersian }, shifts: slots } });
@@ -2566,7 +2652,7 @@ router.get('/reports/security-personnel-performance.pdf', protect, securityAdmin
           include: {
             personnel: { include: { user: true, shift: true } },
             logEntries: {
-              include: { reportType: true, participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } } },
+              include: { reportType: shiftLogReportTypeInclude, participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } } },
               orderBy: { rowNumber: 'asc' }
             },
             patrolSessions: { include: { personnel: { include: { user: true } } }, orderBy: { startedAt: 'asc' } }
@@ -2592,7 +2678,7 @@ router.get('/reports/security-personnel-performance.pdf', protect, securityAdmin
       const logs = session?.logEntries.map((entry) => `
         <tr>
           <td>${entry.rowNumber.toLocaleString('fa-IR')}</td>
-          <td>${securityEscapeHtml(entry.reportType.name)}${entry.reportType.description ? `<div class="muted">${securityEscapeHtml(entry.reportType.description)}</div>` : ''}</td>
+          <td>${securityEscapeHtml(`${entry.reportType.category?.name ? `${entry.reportType.category.name} / ` : ''}${entry.reportType.name}`)}${entry.reportType.description ? `<div class="muted">${securityEscapeHtml(entry.reportType.description)}</div>` : ''}</td>
           <td>${securityEscapeHtml(entry.description || '-')}</td>
           <td>${entry.participants.map(participantDisplayName).map(securityEscapeHtml).join('، ') || '-'}</td>
           <td>${formatSecurityDateTime(entry.createdAt)}</td>

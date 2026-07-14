@@ -21,10 +21,11 @@ const participantMeta = (person: any) => person.department?.namePersian || perso
 const logParticipantName = (participant: any) => participantName(participant.personnel || participant.user);
 
 export default function SecuritySupervisorReportsPage() {
+  const [categories, setCategories] = useState<any[]>([]);
   const [types, setTypes] = useState<any[]>([]);
   const [session, setSession] = useState<any>(null);
   const [personnel, setPersonnel] = useState<any>(null);
-  const [form, setForm] = useState({ reportTypeId: '', description: '', participantIds: [] as string[] });
+  const [form, setForm] = useState({ categoryId: '', reportTypeId: '', description: '', participantIds: [] as string[] });
   const [participants, setParticipants] = useState<any[]>([]);
   const [images, setImages] = useState<File[]>([]);
   const [patrolDescription, setPatrolDescription] = useState('');
@@ -36,6 +37,8 @@ export default function SecuritySupervisorReportsPage() {
   const participantPickerRef = useRef<HTMLDivElement>(null);
 
   const activePatrol = useMemo(() => session?.patrolSessions?.find((patrol: any) => patrol.status === 'ACTIVE'), [session]);
+  const selectedCategory = useMemo(() => categories.find((category) => category.id === form.categoryId), [categories, form.categoryId]);
+  const categoryTypes = useMemo(() => selectedCategory?.reportTypes || [], [selectedCategory]);
   const selectedType = useMemo(() => types.find((type) => type.id === form.reportTypeId), [types, form.reportTypeId]);
   const selectedParticipants = useMemo(
     () => participants.filter((user) => form.participantIds.includes(user.id)),
@@ -56,10 +59,14 @@ export default function SecuritySupervisorReportsPage() {
     setError('');
     try {
       const [typesResponse, logResponse, participantResponse] = await Promise.all([
-        securityAPI.getInstantReportTypes(false),
+        securityAPI.getInstantReportCategories(false),
         securityAPI.getActiveShiftLog(), securityAPI.getShiftLogParticipants(),
       ]);
-      if (typesResponse.data.success) setTypes(typesResponse.data.data || []);
+      if (typesResponse.data.success) {
+        const nextCategories = typesResponse.data.data || [];
+        setCategories(nextCategories);
+        setTypes(nextCategories.flatMap((category: any) => category.reportTypes || []));
+      }
       if (logResponse.data.success) {
         setSession(logResponse.data.data.session);
         setPersonnel(logResponse.data.data.personnel);
@@ -86,7 +93,7 @@ export default function SecuritySupervisorReportsPage() {
       payload.append('participantIds', JSON.stringify(form.participantIds));
       images.forEach((image) => payload.append('images', image));
       await securityAPI.createShiftLogEntry(payload);
-      setForm({ reportTypeId: '', description: '', participantIds: [] });
+      setForm({ categoryId: '', reportTypeId: '', description: '', participantIds: [] });
       setImages([]);
       setMessage('گزارش لحظه‌ای ثبت شد.');
       await loadData();
@@ -180,16 +187,29 @@ export default function SecuritySupervisorReportsPage() {
                 </p>
               </div>
             )}
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(320px,0.9fr)]">
+              <label className="block">
+                <span className={labelClass}>دسته‌بندی گزارش لحظه‌ای</span>
+                <EnhancedDropdown
+                  value={form.categoryId}
+                  onChange={(categoryId) => setForm((current) => ({ ...current, categoryId, reportTypeId: '' }))}
+                  placeholder="انتخاب دسته‌بندی"
+                  options={categories.map((category) => ({ value: category.id, label: category.name }))}
+                  searchable
+                  required
+                />
+                {selectedCategory?.description && <p className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">{selectedCategory.description}</p>}
+              </label>
               <label className="block">
                 <span className={labelClass}>نوع گزارش لحظه‌ای</span>
                 <EnhancedDropdown
                   value={form.reportTypeId}
                   onChange={(reportTypeId) => setForm((current) => ({ ...current, reportTypeId }))}
                   placeholder="انتخاب کنید"
-                  options={types.map((type) => ({ value: type.id, label: type.name }))}
+                  options={categoryTypes.map((type: any) => ({ value: type.id, label: type.name }))}
                   searchable
                   required
+                  disabled={!form.categoryId}
                 />
                 {selectedType?.description && <p className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">{selectedType.description}</p>}
               </label>

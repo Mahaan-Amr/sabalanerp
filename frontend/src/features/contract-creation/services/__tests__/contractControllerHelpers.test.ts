@@ -14,9 +14,13 @@ import {
   parseContractAutosaveDraft
 } from '../../utils/contractDraftStorage';
 import {
+  getContractQuantityInputPolicy,
   mergeEditedRemainingStoneState,
+  resolveLongitudinalQuantityOptimizationFailure,
   resolveLongitudinalWidth
 } from '../../utils/productConfigurationController';
+import { calculateSmartLongitudinalCutPlan } from '../remainingStoneService';
+import { handleSmartCalculation } from '../../utils/productCalculations';
 import {
   isValidIranianMobile,
   normalizeIranianMobile,
@@ -137,6 +141,56 @@ assert.deepEqual(
   resolveLongitudinalWidth({ length: 10, squareMeters: 2, quantity: 1, width: 0 }, product, 'cm', false),
   { length: 10, squareMeters: 2, quantity: 1, width: 0 }
 );
+
+assert.deepEqual(getContractQuantityInputPolicy('longitudinal', 0), {
+  minimum: 0,
+  quantity: 0,
+  calculationQuantity: 1,
+  optimizerRequested: true
+});
+assert.deepEqual(getContractQuantityInputPolicy('longitudinal', undefined), {
+  minimum: 0,
+  quantity: 0,
+  calculationQuantity: 1,
+  optimizerRequested: true
+});
+for (const productType of ['slab', 'stair', 'prepared'] as const) {
+  assert.deepEqual(getContractQuantityInputPolicy(productType, 0), {
+    minimum: 1,
+    quantity: 1,
+    calculationQuantity: 1,
+    optimizerRequested: false
+  });
+}
+assert.deepEqual(getContractQuantityInputPolicy('longitudinal', 3), {
+  minimum: 0,
+  quantity: 3,
+  calculationQuantity: 3,
+  optimizerRequested: false
+});
+const zeroQuantityPolicy = getContractQuantityInputPolicy('longitudinal', 0);
+assert.equal(
+  handleSmartCalculation(
+    'quantity',
+    zeroQuantityPolicy.quantity,
+    { length: 50, width: 7, quantity: zeroQuantityPolicy.quantity },
+    'm',
+    'cm',
+    zeroQuantityPolicy.calculationQuantity
+  ).squareMeters,
+  3.5
+);
+
+const impossibleQuantityOptimization = calculateSmartLongitudinalCutPlan({
+  originalWidthCm: 40,
+  enteredWidth: 45,
+  enteredWidthUnit: 'cm',
+  enteredLength: 50,
+  enteredLengthUnit: 'm',
+  quantity: 0
+});
+assert.ok(resolveLongitudinalQuantityOptimizationFailure(true, impossibleQuantityOptimization));
+assert.equal(resolveLongitudinalQuantityOptimizationFailure(false, impossibleQuantityOptimization), null);
 
 const usedStone: RemainingStone = {
   id: 'used-1',

@@ -108,6 +108,7 @@ import {
 } from '@/features/contract-creation/services/remainingStoneService';
 import {
   mergeEditedRemainingStoneState,
+  resolveLongitudinalQuantityOptimizationFailure,
   resolveLongitudinalWidth
 } from '@/features/contract-creation/utils/productConfigurationController';
 import {
@@ -4788,12 +4789,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       !touchedFields.has('length');
     const hasDimensions = (productConfig.length && productConfig.width) || productConfig.squareMeters;
     const enteredLongitudinalQuantity = Math.max(0, Number(productConfig.quantity) || 0);
+    const longitudinalQuantityOptimizerIntent =
+      (productConfig.productType || previousLongitudinalProduct?.productType) === 'longitudinal' &&
+      (enteredLongitudinalQuantity === 0 || preserveDerivedQuantity);
     const quantityOptimizerRequested =
-      (enteredLongitudinalQuantity === 0 || preserveDerivedQuantity) &&
+      longitudinalQuantityOptimizerIntent &&
       Number(productConfig.length || 0) > 0 &&
       Number(productConfig.width || 0) > 0;
     const hasRequiredFields =
-      (enteredLongitudinalQuantity > 0 || quantityOptimizerRequested) &&
+      (enteredLongitudinalQuantity > 0 || longitudinalQuantityOptimizerIntent) &&
       (editingRemainingStoneChild || productConfig.pricePerSquareMeter);
     
     console.log('🔍 Main Product Validation Results:', {
@@ -4816,7 +4820,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       console.log('❌ Missing required fields - quantity:', productConfig.quantity, 'pricePerSquareMeter:', productConfig.pricePerSquareMeter);
       
       // Provide more specific error messages
-      if (!productConfig.quantity && !quantityOptimizerRequested) {
+      if (!productConfig.quantity && !longitudinalQuantityOptimizerIntent) {
         setErrors({ products: 'لطفاً تعداد را وارد کنید' });
       } else if (!productConfig.pricePerSquareMeter && !editingRemainingStoneChild) {
         setErrors({ products: 'لطفاً فی هر متر مربع را وارد کنید' });
@@ -4944,6 +4948,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       sawKerfCm,
       calibrationCutEnabled
     });
+    const quantityOptimizationFailure = resolveLongitudinalQuantityOptimizationFailure(
+      quantityOptimizerRequested,
+      smartCutPlan
+    );
+    if (quantityOptimizationFailure) {
+      setErrors({ products: quantityOptimizationFailure });
+      return;
+    }
     const longitudinalPricePerSquareMeter = Number(productConfig.pricePerSquareMeter) || 0;
     const longitudinalMaterialPricing = calculateLongitudinalMaterialPricing({
       plan: smartCutPlan,

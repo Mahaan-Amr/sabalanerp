@@ -20,7 +20,10 @@ import { isUsableRemainingStone, normalizeRemainingStoneCollection } from '../..
 import { PRODUCT_TYPES } from '../../constants/contract.constants';
 import { productSupportsContractType } from '../../utils/productUtils';
 import { getPreparedKindLabel, getPreparedUnitLabel, inferPreparedKindFromProduct } from '../../utils/preparedProductUtils';
-import { resolveLongitudinalWidth } from '../../utils/productConfigurationController';
+import {
+  getContractQuantityInputPolicy,
+  resolveLongitudinalWidth
+} from '../../utils/productConfigurationController';
 import {
   activateFinishingSelection,
   calculateDefaultFinishingQuantity,
@@ -2376,8 +2379,9 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                               setIsMandatory(true);
                             }
                             setProductConfig((prev: any) => {
-                              const updatedConfig = { ...prev, quantity: value };
-                              const effectiveQuantity = value || 1;
+                              const quantityPolicy = getContractQuantityInputPolicy(currentProductType, value);
+                              const updatedConfig = { ...prev, quantity: quantityPolicy.quantity };
+                              const effectiveQuantity = quantityPolicy.calculationQuantity;
                               const smartResult = handleSmartCalculation('quantity', effectiveQuantity, updatedConfig, lengthUnit, widthUnit, effectiveQuantity);
                               const updatedCuttingCost = calculateAutoCuttingCost(
                                 updatedConfig.length,
@@ -2393,7 +2397,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                             });
                           }}
                           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                          min={1}
+                          min={getContractQuantityInputPolicy(currentProductType, productConfig.quantity).minimum}
                           placeholder="تعداد"
                         />
                       </div>

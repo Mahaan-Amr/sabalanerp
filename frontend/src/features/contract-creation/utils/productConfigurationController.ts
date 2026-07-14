@@ -1,10 +1,49 @@
-import type { ContractProduct, Product, RemainingStone } from '../types/contract.types';
+import type {
+  ContractProduct,
+  ContractUsageType,
+  Product,
+  RemainingStone,
+  SmartLongitudinalCutPlan
+} from '../types/contract.types';
 import { recalculateUsedRemainingDimensions } from './dimensionUtils';
 import {
   mergeRemainingStoneCollection,
   normalizeRemainingStoneCollection,
   sanitizeRemainingStoneEntry
 } from './remainingStoneGuards';
+
+export interface ContractQuantityInputPolicy {
+  minimum: number;
+  quantity: number;
+  calculationQuantity: number;
+  optimizerRequested: boolean;
+}
+
+export const getContractQuantityInputPolicy = (
+  productType: ContractUsageType | null | undefined,
+  value: number | null | undefined
+): ContractQuantityInputPolicy => {
+  const enteredQuantity = Math.max(0, Number(value) || 0);
+  const optimizerRequested = productType === 'longitudinal' && enteredQuantity === 0;
+  const quantity = optimizerRequested ? 0 : Math.max(1, enteredQuantity);
+
+  return {
+    minimum: productType === 'longitudinal' ? 0 : 1,
+    quantity,
+    calculationQuantity: optimizerRequested ? 1 : quantity,
+    optimizerRequested
+  };
+};
+
+export const resolveLongitudinalQuantityOptimizationFailure = (
+  quantityOptimizationRequested: boolean,
+  plan: Pick<SmartLongitudinalCutPlan, 'derivedQuantity' | 'requestedQuantity' | 'warnings'>
+): string | null => {
+  if (!quantityOptimizationRequested) return null;
+  if (plan.derivedQuantity && plan.requestedQuantity > 0) return null;
+
+  return plan.warnings[0] || 'بهینه‌سازی تعداد با ابعاد واردشده ممکن نیست. ابعاد سنگ و محصول را بررسی کنید.';
+};
 
 export const getOriginalWidthForProduct = (
   selectedProduct: Pick<Product, 'widthValue'> | null | undefined,

@@ -1,4 +1,4 @@
-import type { RemainingStone } from '../types/contract.types';
+import type { ContractProduct, RemainingStone } from '../types/contract.types';
 
 const EPSILON = 0.000001;
 
@@ -88,3 +88,29 @@ export const mergeRemainingStoneCollection = (stones: RemainingStone[]): Remaini
   return Array.from(merged.values()).map(sanitizeRemainingStoneEntry);
 };
 
+const getLegacyRemainingStoneUsageKeys = (stone: RemainingStone): string[] => {
+  const keys = [stone.id, stone.sourceCutId].filter(Boolean);
+  const layerSourceMatch = stone.id.match(/^used_layer_(.*)_\d+$/);
+  if (layerSourceMatch?.[1]) {
+    keys.push(layerSourceMatch[1]);
+  }
+  return keys;
+};
+
+export const getAvailableRemainingStoneInventory = (
+  product: Pick<ContractProduct, 'remainingStones' | 'remainingStoneSourceInventory' | 'usedRemainingStones'>
+): RemainingStone[] => {
+  const remaining = normalizeRemainingStoneCollection(product.remainingStones || [])
+    .filter(isUsableRemainingStone);
+
+  // Canonical replay already replaces consumed stock with its physical secondary remnants.
+  // Applying the legacy sourceCutId filter again would hide every remnant in that lineage.
+  if (Array.isArray(product.remainingStoneSourceInventory)) {
+    return remaining;
+  }
+
+  const usedKeys = new Set((product.usedRemainingStones || []).flatMap(getLegacyRemainingStoneUsageKeys));
+  return remaining.filter((stone) =>
+    !getLegacyRemainingStoneUsageKeys(stone).some((key) => usedKeys.has(key))
+  );
+};

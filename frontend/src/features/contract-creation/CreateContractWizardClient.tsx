@@ -87,6 +87,7 @@ import {
 } from '@/features/contract-creation/utils/stairSystemHelpers';
 import { generateContractHTML } from '@/features/contract-creation/utils/contractHTMLGenerator';
 import {
+  getAvailableRemainingStoneInventory,
   isUsableRemainingStone,
   normalizeRemainingStoneCollection,
   sanitizeRemainingStoneEntry
@@ -983,34 +984,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     currentProductRemainingStones: RemainingStone[]
   ): RemainingStone[] => {
     const allAvailable: RemainingStone[] = [];
-
-    const getRemainingStoneUsageKeys = (stone: RemainingStone): string[] => {
-      const keys = [stone.id, stone.sourceCutId].filter(Boolean);
-      const layerSourceMatch = stone.id.match(/^used_layer_(.*)_\d+$/);
-      if (layerSourceMatch?.[1]) {
-        keys.push(layerSourceMatch[1]);
-      }
-      return keys;
-    };
     
     // Collect from all non-layer products in session (including longitudinal and slab)
     sessionItems.forEach(item => {
       const itemIsLayer = ((item.meta as any)?.isLayer) || false;
       if (!itemIsLayer && item.remainingStones && item.remainingStones.length > 0) {
-        // Get remaining stones that haven't been used yet
-        const usedRemainingStones = item.usedRemainingStones || [];
-        const usedRemainingStoneIds = new Set(usedRemainingStones.flatMap(getRemainingStoneUsageKeys));
-        
-        item.remainingStones.forEach(rs => {
-          // Only include if not already used and usable after sanitization
-          const sanitizedStone = sanitizeRemainingStoneEntry(rs);
-          const isAlreadyUsed = getRemainingStoneUsageKeys(sanitizedStone).some(key => usedRemainingStoneIds.has(key));
-          if (!isAlreadyUsed) {
-            if (isUsableRemainingStone(sanitizedStone)) {
-              allAvailable.push(sanitizedStone);
-            }
-          }
-        });
+        allAvailable.push(...getAvailableRemainingStoneInventory(item));
       }
     });
     

@@ -409,6 +409,22 @@ _Avoid_: silently deleting child rows, partially applying the source edit, prese
 Creating, editing, or deleting a remaining-stone child uses the same atomic replay rule as editing its source product. An edited allocation keeps its original order, a new allocation is appended after existing children, and deleting a child regenerates the source remainder before replaying every surviving allocation; if replay fails, nothing changes and conflicts are identified.
 _Avoid_: manually adding a deleted child's geometry back into the current remainder, patching only one child or one remaining piece, partially committing a replay, or maintaining separate allocation rules for create, edit, delete, and source edit
 
+**باقی‌مانده ثانویه تخصیص**:
+The reusable physical pieces left after creating a child from remaining stone belong to the original source row's canonical remaining-stone inventory. The child owns its finished geometry and operations but does not become the inventory owner of those secondary remnants.
+_Avoid_: hiding secondary remnants under the child row, marking them consumed because they share source lineage, or creating a separate child-owned inventory chain
+
+**برش چندمحوره محصول باقی‌مانده**:
+When a child product reduces both the width and length of its selected remaining stone, its physical cutting truth contains separate longitudinal and cross breakdown entries with their own meters and costs. Their sum owns the cutting charge; a legacy single cut-type label is not the canonical description of the operation.
+_Avoid_: recording only one axis, collapsing both axes into an ambiguous "both" label, or charging a combined amount without preserving its physical breakdown
+
+**گروه هندسی موجودی باقی‌مانده**:
+Identical remaining-stone pieces are presented as one inventory group that states dimensions and area per piece, available piece count, and total group area. Allocations consume one or more physical pieces from that group rather than treating the combined area as one rectangle.
+_Avoid_: displaying total group area beside single-piece dimensions without quantity, calling an inventory group one stone, or hiding how many source pieces an allocation consumes
+
+**پیش‌نمایش هندسی تخصیص باقی‌مانده**:
+Before a remaining-stone allocation is committed, its preview shows the finished child pieces, consumed source-piece count, every resulting secondary-remnant geometry, and saw-kerf consumption when enabled. Consumed and remaining area totals support this physical preview but never replace it.
+_Avoid_: previewing only aggregate area subtraction, using a different geometry calculation from transactional replay, or hiding the effect of saw kerf until after save
+
 **افزونه‌های محصول ساخته‌شده از باقی‌مانده**:
 A contract product created from remaining stone owns its own ابزار and پرداخت سنگ selections, quantities, and charges, calculated from that child product's geometry and quantity. It starts without add-ons and never inherits them implicitly from the source product; any future explicit copy action must create independently editable add-ons recalculated for the child.
 _Avoid_: copying source-product add-on metadata or charges into the child, pricing a child from the source product's dimensions, or keeping copied add-ons linked to later source-product changes

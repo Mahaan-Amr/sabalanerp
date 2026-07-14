@@ -23,6 +23,7 @@ import {
   replayRemainingStoneAllocations,
   resolveRemainingStoneSourceInventory
 } from '../services/remainingStoneAllocationReplayService';
+import { calculateRemainingChildCuttingBreakdown } from '../services/remainingStoneCuttingService';
 
 interface UseRemainingStoneModalOptions {
   wizardData: ContractWizardData;
@@ -323,9 +324,12 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
       const wasSplit = splitCount > row.quantity;
       const widthCut = row.width < stockInfo.sanitized.width;
       const lengthCut = row.length < stockInfo.sanitized.length;
-      const cutMetersPerPiece = (widthCut ? row.length : 0) + (lengthCut ? row.width / 100 : 0);
-      const totalCuttingMeters = cutMetersPerPiece * row.quantity;
-      const cuttingCost = cuttingCostPerMeter > 0 ? totalCuttingMeters * cuttingCostPerMeter : 0;
+      const cuttingBreakdown = calculateRemainingChildCuttingBreakdown({
+        row,
+        stock: stockInfo.sanitized,
+        rate: cuttingCostPerMeter
+      });
+      const cuttingCost = cuttingBreakdown.reduce((total, entry) => total + entry.cost, 0);
       const cutType: 'longitudinal' | 'cross' | null = lengthCut ? 'cross' : (widthCut ? 'longitudinal' : null);
 
       return {
@@ -358,6 +362,7 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
         originalLength: stockInfo.sanitized.length,
         cuttingCost,
         physicalCuttingCost: cuttingCost,
+        cuttingBreakdown,
         cuttingCostPerMeter,
         cutDescription: widthCut || lengthCut
           ? 'هزینه برش بر اساس پارتیشن سنگ باقی‌مانده محاسبه شد.'

@@ -6,7 +6,10 @@ import { FaPlus, FaRuler, FaTimes, FaTrash } from 'react-icons/fa';
 import type { ContractWizardData, RemainingStone, StonePartition } from '../../types/contract.types';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { StoneCADDesigner } from '@/components/stone-cad/StoneCADDesigner';
-import { formatDisplayNumber } from '@/lib/numberFormat';
+import { formatDisplayNumber, formatSquareMeters } from '@/lib/numberFormat';
+import { mergeRemainingStoneCollection } from '../../utils/remainingStoneGuards';
+import { allocateRemainingStonePartitions } from '../../services/remainingStonePartitionService';
+import { SAW_KERF_CM } from '../../utils/sawKerf';
 
 interface RemainingStoneModalProps {
   isOpen: boolean;
@@ -74,10 +77,39 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
   };
 
   const validPartitions = partitions.filter(partition => partition.width > 0 && partition.length > 0);
-  const totalUsedSquareMeters = validPartitions.reduce((sum, partition) => sum + partition.squareMeters, 0);
-  const remainingSquareMeters = remainingStone.squareMeters - totalUsedSquareMeters;
-  const totalPieces = validPartitions.reduce((sum, partition) => sum + Math.max(1, Math.floor(partition.quantity || 1)), 0);
+  const normalizedPreviewRows = validPartitions.map((partition) => {
+    const width = partitionWidthUnit === 'm' ? partition.width * 100 : partition.width;
+    const length = partitionLengthUnit === 'm' ? partition.length : partition.length / 100;
+    const quantity = Math.max(1, Math.floor(Number(partition.quantity) || 1));
+    return {
+      ...partition,
+      width,
+      length,
+      quantity,
+      squareMeters: (width * length * quantity) / 100
+    };
+  });
+  const allocationPreview = allocateRemainingStonePartitions(normalizedPreviewRows, remainingStone, {
+    sawKerfEnabled: remainingStoneSawKerfEnabled,
+    sawKerfCm: SAW_KERF_CM
+  });
+  const previewIsValid = allocationPreview.rowErrors.size === 0;
   const stockQuantity = Math.max(1, Math.floor(Number(remainingStone.quantity) || 1));
+  const secondaryRemnants = previewIsValid
+    ? mergeRemainingStoneCollection(allocationPreview.remainingAreas)
+    : [];
+  const sourcePieceArea = (remainingStone.width * remainingStone.length) / 100;
+  const finishedArea = normalizedPreviewRows.reduce((sum, partition) => sum + partition.squareMeters, 0);
+  const secondaryRemnantArea = secondaryRemnants.reduce((sum, stone) => sum + stone.squareMeters, 0);
+  const physicallyConsumedArea = previewIsValid
+    ? Math.max(0, allocationPreview.consumedSourcePieces * sourcePieceArea - secondaryRemnantArea)
+    : 0;
+  const kerfConsumedArea = Math.max(0, physicallyConsumedArea - finishedArea);
+  const unconsumedSourceQuantity = previewIsValid
+    ? Math.max(0, stockQuantity - allocationPreview.consumedSourcePieces)
+    : stockQuantity;
+  const remainingInventoryArea = secondaryRemnantArea + unconsumedSourceQuantity * sourcePieceArea;
+  const totalPieces = validPartitions.reduce((sum, partition) => sum + Math.max(1, Math.floor(partition.quantity || 1)), 0);
 
   const metricClass = 'rounded-xl border border-teal-400/20 bg-teal-500/10 p-3';
   const metricLabelClass = 'block text-[11px] font-medium text-teal-700 dark:text-teal-200';
@@ -321,25 +353,82 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
 
           {validPartitions.length > 0 && (
             <section className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/40 sm:p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">پیش‌نمایش هندسی تخصیص</h4>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    نتیجه واقعی برش، باقی‌مانده‌های ثانویه و خوراک اره پیش از ذخیره
+                  </p>
+                </div>
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                  previewIsValid
+                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                    : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                }`}>
+                  {previewIsValid ? 'قابل تخصیص' : 'تخصیص نامعتبر'}
+                </span>
+              </div>
+
+              {!previewIsValid && allocationPreview.summaryError && (
+                <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                  {allocationPreview.summaryError}
+                </div>
+              )}
+
+              {previewIsValid && (
+                <div className="mb-3 grid gap-3 lg:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                    <h5 className="text-xs font-bold text-slate-700 dark:text-slate-200">محصول‌های ساخته‌شده</h5>
+                    <div className="mt-2 space-y-2">
+                      {normalizedPreviewRows.map((row, index) => (
+                        <div key={row.id} className="flex flex-wrap justify-between gap-2 text-xs text-slate-600 dark:text-slate-300">
+                          <span>محصول {formatDisplayNumber(index + 1)}: {formatDisplayNumber(row.width)}cm × {formatDisplayNumber(row.length)}m</span>
+                          <span>{formatDisplayNumber(row.quantity)} عدد · {formatSquareMeters(row.squareMeters)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-orange-200 bg-orange-50 p-3 dark:border-orange-800 dark:bg-orange-900/10">
+                    <h5 className="text-xs font-bold text-orange-800 dark:text-orange-200">باقی‌مانده‌های ثانویه قابل استفاده</h5>
+                    <div className="mt-2 space-y-2">
+                      {secondaryRemnants.length > 0 ? secondaryRemnants.map((stone) => {
+                        const quantity = Math.max(1, Math.floor(Number(stone.quantity) || 1));
+                        const perPieceArea = (stone.width * stone.length) / 100;
+                        return (
+                          <div key={stone.id} className="flex flex-wrap justify-between gap-2 text-xs text-orange-800 dark:text-orange-200">
+                            <span>{formatDisplayNumber(stone.width)}cm × {formatDisplayNumber(stone.length)}m</span>
+                            <span>{formatDisplayNumber(quantity)} عدد · هر قطعه {formatSquareMeters(perPieceArea)} · کل {formatSquareMeters(perPieceArea * quantity)}</span>
+                          </div>
+                        );
+                      }) : (
+                        <span className="text-xs text-orange-700 dark:text-orange-300">باقی‌مانده ثانویه‌ای ایجاد نمی‌شود.</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <div className="rounded-xl bg-white p-3 dark:bg-slate-800">
-                  <span className="block text-[11px] text-slate-500 dark:text-slate-400">مصرف‌شده</span>
-                  <span className="mt-1 block font-bold text-slate-900 dark:text-white">{formatDisplayNumber(totalUsedSquareMeters)}</span>
+                  <span className="block text-[11px] text-slate-500 dark:text-slate-400">قطعات منبع مصرف‌شده</span>
+                  <span className="mt-1 block font-bold text-slate-900 dark:text-white">{formatDisplayNumber(allocationPreview.consumedSourcePieces)} از {formatDisplayNumber(stockQuantity)}</span>
                 </div>
                 <div className="rounded-xl bg-white p-3 dark:bg-slate-800">
-                  <span className="block text-[11px] text-slate-500 dark:text-slate-400">باقی‌مانده</span>
-                  <span className={`mt-1 block font-bold ${remainingSquareMeters >= 0 ? 'text-slate-900 dark:text-white' : 'text-red-600 dark:text-red-300'}`}>
-                    {formatDisplayNumber(remainingSquareMeters)}
-                  </span>
+                  <span className="block text-[11px] text-slate-500 dark:text-slate-400">محصول نهایی</span>
+                  <span className="mt-1 block font-bold text-slate-900 dark:text-white">{formatSquareMeters(finishedArea)}</span>
                 </div>
                 <div className="rounded-xl bg-white p-3 dark:bg-slate-800">
-                  <span className="block text-[11px] text-slate-500 dark:text-slate-400">پارتیشن‌ها</span>
-                  <span className="mt-1 block font-bold text-slate-900 dark:text-white">{formatDisplayNumber(validPartitions.length)}</span>
+                  <span className="block text-[11px] text-slate-500 dark:text-slate-400">خوراک اره</span>
+                  <span className="mt-1 block font-bold text-slate-900 dark:text-white">{formatSquareMeters(kerfConsumedArea)}</span>
                 </div>
                 <div className="rounded-xl bg-white p-3 dark:bg-slate-800">
-                  <span className="block text-[11px] text-slate-500 dark:text-slate-400">کل قطعات</span>
-                  <span className="mt-1 block font-bold text-slate-900 dark:text-white">{formatDisplayNumber(totalPieces)}</span>
+                  <span className="block text-[11px] text-slate-500 dark:text-slate-400">موجودی باقی‌مانده</span>
+                  <span className="mt-1 block font-bold text-slate-900 dark:text-white">{formatSquareMeters(remainingInventoryArea)}</span>
                 </div>
+              </div>
+              <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                {formatDisplayNumber(validPartitions.length)} ردیف · {formatDisplayNumber(totalPieces)} قطعه نهایی · مصرف فیزیکی {formatSquareMeters(physicallyConsumedArea)}
               </div>
             </section>
           )}
@@ -400,7 +489,8 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
             <button
               type="button"
               onClick={onCreatePartitions}
-              className="min-h-11 rounded-xl bg-gradient-to-r from-teal-500 to-teal-600 px-6 py-2 text-sm font-bold text-white shadow-sm transition hover:from-teal-600 hover:to-teal-700 sm:min-w-40"
+              disabled={validPartitions.length === 0 || !previewIsValid}
+              className="min-h-11 rounded-xl bg-gradient-to-r from-teal-500 to-teal-600 px-6 py-2 text-sm font-bold text-white shadow-sm transition hover:from-teal-600 hover:to-teal-700 disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-40"
             >
               ایجاد پارتیشن‌ها
             </button>

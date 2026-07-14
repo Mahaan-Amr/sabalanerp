@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { replayRemainingStoneAllocations } from '../remainingStoneAllocationReplayService';
 import type { ContractProduct, RemainingStone } from '../../types/contract.types';
 import { ensureContractProductRowIds } from '../../utils/contractProductIdentity';
+import { getAvailableRemainingStoneInventory } from '../../utils/remainingStoneGuards';
 import {
   hasUnresolvedLegacyRemainingChildAddOns,
   recalculateRemainingChildAddOns,
@@ -95,6 +96,38 @@ const child = (rowId: string, sourceRowId: string, order: number): ContractProdu
     }
   }
 });
+
+{
+  const parent = source('source-secondary-remnants', [stock(14, 0.8)]);
+  const allocatedChild = child('child-two-axis-cut', parent.rowId as string, 0);
+  allocatedChild.width = 7;
+  allocatedChild.diameterOrWidth = 7;
+  allocatedChild.length = 0.6;
+  allocatedChild.squareMeters = 0.042;
+  allocatedChild.cuttingCostPerMeter = 20_000;
+
+  const result = replayRemainingStoneAllocations({
+    products: [parent, allocatedChild],
+    sourceRowId: parent.rowId as string
+  });
+
+  assert.equal(result.ok, true);
+  const replayedParent = result.products[0];
+  const replayedChild = result.products[1];
+  const available = getAvailableRemainingStoneInventory(replayedParent);
+
+  assert.deepEqual(
+    available.map((stone) => [Number(stone.width.toFixed(6)), Number(stone.length.toFixed(6))]),
+    [[7, 0.2], [7, 0.8]]
+  );
+  assert.equal(Number(available.reduce((sum, stone) => sum + stone.squareMeters, 0).toFixed(6)), 0.07);
+  assert.deepEqual(replayedChild.cuttingBreakdown, [
+    { type: 'longitudinal', meters: 0.6, rate: 20_000, cost: 12_000 },
+    { type: 'cross', meters: 0.07, rate: 20_000, cost: 1_400 }
+  ]);
+  assert.equal(replayedChild.cuttingCost, 13_400);
+  assert.equal(replayedChild.totalPrice, 13_400);
+}
 
 {
   const parent = source('source-a', [stock(60, 3)]);

@@ -5,6 +5,7 @@ import { mergeRemainingStoneCollection, normalizeRemainingStoneCollection } from
 import { allocateRemainingStonePartitions } from './remainingStonePartitionService';
 import { recalculateRemainingChildAddOns } from './remainingStoneChildAddOnService';
 import { calculateSlabRemainingStones, calculateSmartLongitudinalCutPlan } from './remainingStoneService';
+import { calculateRemainingChildCuttingBreakdown } from './remainingStoneCuttingService';
 
 export interface RemainingStoneReplayConflict {
   childRowId: string;
@@ -195,8 +196,12 @@ export const replayRemainingStoneAllocations = ({
     const physicalPieces = successfulAllocation.physicalPiecesByRow.get(row.id) || [];
     const widthCut = row.width < stock.width;
     const lengthCut = row.length < stock.length;
-    const cuttingMetersPerPiece = (widthCut ? row.length : 0) + (lengthCut ? row.width / 100 : 0);
-    const cuttingCost = cuttingMetersPerPiece * row.quantity * Number(recalculatedChild.cuttingCostPerMeter || 0);
+    const cuttingBreakdown = calculateRemainingChildCuttingBreakdown({
+      row,
+      stock,
+      rate: Number(recalculatedChild.cuttingCostPerMeter || 0)
+    });
+    const cuttingCost = cuttingBreakdown.reduce((total, entry) => total + entry.cost, 0);
     const allocationOrder = getAllocationOrder(recalculatedChild, replayIndex);
     const generatedRemainingStoneIds = successfulAllocation.remainingAreas.map((area) => area.id);
 
@@ -230,6 +235,7 @@ export const replayRemainingStoneAllocations = ({
       originalLength: stock.length,
       cuttingCost,
       physicalCuttingCost: cuttingCost,
+      cuttingBreakdown,
       totalPrice: getChildOperationTotal(recalculatedChild, cuttingCost),
       remainingStones: [],
       usedRemainingStones: [],

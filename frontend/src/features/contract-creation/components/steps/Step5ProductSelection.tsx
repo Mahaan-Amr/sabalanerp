@@ -12,15 +12,13 @@ import {
   getServiceRowUnitPriceFromCatalog
 } from '../../utils/contractServiceRows';
 import {
-  isUsableRemainingStone,
-  normalizeRemainingStoneCollection
+  getAvailableRemainingStoneInventory
 } from '../../utils/remainingStoneGuards';
 import { getPreparedKindLabel, getPreparedQuantity, getPreparedUnit, getPreparedUnitLabel, isPreparedProductType } from '../../utils/preparedProductUtils';
 import { getPartDisplayLabel } from '../../utils/stairSystemHelpers';
 import { isMandatoryLongitudinalCuttingNonBillable } from '../../utils/mandatoryCuttingPricing';
 import { hasUnresolvedLegacyRemainingChildAddOns } from '../../services/remainingStoneChildAddOnService';
 import type { ContractProduct, ContractServiceRowSourceType } from '../../types/contract.types';
-import type { RemainingStone } from '../../types/contract.types';
 import type { ContractProductCartController } from '../../hooks/useContractProductCartController';
 
 const PRODUCT_TYPES = [
@@ -67,15 +65,6 @@ const getProductTypeClasses = (type: ContractProduct['productType']) => {
   if (type === 'slab') return 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-200 dark:border-indigo-800';
   if (type === 'prepared' || type === 'volumetric') return 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-200 dark:border-emerald-800';
   return 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-200 dark:border-purple-800';
-};
-
-const getRemainingStoneUsageKeys = (stone: RemainingStone): string[] => {
-  const keys = [stone.id, stone.sourceCutId].filter(Boolean);
-  const layerSourceMatch = stone.id.match(/^used_layer_(.*)_\d+$/);
-  if (layerSourceMatch?.[1]) {
-    keys.push(layerSourceMatch[1]);
-  }
-  return keys;
 };
 
 const SERVICE_SOURCE_OPTIONS: ContractServiceRowSourceType[] = ['tool', 'cutting', 'finishing'];
@@ -496,10 +485,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
             <div className="space-y-3">
               {cart.items.map((product, index) => {
                 const catalogProduct = product.product;
-                const usedRemainingStoneKeys = new Set((product.usedRemainingStones || []).flatMap(getRemainingStoneUsageKeys));
-                const availableRemainingStones = normalizeRemainingStoneCollection(product.remainingStones || [])
-                  .filter(isUsableRemainingStone)
-                  .filter((stone) => !getRemainingStoneUsageKeys(stone).some((key) => usedRemainingStoneKeys.has(key)));
+                const availableRemainingStones = getAvailableRemainingStoneInventory(product);
                 const smartCutPlan = product.smartCutPlan;
                 const billableCuttingCost = isMandatoryLongitudinalCuttingNonBillable(product)
                   ? 0
@@ -668,7 +654,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                                 key={remainingStone.id}
                                 className="rounded-lg border border-orange-200 bg-white p-3 dark:border-orange-800 dark:bg-slate-900/50"
                               >
-                                <div className="grid grid-cols-3 gap-2 text-xs">
+                                <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
                                   <div className="rounded-md bg-orange-50 px-2 py-1.5 dark:bg-orange-900/20">
                                     <p className="text-orange-700 dark:text-orange-200">عرض</p>
                                     <p className="mt-1 font-semibold text-slate-900 dark:text-white">
@@ -682,24 +668,28 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                                     </p>
                                   </div>
                                   <div className="rounded-md bg-orange-50 px-2 py-1.5 dark:bg-orange-900/20">
-                                    <p className="text-orange-700 dark:text-orange-200">مساحت</p>
+                                    <p className="text-orange-700 dark:text-orange-200">مساحت هر قطعه</p>
                                     <p className="mt-1 font-semibold text-slate-900 dark:text-white">
-                                      {formatSquareMeters(remainingStone.squareMeters)}
+                                      {formatSquareMeters((remainingStone.width * remainingStone.length) / 100)}
+                                    </p>
+                                  </div>
+                                  <div className="rounded-md bg-orange-50 px-2 py-1.5 dark:bg-orange-900/20">
+                                    <p className="text-orange-700 dark:text-orange-200">موجودی</p>
+                                    <p className="mt-1 font-semibold text-slate-900 dark:text-white">
+                                      {formatDisplayNumber(remainingStone.quantity || 1)} قطعه
                                     </p>
                                   </div>
                                 </div>
-                                {remainingStone.quantity && remainingStone.quantity > 1 && (
-                                  <p className="mt-2 text-xs text-orange-700 dark:text-orange-200">
-                                    تعداد قطعه: {formatDisplayNumber(remainingStone.quantity)}
-                                  </p>
-                                )}
+                                <p className="mt-2 text-xs font-semibold text-orange-800 dark:text-orange-100">
+                                  مساحت کل موجودی: {formatSquareMeters(remainingStone.squareMeters)}
+                                </p>
                                 {cart.useRemainingStone && (
                                   <button
                                     type="button"
                                     onClick={() => cart.useRemainingStone?.(remainingStone, product)}
                                     className="mt-2 inline-flex min-h-9 w-full items-center justify-center rounded-lg bg-orange-500 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-orange-600"
                                   >
-                                    استفاده از این سنگ
+                                    استفاده از این موجودی
                                   </button>
                                 )}
                               </div>
@@ -856,10 +846,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                   const rowKey = `product-${index}-${product.productId || product.stoneCode || 'row'}`;
                   const isExpanded = expandedDesktopRows.has(rowKey);
                   const catalogProduct = product.product;
-                  const usedRemainingStoneKeys = new Set((product.usedRemainingStones || []).flatMap(getRemainingStoneUsageKeys));
-                  const availableRemainingStones = normalizeRemainingStoneCollection(product.remainingStones || [])
-                    .filter(isUsableRemainingStone)
-                    .filter((stone) => !getRemainingStoneUsageKeys(stone).some((key) => usedRemainingStoneKeys.has(key)));
+                  const availableRemainingStones = getAvailableRemainingStoneInventory(product);
                   const smartCutPlan = product.smartCutPlan;
                   const billableCuttingCost = isMandatoryLongitudinalCuttingNonBillable(product)
                     ? 0
@@ -1027,10 +1014,11 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                                           key={remainingStone.id}
                                           className="rounded-lg border border-orange-200 bg-white p-2 text-xs dark:border-orange-800 dark:bg-slate-900/50"
                                         >
-                                          <div className="flex flex-wrap items-center justify-between gap-2 text-slate-800 dark:text-slate-100">
-                                            <span>عرض {formatDisplayNumber(remainingStone.width)} cm</span>
-                                            <span>طول {formatDisplayNumber(remainingStone.length)} m</span>
-                                            <span>{formatSquareMeters(remainingStone.squareMeters)}</span>
+                                          <div className="grid grid-cols-2 gap-1 text-slate-800 dark:text-slate-100">
+                                            <span>هر قطعه: {formatDisplayNumber(remainingStone.width)} cm × {formatDisplayNumber(remainingStone.length)} m</span>
+                                            <span>موجودی: {formatDisplayNumber(remainingStone.quantity || 1)} قطعه</span>
+                                            <span>مساحت هر قطعه: {formatSquareMeters((remainingStone.width * remainingStone.length) / 100)}</span>
+                                            <span>مساحت کل: {formatSquareMeters(remainingStone.squareMeters)}</span>
                                           </div>
                                           {cart.useRemainingStone && (
                                             <button
@@ -1038,7 +1026,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                                               onClick={() => cart.useRemainingStone?.(remainingStone, product)}
                                               className="mt-2 inline-flex min-h-8 w-full items-center justify-center rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-orange-600"
                                             >
-                                              استفاده از این سنگ
+                                              استفاده از این موجودی
                                             </button>
                                           )}
                                         </div>

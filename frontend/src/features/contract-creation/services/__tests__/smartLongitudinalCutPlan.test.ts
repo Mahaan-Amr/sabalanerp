@@ -9,6 +9,66 @@ const approx = (actual: number, expected: number) => {
 };
 
 {
+  const packedExplicitPieces = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 20,
+    enteredWidthUnit: 'cm',
+    enteredLength: 10,
+    enteredLengthUnit: 'm',
+    quantity: 2,
+    longitudinalRatePerMeter: 100,
+    calibrationCutEnabled: false,
+    seed: 17
+  });
+
+  assert.equal(packedExplicitPieces.derivedQuantity, false);
+  assert.deepEqual(packedExplicitPieces.productionPieces, [{ widthCm: 20, lengthM: 10, quantity: 2 }]);
+  assert.equal(packedExplicitPieces.stripsPerSource, 2);
+  assert.equal(packedExplicitPieces.sourceBandsNeeded, 1);
+  approx(packedExplicitPieces.sourceLengthConsumedM, 10);
+  approx(packedExplicitPieces.consumedAreaSqm, 4);
+  assert.equal(packedExplicitPieces.remainingStones.length, 0);
+  approx(packedExplicitPieces.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 10);
+
+  const calibratedPackedPieces = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 20,
+    enteredWidthUnit: 'cm',
+    enteredLength: 10,
+    enteredLengthUnit: 'm',
+    quantity: 2,
+    longitudinalRatePerMeter: 100,
+    calibrationCutEnabled: true,
+    seed: 17
+  });
+  approx(calibratedPackedPieces.sourceLengthConsumedM, 10);
+  approx(calibratedPackedPieces.consumedAreaSqm, 4);
+  approx(calibratedPackedPieces.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 20);
+
+  const kerfedPackedPieces = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 20,
+    enteredWidthUnit: 'cm',
+    enteredLength: 10,
+    enteredLengthUnit: 'm',
+    quantity: 2,
+    longitudinalRatePerMeter: 100,
+    sawKerfEnabled: true,
+    sawKerfCm: 0.3,
+    calibrationCutEnabled: false,
+    seed: 17
+  });
+  assert.equal(kerfedPackedPieces.stripsPerSource, 1);
+  assert.equal(kerfedPackedPieces.sourceBandsNeeded, 2);
+  approx(kerfedPackedPieces.sourceLengthConsumedM, 20);
+  approx(kerfedPackedPieces.consumedAreaSqm, 8);
+  assert.equal(kerfedPackedPieces.remainingStones.length, 1);
+  approx(kerfedPackedPieces.remainingStones[0].width, 19.7);
+  approx(kerfedPackedPieces.remainingStones[0].length, 10);
+  assert.equal(kerfedPackedPieces.remainingStones[0].quantity, 2);
+}
+
+{
   const plan = calculateSmartLongitudinalCutPlan({
     originalWidthCm: 40,
     enteredWidth: 13,

@@ -13,7 +13,6 @@ import { restoreLongitudinalCustomerRequest } from './longitudinalOptimizerGeome
 export const generateContractHTML = (data: any): string => {
   const discount = data.discount || data.contractData?.discount || null;
   const getSourceMaterialSummary = (product: any): string => {
-    if (product?.smartCutDerivedQuantity) return '';
     const smartCutPlan = product?.smartCutPlan || {};
     const stairMeta = product?.meta?.stair || {};
     const sourceWidthCm = Number(smartCutPlan.sourceWidthCm || product?.originalWidth || 0);

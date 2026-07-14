@@ -921,7 +921,8 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   });
   assert.ok(customerHtml.includes('۵۰m × ۷cm'));
   assert.ok(!customerHtml.includes('خروجی فیزیکی تولید'));
-  assert.ok(!customerHtml.includes('سنگ مصرفی برای'));
+  assert.ok(customerHtml.includes('سنگ مصرفی برای'));
+  assert.ok(customerHtml.includes('عرض ۴۰cm × طول ۱۰m × ۱ عدد، جمع ۴ متر مربع'));
 
   const legacySavedProduct = contractProduct({
     length: plan.requestedLengthM,

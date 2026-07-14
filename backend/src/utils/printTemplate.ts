@@ -666,7 +666,6 @@ const buildPhysicalProductionNote = (product: any): string => {
 };
 
 const buildSourceMaterialRows = (product: any): NormalizedSourceMaterial[] => {
-  if (product?.smartCutDerivedQuantity) return [];
   const smartCutPlan = product?.smartCutPlan || {};
   const sourceWidthCm = toNumber(smartCutPlan?.sourceWidthCm || product?.originalWidth);
   const productWidthCm = toNumber(product?.width);

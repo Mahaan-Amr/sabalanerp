@@ -3708,6 +3708,73 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                     </span>
                   </label>
                   )}
+                  {currentProductType === 'longitudinal' && (() => {
+                    const originalWidthForCalculation = (isEditMode && productConfig.originalWidth)
+                      ? productConfig.originalWidth
+                      : (selectedProduct?.widthValue || 0);
+                    const internalPlan = calculateSmartLongitudinalCutPlan({
+                      originalWidthCm: Number(originalWidthForCalculation) || 0,
+                      enteredWidth: Number(productConfig.width) || 0,
+                      enteredWidthUnit: widthUnit,
+                      enteredLength: Number(productConfig.length) || 0,
+                      enteredLengthUnit: lengthUnit,
+                      quantity: Number(productConfig.quantity) > 0 ? Number(productConfig.quantity) : 0,
+                      requestedAreaSqm: Number(productConfig.squareMeters || 0),
+                      allowPhysicalSplitting: !!productConfig.smartCutAllowPhysicalSplitting,
+                      sawKerfEnabled: !!productConfig.sawKerfEnabled,
+                      sawKerfCm: productConfig.sawKerfEnabled ? (productConfig.sawKerfCm || SAW_KERF_CM) : null,
+                      calibrationCutEnabled: productConfig.calibrationCutEnabled ?? true,
+                      optimizationEnabled: true,
+                      seed: 0
+                    });
+                    if (!internalPlan.derivedQuantity) return null;
+
+                    const productionLengthM = internalPlan.productionPieces.reduce(
+                      (sum, piece) => sum + Number(piece.lengthM || 0) * Number(piece.quantity || 0),
+                      0
+                    );
+                    const cuttingMeters = internalPlan.cuttingBreakdown
+                      .filter((cut) => cut.type === 'longitudinal')
+                      .reduce((sum, cut) => sum + Number(cut.meters || 0), 0);
+                    const calibrationMeters = internalPlan.calibrationCutEnabled && internalPlan.requestedWidthCm < internalPlan.sourceWidthCm
+                      ? Number(internalPlan.sourceLengthConsumedM || 0)
+                      : 0;
+                    const baseCuttingMeters = Math.max(0, cuttingMeters - calibrationMeters);
+                    const shortEdgeMeters = internalPlan.requestedQuantity * (internalPlan.requestedWidthCm / 100);
+
+                    return (
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm dark:border-blue-800 dark:bg-blue-950/30">
+                        <p className="font-semibold text-blue-900 dark:text-blue-100">مبنای محاسبات داخلی</p>
+                        <p className="mt-1 text-xs leading-5 text-blue-700 dark:text-blue-200">
+                          این اطلاعات فقط مبنای محاسبه فروش است؛ درخواست اصلی و خروجی واحدها همان تعداد ۰، طول {formatDisplayNumber(internalPlan.totalRequestedLengthM)} متر و عرض {formatDisplayNumber(internalPlan.requestedWidthCm)} سانتی‌متر باقی می‌ماند.
+                        </p>
+                        <div className="mt-3 grid gap-2 text-xs leading-5 text-slate-700 dark:text-slate-200 sm:grid-cols-2">
+                          <div>
+                            <span className="font-medium">چیدمان محاسباتی:</span>{' '}
+                            {internalPlan.productionPieces.map((piece) =>
+                              `${formatDisplayNumber(piece.quantity)} × ${formatDisplayNumber(piece.lengthM)}m × ${formatDisplayNumber(piece.widthCm)}cm`
+                            ).join('، ')}
+                          </div>
+                          <div><span className="font-medium">سنگ:</span> درخواست {formatSquareMeters(internalPlan.requestedAreaSqm)}، مصرف {formatSquareMeters(internalPlan.consumedAreaSqm)}</div>
+                          <div><span className="font-medium">لبه طولی ابزار:</span> هر لبه {formatDisplayNumber(productionLengthM)} متر؛ دو لبه {formatDisplayNumber(productionLengthM * 2)} متر</div>
+                          <div><span className="font-medium">لبه عرضی ابزار:</span> هر سمت {formatDisplayNumber(shortEdgeMeters)} متر؛ دو سمت {formatDisplayNumber(shortEdgeMeters * 2)} متر</div>
+                          <div>
+                            <span className="font-medium">برش طولی:</span>{' '}
+                            {formatDisplayNumber(baseCuttingMeters)} متر
+                            {calibrationMeters > 0 ? ` + ${formatDisplayNumber(calibrationMeters)} متر کالیبر = ${formatDisplayNumber(cuttingMeters)} متر` : ''}
+                          </div>
+                          <div>
+                            <span className="font-medium">باقی‌مانده قابل استفاده:</span>{' '}
+                            {internalPlan.remainingStones.length > 0
+                              ? internalPlan.remainingStones.map((stone) =>
+                                  `${formatDisplayNumber(stone.quantity || 1)} × ${formatDisplayNumber(stone.length)}m × ${formatDisplayNumber(stone.width)}cm`
+                                ).join('، ')
+                              : 'ندارد'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {/* Mandatory Pricing Section - Only for longitudinal stones */}
                   {currentProductType === 'longitudinal' && (
                   <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
@@ -3810,22 +3877,6 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                           if (pricing.originalTotalPrice > 0) {
                             return (
                               <div className="mt-3 p-2 bg-white dark:bg-gray-800 rounded border border-yellow-300 dark:border-yellow-600">
-                                {smartCutPlan.mode !== 'none' && (
-                                  <div className="mb-2 space-y-1 border-b border-yellow-200 pb-2 text-xs text-gray-600 dark:border-yellow-700 dark:text-gray-300">
-                                    <div>متراژ درخواستی: {formatSquareMeters(smartCutPlan.requestedAreaSqm)}</div>
-                                    <div>متراژ مصرفی سنگ اصلی: {formatSquareMeters(pricing.pricingSquareMeters)}</div>
-                                    {smartCutPlan.derivedQuantity && (
-                                      <div className="font-medium text-blue-700 dark:text-blue-200">
-                                        خروجی بهینه: {formatDisplayNumber(smartCutPlan.requestedQuantity)} قطعه × طول {formatDisplayNumber(smartCutPlan.requestedLengthM)} متر
-                                      </div>
-                                    )}
-                                    <div>
-                                      ظرفیت هر ردیف سنگ: {formatDisplayNumber(smartCutPlan.stripsPerSource)} قطعه
-                                      {' • '}
-                                      تعداد ردیف مصرفی: {formatDisplayNumber(smartCutPlan.sourceBandsNeeded)}
-                                    </div>
-                                  </div>
-                                )}
                                 <div className="text-xs text-gray-600 dark:text-gray-400">
                                   قیمت اصلی: {formatPrice(pricing.originalTotalPrice, 'تومان')}
                                 </div>

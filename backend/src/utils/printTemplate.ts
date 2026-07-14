@@ -623,7 +623,33 @@ const lengthValueToMeters = (value: unknown, unit: unknown): number => {
   return unit === 'cm' ? numeric / 100 : numeric;
 };
 
+const restoreLongitudinalCustomerRequest = (product: any): any => {
+  const plan = product?.smartCutPlan;
+  if (
+    product?.productType !== 'longitudinal' ||
+    !product?.smartCutDerivedQuantity ||
+    !plan?.derivedQuantity ||
+    toNumber(plan?.totalRequestedLengthM) <= 0
+  ) {
+    return product;
+  }
+
+  const requestedWidthCm = toNumber(plan?.requestedWidthCm);
+  return {
+    ...product,
+    quantity: 0,
+    length: product?.lengthUnit === 'cm'
+      ? toNumber(plan.totalRequestedLengthM) * 100
+      : toNumber(plan.totalRequestedLengthM),
+    width: requestedWidthCm > 0
+      ? (product?.widthUnit === 'm' ? requestedWidthCm / 100 : requestedWidthCm)
+      : product?.width,
+    squareMeters: toNumber(plan?.requestedAreaSqm) || toNumber(product?.squareMeters)
+  };
+};
+
 const buildPhysicalProductionNote = (product: any): string => {
+  if (product?.smartCutDerivedQuantity) return '';
   const pieces = Array.isArray(product?.smartCutPlan?.productionPieces)
     ? product.smartCutPlan.productionPieces
     : [];
@@ -640,6 +666,7 @@ const buildPhysicalProductionNote = (product: any): string => {
 };
 
 const buildSourceMaterialRows = (product: any): NormalizedSourceMaterial[] => {
+  if (product?.smartCutDerivedQuantity) return [];
   const smartCutPlan = product?.smartCutPlan || {};
   const sourceWidthCm = toNumber(smartCutPlan?.sourceWidthCm || product?.originalWidth);
   const productWidthCm = toNumber(product?.width);
@@ -703,13 +730,15 @@ const normalizeProducts = (
   const relationItems = Array.isArray(contract.items) ? contract.items : [];
 
   if (contractDataProducts.length > 0) {
-    return contractDataProducts.map((product: any, index: number) => {
+    return contractDataProducts.map((savedProduct: any, index: number) => {
+      const product = restoreLongitudinalCustomerRequest(savedProduct);
       const relationItem = relationItems.find((item: any) =>
         item?.productId === product?.productId &&
         (item?.stairPartType || null) === (product?.stairPartType || null)
       ) || relationItems[index];
 
-      const cutsFromBreakdown: NormalizedCut[] = Array.isArray(product?.cuttingBreakdown)
+      const hideInternalOptimizerBreakdown = Boolean(product?.smartCutDerivedQuantity);
+      const cutsFromBreakdown: NormalizedCut[] = !hideInternalOptimizerBreakdown && Array.isArray(product?.cuttingBreakdown)
         ? product.cuttingBreakdown.map((cut: any) => ({
           type: cut?.type === 'cross' ? 'برش عرضی' : 'برش طولی',
           code: firstText(cut?.code, cut?.sourceCode),
@@ -721,7 +750,7 @@ const normalizeProducts = (
 
       const cutsFromDetails: NormalizedCut[] = cutsFromBreakdown.length > 0
         ? []
-        : (Array.isArray(product?.cutDetails)
+        : (!hideInternalOptimizerBreakdown && Array.isArray(product?.cutDetails)
           ? product.cutDetails.map((cut: any) => ({
               type: cutTypeLabel(cut),
               code: firstText(cut?.code, cut?.sourceCode),
@@ -849,7 +878,7 @@ const normalizeProducts = (
         preparedQuantity: toNumber(product?.preparedQuantity || product?.quantity || relationItem?.quantity),
         stairPart: stairPartLabel(product?.stairPartType || relationItem?.stairPartType),
         dimensions,
-        quantity: toNumber(product?.quantity || relationItem?.quantity),
+        quantity: toNumber(product?.quantity ?? relationItem?.quantity),
         squareMeters: toNumber(product?.squareMeters),
         unitPrice: isFromRemainingStone ? 0 : toNumber(product?.pricePerSquareMeter || product?.unitPrice || relationItem?.unitPrice),
         originalTotalPrice: toNumber(product?.originalTotalPrice),

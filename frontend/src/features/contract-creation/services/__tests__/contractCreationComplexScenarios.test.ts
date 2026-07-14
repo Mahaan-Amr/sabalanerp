@@ -27,6 +27,12 @@ import {
   restoreRemainingStoneAfterChildRemoval
 } from '../../utils/productConfigurationController';
 import { generateSlabContractProductName } from '../../utils/productUtils';
+import { generateContractHTML } from '../../utils/contractHTMLGenerator';
+import {
+  getContractProductOperationGeometry,
+  resolveLongitudinalCustomerFields,
+  restoreLongitudinalCustomerRequest
+} from '../../utils/longitudinalOptimizerGeometry';
 import type {
   ContractProduct,
   ContractServiceRow,
@@ -868,9 +874,9 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
     seed: 15
   });
   const optimizedProduct = contractProduct({
-    length: plan.requestedLengthM,
+    length: plan.totalRequestedLengthM,
     width: plan.requestedWidthCm,
-    quantity: plan.requestedQuantity,
+    quantity: 0,
     squareMeters: plan.requestedAreaSqm,
     smartCutPlan: plan,
     smartCutDerivedQuantity: true,
@@ -907,6 +913,74 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   approx(recalculated.product.finishingQuantity || 0, 3.5);
   approx(recalculated.product.finishingCost || 0, 700_000);
   approx(getDeliveryTargetAmount(recalculated.product), 50);
+  const customerHtml = generateContractHTML({
+    products: [recalculated.product],
+    contractNumber: 'TEST-1',
+    contractDate: '1405/04/23',
+    customer: { firstName: 'Test', lastName: 'Customer' }
+  });
+  assert.ok(customerHtml.includes('۵۰m × ۷cm'));
+  assert.ok(!customerHtml.includes('خروجی فیزیکی تولید'));
+  assert.ok(!customerHtml.includes('سنگ مصرفی برای'));
+
+  const legacySavedProduct = contractProduct({
+    length: plan.requestedLengthM,
+    width: plan.requestedWidthCm,
+    quantity: plan.requestedQuantity,
+    squareMeters: plan.requestedAreaSqm,
+    smartCutPlan: plan,
+    smartCutDerivedQuantity: true
+  });
+  const restoredCustomerRequest = restoreLongitudinalCustomerRequest(legacySavedProduct);
+  assert.equal(restoredCustomerRequest.quantity, 0);
+  approx(restoredCustomerRequest.length, 50);
+  approx(restoredCustomerRequest.width, 7);
+  assert.equal(legacySavedProduct.quantity, 5);
+  approx(legacySavedProduct.length, 10);
+  const legacyCustomerHtml = generateContractHTML({
+    products: [legacySavedProduct],
+    contractNumber: 'TEST-LEGACY',
+    contractDate: '1405/04/23',
+    customer: { firstName: 'Test', lastName: 'Customer' }
+  });
+  assert.ok(legacyCustomerHtml.includes('۵۰m × ۷cm'));
+  assert.ok(legacyCustomerHtml.includes('>۰ عدد</td>'));
+  assert.equal(hasLongitudinalGeometryChanged({
+    previousProduct: restoredCustomerRequest,
+    nextOriginalWidthCm: 40,
+    nextWidthValue: 7,
+    nextWidthUnit: 'cm',
+    nextLengthValue: 50,
+    nextLengthUnit: 'm',
+    nextQuantity: 0
+  }), false);
+
+  assert.deepEqual(resolveLongitudinalCustomerFields({
+    enteredLength: 50,
+    enteredLengthUnit: 'm',
+    enteredWidth: 7,
+    enteredQuantity: 0,
+    plan
+  }), { length: 50, width: 7, quantity: 0 });
+
+  const explicitTwoPieces = contractProduct({
+    productType: 'longitudinal',
+    length: 50,
+    lengthUnit: 'm',
+    width: 7,
+    widthUnit: 'cm',
+    quantity: 2,
+    smartCutDerivedQuantity: false,
+    smartCutPlan: null
+  });
+  assert.deepEqual(resolveLongitudinalCustomerFields({
+    enteredLength: 50,
+    enteredLengthUnit: 'm',
+    enteredWidth: 7,
+    enteredQuantity: 2,
+    plan: null
+  }), { length: 50, width: 7, quantity: 2 });
+  approx(getContractProductOperationGeometry(explicitTwoPieces).totalLengthMeters, 100);
 }
 
 {

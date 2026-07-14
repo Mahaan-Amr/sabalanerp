@@ -3,6 +3,7 @@
 
 import { formatDisplayNumber, formatQuantity, formatSquareMeters, formatPrice } from '@/lib/numberFormat';
 import { getServiceRowSourceLabel, getServiceRowUnitLabel } from './contractServiceRows';
+import { restoreLongitudinalCustomerRequest } from './longitudinalOptimizerGeometry';
 
 /**
  * Generate HTML representation of contract data
@@ -12,6 +13,7 @@ import { getServiceRowSourceLabel, getServiceRowUnitLabel } from './contractServ
 export const generateContractHTML = (data: any): string => {
   const discount = data.discount || data.contractData?.discount || null;
   const getSourceMaterialSummary = (product: any): string => {
+    if (product?.smartCutDerivedQuantity) return '';
     const smartCutPlan = product?.smartCutPlan || {};
     const stairMeta = product?.meta?.stair || {};
     const sourceWidthCm = Number(smartCutPlan.sourceWidthCm || product?.originalWidth || 0);
@@ -39,6 +41,7 @@ export const generateContractHTML = (data: any): string => {
     return `عرض ${formatDisplayNumber(sourceWidthCm)}cm × طول ${formatDisplayNumber(sourceLengthM)}m × ${formatDisplayNumber(sourceQuantity)} عدد، جمع ${formatSquareMeters(sourceAreaSqm)}${kerfNote}`;
   };
   const getPhysicalProductionSummary = (product: any): string => {
+    if (product?.smartCutDerivedQuantity) return '';
     const pieces = Array.isArray(product?.smartCutPlan?.productionPieces)
       ? product.smartCutPlan.productionPieces
       : [];
@@ -60,13 +63,14 @@ export const generateContractHTML = (data: any): string => {
         </tr>
       </thead>
       <tbody>
-        ${data.products.map((product: any) => {
+        ${data.products.map((savedProduct: any) => {
+          const product: any = restoreLongitudinalCustomerRequest(savedProduct);
           const sourceMaterialSummary = getSourceMaterialSummary(product);
           const physicalProductionSummary = getPhysicalProductionSummary(product);
           const productName = product.product?.namePersian || product.product?.name || product.namePersian || product.name || 'نامشخص';
           const kerfNote = product.sawKerfEnabled ? ' - خوراک اره لحاظ شده' : '';
           const requestedDimensions = product.length && product.width
-            ? `${formatDisplayNumber(product.length)}${product.lengthUnit || ''} × ${formatDisplayNumber(product.width)}${product.widthUnit || ''}${product.smartCutDerivedDimension || product.smartCutDerivedQuantity ? ' (محاسبه‌شده توسط سیستم)' : ''}`
+            ? `${formatDisplayNumber(product.length)}${product.lengthUnit || ''} × ${formatDisplayNumber(product.width)}${product.widthUnit || ''}`
             : 'نامشخص';
           return `
           <tr>

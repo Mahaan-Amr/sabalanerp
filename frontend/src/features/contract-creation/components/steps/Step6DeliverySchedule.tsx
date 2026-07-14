@@ -95,19 +95,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
     const wantedWidthCm = toWidthCm(product.width, product.widthUnit);
     if (wantedWidthCm <= 0) return null;
 
-    const usedWidthCm = Number(
-      product.smartCutPlan?.sourceWidthCm ||
-      product.originalWidth ||
-      product.product?.widthValue ||
-      0
-    ) || 0;
-
-    const wantedLabel = `عرض درخواستی: ${formatDisplayNumber(wantedWidthCm)}cm`;
-    const usedLabel = usedWidthCm > 0
-      ? `عرض مصرفی: ${formatDisplayNumber(usedWidthCm)}cm`
-      : null;
-
-    return [wantedLabel, usedLabel].filter(Boolean).join(' | ');
+    return `عرض درخواستی: ${formatDisplayNumber(wantedWidthCm)}cm`;
   };
 
   // Total delivery amount already assigned for a product across deliveries, optionally excluding one delivery

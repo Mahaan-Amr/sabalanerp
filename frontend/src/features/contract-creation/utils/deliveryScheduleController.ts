@@ -81,7 +81,8 @@ export const getDeliveryTargetAmount = (product: ContractProduct): number => {
   if (isPreparedProductType(product.productType)) return getPreparedQuantity(product);
   if (unit === 'meter') {
     const lengthM = product.lengthUnit === 'm' ? product.length : (product.length || 0) / 100;
-    return lengthM * (product.quantity || 0);
+    const quantity = Number(product.quantity) || 0;
+    return lengthM * (quantity > 0 ? quantity : 1);
   }
   if (unit === 'squareMeter') return product.squareMeters || 0;
   return product.quantity || 0;

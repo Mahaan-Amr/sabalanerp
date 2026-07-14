@@ -6,6 +6,7 @@ import { FaTimes } from 'react-icons/fa';
 import type { ContractWizardData, SubService, AppliedSubService } from '../../types/contract.types';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { formatDisplayNumber, formatPrice, sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
+import { getContractProductOperationGeometry } from '../../utils/longitudinalOptimizerGeometry';
 
 interface SubServiceModalProps {
   isOpen: boolean;
@@ -81,9 +82,9 @@ export const SubServiceModal: React.FC<SubServiceModalProps> = ({
                   const currentProduct = wizardData.products[productIndex];
                   if (!currentProduct) return null;
                   
-                  const lengthInMeters = currentProduct.lengthUnit === 'm' ? currentProduct.length : (currentProduct.length / 100);
-                  const availableLength = lengthInMeters * Math.max(1, currentProduct.quantity || 1);
-                  const availableSquareMeters = currentProduct.squareMeters;
+                  const operationGeometry = getContractProductOperationGeometry(currentProduct);
+                  const availableLength = operationGeometry.totalLengthMeters;
+                  const availableSquareMeters = operationGeometry.squareMeters;
                   
                   return (
                     <div className="mb-6 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
@@ -178,9 +179,9 @@ export const SubServiceModal: React.FC<SubServiceModalProps> = ({
                       const currentProduct = wizardData.products[productIndex];
                       if (!currentProduct) return null;
                       
-                      const lengthInMeters = currentProduct.lengthUnit === 'm' ? currentProduct.length : (currentProduct.length / 100);
-                      const availableLength = lengthInMeters * Math.max(1, currentProduct.quantity || 1);
-                      const availableSquareMeters = currentProduct.squareMeters;
+                      const operationGeometry = getContractProductOperationGeometry(currentProduct);
+                      const availableLength = operationGeometry.totalLengthMeters;
+                      const availableSquareMeters = operationGeometry.squareMeters;
                       
                       // Get selected calculation base (user can override default)
                       const selectedCalculationBase = subServiceCalculationBases[subService.id] || subService.calculationBase;
@@ -312,9 +313,9 @@ export const SubServiceModal: React.FC<SubServiceModalProps> = ({
                       
                       // Validate all meter values
                       let isValid = true;
-                      const lengthInMeters = currentProduct.lengthUnit === 'm' ? currentProduct.length : (currentProduct.length / 100);
-                      const availableLength = lengthInMeters * Math.max(1, currentProduct.quantity || 1);
-                      const availableSquareMeters = currentProduct.squareMeters;
+                      const operationGeometry = getContractProductOperationGeometry(currentProduct);
+                      const availableLength = operationGeometry.totalLengthMeters;
+                      const availableSquareMeters = operationGeometry.squareMeters;
                       
                       selectedSubServices.forEach(subService => {
                         const selectedCalculationBase = subServiceCalculationBases[subService.id] || subService.calculationBase;

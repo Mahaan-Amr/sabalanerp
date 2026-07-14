@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0010
+---
+
 # Explicit versus derived cutting dimensions
 
 Explicitly entered width and length are physical-piece constraints, so smart cutting preserves each requested piece unless the user deliberately allows physical splitting. A zero or empty dimension authorizes the optimizer to derive that missing value from the remaining quantity and area inputs for an efficient layout, with the calculated dimensions and physical result shown before save.

@@ -303,6 +303,7 @@ const approx = (actual: number, expected: number) => {
   approx(plan.sourceLengthConsumedM, 10);
   approx(plan.requestedAreaSqm, 3.5);
   approx(plan.consumedAreaSqm, 4);
+  approx(plan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 50);
   assert.equal(plan.remainingStones.length, 1);
   approx(plan.remainingStones[0].width, 5);
   approx(plan.remainingStones[0].length, 10);
@@ -313,6 +314,19 @@ const approx = (actual: number, expected: number) => {
   });
   approx(pricing.pricingSquareMeters, 4);
   approx(pricing.originalTotalPrice, 6_400_000);
+
+  const calibratedPlan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 7,
+    enteredWidthUnit: 'cm',
+    enteredLength: 50,
+    enteredLengthUnit: 'm',
+    quantity: 0,
+    requestedAreaSqm: 3.5,
+    calibrationCutEnabled: true,
+    seed: 13
+  });
+  approx(calibratedPlan.cuttingBreakdown.find((cut) => cut.type === 'longitudinal')?.meters || 0, 60);
 
   const replayPlan = calculateSmartLongitudinalCutPlan({
     originalWidthCm: 40,

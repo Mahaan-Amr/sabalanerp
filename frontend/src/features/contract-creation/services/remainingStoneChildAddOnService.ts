@@ -1,4 +1,5 @@
 import type { AppliedSubService, ContractProduct } from '../types/contract.types';
+import { getContractProductOperationGeometry } from '../utils/longitudinalOptimizerGeometry';
 
 export interface RemainingChildAddOnResult {
   ok: boolean;
@@ -99,14 +100,6 @@ export const resolveLegacyRemainingChildAddOns = (
   return recalculateRemainingChildAddOns(adopted);
 };
 
-const toLengthMeters = (product: ContractProduct): number =>
-  (product.lengthUnit === 'cm' ? Number(product.length || 0) / 100 : Number(product.length || 0)) *
-  Math.max(1, Number(product.quantity) || 1);
-
-const toWidthMeters = (product: ContractProduct): number =>
-  (product.widthUnit === 'm' ? Number(product.width || 0) : Number(product.width || 0) / 100) *
-  Math.max(1, Number(product.quantity) || 1);
-
 const hasSelectedEdges = (tool: AppliedSubService): boolean => {
   const edges = tool.edges;
   return !!(edges?.perimeter || edges?.front || edges?.back || edges?.left || edges?.right);
@@ -114,8 +107,9 @@ const hasSelectedEdges = (tool: AppliedSubService): boolean => {
 
 const calculateEdgeMeters = (product: ContractProduct, tool: AppliedSubService): number => {
   const edges = tool.edges || {};
-  const lengthMeters = toLengthMeters(product);
-  const widthMeters = toWidthMeters(product);
+  const geometry = getContractProductOperationGeometry(product);
+  const lengthMeters = geometry.totalLengthMeters;
+  const widthMeters = geometry.totalWidthMeters;
   if (edges.perimeter) return (lengthMeters + widthMeters) * 2;
 
   return (edges.front ? lengthMeters : 0) +
@@ -132,8 +126,9 @@ export const recalculateRemainingChildAddOns = (product: ContractProduct): Remai
       reason: 'افزونه‌های قدیمی این محصول باقی‌مانده هنوز تعیین تکلیف نشده‌اند؛ ابتدا حذف یا پذیرش و محاسبه مجدد را انتخاب کنید.'
     };
   }
-  const lengthCapacity = toLengthMeters(product);
-  const areaCapacity = Number(product.squareMeters || 0);
+  const geometry = getContractProductOperationGeometry(product);
+  const lengthCapacity = geometry.totalLengthMeters;
+  const areaCapacity = geometry.squareMeters;
   const recalculatedTools: AppliedSubService[] = [];
 
   for (const tool of product.appliedSubServices || []) {

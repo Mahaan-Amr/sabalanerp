@@ -132,8 +132,13 @@ import {
 } from '@/features/contract-creation/utils/contractDraftStorage';
 import {
   getDeliverableProductEntries,
+  getDeliveryTargetAmount as getContractDeliveryTargetAmount,
   getSchedulableServiceEntries
 } from '@/features/contract-creation/utils/deliveryScheduleController';
+import {
+  resolveLongitudinalCustomerFields,
+  restoreLongitudinalCustomerRequest
+} from '@/features/contract-creation/utils/longitudinalOptimizerGeometry';
 import {
   createContractServiceRow,
   getServiceRowSourceLabel,
@@ -1452,7 +1457,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const normalizeWizardFinishingProducts = (data: ContractWizardData): ContractWizardData => ({
     ...data,
     serviceRows: data.serviceRows || [],
-    products: ensureContractProductRowIds((data.products || []).map((product) => {
+    products: ensureContractProductRowIds((data.products || []).map((savedProduct) => {
+      const product = restoreLongitudinalCustomerRequest(savedProduct);
       const finishing = normalizeProductFinishing(product);
       if (!finishing) return product;
       return {
@@ -2887,7 +2893,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   // Handle editing an existing product
   const handleEditProduct = (index: number) => {
     console.log('🔵 handleEditProduct called:', { index, totalProducts: wizardData.products.length });
-    const product = wizardData.products[index];
+    const savedProduct = wizardData.products[index];
+    const product = savedProduct ? restoreLongitudinalCustomerRequest(savedProduct) : savedProduct;
     if (!product) {
       console.error('❌ Product not found at index:', index);
       return;
@@ -4967,6 +4974,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       mandatoryPercentage
     });
     const shouldCutByGeometry = smartCutPlan.enabled;
+    const customerFields = resolveLongitudinalCustomerFields({
+      enteredLength: calculated.length,
+      enteredLengthUnit: lengthUnit as 'cm' | 'm',
+      enteredWidth: calculated.width,
+      enteredQuantity: effectiveQuantity,
+      plan: smartCutPlan
+    });
     const longitudinalGeometryChanged = hasLongitudinalGeometryChanged({
       previousProduct: previousLongitudinalProduct
         ? {
@@ -4983,7 +4997,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       nextWidthUnit: widthUnit as 'cm' | 'm',
       nextLengthValue: calculated.length,
       nextLengthUnit: lengthUnit as 'cm' | 'm',
-      nextQuantity: smartCutPlan.requestedQuantity
+      nextQuantity: customerFields.quantity
     });
     const remainingStoneEditState = editingRemainingStoneChild
       ? {
@@ -5013,9 +5027,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       stoneCode: productConfig.stoneCode || selectedProduct.code,
       stoneName: productConfig.stoneName || selectedProduct.namePersian,
       diameterOrWidth: productConfig.diameterOrWidth || selectedProduct.widthValue,
-      length: smartCutPlan.derivedQuantity ? smartCutPlan.requestedLengthM : calculated.length,
-      width: calculated.width,
-      quantity: smartCutPlan.derivedQuantity ? smartCutPlan.requestedQuantity : effectiveQuantity,
+      length: customerFields.length,
+      width: customerFields.width,
+      quantity: customerFields.quantity,
       squareMeters: smartCutPlan.enabled ? smartCutPlan.requestedAreaSqm : calculated.squareMeters,
       pricePerSquareMeter: editingRemainingStoneChild ? 0 : (productConfig.pricePerSquareMeter || 0),
       totalPrice: editingRemainingStoneChild
@@ -5056,12 +5070,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       // For products created from remaining stone, originalLength is set in handleCreateFromRemainingStone
       originalLength: (isEditMode && productConfig.originalLength !== undefined) 
         ? productConfig.originalLength 
-        : (lengthUnit === 'm' ? calculated.length : (calculated.length / 100)),
+        : (lengthUnit === 'm' ? customerFields.length : (customerFields.length / 100)),
       cuttingCost: billableCuttingCost,
       physicalCuttingCost: calculatedCuttingCost,
       cuttingCostPerMeter: finalCuttingCostPerMeter,
       cuttingBreakdown: smartCutPlan.enabled ? smartCutPlan.cuttingBreakdown : undefined,
-      smartCutPlan: smartCutPlan.enabled ? smartCutPlan : null,
+      smartCutPlan: (smartCutPlan.enabled || smartCutPlan.derivedQuantity) ? smartCutPlan : null,
       smartCutAllowPhysicalSplitting: !!productConfig.smartCutAllowPhysicalSplitting,
       smartCutDerivedDimension: smartCutPlan.derivedDimension || null,
       smartCutDerivedQuantity: !!smartCutPlan.derivedQuantity,
@@ -5275,14 +5289,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             return 'count';
           };
           const getDeliveryTargetAmount = (product: ContractProduct): number => {
-            const unit = getDeliveryUnit(product);
-            if (isPreparedProductType(product.productType)) return getPreparedQuantity(product);
-            if (unit === 'meter') {
-              const lengthM = product.lengthUnit === 'm' ? product.length : (product.length || 0) / 100;
-              return lengthM * (product.quantity || 0);
-            }
-            if (unit === 'squareMeter') return product.squareMeters || 0;
-            return product.quantity || 0;
+            return getContractDeliveryTargetAmount(product);
           };
           const getDeliveryUnitLabel = (unit: 'meter' | 'squareMeter' | 'ton' | 'count') => {
             if (unit === 'meter') return 'متر';

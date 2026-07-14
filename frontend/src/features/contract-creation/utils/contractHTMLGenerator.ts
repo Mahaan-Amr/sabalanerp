@@ -66,7 +66,7 @@ export const generateContractHTML = (data: any): string => {
           const productName = product.product?.namePersian || product.product?.name || product.namePersian || product.name || 'نامشخص';
           const kerfNote = product.sawKerfEnabled ? ' - خوراک اره لحاظ شده' : '';
           const requestedDimensions = product.length && product.width
-            ? `${formatDisplayNumber(product.length)}${product.lengthUnit || ''} × ${formatDisplayNumber(product.width)}${product.widthUnit || ''}${product.smartCutDerivedDimension ? ' (محاسبه‌شده توسط سیستم)' : ''}`
+            ? `${formatDisplayNumber(product.length)}${product.lengthUnit || ''} × ${formatDisplayNumber(product.width)}${product.widthUnit || ''}${product.smartCutDerivedDimension || product.smartCutDerivedQuantity ? ' (محاسبه‌شده توسط سیستم)' : ''}`
             : 'نامشخص';
           return `
           <tr>

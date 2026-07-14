@@ -3767,13 +3767,23 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                             originalWidth: originalWidthForCalculation,
                             cuttingCostPerMeter: productConfig.cuttingCostPerMeter || 0
                           });
+                          const preserveDerivedQuantityPreview =
+                            !!productConfig.smartCutDerivedQuantity &&
+                            !touchedFields.has('quantity') &&
+                            !touchedFields.has('length');
                           const smartCutPlan = calculateSmartLongitudinalCutPlan({
                             originalWidthCm: Number(originalWidthForCalculation) || 0,
                             enteredWidth: Number(productConfig.width) || 0,
                             enteredWidthUnit: widthUnit,
-                            enteredLength: Number(productConfig.length) || 0,
+                            enteredLength: preserveDerivedQuantityPreview
+                              ? (lengthUnit === 'cm'
+                                ? Number(productConfig.smartCutPlan?.totalRequestedLengthM || 0) * 100
+                                : Number(productConfig.smartCutPlan?.totalRequestedLengthM || productConfig.length || 0))
+                              : Number(productConfig.length) || 0,
                             enteredLengthUnit: lengthUnit,
-                            quantity: Number(productConfig.quantity) || getEffectiveQuantity(),
+                            quantity: preserveDerivedQuantityPreview
+                              ? 0
+                              : (Number(productConfig.quantity) > 0 ? Number(productConfig.quantity) : 0),
                             requestedAreaSqm: Number(productConfig.squareMeters || calculated.squareMeters || 0),
                             allowPhysicalSplitting: !!productConfig.smartCutAllowPhysicalSplitting,
                             sawKerfEnabled: !!productConfig.sawKerfEnabled,
@@ -3800,6 +3810,11 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                                   <div className="mb-2 space-y-1 border-b border-yellow-200 pb-2 text-xs text-gray-600 dark:border-yellow-700 dark:text-gray-300">
                                     <div>متراژ درخواستی: {formatSquareMeters(smartCutPlan.requestedAreaSqm)}</div>
                                     <div>متراژ مصرفی سنگ اصلی: {formatSquareMeters(pricing.pricingSquareMeters)}</div>
+                                    {smartCutPlan.derivedQuantity && (
+                                      <div className="font-medium text-blue-700 dark:text-blue-200">
+                                        خروجی بهینه: {formatDisplayNumber(smartCutPlan.requestedQuantity)} قطعه × طول {formatDisplayNumber(smartCutPlan.requestedLengthM)} متر
+                                      </div>
+                                    )}
                                     <div>
                                       ظرفیت هر ردیف سنگ: {formatDisplayNumber(smartCutPlan.stripsPerSource)} قطعه
                                       {' • '}

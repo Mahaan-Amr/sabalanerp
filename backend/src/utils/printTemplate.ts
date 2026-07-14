@@ -631,9 +631,11 @@ const buildPhysicalProductionNote = (product: any): string => {
   const breakdown = pieces.map((piece: any) =>
     `${toFaNumber(piece?.quantity, 0)} عدد × عرض ${toFaNumber(piece?.widthCm, 4)}cm × طول ${toFaNumber(piece?.lengthM, 4)}m`
   ).join('، ');
-  const derivedLabel = product?.smartCutDerivedDimension
-    ? `بعد ${product.smartCutDerivedDimension === 'width' ? 'عرض' : 'طول'} توسط سیستم محاسبه شده؛ `
-    : '';
+  const derivedLabel = product?.smartCutDerivedQuantity
+    ? 'تعداد و طول قطعات توسط سیستم بهینه شده؛ '
+    : product?.smartCutDerivedDimension
+      ? `بعد ${product.smartCutDerivedDimension === 'width' ? 'عرض' : 'طول'} توسط سیستم محاسبه شده؛ `
+      : '';
   return `${derivedLabel}خروجی فیزیکی تولید: ${breakdown}`;
 };
 

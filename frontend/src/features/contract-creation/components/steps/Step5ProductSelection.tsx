@@ -622,6 +622,9 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                       <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm dark:border-teal-800 dark:bg-teal-900/20">
                         <p className="font-semibold text-teal-800 dark:text-teal-100">خلاصه برش هوشمند</p>
                         <div className="mt-2 space-y-1 text-xs leading-5 text-slate-700 dark:text-slate-300">
+                          {smartCutPlan.derivedQuantity && (
+                            <p className="font-medium text-blue-700 dark:text-blue-200">تعداد و طول هر قطعه توسط سیستم بهینه شده است.</p>
+                          )}
                           {smartCutPlan.productionPieces.map((piece, pieceIndex) => (
                             <p key={pieceIndex}>
                               {formatDisplayNumber(piece.quantity)} × عرض {formatDisplayNumber(piece.widthCm)} cm × طول {formatDisplayNumber(piece.lengthM)} m
@@ -978,6 +981,9 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                                 {smartCutPlan?.enabled && (
                                   <div className="mt-3 rounded-lg border border-teal-200 bg-teal-50 p-3 text-xs leading-5 dark:border-teal-800 dark:bg-teal-900/20">
                                     <p className="font-semibold text-teal-800 dark:text-teal-100">خلاصه برش هوشمند</p>
+                                    {smartCutPlan.derivedQuantity && (
+                                      <p className="font-medium text-blue-700 dark:text-blue-200">تعداد و طول هر قطعه توسط سیستم بهینه شده است.</p>
+                                    )}
                                     {smartCutPlan.productionPieces.slice(0, 4).map((piece, pieceIndex) => (
                                       <p key={pieceIndex} className="text-slate-700 dark:text-slate-300">
                                         {formatDisplayNumber(piece.quantity)} × عرض {formatDisplayNumber(piece.widthCm)} cm × طول {formatDisplayNumber(piece.lengthM)} m

@@ -285,6 +285,101 @@ const approx = (actual: number, expected: number) => {
 {
   const plan = calculateSmartLongitudinalCutPlan({
     originalWidthCm: 40,
+    enteredWidth: 7,
+    enteredWidthUnit: 'cm',
+    enteredLength: 50,
+    enteredLengthUnit: 'm',
+    quantity: 0,
+    requestedAreaSqm: 3.5,
+    calibrationCutEnabled: false,
+    seed: 13
+  });
+
+  assert.equal(plan.enabled, true);
+  assert.equal(plan.mode, 'optimized');
+  assert.equal(plan.derivedQuantity, true);
+  assert.deepEqual(plan.productionPieces, [{ widthCm: 7, lengthM: 10, quantity: 5 }]);
+  approx(plan.totalRequestedLengthM, 50);
+  approx(plan.sourceLengthConsumedM, 10);
+  approx(plan.requestedAreaSqm, 3.5);
+  approx(plan.consumedAreaSqm, 4);
+  assert.equal(plan.remainingStones.length, 1);
+  approx(plan.remainingStones[0].width, 5);
+  approx(plan.remainingStones[0].length, 10);
+  approx(plan.remainingStones[0].squareMeters, 0.5);
+  const pricing = calculateLongitudinalMaterialPricing({
+    plan,
+    pricePerSquareMeter: 1_600_000
+  });
+  approx(pricing.pricingSquareMeters, 4);
+  approx(pricing.originalTotalPrice, 6_400_000);
+
+  const replayPlan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 7,
+    enteredWidthUnit: 'cm',
+    enteredLength: 10,
+    enteredLengthUnit: 'm',
+    quantity: 5,
+    requestedAreaSqm: 3.5,
+    calibrationCutEnabled: false,
+    seed: 13
+  });
+
+  assert.equal(replayPlan.derivedQuantity, false);
+  assert.deepEqual(replayPlan.productionPieces, plan.productionPieces);
+  approx(replayPlan.totalRequestedLengthM, plan.totalRequestedLengthM);
+  approx(replayPlan.sourceLengthConsumedM, plan.sourceLengthConsumedM);
+  approx(replayPlan.consumedAreaSqm, plan.consumedAreaSqm);
+  approx(replayPlan.remainingStones[0].width, plan.remainingStones[0].width);
+  approx(replayPlan.remainingStones[0].length, plan.remainingStones[0].length);
+}
+
+{
+  const kerfPlan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 7,
+    enteredWidthUnit: 'cm',
+    enteredLength: 50,
+    enteredLengthUnit: 'm',
+    quantity: 0,
+    requestedAreaSqm: 3.5,
+    sawKerfEnabled: true,
+    sawKerfCm: 0.3,
+    calibrationCutEnabled: false,
+    seed: 16
+  });
+
+  assert.equal(kerfPlan.requestedQuantity, 5);
+  approx(kerfPlan.requestedLengthM, 10);
+  approx(kerfPlan.consumedWidthCm, 7.3);
+  approx(kerfPlan.remainingStones[0].width, 3.5);
+  approx(kerfPlan.remainingStones[0].length, 10);
+}
+
+{
+  const explicitSinglePiece = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 7,
+    enteredWidthUnit: 'cm',
+    enteredLength: 50,
+    enteredLengthUnit: 'm',
+    quantity: 1,
+    requestedAreaSqm: 3.5,
+    calibrationCutEnabled: false,
+    seed: 14
+  });
+
+  assert.equal(explicitSinglePiece.derivedQuantity, false);
+  assert.deepEqual(explicitSinglePiece.productionPieces, [{ widthCm: 7, lengthM: 50, quantity: 1 }]);
+  approx(explicitSinglePiece.sourceLengthConsumedM, 50);
+  approx(explicitSinglePiece.remainingStones[0].width, 33);
+  approx(explicitSinglePiece.remainingStones[0].length, 50);
+}
+
+{
+  const plan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
     enteredWidth: 0,
     enteredWidthUnit: 'cm',
     enteredLength: 10,

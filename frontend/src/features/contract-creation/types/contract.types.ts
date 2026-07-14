@@ -236,6 +236,7 @@ export interface SmartLongitudinalCutPlan {
   consumedAreaSqm: number;
   requestedAreaSqm: number;
   derivedDimension?: 'width' | 'length' | null;
+  derivedQuantity?: boolean;
   physicalSplittingAllowed?: boolean;
   sawKerfEnabled?: boolean;
   sawKerfCm?: number | null;
@@ -480,6 +481,7 @@ export interface ContractProduct {
   smartCutPlan?: SmartLongitudinalCutPlan | null;
   smartCutAllowPhysicalSplitting?: boolean;
   smartCutDerivedDimension?: 'width' | 'length' | null;
+  smartCutDerivedQuantity?: boolean;
   legacyRemainingAddOnResolution?: 'adopted' | 'removed';
   // Stair-specific fields (for backward compatibility and display)
   treadWidth?: number;

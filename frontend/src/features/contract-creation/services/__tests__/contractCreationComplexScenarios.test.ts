@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { calculateSmartLongitudinalCutPlan, calculateSlabRemainingStones, hasLongitudinalGeometryChanged } from '../remainingStoneService';
 import { allocateRemainingStonePartitions } from '../remainingStonePartitionService';
+import { recalculateRemainingChildAddOns } from '../remainingStoneChildAddOnService';
 import { calculateSlabCut, validateCutDimensions } from '../stoneCuttingService';
 import { calculateLayerMetrics, calculateStairStoneUsage, computeTotalsV2 } from '../stairCalculationService';
 import { validatePayment, validateWizardStep } from '../validationService';
@@ -852,6 +853,60 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   assert.equal(getDeliveryUnit(prepared), 'ton');
   approx(getDeliveryTargetAmount(prepared), 2.5);
   approx(getServiceDeliveryTargetAmount(tool), 24);
+}
+
+{
+  const plan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 7,
+    enteredWidthUnit: 'cm',
+    enteredLength: 50,
+    enteredLengthUnit: 'm',
+    quantity: 0,
+    requestedAreaSqm: 3.5,
+    calibrationCutEnabled: false,
+    seed: 15
+  });
+  const optimizedProduct = contractProduct({
+    length: plan.requestedLengthM,
+    width: plan.requestedWidthCm,
+    quantity: plan.requestedQuantity,
+    squareMeters: plan.requestedAreaSqm,
+    smartCutPlan: plan,
+    smartCutDerivedQuantity: true,
+    appliedSubServices: [{
+      id: 'edge-left',
+      subServiceId: 'tool-edge',
+      subService: {
+        id: 'tool-edge',
+        code: 'EDGE',
+        namePersian: 'لبه کوتاه',
+        pricePerMeter: 100_000,
+        calculationBase: 'length',
+        isActive: true
+      },
+      meter: 0.07,
+      cost: 7_000,
+      calculationBase: 'length',
+      edges: { left: true }
+    }],
+    finishingId: 'finish-1',
+    finishingName: 'پرداخت سطح',
+    finishingUnitPrice: 200_000,
+    finishingPricePerSquareMeter: 200_000,
+    finishingCalculationBase: 'squareMeters',
+    finishingQuantity: 3.5,
+    finishingCost: 700_000,
+    finishingSquareMeters: 3.5
+  });
+  const recalculated = recalculateRemainingChildAddOns(optimizedProduct);
+
+  assert.equal(recalculated.ok, true);
+  approx(recalculated.product.appliedSubServices?.[0]?.meter || 0, 0.35);
+  approx(recalculated.product.totalSubServiceCost || 0, 35_000);
+  approx(recalculated.product.finishingQuantity || 0, 3.5);
+  approx(recalculated.product.finishingCost || 0, 700_000);
+  approx(getDeliveryTargetAmount(recalculated.product), 50);
 }
 
 {

@@ -120,43 +120,49 @@ export const calculateSmartLongitudinalCutPlan = ({
   const sourceWidthCm = Math.max(0, Number(originalWidthCm) || 0);
   const explicitWidthCm = toCentimeters(Number(enteredWidth) || 0, enteredWidthUnit);
   const explicitLengthM = toMeters(Number(enteredLength) || 0, enteredLengthUnit);
-  const requestedQuantity = Math.max(0, Number(quantity) || 0);
+  const enteredQuantity = Math.max(0, Number(quantity) || 0);
   const safeRequestedAreaSqm = Math.max(0, Number(requestedAreaSqm) || 0);
+  const quantityOptimizationRequested = enteredQuantity === 0 && explicitWidthCm > 0 && explicitLengthM > 0;
   const derivedDimension: SmartLongitudinalCutPlan['derivedDimension'] =
-    explicitWidthCm <= 0 && explicitLengthM > 0 && safeRequestedAreaSqm > 0 && requestedQuantity > 0
+    explicitWidthCm <= 0 && explicitLengthM > 0 && safeRequestedAreaSqm > 0 && enteredQuantity > 0
       ? 'width'
-      : explicitLengthM <= 0 && explicitWidthCm > 0 && safeRequestedAreaSqm > 0 && requestedQuantity > 0
+      : explicitLengthM <= 0 && explicitWidthCm > 0 && safeRequestedAreaSqm > 0 && enteredQuantity > 0
         ? 'length'
         : null;
   const requestedWidthCm = derivedDimension === 'width'
-    ? (safeRequestedAreaSqm * 100) / (explicitLengthM * requestedQuantity)
+    ? (safeRequestedAreaSqm * 100) / (explicitLengthM * enteredQuantity)
     : explicitWidthCm;
-  const requestedLengthM = derivedDimension === 'length'
-    ? safeRequestedAreaSqm / ((explicitWidthCm / 100) * requestedQuantity)
+  const baseRequestedLengthM = derivedDimension === 'length'
+    ? safeRequestedAreaSqm / ((explicitWidthCm / 100) * enteredQuantity)
     : explicitLengthM;
   const kerfCm = resolveSawKerfCm(sawKerfEnabled, sawKerfCm);
   const shouldApplyKerfToWidth = sawKerfEnabled && requestedWidthCm > 0 && requestedWidthCm < sourceWidthCm;
   const consumedWidthCm = shouldApplyKerfToWidth ? requestedWidthCm + kerfCm : requestedWidthCm;
-  const totalRequestedLengthM = requestedLengthM * requestedQuantity;
   const warnings: string[] = [];
   const baseSeed = seed ?? Date.now();
 
-  if (sourceWidthCm <= 0 || requestedWidthCm <= 0 || requestedLengthM <= 0 || requestedQuantity <= 0) {
+  if (
+    sourceWidthCm <= 0 ||
+    requestedWidthCm <= 0 ||
+    baseRequestedLengthM <= 0 ||
+    (enteredQuantity <= 0 && !quantityOptimizationRequested)
+  ) {
     return {
       enabled: false,
       mode: 'none',
       sourceWidthCm,
       requestedWidthCm,
       consumedWidthCm,
-      requestedLengthM,
-      requestedQuantity,
-      totalRequestedLengthM,
+      requestedLengthM: baseRequestedLengthM,
+      requestedQuantity: enteredQuantity,
+      totalRequestedLengthM: baseRequestedLengthM * enteredQuantity,
       sourceBandsNeeded: 0,
       stripsPerSource: 0,
       sourceLengthConsumedM: 0,
       consumedAreaSqm: 0,
       requestedAreaSqm: 0,
       derivedDimension,
+      derivedQuantity: false,
       physicalSplittingAllowed: false,
       sawKerfEnabled,
       sawKerfCm: sawKerfEnabled ? kerfCm : null,
@@ -179,15 +185,16 @@ export const calculateSmartLongitudinalCutPlan = ({
       sourceWidthCm,
       requestedWidthCm,
       consumedWidthCm,
-      requestedLengthM,
-      requestedQuantity,
-      totalRequestedLengthM,
+      requestedLengthM: baseRequestedLengthM,
+      requestedQuantity: enteredQuantity,
+      totalRequestedLengthM: baseRequestedLengthM * enteredQuantity,
       sourceBandsNeeded: 0,
       stripsPerSource: 0,
       sourceLengthConsumedM: 0,
       consumedAreaSqm: 0,
       requestedAreaSqm: 0,
       derivedDimension,
+      derivedQuantity: false,
       physicalSplittingAllowed: false,
       sawKerfEnabled,
       sawKerfCm: sawKerfEnabled ? kerfCm : null,
@@ -201,7 +208,14 @@ export const calculateSmartLongitudinalCutPlan = ({
   }
 
   const possibleStrips = Math.max(1, Math.floor(sourceWidthCm / consumedWidthCm));
-  const physicalSplittingAllowed = allowPhysicalSplitting || derivedDimension !== null;
+  const requestedQuantity = quantityOptimizationRequested ? possibleStrips : enteredQuantity;
+  const requestedLengthM = quantityOptimizationRequested
+    ? baseRequestedLengthM / requestedQuantity
+    : baseRequestedLengthM;
+  const totalRequestedLengthM = quantityOptimizationRequested
+    ? baseRequestedLengthM
+    : requestedLengthM * requestedQuantity;
+  const physicalSplittingAllowed = allowPhysicalSplitting || derivedDimension !== null || quantityOptimizationRequested;
   const shouldSplitSingleLogicalLength = optimizationEnabled && physicalSplittingAllowed && requestedQuantity === 1 && possibleStrips > 1;
   const stripsPerSource = optimizationEnabled
     ? (shouldSplitSingleLogicalLength ? possibleStrips : Math.min(possibleStrips, requestedQuantity))
@@ -292,6 +306,7 @@ export const calculateSmartLongitudinalCutPlan = ({
     consumedAreaSqm,
     requestedAreaSqm: calculatedRequestedAreaSqm,
     derivedDimension,
+    derivedQuantity: quantityOptimizationRequested,
     physicalSplittingAllowed,
     sawKerfEnabled,
     sawKerfCm: sawKerfEnabled ? kerfCm : null,

@@ -119,7 +119,10 @@ import {
   formatRemainingStoneReplayConflicts,
   replayRemainingStoneAllocations
 } from '@/features/contract-creation/services/remainingStoneAllocationReplayService';
-import { resolveLegacyRemainingChildAddOns } from '@/features/contract-creation/services/remainingStoneChildAddOnService';
+import {
+  recalculateRemainingChildAddOns,
+  resolveLegacyRemainingChildAddOns
+} from '@/features/contract-creation/services/remainingStoneChildAddOnService';
 import {
   CONTRACT_DRAFT_STORAGE_KEY,
   clampContractDraftStep,
@@ -3212,7 +3215,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setMandatoryPercentage(product.mandatoryPercentage || 20);
     
     // Set quantity interaction tracking - if quantity > 1, it has been interacted with
-    setHasQuantityBeenInteracted((product.quantity || 0) > 1);
+    setHasQuantityBeenInteracted((product.quantity || 0) > 0);
     
     // Set product config with all fields including remaining stone tracking
     // For slab products, ensure slabStandardDimensions is properly loaded
@@ -4779,8 +4782,19 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     const previousLongitudinalProduct =
       isEditMode && editingProductIndex !== null ? wizardData.products[editingProductIndex] : null;
     const editingRemainingStoneChild = isRemainingStoneChild(previousLongitudinalProduct);
+    const preserveDerivedQuantity =
+      !!productConfig.smartCutDerivedQuantity &&
+      !touchedFields.has('quantity') &&
+      !touchedFields.has('length');
     const hasDimensions = (productConfig.length && productConfig.width) || productConfig.squareMeters;
-    const hasRequiredFields = productConfig.quantity && (editingRemainingStoneChild || productConfig.pricePerSquareMeter);
+    const enteredLongitudinalQuantity = Math.max(0, Number(productConfig.quantity) || 0);
+    const quantityOptimizerRequested =
+      (enteredLongitudinalQuantity === 0 || preserveDerivedQuantity) &&
+      Number(productConfig.length || 0) > 0 &&
+      Number(productConfig.width || 0) > 0;
+    const hasRequiredFields =
+      (enteredLongitudinalQuantity > 0 || quantityOptimizerRequested) &&
+      (editingRemainingStoneChild || productConfig.pricePerSquareMeter);
     
     console.log('🔍 Main Product Validation Results:', {
       hasDimensions,
@@ -4802,7 +4816,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       console.log('❌ Missing required fields - quantity:', productConfig.quantity, 'pricePerSquareMeter:', productConfig.pricePerSquareMeter);
       
       // Provide more specific error messages
-      if (!productConfig.quantity) {
+      if (!productConfig.quantity && !quantityOptimizerRequested) {
         setErrors({ products: 'لطفاً تعداد را وارد کنید' });
       } else if (!productConfig.pricePerSquareMeter && !editingRemainingStoneChild) {
         setErrors({ products: 'لطفاً فی هر متر مربع را وارد کنید' });
@@ -4844,11 +4858,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }
     
     // Calculate metrics - use effective quantity (default to 1 if not interacted)
-    const effectiveQuantity = getEffectiveQuantity();
+    const effectiveQuantity = enteredLongitudinalQuantity > 0 ? enteredLongitudinalQuantity : 1;
     const calculated = calculateStoneMetrics({
       length: productConfig.length,
       width: productConfig.width,
-      quantity: effectiveQuantity,
+      quantity: quantityOptimizerRequested ? 0 : effectiveQuantity,
       squareMeters: productConfig.squareMeters,
       pricePerSquareMeter: productConfig.pricePerSquareMeter,
       lengthUnit: lengthUnit,
@@ -4910,13 +4924,18 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     const calibrationCutEnabled = productConfig.calibrationCutEnabled ?? true;
     const preserveDerivedWidth = productConfig.smartCutDerivedDimension === 'width' && !touchedFields.has('width');
     const preserveDerivedLength = productConfig.smartCutDerivedDimension === 'length' && !touchedFields.has('length');
+    const optimizerTotalLength = preserveDerivedQuantity
+      ? Number(productConfig.smartCutPlan?.totalRequestedLengthM || 0)
+      : 0;
     const smartCutPlan = calculateSmartLongitudinalCutPlan({
       originalWidthCm: originalWidth,
       enteredWidth: preserveDerivedWidth ? 0 : Number(productConfig.width || 0),
       enteredWidthUnit: widthUnit as 'cm' | 'm',
-      enteredLength: preserveDerivedLength ? 0 : Number(productConfig.length || 0),
+      enteredLength: preserveDerivedLength
+        ? 0
+        : (optimizerTotalLength > 0 ? optimizerTotalLength : Number(productConfig.length || 0)),
       enteredLengthUnit: lengthUnit as 'cm' | 'm',
-      quantity: effectiveQuantity,
+      quantity: quantityOptimizerRequested ? 0 : effectiveQuantity,
       requestedAreaSqm: Number(productConfig.squareMeters || calculated.squareMeters || 0),
       allowPhysicalSplitting: !!productConfig.smartCutAllowPhysicalSplitting,
       longitudinalRatePerMeter: finalCuttingCostPerMeter,
@@ -4952,7 +4971,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       nextWidthUnit: widthUnit as 'cm' | 'm',
       nextLengthValue: calculated.length,
       nextLengthUnit: lengthUnit as 'cm' | 'm',
-      nextQuantity: effectiveQuantity
+      nextQuantity: smartCutPlan.requestedQuantity
     });
     const remainingStoneEditState = editingRemainingStoneChild
       ? {
@@ -4982,9 +5001,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       stoneCode: productConfig.stoneCode || selectedProduct.code,
       stoneName: productConfig.stoneName || selectedProduct.namePersian,
       diameterOrWidth: productConfig.diameterOrWidth || selectedProduct.widthValue,
-      length: calculated.length,
+      length: smartCutPlan.derivedQuantity ? smartCutPlan.requestedLengthM : calculated.length,
       width: calculated.width,
-      quantity: effectiveQuantity,
+      quantity: smartCutPlan.derivedQuantity ? smartCutPlan.requestedQuantity : effectiveQuantity,
       squareMeters: smartCutPlan.enabled ? smartCutPlan.requestedAreaSqm : calculated.squareMeters,
       pricePerSquareMeter: editingRemainingStoneChild ? 0 : (productConfig.pricePerSquareMeter || 0),
       totalPrice: editingRemainingStoneChild
@@ -5033,6 +5052,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       smartCutPlan: smartCutPlan.enabled ? smartCutPlan : null,
       smartCutAllowPhysicalSplitting: !!productConfig.smartCutAllowPhysicalSplitting,
       smartCutDerivedDimension: smartCutPlan.derivedDimension || null,
+      smartCutDerivedQuantity: !!smartCutPlan.derivedQuantity,
       cutDescription:
         productConfig.cutDescription ||
         (shouldCutByGeometry
@@ -5086,9 +5106,23 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       } as any
     };
     
-    // Add SubService costs to totalPrice if they exist
-    const existingSubServiceCost = (isEditMode && productConfig.totalSubServiceCost) ? productConfig.totalSubServiceCost : 0;
-    finalProduct.totalPrice = (editingRemainingStoneChild ? 0 : finalProduct.totalPrice) + billableCuttingCost + existingSubServiceCost + finishingCost;
+    if (smartCutPlan.derivedQuantity) {
+      const recalculatedAddOns = recalculateRemainingChildAddOns(finalProduct);
+      if (!recalculatedAddOns.ok) {
+        setErrors({ products: recalculatedAddOns.reason || 'افزونه‌های محصول با خروجی بهینه‌سازی‌شده سازگار نیستند.' });
+        return;
+      }
+      Object.assign(finalProduct, recalculatedAddOns.product);
+    }
+
+    // Add operation costs after optimizer-owned geometry has recalculated its add-ons.
+    const existingSubServiceCost = Number(finalProduct.totalSubServiceCost || 0);
+    const resolvedFinishingCost = Number(finalProduct.finishingCost || 0);
+    finalProduct.totalPrice =
+      (editingRemainingStoneChild ? 0 : longitudinalMaterialPricing.totalPrice) +
+      billableCuttingCost +
+      existingSubServiceCost +
+      resolvedFinishingCost;
     
     // Add to contract or update existing product
     if (isEditMode && editingProductIndex !== null) {
@@ -11323,13 +11357,23 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       const requestedLengthM = lengthUnit === 'cm'
                         ? Number(productConfig.length || 0) / 100
                         : Number(productConfig.length || 0);
+                      const preserveDerivedQuantityPreview =
+                        !!productConfig.smartCutDerivedQuantity &&
+                        !touchedFields.has('quantity') &&
+                        !touchedFields.has('length');
                       const plan = calculateSmartLongitudinalCutPlan({
                         originalWidthCm: sourceWidthCm,
                         enteredWidth: productConfig.smartCutDerivedDimension === 'width' && !touchedFields.has('width') ? 0 : requestedWidthCm,
                         enteredWidthUnit: 'cm',
-                        enteredLength: productConfig.smartCutDerivedDimension === 'length' && !touchedFields.has('length') ? 0 : requestedLengthM,
+                        enteredLength: productConfig.smartCutDerivedDimension === 'length' && !touchedFields.has('length')
+                          ? 0
+                          : (preserveDerivedQuantityPreview
+                            ? Number(productConfig.smartCutPlan?.totalRequestedLengthM || requestedLengthM)
+                            : requestedLengthM),
                         enteredLengthUnit: 'm',
-                        quantity: getEffectiveQuantity(),
+                        quantity: preserveDerivedQuantityPreview
+                          ? 0
+                          : (Number(productConfig.quantity) > 0 ? Number(productConfig.quantity) : 0),
                         requestedAreaSqm: Number(productConfig.squareMeters || 0),
                         longitudinalRatePerMeter: getCuttingTypePricePerMeter('LONG') || 0,
                         crossRatePerMeter: getCuttingTypePricePerMeter('CROSS') || 0,
@@ -11362,6 +11406,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               </span>
                             )}
                           </div>
+                          {plan.derivedQuantity ? (
+                            <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-200">
+                              تعداد صفر به معنی بهینه‌سازی خودکار است: {formatDisplayNumber(plan.requestedQuantity)} قطعه با طول {formatDisplayNumber(plan.requestedLengthM)} متر تولید می‌شود.
+                            </div>
+                          ) : (
                           <label className="mb-3 flex items-start gap-2 rounded-md border border-teal-200 bg-white/60 px-3 py-2 text-xs text-teal-900 dark:border-teal-700 dark:bg-slate-900/30 dark:text-teal-100">
                             <input
                               type="checkbox"
@@ -11379,6 +11428,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               </span>
                             </span>
                           </label>
+                          )}
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-teal-900 dark:text-teal-100">
                             {plan.derivedDimension && (
                               <p className="md:col-span-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-200">

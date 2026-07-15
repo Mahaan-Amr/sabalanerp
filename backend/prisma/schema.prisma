@@ -9,79 +9,87 @@ datasource db {
 }
 
 model User {
-  id                        String                @id @default(cuid())
-  email                     String                @unique
-  username                  String                @unique
-  password                  String
-  firstName                 String
-  lastName                  String
-  role                      UserRole              @default(USER)
-  isActive                  Boolean               @default(true)
-  createdAt                 DateTime              @default(now())
-  updatedAt                 DateTime              @updatedAt
-  departmentId              String?
-  personnelId               String?               @unique
-  attendanceRecords         AttendanceRecord[]
-  comments                  Comment[]
-  createdTemplates          ContractTemplate[]
-  approvedContracts         Contract[]            @relation("ContractApprovedBy")
-  createdContracts          Contract[]            @relation("ContractCreatedBy")
-  signedContracts           Contract[]            @relation("ContractSignedBy")
-  approvedExceptions        ExceptionRequest[]    @relation("ExceptionApprover")
-  cancelledExceptions       ExceptionRequest[]    @relation("ExceptionCanceller")
-  createdExceptionRequests  ExceptionRequest[]    @relation("ExceptionCreatedBy")
-  exceptionRequests         ExceptionRequest[]    @relation("ExceptionEmployee")
-  rejectedExceptions        ExceptionRequest[]    @relation("ExceptionRejecter")
-  approvedMissions          MissionAssignment[]   @relation("MissionApprover")
-  assignedMissions          MissionAssignment[]   @relation("MissionAssigner")
-  missionAssignments        MissionAssignment[]   @relation("MissionEmployee")
-  orders                    Order[]
-  posts                     Post[]
-  profile                   Profile?
-  approvedSalesContracts    SalesContract[]       @relation("SalesContractApprovedBy")
-  createdSalesContracts     SalesContract[]       @relation("SalesContractCreatedBy")
-  signedSalesContracts      SalesContract[]       @relation("SalesContractSignedBy")
-  securityPersonnel         SecurityPersonnel?
-  department                Department?           @relation(fields: [departmentId], references: [id])
-  personnel                 Personnel?            @relation(fields: [personnelId], references: [id], onDelete: SetNull)
-  grantedPermissions        WorkspacePermission[] @relation("PermissionGranter")
-  workspacePermissions      WorkspacePermission[]
-  grantedFeaturePermissions FeaturePermission[]   @relation("FeaturePermissionGranter")
-  featurePermissions        FeaturePermission[]
-  ownedCrmCustomers         CrmCustomer[]         @relation("CrmCustomerOwner")
-  createdCrmCustomers       CrmCustomer[]         @relation("CrmCustomerCreatedBy")
-  updatedCrmCustomers       CrmCustomer[]         @relation("CrmCustomerUpdatedBy")
-  responsibleCrmPotentialProjects CrmPotentialProject[] @relation("CrmPotentialProjectResponsibleSeller")
-  createdCrmPotentialProjects CrmPotentialProject[] @relation("CrmPotentialProjectCreatedBy")
-  crmFollowUpReports        CrmFollowUpReport[]   @relation("CrmFollowUpSeller")
-  assignedCrmNextActions    CrmNextAction[]       @relation("CrmNextActionAssignee")
-  completedCrmNextActions   CrmNextAction[]       @relation("CrmNextActionCompletedBy")
-  crmTimelineEvents         CrmTimelineEvent[]     @relation("CrmTimelineActor")
-  logisticsDrivers          LogisticsDriver[]     @relation("LogisticsDriverCreatedBy")
-  securityVehiclePairs      SecurityVehiclePair[] @relation("SecurityVehiclePairCreatedBy")
+  id                                         String                               @id @default(cuid())
+  email                                      String                               @unique
+  username                                   String                               @unique
+  password                                   String
+  firstName                                  String
+  lastName                                   String
+  role                                       UserRole                             @default(USER)
+  isActive                                   Boolean                              @default(true)
+  createdAt                                  DateTime                             @default(now())
+  updatedAt                                  DateTime                             @updatedAt
+  departmentId                               String?
+  personnelId                                String?                              @unique
+  attendanceRecords                          AttendanceRecord[]
+  comments                                   Comment[]
+  createdTemplates                           ContractTemplate[]
+  approvedContracts                          Contract[]                           @relation("ContractApprovedBy")
+  createdContracts                           Contract[]                           @relation("ContractCreatedBy")
+  signedContracts                            Contract[]                           @relation("ContractSignedBy")
+  approvedExceptions                         ExceptionRequest[]                   @relation("ExceptionApprover")
+  cancelledExceptions                        ExceptionRequest[]                   @relation("ExceptionCanceller")
+  createdExceptionRequests                   ExceptionRequest[]                   @relation("ExceptionCreatedBy")
+  exceptionRequests                          ExceptionRequest[]                   @relation("ExceptionEmployee")
+  rejectedExceptions                         ExceptionRequest[]                   @relation("ExceptionRejecter")
+  approvedMissions                           MissionAssignment[]                  @relation("MissionApprover")
+  assignedMissions                           MissionAssignment[]                  @relation("MissionAssigner")
+  missionAssignments                         MissionAssignment[]                  @relation("MissionEmployee")
+  orders                                     Order[]
+  posts                                      Post[]
+  profile                                    Profile?
+  approvedSalesContracts                     SalesContract[]                      @relation("SalesContractApprovedBy")
+  createdSalesContracts                      SalesContract[]                      @relation("SalesContractCreatedBy")
+  signedSalesContracts                       SalesContract[]                      @relation("SalesContractSignedBy")
+  responsibleSalesContracts                  SalesContract[]                      @relation("SalesContractResponsibleSeller")
+  realizedSalesContracts                     SalesContract[]                      @relation("SalesContractRealizedSeller")
+  previousSalesAssignments                   SalesContractSellerAudit[]           @relation("SalesContractPreviousSeller")
+  nextSalesAssignments                       SalesContractSellerAudit[]           @relation("SalesContractNextSeller")
+  changedSalesAssignments                    SalesContractSellerAudit[]           @relation("SalesContractAssignmentActor")
+  salesReportingEvents                       SalesReportingEvent[]                @relation("SalesReportingEventSeller")
+  createdSalesReportingEvents                SalesReportingEvent[]                @relation("SalesReportingEventActor")
+  salesReportPresets                         SalesReportPreset[]                  @relation("SalesReportPresetOwner")
+  securityPersonnel                          SecurityPersonnel?
+  department                                 Department?                          @relation(fields: [departmentId], references: [id])
+  personnel                                  Personnel?                           @relation(fields: [personnelId], references: [id], onDelete: SetNull)
+  grantedPermissions                         WorkspacePermission[]                @relation("PermissionGranter")
+  workspacePermissions                       WorkspacePermission[]
+  grantedFeaturePermissions                  FeaturePermission[]                  @relation("FeaturePermissionGranter")
+  featurePermissions                         FeaturePermission[]
+  ownedCrmCustomers                          CrmCustomer[]                        @relation("CrmCustomerOwner")
+  createdCrmCustomers                        CrmCustomer[]                        @relation("CrmCustomerCreatedBy")
+  updatedCrmCustomers                        CrmCustomer[]                        @relation("CrmCustomerUpdatedBy")
+  responsibleCrmPotentialProjects            CrmPotentialProject[]                @relation("CrmPotentialProjectResponsibleSeller")
+  createdCrmPotentialProjects                CrmPotentialProject[]                @relation("CrmPotentialProjectCreatedBy")
+  crmFollowUpReports                         CrmFollowUpReport[]                  @relation("CrmFollowUpSeller")
+  assignedCrmNextActions                     CrmNextAction[]                      @relation("CrmNextActionAssignee")
+  completedCrmNextActions                    CrmNextAction[]                      @relation("CrmNextActionCompletedBy")
+  crmTimelineEvents                          CrmTimelineEvent[]                   @relation("CrmTimelineActor")
+  logisticsDrivers                           LogisticsDriver[]                    @relation("LogisticsDriverCreatedBy")
+  securityVehiclePairs                       SecurityVehiclePair[]                @relation("SecurityVehiclePairCreatedBy")
   createdSecurityAttendanceRosterMemberships SecurityAttendanceRosterMembership[] @relation("SecurityAttendanceRosterCreatedBy")
-  endedSecurityAttendanceRosterMemberships SecurityAttendanceRosterMembership[] @relation("SecurityAttendanceRosterEndedBy")
-  requestedLoadingDrivers   LogisticsDriverRequest[] @relation("LogisticsDriverRequestRequestedBy")
-  fulfilledLoadingDrivers   LogisticsDriverRequest[] @relation("LogisticsDriverRequestFulfilledBy")
-  cancelledLoadingDrivers   LogisticsDriverRequest[] @relation("LogisticsDriverRequestCancelledBy")
-  instantReportParticipants SecurityShiftLogParticipant[]
+  endedSecurityAttendanceRosterMemberships   SecurityAttendanceRosterMembership[] @relation("SecurityAttendanceRosterEndedBy")
+  requestedLoadingDrivers                    LogisticsDriverRequest[]             @relation("LogisticsDriverRequestRequestedBy")
+  fulfilledLoadingDrivers                    LogisticsDriverRequest[]             @relation("LogisticsDriverRequestFulfilledBy")
+  cancelledLoadingDrivers                    LogisticsDriverRequest[]             @relation("LogisticsDriverRequestCancelledBy")
+  instantReportParticipants                  SecurityShiftLogParticipant[]
 
   @@map("users")
 }
 
 model Personnel {
-  id                String             @id @default(cuid())
-  firstName         String
-  lastName          String
-  departmentId      String?
-  isActive          Boolean            @default(true)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  attendanceRecords AttendanceRecord[]
+  id                                  String                               @id @default(cuid())
+  firstName                           String
+  lastName                            String
+  departmentId                        String?
+  isActive                            Boolean                              @default(true)
+  createdAt                           DateTime                             @default(now())
+  updatedAt                           DateTime                             @updatedAt
+  attendanceRecords                   AttendanceRecord[]
   securityAttendanceRosterMemberships SecurityAttendanceRosterMembership[]
-  instantReportParticipants SecurityShiftLogParticipant[]
-  user              User?
-  department        Department?        @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  instantReportParticipants           SecurityShiftLogParticipant[]
+  user                                User?
+  department                          Department?                          @relation(fields: [departmentId], references: [id], onDelete: SetNull)
 
   @@index([isActive, departmentId])
   @@index([lastName, firstName])
@@ -252,25 +260,25 @@ model Shift {
 }
 
 model SecurityPersonnel {
-  id                String             @id @default(cuid())
-  userId            String             @unique
+  id                String                           @id @default(cuid())
+  userId            String                           @unique
   shiftId           String
   position          String
-  isActive          Boolean            @default(true)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  isActive          Boolean                          @default(true)
+  createdAt         DateTime                         @default(now())
+  updatedAt         DateTime                         @updatedAt
   attendanceRecords AttendanceRecord[]
-  primaryAPlans     SecurityShiftPlan[] @relation("SecurityShiftPlanPrimaryA")
-  primaryBPlans     SecurityShiftPlan[] @relation("SecurityShiftPlanPrimaryB")
-  primaryCPlans     SecurityShiftPlan[] @relation("SecurityShiftPlanPrimaryC")
-  plannedSlots      SecurityShiftPlanSlot[] @relation("SecurityShiftPlannedPersonnel")
-  replacementSlots  SecurityShiftPlanSlot[] @relation("SecurityShiftReplacementPersonnel")
+  primaryAPlans     SecurityShiftPlan[]              @relation("SecurityShiftPlanPrimaryA")
+  primaryBPlans     SecurityShiftPlan[]              @relation("SecurityShiftPlanPrimaryB")
+  primaryCPlans     SecurityShiftPlan[]              @relation("SecurityShiftPlanPrimaryC")
+  plannedSlots      SecurityShiftPlanSlot[]          @relation("SecurityShiftPlannedPersonnel")
+  replacementSlots  SecurityShiftPlanSlot[]          @relation("SecurityShiftReplacementPersonnel")
   shiftAttendances  SecurityShiftAttendance[]
   shiftSessions     SecurityShiftSession[]
   patrolSessions    SecurityPatrolSession[]
   temporaryCoverage SecurityShiftTemporaryCoverage[]
-  shift             Shift              @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shift             Shift                            @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  user              User                             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("security_personnel")
 }
@@ -306,22 +314,22 @@ model SecurityShiftPlan {
 }
 
 model SecurityShiftPlanSlot {
-  id                     String                          @id @default(cuid())
+  id                     String                           @id @default(cuid())
   planId                 String
   sequence               Int
   startsAt               DateTime
   endsAt                 DateTime
   plannedPersonnelId     String
   replacementPersonnelId String?
-  coverageStatus         SecurityShiftCoverageStatus    @default(COVERED)
+  coverageStatus         SecurityShiftCoverageStatus      @default(COVERED)
   leaveRequestId         String?
   overrideReason         String?
   probableNoShowAt       DateTime?
-  createdAt              DateTime                        @default(now())
-  updatedAt              DateTime                        @updatedAt
-  plan                   SecurityShiftPlan               @relation(fields: [planId], references: [id], onDelete: Cascade)
-  plannedPersonnel       SecurityPersonnel               @relation("SecurityShiftPlannedPersonnel", fields: [plannedPersonnelId], references: [id], onDelete: Restrict)
-  replacementPersonnel   SecurityPersonnel?              @relation("SecurityShiftReplacementPersonnel", fields: [replacementPersonnelId], references: [id], onDelete: Restrict)
+  createdAt              DateTime                         @default(now())
+  updatedAt              DateTime                         @updatedAt
+  plan                   SecurityShiftPlan                @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plannedPersonnel       SecurityPersonnel                @relation("SecurityShiftPlannedPersonnel", fields: [plannedPersonnelId], references: [id], onDelete: Restrict)
+  replacementPersonnel   SecurityPersonnel?               @relation("SecurityShiftReplacementPersonnel", fields: [replacementPersonnelId], references: [id], onDelete: Restrict)
   attendance             SecurityShiftAttendance[]
   session                SecurityShiftSession?
   temporaryCoverage      SecurityShiftTemporaryCoverage[]
@@ -337,18 +345,18 @@ model SecurityShiftPlanSlot {
 }
 
 model SecurityShiftAttendance {
-  id                  String            @id @default(cuid())
-  slotId              String
-  personnelId         String
-  arrivedAt           DateTime          @default(now())
-  delayMinutes        Int               @default(0)
-  originalArrivedAt   DateTime?
-  correctedAt         DateTime?
-  correctedBy         String?
-  correctionReason    String?
-  createdAt           DateTime          @default(now())
-  slot                SecurityShiftPlanSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
-  personnel           SecurityPersonnel @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  id                String                @id @default(cuid())
+  slotId            String
+  personnelId       String
+  arrivedAt         DateTime              @default(now())
+  delayMinutes      Int                   @default(0)
+  originalArrivedAt DateTime?
+  correctedAt       DateTime?
+  correctedBy       String?
+  correctionReason  String?
+  createdAt         DateTime              @default(now())
+  slot              SecurityShiftPlanSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  personnel         SecurityPersonnel     @relation(fields: [personnelId], references: [id], onDelete: Restrict)
 
   @@unique([slotId, personnelId])
   @@index([personnelId, arrivedAt])
@@ -356,22 +364,22 @@ model SecurityShiftAttendance {
 }
 
 model SecurityShiftSession {
-  id                String                     @id @default(cuid())
-  slotId            String                     @unique
-  personnelId       String
-  status            SecurityShiftSessionStatus @default(ACTIVE)
-  startedAt         DateTime                   @default(now())
-  endedAt           DateTime?
-  overtimeMinutes   Int                        @default(0)
-  forceClosedBy     String?
-  forceCloseReason  String?
-  closureSummary    String?
-  createdAt         DateTime                   @default(now())
-  updatedAt         DateTime                   @updatedAt
-  slot              SecurityShiftPlanSlot      @relation(fields: [slotId], references: [id], onDelete: Restrict)
-  personnel         SecurityPersonnel           @relation(fields: [personnelId], references: [id], onDelete: Restrict)
-  logEntries        SecurityShiftLogEntry[]
-  patrolSessions    SecurityPatrolSession[]
+  id               String                     @id @default(cuid())
+  slotId           String                     @unique
+  personnelId      String
+  status           SecurityShiftSessionStatus @default(ACTIVE)
+  startedAt        DateTime                   @default(now())
+  endedAt          DateTime?
+  overtimeMinutes  Int                        @default(0)
+  forceClosedBy    String?
+  forceCloseReason String?
+  closureSummary   String?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  slot             SecurityShiftPlanSlot      @relation(fields: [slotId], references: [id], onDelete: Restrict)
+  personnel        SecurityPersonnel          @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  logEntries       SecurityShiftLogEntry[]
+  patrolSessions   SecurityPatrolSession[]
 
   @@index([status, startedAt])
   @@index([personnelId, startedAt])
@@ -396,31 +404,31 @@ model SecurityShiftTemporaryCoverage {
 }
 
 model AttendanceRecord {
-  id                  String            @id @default(cuid())
-  employeeId          String?
-  personnelId         String?
-  securityPersonnelId String
-  date                DateTime
-  shiftId             String
-  entryTime           String?
-  exitTime            String?
-  status              AttendanceStatus  @default(PRESENT)
-  exceptionType       String?
-  exceptionTime       String?
-  exceptionDuration   Int?
-  digitalSignature    String?
-  notes               String?
-  personnelFirstName  String?
-  personnelLastName   String?
-  departmentId        String?
-  departmentName      String?
+  id                    String            @id @default(cuid())
+  employeeId            String?
+  personnelId           String?
+  securityPersonnelId   String
+  date                  DateTime
+  shiftId               String
+  entryTime             String?
+  exitTime              String?
+  status                AttendanceStatus  @default(PRESENT)
+  exceptionType         String?
+  exceptionTime         String?
+  exceptionDuration     Int?
+  digitalSignature      String?
+  notes                 String?
+  personnelFirstName    String?
+  personnelLastName     String?
+  departmentId          String?
+  departmentName        String?
   departmentNamePersian String?
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
-  employee            User?             @relation(fields: [employeeId], references: [id], onDelete: SetNull)
-  personnel           Personnel?        @relation(fields: [personnelId], references: [id], onDelete: Restrict)
-  securityPersonnel   SecurityPersonnel @relation(fields: [securityPersonnelId], references: [id], onDelete: Cascade)
-  shift               Shift             @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  employee              User?             @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  personnel             Personnel?        @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  securityPersonnel     SecurityPersonnel @relation(fields: [securityPersonnelId], references: [id], onDelete: Cascade)
+  shift                 Shift             @relation(fields: [shiftId], references: [id], onDelete: Cascade)
 
   @@index([personnelId, date])
   @@index([employeeId, date])
@@ -571,51 +579,126 @@ model RoleFeaturePermission {
 }
 
 model SalesContract {
-  id                    String                         @id @default(cuid())
-  contractNumber        String                         @unique
-  creatorSequenceNumber Int?
-  title                 String
-  titlePersian          String
-  content               String
-  status                ContractStatus                 @default(DRAFT)
-  customerId            String
-  departmentId          String
-  templateId            String?
-  createdBy             String
-  approvedBy            String?
-  signedBy              String?
-  signedAt              DateTime?
-  printedAt             DateTime?
-  totalAmount           Decimal?                       @db.Decimal(15, 2)
-  currency              String                         @default("تومان")
-  notes                 String?
-  contractData          Json?
-  calculations          Json?
-  signatures            Json?
-  createdAt             DateTime                       @default(now())
-  updatedAt             DateTime                       @updatedAt
-  items                 ContractItem[]
-  deliveries            Delivery[]
-  payments              Payment[]
-  verificationCodes     ContractVerificationCode[]
-  publicConfirmations   ContractPublicConfirmation[]
-  confirmationAuditLogs ContractConfirmationAuditLog[]
-  logisticsLoadingLines LogisticsLoadingLine[]
+  id                                String                             @id @default(cuid())
+  contractNumber                    String                             @unique
+  creatorSequenceNumber             Int?
+  title                             String
+  titlePersian                      String
+  content                           String
+  status                            ContractStatus                     @default(DRAFT)
+  customerId                        String
+  departmentId                      String
+  templateId                        String?
+  createdBy                         String
+  responsibleSellerId               String
+  responsibleSellerSource           String                             @default("CREATOR_DEFAULT")
+  realizedSellerId                  String?
+  realizedSellerSource              String?
+  realizedAt                        DateTime?
+  realizedAmount                    Decimal?                           @db.Decimal(15, 2)
+  lostAt                            DateTime?
+  approvedBy                        String?
+  signedBy                          String?
+  signedAt                          DateTime?
+  printedAt                         DateTime?
+  totalAmount                       Decimal?                           @db.Decimal(15, 2)
+  currency                          String                             @default("تومان")
+  notes                             String?
+  contractData                      Json?
+  calculations                      Json?
+  signatures                        Json?
+  createdAt                         DateTime                           @default(now())
+  updatedAt                         DateTime                           @updatedAt
+  items                             ContractItem[]
+  deliveries                        Delivery[]
+  payments                          Payment[]
+  verificationCodes                 ContractVerificationCode[]
+  publicConfirmations               ContractPublicConfirmation[]
+  confirmationAuditLogs             ContractConfirmationAuditLog[]
+  logisticsLoadingLines             LogisticsLoadingLine[]
   logisticsLoadingDriverAllocations LogisticsLoadingDriverAllocation[]
-  wonCrmPotentialProject CrmPotentialProject? @relation("CrmPotentialProjectWonContract")
-  isSigned              Boolean                        @default(false)
-  signedByPhoneNumber   String?
-  verificationCodeId    String?                        @unique
-  verificationCode      ContractVerificationCode?      @relation("VerifiedCode", fields: [verificationCodeId], references: [id])
-  approvedByUser        User?                          @relation("SalesContractApprovedBy", fields: [approvedBy], references: [id])
-  createdByUser         User                           @relation("SalesContractCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade)
-  customer              CrmCustomer                    @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  department            Department                     @relation("SalesContractDepartment", fields: [departmentId], references: [id], onDelete: Cascade)
-  signedByUser          User?                          @relation("SalesContractSignedBy", fields: [signedBy], references: [id])
-  template              ContractTemplate?              @relation("SalesContractTemplate", fields: [templateId], references: [id])
+  wonCrmPotentialProject            CrmPotentialProject?               @relation("CrmPotentialProjectWonContract")
+  isSigned                          Boolean                            @default(false)
+  signedByPhoneNumber               String?
+  verificationCodeId                String?                            @unique
+  verificationCode                  ContractVerificationCode?          @relation("VerifiedCode", fields: [verificationCodeId], references: [id])
+  approvedByUser                    User?                              @relation("SalesContractApprovedBy", fields: [approvedBy], references: [id])
+  createdByUser                     User                               @relation("SalesContractCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade)
+  customer                          CrmCustomer                        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  department                        Department                         @relation("SalesContractDepartment", fields: [departmentId], references: [id], onDelete: Cascade)
+  signedByUser                      User?                              @relation("SalesContractSignedBy", fields: [signedBy], references: [id])
+  responsibleSeller                 User                               @relation("SalesContractResponsibleSeller", fields: [responsibleSellerId], references: [id], onDelete: Restrict)
+  realizedSeller                    User?                              @relation("SalesContractRealizedSeller", fields: [realizedSellerId], references: [id], onDelete: SetNull)
+  template                          ContractTemplate?                  @relation("SalesContractTemplate", fields: [templateId], references: [id])
+  sellerAudits                      SalesContractSellerAudit[]
+  reportingEvents                   SalesReportingEvent[]
 
   @@index([createdBy, creatorSequenceNumber])
+  @@index([responsibleSellerId])
+  @@index([realizedSellerId])
+  @@index([realizedAt])
+  @@index([lostAt])
   @@map("sales_contracts")
+}
+
+model SalesContractSellerAudit {
+  id               String        @id @default(cuid())
+  contractId       String
+  previousSellerId String?
+  nextSellerId     String?
+  changedBy        String
+  changeType       String
+  reason           String
+  metadata         Json?
+  createdAt        DateTime      @default(now())
+  contract         SalesContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  previousSeller   User?         @relation("SalesContractPreviousSeller", fields: [previousSellerId], references: [id], onDelete: SetNull)
+  nextSeller       User?         @relation("SalesContractNextSeller", fields: [nextSellerId], references: [id], onDelete: SetNull)
+  actor            User          @relation("SalesContractAssignmentActor", fields: [changedBy], references: [id], onDelete: Restrict)
+
+  @@index([contractId, createdAt])
+  @@index([changedBy])
+  @@map("sales_contract_seller_audits")
+}
+
+model SalesReportingEvent {
+  id          String        @id @default(cuid())
+  contractId  String
+  eventType   String
+  amount      Decimal       @db.Decimal(15, 2)
+  effectiveAt DateTime
+  sellerId    String?
+  sourceKey   String        @unique
+  reason      String?
+  metadata    Json?
+  createdBy   String?
+  createdAt   DateTime      @default(now())
+  contract    SalesContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  seller      User?         @relation("SalesReportingEventSeller", fields: [sellerId], references: [id], onDelete: SetNull)
+  actor       User?         @relation("SalesReportingEventActor", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([effectiveAt])
+  @@index([eventType, effectiveAt])
+  @@index([sellerId, effectiveAt])
+  @@index([contractId, effectiveAt])
+  @@map("sales_reporting_events")
+}
+
+model SalesReportPreset {
+  id            String   @id @default(cuid())
+  name          String
+  ownerId       String
+  visibility    String   @default("PERSONAL")
+  departmentId  String?
+  configuration Json
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  owner         User     @relation("SalesReportPresetOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@index([visibility, departmentId])
+  @@map("sales_report_presets")
 }
 
 model CrmCustomer {
@@ -774,33 +857,33 @@ model CrmCommunication {
 }
 
 model CrmPotentialProject {
-  id                 String              @id @default(cuid())
-  customerId         String
+  id                  String              @id @default(cuid())
+  customerId          String
   responsibleSellerId String
-  createdBy          String?
-  title              String
-  status             String              @default("جدید")
-  workType           String
-  address            String?
-  estimatedValue     Decimal?            @db.Decimal(15, 2)
-  probability        Int?
-  expectedCloseDate  DateTime?
-  description        String?
-  source             String?
-  lostReason         String?
-  dormantReason      String?
-  revisitDate        DateTime?
-  wonSalesContractId String?             @unique
-  isActive           Boolean             @default(true)
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  customer           CrmCustomer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  responsibleSeller  User                @relation("CrmPotentialProjectResponsibleSeller", fields: [responsibleSellerId], references: [id], onDelete: Cascade)
-  createdByUser      User?               @relation("CrmPotentialProjectCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
-  wonSalesContract   SalesContract?      @relation("CrmPotentialProjectWonContract", fields: [wonSalesContractId], references: [id], onDelete: SetNull)
-  followUpReports    CrmFollowUpReport[]
-  nextActions        CrmNextAction[]
-  timelineEvents     CrmTimelineEvent[]
+  createdBy           String?
+  title               String
+  status              String              @default("جدید")
+  workType            String
+  address             String?
+  estimatedValue      Decimal?            @db.Decimal(15, 2)
+  probability         Int?
+  expectedCloseDate   DateTime?
+  description         String?
+  source              String?
+  lostReason          String?
+  dormantReason       String?
+  revisitDate         DateTime?
+  wonSalesContractId  String?             @unique
+  isActive            Boolean             @default(true)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  customer            CrmCustomer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  responsibleSeller   User                @relation("CrmPotentialProjectResponsibleSeller", fields: [responsibleSellerId], references: [id], onDelete: Cascade)
+  createdByUser       User?               @relation("CrmPotentialProjectCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  wonSalesContract    SalesContract?      @relation("CrmPotentialProjectWonContract", fields: [wonSalesContractId], references: [id], onDelete: SetNull)
+  followUpReports     CrmFollowUpReport[]
+  nextActions         CrmNextAction[]
+  timelineEvents      CrmTimelineEvent[]
 
   @@index([customerId])
   @@index([responsibleSellerId])
@@ -888,80 +971,80 @@ model CrmTimelineEvent {
 }
 
 model Product {
-  id                               String                       @id @default(cuid())
-  code                             String                       @unique
-  name                             String
-  namePersian                      String
-  cuttingDimensionCode             String
-  cuttingDimensionName             String
-  cuttingDimensionNamePersian      String
-  stoneTypeCode                    String
-  stoneTypeName                    String
-  stoneTypeNamePersian             String
-  widthCode                        String
-  widthValue                       Decimal                      @db.Decimal(5, 2)
-  widthName                        String
-  thicknessCode                    String
-  thicknessValue                   Decimal                      @db.Decimal(5, 2)
-  thicknessName                    String
-  mineCode                         String
-  mineName                         String
-  mineNamePersian                  String
-  finishCode                       String
-  finishName                       String
-  finishNamePersian                String
-  colorCode                        String
-  colorName                        String
-  colorNamePersian                 String
-  qualityCode                      String
-  qualityName                      String
-  qualityNamePersian               String
-  basePrice                        Decimal?                     @db.Decimal(15, 2)
-  currency                         String                       @default("ریال")
-  isAvailable                      Boolean                      @default(true)
-  leadTime                         Int?
-  description                      String?
-  images                           String[]
-  isActive                         Boolean                      @default(true)
-  availableInLongitudinalContracts Boolean                      @default(true)
-  availableInStairContracts        Boolean                      @default(true)
-  availableInSlabContracts         Boolean                      @default(true)
-  availableInVolumetricContracts   Boolean                      @default(true)
-  deletedAt                        DateTime?
-  createdAt                        DateTime                     @default(now())
-  updatedAt                        DateTime                     @updatedAt
-  contractItems                    ContractItem[]
-  deliveryProducts                 DeliveryProduct[]
-  logisticsLoadingLines            LogisticsLoadingLine[]
+  id                                String                             @id @default(cuid())
+  code                              String                             @unique
+  name                              String
+  namePersian                       String
+  cuttingDimensionCode              String
+  cuttingDimensionName              String
+  cuttingDimensionNamePersian       String
+  stoneTypeCode                     String
+  stoneTypeName                     String
+  stoneTypeNamePersian              String
+  widthCode                         String
+  widthValue                        Decimal                            @db.Decimal(5, 2)
+  widthName                         String
+  thicknessCode                     String
+  thicknessValue                    Decimal                            @db.Decimal(5, 2)
+  thicknessName                     String
+  mineCode                          String
+  mineName                          String
+  mineNamePersian                   String
+  finishCode                        String
+  finishName                        String
+  finishNamePersian                 String
+  colorCode                         String
+  colorName                         String
+  colorNamePersian                  String
+  qualityCode                       String
+  qualityName                       String
+  qualityNamePersian                String
+  basePrice                         Decimal?                           @db.Decimal(15, 2)
+  currency                          String                             @default("ریال")
+  isAvailable                       Boolean                            @default(true)
+  leadTime                          Int?
+  description                       String?
+  images                            String[]
+  isActive                          Boolean                            @default(true)
+  availableInLongitudinalContracts  Boolean                            @default(true)
+  availableInStairContracts         Boolean                            @default(true)
+  availableInSlabContracts          Boolean                            @default(true)
+  availableInVolumetricContracts    Boolean                            @default(true)
+  deletedAt                         DateTime?
+  createdAt                         DateTime                           @default(now())
+  updatedAt                         DateTime                           @updatedAt
+  contractItems                     ContractItem[]
+  deliveryProducts                  DeliveryProduct[]
+  logisticsLoadingLines             LogisticsLoadingLine[]
   logisticsLoadingDriverAllocations LogisticsLoadingDriverAllocation[]
-  logisticsLoadingCorrections      LogisticsLoadingCorrection[]
+  logisticsLoadingCorrections       LogisticsLoadingCorrection[]
 
   @@map("products")
 }
 
 model ContractItem {
-  id                          String                       @id @default(cuid())
-  contractId                  String
-  productId                   String
-  productType                 String? // نوع محصول: 'longitudinal' | 'stair' | etc.
-  quantity                    Decimal                      @db.Decimal(10, 2)
-  unitPrice                   Decimal                      @db.Decimal(15, 2)
-  totalPrice                  Decimal                      @db.Decimal(15, 2)
-  description                 String?
+  id                                String                             @id @default(cuid())
+  contractId                        String
+  productId                         String
+  productType                       String? // نوع محصول: 'longitudinal' | 'stair' | etc.
+  quantity                          Decimal                            @db.Decimal(10, 2)
+  unitPrice                         Decimal                            @db.Decimal(15, 2)
+  totalPrice                        Decimal                            @db.Decimal(15, 2)
+  description                       String?
   // Mandatory pricing fields
-  isMandatory                 Boolean                      @default(false)
-  mandatoryPercentage         Decimal?                     @db.Decimal(5, 2)
-  originalTotalPrice          Decimal?                     @db.Decimal(15, 2)
+  isMandatory                       Boolean                            @default(false)
+  mandatoryPercentage               Decimal?                           @db.Decimal(5, 2)
+  originalTotalPrice                Decimal?                           @db.Decimal(15, 2)
   // Stair system linking fields
-  stairSystemId               String? // ID to link multiple items belonging to same stair system
-  stairPartType               String? // نوع بخش پله: 'tread' | 'riser' | 'landing' (کف پله, خیز پله, پاگرد)
-  createdAt                   DateTime                     @default(now())
-  updatedAt                   DateTime                     @updatedAt
-  contract                    SalesContract                @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  product                     Product                      @relation(fields: [productId], references: [id], onDelete: Cascade)
-  logisticsLoadingLines       LogisticsLoadingLine[]
+  stairSystemId                     String? // ID to link multiple items belonging to same stair system
+  stairPartType                     String? // نوع بخش پله: 'tread' | 'riser' | 'landing' (کف پله, خیز پله, پاگرد)
+  createdAt                         DateTime                           @default(now())
+  updatedAt                         DateTime                           @updatedAt
+  contract                          SalesContract                      @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  product                           Product                            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  logisticsLoadingLines             LogisticsLoadingLine[]
   logisticsLoadingDriverAllocations LogisticsLoadingDriverAllocation[]
-  logisticsLoadingCorrections LogisticsLoadingCorrection[]
+  logisticsLoadingCorrections       LogisticsLoadingCorrection[]
 
   @@map("contract_items")
 }
@@ -1022,27 +1105,27 @@ model LogisticsDriver {
 }
 
 model SecurityVehiclePair {
-  id            String                    @id @default(cuid())
-  firstName     String
-  lastName      String
-  vehiclePlate  String
-  vehiclePlateKind SecurityVehiclePlateKind @default(STANDARD)
-  vehicleType   String
-  phone         String
-  nationalCode  String
-  homeAddress   String?
-  relativePhone String?
-  informationGraceEndsAt DateTime?
-  notes         String?
-  isActive      Boolean                   @default(true)
-  createdBy     String
-  createdAt     DateTime                  @default(now())
-  updatedAt     DateTime                  @updatedAt
-  createdByUser User                      @relation("SecurityVehiclePairCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade)
-  loadings      LogisticsLoading[]
-  movements     SecurityVehicleMovement[]
-  photos        SecurityVehiclePairPhoto[]
-  queueTurns    SecurityDriverQueueTurn[]
+  id                       String                             @id @default(cuid())
+  firstName                String
+  lastName                 String
+  vehiclePlate             String
+  vehiclePlateKind         SecurityVehiclePlateKind           @default(STANDARD)
+  vehicleType              String
+  phone                    String
+  nationalCode             String
+  homeAddress              String?
+  relativePhone            String?
+  informationGraceEndsAt   DateTime?
+  notes                    String?
+  isActive                 Boolean                            @default(true)
+  createdBy                String
+  createdAt                DateTime                           @default(now())
+  updatedAt                DateTime                           @updatedAt
+  createdByUser            User                               @relation("SecurityVehiclePairCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade)
+  loadings                 LogisticsLoading[]
+  movements                SecurityVehicleMovement[]
+  photos                   SecurityVehiclePairPhoto[]
+  queueTurns               SecurityDriverQueueTurn[]
   loadingDriverAssignments LogisticsLoadingDriverAssignment[]
 
   @@index([createdBy])
@@ -1051,31 +1134,31 @@ model SecurityVehiclePair {
 }
 
 model SecurityDriverQueueTurn {
-  id               String                        @id @default(cuid())
-  vehiclePairId    String
-  status           SecurityDriverQueueTurnStatus @default(WAITING)
-  enteredAt        DateTime                      @default(now())
-  enteredBy        String
-  reservedAt       DateTime?
-  reservedBy       String?
-  reservedPosition Int?
-  loadingAreaEnteredAt DateTime?
-  loadingAreaEnteredBy String?
-  returnedToQueueAt DateTime?
-  returnedToQueueBy String?
-  returnToQueueReason String?
-  loadingId        String?
-  driverRequestId  String?                       @unique
-  dispatchedAt     DateTime?
-  dispatchedBy     String?
-  removedAt        DateTime?
-  removedBy        String?
-  removalReason    String?
-  createdAt        DateTime                      @default(now())
-  updatedAt        DateTime                      @updatedAt
-  vehiclePair      SecurityVehiclePair           @relation(fields: [vehiclePairId], references: [id], onDelete: Restrict)
-  loading          LogisticsLoading?             @relation(fields: [loadingId], references: [id], onDelete: SetNull)
-  driverRequest    LogisticsDriverRequest?       @relation(fields: [driverRequestId], references: [id], onDelete: SetNull)
+  id                      String                            @id @default(cuid())
+  vehiclePairId           String
+  status                  SecurityDriverQueueTurnStatus     @default(WAITING)
+  enteredAt               DateTime                          @default(now())
+  enteredBy               String
+  reservedAt              DateTime?
+  reservedBy              String?
+  reservedPosition        Int?
+  loadingAreaEnteredAt    DateTime?
+  loadingAreaEnteredBy    String?
+  returnedToQueueAt       DateTime?
+  returnedToQueueBy       String?
+  returnToQueueReason     String?
+  loadingId               String?
+  driverRequestId         String?                           @unique
+  dispatchedAt            DateTime?
+  dispatchedBy            String?
+  removedAt               DateTime?
+  removedBy               String?
+  removalReason           String?
+  createdAt               DateTime                          @default(now())
+  updatedAt               DateTime                          @updatedAt
+  vehiclePair             SecurityVehiclePair               @relation(fields: [vehiclePairId], references: [id], onDelete: Restrict)
+  loading                 LogisticsLoading?                 @relation(fields: [loadingId], references: [id], onDelete: SetNull)
+  driverRequest           LogisticsDriverRequest?           @relation(fields: [driverRequestId], references: [id], onDelete: SetNull)
   loadingDriverAssignment LogisticsLoadingDriverAssignment?
 
   @@index([status, enteredAt])
@@ -1172,16 +1255,16 @@ model SecurityInstantReportCategory {
 }
 
 model SecurityInstantReportType {
-  id           String                         @id @default(cuid())
+  id           String                        @id @default(cuid())
   categoryId   String
   name         String
   description  String?
-  displayOrder Int                            @default(0)
-  isActive     Boolean                        @default(true)
+  displayOrder Int                           @default(0)
+  isActive     Boolean                       @default(true)
   createdBy    String
-  createdAt    DateTime                       @default(now())
-  updatedAt    DateTime                       @updatedAt
-  category     SecurityInstantReportCategory  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  createdAt    DateTime                      @default(now())
+  updatedAt    DateTime                      @updatedAt
+  category     SecurityInstantReportCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   logEntries   SecurityShiftLogEntry[]
 
   @@unique([categoryId, name])
@@ -1191,21 +1274,21 @@ model SecurityInstantReportType {
 }
 
 model SecurityShiftLogEntry {
-  id            String                   @id @default(cuid())
-  sessionId     String
-  reportTypeId  String
-  rowNumber     Int
-  description   String?
-  status        SecurityShiftLogStatus   @default(ACTIVE)
-  createdBy     String
-  createdAt     DateTime                 @default(now())
-  voidedBy      String?
-  voidedAt      DateTime?
-  voidReason    String?
-  session       SecurityShiftSession     @relation(fields: [sessionId], references: [id], onDelete: Restrict)
-  reportType    SecurityInstantReportType @relation(fields: [reportTypeId], references: [id], onDelete: Restrict)
-  participants  SecurityShiftLogParticipant[]
-  attachments   SecurityShiftLogAttachment[]
+  id           String                        @id @default(cuid())
+  sessionId    String
+  reportTypeId String
+  rowNumber    Int
+  description  String?
+  status       SecurityShiftLogStatus        @default(ACTIVE)
+  createdBy    String
+  createdAt    DateTime                      @default(now())
+  voidedBy     String?
+  voidedAt     DateTime?
+  voidReason   String?
+  session      SecurityShiftSession          @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  reportType   SecurityInstantReportType     @relation(fields: [reportTypeId], references: [id], onDelete: Restrict)
+  participants SecurityShiftLogParticipant[]
+  attachments  SecurityShiftLogAttachment[]
 
   @@unique([sessionId, rowNumber])
   @@index([sessionId, createdAt])
@@ -1215,14 +1298,14 @@ model SecurityShiftLogEntry {
 }
 
 model SecurityShiftLogParticipant {
-  id        String                @id @default(cuid())
-  entryId   String
-  userId    String?
+  id          String                @id @default(cuid())
+  entryId     String
+  userId      String?
   personnelId String?
-  createdAt DateTime              @default(now())
-  entry     SecurityShiftLogEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
-  user      User?                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  personnel Personnel?            @relation(fields: [personnelId], references: [id], onDelete: Cascade)
+  createdAt   DateTime              @default(now())
+  entry       SecurityShiftLogEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  user        User?                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  personnel   Personnel?            @relation(fields: [personnelId], references: [id], onDelete: Cascade)
 
   @@unique([entryId, userId])
   @@unique([entryId, personnelId])
@@ -1246,15 +1329,15 @@ model SecurityShiftLogAttachment {
 }
 
 model SecurityPatrolSession {
-  id          String                     @id @default(cuid())
+  id          String               @id @default(cuid())
   sessionId   String
   personnelId String
-  status      SecurityPatrolStatus       @default(ACTIVE)
-  startedAt   DateTime                   @default(now())
+  status      SecurityPatrolStatus @default(ACTIVE)
+  startedAt   DateTime             @default(now())
   endedAt     DateTime?
   description String?
-  session     SecurityShiftSession       @relation(fields: [sessionId], references: [id], onDelete: Restrict)
-  personnel   SecurityPersonnel          @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  session     SecurityShiftSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  personnel   SecurityPersonnel    @relation(fields: [personnelId], references: [id], onDelete: Restrict)
 
   @@index([sessionId, startedAt])
   @@index([personnelId, status])
@@ -1262,18 +1345,18 @@ model SecurityPatrolSession {
 }
 
 model SecuritySupervisorReport {
-  id            String   @id @default(cuid())
+  id            String                 @id @default(cuid())
   reportDate    DateTime
   shiftId       String?
-  planSlotId    String?  @unique
+  planSlotId    String?                @unique
   authorId      String
   summary       String
   incidents     String?
   followUpNotes String?
   attachments   Json?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  shift         Shift?   @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  shift         Shift?                 @relation(fields: [shiftId], references: [id], onDelete: SetNull)
   planSlot      SecurityShiftPlanSlot? @relation(fields: [planSlotId], references: [id], onDelete: SetNull)
 
   @@index([reportDate])
@@ -1301,12 +1384,12 @@ model SabalanCalendarEntry {
 }
 
 model LogisticsLoading {
-  id                       String                       @id @default(cuid())
-  loadingNumber            String                       @unique
+  id                       String                             @id @default(cuid())
+  loadingNumber            String                             @unique
   customerId               String
   projectId                String
-  status                   LogisticsLoadingStatus       @default(DRAFT)
-  loadingDate              DateTime                     @default(now())
+  status                   LogisticsLoadingStatus             @default(DRAFT)
+  loadingDate              DateTime                           @default(now())
   notes                    String?
   driverId                 String?
   vehiclePairId            String?
@@ -1317,12 +1400,12 @@ model LogisticsLoading {
   cancelledBy              String?
   cancellationReason       String?
   createdBy                String
-  createdAt                DateTime                     @default(now())
-  updatedAt                DateTime                     @updatedAt
-  customer                 CrmCustomer                  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  project                  ProjectAddress               @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  driver                   LogisticsDriver?             @relation(fields: [driverId], references: [id], onDelete: SetNull)
-  vehiclePair              SecurityVehiclePair?         @relation(fields: [vehiclePairId], references: [id], onDelete: SetNull)
+  createdAt                DateTime                           @default(now())
+  updatedAt                DateTime                           @updatedAt
+  customer                 CrmCustomer                        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  project                  ProjectAddress                     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  driver                   LogisticsDriver?                   @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  vehiclePair              SecurityVehiclePair?               @relation(fields: [vehiclePairId], references: [id], onDelete: SetNull)
   lines                    LogisticsLoadingLine[]
   corrections              LogisticsLoadingCorrection[]
   securityVehicleMovements SecurityVehicleMovement[]
@@ -1340,17 +1423,17 @@ model LogisticsLoading {
 }
 
 model LogisticsLoadingDriverAssignment {
-  id             String                         @id @default(cuid())
+  id             String                             @id @default(cuid())
   loadingId      String
-  queueTurnId    String                         @unique
+  queueTurnId    String                             @unique
   vehiclePairId  String
   driverSnapshot Json
   createdBy      String
-  createdAt      DateTime                       @default(now())
-  updatedAt      DateTime                       @updatedAt
-  loading        LogisticsLoading               @relation(fields: [loadingId], references: [id], onDelete: Cascade)
-  queueTurn      SecurityDriverQueueTurn        @relation(fields: [queueTurnId], references: [id], onDelete: Restrict)
-  vehiclePair    SecurityVehiclePair            @relation(fields: [vehiclePairId], references: [id], onDelete: Restrict)
+  createdAt      DateTime                           @default(now())
+  updatedAt      DateTime                           @updatedAt
+  loading        LogisticsLoading                   @relation(fields: [loadingId], references: [id], onDelete: Cascade)
+  queueTurn      SecurityDriverQueueTurn            @relation(fields: [queueTurnId], references: [id], onDelete: Restrict)
+  vehiclePair    SecurityVehiclePair                @relation(fields: [vehiclePairId], references: [id], onDelete: Restrict)
   allocations    LogisticsLoadingDriverAllocation[]
 
   @@index([loadingId])
@@ -1388,23 +1471,23 @@ model LogisticsLoadingDriverAllocation {
 }
 
 model LogisticsDriverRequest {
-  id              String                      @id @default(cuid())
+  id              String                       @id @default(cuid())
   loadingId       String
   status          LogisticsDriverRequestStatus @default(PENDING_SECURITY)
   contextSnapshot Json?
   requestedBy     String
-  requestedAt     DateTime                    @default(now())
+  requestedAt     DateTime                     @default(now())
   fulfilledBy     String?
   fulfilledAt     DateTime?
   cancelledBy     String?
   cancelledAt     DateTime?
   completedAt     DateTime?
-  createdAt       DateTime                    @default(now())
-  updatedAt       DateTime                    @updatedAt
-  loading         LogisticsLoading            @relation(fields: [loadingId], references: [id], onDelete: Cascade)
-  requester       User                        @relation("LogisticsDriverRequestRequestedBy", fields: [requestedBy], references: [id], onDelete: Cascade)
-  fulfiller       User?                       @relation("LogisticsDriverRequestFulfilledBy", fields: [fulfilledBy], references: [id], onDelete: SetNull)
-  canceller       User?                       @relation("LogisticsDriverRequestCancelledBy", fields: [cancelledBy], references: [id], onDelete: SetNull)
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+  loading         LogisticsLoading             @relation(fields: [loadingId], references: [id], onDelete: Cascade)
+  requester       User                         @relation("LogisticsDriverRequestRequestedBy", fields: [requestedBy], references: [id], onDelete: Cascade)
+  fulfiller       User?                        @relation("LogisticsDriverRequestFulfilledBy", fields: [fulfilledBy], references: [id], onDelete: SetNull)
+  canceller       User?                        @relation("LogisticsDriverRequestCancelledBy", fields: [cancelledBy], references: [id], onDelete: SetNull)
   queueTurn       SecurityDriverQueueTurn?
 
   @@index([loadingId, status])
@@ -1912,22 +1995,22 @@ model AccountingTaxRecord {
 }
 
 model AccountingContractFlag {
-  id         String                 @id @default(cuid())
-  contractId String
-  category   AccountingFlagCategory
-  severity   AccountingFlagSeverity @default(MEDIUM)
-  title      String
-  note       String?
-  status     AccountingFlagStatus   @default(OPEN)
-  createdBy  String
-  resolvedBy String?
-  resolvedAt DateTime?
-  resolutionNote String?
-  cancelledBy String?
-  cancelledAt DateTime?
+  id                 String                 @id @default(cuid())
+  contractId         String
+  category           AccountingFlagCategory
+  severity           AccountingFlagSeverity @default(MEDIUM)
+  title              String
+  note               String?
+  status             AccountingFlagStatus   @default(OPEN)
+  createdBy          String
+  resolvedBy         String?
+  resolvedAt         DateTime?
+  resolutionNote     String?
+  cancelledBy        String?
+  cancelledAt        DateTime?
   cancellationReason String?
-  createdAt  DateTime               @default(now())
-  updatedAt  DateTime               @updatedAt
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
 
   @@index([contractId])
   @@index([status])

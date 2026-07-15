@@ -4,6 +4,7 @@
 import { CorrectionRequestStatus, Prisma, PrismaClient } from '@prisma/client';
 import { generateContractNumberAssignment } from './contractNumberService';
 import { buildAccountingSummaryForContracts } from './accountingService';
+import { recordRealizedAdjustment } from './salesAttributionService';
 
 const prisma = new PrismaClient();
 
@@ -29,6 +30,7 @@ export interface CreateContractData {
   currency?: string;
   notes?: string;
   contractData?: any;
+  potentialProjectId?: string;
 }
 
 export interface UpdateContractData {
@@ -109,6 +111,21 @@ export async function createContract(
     try {
       return await prisma.$transaction(async (tx) => {
         const { contractNumber, creatorSequenceNumber } = await generateContractNumberAssignment(userId, tx);
+        const potentialProject = data.potentialProjectId
+          ? await tx.crmPotentialProject.findUnique({
+            where: { id: data.potentialProjectId },
+            select: { id: true, customerId: true, responsibleSellerId: true, wonSalesContractId: true }
+          })
+          : null;
+        if (data.potentialProjectId && !potentialProject) {
+          throw new Error('CRM potential project not found');
+        }
+        if (potentialProject && potentialProject.customerId !== data.customerId) {
+          throw new Error('CRM potential project customer does not match contract customer');
+        }
+        if (potentialProject?.wonSalesContractId) {
+          throw new Error('CRM potential project is already linked to a sales contract');
+        }
         const previousContractNumber = data.contractData?.contractNumber;
         const contractData = {
           ...(data.contractData || {}),
@@ -119,7 +136,7 @@ export async function createContract(
           ? String(data.content).split(String(previousContractNumber)).join(contractNumber)
           : data.content;
 
-        return tx.salesContract.create({
+        const contract = await tx.salesContract.create({
           data: {
             contractNumber,
             creatorSequenceNumber,
@@ -130,6 +147,8 @@ export async function createContract(
             departmentId: data.departmentId,
             templateId: data.templateId || null,
             createdBy: userId,
+            responsibleSellerId: potentialProject?.responsibleSellerId || userId,
+            responsibleSellerSource: potentialProject ? 'CRM_PROJECT_DEFAULT' : 'CREATOR_DEFAULT',
             totalAmount: data.totalAmount ? parseFloat(String(data.totalAmount)) : null,
             currency: data.currency || 'تومان',
             notes: data.notes || null,
@@ -150,9 +169,19 @@ export async function createContract(
                 lastName: true,
                 username: true,
               }
+            },
+            responsibleSeller: {
+              select: { id: true, firstName: true, lastName: true, username: true }
             }
           }
         });
+        if (potentialProject) {
+          await tx.crmPotentialProject.update({
+            where: { id: potentialProject.id },
+            data: { wonSalesContractId: contract.id }
+          });
+        }
+        return contract;
       });
     } catch (error) {
       if (
@@ -319,13 +348,26 @@ export async function updateContract(
       });
     }
 
+    if (contract.realizedAt && data.totalAmount !== undefined) {
+      await recordRealizedAdjustment(tx, {
+        contractId,
+        previousAmount: contract.totalAmount,
+        nextAmount: data.totalAmount,
+        sourceKey: approvedSalesCorrection
+          ? `accounting-correction:${approvedSalesCorrection.id}`
+          : `contract-adjustment:${contractId}:${Date.now()}`,
+        actorId: userId,
+        reason: approvedSalesCorrection?.accountantNote || data.notes || 'Sales contract amount corrected'
+      });
+    }
+
     return tx.salesContract.update({
       where: { id: contractId },
       data: {
         title: data.title,
         titlePersian: data.titlePersian,
         content: data.content,
-        totalAmount: data.totalAmount ? parseFloat(String(data.totalAmount)) : contract.totalAmount,
+        totalAmount: data.totalAmount !== undefined ? parseFloat(String(data.totalAmount)) : contract.totalAmount,
         currency: data.currency,
         notes: data.notes,
         contractData: data.contractData,
@@ -345,6 +387,12 @@ export async function updateContract(
             lastName: true,
             username: true,
           }
+        },
+        responsibleSeller: {
+          select: { id: true, firstName: true, lastName: true, username: true }
+        },
+        realizedSeller: {
+          select: { id: true, firstName: true, lastName: true, username: true }
         },
         items: {
           include: {
@@ -386,6 +434,12 @@ export async function getContract(contractId: string) {
           lastName: true,
           username: true,
         }
+      },
+      responsibleSeller: {
+        select: { id: true, firstName: true, lastName: true, username: true }
+      },
+      realizedSeller: {
+        select: { id: true, firstName: true, lastName: true, username: true }
       },
       approvedByUser: {
         select: {
@@ -528,6 +582,7 @@ export async function rejectContract(
     where: { id: contractId },
     data: {
       status: 'CANCELLED',
+      lostAt: new Date(),
       signatures: {
         ...(contract.signatures as any || {}),
         reject: {
@@ -541,5 +596,3 @@ export async function rejectContract(
 
   return updatedContract;
 }
-
-

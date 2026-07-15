@@ -7,6 +7,7 @@ import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceReq
 import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
 import { renderReportPdfHeaderTemplate } from '../utils/printTemplate';
+import { buildSalesReport } from '../services/salesReportingService';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -543,9 +544,57 @@ const requireBiAccess = [
   requireFeatureAccess(FEATURES.BI_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW)
 ];
 
+const buildSharedBiOverview = async (req: WorkspaceRequest) => {
+  const report = await buildSalesReport({
+    userId: req.user!.id,
+    role: req.user!.role,
+    departmentId: req.user!.departmentId,
+    canManage: true,
+    canCompany: req.user!.role === 'ADMIN'
+  }, req.query);
+  return {
+    ...report,
+    cards: {
+      ...report.cards,
+      realizedSales: report.cards.netRealized,
+      pipelineSales: report.cards.pipelineValue,
+      receivableAmount: report.finance.receivableAmount,
+      overdueAmount: 0,
+      realizedContractCount: report.cards.realizedCount,
+      averageContractValue: report.cards.realizedCount ? Math.round(report.cards.netRealized / report.cards.realizedCount) : 0,
+      deliveryRiskCount: Math.max(report.delivery.promisedDeliveries - report.delivery.exitedLoadings, 0)
+    },
+    comparison: { previousRealizedSales: report.cards.previousNetRealized, realizedSalesDelta: report.cards.netRealized - report.cards.previousNetRealized },
+    trend: report.trend.map((row) => ({ label: row.label, realized: row.net, pipeline: row.pipeline, collected: 0 })),
+    statusDistribution: report.statusDistribution.map((row) => ({ status: row.label, value: row.value, count: row.count })),
+    sellers: report.sellers.map((row) => ({
+      ...row,
+      realizedSales: row.netRealized,
+      realizedContracts: row.realizedCount,
+      pipelineAmount: row.pipelineValue,
+      lostAmount: row.lostValue,
+      lostContracts: row.lostCount,
+      averageContractValue: row.averageRealizedValue || 0,
+      receivableAmount: 0,
+      overdueAmount: 0
+    })),
+    finance: { ...report.finance, paidAmount: report.finance.receivedAmount, overdueAmount: 0, paymentMethodMix: [] },
+    delivery: {
+      overdue: Math.max(report.delivery.promisedDeliveries - report.delivery.finalizedLoadings, 0),
+      upcoming: report.delivery.promisedDeliveries,
+      deliveredUnconfirmed: Math.max(report.delivery.finalizedLoadings - report.delivery.exitedLoadings, 0),
+      completed: report.delivery.exitedLoadings,
+      cancelled: 0,
+      rows: []
+    },
+    products: { topProducts: report.products.map((row) => ({ ...row, realizedSales: row.value })), productTypeMix: [], lowPerformingProducts: [] },
+    customers: { topCustomers: report.customers.map((row) => ({ ...row, realizedSales: row.value, realizedContracts: row.contracts })), repeatCustomers: report.customers.filter((row) => row.contracts > 1), concentrationTop5Percent: 0, receivableExposure: [], newCustomers: [] }
+  };
+};
+
 router.get('/sales/overview', requireBiAccess, async (req: WorkspaceRequest, res: Response) => {
   try {
-    const overview = await buildOverview(req);
+    const overview = await buildSharedBiOverview(req);
     res.json({ success: true, data: overview });
   } catch (error) {
     console.error('BI sales overview error:', error);
@@ -555,7 +604,7 @@ router.get('/sales/overview', requireBiAccess, async (req: WorkspaceRequest, res
 
 router.get('/sales/export/:table', requireBiAccess, async (req: WorkspaceRequest, res: Response) => {
   try {
-    const overview = await buildOverview(req);
+    const overview = await buildSharedBiOverview(req);
     const table = req.params.table;
     const rowsByTable: Record<string, any[]> = {
       sellers: overview.sellers,
@@ -579,7 +628,7 @@ router.get('/sales/export/:table', requireBiAccess, async (req: WorkspaceRequest
 
 router.get('/sales/summary.pdf', requireBiAccess, async (req: WorkspaceRequest, res: Response) => {
   try {
-    const overview = await buildOverview(req);
+    const overview = await buildSharedBiOverview(req);
     const filePath = await generatePdfFromHtml({
       htmlContent: renderBiReportHtml(overview),
       outputDir: path.join(process.cwd(), 'storage', 'bi-reports'),

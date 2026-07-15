@@ -209,6 +209,9 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         },
         totalAmount,
         currency: 'تومان',
+        potentialProjectId: typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search).get('potentialProjectId') || undefined
+          : undefined,
         _relations: {
           items: normalizedProducts.map((product) => ({
             productId: product.productId,

@@ -1,6 +1,7 @@
 ﻿import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
 import smsService from './smsService';
+import { recordContractCancellation } from './salesAttributionService';
 
 const prisma = new PrismaClient();
 
@@ -920,6 +921,7 @@ export class ContractConfirmationService {
     }
 
     await prisma.$transaction(async (tx) => {
+      await recordContractCancellation(tx, contract.id, params.requestedBy, new Date());
       await tx.salesContract.update({
         where: { id: contract.id },
         data: {

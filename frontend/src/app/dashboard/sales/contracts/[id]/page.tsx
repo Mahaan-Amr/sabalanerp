@@ -27,7 +27,8 @@ import {
   type ErpMetric,
   type ErpTone,
 } from '@/components/erp';
-import { dashboardAPI, resolveBackendAssetUrl, salesAPI } from '@/lib/api';
+import { dashboardAPI, resolveBackendAssetUrl, salesAPI, salesReportsAPI } from '@/lib/api';
+import { useWorkspace, WORKSPACES, WORKSPACE_PERMISSIONS } from '@/contexts/WorkspaceContext';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { formatDisplayNumber, formatPrice, formatSquareMeters, sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -96,6 +97,11 @@ interface Contract {
     lastName: string;
     username: string;
   };
+  responsibleSeller: { id: string; firstName: string; lastName: string; username: string };
+  responsibleSellerSource: string;
+  realizedSeller?: { id: string; firstName: string; lastName: string; username: string } | null;
+  realizedSellerSource?: string | null;
+  realizedAt?: string | null;
   approvedByUser?: {
     firstName: string;
     lastName: string;
@@ -148,11 +154,16 @@ const getCustomerName = (contract: Contract) =>
   );
 
 export default function ContractDetailPage() {
+  const { hasPermission } = useWorkspace();
   const params = useParams();
   const contractId = params.id as string;
 
   const [contract, setContract] = useState<Contract | null>(null);
   const [currentUser, setCurrentUser] = useState<PermissionUser | null>(null);
+  const [sellerOptions, setSellerOptions] = useState<any[]>([]);
+  const [nextSellerId, setNextSellerId] = useState('');
+  const [sellerChangeReason, setSellerChangeReason] = useState('');
+  const [changingSeller, setChangingSeller] = useState(false);
   const [contractPermissions, setContractPermissions] = useState({
     canView: false,
     canCreate: false,
@@ -166,11 +177,17 @@ export default function ContractDetailPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [printVariant, setPrintVariant] = useState<SalesContractPrintVariant>('original');
+  const canManageSellers = currentUser?.role === 'ADMIN' || hasPermission(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.ADMIN);
 
   useEffect(() => {
     loadContract();
     loadCurrentUser();
   }, [contractId]);
+
+  useEffect(() => {
+    if (!canManageSellers) return;
+    salesReportsAPI.getSellers().then((response) => setSellerOptions(response.data.data || [])).catch(() => undefined);
+  }, [canManageSellers]);
 
   const loadContract = async () => {
     try {
@@ -234,6 +251,36 @@ export default function ContractDetailPage() {
       setError(error.response?.data?.error || 'خطا در انجام عملیات');
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  const handleSellerChange = async () => {
+    if (!contract || !nextSellerId || !sellerChangeReason.trim()) return;
+    setChangingSeller(true);
+    try {
+      await salesAPI.reassignResponsibleSeller(contract.id, nextSellerId, sellerChangeReason.trim());
+      setNextSellerId('');
+      setSellerChangeReason('');
+      await loadContract();
+    } catch (reason: any) {
+      setError(reason?.response?.data?.error || 'خطا در تغییر مسئول فروش قرارداد');
+    } finally {
+      setChangingSeller(false);
+    }
+  };
+
+  const handleLegacyCreditAssignment = async () => {
+    if (!contract || !nextSellerId || !sellerChangeReason.trim()) return;
+    setChangingSeller(true);
+    try {
+      await salesAPI.assignLegacyRealizedCredit(contract.id, nextSellerId, sellerChangeReason.trim());
+      setNextSellerId('');
+      setSellerChangeReason('');
+      await loadContract();
+    } catch (reason: any) {
+      setError(reason?.response?.data?.error || 'خطا در انتساب فروش قطعی قدیمی');
+    } finally {
+      setChangingSeller(false);
     }
   };
 
@@ -675,10 +722,26 @@ export default function ContractDetailPage() {
               <div className="space-y-3">
                 <ErpFieldView label="بخش" value={sanitizeUiText(contract.department.namePersian, '—')} />
                 <ErpFieldView label="ایجاد کننده" value={`${contract.createdByUser.firstName} ${contract.createdByUser.lastName}`} />
+                <ErpFieldView label="مسئول فروش قرارداد" value={`${contract.responsibleSeller.firstName} ${contract.responsibleSeller.lastName}`.trim() || contract.responsibleSeller.username} hint={contract.responsibleSellerSource === 'MIGRATED_CREATOR' ? 'مقدار اولیه مهاجرتی' : 'مستقل از ایجادکننده قرارداد'} tone="primary" />
+                <ErpFieldView label="اعتبار فروش قطعی" value={contract.realizedSeller ? (`${contract.realizedSeller.firstName} ${contract.realizedSeller.lastName}`.trim() || contract.realizedSeller.username) : contract.realizedAt ? 'فروش قطعی تخصیص‌نیافته قدیمی' : 'هنوز فروش قطعی نشده'} hint={contract.realizedAt ? `تاریخ تحقق: ${PersianCalendar.formatForDisplay(contract.realizedAt)}` : undefined} />
                 {contract.approvedByUser && <ErpFieldView label="تایید کننده" value={`${contract.approvedByUser.firstName} ${contract.approvedByUser.lastName}`} />}
                 {contract.signedByUser && <ErpFieldView label="امضا کننده" value={`${contract.signedByUser.firstName} ${contract.signedByUser.lastName}`} />}
               </div>
             </ErpSection>
+
+            {canManageSellers && (
+              <ErpSection title="تغییر مسئول فروش قرارداد" description="تغییر مسئول فقط روی پایپ‌لاین فعلی اثر دارد و اعتبار فروش قطعی گذشته را بازنویسی نمی‌کند.">
+                <div className="space-y-3">
+                  <select value={nextSellerId} onChange={(event) => setNextSellerId(event.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900">
+                    <option value="">انتخاب فروشنده جدید</option>
+                    {sellerOptions.map((seller) => <option key={seller.id} value={seller.id}>{`${seller.firstName || ''} ${seller.lastName || ''}`.trim() || seller.username}</option>)}
+                  </select>
+                  <textarea value={sellerChangeReason} onChange={(event) => setSellerChangeReason(event.target.value)} placeholder="دلیل تغییر مسئول (الزامی)" className="min-h-20 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900" />
+                  <button disabled={changingSeller || !nextSellerId || !sellerChangeReason.trim()} onClick={handleSellerChange} className="w-full rounded-lg bg-teal-800 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">{changingSeller ? 'در حال ثبت...' : 'ثبت تغییر مسئول با سابقه حسابرسی'}</button>
+                  {contract.realizedAt && !contract.realizedSeller && <button disabled={changingSeller || !nextSellerId || !sellerChangeReason.trim()} onClick={handleLegacyCreditAssignment} className="w-full rounded-lg border border-amber-500 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900 disabled:opacity-50">انتساب اعتبار فروش قطعی قدیمی با سابقه حسابرسی</button>}
+                </div>
+              </ErpSection>
+            )}
 
             <ErpSection title="تاریخچه">
               <div className="space-y-3">

@@ -23,6 +23,8 @@ import {
   salesContractPrintableInclude
 } from '../utils/salesContractPdf';
 import type { ContractPrintVariant } from '../utils/printTemplate';
+import { assignLegacyRealizedCredit, reassignContractSeller, snapshotRealizedSale } from '../services/salesAttributionService';
+import salesReportsRouter from './salesReports';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -405,6 +407,12 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
             lastName: true,
             username: true,
           }
+        },
+        responsibleSeller: {
+          select: { id: true, firstName: true, lastName: true, username: true }
+        },
+        realizedSeller: {
+          select: { id: true, firstName: true, lastName: true, username: true }
         }
       },
       orderBy: {
@@ -688,7 +696,8 @@ router.post('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
       totalAmount,
       currency,
       notes,
-      contractData
+      contractData,
+      potentialProjectId
     } = req.body;
 
     // Check if user has access to this department
@@ -710,7 +719,8 @@ router.post('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
       totalAmount,
       currency,
       notes,
-      contractData
+      contractData,
+      potentialProjectId
     }, req.user.id);
 
     res.status(201).json({
@@ -720,11 +730,14 @@ router.post('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
     return;
   } catch (error: any) {
     console.error('Create sales contract error:', error);
-    if (error.message === 'User not found') {
+    if (error.message === 'User not found' || error.message === 'CRM potential project not found') {
       return res.status(404).json({
         success: false,
         error: error.message
       });
+    }
+    if (error.message === 'CRM potential project customer does not match contract customer' || error.message === 'CRM potential project is already linked to a sales contract') {
+      return res.status(400).json({ success: false, error: error.message });
     }
     res.status(500).json({
       success: false,
@@ -860,21 +873,30 @@ router.put('/contracts/:id/print', protect, requireFeatureAccess(FEATURES.SALES_
 
     const note: string | undefined = req.body?.note;
 
-    const updatedContract = await prisma.salesContract.update({
-      where: { id: req.params.id },
-      data: {
-        status: contract.status === 'SIGNED' ? 'PRINTED' : contract.status,
-        printedAt: new Date(),
-        signatures: {
-          ...(contract.signatures as any || {}),
-          print: {
-            by: req.user.id,
-            at: new Date().toISOString(),
-            note: note || null,
-            pdfPath
+    await prisma.$transaction(async (tx) => {
+      await tx.salesContract.update({
+        where: { id: req.params.id },
+        data: {
+          status: contract.status === 'SIGNED' ? 'PRINTED' : contract.status,
+          printedAt: new Date(),
+          signatures: {
+            ...(contract.signatures as any || {}),
+            print: {
+              by: req.user.id,
+              at: new Date().toISOString(),
+              note: note || null,
+              pdfPath
+            }
           }
         }
-      },
+      });
+      if (contract.status === 'SIGNED' || contract.status === 'PRINTED') {
+        await snapshotRealizedSale(tx, contract.id, req.user.id, contract.signedAt || new Date());
+      }
+    });
+
+    const updatedContract = await prisma.salesContract.findUniqueOrThrow({
+      where: { id: req.params.id },
       include: {
         customer: {
           include: {
@@ -993,21 +1015,29 @@ router.put('/contracts/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_C
 
     const note: string | undefined = req.body?.note;
 
-    const updatedContract = await prisma.salesContract.update({
-      where: { id: req.params.id },
-      data: {
-        status: 'SIGNED',
-        signedBy: req.user.id,
-        signedAt: new Date(),
-        signatures: {
-          ...(contract.signatures as any || {}),
-          sign: {
-            by: req.user.id,
-            at: new Date().toISOString(),
-            note: note || null
+    const signedAt = new Date();
+    await prisma.$transaction(async (tx) => {
+      await tx.salesContract.update({
+        where: { id: req.params.id },
+        data: {
+          status: 'SIGNED',
+          signedBy: req.user.id,
+          signedAt,
+          signatures: {
+            ...(contract.signatures as any || {}),
+            sign: {
+              by: req.user.id,
+              at: signedAt.toISOString(),
+              note: note || null
+            }
           }
         }
-      },
+      });
+      await snapshotRealizedSale(tx, contract.id, req.user.id, signedAt);
+    });
+
+    const updatedContract = await prisma.salesContract.findUniqueOrThrow({
+      where: { id: req.params.id },
       include: {
         customer: {
           include: {
@@ -1057,6 +1087,66 @@ router.put('/contracts/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_C
     return;
   }
 });
+
+router.put(
+  '/contracts/:id/responsible-seller',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.ADMIN),
+  [
+    body('sellerId').notEmpty().withMessage('فروشنده مسئول جدید الزامی است'),
+    body('reason').trim().notEmpty().withMessage('دلیل تغییر مسئول الزامی است')
+  ],
+  async (req: any, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    try {
+      const contract = await prisma.salesContract.findUnique({ where: { id: req.params.id }, select: { departmentId: true } });
+      if (!contract) return res.status(404).json({ success: false, error: 'Contract not found' });
+      if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
+        return res.status(403).json({ success: false, error: 'Access denied' });
+      }
+      const updated = await reassignContractSeller(prisma, {
+        contractId: req.params.id,
+        nextSellerId: req.body.sellerId,
+        actorId: req.user.id,
+        reason: req.body.reason
+      });
+      return res.json({ success: true, data: updated });
+    } catch (error: any) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+  }
+);
+
+router.put(
+  '/contracts/:id/legacy-realized-credit',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.ADMIN),
+  [
+    body('sellerId').notEmpty().withMessage('فروشنده فروش قطعی الزامی است'),
+    body('reason').trim().notEmpty().withMessage('دلیل انتساب تاریخی الزامی است')
+  ],
+  async (req: any, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    try {
+      const contract = await prisma.salesContract.findUnique({ where: { id: req.params.id }, select: { departmentId: true } });
+      if (!contract) return res.status(404).json({ success: false, error: 'Contract not found' });
+      if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
+        return res.status(403).json({ success: false, error: 'Access denied' });
+      }
+      const updated = await assignLegacyRealizedCredit(prisma, {
+        contractId: req.params.id,
+        sellerId: req.body.sellerId,
+        actorId: req.user.id,
+        reason: req.body.reason
+      });
+      return res.json({ success: true, data: updated });
+    } catch (error: any) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+  }
+);
 
 // ==================== SALES DASHBOARD ====================
 
@@ -1720,9 +1810,6 @@ router.post('/contracts/:contractId/items', protect, requireWorkspaceAccess(WORK
   }
 });
 
+router.use('/reports', salesReportsRouter);
+
 export default router;
-
-
-
-
-

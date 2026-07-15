@@ -512,9 +512,41 @@ _Avoid_: wording like `قرارداد قبلا تایید شده است` when th
 The comprehensive reporting surface inside the Sales workspace for analyzing sales contracts, pipeline, customers, products, payments, delivery commitments, and seller performance according to the viewer's permissions. Shared sales reporting is available to authorized sales users, while sensitive cross-seller and company-wide analysis is limited to managers and admins.
 _Avoid_: treating it as a placeholder dashboard, maintaining separate reporting truths for Sales and BI, or exposing manager-only comparisons to ordinary sales users
 
+**بخش‌های گزارش فروش**:
+One comprehensive role-gated reporting page with persistent shared filters across نمای کلی، قراردادها، مشتریان و پروژه‌ها، محصولات و خدمات، پرداخت و وصول، تحویل و بارگیری، عملکرد فروشندگان, and خروجی گزارش. عملکرد فروشندگان is visible only within authorized Sales management scope, while every other section still obeys the viewer's contract-level reporting scope.
+_Avoid_: separate pages that silently use different filters, exposing an inaccessible section through exports, or letting a tab change the permitted data scope
+
+**سازنده خروجی گزارش فروش**:
+A presentation-only builder for PDF and print output using the shared branded report layout. Users may select and reorder permitted sections, charts, tables, and columns; set title, subtitle or note, orientation, and page size; and save personal presets. Sales admins may publish department presets and global admins may publish company presets, but loading any preset re-applies the viewer's current data permissions at generation time.
+_Avoid_: using contract-document templates for analytics, allowing a preset to carry broader data access, editing calculated values in the builder, or storing exported figures as user-entered truth
+
+**لحظه داده گزارش**:
+The explicit data time represented by a report. Interactive Sales and BI screens query current authoritative data, show their latest refresh time, and allow manual refresh; starting PDF, Excel, or print output freezes one consistent authorized snapshot so its totals, charts, and detail tables cannot change independently during generation.
+_Avoid_: presenting cached data as current without a timestamp, mixing results from different refreshes in one export, or allowing a long-running export to combine records from different moments
+
+**کامل‌بودن داده گزارش**:
+The explicit distinction between confirmed zero, an unrecorded unknown value, a source with no usable record, and data hidden by permission. Partially connected cross-workspace metrics show their coverage, such as how many authorized contracts have Accounting receipt data, instead of silently treating missing records as zero.
+_Avoid_: inventing zero from missing data, revealing hidden values through summaries, treating unavailable source data as a negative business outcome, or presenting a partial metric without its coverage
+
+**نمودار فارسی گزارش‌ها**:
+An RTL-aware chart shared by Sales Reports and BI whose Persian title, legend, tooltip, labels, numbers, currency, and Jalali dates remain readable. Chronological charts place the oldest period on the right and the newest on the left, with comparison series aligned in the same direction. Long Persian customer, project, product, and seller labels must wrap, abbreviate with an accessible full label, or use a horizontal layout instead of clipping or overlapping.
+_Avoid_: applying RTL only to the surrounding card, leaving BI charts with LTR internals, reversing time direction inconsistently between charts, Latin-only digits or Gregorian labels without context, color-only status meaning, unreadable rotated Persian text, or legends and tooltips detached from their data
+
+**جزئیات تعاملی نمودار گزارش**:
+The permission-preserving drill-down opened from a meaningful chart bar, point, status, customer, product, or seller. It carries the report's active filters plus the visibly selected datum into a detailed table or drawer, explains the resulting scope, and offers links only to source records the viewer may already access.
+_Avoid_: a decorative chart with no path to evidence, a hidden filter that users cannot understand or clear, opening unfiltered records, or using chart interaction to bypass contract-level authorization
+
+**مرز گزارش فروش و هوش تجاری**:
+Sales Reports is the comprehensive operational and performance report for the Sales workspace. BI remains an authorized cross-workspace analysis surface and reuses the same RTL chart and formatting foundation instead of maintaining a visually inconsistent reporting implementation or becoming a second source of Sales metric truth.
+_Avoid_: duplicating Sales calculations independently in BI, redesigning only Sales charts while leaving BI effectively LTR, or turning the Sales report into a company-wide BI bypass
+
 **دامنه داده گزارش فروش**:
 An ordinary Sales user sees reporting derived only from contracts they created, while Sales managers and admins may analyze other sellers within their permitted management scope and global admins may analyze the whole company.
 _Avoid_: letting an ordinary Sales user see other sellers' contracts, customer/product results derived from those contracts, seller comparisons, or company-wide totals
+
+**دسترسی مدیریتی گزارش فروش**:
+Restricted Sales reporting is granted by Sales workspace `admin` permission, with global admins receiving company-wide access. A manager title or access to another workspace does not by itself grant seller comparisons or broader Sales data.
+_Avoid_: hard-coding sensitive report access only to a generic manager role, or allowing management authority from an unrelated workspace to expand Sales visibility
 
 **BI فروش**:
 A native business-intelligence workspace for analyzing sales-contract performance from sales-owned data such as contracts, payments, customers, products, delivery status, discounts, and seller performance.
@@ -527,6 +559,42 @@ _Avoid_: counting draft, pending, approved, cancelled, or expired contracts as r
 **وضعیت قرارداد در گزارش فروش**:
 The actual lifecycle status of a sales contract, shown with a Persian label and a short explanation of what has happened and what is expected next. Reporting buckets such as pipeline, realized, and lost group contracts for analysis but do not replace or hide their real statuses.
 _Avoid_: showing only a vague reporting bucket, or presenting an aggregated category as though it were the contract's exact workflow status
+
+**بازه زمانی گزارش فروش**:
+Sales reporting defaults to the current Jalali month and supports today, yesterday, the last seven days, current Jalali quarter and year, the last twelve months, and a custom Jalali range, with comparison to the immediately preceding equal-length period. Realized, pipeline, and lost sales enter a period using their respective signing, creation, and cancellation or expiry business dates.
+_Avoid_: mixing lifecycle dates inside one metric, using rolling timestamps where a complete calendar period is intended, or comparing unequal periods without saying so
+
+**حقیقت‌های مرتبط در گزارش فروش**:
+Sales Reports may place contract value, payment promises, accounting receipts, logistics delivery, and Security-recorded exit together, but each fact retains its owning workspace and is labeled as planned, confirmed, loaded, delivered, or exited. Sales owns contract value, discount, payment plan, and promised delivery; Accounting owns actual receipts and receivables; Logistics owns actual loading and delivery; Security owns physical exit time.
+_Avoid_: treating a payment plan as received money, a promised delivery as physical delivery, or a finalized loading as proof that the vehicle exited
+
+**گزارش عملکرد فروشنده**:
+A permission-scoped Sales report for one seller, with ordinary Sales users fixed to themselves, Sales workspace admins able to select sellers in their management scope, and global admins able to select departments and sellers company-wide.
+_Avoid_: giving ordinary Sales users a selector for other sellers, or calculating seller performance from contracts outside the viewer's permitted scope
+
+**مسئول فروش قرارداد**:
+The seller commercially responsible for a Sales Contract, distinct from the user who entered it. A contract converted from a potential project defaults to that project's responsible seller; otherwise it defaults to its creator, and manager-authorized reassignment requires an audit reason.
+_Avoid_: treating technical data entry as sales ownership, silently changing ownership, or losing the CRM project owner during conversion
+
+**اعتبار فروش قطعی فروشنده**:
+The seller who receives realized-sales performance credit, snapshotted from the contract's responsible seller when the contract first becomes `SIGNED` or `PRINTED`. Pipeline follows current responsibility, but later reassignment does not rewrite historical realized performance.
+_Avoid_: recalculating historical seller credit from current ownership, or crediting the creator when another seller owned the commercial work
+
+**انتساب قدیمی فروشنده قرارداد**:
+The migration state for Sales Contracts created before explicit contract responsibility and realized-credit snapshots existed. A CRM-linked contract uses the seller at conversion only when CRM history can establish it reliably; otherwise its creator becomes the current operational owner and is labeled as a migrated initial value. Unverifiable realized credit remains in فروش قطعی تخصیص‌نیافته قدیمی until a Sales admin assigns it with an audit reason, while company and department totals still include its value.
+_Avoid_: treating a mutable current CRM owner as historical proof, silently crediting the creator for legacy realized sales, excluding unassigned legacy sales from aggregate totals, or resolving historical attribution without an audit reason
+
+**شاخص‌های عملکرد فروشنده**:
+Seller performance is a transparent set of contract creation, pipeline, realized sales, realization time, lost outcomes, customer mix, product/service mix, and period-comparison metrics rather than one composite score. Seller discount behavior and cross-seller comparison are restricted to manager/admin reporting, while accounting and delivery outcomes remain contextual unless Sales responsibility is defined separately.
+_Avoid_: an opaque performance score, penalizing sellers for downstream work they do not own, or exposing sensitive comparisons to ordinary Sales users
+
+**نرخ موفقیت قراردادهای تعیین‌تکلیف‌شده**:
+The share of contracts reaching `SIGNED` or `PRINTED` among contracts that reached either a realized outcome or `CANCELLED`/`EXPIRED` during the selected period. Draft and active pipeline contracts are excluded, and CRM potential-project conversion remains a separately labeled metric.
+_Avoid_: calling open pipeline a failure, dividing by every newly created contract, or mixing CRM opportunity conversion with Sales contract outcomes
+
+**تعدیل فروش قطعی**:
+A dated positive or negative change to an already realized Sales Contract that preserves the original realized amount and date while recording the correction or cancellation delta in the period when it becomes effective. Gross realized sales and dated adjustments are shown separately and combine into net realized sales without silently rewriting closed periods.
+_Avoid_: replacing the original amount in historical reports, counting both the current mutable contract total and its adjustment, or inferring adjustments from the current amount without an authoritative change record
 
 **پایپ‌لاین فروش در BI فروش**:
 The sales value still in progress in BI, limited to sales contracts whose status is `PENDING_APPROVAL` or `APPROVED`.

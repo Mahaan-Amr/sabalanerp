@@ -207,6 +207,12 @@ export const salesAPI = {
   
   printContract: (id: string, note?: string) => api.put(`/sales/contracts/${id}/print`, { note }),
 
+  reassignResponsibleSeller: (id: string, sellerId: string, reason: string) =>
+    api.put(`/sales/contracts/${id}/responsible-seller`, { sellerId, reason }),
+
+  assignLegacyRealizedCredit: (id: string, sellerId: string, reason: string) =>
+    api.put(`/sales/contracts/${id}/legacy-realized-credit`, { sellerId, reason }),
+
   getContractPdf: (contractId: string, params?: { fresh?: boolean; variant?: 'original' | 'summary' }) =>
     api.get(`/sales/contracts/${contractId}/pdf`, { params }),
 
@@ -536,6 +542,18 @@ export const biAPI = {
     api.get(`/bi/sales/export/${table}`, { params, responseType: 'blob' }),
   downloadSalesSummaryPdf: (params?: any) =>
     api.get('/bi/sales/summary.pdf', { params, responseType: 'blob' }),
+};
+
+export const salesReportsAPI = {
+  getOverview: (params?: any) => api.get('/sales/reports/overview', { params }),
+  getSellers: (params?: any) => api.get('/sales/reports/sellers', { params }),
+  getPresets: () => api.get('/sales/reports/presets'),
+  createPreset: (data: any) => api.post('/sales/reports/presets', data),
+  deletePreset: (id: string) => api.delete(`/sales/reports/presets/${id}`),
+  downloadPdf: (filters: any, configuration: any) =>
+    api.post('/sales/reports/export.pdf', { filters, configuration }, { responseType: 'blob' }),
+  downloadExcel: (filters: any, configuration: any) =>
+    api.post('/sales/reports/export.xlsx', { filters, configuration }, { responseType: 'blob' })
 };
 
 export const logisticsAPI = {

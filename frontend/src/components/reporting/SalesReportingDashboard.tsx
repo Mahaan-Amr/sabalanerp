@@ -10,7 +10,7 @@ import {
 import PersianCalendarPicker from '@/components/PersianCalendar';
 import { PersianCalendar } from '@/lib/persian-calendar';
 import { biAPI, departmentsAPI, salesReportsAPI } from '@/lib/api';
-import { RtlHorizontalBarChart, RtlTrendChart } from './RtlCharts';
+import { resolveChartLabel, RtlHorizontalBarChart, RtlTrendChart } from './RtlCharts';
 
 type Mode = 'sales' | 'bi';
 type Report = any;
@@ -208,7 +208,7 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
           <Metric label="مشتری قطعی" value={count(report.cards.customerCount)} hint="مشتریان یکتا در فروش قطعی" tone="blue" />
           <Metric label="نرخ موفقیت قراردادهای تعیین‌تکلیف‌شده" value={report.cards.successRate == null ? 'نامشخص' : `${count(report.cards.successRate)}٪`} hint="پیش‌نویس و پایپ‌لاین باز حذف شده‌اند" tone="amber" />
         </div><Panel title="روند فروش" description="قدیمی‌ترین تاریخ در سمت راست و جدیدترین تاریخ در سمت چپ قرار دارد. برای مشاهده شواهد روی نمودار کلیک کنید."><RtlTrendChart data={report.trend} onSelect={(row) => openRows(`جزئیات ${row.label}`, `فیلتر نمودار: ${row.label} در دامنه ${report.scope.label}`, contractsForTrendPoint(report.contracts, row))} /></Panel>
-        <Panel title="وضعیت واقعی قراردادها" description="هر وضعیت همراه با معنای عملیاتی خودش نمایش داده می‌شود."><RtlHorizontalBarChart data={report.statusDistribution.map((row: any) => ({ ...row, label: `${row.label} · ${count(row.count)}` }))} onSelect={(row) => openRows(row.label, row.description, report.contracts.filter((contract: any) => contract.status === row.status))} /></Panel></div>}
+        <Panel title="وضعیت واقعی قراردادها" description="هر وضعیت همراه با معنای عملیاتی خودش نمایش داده می‌شود."><RtlHorizontalBarChart data={report.statusDistribution.map((row: any) => ({ ...row, label: `${resolveChartLabel(row)} · ${count(row.count)}` }))} onSelect={(row) => openRows(resolveChartLabel(row), row.description, report.contracts.filter((contract: any) => contract.status === row.status))} /></Panel></div>}
 
         {activeTab === 'contracts' && <Panel title="قراردادها" description="برای بازکردن جزئیات و منبع روی یک ردیف کلیک کنید."><Table rows={report.contracts} onRow={(row) => openRows(`قرارداد ${row.contractNumber}`, row.statusDescription, [row])} columns={[
           { key: 'contractNumber', label: 'شماره قرارداد' }, { key: 'customer', label: 'مشتری' }, { key: 'project', label: 'پروژه' },

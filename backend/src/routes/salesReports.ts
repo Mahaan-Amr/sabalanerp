@@ -7,7 +7,7 @@ import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
 import { buildSalesReport, getSalesReportSellers, SalesReportAccess } from '../services/salesReportingService';
 import { generatePdfFromHtml } from '../utils/pdf';
-import { renderReportPdfHeaderTemplate } from '../utils/printTemplate';
+import { renderReportPdfHeaderTemplate, renderYekanFontFaces } from '../utils/printTemplate';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -60,11 +60,12 @@ const trendSvg = (rows: any[]) => {
   const point = (value: number, index: number) => `${45 + index * step},${height - 45 - (Math.max(value, 0) / max) * (height - 85)}`;
   const netPoints = rows.map((row, index) => point(row.net, index)).join(' ');
   const pipelinePoints = rows.map((row, index) => point(row.pipeline, index)).join(' ');
+  const labelStep = Math.max(1, Math.ceil(rows.length / 8));
   return `<div class="chart"><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="روند فروش از قدیمی در سمت راست تا جدید در سمت چپ">
     <line x1="40" y1="${height - 40}" x2="${width - 20}" y2="${height - 40}" stroke="#94a3b8" />
     <polyline points="${netPoints}" fill="none" stroke="#0f766e" stroke-width="4" />
     <polyline points="${pipelinePoints}" fill="none" stroke="#f59e0b" stroke-width="3" stroke-dasharray="7 5" />
-    ${rows.map((row, index) => `<text x="${45 + index * step}" y="${height - 17}" text-anchor="middle" font-size="10">${escape(row.label)}</text>`).join('')}
+    ${rows.map((row, index) => (index === 0 || index === rows.length - 1 || index % labelStep === 0) ? `<text x="${45 + index * step}" y="${height - 17}" text-anchor="middle" font-size="10">${escape(row.label)}</text>` : '').join('')}
   </svg><div class="legend"><span><i class="teal"></i>فروش خالص</span><span><i class="amber"></i>پایپ‌لاین</span></div></div>`;
 };
 
@@ -114,6 +115,7 @@ const renderReport = (report: any, config: ReturnType<typeof safeConfig>) => {
     ))}</section>` : ''
   };
   return `<style>
+    ${renderYekanFontFaces()}
     *{box-sizing:border-box}body{margin:0;color:#172033;font-family:'Yekan Bakh',Tahoma,Arial,sans-serif;direction:rtl}.sheet{padding:3mm 6mm}.title{border-bottom:2px solid #0f766e;padding-bottom:10px}.title h1{margin:0;color:#075252;font-size:22px}.title p{margin:5px 0 0;color:#64748b}.note{margin:10px 0;padding:8px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:7px;white-space:pre-wrap}section{break-inside:avoid;margin-top:16px}h2{font-size:15px;color:#075252;margin:0 0 8px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.card{border:1px solid #d7e1e7;border-radius:8px;padding:8px;background:#fbfefe}.card span{display:block;font-size:9px;color:#64748b}.card strong{display:block;margin-top:4px;font-size:13px;color:#0f3f3f}table{width:100%;border-collapse:collapse;margin-top:6px;page-break-inside:auto}tr{page-break-inside:avoid}th,td{border:1px solid #d7dee5;padding:6px;text-align:right;font-size:8.5px;vertical-align:top}th{background:#eef7f6;color:#075252}.empty{text-align:center;color:#64748b}.coverage{font-size:9px;background:#fff7dd;border:1px solid #f5d87a;padding:7px;border-radius:6px}.chart{direction:rtl;margin-top:8px;border:1px solid #e2e8f0;border-radius:8px;padding:5px}.chart svg{width:100%;height:190px}.legend{display:flex;gap:16px;justify-content:center;font-size:9px}.legend i{display:inline-block;width:12px;height:3px;margin-left:4px}.teal{background:#0f766e}.amber{background:#f59e0b}
   </style><div class="sheet"><div class="title"><h1>${escape(config.title)}</h1>${config.subtitle ? `<p>${escape(config.subtitle)}</p>` : ''}<p>${escape(report.period.label)} · ${escape(report.scope.label)} · آخرین به‌روزرسانی ${escape(report.generatedAtLabel)}</p></div>${config.note ? `<div class="note">${escape(config.note)}</div>` : ''}${config.sections.map((key) => sections[key] || '').join('')}</div>`;
 };

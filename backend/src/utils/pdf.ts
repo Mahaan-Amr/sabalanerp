@@ -51,6 +51,7 @@ export async function generatePdfFromHtml(options: GeneratePdfOptions): Promise<
     </head><body>${options.htmlContent}</body></html>`;
 
     await page.setContent(htmlWithRtl, { waitUntil: 'networkidle0' });
+    await page.evaluate('document.fonts.ready');
     await page.emulateMediaType('print');
 
     const width = `${options.widthMm ?? (options.landscape ? 297 : 210)}mm`;

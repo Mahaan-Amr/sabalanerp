@@ -6,7 +6,7 @@ import { protect, authorize } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
 import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
-import { renderReportPdfHeaderTemplate } from '../utils/printTemplate';
+import { renderReportPdfHeaderTemplate, renderYekanFontFaces } from '../utils/printTemplate';
 import { buildSalesReport } from '../services/salesReportingService';
 
 const router = express.Router();
@@ -501,6 +501,7 @@ const renderBiReportHtml = (overview: any) => {
 
   return `
     <style>
+      ${renderYekanFontFaces()}
       body { margin: 0; color: #1f2937; font-family: 'Yekan Bakh', Tahoma, Arial, sans-serif; }
       .sheet { padding: 8mm; padding-top: 2mm; direction: rtl; }
       h1 { margin: 0 0 10px; font-size: 18px; color: #074747; }
@@ -544,14 +545,16 @@ const requireBiAccess = [
   requireFeatureAccess(FEATURES.BI_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW)
 ];
 
-const buildSharedBiOverview = async (req: WorkspaceRequest) => {
-  const report = await buildSalesReport({
+const buildInteractiveBiReport = async (req: WorkspaceRequest) => buildSalesReport({
     userId: req.user!.id,
     role: req.user!.role,
     departmentId: req.user!.departmentId,
     canManage: true,
     canCompany: req.user!.role === 'ADMIN'
   }, req.query);
+
+const buildSharedBiOverview = async (req: WorkspaceRequest) => {
+  const report = await buildInteractiveBiReport(req);
   return {
     ...report,
     cards: {
@@ -594,7 +597,7 @@ const buildSharedBiOverview = async (req: WorkspaceRequest) => {
 
 router.get('/sales/overview', requireBiAccess, async (req: WorkspaceRequest, res: Response) => {
   try {
-    const overview = await buildSharedBiOverview(req);
+    const overview = await buildInteractiveBiReport(req);
     res.json({ success: true, data: overview });
   } catch (error) {
     console.error('BI sales overview error:', error);

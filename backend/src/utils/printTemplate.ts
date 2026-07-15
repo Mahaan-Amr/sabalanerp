@@ -268,7 +268,7 @@ const yekanRegularUrl = fileToDataUri(publicAssetPath('yekan-bakh', 'YekanBakh-R
 const yekanSemiBoldUrl = fileToDataUri(publicAssetPath('yekan-bakh', 'YekanBakh-SemiBold.woff2'), 'font/woff2');
 const yekanBoldUrl = fileToDataUri(publicAssetPath('yekan-bakh', 'YekanBakh-Bold.woff2'), 'font/woff2');
 
-const renderYekanFontFaces = (): string => `
+export const renderYekanFontFaces = (): string => `
   @font-face {
     font-family: 'Yekan Bakh';
     src: url('${escapeHtml(yekanRegularUrl, { localizeDigits: false })}') format('woff2');

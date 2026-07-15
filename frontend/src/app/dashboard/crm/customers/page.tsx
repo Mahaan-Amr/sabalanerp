@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { FaBan, FaBuilding, FaCheckCircle, FaEdit, FaEnvelope, FaExclamationTriangle, FaEye, FaLock, FaMapMarkerAlt, FaPhone, FaPlus, FaUser, FaUsers } from 'react-icons/fa';
-import { ErpBadge, ErpButton, ErpEmptyState, ErpFieldView, ErpListPage, ErpLoading, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpEmptyState, ErpFieldView, ErpListPage, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
 import { crmAPI, dashboardAPI } from '@/lib/api';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
@@ -303,10 +303,6 @@ export default function CustomersPage() {
     },
   ];
 
-  if (loading) {
-    return <ErpLoading />;
-  }
-
   if (error) {
     return (
       <ErpEmptyState
@@ -375,6 +371,7 @@ export default function CustomersPage() {
           ],
         },
       ]}
+      isLoading={loading}
       rows={customers}
       rowKey={(customer) => customer.id}
       columns={columns}

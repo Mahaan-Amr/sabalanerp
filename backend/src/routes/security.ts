@@ -5,7 +5,7 @@ import multer from 'multer';
 import * as XLSX from 'xlsx';
 import { body, validationResult } from 'express-validator';
 import { AttendanceStatus, LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityPatrolStatus, SecurityShiftCoverageStatus, SecurityShiftLogStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
-import { protect, authorize, AuthRequest } from '../middleware/auth';
+import { protect, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
@@ -2206,8 +2206,8 @@ router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SECURI
 
 // @desc    Get security personnel
 // @route   GET /api/security/personnel
-// @access  Private/Admin
-router.get('/personnel', protect, authorize('ADMIN'), requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_PERSONNEL_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
+// @access  Private/Security workspace admin
+router.get('/personnel', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_PERSONNEL_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
     const includeInactive = req.query.includeInactive !== 'false';
     const personnel = await prisma.securityPersonnel.findMany({
@@ -2251,8 +2251,8 @@ router.get('/personnel', protect, authorize('ADMIN'), requireWorkspaceAccess(WOR
 
 // @desc    Get active users eligible for security personnel assignment
 // @route   GET /api/security/personnel/eligible-users
-// @access  Private/Admin
-router.get('/personnel/eligible-users', protect, authorize('ADMIN'), securityAdmin, async (_req: AuthRequest, res: Response) => {
+// @access  Private/Security workspace admin
+router.get('/personnel/eligible-users', protect, securityAdmin, async (_req: AuthRequest, res: Response) => {
   try {
     const now = new Date();
     const rolePermissions = await prisma.roleWorkspacePermission.findMany({
@@ -2290,8 +2290,8 @@ router.get('/personnel/eligible-users', protect, authorize('ADMIN'), securityAdm
 
 // @desc    Assign security personnel
 // @route   POST /api/security/personnel
-// @access  Private/Admin
-router.post('/personnel', protect, authorize('ADMIN'), requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_PERSONNEL_ASSIGN, FEATURE_PERMISSIONS.EDIT), [
+// @access  Private/Security workspace admin
+router.post('/personnel', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_PERSONNEL_ASSIGN, FEATURE_PERMISSIONS.EDIT), [
   body('userId').notEmpty().withMessage('User ID is required'),
   body('shiftId').notEmpty().withMessage('Shift ID is required'),
   body('position').notEmpty().withMessage('Position is required'),
@@ -2372,8 +2372,8 @@ router.post('/personnel', protect, authorize('ADMIN'), requireWorkspaceAccess(WO
 
 // @desc    Activate/deactivate security personnel
 // @route   PUT /api/security/personnel/:id/status
-// @access  Private/Admin
-router.put('/personnel/:id/status', protect, authorize('ADMIN'), securityAdmin, [
+// @access  Private/Security workspace admin
+router.put('/personnel/:id/status', protect, securityAdmin, [
   body('isActive').isBoolean().withMessage('isActive must be boolean')
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -2877,7 +2877,7 @@ router.post('/exceptions/request', protect, requireWorkspaceAccess(WORKSPACES.SE
 // @desc    Get exception requests (for managers/approvers)
 // @route   GET /api/security/exceptions/requests
 // @access  Private/Managers
-router.get('/exceptions/requests', protect, authorize('ADMIN'), requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
+router.get('/exceptions/requests', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
     const { status, type, page = 1, limit = 10 } = req.query;
     
@@ -2945,7 +2945,7 @@ router.get('/exceptions/requests', protect, authorize('ADMIN'), requireWorkspace
 // @desc    Approve exception request
 // @route   PUT /api/security/exceptions/:id/approve
 // @access  Private/Managers
-router.put('/exceptions/:id/approve', protect, authorize('ADMIN'), requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_APPROVE, FEATURE_PERMISSIONS.EDIT), [
+router.put('/exceptions/:id/approve', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_APPROVE, FEATURE_PERMISSIONS.EDIT), [
   body('notes').optional().isString().withMessage('Notes must be a string')
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -3018,7 +3018,7 @@ router.put('/exceptions/:id/approve', protect, authorize('ADMIN'), requireWorksp
 // @desc    Reject exception request
 // @route   PUT /api/security/exceptions/:id/reject
 // @access  Private/Managers
-router.put('/exceptions/:id/reject', protect, authorize('ADMIN'), requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_REJECT, FEATURE_PERMISSIONS.EDIT), [
+router.put('/exceptions/:id/reject', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_REJECT, FEATURE_PERMISSIONS.EDIT), [
   body('rejectionReason').notEmpty().withMessage('Rejection reason is required')
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -3242,7 +3242,7 @@ router.get('/missions', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WOR
 // @desc    Approve mission assignment
 // @route   PUT /api/security/missions/:id/approve
 // @access  Private/Managers
-router.put('/missions/:id/approve', protect, authorize('ADMIN'), requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_MISSIONS_APPROVE, FEATURE_PERMISSIONS.EDIT), async (req: AuthRequest, res: Response) => {
+router.put('/missions/:id/approve', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_MISSIONS_APPROVE, FEATURE_PERMISSIONS.EDIT), async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
 

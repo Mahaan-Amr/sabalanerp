@@ -33,6 +33,10 @@ import ExceptionRequestForm from '@/components/ExceptionRequestForm';
 import MissionAssignmentForm from '@/components/MissionAssignmentForm';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { securityAPI } from '@/lib/api';
+import {
+  getSecurityDashboardDescription,
+  type SecurityPersonnelSummary
+} from './securityDashboardViewModel';
 import { notifySecurity } from '@/components/SecurityNoticeHost';
 import PersianCalendar from '@/lib/persian-calendar';
 
@@ -45,11 +49,7 @@ interface SecurityStats {
     endTime: string;
     duration: number;
   };
-  securityPersonnel: {
-    name: string;
-    position: string;
-    department: string;
-  };
+  securityPersonnel: SecurityPersonnelSummary | null;
   todayStats: {
     totalEmployees: number;
     present: number;
@@ -324,7 +324,7 @@ export default function SecurityDashboardPage() {
     <ErpPage
       eyebrow="Security"
       title="حراست"
-      description={`${stats?.securityPersonnel.name || 'کاربر حراست'} - ${stats?.securityPersonnel.position || 'اپراتور شیفت'}`}
+      description={getSecurityDashboardDescription(stats?.securityPersonnel ?? null)}
       actions={[
         { label: 'درخواست استثنا', onClick: () => setShowExceptionForm(true), icon: FaExclamationTriangle, tone: 'warning' },
         { label: 'ماموریت جدید', onClick: () => setShowMissionForm(true), icon: FaPlane, tone: 'info' },

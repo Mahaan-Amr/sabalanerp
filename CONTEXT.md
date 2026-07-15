@@ -508,6 +508,14 @@ _Avoid_: passing through malformed or partially converted date strings
 The customer-facing confirmation state shown after OTP verification. Once verified, it should read as a completed state such as `تایید شده در تاریخ ...`, not as a duplicate-action warning.
 _Avoid_: wording like `قرارداد قبلا تایید شده است` when the customer has successfully reached the final confirmation state
 
+**گزارش فروش**:
+The comprehensive reporting surface inside the Sales workspace for analyzing sales contracts, pipeline, customers, products, payments, delivery commitments, and seller performance according to the viewer's permissions. Shared sales reporting is available to authorized sales users, while sensitive cross-seller and company-wide analysis is limited to managers and admins.
+_Avoid_: treating it as a placeholder dashboard, maintaining separate reporting truths for Sales and BI, or exposing manager-only comparisons to ordinary sales users
+
+**دامنه داده گزارش فروش**:
+An ordinary Sales user sees reporting derived only from contracts they created, while Sales managers and admins may analyze other sellers within their permitted management scope and global admins may analyze the whole company.
+_Avoid_: letting an ordinary Sales user see other sellers' contracts, customer/product results derived from those contracts, seller comparisons, or company-wide totals
+
 **BI فروش**:
 A native business-intelligence workspace for analyzing sales-contract performance from sales-owned data such as contracts, payments, customers, products, delivery status, discounts, and seller performance.
 _Avoid_: treating it as an embedded external BI tool or as a company-wide analytics workspace
@@ -515,6 +523,10 @@ _Avoid_: treating it as an embedded external BI tool or as a company-wide analyt
 **فروش قطعی در BI فروش**:
 The sales value counted as realized sales in BI, limited to sales contracts whose status is `SIGNED` or `PRINTED`.
 _Avoid_: counting draft, pending, approved, cancelled, or expired contracts as realized sales
+
+**وضعیت قرارداد در گزارش فروش**:
+The actual lifecycle status of a sales contract, shown with a Persian label and a short explanation of what has happened and what is expected next. Reporting buckets such as pipeline, realized, and lost group contracts for analysis but do not replace or hide their real statuses.
+_Avoid_: showing only a vague reporting bucket, or presenting an aggregated category as though it were the contract's exact workflow status
 
 **پایپ‌لاین فروش در BI فروش**:
 The sales value still in progress in BI, limited to sales contracts whose status is `PENDING_APPROVAL` or `APPROVED`.

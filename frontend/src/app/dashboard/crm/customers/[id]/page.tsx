@@ -70,7 +70,7 @@ interface CrmCustomer {
   projectAddresses: Array<{
     id: string;
     address: string;
-    city: string;
+    city: string | null;
     postalCode?: string;
     projectName?: string;
     projectType?: string;
@@ -374,17 +374,23 @@ export default function CustomerDetailPage() {
     e.preventDefault();
     if (!customer) return;
 
+    const projectPayload = {
+      ...projectFormData,
+      address: projectFormData.address.trim(),
+      city: projectFormData.city.trim() || null
+    };
+
     try {
       if (editingProject) {
         // Update existing project
-        const response = await crmAPI.updateProjectAddress(customer.id, editingProject.id, projectFormData);
+        const response = await crmAPI.updateProjectAddress(customer.id, editingProject.id, projectPayload);
         if (response.data.success) {
           await fetchCustomer();
           setShowAddProjectModal(false);
         }
       } else {
         // Create new project
-        const response = await crmAPI.addProjectAddress(customer.id, projectFormData);
+        const response = await crmAPI.addProjectAddress(customer.id, projectPayload);
         if (response.data.success) {
           await fetchCustomer();
           setShowAddProjectModal(false);
@@ -802,7 +808,7 @@ export default function CustomerDetailPage() {
                             )}
                           </div>
                           <p className="text-gray-300 mb-1">{address.address}</p>
-                          <p className="text-gray-400 text-sm">{address.city}</p>
+                          {address.city && <p className="text-gray-400 text-sm">{address.city}</p>}
                           {address.postalCode && (
                             <p className="text-gray-400 text-sm">کد پستی: {address.postalCode}</p>
                           )}
@@ -1117,7 +1123,6 @@ export default function CustomerDetailPage() {
                     onChange={(e) => setProjectFormData(prev => ({ ...prev, city: e.target.value }))}
                     className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
                     placeholder="شهر"
-                    required
                   />
                 </div>
               </div>

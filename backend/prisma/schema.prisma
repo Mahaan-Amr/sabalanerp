@@ -678,7 +678,7 @@ model ProjectAddress {
   id                       String                    @id @default(cuid())
   customerId               String
   address                  String
-  city                     String
+  city                     String?
   postalCode               String?
   projectName              String?
   projectType              String?

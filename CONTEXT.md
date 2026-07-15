@@ -101,8 +101,8 @@ A potential customer project being pursued by sellers before it becomes a priced
 _Avoid_: creating a sales contract just to track an unconfirmed project, or losing the project context inside generic customer notes.
 
 **فیلدهای پروژه احتمالی**:
-A potential project requires project title, CRM person/customer, responsible seller, project status, and work/deal type. Address or location, estimated value, probability, expected close date, description, source or referrer, and next follow-up are optional at creation.
-_Avoid_: blocking early project capture with forecasting or location details that the seller may not know yet.
+A potential project requires project title, CRM person/customer, responsible seller, project status, and work/deal type. Address or location, including city, estimated value, probability, expected close date, description, source or referrer, and next follow-up are optional at creation; an unknown city remains unspecified.
+_Avoid_: blocking early project capture with forecasting or location details that the seller may not know yet, or inferring a city such as Tehran when none was provided.
 
 **برآورد پروژه احتمالی**:
 Optional CRM forecasting fields on a potential project, such as estimated value, probability, and expected close date or month. They help managers forecast pipeline value but should not block sellers when early project details are unknown.

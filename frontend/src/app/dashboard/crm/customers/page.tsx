@@ -30,7 +30,7 @@ interface CrmCustomer {
   projectAddresses: Array<{
     id: string;
     address: string;
-    city: string;
+    city: string | null;
     projectName?: string;
     projectType?: string;
     isActive: boolean;

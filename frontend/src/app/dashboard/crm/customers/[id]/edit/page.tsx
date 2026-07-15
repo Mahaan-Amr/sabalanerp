@@ -340,9 +340,9 @@ export default function EditCustomerPage() {
       nextErrors.phones = 'حداقل یک شماره تماس معتبر برای مشتری الزامی است';
     }
 
-    const invalidProject = projects.find((project) => project.isActive && (!project.address.trim() || !project.city.trim()));
+    const invalidProject = projects.find((project) => project.isActive && !project.address.trim());
     if (invalidProject) {
-      nextErrors.projects = 'برای پروژه‌های فعال، آدرس و شهر الزامی است';
+      nextErrors.projects = 'برای پروژه‌های فعال، آدرس الزامی است';
     }
 
     const invalidContact = contacts.find((contact) => contact.isActive && (!contact.firstName.trim() || !contact.lastName.trim()));
@@ -407,7 +407,7 @@ export default function EditCustomerPage() {
           if (!project.isActive) return Promise.resolve();
           const payload = {
             address: project.address.trim(),
-            city: project.city.trim(),
+            city: project.city.trim() || null,
             postalCode: project.postalCode.trim() || null,
             projectName: project.projectName.trim() || null,
             projectType: project.projectType.trim() || null,

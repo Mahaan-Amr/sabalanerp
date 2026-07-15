@@ -883,7 +883,7 @@ router.post('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOME
         projectAddresses: projectAddresses && projectAddresses.length > 0 ? {
           create: projectAddresses.map((addr: any) => ({
             address: addr.address,
-            city: addr.city,
+            city: normalizeNullableText(addr.city),
             postalCode: addr.postalCode || null,
             projectName: addr.projectName || null,
             projectType: addr.projectType || null,
@@ -1190,7 +1190,6 @@ router.put('/customers/:id/owner', protect, async (req: any, res: Response): Pro
 // @access  Private/CRM Workspace
 router.post('/customers/:customerId/project-addresses', protect, requireAnyFeatureAccess([FEATURES.CRM_PROJECT_ADDRESSES_CREATE, FEATURES.SALES_CUSTOMERS_EDIT], FEATURE_PERMISSIONS.EDIT), [
   body('address').notEmpty().withMessage('Address is required'),
-  body('city').notEmpty().withMessage('City is required'),
 ], async (req: any, res: Response): Promise<void> => {
   try {
     const errors = validationResult(req);
@@ -1237,7 +1236,7 @@ router.post('/customers/:customerId/project-addresses', protect, requireAnyFeatu
       data: {
         customerId,
         address,
-        city,
+        city: normalizeNullableText(city),
         postalCode,
         projectName,
         projectType,
@@ -1268,7 +1267,6 @@ router.post('/customers/:customerId/project-addresses', protect, requireAnyFeatu
 // @access  Private/CRM Workspace
 router.put('/customers/:customerId/project-addresses/:projectId', protect, requireAnyFeatureAccess([FEATURES.CRM_PROJECT_ADDRESSES_EDIT, FEATURES.SALES_CUSTOMERS_EDIT], FEATURE_PERMISSIONS.EDIT), [
   body('address').notEmpty().withMessage('Address is required'),
-  body('city').notEmpty().withMessage('City is required'),
 ], async (req: any, res: Response): Promise<void> => {
   try {
     const errors = validationResult(req);
@@ -1328,7 +1326,7 @@ router.put('/customers/:customerId/project-addresses/:projectId', protect, requi
       where: { id: projectId },
       data: {
         address,
-        city,
+        city: normalizeNullableText(city),
         postalCode,
         projectName,
         projectType,

@@ -516,7 +516,7 @@ export default function CreateCustomerPage() {
         // Create projectAddresses array from individual project fields
         projectAddresses: formData.projectName.trim() && formData.projectAddress.trim() ? [{
           address: formData.projectAddress.trim(),
-          city: formData.projectCity.trim() || 'تهران', // Use provided city or default to Tehran
+          city: formData.projectCity.trim() || null,
           postalCode: null,
           projectName: formData.projectName.trim(),
           projectType: formData.projectType.trim() || null,

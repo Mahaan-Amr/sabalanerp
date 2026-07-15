@@ -123,7 +123,7 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
                       {project.projectName || 'بدون نام پروژه'}
                     </h4>
                     <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{project.address}</p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{project.city}</p>
+                    {project.city && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{project.city}</p>}
                   </div>
                   <span className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${
                     wizardData.projectId === project.id

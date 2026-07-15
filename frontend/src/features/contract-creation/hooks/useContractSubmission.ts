@@ -14,6 +14,7 @@ import { getPreparedQuantity, getPreparedUnit, isPreparedProductType, normalizeC
 import { getDeliverableProductEntries } from '../utils/deliveryScheduleController';
 import { normalizeMandatoryLongitudinalCuttingPricing } from '../utils/mandatoryCuttingPricing';
 import { hasUnresolvedLegacyRemainingChildAddOns } from '../services/remainingStoneChildAddOnService';
+import { getContractGrossPayableTotal, reconcileContractProductPricing } from '../utils/contractProductPricing';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
@@ -148,8 +149,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         };
         const product = normalizeMandatoryLongitudinalCuttingPricing(productWithType);
         const finishing = normalizeProductFinishing(product);
-        if (!finishing) return product;
-        return {
+        if (!finishing) return reconcileContractProductPricing(product);
+        return reconcileContractProductPricing({
           ...product,
           finishingCalculationBase: product.finishingCalculationBase || finishing.calculationBase,
           finishingUnitPrice: product.finishingUnitPrice ?? finishing.unitPrice,
@@ -159,11 +160,10 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             product.finishingSquareMeters ??
             (finishing.calculationBase === 'squareMeters' ? finishing.quantity : null),
           finishingCost: product.finishingCost ?? finishing.cost
-        };
+        });
       });
-      const productsTotal = sumNumericValues(normalizedProducts, (product) => product.totalPrice);
-      const serviceRowsTotal = sumNumericValues(wizardData.serviceRows || [], (row) => row.totalPrice);
-      const totalAmount = wizardData.payment.totalContractAmount || (productsTotal + serviceRowsTotal);
+      const totalAmount = wizardData.payment.totalContractAmount ||
+        getContractGrossPayableTotal(normalizedProducts, wizardData.serviceRows || []);
       const deliverableProductIndices = new Set(getDeliverableProductEntries(normalizedProducts).map(({ productIndex }) => productIndex));
       const contractDeliveries = deliverableProductIndices.size === 0
         ? []
@@ -285,6 +285,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         
         // Store contract ID in signature state for Step 8
         updateWizardData({
+          products: normalizedProducts,
           contractNumber: savedContractNumber,
           creatorSequenceNumber,
           signature: {

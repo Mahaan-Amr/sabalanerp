@@ -1,8 +1,9 @@
 ﻿// Contract HTML Service
 // Generates HTML content for contract documents
 
-import type { ContractWizardData, CrmCustomer, ProjectAddress, ContractProduct, DeliverySchedule, PaymentMethod } from '../types/contract.types';
+import type { CrmCustomer, ProjectAddress, ContractProduct, ContractServiceRow, DeliverySchedule, PaymentMethod } from '../types/contract.types';
 import { formatPrice, formatQuantity, formatSquareMeters, sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
+import { getContractGrossPayableTotal, getContractProductPayableTotal } from '../utils/contractProductPricing';
 
 interface ContractHTMLData {
   contractNumber: string;
@@ -10,6 +11,7 @@ interface ContractHTMLData {
   customer: CrmCustomer | null;
   project: ProjectAddress | null;
   products: ContractProduct[];
+  serviceRows?: ContractServiceRow[];
   deliveries: DeliverySchedule[];
   payment: PaymentMethod;
   discount?: {
@@ -42,7 +44,7 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
             <td style="border: 1px solid #ddd; padding: 8px;">${formatQuantity(product.quantity || 0)}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatSquareMeters(product.squareMeters || 0)}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${toFiniteNumber(product.pricePerSquareMeter) > 0 ? formatPrice(product.pricePerSquareMeter, product.currency || 'تومان') : 'نامشخص'}</td>
-            <td style="border: 1px solid #ddd; padding: 8px;">${toFiniteNumber(product.totalPrice) > 0 ? formatPrice(product.totalPrice, product.currency || 'تومان') : 'نامشخص'}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${getContractProductPayableTotal(product) > 0 ? formatPrice(getContractProductPayableTotal(product), product.currency || 'تومان') : 'نامشخص'}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -59,7 +61,7 @@ export const generateContractHTML = (data: ContractHTMLData): string => {
   ` : '';
 
   const totalAmount = toFiniteNumber(data.payment?.totalContractAmount) || 
-    sumNumericValues(data.products, (product) => product.totalPrice);
+    getContractGrossPayableTotal(data.products, data.serviceRows || []);
   const discountAmount = toFiniteNumber(data.discount?.amount);
   const discountPercent = toFiniteNumber(data.discount?.percent);
   const paymentTotal = sumNumericValues(data.payment?.payments || [], (payment) => payment.amount);

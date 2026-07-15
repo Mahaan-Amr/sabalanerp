@@ -7,6 +7,7 @@ import { formatDisplayNumber, formatSquareMeters, formatPrice, sumNumericValues,
 import { normalizeProductFinishing } from '../utils/finishingUtils';
 import { getServiceRowUnitLabel } from '../utils/contractServiceRows';
 import { getPreparedKindLabel, getPreparedQuantity, getPreparedUnit, isPreparedProductType } from '../utils/preparedProductUtils';
+import { getContractGrossPayableTotal, getContractProductPayableTotal } from '../utils/contractProductPricing';
 
 interface ServiceEntry {
   key: string;
@@ -68,7 +69,7 @@ export const useContractSummary = (
   // Calculate products summary (total price, square meters, quantity)
   const productsSummary = useMemo<ProductsSummary>(() => {
     const summary = products.reduce((acc, product) => {
-      acc.totalPrice += toFiniteNumber(product.totalPrice);
+      acc.totalPrice += getContractProductPayableTotal(product);
       acc.totalSquareMeters += isPreparedProductType(product.productType) && getPreparedUnit(product) !== 'squareMeter'
         ? 0
         : toFiniteNumber(product.squareMeters);
@@ -272,7 +273,7 @@ export const useContractSummary = (
         partLabel = `${partLabel}/حکمی`;
       }
       const pricePerSqmValue = toFiniteNumber(product.unitPrice ?? product.pricePerSquareMeter) || null;
-      const totalPriceValue = toFiniteNumber(product.totalPrice);
+      const totalPriceValue = getContractProductPayableTotal(product);
       // For layer products, get stone area used from meta
       const layerMeta = isLayer ? (product.meta as any) : null;
       const stoneAreaUsedSqm = layerMeta?.stoneAreaUsedSqm;
@@ -291,8 +292,7 @@ export const useContractSummary = (
   }, [products]);
 
   // Calculate grand total
-  const standaloneServicesTotal = sumNumericValues(standaloneServiceRows, (row) => row.totalPrice);
-  const contractGrandTotal = productsSummary.totalPrice + standaloneServicesTotal;
+  const contractGrandTotal = getContractGrossPayableTotal(products, standaloneServiceRows);
 
   return {
     productsSummary,

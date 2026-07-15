@@ -736,8 +736,7 @@ const normalizeProducts = (
         (item?.stairPartType || null) === (product?.stairPartType || null)
       ) || relationItems[index];
 
-      const hideInternalOptimizerBreakdown = Boolean(product?.smartCutDerivedQuantity);
-      const cutsFromBreakdown: NormalizedCut[] = !hideInternalOptimizerBreakdown && Array.isArray(product?.cuttingBreakdown)
+      const cutsFromBreakdown: NormalizedCut[] = Array.isArray(product?.cuttingBreakdown)
         ? product.cuttingBreakdown.map((cut: any) => ({
           type: cut?.type === 'cross' ? 'برش عرضی' : 'برش طولی',
           code: firstText(cut?.code, cut?.sourceCode),
@@ -749,7 +748,7 @@ const normalizeProducts = (
 
       const cutsFromDetails: NormalizedCut[] = cutsFromBreakdown.length > 0
         ? []
-        : (!hideInternalOptimizerBreakdown && Array.isArray(product?.cutDetails)
+        : (!product?.smartCutDerivedQuantity && Array.isArray(product?.cutDetails)
           ? product.cutDetails.map((cut: any) => ({
               type: cutTypeLabel(cut),
               code: firstText(cut?.code, cut?.sourceCode),
@@ -1104,7 +1103,14 @@ const normalizeFinancials = (
   standaloneServices: NormalizedStandaloneService[] = []
 ): NormalizedFinancials => {
   const currency = String(contract.currency || contract.contractData?.payment?.currency || 'تومان');
-  const productsTotal = products.reduce((sum, product) => sum + toNumber(product.totalPrice), 0);
+  const productsTotal = products.reduce((sum, product) => {
+    const billableCuts = hasNonBillableMandatoryLongitudinalCuts(product)
+      ? 0
+      : product.cuts.reduce((cutSum, cut) => cutSum + toNumber(cut.cost), 0);
+    const tools = product.tools.reduce((toolSum, tool) => toolSum + toNumber(tool.cost), 0);
+    const services = product.services.reduce((serviceSum, service) => serviceSum + toNumber(service.cost), 0);
+    return sum + Math.max(toNumber(product.totalPrice) - billableCuts - tools - services, 0);
+  }, 0);
   const productServicesTotal = products.reduce((sum, product) => {
     const services = product.services
       .filter((service) => service.category !== 'پرداخت سنگ')

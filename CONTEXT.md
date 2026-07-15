@@ -244,6 +244,10 @@ _Avoid_: copying delivery assignments, internal row IDs, or links that make the 
 The catalog a standalone service row is selected from, such as ابزار, برش, or پرداخت سنگ. These catalogs remain separate for management and search, but once selected they become the same ردیف خدمات قرارداد shape for pricing, payment, and print output.
 _Avoid_: merging the source catalogs just because contract rows share one shape
 
+**تفکیک جمع محصولات و خدمات وابسته قرارداد**:
+The customer-facing confirmation and print summary show the non-service product subtotal separately from billable cutting, tools, finishing, and standalone service rows, while the persisted product `totalPrice` remains the canonical all-in product amount. The final payable total counts every billable fact exactly once.
+_Avoid_: omitting a priced operation from the final payable amount, adding a displayed dependent service on top of an already all-in product total, presenting physical non-billable حکمی cutting as a customer charge, or silently rewriting a finalized historical contract
+
 **توضیحات ردیف خدمات قرارداد**:
 A per-contract note attached to a selected standalone service row, prefilled from the catalog description when available but editable without changing the catalog.
 _Avoid_: editing the catalog service description when the user only means the current contract row

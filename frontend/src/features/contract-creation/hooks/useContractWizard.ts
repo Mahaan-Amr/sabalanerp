@@ -5,8 +5,8 @@ import { useState, useCallback, useMemo, useRef } from 'react';
 import type { ContractWizardData } from '../types/contract.types';
 import { validateWizardStep } from '../services/validationService';
 import PersianCalendar from '@/lib/persian-calendar';
-import { sumNumericValues } from '@/lib/numberFormat';
 import { ensureContractProductRowIds } from '../utils/contractProductIdentity';
+import { getContractGrossPayableTotal } from '../utils/contractProductPricing';
 
 const getCurrentPersianDate = () => {
   try {
@@ -185,8 +185,7 @@ export const useContractWizard = () => {
 
   // Calculate contract total
   const contractTotal = useMemo(() => {
-    return sumNumericValues(wizardData.products, (product) => product.totalPrice) +
-      sumNumericValues(wizardData.serviceRows || [], (row) => row.totalPrice);
+    return getContractGrossPayableTotal(wizardData.products, wizardData.serviceRows || []);
   }, [wizardData.products, wizardData.serviceRows]);
 
   // Update payment total
@@ -237,4 +236,3 @@ export const useContractWizard = () => {
     totalSteps: WIZARD_STEPS.length
   };
 };
-

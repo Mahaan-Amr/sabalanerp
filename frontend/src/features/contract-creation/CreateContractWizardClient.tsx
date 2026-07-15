@@ -131,6 +131,14 @@ import {
   parseContractAutosaveDraft
 } from '@/features/contract-creation/utils/contractDraftStorage';
 import {
+  getContractGrossPayableTotal,
+  getContractProductNonServiceSubtotal,
+  getContractProductPayableTotal,
+  getContractProductsPayableTotal,
+  reconcileContractProductPricing
+} from '@/features/contract-creation/utils/contractProductPricing';
+import { getBillableCuttingCost } from '@/features/contract-creation/utils/mandatoryCuttingPricing';
+import {
   getDeliverableProductEntries,
   getDeliveryTargetAmount as getContractDeliveryTargetAmount,
   getSchedulableServiceEntries
@@ -569,14 +577,6 @@ export default function CreateContractWizard({
     [customers, isCollaborationContract]
   );
 
-  const contractProductsTotal = useMemo(
-    () => sumNumericValues(wizardData.products, (product) => product.totalPrice),
-    [wizardData.products]
-  );
-  const standaloneServicesTotal = useMemo(
-    () => sumNumericValues(wizardData.serviceRows || [], (row) => row.totalPrice),
-    [wizardData.serviceRows]
-  );
   const discountBaseSubtotal = useMemo(
     () => getContractBaseSubtotal(wizardData.products),
     [wizardData.products]
@@ -622,7 +622,7 @@ export default function CreateContractWizard({
       setCurrentStep(6);
     }
   }, [currentStep, setCurrentStep, shouldSkipDeliveryStep]);
-  const grossContractTotal = contractProductsTotal + standaloneServicesTotal;
+  const grossContractTotal = getContractGrossPayableTotal(wizardData.products, wizardData.serviceRows || []);
   const payableContractTotal = Math.max(grossContractTotal - appliedDiscountAmount, 0);
 
   useEffect(() => {
@@ -678,7 +678,6 @@ export default function CreateContractWizard({
     matchingDiscountRange,
     maxDiscountPercent,
     payableContractTotal,
-    standaloneServicesTotal,
     setWizardData
   ]);
 
@@ -3698,15 +3697,18 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return;
     }
 
-    const totalAmount = wizardData.payment.totalContractAmount ||
-      sumNumericValues(wizardData.products, (product) => product.totalPrice) +
-      sumNumericValues(wizardData.serviceRows || [], (row) => row.totalPrice);
+    const printableWizardData = {
+      ...wizardData,
+      products: wizardData.products.map(reconcileContractProductPricing)
+    };
+    const totalAmount = printableWizardData.payment.totalContractAmount ||
+      getContractGrossPayableTotal(printableWizardData.products, printableWizardData.serviceRows || []);
 
     await salesAPI.updateContract(contractId, {
-      content: generateContractHTML(wizardData),
+      content: generateContractHTML(printableWizardData),
       totalAmount,
-      currency: wizardData.payment.currency || 'تومان',
-      contractData: wizardData
+      currency: printableWizardData.payment.currency || 'تومان',
+      contractData: printableWizardData
     });
   };
 
@@ -5562,7 +5564,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             quantity: toFiniteNumber(product.quantity),
             squareMeters: toFiniteNumber(product.squareMeters),
             unitPrice: toFiniteNumber(product.pricePerSquareMeter) || toFiniteNumber(product.unitPrice),
-            totalPrice: toFiniteNumber(product.totalPrice),
+            totalPrice: getContractProductNonServiceSubtotal(product),
             description: product.description || '—'
           };
         });
@@ -5583,15 +5585,20 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             });
           });
 
+          const physicalCuttingTotal = sumNumericValues(product.cuttingBreakdown || [], (cut) => cut.cost);
+          const billableCuttingTotal = getBillableCuttingCost(product);
           (product.cuttingBreakdown || []).forEach((cut, cutIndex) => {
+            const billableCutCost = physicalCuttingTotal > 0
+              ? billableCuttingTotal * (toFiniteNumber(cut.cost) / physicalCuttingTotal)
+              : 0;
             serviceDetails.push({
               id: `cut-${productIndex}-${cutIndex}`,
               productName,
               category: 'برش',
               name: cut.type === 'cross' ? 'برش عرضی' : 'برش طولی',
               amountLabel: `${toFiniteNumber(cut.meters)} متر`,
-              rateLabel: cut.rate ? `${cut.rate}` : '—',
-              cost: toFiniteNumber(cut.cost)
+              rateLabel: billableCuttingTotal > 0 && cut.rate ? `${cut.rate}` : '—',
+              cost: billableCutCost
             });
           });
 
@@ -5667,7 +5674,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           description: payment.description || '—'
         }));
 
-        const productsTotal = sumNumericValues(wizardData.products, (product) => product.totalPrice);
+        const productsTotal = sumNumericValues(wizardData.products, getContractProductNonServiceSubtotal);
         const cutsTotal = serviceDetails
           .filter((service) => service.category === 'برش')
           .reduce((sum, service) => sum + toFiniteNumber(service.cost), 0);

@@ -26,6 +26,14 @@ const contract = {
       originalWidth: 40,
       isCut: true,
       smartCutDerivedQuantity: true,
+      cuttingCost: 5_000,
+      cuttingBreakdown: [{
+        type: 'longitudinal',
+        code: 'CUT-LONG-TEST',
+        meters: 50,
+        rate: 100,
+        cost: 5_000
+      }],
       smartCutPlan: {
         enabled: true,
         mode: 'optimized',
@@ -43,8 +51,14 @@ const contract = {
         derivedQuantity: true,
         productionPieces: [{ widthCm: 7, lengthM: 10, quantity: 5 }],
         remainingStones: [{ width: 5, length: 10, quantity: 1, squareMeters: 0.5 }],
-        cuttingBreakdown: [],
-        totalCuttingCost: 0,
+        cuttingBreakdown: [{
+          type: 'longitudinal',
+          code: 'CUT-LONG-TEST',
+          meters: 50,
+          rate: 100,
+          cost: 5_000
+        }],
+        totalCuttingCost: 5_000,
         warnings: []
       }
     }]
@@ -57,5 +71,6 @@ assert.ok(html.includes('سنگ مصرفی'));
 assert.match(html, /سنگ مصرفی[\s\S]*?<td>۱۰<\/td>[\s\S]*?<td>۰٫۴<\/td>[\s\S]*?<td>۱<\/td>[\s\S]*?<td>۴<\/td>/);
 assert.ok(!html.includes('خروجی فیزیکی تولید'));
 assert.ok(!html.includes('۵ عدد × عرض ۷cm × طول ۱۰m'));
+assert.ok(html.includes('CUT-LONG-TEST'));
 
 console.log('printTemplateLongitudinalOptimizer tests passed');

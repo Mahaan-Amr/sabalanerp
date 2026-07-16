@@ -1186,20 +1186,20 @@ Core حراست operational pages must follow Sabalan ERP's shared design system
 _Avoid_: reviving the older red/rose security theme, table-only mobile attendance, cramped side-by-side fields that break Persian labels, or hiding the core action list behind horizontal scrolling
 
 **خروجی گزارش‌های حراست**:
-A PDF or Excel rendition of the currently filtered aggregate security report, containing its summary metrics and daily attendance breakdown. It is not an export of shift logs, personal schedules, or other operational records whose report layouts have not been defined.
+A PDF or Excel rendition of the currently filtered security report. The attendance PDF contains summary metrics plus one detailed row per rostered personnel per day; it is not an export of shift logs, personal schedules, or other operational records whose report layouts have not been defined.
 _Avoid_: placeholder export buttons, ignoring active report filters, or exporting sensitive operational data under an ambiguous report name
 
 **دو نوع خروجی گزارش حراست**:
-Security reporting has two distinct export families. The حضور و غیاب کارکنان scope exports aggregate attendance PDF/Excel. The عملکرد نیروهای حراست scope has its own manager-only detailed PDF for finished security shifts and operational evidence.
+Security reporting has two distinct export families. The حضور و غیاب کارکنان scope exports personnel attendance details and summary metrics, while the عملکرد نیروهای حراست scope has its own manager-only detailed PDF for finished security shifts and operational evidence.
 _Avoid_: one ambiguous PDF button that sometimes exports attendance aggregates and sometimes exports detailed shift narratives.
 
 **صادرکننده گزارش حراست**:
-A security manager, supervisor, or explicitly authorized read-only report viewer who may generate aggregate security report exports. A regular guard may use personal scheduling and shift-report workflows but cannot export aggregate reports.
-_Avoid_: granting aggregate-report export to every user who can work a security shift, or relying only on hidden front-end buttons to protect report data
+A security manager, supervisor, or explicitly authorized read-only report viewer who may generate personnel attendance and security-performance exports. A regular guard may use personal scheduling and shift-report workflows but cannot export these reports.
+_Avoid_: granting personnel attendance export to every user who can work a security shift, or relying only on hidden front-end buttons to protect report data
 
 **محتوای خروجی گزارش حراست**:
-The privacy-minimized first export layout: selected date range and filters, generation time, aggregate KPIs, and the daily attendance breakdown without employee names.
-_Avoid_: a report with no filter context, exposing individual personnel data when aggregate data answers the reporting need, or a file that differs materially from the on-screen report
+The attendance export contains the selected date range and filters, generation time, aggregate KPIs, and one row per rostered personnel per day with name, department, status, entry, exit, registered shift, notes, and signature state.
+_Avoid_: a report with no filter context, collapsing personnel into only one aggregate row per day, omitting absent roster members, or mixing security shift narratives into the attendance table
 
 **تقویم سالیانه سبلان**:
 A company-wide calendar authority for marking days as holidays and recording events. It is informational until a specific workflow explicitly chooses to consume it, so existing attendance, shift, contract, and delivery behavior does not change implicitly.

@@ -9,6 +9,7 @@ import { protect, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
+import { renderSecurityAttendanceReportHtml, securityAttendanceStatusLabel, SecurityAttendanceReportRow } from '../utils/securityAttendanceReport';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -2912,7 +2913,7 @@ router.get('/reports/security-personnel-performance.pdf', protect, securityAdmin
   }
 });
 
-// Aggregate exports are intentionally limited to operational report users (edit/admin).
+// Personnel attendance exports are intentionally limited to operational report users (edit/admin).
 // Guards retain their self-service schedule and shift-log views without bulk export access.
 router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, res: Response) => {
   try {
@@ -2922,46 +2923,66 @@ router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, re
     const endDate = requestedEnd < startDate ? startDate : requestedEnd;
     const days = Math.min(92, Math.floor((endDate.getTime() - startDate.getTime()) / 86_400_000) + 1);
     const trend: Array<Record<string, string | number>> = [];
+    const attendanceDetails: SecurityAttendanceReportRow[] = [];
     for (let index = 0; index < days; index += 1) {
       const date = addDays(startDate, index);
       const daily = await buildDailyAttendance({ date: date.toISOString(), departmentId: req.query.departmentId, shiftId: req.query.shiftId });
+      const formattedDate = date.toLocaleDateString('fa-IR', { timeZone: 'Asia/Tehran' });
       trend.push({
-        'تاریخ': date.toLocaleDateString('fa-IR'), 'کل': daily.stats.totalEmployees, 'حاضر': daily.stats.present,
+        'تاریخ': formattedDate, 'کل': daily.stats.totalEmployees, 'حاضر': daily.stats.present,
         'غایب': daily.stats.absent, 'تأخیر': daily.stats.late, 'ماموریت': daily.stats.mission,
         'مرخصی': daily.stats.leave, 'امضاشده': daily.stats.signed
+      });
+      daily.attendanceSummary.forEach((record) => {
+        const previousAttendanceNote = record.openPreviousAttendance
+          ? `خروج روز قبل ثبت نشده است (${record.openPreviousAttendance.entryTime || '-'})`
+          : '';
+        const notes = [record.notes || record.exceptionType || '', previousAttendanceNote].filter(Boolean).join('\n') || '-';
+        attendanceDetails.push({
+          date: formattedDate,
+          employee: `${record.employee.firstName} ${record.employee.lastName}`.trim() || record.employee.username || '-',
+          department: record.employee.department?.namePersian || record.employee.department?.name || '-',
+          status: securityAttendanceStatusLabel(record.status),
+          entryTime: record.entryTime || '-',
+          exitTime: record.exitTime || '-',
+          shift: record.shift?.namePersian || '-',
+          notes,
+          signature: record.digitalSignature ? 'ثبت شده' : '-'
+        });
       });
     }
     const totals = trend.reduce<{ total: number; present: number; absent: number; late: number }>((sum, day) => ({
       total: sum.total + Number(day['کل']), present: sum.present + Number(day['حاضر']), absent: sum.absent + Number(day['غایب']), late: sum.late + Number(day['تأخیر'])
     }), { total: 0, present: 0, absent: 0, late: 0 });
-    const title = `گزارش حراست ${startDate.toLocaleDateString('fa-IR')} تا ${addDays(startDate, days - 1).toLocaleDateString('fa-IR')}`;
-    const generatedAt = new Date().toLocaleString('fa-IR');
+    const title = `گزارش حراست ${startDate.toLocaleDateString('fa-IR', { timeZone: 'Asia/Tehran' })} تا ${addDays(startDate, days - 1).toLocaleDateString('fa-IR', { timeZone: 'Asia/Tehran' })}`;
+    const generatedAt = formatSecurityDateTime(new Date());
     if (format === 'excel') {
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([[title], [`زمان تولید: ${generatedAt}`], [], ['کل نفر-روز', totals.total, 'حاضر', totals.present, 'غایب', totals.absent, 'تأخیر', totals.late]]), 'خلاصه');
       XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(trend), 'روزانه');
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(attendanceDetails.map((row) => ({
+        'تاریخ': row.date,
+        'کارمند': row.employee,
+        'بخش': row.department,
+        'وضعیت': row.status,
+        'ورود': row.entryTime,
+        'خروج': row.exitTime,
+        'شیفت ثبت': row.shift,
+        'یادداشت': row.notes,
+        'امضا': row.signature
+      }))), 'جزئیات پرسنل');
       const file = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', 'attachment; filename="security-report.xlsx"');
       return res.send(file);
     }
-    const rows = trend.map((day) => `<tr>${Object.values(day).map((value) => `<td>${securityEscapeHtml(value)}</td>`).join('')}</tr>`).join('');
-    const htmlContent = `
-      ${securityPdfStyles()}
-      <div class="sheet">
-        <header class="header">
-          <div><h1>${securityEscapeHtml(title)}</h1><div class="meta">زمان تولید: ${securityEscapeHtml(generatedAt)}</div></div>
-          <div class="meta">خروجی حضور و غیاب کارکنان</div>
-        </header>
-        <div class="cards">
-          <div class="card"><span>کل نفر-روز</span><strong>${totals.total.toLocaleString('fa-IR')}</strong></div>
-          <div class="card"><span>حاضر</span><strong>${totals.present.toLocaleString('fa-IR')}</strong></div>
-          <div class="card"><span>غایب</span><strong>${totals.absent.toLocaleString('fa-IR')}</strong></div>
-          <div class="card"><span>تأخیر</span><strong>${totals.late.toLocaleString('fa-IR')}</strong></div>
-        </div>
-        <table><thead><tr>${Object.keys(trend[0] || {}).map((key) => `<th>${securityEscapeHtml(key)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
-      </div>
-    `;
+    const htmlContent = renderSecurityAttendanceReportHtml({
+      baseStyles: securityPdfStyles(),
+      title,
+      generatedAt,
+      totals,
+      rows: attendanceDetails
+    });
     const pdfPath = await generatePdfFromHtml({ fileName: `security-report-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent, margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
     res.download(pdfPath, 'security-report.pdf', () => fs.unlink(pdfPath, () => undefined));
   } catch (error) {

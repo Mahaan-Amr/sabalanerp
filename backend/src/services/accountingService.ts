@@ -18,6 +18,7 @@ import {
   TaxReadinessStatus,
   TaxSubmissionStatus
 } from '@prisma/client';
+import { classifyInvoiceStatus, isOpenInvoiceCandidate, isValidFinanciallyApprovedInvoice } from './accountingStatus';
 
 const prisma = new PrismaClient();
 
@@ -544,21 +545,9 @@ const buildContractRow = async (contract: any, settings: any) => {
   const eligible = ELIGIBLE_CONTRACT_STATUSES.includes(contract.status);
   const openCorrections = corrections.filter((item: any) => activeCorrectionStatuses().includes(item.status));
   const openFlags = flags.filter((item: any) => item.status === 'OPEN');
-  const hasRecords = records.length > 0 || receivables.length > 0 || payments.length > 0 || taxRecords.length > 0;
-  const issuedInvoices = records.filter((record: any) => (
-    record.kind === FinancialRecordKind.INVOICE_CANDIDATE &&
-    (record.status === AccountingRecordStatus.ISSUED || record.status === AccountingRecordStatus.POSTED)
-  ));
-  const openInvoiceCandidates = records.filter((record: any) => (
-    record.kind === FinancialRecordKind.INVOICE_CANDIDATE &&
-    ![AccountingRecordStatus.ISSUED, AccountingRecordStatus.POSTED, AccountingRecordStatus.VOIDED].includes(record.status)
-  ));
-
-  const invoiceStatus = records.some((record: any) => record.status === AccountingRecordStatus.ISSUED || record.status === AccountingRecordStatus.POSTED)
-    ? 'ISSUED'
-    : records.some((record: any) => record.kind === FinancialRecordKind.INVOICE_CANDIDATE)
-      ? 'DRAFT'
-      : 'NONE';
+  const issuedInvoices = records.filter(isValidFinanciallyApprovedInvoice);
+  const openInvoiceCandidates = records.filter(isOpenInvoiceCandidate);
+  const invoiceStatus = classifyInvoiceStatus(records);
 
   const overdueReceivables = receivables.filter((receivable: any) => (
     receivable.status !== ReceivableStatus.SETTLED &&
@@ -582,7 +571,7 @@ const buildContractRow = async (contract: any, settings: any) => {
   let sourceStatus = eligible ? 'ELIGIBLE' : 'VISIBLE_ONLY';
   if (openCorrections.length > 0) {
     sourceStatus = 'NEEDS_CORRECTION';
-  } else if (hasRecords) {
+  } else if (issuedInvoices.length > 0) {
     sourceStatus = 'HAS_FINANCIAL_RECORDS';
   }
 
@@ -769,7 +758,9 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
   }
 
   if (query.sourceStatus && query.sourceStatus !== 'ALL') {
-    items = items.filter((item) => item.accounting.sourceStatus === query.sourceStatus);
+    items = items.filter((item) => query.sourceStatus === 'HAS_FINANCIAL_RECORDS'
+      ? item.accounting.invoiceStatus === 'ISSUED'
+      : item.accounting.sourceStatus === query.sourceStatus);
   }
   if (query.taxStatus && query.taxStatus !== 'ALL') {
     items = items.filter((item) => item.accounting.taxStatus === query.taxStatus);

@@ -763,9 +763,12 @@ export const securityAPI = {
     return api.get('/security/attendance/daily', { params });
   },
   getDashboardStats: (params?: any) => api.get('/security/dashboard/stats', { params }),
+  getOperationalPersonnel: () => api.get('/security/operational-personnel'),
   getSecurityReportSummary: (params?: any) => api.get('/security/reports/summary', { params }),
   getSecurityPersonnelPerformance: (params?: any) => api.get('/security/reports/security-personnel-performance', { params }),
   downloadSecurityPersonnelPerformancePdf: (params?: any) => api.get('/security/reports/security-personnel-performance.pdf', { params, responseType: 'blob' }),
+  getLatestCompletedShiftReportStatus: () => api.get('/security/reports/latest-completed-shift'),
+  downloadLatestCompletedShiftPdf: () => api.get('/security/reports/latest-completed-shift.pdf', { responseType: 'blob' }),
   getSecurityPersonnelShiftHistory: (id: string, params?: any) => api.get(`/security/reports/security-personnel/${id}/shift-history`, { params }),
   exportSecurityReport: (format: 'pdf' | 'excel', params?: any) => api.get('/security/reports/export', { params: { ...params, format }, responseType: 'blob' }),
   

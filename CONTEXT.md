@@ -652,6 +652,10 @@ _Avoid_: locking sales edits merely because the contract was sales-approved, dig
 Sales users may view the accounting status of a sales contract as read-only accounting information on the sales contract list and detail pages. The status remains owned by accounting and reflects the current accounting workflow state, including whether the contract is eligible for financial action, already has financial records, or needs accounting correction.
 _Avoid_: letting sales users edit accounting status, or showing a stale sales-owned copy of the accounting workflow state
 
+**دارای رکورد مالی**:
+A sales contract qualifies as دارای رکورد مالی only while it has at least one currently valid financially approved invoice record in `ISSUED` or `POSTED` state. Draft and voided records do not qualify, and an unapproved replacement qualifies only after financial approval; the corresponding filter follows this factual rule even when a higher-priority primary badge such as نیازمند اصلاح is displayed.
+_Avoid_: treating draft creation as financial approval, counting voided records, hiding an urgent correction behind this badge, or excluding a valid approved invoice from the filter because another primary status is displayed
+
 **تاریخ فاکتور سیستمی**:
 The Sepidar/system invoice date entered by accounting during financial approval. It may be today, up to ten days in the past, or up to thirty days in the future.
 _Avoid_: treating future system invoice dates as invalid when they are within the accounting forward-entry window
@@ -1057,8 +1061,20 @@ _Avoid_: requiring patrol notes before the patrol happens, storing patrols as fr
 
 **گزارش‌های حراست**:
 A reporting workspace for aggregate operational data such as attendance, exceptions, missions, shift sessions, and signatures over a selected date range. It is separate from گزارش شیفت حراست and should be filterable by date range, department, shift, and personnel when those dimensions apply.
-Across a date range, absence is derived per day from active users in scope minus users with an attendance record for that day; it is not limited to stored ABSENT rows.
+Across a date range, absence is derived per day from the current A/B/C operational population minus people with an attendance record for that day; it is not limited to stored ABSENT rows.
 _Avoid_: using mock analytics, mixing narrative shift closure reports into aggregate KPIs, or showing labels that do not match the underlying metric
+
+**شیفت قبل حراست**:
+The finished security shift session with the most recent actual `endedAt`, whether normally closed or force-closed by a manager. It is based on actual completion order rather than the previous planned rota slot.
+_Avoid_: selecting the prior scheduled slot when another session finished later, or excluding force-closed sessions from the latest completed shift
+
+**خروجی شیفت قبل حراست**:
+A quick report action that immediately downloads a PDF for شیفت قبل حراست. The PDF includes only sections backed by actual recorded data or activity and omits empty sections, placeholder rows, and irrelevant zero-value summaries; when no completed shift exists, the visible action is disabled with «هنوز شیفت پایان‌یافته‌ای برای دریافت گزارش وجود ندارد».
+_Avoid_: opening an intermediate detail page, exporting a date-range report, generating an empty PDF, or returning a generic error when no completed shift exists
+
+**بخش‌های مبتنی بر شواهد در PDF تفصیلی حراست**:
+Both the latest-shift PDF and personnel-performance PDF omit empty per-shift patrol, attendance, closure-summary, participant, and image sections, while retaining sections with real recorded activity. The standalone date-range attendance PDF keeps its consistent analytical structure because zero attendance values are meaningful data there.
+_Avoid_: printing placeholder operational sections in detailed PDFs, or removing meaningful zero-valued rows from the aggregate attendance report
 
 **عملکرد نیروهای حراست**:
 The manager-only reporting view of assigned Security personnel over a selected date range, covering their planned duties, attendance, sessions, coverage exceptions, patrols, and timestamped shift-log activity. It is separate from company-wide attendance reporting.
@@ -1073,20 +1089,28 @@ A report filter set whose controls follow the selected reporting scope: quick or
 _Avoid_: one static filter form that exposes irrelevant controls, or losing the selected filters when the report scope changes
 
 **دسترسی گزارش عملکرد نیروهای حراست**:
-Manager-level Security workspace access to the detailed performance view and its operational narratives. This access is distinct from ordinary guard self-service and aggregate report viewing.
-_Avoid_: protecting detailed personnel performance only by hidden interface controls, or exposing guard narratives to generic workspace viewers
+Manager-level Security workspace access to the detailed performance view, its operational narratives, and the latest-completed-shift PDF. This access is distinct from ordinary guard self-service and aggregate report viewing.
+_Avoid_: protecting detailed personnel performance only by hidden interface controls, exposing guard narratives to generic workspace viewers, or allowing report-page visibility alone to authorize detailed PDF downloads
 
 **خروجی عملکرد نیروهای حراست**:
 The manager-only performance PDF may include detailed operational evidence from finished security shifts in the selected date range: shift date/time and status, planned/replacement/temporary coverage person, attendance and delay, closure summary, instant report rows with report type names and descriptions, and patrol sessions. Active shifts are excluded. Both CLOSED and FORCE_CLOSED sessions count as finished, with force-closed shifts clearly labeled.
 _Avoid_: exporting active shifts, hiding force-closed status, or exposing detailed operational narratives outside the manager/admin performance export.
+
+**تصاویر گزارش لحظه‌ای در خروجی حراست**:
+Images are printed directly beneath their own instant-report row with preserved aspect ratio, up to two images per row, natural continuation across rows or pages, and a caption containing the report row number and original filename. Voided-report images follow the same layout while retaining the report's voided context.
+_Avoid_: separating images from their report, stretching or cropping evidence, mixing images from different rows, or omitting identifying captions
+
+**حضور و غیاب در خروجی شیفت حراست**:
+Each completed shift in a latest-shift or personnel-performance PDF has a separate attendance section for the guard who actually worked and any recorded replacement or temporary coverage, including recorded arrival, delay, and corrections. Off-duty A/B/C guards are not shown as absent, while the standalone attendance PDF remains the date-range attendance export.
+_Avoid_: treating off-duty primary guards as absent, merging attendance into unrelated shift metadata, or replacing the standalone attendance report with shift-specific attendance
 
 **تاریخچه تفصیلی شیفت نیروی حراست**:
 A manager/admin-only dedicated page for chronological review of one Security guard's shifts in the selected range. Each expandable shift keeps scheduled and actual coverage, attendance and session timing, exceptions, patrols, closure data, and the complete instant-report audit trail together.
 _Avoid_: flattening evidence from different shifts into one unscoped activity feed, showing detailed history to ordinary guards, or losing the report date context when navigating to the history
 
 **گزارش لحظه‌ای باطل‌شده حراست**:
-An instant report that remains visible in the shift audit trail with a clear voided state, void time, and void reason. It is historical evidence rather than active shift content.
-_Avoid_: deleting voided reports, or presenting them as active without their void context
+An instant report that remains visible in the shift audit trail and PDF exports with a clear voided state, void time, void reason, and any attached images. It is historical evidence rather than active shift content and does not count toward active-work summary totals.
+_Avoid_: deleting voided reports or their images, counting them as active work, or presenting them as active without their void context
 
 **نمایش تاریخچه تفصیلی شیفت**:
 The detailed shift-history page defaults to the selected guard's entire record, including inactive/former Security personnel, and orders shifts newest first. A date range is an optional narrowing filter; each shift begins with a compact status and timing header, while its complete audit evidence is revealed in an expandable section.
@@ -1191,6 +1215,14 @@ _Avoid_: asking managers to manually tune shift duration for the normal annual p
 A generated schedule with a date range and exactly three ordered primary guards. The normal annual plan uses fixed 07:00/19:00 shift boundaries and 12-hour slots; managers define the A/B/C order and generation dates, not the slot duration. Publishing a plan is an operational activation event: if the published schedule contains the current time, the current slot's assigned guard becomes the active shift worker immediately and their attendance is recorded with the server timestamp. If a plan is published mid-slot, the slot keeps its scheduled 07:00/19:00 boundary while the session start and attendance time remain the real publish timestamp. Mid-year primary changes create a future plan revision, while other eligible security personnel remain substitutes outside the base cycle. Draft plans may be deleted by a manager before publication, but published plans are retained as operational history and should be replaced, superseded, or explicitly cancelled rather than physically deleted.
 _Avoid_: exposing normal annual-plan timing as free-form manager inputs, publishing a current schedule that still waits for manual shift start, rewriting started slots, placing one person in multiple primary positions, or silently inserting substitutes into the A→B→C rotation
 
+**جمعیت عملیاتی جاری حراست**:
+The three A/B/C primary guards in the current published annual shift plan are the only people shown in normal حراست dashboards, attendance, performance reports, filters, and PDFs. During a gap with no plan covering the current time, the latest non-superseded published plan remains authoritative; with no published plan history the population is intentionally empty and managers are guided to publish one. Substitutes appear only in the historical shifts they actually covered; workspace access alone never makes an admin, manager, or developer part of this population, and historical records retain their original people.
+_Avoid_: deriving reportable guards from workspace access, falling back to all users when no current slot exists, showing substitutes as current primary guards, or rewriting historical shift participants when the current A/B/C plan changes
+
+**نامزد پیکربندی نیروی حراست**:
+An otherwise eligible person outside the current A/B/C population may appear only in manager-only shift-plan creation, replacement, or temporary-coverage controls so future assignments remain possible. The candidate does not enter normal operational reports or people lists unless they actually cover a historical shift or become a published A/B/C guard.
+_Avoid_: exposing configuration candidates in normal dashboards and reports, or making future A/B/C and replacement assignment impossible by hiding candidates from managers
+
 **جایگزینی شیفت حراست**:
 A slot-specific exception that preserves the annual A→B→C baseline while assigning another eligible security user as the actual worker for an absent planned guard. Later planned assignments do not shift, and rest or overlap conflicts require a manager override reason.
 _Avoid_: regenerating the rotation after leave, transferring ownership of later slots to the substitute, or hiding rest violations created by coverage
@@ -1212,36 +1244,12 @@ An active system user linked to organizational personnel who already has a secur
 _Avoid_: offering every active personnel record in security personnel assignment, assigning non-login personnel to authenticated shift work, or using placeholder sample users when no eligible user exists
 
 **فهرست حضور و غیاب حراست**:
-A manager-maintained roster of active organizational personnel who should appear in حراست attendance, metrics, reports, and absence calculations. Personnel outside this roster remain normal Personnel records but are excluded from the حراست daily attendance population.
-_Avoid_: treating all active personnel as automatically in scope, using an exclusion list as the primary model, or counting people outside the roster in حراست attendance metrics
+A derived attendance population equal to the three guards in جمعیت عملیاتی جاری حراست. Publishing a new A/B/C plan changes the current attendance population without rewriting raw historical attendance evidence.
+_Avoid_: maintaining a competing manual roster, treating all active personnel or workspace users as automatically in scope, or counting people outside current A/B/C in normal attendance metrics
 
 **فهرست خالی حضور و غیاب حراست**:
-An empty فهرست حضور و غیاب حراست is an intentional empty attendance scope. حراست attendance pages and metrics should show no population and guide managers to configure the roster, rather than falling back to all active personnel.
-_Avoid_: silently loading all personnel when the roster is empty, calculating attendance percentages from an unconfigured population, or hiding the need for manager configuration
-
-**مالکیت فهرست حضور و غیاب حراست**:
-Only حراست manager/admin users maintain the attendance roster. Operational guards use the resulting roster for attendance work but do not add or remove personnel from it during daily operations.
-_Avoid_: letting guards quietly expand the metric population from the attendance screen, mixing roster governance with check-in/check-out actions, or making roster membership a personal preference
-
-**عضویت تاریخ‌دار در فهرست حضور و غیاب حراست**:
-Roster membership is effective-dated: adding or removing personnel changes the حراست attendance population from the effective date forward, while historical attendance reports keep the roster truth that applied on each past day.
-_Avoid_: recalculating old attendance rates from today's roster, using a current-only checkbox for a historical metric boundary, or erasing past roster membership when someone leaves the attendance scope
-
-**راه‌اندازی اولیه فهرست حضور و غیاب حراست**:
-On first rollout of the roster model, currently active personnel may be seeded into the فهرست حضور و غیاب حراست effective from the rollout date so daily operations do not go blank. This is a one-time transition; after rollout, an empty roster remains an intentional empty attendance scope.
-_Avoid_: treating the seed as a permanent fallback to all active personnel, backfilling old roster history without an explicit decision, or changing pre-rollout reports unexpectedly
-
-**حذف از فهرست حضور و غیاب حراست**:
-Removing personnel from the attendance roster ends their future attendance scope but does not delete or rewrite existing attendance records. If removal is effective for the current day, that person leaves the current day's roster population and metrics while their raw attendance record remains available for audit/history.
-_Avoid_: deleting attendance evidence, changing historical days where the person was in scope, or keeping removed personnel in current metrics because they had a record earlier that day
-
-**افزودن به فهرست حضور و غیاب حراست**:
-Adding personnel to the attendance roster is effective from the selected date. If the effective date is today, the person immediately appears in today's حراست attendance population and metrics, usually as غایب until ورود or an exception is recorded; managers can choose a future effective date to avoid changing today's metrics.
-_Avoid_: delaying today-effective additions until tomorrow, hiding newly scoped personnel from current attendance, or changing today's metrics without making the effective date explicit
-
-**برابری پرسنل در حضور و غیاب**:
-In daily security attendance, user-linked and non-user personnel behave the same from the acting guard's perspective: both can be searched, filtered, checked in, checked out, marked with exceptions, and signed. Permissions belong to the acting system user, not to the personnel record being attended.
-_Avoid_: exposing login-account status as an attendance concern, hiding non-user personnel from security actions, or requiring attended personnel to have system permissions
+An empty attendance population means no A/B/C plan has ever been published. حراست attendance pages and metrics show no people and guide managers to publish a plan instead of falling back to all active personnel or access-bearing users.
+_Avoid_: calculating attendance from an unconfigured population, silently loading all personnel, or hiding the need to publish A/B/C
 
 **ثبت ورود تکراری در حضور و غیاب حراست**:
 When حراست records ورود for a person and that same person already has an entry time for the selected attendance date, the operation should behave as a successful idempotent action and return the existing attendance truth to the operator. The visible daily list should then show the existing حاضر record instead of leaving the person as غایب.

@@ -65,12 +65,6 @@ const scopedPersonnelWhere = (departmentId?: unknown, personnelId?: unknown) => 
   ...(departmentId ? { departmentId: String(departmentId) } : {}),
   ...(personnelId ? { id: String(personnelId) } : {})
 });
-const scopedEmployeeWhere = (departmentId?: unknown, employeeId?: unknown) => ({
-  isActive: true,
-  ...(departmentId ? { departmentId: String(departmentId) } : {}),
-  ...(employeeId ? { id: String(employeeId) } : {})
-});
-
 const attendanceInclude = {
   employee: {
     select: {
@@ -126,13 +120,6 @@ const rosterMembershipWhere = (targetDate: Date) => ({
   OR: [{ effectiveTo: null }, { effectiveTo: { gt: targetDate } }]
 });
 
-const rosterRolloutDate = async () => {
-  const result = await prisma.securityAttendanceRosterMembership.aggregate({
-    _min: { effectiveFrom: true }
-  });
-  return result._min.effectiveFrom ? startOfDay(result._min.effectiveFrom) : null;
-};
-
 const personnelSelect = {
   id: true,
   firstName: true,
@@ -142,35 +129,46 @@ const personnelSelect = {
   user: { select: { id: true, username: true, email: true } }
 };
 
-const loadAttendancePopulation = async (targetDate: Date, filters: { departmentId?: unknown; employeeId?: unknown; personnelId?: unknown }) => {
+const currentOperationalSecurityPersonnel = async () => {
+  const plan = await prisma.securityShiftPlan.findFirst({
+    where: { status: SecurityShiftPlanStatus.PUBLISHED },
+    select: { primaryAId: true, primaryBId: true, primaryCId: true },
+    orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }]
+  });
+  if (!plan) return [];
+
+  const orderedIds = [plan.primaryAId, plan.primaryBId, plan.primaryCId];
+  const personnel = await prisma.securityPersonnel.findMany({
+    where: { id: { in: orderedIds } },
+    include: {
+      shift: true,
+      user: {
+        select: {
+          id: true,
+          personnelId: true,
+          firstName: true,
+          lastName: true,
+          username: true,
+          email: true,
+          department: { select: { id: true, name: true, namePersian: true } },
+          personnel: { select: personnelSelect }
+        }
+      }
+    }
+  });
+  const byId = new Map(personnel.map((person) => [person.id, person]));
+  return orderedIds.map((id) => byId.get(id)).filter(Boolean) as typeof personnel;
+};
+
+const currentOperationalSecurityIds = async () => (await currentOperationalSecurityPersonnel()).map((person) => person.id);
+
+const loadAttendancePopulation = async (_targetDate: Date, filters: { departmentId?: unknown; employeeId?: unknown; personnelId?: unknown }) => {
   const targetPersonnelId = filters.personnelId || filters.employeeId;
-  const personnelWhere = scopedPersonnelWhere(filters.departmentId, targetPersonnelId);
-  const rolloutDate = await rosterRolloutDate();
-
-  if (rolloutDate && targetDate < rolloutDate) {
-    return prisma.personnel.findMany({
-      where: personnelWhere,
-      select: personnelSelect,
-      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }]
-    });
-  }
-
-  if (!rolloutDate) return [];
-
-  const memberships = await prisma.securityAttendanceRosterMembership.findMany({
-    where: {
-      ...rosterMembershipWhere(targetDate),
-      personnel: personnelWhere
-    },
-    include: { personnel: { select: personnelSelect } },
-    orderBy: [{ personnel: { lastName: 'asc' } }, { personnel: { firstName: 'asc' } }, { effectiveFrom: 'desc' }]
-  });
-
-  const byPersonnel = new Map<string, any>();
-  memberships.forEach((membership) => {
-    if (!byPersonnel.has(membership.personnelId)) byPersonnel.set(membership.personnelId, membership.personnel);
-  });
-  return Array.from(byPersonnel.values());
+  return (await currentOperationalSecurityPersonnel())
+    .map((securityPerson) => securityPerson.user.personnel)
+    .filter((personnel): personnel is NonNullable<typeof personnel> => Boolean(personnel))
+    .filter((personnel) => !filters.departmentId || personnel.department?.id === String(filters.departmentId))
+    .filter((personnel) => !targetPersonnelId || personnel.id === String(targetPersonnelId));
 };
 
 const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: unknown; shiftId?: unknown; employeeId?: unknown; personnelId?: unknown }) => {
@@ -2149,7 +2147,7 @@ router.get('/attendance/daily', protect, requireWorkspaceAccess(WORKSPACES.SECUR
 // @access  Private/Security Personnel
 router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
-    const [securityPersonnel, daily] = await Promise.all([
+    const [securityPersonnel, daily, operationalIds] = await Promise.all([
       prisma.securityPersonnel.findUnique({
       where: { userId: req.user!.id },
       include: { 
@@ -2168,15 +2166,17 @@ router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SECURI
         }
       }
       }),
-      buildDailyAttendance(req.query)
+      buildDailyAttendance(req.query),
+      currentOperationalSecurityIds()
     ]);
+    const visibleSecurityPersonnel = securityPersonnel && operationalIds.includes(securityPersonnel.id) ? securityPersonnel : null;
 
     const stats = {
-      currentShift: securityPersonnel?.shift || null,
-      securityPersonnel: securityPersonnel ? {
-        name: `${securityPersonnel.user.firstName} ${securityPersonnel.user.lastName}`,
-        position: securityPersonnel.position,
-        department: securityPersonnel.user.department?.namePersian
+      currentShift: visibleSecurityPersonnel?.shift || null,
+      securityPersonnel: visibleSecurityPersonnel ? {
+        name: `${visibleSecurityPersonnel.user.firstName} ${visibleSecurityPersonnel.user.lastName}`,
+        position: visibleSecurityPersonnel.position,
+        department: visibleSecurityPersonnel.user.department?.namePersian
       } : null,
       todayStats: daily.stats,
       recentActivity: daily.attendanceRecords.slice(-5).map(record => ({
@@ -2201,6 +2201,32 @@ router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SECURI
       error: 'Server error'
     });
     return;
+  }
+});
+
+// @desc    Get the current published A/B/C operational population
+// @route   GET /api/security/operational-personnel
+// @access  Private/Security workspace
+router.get('/operational-personnel', protect, securityView, async (_req: AuthRequest, res: Response) => {
+  try {
+    const personnel = await currentOperationalSecurityPersonnel();
+    const data = personnel.map((person) => ({
+      id: person.id,
+      position: person.position,
+      isActive: person.isActive,
+      shiftId: person.shiftId,
+      shift: person.shift,
+      user: {
+        firstName: person.user.firstName,
+        lastName: person.user.lastName,
+        username: person.user.username,
+        department: person.user.department
+      }
+    }));
+    res.json({ success: true, data, configured: data.length === 3 });
+  } catch (error) {
+    console.error('Get operational security personnel error:', error);
+    res.status(500).json({ success: false, error: 'دریافت جمعیت عملیاتی حراست ناموفق بود.' });
   }
 });
 
@@ -2414,7 +2440,19 @@ router.get('/reports/summary', protect, securityView, async (req: AuthRequest, r
     const days = Math.min(92, Math.floor((endDate.getTime() - startDate.getTime()) / 86_400_000) + 1);
     const rangeEnd = addDays(startDate, days);
     const { departmentId, shiftId, employeeId } = req.query;
-    const employeeWhere = scopedEmployeeWhere(departmentId, employeeId);
+    const operationalPersonnel = await currentOperationalSecurityPersonnel();
+    const operationalSecurityIds = operationalPersonnel.map((person) => person.id);
+    const operationalUserIds = operationalPersonnel.map((person) => person.user.id);
+    const scopedOperationalUserIds = employeeId && operationalUserIds.includes(String(employeeId))
+      ? [String(employeeId)]
+      : employeeId
+        ? []
+        : operationalUserIds;
+    const employeeWhere = {
+      isActive: true,
+      id: { in: scopedOperationalUserIds },
+      ...(departmentId ? { departmentId: String(departmentId) } : {})
+    };
 
     const trend: Array<{ date: string; total: number; present: number; absent: number; late: number; mission: number; leave: number; signed: number }> = [];
     for (let index = 0; index < days; index += 1) {
@@ -2465,7 +2503,14 @@ router.get('/reports/summary', protect, securityView, async (req: AuthRequest, r
         where: {
           startedAt: { lt: rangeEnd },
           OR: [{ endedAt: null }, { endedAt: { gte: startDate } }],
-          ...(shiftId ? { slot: { plannedPersonnel: { shiftId: String(shiftId) } } } : {})
+          slot: {
+            OR: [
+              { plannedPersonnelId: { in: operationalSecurityIds } },
+              { replacementPersonnelId: { in: operationalSecurityIds } },
+              { temporaryCoverage: { some: { personnelId: { in: operationalSecurityIds } } } }
+            ],
+            ...(shiftId ? { plannedPersonnel: { shiftId: String(shiftId) } } : {})
+          }
         },
         select: { status: true, personnelId: true }
       })
@@ -2473,8 +2518,9 @@ router.get('/reports/summary', protect, securityView, async (req: AuthRequest, r
 
     const countByStatus = (items: Array<{ status: string; _count: { _all: number } }>, status: string) =>
       items.find((item) => item.status === status)?._count._all || 0;
-    const activePersonnel = await prisma.securityPersonnel.count({ where: { isActive: true, ...(shiftId ? { shiftId: String(shiftId) } : {}) } });
-    const totalPersonnel = await prisma.securityPersonnel.count({ where: shiftId ? { shiftId: String(shiftId) } : undefined });
+    const scopedOperationalPersonnel = operationalPersonnel.filter((person) => !shiftId || person.shiftId === String(shiftId));
+    const activePersonnel = scopedOperationalPersonnel.filter((person) => person.isActive).length;
+    const totalPersonnel = scopedOperationalPersonnel.length;
     const completedShifts = shifts.filter((shift) => shift.status === SecurityShiftSessionStatus.CLOSED || shift.status === SecurityShiftSessionStatus.FORCE_CLOSED).length;
     const activeShifts = shifts.filter((shift) => shift.status === SecurityShiftSessionStatus.ACTIVE).length;
 
@@ -2533,7 +2579,9 @@ router.get('/reports/security-personnel-performance', protect, securityAdmin, as
     const sessionStatus = String(req.query.sessionStatus || '').trim() || undefined;
     const coverageStatus = String(req.query.coverageStatus || '').trim() || undefined;
     const activityType = String(req.query.activityType || '').trim() || undefined;
-    const personnel = await prisma.securityPersonnel.findMany({ where: { ...(personnelId ? { id: personnelId } : {}), ...(shiftId ? { shiftId } : {}) }, include: { user: { select: { firstName: true, lastName: true, username: true } }, shift: { select: { namePersian: true } } }, orderBy: { user: { firstName: 'asc' } } });
+    const personnel = (await currentOperationalSecurityPersonnel()).filter((person) => (
+      (!personnelId || person.id === personnelId) && (!shiftId || person.shiftId === shiftId)
+    ));
     const ids = personnel.map((item) => item.id);
     const slots = await prisma.securityShiftPlanSlot.findMany({ where: { startsAt: { lt: rangeEnd }, endsAt: { gt: startDate }, ...(coverageStatus ? { coverageStatus: coverageStatus as any } : {}), OR: [{ plannedPersonnelId: { in: ids } }, { replacementPersonnelId: { in: ids } }, { temporaryCoverage: { some: { personnelId: { in: ids } } } }] }, include: { attendance: true, session: { include: { patrolSessions: true, logEntries: { include: { reportType: shiftLogReportTypeInclude }, orderBy: { createdAt: 'asc' } } }, }, temporaryCoverage: true }, orderBy: { startsAt: 'asc' } });
     const summaries = personnel.map((person) => {
@@ -2541,7 +2589,7 @@ router.get('/reports/security-personnel-performance', protect, securityAdmin, as
       const sessions = assigned.map((slot) => slot.session).filter(Boolean).filter((session: any) => !sessionStatus || session.status === sessionStatus) as any[];
       const attendance = assigned.flatMap((slot) => slot.attendance.filter((item) => item.personnelId === person.id));
       const patrols = sessions.flatMap((session) => session.patrolSessions.filter((patrol: any) => patrol.personnelId === person.id));
-      const logs = sessions.flatMap((session) => session.logEntries);
+      const logs = sessions.flatMap((session) => session.logEntries).filter((entry) => entry.status !== SecurityShiftLogStatus.VOIDED);
       return { id: person.id, name: `${person.user.firstName} ${person.user.lastName}`.trim() || person.user.username, shift: person.shift.namePersian, plannedSlots: assigned.length, attended: attendance.length, late: attendance.filter((item) => item.delayMinutes > 0).length, noShows: assigned.filter((slot) => !!slot.probableNoShowAt).length, completed: sessions.filter((session) => session.status === SecurityShiftSessionStatus.CLOSED).length, forceClosed: sessions.filter((session) => session.status === SecurityShiftSessionStatus.FORCE_CLOSED).length, active: sessions.filter((session) => session.status === SecurityShiftSessionStatus.ACTIVE).length, patrols: patrols.length, logEntries: logs.length, coverageExceptions: assigned.filter((slot) => slot.coverageStatus !== SecurityShiftCoverageStatus.COVERED).length };
     });
     const selected = personnelId ? slots.flatMap((slot) => (slot.session ? [{ slot, session: slot.session }] : [])).flatMap(({ slot, session }) => {
@@ -2610,11 +2658,16 @@ const securityPdfStyles = () => {
       table{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:8px}
       th,td{border:1px solid #d1d5db;padding:5px;vertical-align:top;word-break:break-word}
       th{background:#edf7f6;font-weight:700;color:#074747}
-      .shift{border:1px solid #d8dee9;border-radius:8px;padding:8px;margin-bottom:9px;break-inside:avoid}
+      .shift{border:1px solid #d8dee9;border-radius:8px;padding:8px;margin-bottom:9px;break-inside:auto}
       .muted{color:#64748b}
       .badge{display:inline-block;border-radius:999px;padding:2px 7px;background:#e2e8f0;color:#334155;font-size:9px}
       .badge.force{background:#fee2e2;color:#991b1b}
+      .badge.voided{background:#fee2e2;color:#991b1b}
       .note{background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px;margin:5px 0}
+      .images{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:7px 0}
+      .evidence-image{border:1px solid #d8dee9;border-radius:7px;padding:6px;break-inside:avoid;background:#fff}
+      .evidence-image img{display:block;width:100%;height:auto;max-height:90mm;object-fit:contain;border-radius:5px}
+      .caption{margin-top:4px;color:#475569;font-size:9px;direction:rtl}
     </style>
   `;
 };
@@ -2622,6 +2675,170 @@ const securityPdfStyles = () => {
 const securityName = (value: any) => `${value?.firstName || ''} ${value?.lastName || ''}`.trim() || value?.username || '-';
 const participantDisplayName = (participant: any) => securityName(participant.personnel || participant.user);
 const formatSecurityDateTime = (value: unknown) => value ? new Date(String(value)).toLocaleString('fa-IR') : '-';
+
+const detailedShiftInclude = {
+  plan: { select: { title: true } },
+  plannedPersonnel: { include: { user: true, shift: true } },
+  replacementPersonnel: { include: { user: true, shift: true } },
+  attendance: { include: { personnel: { include: { user: true, shift: true } } }, orderBy: { arrivedAt: 'asc' as const } },
+  temporaryCoverage: { include: { personnel: { include: { user: true, shift: true } } } },
+  session: {
+    include: {
+      personnel: { include: { user: true, shift: true } },
+      logEntries: {
+        include: {
+          reportType: shiftLogReportTypeInclude,
+          participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } },
+          attachments: true
+        },
+        orderBy: { rowNumber: 'asc' as const }
+      },
+      patrolSessions: { include: { personnel: { include: { user: true } } }, orderBy: { startedAt: 'asc' as const } }
+    }
+  }
+};
+
+const securityShiftImageHtml = (entry: any) => {
+  const images = (entry.attachments || []).map((attachment: any) => ({
+    attachment,
+    dataUri: securityFileToDataUri(path.join(shiftLogPhotoDir, attachment.storageName), attachment.mimeType)
+  })).filter((item: any) => item.dataUri);
+  if (!images.length) return '';
+  return `<div class="images">${images.map(({ attachment, dataUri }: any) => `
+    <figure class="evidence-image">
+      <img src="${dataUri}" alt="${securityEscapeHtml(attachment.originalName)}" />
+      <figcaption class="caption">ردیف ${entry.rowNumber.toLocaleString('fa-IR')} · ${securityEscapeHtml(attachment.originalName)}</figcaption>
+    </figure>
+  `).join('')}</div>`;
+};
+
+const renderDetailedSecurityShift = (slot: any) => {
+  const session = slot.session;
+  if (!session) return '';
+  const statusLabel = session.status === SecurityShiftSessionStatus.FORCE_CLOSED ? 'بسته‌شده توسط مدیر' : 'تکمیل‌شده';
+  const temporaryNames = slot.temporaryCoverage.map((coverage: any) => securityName(coverage.personnel.user)).filter((name: string) => name !== '-');
+  const hasParticipants = session.logEntries.some((entry: any) => entry.participants.length > 0);
+
+  const logRows = session.logEntries.map((entry: any) => {
+    const voided = entry.status === SecurityShiftLogStatus.VOIDED;
+    const participants = entry.participants.map(participantDisplayName).map(securityEscapeHtml).join('، ');
+    const imageHtml = securityShiftImageHtml(entry);
+    const columnCount = hasParticipants ? 6 : 5;
+    return `
+      <tr>
+        <td>${entry.rowNumber.toLocaleString('fa-IR')}</td>
+        <td>${securityEscapeHtml(`${entry.reportType.category?.name ? `${entry.reportType.category.name} / ` : ''}${entry.reportType.name}`)}${entry.reportType.description ? `<div class="muted">${securityEscapeHtml(entry.reportType.description)}</div>` : ''}</td>
+        <td>${securityEscapeHtml(entry.description || '-')}</td>
+        ${hasParticipants ? `<td>${participants || '-'}</td>` : ''}
+        <td>${voided ? `<span class="badge voided">باطل‌شده</span>${entry.voidedAt ? `<div class="muted">زمان ابطال: ${formatSecurityDateTime(entry.voidedAt)}</div>` : ''}${entry.voidReason ? `<div class="muted">دلیل: ${securityEscapeHtml(entry.voidReason)}</div>` : ''}` : '<span class="badge">فعال</span>'}</td>
+        <td>${formatSecurityDateTime(entry.createdAt)}</td>
+      </tr>
+      ${imageHtml ? `<tr><td colspan="${columnCount}">${imageHtml}</td></tr>` : ''}
+    `;
+  }).join('');
+
+  const logsSection = logRows ? `
+    <h3>گزارش‌های لحظه‌ای</h3>
+    <table><thead><tr><th>ردیف</th><th>نوع گزارش</th><th>شرح رویداد</th>${hasParticipants ? '<th>افراد مرتبط</th>' : ''}<th>وضعیت</th><th>زمان ثبت</th></tr></thead><tbody>${logRows}</tbody></table>
+  ` : '';
+
+  const attendanceRows = slot.attendance.map((attendance: any) => `
+    <tr>
+      <td>${securityEscapeHtml(securityName(attendance.personnel.user))}</td>
+      <td>${formatSecurityDateTime(attendance.arrivedAt)}</td>
+      <td>${attendance.delayMinutes.toLocaleString('fa-IR')} دقیقه</td>
+      <td>${attendance.correctedAt ? `${attendance.originalArrivedAt ? `<div>زمان قبلی: ${formatSecurityDateTime(attendance.originalArrivedAt)}</div>` : ''}<div>اصلاح: ${formatSecurityDateTime(attendance.correctedAt)}</div>${attendance.correctionReason ? `<div class="muted">دلیل: ${securityEscapeHtml(attendance.correctionReason)}</div>` : ''}` : '-'}</td>
+    </tr>
+  `).join('');
+  const attendanceSection = attendanceRows ? `
+    <h3>گزارش حضور و غیاب شیفت</h3>
+    <table><thead><tr><th>نیرو</th><th>زمان حضور</th><th>تاخیر</th><th>اصلاح ثبت</th></tr></thead><tbody>${attendanceRows}</tbody></table>
+  ` : '';
+
+  const patrolRows = session.patrolSessions.map((patrol: any) => `
+    <tr><td>${securityEscapeHtml(securityName(patrol.personnel.user))}</td><td>${formatSecurityDateTime(patrol.startedAt)}</td><td>${formatSecurityDateTime(patrol.endedAt)}</td><td>${securityEscapeHtml(patrol.description || '-')}</td></tr>
+  `).join('');
+  const patrolSection = patrolRows ? `
+    <h3>گشت‌زنی‌ها</h3>
+    <table><thead><tr><th>نیرو</th><th>شروع</th><th>پایان</th><th>توضیحات</th></tr></thead><tbody>${patrolRows}</tbody></table>
+  ` : '';
+
+  const optionalCoverageRows = [
+    slot.replacementPersonnel ? `<tr><th>جایگزین</th><td colspan="3">${securityEscapeHtml(securityName(slot.replacementPersonnel.user))}</td></tr>` : '',
+    temporaryNames.length ? `<tr><th>پوشش موقت</th><td colspan="3">${securityEscapeHtml(temporaryNames.join('، '))}</td></tr>` : ''
+  ].filter(Boolean).join('');
+
+  return `
+    <section class="shift">
+      <h2>${securityEscapeHtml(securityName(session.personnel.user))} <span class="badge ${session.status === SecurityShiftSessionStatus.FORCE_CLOSED ? 'force' : ''}">${statusLabel}</span></h2>
+      <table><tbody>
+        <tr><th>بازه برنامه</th><td>${formatSecurityDateTime(slot.startsAt)} تا ${formatSecurityDateTime(slot.endsAt)}</td><th>بازه واقعی</th><td>${formatSecurityDateTime(session.startedAt)} تا ${formatSecurityDateTime(session.endedAt)}</td></tr>
+        <tr><th>شیفت</th><td>${securityEscapeHtml(slot.plannedPersonnel.shift.namePersian)}</td><th>برنامه</th><td>${securityEscapeHtml(slot.plan.title)}</td></tr>
+        <tr><th>نیروی برنامه‌ریزی‌شده</th><td colspan="3">${securityEscapeHtml(securityName(slot.plannedPersonnel.user))}</td></tr>
+        ${optionalCoverageRows}
+      </tbody></table>
+      ${session.forceCloseReason ? `<div class="note"><strong>دلیل بستن توسط مدیر:</strong> ${securityEscapeHtml(session.forceCloseReason)}</div>` : ''}
+      ${session.closureSummary ? `<div class="note"><strong>خلاصه پایان:</strong> ${securityEscapeHtml(session.closureSummary)}</div>` : ''}
+      ${attendanceSection}
+      ${logsSection}
+      ${patrolSection}
+    </section>
+  `;
+};
+
+const latestCompletedSecurityShiftWhere = {
+  session: {
+    status: { in: [SecurityShiftSessionStatus.CLOSED, SecurityShiftSessionStatus.FORCE_CLOSED] },
+    endedAt: { not: null }
+  }
+};
+
+const latestCompletedSecurityShift = (includeDetails = false) => includeDetails
+  ? prisma.securityShiftPlanSlot.findFirst({
+      where: latestCompletedSecurityShiftWhere,
+      include: detailedShiftInclude,
+      orderBy: { session: { endedAt: 'desc' } }
+    })
+  : prisma.securityShiftPlanSlot.findFirst({
+      where: latestCompletedSecurityShiftWhere,
+      select: { id: true, session: { select: { endedAt: true, status: true } } },
+      orderBy: { session: { endedAt: 'desc' } }
+    });
+
+router.get('/reports/latest-completed-shift', protect, securityAdmin, async (_req: AuthRequest, res: Response) => {
+  try {
+    const slot = await latestCompletedSecurityShift();
+    res.json({
+      success: true,
+      data: slot ? { available: true, slotId: slot.id, endedAt: slot.session?.endedAt, status: slot.session?.status } : { available: false }
+    });
+  } catch (error) {
+    console.error('Get latest completed security shift error:', error);
+    res.status(500).json({ success: false, error: 'بررسی گزارش شیفت قبل ناموفق بود.' });
+  }
+});
+
+router.get('/reports/latest-completed-shift.pdf', protect, securityAdmin, async (_req: AuthRequest, res: Response) => {
+  try {
+    const slot = await latestCompletedSecurityShift(true) as any;
+    if (!slot) return res.status(404).json({ success: false, error: 'هنوز شیفت پایان‌یافته‌ای برای دریافت گزارش وجود ندارد' });
+    const html = `
+      ${securityPdfStyles()}
+      <div class="sheet">
+        <header class="header">
+          <div><h1>گزارش‌های حراست شیفت قبل</h1><div class="meta">پایان واقعی شیفت: ${formatSecurityDateTime(slot.session?.endedAt)} | زمان تولید: ${formatSecurityDateTime(new Date())}</div></div>
+          <div class="meta">آخرین شیفت بر اساس زمان پایان واقعی</div>
+        </header>
+        ${renderDetailedSecurityShift(slot)}
+      </div>
+    `;
+    const pdfPath = await generatePdfFromHtml({ fileName: `security-latest-completed-shift-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
+    return res.download(pdfPath, 'security-latest-completed-shift.pdf', () => fs.unlink(pdfPath, () => undefined));
+  } catch (error) {
+    console.error('Export latest completed security shift PDF error:', error);
+    return res.status(500).json({ success: false, error: 'ساخت PDF شیفت قبل ناموفق بود.' });
+  }
+});
 
 router.get('/reports/security-personnel-performance.pdf', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
   try {
@@ -2632,6 +2849,10 @@ router.get('/reports/security-personnel-performance.pdf', protect, securityAdmin
     const personnelId = String(req.query.personnelId || '').trim() || undefined;
     const shiftId = String(req.query.shiftId || '').trim() || undefined;
     const coverageStatus = String(req.query.coverageStatus || '').trim() || undefined;
+    const operationalIds = (await currentOperationalSecurityPersonnel())
+      .filter((person) => !shiftId || person.shiftId === shiftId)
+      .map((person) => person.id);
+    const scopedIds = personnelId && operationalIds.includes(personnelId) ? [personnelId] : personnelId ? [] : operationalIds;
 
     const slots = await prisma.securityShiftPlanSlot.findMany({
       where: {
@@ -2639,74 +2860,31 @@ router.get('/reports/security-personnel-performance.pdf', protect, securityAdmin
         endsAt: { gt: startDate },
         ...(coverageStatus ? { coverageStatus: coverageStatus as any } : {}),
         session: { status: { in: [SecurityShiftSessionStatus.CLOSED, SecurityShiftSessionStatus.FORCE_CLOSED] } },
-        ...(shiftId ? { plannedPersonnel: { shiftId } } : {}),
-        ...(personnelId ? { OR: [{ plannedPersonnelId: personnelId }, { replacementPersonnelId: personnelId }, { temporaryCoverage: { some: { personnelId } } }] } : {})
+        OR: [
+          { plannedPersonnelId: { in: scopedIds } },
+          { replacementPersonnelId: { in: scopedIds } },
+          { temporaryCoverage: { some: { personnelId: { in: scopedIds } } } }
+        ]
       },
-      include: {
-        plan: { select: { title: true } },
-        plannedPersonnel: { include: { user: true, shift: true } },
-        replacementPersonnel: { include: { user: true, shift: true } },
-        attendance: true,
-        temporaryCoverage: { include: { personnel: { include: { user: true, shift: true } } } },
-        session: {
-          include: {
-            personnel: { include: { user: true, shift: true } },
-            logEntries: {
-              include: { reportType: shiftLogReportTypeInclude, participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } } },
-              orderBy: { rowNumber: 'asc' }
-            },
-            patrolSessions: { include: { personnel: { include: { user: true } } }, orderBy: { startedAt: 'asc' } }
-          }
-        }
-      },
+      include: detailedShiftInclude,
       orderBy: { startsAt: 'asc' }
     });
 
     const totals = {
       shifts: slots.length,
       forceClosed: slots.filter((slot) => slot.session?.status === SecurityShiftSessionStatus.FORCE_CLOSED).length,
-      logs: slots.reduce((sum, slot) => sum + (slot.session?.logEntries.length || 0), 0),
+      logs: slots.reduce((sum, slot) => sum + (slot.session?.logEntries.filter((entry) => entry.status !== SecurityShiftLogStatus.VOIDED).length || 0), 0),
       patrols: slots.reduce((sum, slot) => sum + (slot.session?.patrolSessions.length || 0), 0)
     };
 
     const rangeLabel = `${startDate.toLocaleDateString('fa-IR')} تا ${endDate.toLocaleDateString('fa-IR')}`;
-    const shiftHtml = slots.map((slot) => {
-      const session = slot.session;
-      const attendance = slot.attendance.find((item) => item.personnelId === session?.personnelId);
-      const statusLabel = session?.status === SecurityShiftSessionStatus.FORCE_CLOSED ? 'بسته‌شده توسط مدیر' : 'تکمیل‌شده';
-      const temporaryNames = slot.temporaryCoverage.map((coverage) => securityName(coverage.personnel.user)).join('، ') || '-';
-      const logs = session?.logEntries.map((entry) => `
-        <tr>
-          <td>${entry.rowNumber.toLocaleString('fa-IR')}</td>
-          <td>${securityEscapeHtml(`${entry.reportType.category?.name ? `${entry.reportType.category.name} / ` : ''}${entry.reportType.name}`)}${entry.reportType.description ? `<div class="muted">${securityEscapeHtml(entry.reportType.description)}</div>` : ''}</td>
-          <td>${securityEscapeHtml(entry.description || '-')}</td>
-          <td>${entry.participants.map(participantDisplayName).map(securityEscapeHtml).join('، ') || '-'}</td>
-          <td>${formatSecurityDateTime(entry.createdAt)}</td>
-        </tr>
-      `).join('') || '<tr><td colspan="5" class="muted">گزارش لحظه‌ای ثبت نشده است.</td></tr>';
-      const patrols = session?.patrolSessions.map((patrol) => `
-        <tr><td>${securityName(patrol.personnel.user)}</td><td>${formatSecurityDateTime(patrol.startedAt)}</td><td>${formatSecurityDateTime(patrol.endedAt)}</td><td>${securityEscapeHtml(patrol.description || '-')}</td></tr>
-      `).join('') || '<tr><td colspan="4" class="muted">گشت‌زنی ثبت نشده است.</td></tr>';
-
-      return `
-        <section class="shift">
-          <h2>${securityEscapeHtml(securityName(session?.personnel.user))} <span class="badge ${session?.status === SecurityShiftSessionStatus.FORCE_CLOSED ? 'force' : ''}">${statusLabel}</span></h2>
-          <table>
-            <tbody>
-              <tr><th>بازه برنامه</th><td>${formatSecurityDateTime(slot.startsAt)} تا ${formatSecurityDateTime(slot.endsAt)}</td><th>بازه واقعی</th><td>${formatSecurityDateTime(session?.startedAt)} تا ${formatSecurityDateTime(session?.endedAt)}</td></tr>
-              <tr><th>شیفت</th><td>${securityEscapeHtml(slot.plannedPersonnel.shift.namePersian)}</td><th>برنامه</th><td>${securityEscapeHtml(slot.plan.title)}</td></tr>
-              <tr><th>نیروی برنامه‌ریزی‌شده</th><td>${securityEscapeHtml(securityName(slot.plannedPersonnel.user))}</td><th>جایگزین</th><td>${securityEscapeHtml(securityName(slot.replacementPersonnel?.user))}</td></tr>
-              <tr><th>پوشش موقت</th><td>${securityEscapeHtml(temporaryNames)}</td><th>تاخیر</th><td>${(attendance?.delayMinutes || 0).toLocaleString('fa-IR')} دقیقه</td></tr>
-            </tbody>
-          </table>
-          ${session?.closureSummary ? `<div class="note"><strong>خلاصه پایان:</strong> ${securityEscapeHtml(session.closureSummary)}</div>` : ''}
-          <h3>گزارش‌های لحظه‌ای</h3>
-          <table><thead><tr><th>ردیف</th><th>نوع گزارش</th><th>شرح رویداد</th><th>افراد مرتبط</th><th>زمان ثبت</th></tr></thead><tbody>${logs}</tbody></table>
-          <h3>گشت‌زنی‌ها</h3>
-          <table><thead><tr><th>نیرو</th><th>شروع</th><th>پایان</th><th>توضیحات</th></tr></thead><tbody>${patrols}</tbody></table>
-        </section>
-      `;
-    }).join('') || '<p class="muted">شیفت پایان‌یافته‌ای در این بازه وجود ندارد.</p>';
+    const shiftHtml = slots.map(renderDetailedSecurityShift).join('') || '<p class="muted">شیفت پایان‌یافته‌ای در این بازه وجود ندارد.</p>';
+    const summaryCards = [
+      totals.shifts ? `<div class="card"><span>شیفت پایان‌یافته</span><strong>${totals.shifts.toLocaleString('fa-IR')}</strong></div>` : '',
+      totals.forceClosed ? `<div class="card"><span>بسته‌شده مدیر</span><strong>${totals.forceClosed.toLocaleString('fa-IR')}</strong></div>` : '',
+      totals.logs ? `<div class="card"><span>گزارش لحظه‌ای فعال</span><strong>${totals.logs.toLocaleString('fa-IR')}</strong></div>` : '',
+      totals.patrols ? `<div class="card"><span>گشت‌زنی</span><strong>${totals.patrols.toLocaleString('fa-IR')}</strong></div>` : ''
+    ].filter(Boolean).join('');
 
     const html = `
       ${securityPdfStyles()}
@@ -2715,12 +2893,7 @@ router.get('/reports/security-personnel-performance.pdf', protect, securityAdmin
           <div><h1>گزارش عملکرد نیروهای حراست</h1><div class="meta">بازه: ${securityEscapeHtml(rangeLabel)} | زمان تولید: ${formatSecurityDateTime(new Date())}</div></div>
           <div class="meta">فقط شیفت‌های پایان‌یافته در این خروجی آمده‌اند.</div>
         </header>
-        <div class="cards">
-          <div class="card"><span>شیفت پایان‌یافته</span><strong>${totals.shifts.toLocaleString('fa-IR')}</strong></div>
-          <div class="card"><span>بسته‌شده مدیر</span><strong>${totals.forceClosed.toLocaleString('fa-IR')}</strong></div>
-          <div class="card"><span>گزارش لحظه‌ای</span><strong>${totals.logs.toLocaleString('fa-IR')}</strong></div>
-          <div class="card"><span>گشت‌زنی</span><strong>${totals.patrols.toLocaleString('fa-IR')}</strong></div>
-        </div>
+        ${summaryCards ? `<div class="cards">${summaryCards}</div>` : ''}
         ${shiftHtml}
       </div>
     `;
@@ -2880,8 +3053,8 @@ router.post('/exceptions/request', protect, requireWorkspaceAccess(WORKSPACES.SE
 router.get('/exceptions/requests', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
     const { status, type, page = 1, limit = 10 } = req.query;
-    
-    const where: any = {};
+    const operationalUserIds = (await currentOperationalSecurityPersonnel()).map((person) => person.user.id);
+    const where: any = { employeeId: { in: operationalUserIds } };
     if (status) where.status = status;
     if (type) where.exceptionType = type;
 
@@ -3180,8 +3353,8 @@ router.post('/missions/assign', protect, requireWorkspaceAccess(WORKSPACES.SECUR
 router.get('/missions', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_MISSIONS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
     const { status, page = 1, limit = 10 } = req.query;
-    
-    const where: any = {};
+    const operationalUserIds = (await currentOperationalSecurityPersonnel()).map((person) => person.user.id);
+    const where: any = { employeeId: { in: operationalUserIds } };
     if (status) where.status = status;
 
     const missionAssignments = await prisma.missionAssignment.findMany({

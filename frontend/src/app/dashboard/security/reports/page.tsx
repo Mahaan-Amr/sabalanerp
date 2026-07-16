@@ -34,9 +34,10 @@ export default function ReportsPage() {
   const [sessionStatus, setSessionStatus] = useState('');
   const [coverageStatus, setCoverageStatus] = useState('');
   const [activityType, setActivityType] = useState('');
+  const [latestShiftReport, setLatestShiftReport] = useState<{ authorized: boolean; available: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [exporting, setExporting] = useState<'attendance-pdf' | 'excel' | 'performance-pdf' | null>(null);
+  const [exporting, setExporting] = useState<'attendance-pdf' | 'excel' | 'performance-pdf' | 'latest-shift-pdf' | null>(null);
 
   const baseParams = () => ({
     startDate: PersianCalendar.toGregorian(range.startDate).toISOString(),
@@ -76,13 +77,26 @@ export default function ReportsPage() {
   }, [scope, range, departmentId, shiftId, personnelId, sessionStatus, coverageStatus, activityType]);
 
   useEffect(() => {
-    Promise.all([departmentsAPI.getDepartments(), securityAPI.getShifts(), securityAPI.getPersonnel()])
+    Promise.all([departmentsAPI.getDepartments(), securityAPI.getShifts(), securityAPI.getOperationalPersonnel()])
       .then(([departmentResponse, shiftResponse, personnelResponse]) => {
         setDepartments(departmentResponse.data.data || []);
         setShifts(shiftResponse.data.data || []);
         setPersonnel(personnelResponse.data.data || []);
       })
       .catch(() => undefined);
+  }, []);
+
+  const loadLatestShiftStatus = async () => {
+    try {
+      const result = await securityAPI.getLatestCompletedShiftReportStatus();
+      setLatestShiftReport({ authorized: true, available: Boolean(result.data.data?.available) });
+    } catch (err: any) {
+      if (err.response?.status === 403) setLatestShiftReport({ authorized: false, available: false });
+    }
+  };
+
+  useEffect(() => {
+    void loadLatestShiftStatus();
   }, []);
 
   const preset = (days: number) => {
@@ -117,6 +131,18 @@ export default function ReportsPage() {
     }
   };
 
+  const exportLatestShiftPdf = async () => {
+    try {
+      setExporting('latest-shift-pdf');
+      const result = await securityAPI.downloadLatestCompletedShiftPdf();
+      downloadBlob(result.data, 'security-latest-completed-shift.pdf');
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'ساخت PDF شیفت قبل ناموفق بود.');
+    } finally {
+      setExporting(null);
+    }
+  };
+
   const attendance = data?.attendance || {};
   const trend = data?.attendanceTrend || [];
   const summaries = performance?.summaries || [];
@@ -136,7 +162,15 @@ export default function ReportsPage() {
       ];
 
   const actions = [
-    { label: 'به‌روزرسانی', icon: FaRedo, tone: 'neutral' as const, onClick: load },
+    { label: 'به‌روزرسانی', icon: FaRedo, tone: 'neutral' as const, onClick: () => { void load(); void loadLatestShiftStatus(); } },
+    ...(latestShiftReport?.authorized ? [{
+      label: exporting === 'latest-shift-pdf' ? 'در حال ساخت...' : 'گزارش‌های حراست شیفت قبل',
+      icon: FaFilePdf,
+      tone: 'info' as const,
+      onClick: exportLatestShiftPdf,
+      disabled: !!exporting || !latestShiftReport.available,
+      title: latestShiftReport.available ? undefined : 'هنوز شیفت پایان‌یافته‌ای برای دریافت گزارش وجود ندارد'
+    }] : []),
     ...(scope === 'attendance'
       ? [
           { label: exporting === 'attendance-pdf' ? 'در حال ساخت...' : 'PDF حضور و غیاب', icon: FaFilePdf, onClick: () => exportAttendance('pdf'), disabled: !!exporting },

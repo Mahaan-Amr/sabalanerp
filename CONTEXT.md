@@ -1216,8 +1216,8 @@ A generated schedule with a date range and exactly three ordered primary guards.
 _Avoid_: exposing normal annual-plan timing as free-form manager inputs, publishing a current schedule that still waits for manual shift start, rewriting started slots, placing one person in multiple primary positions, or silently inserting substitutes into the A→B→C rotation
 
 **جمعیت عملیاتی جاری حراست**:
-The three A/B/C primary guards in the current published annual shift plan are the only people shown in normal حراست dashboards, attendance, performance reports, filters, and PDFs. During a gap with no plan covering the current time, the latest non-superseded published plan remains authoritative; with no published plan history the population is intentionally empty and managers are guided to publish one. Substitutes appear only in the historical shifts they actually covered; workspace access alone never makes an admin, manager, or developer part of this population, and historical records retain their original people.
-_Avoid_: deriving reportable guards from workspace access, falling back to all users when no current slot exists, showing substitutes as current primary guards, or rewriting historical shift participants when the current A/B/C plan changes
+The three A/B/C primary guards in the current published annual shift plan are the people shown in shift-specific dashboards, performance reports, filters, and PDFs. During a gap with no plan covering the current time, the latest non-superseded published plan remains authoritative; with no published plan history the population is intentionally empty and managers are guided to publish one. Substitutes appear only in the historical shifts they actually covered; workspace access alone never makes an admin, manager, or developer part of this population, and historical records retain their original people.
+_Avoid_: using this population for company personnel attendance, deriving reportable guards from workspace access, falling back to all users when no current slot exists, showing substitutes as current primary guards, or rewriting historical shift participants when the current A/B/C plan changes
 
 **نامزد پیکربندی نیروی حراست**:
 An otherwise eligible person outside the current A/B/C population may appear only in manager-only shift-plan creation, replacement, or temporary-coverage controls so future assignments remain possible. The candidate does not enter normal operational reports or people lists unless they actually cover a historical shift or become a published A/B/C guard.
@@ -1244,12 +1244,12 @@ An active system user linked to organizational personnel who already has a secur
 _Avoid_: offering every active personnel record in security personnel assignment, assigning non-login personnel to authenticated shift work, or using placeholder sample users when no eligible user exists
 
 **فهرست حضور و غیاب حراست**:
-A derived attendance population equal to the three guards in جمعیت عملیاتی جاری حراست. Publishing a new A/B/C plan changes the current attendance population without rewriting raw historical attendance evidence.
-_Avoid_: maintaining a competing manual roster, treating all active personnel or workspace users as automatically in scope, or counting people outside current A/B/C in normal attendance metrics
+A date-effective roster of active company personnel whose ورود و خروج is managed by حراست. Managers may add or remove personnel with immediate effect for today, while each historical date, attendance report, and attendance PDF/Excel uses the roster membership effective on that date.
+_Avoid_: deriving company attendance from the A/B/C shift plan or workspace access, automatically including every active person after the initial roster setup, or applying today's roster retroactively to historical attendance
 
 **فهرست خالی حضور و غیاب حراست**:
-An empty attendance population means no A/B/C plan has ever been published. حراست attendance pages and metrics show no people and guide managers to publish a plan instead of falling back to all active personnel or access-bearing users.
-_Avoid_: calculating attendance from an unconfigured population, silently loading all personnel, or hiding the need to publish A/B/C
+An empty attendance population means no personnel are members of فهرست حضور و غیاب حراست for the selected date. Attendance pages and metrics show no people and guide managers to configure the roster instead of falling back to A/B/C guards, all active personnel, or access-bearing users.
+_Avoid_: calculating attendance from an unconfigured population, silently loading another population, or treating an empty roster as a missing shift plan
 
 **ثبت ورود تکراری در حضور و غیاب حراست**:
 When حراست records ورود for a person and that same person already has an entry time for the selected attendance date, the operation should behave as a successful idempotent action and return the existing attendance truth to the operator. The visible daily list should then show the existing حاضر record instead of leaving the person as غایب.

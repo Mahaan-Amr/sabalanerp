@@ -162,13 +162,20 @@ const currentOperationalSecurityPersonnel = async () => {
 
 const currentOperationalSecurityIds = async () => (await currentOperationalSecurityPersonnel()).map((person) => person.id);
 
-const loadAttendancePopulation = async (_targetDate: Date, filters: { departmentId?: unknown; employeeId?: unknown; personnelId?: unknown }) => {
+const loadAttendancePopulation = async (targetDate: Date, filters: { departmentId?: unknown; employeeId?: unknown; personnelId?: unknown }) => {
   const targetPersonnelId = filters.personnelId || filters.employeeId;
-  return (await currentOperationalSecurityPersonnel())
-    .map((securityPerson) => securityPerson.user.personnel)
-    .filter((personnel): personnel is NonNullable<typeof personnel> => Boolean(personnel))
-    .filter((personnel) => !filters.departmentId || personnel.department?.id === String(filters.departmentId))
-    .filter((personnel) => !targetPersonnelId || personnel.id === String(targetPersonnelId));
+  const memberships = await prisma.securityAttendanceRosterMembership.findMany({
+    where: {
+      ...rosterMembershipWhere(targetDate),
+      personnel: {
+        ...(filters.departmentId ? { departmentId: String(filters.departmentId) } : {}),
+        ...(targetPersonnelId ? { id: String(targetPersonnelId) } : {})
+      }
+    },
+    select: { personnel: { select: personnelSelect } },
+    orderBy: { personnel: { lastName: 'asc' } }
+  });
+  return memberships.map((membership) => membership.personnel);
 };
 
 const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: unknown; shiftId?: unknown; employeeId?: unknown; personnelId?: unknown }) => {
@@ -2674,7 +2681,7 @@ const securityPdfStyles = () => {
 
 const securityName = (value: any) => `${value?.firstName || ''} ${value?.lastName || ''}`.trim() || value?.username || '-';
 const participantDisplayName = (participant: any) => securityName(participant.personnel || participant.user);
-const formatSecurityDateTime = (value: unknown) => value ? new Date(String(value)).toLocaleString('fa-IR') : '-';
+const formatSecurityDateTime = (value: unknown) => value ? new Date(String(value)).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' }) : '-';
 
 const detailedShiftInclude = {
   plan: { select: { title: true } },

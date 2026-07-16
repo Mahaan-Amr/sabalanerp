@@ -134,7 +134,9 @@ export default function SecurityShiftsPage() {
     });
     return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
   }, [monthSlots]);
-  const historySlots = useMemo(() => slots.filter((slot) => slot.session || slot.report || slot.attendance?.length || slot.temporaryCoverage?.length || slot.replacementPersonnelId || slot.probableNoShowAt), [slots]);
+  const historySlots = useMemo(() => slots
+    .filter((slot) => slot.session || slot.report || slot.attendance?.length || slot.temporaryCoverage?.length || slot.replacementPersonnelId || slot.probableNoShowAt)
+    .sort((a, b) => new Date(b.session?.endedAt || b.startsAt).getTime() - new Date(a.session?.endedAt || a.startsAt).getTime()), [slots]);
   const activeShiftWorker = currentShift?.activeSession?.personnel || (currentShift?.activeSession?.slot ? slotWorker(currentShift.activeSession.slot) : null);
   const scheduledCurrentWorker = currentShift?.currentSlot ? slotWorker(currentShift.currentSlot) : null;
 

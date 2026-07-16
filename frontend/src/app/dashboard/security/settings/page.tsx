@@ -31,6 +31,17 @@ interface OperationalPerson {
   shift?: { namePersian?: string } | null;
 }
 
+interface AttendanceRosterItem {
+  personnel: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    isActive: boolean;
+    department?: { namePersian?: string | null } | null;
+  };
+  isInRoster: boolean;
+}
+
 const personName = (person: OperationalPerson) => `${person.user.firstName} ${person.user.lastName}`.trim();
 
 export default function SecuritySettingsPage() {
@@ -39,6 +50,8 @@ export default function SecuritySettingsPage() {
   const [categoryForm, setCategoryForm] = useState(emptyCategoryForm);
   const [typeForm, setTypeForm] = useState(emptyTypeForm);
   const [operationalPersonnel, setOperationalPersonnel] = useState<OperationalPerson[]>([]);
+  const [attendanceRoster, setAttendanceRoster] = useState<AttendanceRosterItem[]>([]);
+  const [updatingRosterId, setUpdatingRosterId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -57,8 +70,13 @@ export default function SecuritySettingsPage() {
     setLoading(true);
     setError('');
     try {
-      const [personnelResponse] = await Promise.all([securityAPI.getOperationalPersonnel(), loadReportSettings()]);
+      const [personnelResponse, rosterResponse] = await Promise.all([
+        securityAPI.getOperationalPersonnel(),
+        securityAPI.getAttendanceRoster({ date: new Date().toISOString() }),
+        loadReportSettings()
+      ]);
       if (personnelResponse.data.success) setOperationalPersonnel(personnelResponse.data.data || []);
+      if (rosterResponse.data.success) setAttendanceRoster(rosterResponse.data.data || []);
     } catch (err: any) {
       setError(err.response?.data?.error || 'دریافت تنظیمات حراست ناموفق بود.');
     } finally {
@@ -69,6 +87,25 @@ export default function SecuritySettingsPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  const updateAttendanceRoster = async (item: AttendanceRosterItem) => {
+    setUpdatingRosterId(item.personnel.id);
+    setError('');
+    setMessage('');
+    try {
+      const effectiveDate = new Date().toISOString();
+      const response = item.isInRoster
+        ? await securityAPI.removeAttendanceRosterMember(item.personnel.id, { effectiveDate })
+        : await securityAPI.addAttendanceRosterMember({ personnelId: item.personnel.id, effectiveDate });
+      setMessage(response.data.message || (item.isInRoster ? 'فرد از فهرست حضور و غیاب خارج شد.' : 'فرد به فهرست حضور و غیاب اضافه شد.'));
+      const rosterResponse = await securityAPI.getAttendanceRoster({ date: effectiveDate });
+      if (rosterResponse.data.success) setAttendanceRoster(rosterResponse.data.data || []);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'تغییر فهرست حضور و غیاب ناموفق بود.');
+    } finally {
+      setUpdatingRosterId('');
+    }
+  };
 
   const saveCategory = async () => {
     setSaving(true);
@@ -118,7 +155,7 @@ export default function SecuritySettingsPage() {
     <ErpPage
       eyebrow="حراست"
       title="تنظیمات حراست"
-      description="مدیریت دسته‌بندی و نوع گزارش‌های لحظه‌ای و مشاهده جمعیت عملیاتی A/B/C حراست."
+      description="مدیریت فهرست حضور و غیاب کارکنان، گزارش‌های لحظه‌ای و جمعیت عملیاتی A/B/C حراست."
       metrics={[
         { label: 'دسته‌بندی گزارش', value: categories.length.toLocaleString('fa-IR'), icon: FaFolderOpen, tone: 'info' },
         { label: 'نوع گزارش', value: types.length.toLocaleString('fa-IR'), icon: FaCog, tone: 'info' },
@@ -128,7 +165,7 @@ export default function SecuritySettingsPage() {
       {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-100">{message}</div>}
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-100">{error}</div>}
 
-      <ErpSection title="جمعیت عملیاتی جاری حراست" description="حضور و غیاب، داشبورد و گزارش‌ها فقط از سه نیروی A/B/C آخرین برنامه منتشرشده استفاده می‌کنند.">
+      <ErpSection title="جمعیت عملیاتی جاری حراست" description="شیفت‌ها و گزارش عملکرد حراست از سه نیروی A/B/C آخرین برنامه منتشرشده استفاده می‌کنند.">
         {operationalPersonnel.length === 0 ? (
           <ErpEmptyState icon={FaUsers} title="برنامه شیفت منتشرشده‌ای وجود ندارد" description="برای تعیین جمعیت عملیاتی حراست، یک برنامه A/B/C را منتشر کنید." />
         ) : (
@@ -143,6 +180,36 @@ export default function SecuritySettingsPage() {
                   <ErpBadge tone="success">{['A', 'B', 'C'][index]}</ErpBadge>
                 </div>
               </ErpCard>
+            ))}
+          </div>
+        )}
+      </ErpSection>
+
+      <ErpSection
+        title="فهرست حضور و غیاب کارکنان"
+        description="افراد این فهرست در ورود و خروج روزانه و خروجی‌های حضور و غیاب دیده می‌شوند. تغییرات از امروز اعمال می‌شود و سوابق قبلی محفوظ می‌ماند."
+      >
+        {attendanceRoster.length === 0 ? (
+          <ErpEmptyState icon={FaUsers} title="پرسنل فعالی برای تنظیم فهرست وجود ندارد" />
+        ) : (
+          <div className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
+            {attendanceRoster.map((item) => (
+              <label key={item.personnel.id} className="flex min-h-14 cursor-pointer items-center justify-between gap-3 bg-white px-4 py-3 dark:bg-slate-900/70">
+                <span className="min-w-0">
+                  <span className="block truncate font-semibold text-slate-900 dark:text-white">{item.personnel.firstName} {item.personnel.lastName}</span>
+                  <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{item.personnel.department?.namePersian || 'بدون بخش'}</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <ErpBadge tone={item.isInRoster ? 'success' : 'neutral'}>{item.isInRoster ? 'در فهرست' : 'خارج از فهرست'}</ErpBadge>
+                  <input
+                    type="checkbox"
+                    checked={item.isInRoster}
+                    disabled={Boolean(updatingRosterId)}
+                    onChange={() => updateAttendanceRoster(item)}
+                    className="h-5 w-5 accent-[#074747]"
+                  />
+                </span>
+              </label>
             ))}
           </div>
         )}

@@ -9,7 +9,6 @@ import {
   FaExclamationTriangle,
   FaFilter,
   FaSearch,
-  FaSignature,
   FaSignInAlt,
   FaSignOutAlt,
   FaUserCheck,
@@ -160,6 +159,7 @@ export default function AttendancePage() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [attendanceDialog, setAttendanceDialog] = useState<AttendanceDialogState | null>(null);
+  const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
 
   const fetchAttendanceData = async () => {
     try {
@@ -350,80 +350,59 @@ export default function AttendancePage() {
           <ErpEmptyState icon={FaUsers} title="رکوردی برای نمایش وجود ندارد" description="فیلترها را تغییر دهید یا تاریخ دیگری انتخاب کنید." />
         ) : (
           <>
-            <div className="space-y-3 lg:hidden">
+            <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 lg:hidden">
               {filteredRecords.map((record) => {
                 const checkingIn = actionLoadingId === `checkin-${record.employee.id}`;
                 const checkingOut = actionLoadingId === `checkout-${record.employee.id}`;
+                const expanded = expandedRecordId === record.id;
                 return (
-                  <ErpCard key={record.id} className="p-4">
-                    <div className="flex items-start justify-between gap-3">
+                  <div key={record.id} className="border-b border-slate-100 bg-white p-3 last:border-b-0 dark:border-slate-800 dark:bg-slate-900/70">
+                    <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto] items-center gap-2">
                       <div className="min-w-0">
-                        <p className="truncate text-base font-semibold text-slate-900 dark:text-white">
+                        <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
                           {record.employee.firstName} {record.employee.lastName}
                         </p>
-                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          {record.employee.department?.namePersian || 'بدون بخش'}{record.employee.username ? ` · @${record.employee.username}` : ''}
-                        </p>
                       </div>
+                      <p className="truncate text-xs text-slate-500 dark:text-slate-400">{record.employee.department?.namePersian || 'بدون بخش'}</p>
                       <ErpBadge tone={getStatusTone(record.status)}>{getStatusLabel(record.status)}</ErpBadge>
                     </div>
 
-                    <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                      <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/70">
-                        <dt className="text-xs text-slate-500 dark:text-slate-400">ورود</dt>
-                        <dd className="mt-1 font-semibold text-slate-900 dark:text-white">{record.entryTime || '-'}</dd>
-                      </div>
-                      <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/70">
-                        <dt className="text-xs text-slate-500 dark:text-slate-400">خروج</dt>
-                        <dd className="mt-1 font-semibold text-slate-900 dark:text-white">{record.exitTime || '-'}</dd>
-                      </div>
-                      <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/70">
-                        <dt className="text-xs text-slate-500 dark:text-slate-400">شیفت ثبت</dt>
-                        <dd className="mt-1 font-semibold text-slate-900 dark:text-white">{record.shift?.namePersian || '-'}</dd>
-                      </div>
-                      <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/70">
-                        <dt className="text-xs text-slate-500 dark:text-slate-400">امضا</dt>
-                        <dd className="mt-1 flex items-center gap-2 font-semibold text-slate-900 dark:text-white">
-                          {record.digitalSignature ? <><FaSignature className="h-4 w-4 text-emerald-600" /> ثبت شده</> : '-'}
-                        </dd>
-                      </div>
-                    </dl>
-
-                    <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                      {record.notes || record.exceptionType || 'بدون یادداشت'}
-                    </p>
-                    {record.openPreviousAttendance && (
-                      <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
-                        خروج روز قبل ثبت نشده است: {PersianCalendar.formatForDisplay(record.openPreviousAttendance.date)}، ورود {record.openPreviousAttendance.entryTime || '-'}
-                      </div>
-                    )}
-
-                    <div className="mt-4 grid grid-cols-2 gap-2">
+                    <div className="mt-2 flex flex-wrap gap-2">
                       <ErpButton
-                        label="ثبت ورود"
+                        label="ورود"
                         icon={FaSignInAlt}
                         onClick={() => openAttendanceDialog(record, 'checkin')}
                         disabled={!canCheckIn(record) || Boolean(actionLoadingId) || Boolean(record.openPreviousAttendance)}
-                        variant={canCheckIn(record) && !record.openPreviousAttendance ? 'solid' : 'soft'}
+                        variant="soft"
                       />
                       <ErpButton
-                        label="ثبت خروج"
+                        label="خروج"
                         icon={FaSignOutAlt}
                         onClick={() => openAttendanceDialog(record, 'checkout')}
                         disabled={!canCheckOut(record) || Boolean(actionLoadingId)}
                         tone="neutral"
-                        variant={canCheckOut(record) ? 'solid' : 'soft'}
+                        variant="soft"
                       />
+                      <ErpButton label={expanded ? 'بستن جزئیات' : 'جزئیات'} onClick={() => setExpandedRecordId(expanded ? null : record.id)} tone="neutral" variant="ghost" />
                     </div>
                     {record.openPreviousAttendance && (
                       <div className="mt-2">
                         <ErpButton label="ثبت خروج قبلی" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'close-previous')} tone="warning" variant="solid" disabled={Boolean(actionLoadingId)} />
                       </div>
                     )}
+                    {expanded && (
+                      <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800/70">
+                        <div><dt className="text-xs text-slate-500">ورود</dt><dd className="mt-1 font-semibold">{record.entryTime || '-'}</dd></div>
+                        <div><dt className="text-xs text-slate-500">خروج</dt><dd className="mt-1 font-semibold">{record.exitTime || '-'}</dd></div>
+                        <div><dt className="text-xs text-slate-500">شیفت ثبت</dt><dd className="mt-1 font-semibold">{record.shift?.namePersian || '-'}</dd></div>
+                        <div><dt className="text-xs text-slate-500">یادداشت</dt><dd className="mt-1 font-semibold">{record.notes || record.exceptionType || 'بدون یادداشت'}</dd></div>
+                        {record.openPreviousAttendance && <div className="col-span-2 text-xs font-semibold text-amber-700 dark:text-amber-300">خروج روز قبل ثبت نشده است: {PersianCalendar.formatForDisplay(record.openPreviousAttendance.date)}، ورود {record.openPreviousAttendance.entryTime || '-'}</div>}
+                      </dl>
+                    )}
                     {(checkingIn || checkingOut) && <p className="mt-2 text-xs font-semibold text-[#074747] dark:text-teal-200">در حال ثبت...</p>}
                     {isExceptionStatus(record.status) && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">برای وضعیت‌های استثنا، ورود و خروج مستقیم از کارت پیشنهاد نمی‌شود.</p>}
                     {record.entryTime && record.exitTime && <p className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300"><FaCheckCircle /> تکمیل شده</p>}
-                  </ErpCard>
+                  </div>
                 );
               })}
             </div>

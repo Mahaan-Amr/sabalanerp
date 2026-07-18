@@ -86,6 +86,7 @@ model Personnel {
   createdAt                           DateTime                             @default(now())
   updatedAt                           DateTime                             @updatedAt
   attendanceRecords                   AttendanceRecord[]
+  workSchedules                       PersonnelWorkSchedule[]
   securityAttendanceRosterMemberships SecurityAttendanceRosterMembership[]
   instantReportParticipants           SecurityShiftLogParticipant[]
   user                                User?
@@ -94,6 +95,33 @@ model Personnel {
   @@index([isActive, departmentId])
   @@index([lastName, firstName])
   @@map("personnel")
+}
+
+model PersonnelWorkSchedule {
+  id            String                     @id @default(cuid())
+  personnelId   String
+  effectiveFrom DateTime
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+  personnel     Personnel                  @relation(fields: [personnelId], references: [id], onDelete: Cascade)
+  days          PersonnelWorkScheduleDay[]
+
+  @@unique([personnelId, effectiveFrom])
+  @@index([personnelId, effectiveFrom])
+  @@map("personnel_work_schedules")
+}
+
+model PersonnelWorkScheduleDay {
+  id         String                @id @default(cuid())
+  scheduleId String
+  weekday    Int
+  startTime  String
+  endTime    String
+  schedule   PersonnelWorkSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, weekday])
+  @@index([weekday])
+  @@map("personnel_work_schedule_days")
 }
 
 model Profile {
@@ -423,6 +451,12 @@ model AttendanceRecord {
   departmentId          String?
   departmentName        String?
   departmentNamePersian String?
+  workScheduleStatus    AttendanceWorkScheduleStatus?
+  scheduledStartTime    String?
+  scheduledEndTime      String?
+  delayMinutes          Int?
+  overtimeMinutes       Int?
+  overtimePending       Boolean                       @default(false)
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
   employee              User?             @relation(fields: [employeeId], references: [id], onDelete: SetNull)
@@ -2131,10 +2165,18 @@ enum AttendanceStatus {
   PRESENT
   ABSENT
   LATE
+  PENDING
+  NON_WORKING_DAY
   MISSION
   HOURLY_LEAVE
   SICK_LEAVE
   VACATION
+}
+
+enum AttendanceWorkScheduleStatus {
+  UNCONFIGURED
+  NON_WORKING_DAY
+  WORKDAY
 }
 
 enum ExceptionStatus {

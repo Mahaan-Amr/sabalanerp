@@ -81,6 +81,7 @@ export const usersAPI = {
     isActive?: boolean;
     personnelMode?: 'auto' | 'existing';
     personnelId?: string;
+    workSchedule?: any;
     workspacePermissions?: Array<{
       workspace: string;
       permissionLevel: string;

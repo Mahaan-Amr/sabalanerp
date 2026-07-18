@@ -40,8 +40,8 @@ export default function ReportsPage() {
   const [exporting, setExporting] = useState<'attendance-pdf' | 'excel' | 'performance-pdf' | 'latest-shift-pdf' | null>(null);
 
   const baseParams = () => ({
-    startDate: PersianCalendar.toGregorian(range.startDate).toISOString(),
-    endDate: PersianCalendar.toGregorian(range.endDate).toISOString(),
+    startDate: PersianCalendar.toGregorianDateOnly(range.startDate),
+    endDate: PersianCalendar.toGregorianDateOnly(range.endDate),
     departmentId: departmentId || undefined,
     shiftId: shiftId || undefined
   });

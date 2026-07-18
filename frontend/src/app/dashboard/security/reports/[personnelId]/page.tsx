@@ -16,7 +16,7 @@ const participantName = (participant: any) => {
 export default function SecurityPersonnelHistoryPage() {
   const { personnelId } = useParams<{ personnelId: string }>();
   const [data, setData] = useState<any>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [open, setOpen] = useState<string | null>(null); const [range, setRange] = useState<{ startDate: string; endDate: string } | null>(null);
-  const load = async () => { try { setLoading(true); const result = await securityAPI.getSecurityPersonnelShiftHistory(personnelId, range ? { startDate: PersianCalendar.toGregorian(range.startDate).toISOString(), endDate: PersianCalendar.toGregorian(range.endDate).toISOString() } : undefined); setData(result.data.data); } catch (err: any) { setError(err.response?.data?.error || 'دریافت تاریخچه ناموفق بود.'); } finally { setLoading(false); } };
+  const load = async () => { try { setLoading(true); const result = await securityAPI.getSecurityPersonnelShiftHistory(personnelId, range ? { startDate: PersianCalendar.toGregorianDateOnly(range.startDate), endDate: PersianCalendar.toGregorianDateOnly(range.endDate) } : undefined); setData(result.data.data); } catch (err: any) { setError(err.response?.data?.error || 'دریافت تاریخچه ناموفق بود.'); } finally { setLoading(false); } };
   useEffect(() => { load(); }, [personnelId, range]);
   if (loading) return <ErpLoading />;
   if (error) return <ErpPage eyebrow="حراست" title="تاریخچه شیفت‌ها"><ErpEmptyState title="تاریخچه در دسترس نیست" description={error} icon={FaHistory} action={{ label: 'تلاش مجدد', onClick: load, icon: FaRedo }} /></ErpPage>;

@@ -5,6 +5,7 @@ import { protect, authorize, AuthRequest } from '../middleware/auth';
 import bcrypt from 'bcryptjs';
 import { WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { FEATURE_PERMISSIONS, FEATURE_WORKSPACE_MAP, FEATURES } from '../middleware/feature';
+import { savePersonnelWorkSchedule } from '../utils/personnelWorkSchedule';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -23,6 +24,9 @@ const getFeatureWorkspace = (feature: string): string | null => {
 
 const hasAdminPermissionLevel = (permissions: Array<{ permissionLevel?: string }>) =>
   permissions.some((permission) => permission.permissionLevel === WORKSPACE_PERMISSIONS.ADMIN);
+
+const isScheduleValidationError = (error: unknown) => error instanceof Error
+  && ['ساعت کاری', 'روز کاری', 'تاریخ اجرای'].some((part) => error.message.includes(part));
 
 const normalizePhone = (value?: string | null) => {
   const trimmed = String(value || '').trim();
@@ -44,6 +48,11 @@ const personnelSelect = {
       name: true,
       namePersian: true,
     }
+  },
+  workSchedules: {
+    include: { days: { orderBy: { weekday: 'asc' as const } } },
+    orderBy: { effectiveFrom: 'desc' as const },
+    take: 1
   }
 };
 
@@ -198,6 +207,7 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
   body('isActive').optional().isBoolean(),
   body('personnelMode').optional().isIn(['auto', 'existing']),
   body('personnelId').optional({ values: 'falsy' }).isString(),
+  body('workSchedule').optional().isObject(),
   body('workspacePermissions').optional().isArray(),
   body('workspacePermissions.*.workspace')
     .optional()
@@ -251,6 +261,7 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
       isActive = true,
       personnelMode = 'auto',
       personnelId,
+      workSchedule,
       workspacePermissions = [],
       featurePermissions = []
     } = req.body;
@@ -348,6 +359,7 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
         personnelMode,
         personnelId
       });
+      await savePersonnelWorkSchedule(tx, personnel.id, workSchedule);
 
       const createdUser = await tx.user.create({
         data: {
@@ -430,9 +442,10 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
     });
   } catch (error: any) {
     console.error('Create user error:', error);
-    res.status(error.message?.includes('پرسنل') ? 409 : 500).json({
+    const invalidSchedule = isScheduleValidationError(error);
+    res.status(invalidSchedule ? 400 : error.message?.includes('پرسنل') ? 409 : 500).json({
       success: false,
-      error: error.message?.includes('پرسنل') ? error.message : 'Server error during user creation'
+      error: invalidSchedule || error.message?.includes('پرسنل') ? error.message : 'Server error during user creation'
     });
   }
 });
@@ -519,6 +532,7 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
   body('isActive').optional().isBoolean(),
   body('personnelMode').optional().isIn(['auto', 'existing']),
   body('personnelId').optional({ values: 'falsy' }).isString(),
+  body('workSchedule').optional().isObject(),
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -530,7 +544,7 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
-    const { firstName, lastName, email, username, phone, role, departmentId, isActive, personnelMode, personnelId } = req.body;
+    const { firstName, lastName, email, username, phone, role, departmentId, isActive, personnelMode, personnelId, workSchedule } = req.body;
 
     if (departmentId) {
       const department = await prisma.department.findUnique({
@@ -625,6 +639,7 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
         personnelId: shouldRelink ? personnelId : existingUser.personnelId || undefined,
         currentUserId: existingUser.id
       });
+      await savePersonnelWorkSchedule(tx, linkedPersonnel.id, workSchedule);
 
       return tx.user.update({
         where: { id: req.params.id },
@@ -675,9 +690,10 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
     });
   } catch (error: any) {
     console.error('Update user error:', error);
-    res.status(error.message?.includes('پرسنل') ? 409 : 500).json({
+    const invalidSchedule = isScheduleValidationError(error);
+    res.status(invalidSchedule ? 400 : error.message?.includes('پرسنل') ? 409 : 500).json({
       success: false,
-      error: error.message?.includes('پرسنل') ? error.message : 'Server error'
+      error: invalidSchedule || error.message?.includes('پرسنل') ? error.message : 'Server error'
     });
   }
 });

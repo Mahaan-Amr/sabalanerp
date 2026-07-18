@@ -14,6 +14,7 @@ import {
   FaEyeSlash
 } from 'react-icons/fa';
 import { authAPI, usersAPI, departmentsAPI, personnelAPI } from '@/lib/api';
+import WorkScheduleEditor, { emptyWorkSchedule, workScheduleFromApi, workSchedulePayload } from '@/components/WorkScheduleEditor';
 
 interface Department {
   id: string;
@@ -41,6 +42,7 @@ interface Personnel {
     id: string;
     username: string;
   } | null;
+  workSchedule?: any;
 }
 
 const WORKSPACES = {
@@ -205,6 +207,7 @@ export default function CreateUserPage() {
   const [workspacePermissions, setWorkspacePermissions] = useState<WorkspacePermission[]>([]);
   const [personnelMode, setPersonnelMode] = useState<'auto' | 'existing'>('auto');
   const [selectedPersonnelId, setSelectedPersonnelId] = useState('');
+  const [workSchedule, setWorkSchedule] = useState(emptyWorkSchedule);
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const selectedPreset = PERMISSION_PRESETS.find(item => item.id === selectedPresetId) || null;
   const canGrantAdminPermissions = currentUserRole !== 'MANAGER';
@@ -381,6 +384,7 @@ export default function CreateUserPage() {
         isActive: formData.isActive,
         personnelMode,
         personnelId: personnelMode === 'existing' ? selectedPersonnelId : undefined,
+        workSchedule: workSchedulePayload(workSchedule),
         workspacePermissions
       });
 
@@ -547,6 +551,7 @@ export default function CreateUserPage() {
               </div>
             </div>
           </div>
+          <div className="mt-6"><WorkScheduleEditor value={workSchedule} onChange={setWorkSchedule} /></div>
         </div>
 
         {/* Role and Department */}
@@ -729,7 +734,11 @@ export default function CreateUserPage() {
               <label className="block text-sm text-secondary mb-2">پرسنل موجود</label>
               <select
                 value={selectedPersonnelId}
-                onChange={(event) => setSelectedPersonnelId(event.target.value)}
+                  onChange={(event) => {
+                    const nextId = event.target.value;
+                    setSelectedPersonnelId(nextId);
+                    setWorkSchedule(workScheduleFromApi(personnel.find((person) => person.id === nextId)?.workSchedule));
+                  }}
                 className="glass-liquid-input w-full"
               >
                 <option value="">انتخاب پرسنل</option>

@@ -171,7 +171,7 @@ export default function SecurityDashboardPage() {
 
       const [statsResponse, attendanceResponse] = await Promise.all([
         securityAPI.getDashboardStats(),
-        securityAPI.getDailyAttendance(PersianCalendar.toGregorian(selectedDate).toISOString()),
+        securityAPI.getDailyAttendance(PersianCalendar.toGregorianDateOnly(selectedDate)),
       ]);
 
       if (statsResponse.data.success) setStats(statsResponse.data.data);

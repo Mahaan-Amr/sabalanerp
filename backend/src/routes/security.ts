@@ -4,12 +4,14 @@ import path from 'path';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
 import { body, validationResult } from 'express-validator';
-import { AttendanceStatus, LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityPatrolStatus, SecurityShiftCoverageStatus, SecurityShiftLogStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
+import { AttendanceStatus, AttendanceWorkScheduleStatus, LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityPatrolStatus, SecurityShiftCoverageStatus, SecurityShiftLogStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
 import { protect, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
 import { renderSecurityAttendanceReportHtml, securityAttendanceStatusLabel, SecurityAttendanceReportRow } from '../utils/securityAttendanceReport';
+import { addSecurityDays, parseSecurityBusinessDate, securityNowTime, securityPersianDate, securityPersianDateWithWeekday } from '../utils/securityBusinessDate';
+import { calculateDelayMinutes, calculatePresenceMinutes, calculateScheduledOvertime, loadApplicableWorkSchedules, resolveWorkScheduleDay, scheduledStartHasPassed } from '../utils/personnelWorkSchedule';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -17,42 +19,16 @@ const prisma = new PrismaClient();
 const securityView = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW);
 const securityEdit = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT);
 const securityAdmin = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN);
-const presentLikeStatuses: AttendanceStatus[] = [
-  AttendanceStatus.PRESENT,
-  AttendanceStatus.LATE,
-  AttendanceStatus.MISSION,
-  AttendanceStatus.HOURLY_LEAVE,
-  AttendanceStatus.SICK_LEAVE,
-  AttendanceStatus.VACATION
-];
 const leaveStatuses: AttendanceStatus[] = [
   AttendanceStatus.HOURLY_LEAVE,
   AttendanceStatus.SICK_LEAVE,
   AttendanceStatus.VACATION
 ];
 
-const startOfDay = (date: Date) => {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  return next;
-};
+const addDays = addSecurityDays;
+const parseDayQuery = parseSecurityBusinessDate;
 
-const addDays = (date: Date, days: number) => {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-};
-
-const parseDayQuery = (value: unknown, fallback = new Date()) => {
-  const parsed = value ? new Date(String(value)) : fallback;
-  return startOfDay(Number.isNaN(parsed.getTime()) ? fallback : parsed);
-};
-
-const currentAttendanceTime = () => new Date().toLocaleTimeString('fa-IR', {
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false
-});
+const currentAttendanceTime = () => securityNowTime();
 
 const appendManualAttendanceNote = (existingNote: string | null | undefined, actionLabel: string, reason?: unknown) => {
   const trimmedReason = String(reason || '').trim();
@@ -176,7 +152,7 @@ const loadAttendancePopulation = async (targetDate: Date, filters: { departmentI
     select: { personnel: { select: personnelSelect } },
     orderBy: { personnel: { lastName: 'asc' } }
   });
-  return memberships.map((membership) => membership.personnel);
+  return Array.from(new Map(memberships.map((membership) => [membership.personnel.id, membership.personnel])).values());
 };
 
 const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: unknown; shiftId?: unknown; employeeId?: unknown; personnelId?: unknown }) => {
@@ -184,6 +160,7 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
   const nextDay = addDays(targetDate, 1);
   const allPersonnel = await loadAttendancePopulation(targetDate, filters);
   const personnelIds = allPersonnel.map((personnel) => personnel.id);
+  const workSchedules = await loadApplicableWorkSchedules(prisma, personnelIds, targetDate);
   const attendanceWhere = {
     date: { gte: targetDate, lt: nextDay },
     ...(filters.shiftId ? { shiftId: String(filters.shiftId) } : {}),
@@ -215,6 +192,15 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
   const attendanceSummary = allPersonnel.map((personnel) => {
     const record = recordsByPersonnel.get(personnel.id);
     const openPreviousAttendance = openPreviousByPersonnel.get(personnel.id);
+    const resolvedSchedule = resolveWorkScheduleDay(workSchedules.get(personnel.id), targetDate);
+    const scheduleStatus = record?.workScheduleStatus || resolvedSchedule.status;
+    const scheduledStartTime = record?.scheduledStartTime || resolvedSchedule.day?.startTime || null;
+    const scheduledEndTime = record?.scheduledEndTime || resolvedSchedule.day?.endTime || null;
+    const missingStatus = scheduleStatus === AttendanceWorkScheduleStatus.NON_WORKING_DAY
+      ? AttendanceStatus.NON_WORKING_DAY
+      : scheduleStatus === AttendanceWorkScheduleStatus.WORKDAY && scheduledStartTime && !scheduledStartHasPassed(targetDate, scheduledStartTime)
+        ? AttendanceStatus.PENDING
+        : AttendanceStatus.ABSENT;
     return {
       id: record?.id || `absent-${personnel.id}-${targetDate.toISOString()}`,
       personnel,
@@ -223,12 +209,18 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
       attendance: record || null,
       entryTime: record?.entryTime || null,
       exitTime: record?.exitTime || null,
-      status: record?.status || AttendanceStatus.ABSENT,
+      status: record?.status || missingStatus,
       exceptionType: record?.exceptionType || null,
       notes: record?.notes || null,
       digitalSignature: record?.digitalSignature || null,
       createdAt: record?.createdAt || null,
       shift: record?.shift || null,
+      workScheduleStatus: scheduleStatus,
+      scheduledStartTime,
+      scheduledEndTime,
+      delayMinutes: record?.delayMinutes ?? null,
+      overtimeMinutes: record?.overtimeMinutes ?? null,
+      overtimePending: record?.overtimePending || false,
       openPreviousAttendance: openPreviousAttendance ? {
         id: openPreviousAttendance.id,
         date: openPreviousAttendance.date,
@@ -239,15 +231,15 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
     };
   });
 
-  const countedPresent = attendanceRecords.filter((record) => presentLikeStatuses.includes(record.status)).length;
+  const expectedRows = attendanceSummary.filter((record) => record.status !== AttendanceStatus.NON_WORKING_DAY);
   const stats = {
-    totalEmployees: allPersonnel.length,
+    totalEmployees: expectedRows.length,
     present: attendanceRecords.filter((record) => record.status === AttendanceStatus.PRESENT).length,
-    absent: allPersonnel.length - countedPresent,
+    absent: attendanceSummary.filter((record) => record.status === AttendanceStatus.ABSENT).length,
     late: attendanceRecords.filter((record) => record.status === AttendanceStatus.LATE).length,
     mission: attendanceRecords.filter((record) => record.status === AttendanceStatus.MISSION).length,
     leave: attendanceRecords.filter((record) => leaveStatuses.includes(record.status)).length,
-    exception: attendanceRecords.filter((record) => record.status !== AttendanceStatus.PRESENT).length,
+    exception: attendanceSummary.filter((record) => record.status === AttendanceStatus.ABSENT || record.status === AttendanceStatus.LATE).length,
     signed: attendanceRecords.filter((record) => Boolean(record.digitalSignature)).length
   };
 
@@ -1853,6 +1845,22 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
     const nextDay = addDays(targetDate, 1);
     const [rosterPerson] = await loadAttendancePopulation(targetDate, { personnelId: personnel.id });
     if (!rosterPerson) return res.status(400).json({ success: false, error: 'این فرد در فهرست حضور و غیاب حراست برای این تاریخ نیست.' });
+    const scheduleMap = await loadApplicableWorkSchedules(prisma, [personnel.id], targetDate);
+    const resolvedSchedule = resolveWorkScheduleDay(scheduleMap.get(personnel.id), targetDate);
+    const scheduledStartTime = resolvedSchedule.day?.startTime || null;
+    const scheduledEndTime = resolvedSchedule.day?.endTime || null;
+    const delayMinutes = resolvedSchedule.status === AttendanceWorkScheduleStatus.WORKDAY && scheduledStartTime
+      ? calculateDelayMinutes(currentTime, scheduledStartTime)
+      : resolvedSchedule.status === AttendanceWorkScheduleStatus.NON_WORKING_DAY ? 0 : null;
+    const attendanceStatus = delayMinutes && delayMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT;
+    const scheduleSnapshot = {
+      workScheduleStatus: resolvedSchedule.status,
+      scheduledStartTime,
+      scheduledEndTime,
+      delayMinutes,
+      overtimeMinutes: null,
+      overtimePending: resolvedSchedule.status !== AttendanceWorkScheduleStatus.UNCONFIGURED
+    };
 
     const openPreviousRecord = await prisma.attendanceRecord.findFirst({
       where: {
@@ -1899,8 +1907,9 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
         where: { id: existingRecord.id },
         data: {
           entryTime: currentTime,
-          status: 'PRESENT',
+          status: attendanceStatus,
           notes: appendManualAttendanceNote(existingRecord.notes, 'ثبت دستی ورود', reason),
+          ...scheduleSnapshot,
           ...personnelSnapshot(personnel)
         },
         include: attendanceInclude
@@ -1915,8 +1924,9 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
           shiftId: securityPersonnel.shiftId,
           date: targetDate,
           entryTime: currentTime,
-          status: 'PRESENT',
+          status: attendanceStatus,
           notes: appendManualAttendanceNote(null, 'ثبت دستی ورود', reason),
+          ...scheduleSnapshot,
           ...personnelSnapshot(personnel)
         },
         include: attendanceInclude
@@ -2012,6 +2022,12 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
       where: { id: attendanceRecord.id },
       data: {
         exitTime: currentTime,
+        overtimeMinutes: attendanceRecord.workScheduleStatus === AttendanceWorkScheduleStatus.NON_WORKING_DAY && attendanceRecord.entryTime
+          ? calculatePresenceMinutes(attendanceRecord.entryTime, currentTime)
+          : attendanceRecord.workScheduleStatus === AttendanceWorkScheduleStatus.WORKDAY && attendanceRecord.scheduledStartTime && attendanceRecord.scheduledEndTime
+            ? calculateScheduledOvertime(currentTime, attendanceRecord.scheduledStartTime, attendanceRecord.scheduledEndTime)
+            : null,
+        overtimePending: false,
         notes: appendManualAttendanceNote(attendanceRecord.notes, 'ثبت دستی خروج', reason)
       },
       include: attendanceInclude
@@ -2076,8 +2092,7 @@ router.post('/attendance/exception', protect, requireWorkspaceAccess(WORKSPACES.
     });
     if (!personnel?.isActive) return res.status(404).json({ success: false, error: 'پرسنل فعال پیدا نشد.' });
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = parseDayQuery();
     const [rosterPerson] = await loadAttendancePopulation(today, { personnelId: personnel.id });
     if (!rosterPerson) return res.status(400).json({ success: false, error: 'این فرد در فهرست حضور و غیاب حراست برای امروز نیست.' });
 
@@ -2927,7 +2942,7 @@ router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, re
     for (let index = 0; index < days; index += 1) {
       const date = addDays(startDate, index);
       const daily = await buildDailyAttendance({ date: date.toISOString(), departmentId: req.query.departmentId, shiftId: req.query.shiftId });
-      const formattedDate = date.toLocaleDateString('fa-IR', { timeZone: 'Asia/Tehran' });
+      const formattedDate = securityPersianDate(date);
       trend.push({
         'تاریخ': formattedDate, 'کل': daily.stats.totalEmployees, 'حاضر': daily.stats.present,
         'غایب': daily.stats.absent, 'تأخیر': daily.stats.late, 'ماموریت': daily.stats.mission,
@@ -2947,14 +2962,19 @@ router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, re
           exitTime: record.exitTime || '-',
           shift: record.shift?.namePersian || '-',
           notes,
-          signature: record.digitalSignature ? 'ثبت شده' : '-'
+          signature: record.digitalSignature ? 'ثبت شده' : '-',
+          delayMinutes: record.delayMinutes,
+          overtimeMinutes: record.overtimeMinutes,
+          overtimePending: record.overtimePending
         });
       });
     }
     const totals = trend.reduce<{ total: number; present: number; absent: number; late: number }>((sum, day) => ({
       total: sum.total + Number(day['کل']), present: sum.present + Number(day['حاضر']), absent: sum.absent + Number(day['غایب']), late: sum.late + Number(day['تأخیر'])
     }), { total: 0, present: 0, absent: 0, late: 0 });
-    const title = `گزارش حراست ${startDate.toLocaleDateString('fa-IR', { timeZone: 'Asia/Tehran' })} تا ${addDays(startDate, days - 1).toLocaleDateString('fa-IR', { timeZone: 'Asia/Tehran' })}`;
+    const startLabel = securityPersianDate(startDate);
+    const endLabel = securityPersianDate(addDays(startDate, days - 1));
+    const title = days === 1 ? `گزارش حراست ${securityPersianDateWithWeekday(startDate)}` : `گزارش حراست ${startLabel} تا ${endLabel}`;
     const generatedAt = formatSecurityDateTime(new Date());
     if (format === 'excel') {
       const workbook = XLSX.utils.book_new();
@@ -2968,6 +2988,8 @@ router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, re
         'ورود': row.entryTime,
         'خروج': row.exitTime,
         'شیفت ثبت': row.shift,
+        'تأخیر': row.delayMinutes === null ? '-' : row.delayMinutes,
+        'اضافه‌کار': row.overtimePending ? 'در انتظار ثبت خروج' : row.overtimeMinutes === null ? '-' : row.overtimeMinutes,
         'یادداشت': row.notes,
         'امضا': row.signature
       }))), 'جزئیات پرسنل');
@@ -2976,12 +2998,13 @@ router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, re
       res.setHeader('Content-Disposition', 'attachment; filename="security-report.xlsx"');
       return res.send(file);
     }
+    const exceptionRows = attendanceDetails.filter((row) => row.status === 'غایب' || Number(row.delayMinutes || 0) > 0 || Number(row.overtimeMinutes || 0) > 0);
     const htmlContent = renderSecurityAttendanceReportHtml({
       baseStyles: securityPdfStyles(),
       title,
-      generatedAt,
-      totals,
-      rows: attendanceDetails
+      totals: { absent: totals.absent, late: totals.late },
+      rows: exceptionRows,
+      showDateColumn: days > 1
     });
     const pdfPath = await generatePdfFromHtml({ fileName: `security-report-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent, margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
     res.download(pdfPath, 'security-report.pdf', () => fs.unlink(pdfPath, () => undefined));

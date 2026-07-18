@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { FaCog, FaFolderOpen, FaPlus, FaSave, FaUsers } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
 import { securityAPI } from '@/lib/api';
+import PersianCalendar from '@/lib/persian-calendar';
 
 const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
 const labelClass = 'mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200';
@@ -72,7 +73,7 @@ export default function SecuritySettingsPage() {
     try {
       const [personnelResponse, rosterResponse] = await Promise.all([
         securityAPI.getOperationalPersonnel(),
-        securityAPI.getAttendanceRoster({ date: new Date().toISOString() }),
+        securityAPI.getAttendanceRoster({ date: PersianCalendar.toGregorianDateOnly(PersianCalendar.now()) }),
         loadReportSettings()
       ]);
       if (personnelResponse.data.success) setOperationalPersonnel(personnelResponse.data.data || []);
@@ -93,7 +94,7 @@ export default function SecuritySettingsPage() {
     setError('');
     setMessage('');
     try {
-      const effectiveDate = new Date().toISOString();
+      const effectiveDate = PersianCalendar.toGregorianDateOnly(PersianCalendar.now());
       const response = item.isInRoster
         ? await securityAPI.removeAttendanceRosterMember(item.personnel.id, { effectiveDate })
         : await securityAPI.addAttendanceRosterMember({ personnelId: item.personnel.id, effectiveDate });

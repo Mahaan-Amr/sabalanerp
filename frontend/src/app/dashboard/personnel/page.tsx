@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { FaBuilding, FaLink, FaPlus, FaRedo, FaSave, FaTrash, FaUserTie, FaUsers } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpListPage, ErpLoading, ErpSection, type ErpColumn, type ErpMetric } from '@/components/erp';
 import { departmentsAPI, personnelAPI } from '@/lib/api';
+import WorkScheduleEditor, { emptyWorkSchedule, workScheduleFromApi, workSchedulePayload, type WorkScheduleValue } from '@/components/WorkScheduleEditor';
 
 interface Department {
   id: string;
@@ -24,9 +25,10 @@ interface Personnel {
   } | null;
   canDelete: boolean;
   _count?: { attendanceRecords: number };
+  workSchedule?: any;
 }
 
-const emptyForm = { id: '', firstName: '', lastName: '', departmentId: '', isActive: true, confirmDuplicate: false };
+const emptyForm = () => ({ id: '', firstName: '', lastName: '', departmentId: '', isActive: true, confirmDuplicate: false, workSchedule: emptyWorkSchedule() as WorkScheduleValue });
 const labelClass = 'mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200';
 const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
 
@@ -82,7 +84,7 @@ export default function PersonnelManagementPage() {
     { label: 'بخش‌ها', value: departments.length.toLocaleString('fa-IR'), icon: FaBuilding, tone: 'purple' },
   ];
 
-  const resetForm = () => setForm(emptyForm);
+  const resetForm = () => setForm(emptyForm());
 
   const save = async () => {
     if (!form.firstName.trim() || !form.lastName.trim()) {
@@ -99,6 +101,7 @@ export default function PersonnelManagementPage() {
         departmentId: form.departmentId || null,
         isActive: form.isActive,
         confirmDuplicate: form.confirmDuplicate,
+        workSchedule: workSchedulePayload(form.workSchedule),
       };
       if (form.id) {
         await personnelAPI.updatePerson(form.id, payload);
@@ -129,6 +132,7 @@ export default function PersonnelManagementPage() {
       departmentId: person.department?.id || '',
       isActive: person.isActive,
       confirmDuplicate: false,
+      workSchedule: workScheduleFromApi(person.workSchedule),
     });
   };
 
@@ -277,6 +281,7 @@ export default function PersonnelManagementPage() {
             <span className="text-sm text-slate-700 dark:text-slate-200">فعال</span>
           </label>
         </div>
+        <div className="mt-5"><WorkScheduleEditor value={form.workSchedule} onChange={(workSchedule) => setForm((current) => ({ ...current, workSchedule }))} /></div>
         <div className="mt-4 flex flex-wrap gap-2">
           <ErpButton label={form.id ? 'ذخیره تغییرات' : 'ثبت پرسنل'} icon={form.id ? FaSave : FaPlus} onClick={save} disabled={saving || !form.firstName.trim() || !form.lastName.trim()} variant="solid" />
           {form.id && <ErpButton label="انصراف" onClick={resetForm} tone="neutral" variant="outline" />}

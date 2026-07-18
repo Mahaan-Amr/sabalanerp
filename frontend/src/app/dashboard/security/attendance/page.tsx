@@ -19,6 +19,7 @@ import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSe
 import { notifySecurity } from '@/components/SecurityNoticeHost';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
+import PersianTimePicker, { formatTime12 } from '@/components/PersianTimePicker';
 import { departmentsAPI, securityAPI } from '@/lib/api';
 
 interface AttendanceRecord {
@@ -49,6 +50,12 @@ interface AttendanceRecord {
   notes: string | null;
   digitalSignature: string | null;
   createdAt: string;
+  workScheduleStatus?: string | null;
+  scheduledStartTime?: string | null;
+  scheduledEndTime?: string | null;
+  delayMinutes?: number | null;
+  overtimeMinutes?: number | null;
+  overtimePending?: boolean;
   shift?: {
     id: string;
     namePersian: string;
@@ -96,6 +103,10 @@ const getStatusTone = (status: string) => {
       return 'danger' as const;
     case 'LATE':
       return 'warning' as const;
+    case 'PENDING':
+      return 'info' as const;
+    case 'NON_WORKING_DAY':
+      return 'neutral' as const;
     case 'MISSION':
       return 'info' as const;
     case 'HOURLY_LEAVE':
@@ -114,7 +125,11 @@ const getStatusLabel = (status: string) => {
     case 'ABSENT':
       return 'غایب';
     case 'LATE':
-      return 'تاخیر';
+      return 'حاضر با تأخیر';
+    case 'PENDING':
+      return 'در انتظار شروع';
+    case 'NON_WORKING_DAY':
+      return 'روز غیرکاری';
     case 'MISSION':
       return 'ماموریت';
     case 'HOURLY_LEAVE':
@@ -128,11 +143,11 @@ const getStatusLabel = (status: string) => {
   }
 };
 
-const canCheckIn = (record: AttendanceRecord) => !record.entryTime && ['ABSENT', 'PRESENT'].includes(record.status);
+const canCheckIn = (record: AttendanceRecord) => !record.entryTime && ['ABSENT', 'PRESENT', 'PENDING', 'NON_WORKING_DAY'].includes(record.status);
 const canCheckOut = (record: AttendanceRecord) => Boolean(record.entryTime) && !record.exitTime && ['PRESENT', 'LATE'].includes(record.status);
 const isExceptionStatus = (status: string) => ['MISSION', 'HOURLY_LEAVE', 'SICK_LEAVE', 'VACATION'].includes(status);
 const currentTimeValue = () => new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
-const selectedDateIso = (date: string) => PersianCalendar.toGregorian(date).toISOString();
+const selectedDateIso = (date: string) => PersianCalendar.toGregorianDateOnly(date);
 
 type AttendanceAction = 'checkin' | 'checkout' | 'close-previous';
 
@@ -167,7 +182,7 @@ export default function AttendancePage() {
       setError(null);
 
       const attendanceResponse = await securityAPI.getDailyAttendance({
-        date: PersianCalendar.toGregorian(selectedDate).toISOString(),
+        date: selectedDateIso(selectedDate),
         departmentId: departmentId || undefined,
         shiftId: shiftId || undefined,
       });
@@ -232,7 +247,7 @@ export default function AttendancePage() {
       const response = action === 'checkin'
         ? await securityAPI.checkIn(record.employee.id, { date: selectedDateIso(selectedDate), entryTime: time, reason: requiresReason ? reason.trim() : undefined })
         : await securityAPI.checkOut(record.employee.id, {
-            date: action === 'close-previous' && record.openPreviousAttendance ? new Date(record.openPreviousAttendance.date).toISOString() : selectedDateIso(selectedDate),
+            date: action === 'close-previous' && record.openPreviousAttendance ? String(record.openPreviousAttendance.date).slice(0, 10) : selectedDateIso(selectedDate),
             attendanceId: action === 'close-previous' ? record.openPreviousAttendance?.id : undefined,
             exitTime: time,
             reason: requiresReason || action === 'close-previous' ? reason.trim() || 'ثبت خروج فراموش‌شده' : undefined,
@@ -332,6 +347,8 @@ export default function AttendancePage() {
               <option value="PRESENT">حاضر</option>
               <option value="ABSENT">غایب</option>
               <option value="LATE">تاخیر</option>
+              <option value="PENDING">در انتظار شروع</option>
+              <option value="NON_WORKING_DAY">روز غیرکاری</option>
               <option value="MISSION">ماموریت</option>
               <option value="HOURLY_LEAVE">مرخصی ساعتی</option>
             </select>
@@ -395,6 +412,9 @@ export default function AttendancePage() {
                         <div><dt className="text-xs text-slate-500">ورود</dt><dd className="mt-1 font-semibold">{record.entryTime || '-'}</dd></div>
                         <div><dt className="text-xs text-slate-500">خروج</dt><dd className="mt-1 font-semibold">{record.exitTime || '-'}</dd></div>
                         <div><dt className="text-xs text-slate-500">شیفت ثبت</dt><dd className="mt-1 font-semibold">{record.shift?.namePersian || '-'}</dd></div>
+                        <div><dt className="text-xs text-slate-500">ساعت کاری</dt><dd className="mt-1 font-semibold" dir="ltr">{record.scheduledStartTime && record.scheduledEndTime ? `${formatTime12(record.scheduledStartTime)} – ${formatTime12(record.scheduledEndTime)}` : record.workScheduleStatus === 'NON_WORKING_DAY' ? 'روز غیرکاری' : 'تعریف نشده'}</dd></div>
+                        <div><dt className="text-xs text-slate-500">تأخیر</dt><dd className="mt-1 font-semibold">{record.delayMinutes === null || record.delayMinutes === undefined ? '-' : `${record.delayMinutes.toLocaleString('fa-IR')} دقیقه`}</dd></div>
+                        <div><dt className="text-xs text-slate-500">اضافه‌کار</dt><dd className="mt-1 font-semibold">{record.overtimePending ? 'در انتظار ثبت خروج' : record.overtimeMinutes === null || record.overtimeMinutes === undefined ? '-' : `${record.overtimeMinutes.toLocaleString('fa-IR')} دقیقه`}</dd></div>
                         <div><dt className="text-xs text-slate-500">یادداشت</dt><dd className="mt-1 font-semibold">{record.notes || record.exceptionType || 'بدون یادداشت'}</dd></div>
                         {record.openPreviousAttendance && <div className="col-span-2 text-xs font-semibold text-amber-700 dark:text-amber-300">خروج روز قبل ثبت نشده است: {PersianCalendar.formatForDisplay(record.openPreviousAttendance.date)}، ورود {record.openPreviousAttendance.entryTime || '-'}</div>}
                       </dl>
@@ -416,6 +436,9 @@ export default function AttendancePage() {
                     <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">وضعیت</th>
                     <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">ورود</th>
                     <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">خروج</th>
+                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">ساعت کاری</th>
+                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">تأخیر</th>
+                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">اضافه‌کار</th>
                     <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">شیفت ثبت</th>
                     <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">یادداشت</th>
                     <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">عملیات</th>
@@ -432,6 +455,9 @@ export default function AttendancePage() {
                       <td className="px-3 py-4"><ErpBadge tone={getStatusTone(record.status)}>{getStatusLabel(record.status)}</ErpBadge></td>
                       <td className="px-3 py-4 text-slate-900 dark:text-white">{record.entryTime || '-'}</td>
                       <td className="px-3 py-4 text-slate-900 dark:text-white">{record.exitTime || '-'}</td>
+                      <td className="px-3 py-4 text-slate-600 dark:text-slate-300" dir="ltr">{record.scheduledStartTime && record.scheduledEndTime ? `${formatTime12(record.scheduledStartTime)} – ${formatTime12(record.scheduledEndTime)}` : record.workScheduleStatus === 'NON_WORKING_DAY' ? 'روز غیرکاری' : 'تعریف نشده'}</td>
+                      <td className="px-3 py-4 text-amber-700">{record.delayMinutes === null || record.delayMinutes === undefined ? '-' : `${record.delayMinutes.toLocaleString('fa-IR')} دقیقه`}</td>
+                      <td className="px-3 py-4 text-teal-700">{record.overtimePending ? 'در انتظار خروج' : record.overtimeMinutes === null || record.overtimeMinutes === undefined ? '-' : `${record.overtimeMinutes.toLocaleString('fa-IR')} دقیقه`}</td>
                       <td className="px-3 py-4 text-slate-600 dark:text-slate-300">{record.shift?.namePersian || '-'}</td>
                       <td className="px-3 py-4 text-slate-600 dark:text-slate-300">
                         {record.openPreviousAttendance ? (
@@ -469,7 +495,7 @@ export default function AttendancePage() {
             )}
             <label className="mt-4 block">
               <span className={labelClass}>زمان</span>
-              <input type="time" value={attendanceDialog.time} onChange={(event) => setAttendanceDialog((current) => current ? { ...current, time: event.target.value } : current)} className={inputClass} />
+              <PersianTimePicker value={attendanceDialog.time} onChange={(time) => setAttendanceDialog((current) => current ? { ...current, time } : current)} />
             </label>
             <label className="mt-4 block">
               <span className={labelClass}>دلیل {attendanceDialog.time !== attendanceDialog.defaultTime || attendanceDialog.action === 'close-previous' ? '(الزامی)' : '(اختیاری)'}</span>

@@ -2,6 +2,7 @@ import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
+import { savePersonnelWorkSchedule } from '../utils/personnelWorkSchedule';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -9,6 +10,8 @@ const CUID_REGEX = /^c[a-z0-9]{24}$/;
 
 const normalizeName = (value: unknown) => String(value || '').trim();
 const normalizedDepartmentId = (value: unknown) => String(value || '').trim() || null;
+const isScheduleValidationError = (error: unknown) => error instanceof Error
+  && ['ساعت کاری', 'روز کاری', 'تاریخ اجرای'].some((part) => error.message.includes(part));
 
 const sameNameDepartmentWhere = (firstName: string, lastName: string, departmentId: string | null, excludeId?: string) => ({
   firstName,
@@ -20,8 +23,20 @@ const sameNameDepartmentWhere = (firstName: string, lastName: string, department
 const includePersonnel = {
   department: { select: { id: true, name: true, namePersian: true } },
   user: { select: { id: true, firstName: true, lastName: true, username: true, email: true, isActive: true } },
+  workSchedules: {
+    include: { days: { orderBy: { weekday: 'asc' as const } } },
+    orderBy: { effectiveFrom: 'desc' as const },
+    take: 1
+  },
   _count: { select: { attendanceRecords: true } }
 };
+
+const personnelResponse = (person: any) => ({
+  ...person,
+  workSchedule: person.workSchedules?.[0] || null,
+  workSchedules: undefined,
+  canDelete: person._count.attendanceRecords === 0 && !person.user
+});
 
 router.get('/', protect, authorize('ADMIN', 'MANAGER'), async (req: AuthRequest, res: Response) => {
   try {
@@ -46,10 +61,7 @@ router.get('/', protect, authorize('ADMIN', 'MANAGER'), async (req: AuthRequest,
 
     res.json({
       success: true,
-      data: personnel.map((person) => ({
-        ...person,
-        canDelete: person._count.attendanceRecords === 0 && !person.user
-      }))
+      data: personnel.map(personnelResponse)
     });
   } catch (error) {
     console.error('Get personnel error:', error);
@@ -64,7 +76,7 @@ router.get('/:id', protect, authorize('ADMIN', 'MANAGER'), async (req: AuthReque
       include: includePersonnel
     });
     if (!person) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
-    res.json({ success: true, data: { ...person, canDelete: person._count.attendanceRecords === 0 && !person.user } });
+    res.json({ success: true, data: personnelResponse(person) });
   } catch (error) {
     console.error('Get personnel by id error:', error);
     res.status(500).json({ success: false, error: 'دریافت پرسنل ناموفق بود.' });
@@ -76,7 +88,8 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
   body('lastName').trim().notEmpty().withMessage('نام خانوادگی الزامی است.'),
   body('departmentId').optional({ values: 'falsy' }).isString().custom((value) => CUID_REGEX.test(value)).withMessage('بخش معتبر نیست.'),
   body('isActive').optional().isBoolean(),
-  body('confirmDuplicate').optional().isBoolean()
+  body('confirmDuplicate').optional().isBoolean(),
+  body('workSchedule').optional().isObject()
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -97,14 +110,15 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
       return res.status(409).json({ success: false, error: 'پرسنل با همین نام در همین بخش وجود دارد.', duplicate });
     }
 
-    const person = await prisma.personnel.create({
-      data: { firstName, lastName, departmentId, isActive },
-      include: includePersonnel
+    const person = await prisma.$transaction(async (tx) => {
+      const created = await tx.personnel.create({ data: { firstName, lastName, departmentId, isActive } });
+      await savePersonnelWorkSchedule(tx, created.id, req.body.workSchedule);
+      return tx.personnel.findUniqueOrThrow({ where: { id: created.id }, include: includePersonnel });
     });
-    res.status(201).json({ success: true, data: { ...person, canDelete: true } });
+    res.status(201).json({ success: true, data: personnelResponse(person) });
   } catch (error) {
     console.error('Create personnel error:', error);
-    res.status(500).json({ success: false, error: 'ثبت پرسنل ناموفق بود.' });
+    res.status(isScheduleValidationError(error) ? 400 : 500).json({ success: false, error: isScheduleValidationError(error) ? (error as Error).message : 'ثبت پرسنل ناموفق بود.' });
   }
 });
 
@@ -113,7 +127,8 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
   body('lastName').optional().trim().notEmpty().withMessage('نام خانوادگی نمی‌تواند خالی باشد.'),
   body('departmentId').optional({ values: 'falsy' }).isString().custom((value) => CUID_REGEX.test(value)).withMessage('بخش معتبر نیست.'),
   body('isActive').optional().isBoolean(),
-  body('confirmDuplicate').optional().isBoolean()
+  body('confirmDuplicate').optional().isBoolean(),
+  body('workSchedule').optional().isObject()
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -136,21 +151,24 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
       return res.status(409).json({ success: false, error: 'پرسنل با همین نام در همین بخش وجود دارد.', duplicate });
     }
 
-    const person = await prisma.personnel.update({
-      where: { id: existing.id },
-      data: {
-        firstName,
-        lastName,
-        departmentId,
-        ...(req.body.isActive !== undefined ? { isActive: Boolean(req.body.isActive) } : {})
-      },
-      include: includePersonnel
+    const person = await prisma.$transaction(async (tx) => {
+      await tx.personnel.update({
+        where: { id: existing.id },
+        data: {
+          firstName,
+          lastName,
+          departmentId,
+          ...(req.body.isActive !== undefined ? { isActive: Boolean(req.body.isActive) } : {})
+        }
+      });
+      await savePersonnelWorkSchedule(tx, existing.id, req.body.workSchedule);
+      return tx.personnel.findUniqueOrThrow({ where: { id: existing.id }, include: includePersonnel });
     });
 
-    res.json({ success: true, data: { ...person, canDelete: person._count.attendanceRecords === 0 && !person.user } });
+    res.json({ success: true, data: personnelResponse(person) });
   } catch (error) {
     console.error('Update personnel error:', error);
-    res.status(500).json({ success: false, error: 'ویرایش پرسنل ناموفق بود.' });
+    res.status(isScheduleValidationError(error) ? 400 : 500).json({ success: false, error: isScheduleValidationError(error) ? (error as Error).message : 'ویرایش پرسنل ناموفق بود.' });
   }
 });
 

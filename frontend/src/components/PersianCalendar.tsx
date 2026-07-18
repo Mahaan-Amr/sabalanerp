@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { FaChevronLeft, FaChevronRight, FaCalendarAlt } from 'react-icons/fa';
 import PersianCalendar from '@/lib/persian-calendar';
 import moment from 'moment-jalaali';
+import PersianTimePicker from './PersianTimePicker';
 
 interface PersianCalendarProps {
   value?: string;
@@ -293,12 +294,10 @@ export default function PersianCalendarComponent({
         </div>
         <div className="flex items-center space-x-2 space-x-reverse">
           {showTime && selectedDate && (
-            <input
-              type="time"
+            <PersianTimePicker
               value={selectedTime}
-              onChange={(e) => handleTimeChange(e.target.value)}
-              className="bg-transparent border-none text-sm text-primary focus:outline-none"
-              onClick={(e) => e.stopPropagation()}
+              onChange={handleTimeChange}
+              className="min-w-[170px]"
             />
           )}
           <FaChevronLeft className={`text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />

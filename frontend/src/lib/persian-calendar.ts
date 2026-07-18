@@ -239,6 +239,10 @@ export class PersianCalendar {
     ];
   }
 
+  static toGregorianDateOnly(persianDate: string, format: string = 'jYYYY/jMM/jDD'): string {
+    return moment(persianDate, format).format('YYYY-MM-DD');
+  }
+
   /**
    * Get Persian day names array
    * @returns Array of Persian day names

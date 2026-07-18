@@ -1981,6 +1981,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   const customerPhone = getCustomerPhone(customer, contractData);
   const customerNationalCode = customer.nationalCode || contractData.customer?.nationalCode || EMPTY;
   const customerAddress = project.address || customer.workAddress || customer.homeAddress || customer.address || EMPTY;
+  const projectName = project.projectName || EMPTY;
   const projectManagerName = project.projectManagerName || customer.projectManagerName || EMPTY;
   const projectManagerNumber = project.projectManagerNumber || customer.projectManagerNumber || EMPTY;
 
@@ -2033,14 +2034,15 @@ export function renderContractHtml(contract: RenderableContract, options: Render
 
     ${showCustomerSection ? `<section class="section">
       <h2>مشخصات مشتری و پروژه</h2>
-      <div class="grid two-col">
+      <div class="grid two-col balanced-info">
         <div><strong>نام مشتری:</strong> ${escapeHtml(customerName)}</div>
         <div><strong>کد ملی:</strong> ${escapeHtml(customerNationalCode)}</div>
         <div><strong>شماره تماس:</strong> ${escapeHtml(customerPhone)}</div>
         <div><strong>نام برند/شرکت:</strong> ${escapeHtml(customer.companyName || customer.brandName || EMPTY)}</div>
+        <div><strong>نام پروژه:</strong> ${escapeHtml(projectName)}</div>
+        <div><strong>آدرس پروژه:</strong> ${escapeHtml(customerAddress)}</div>
         <div><strong>مدیر پروژه:</strong> ${escapeHtml(projectManagerName)}</div>
         <div><strong>شماره مدیر پروژه:</strong> ${escapeHtml(projectManagerNumber)}</div>
-        <div class="full"><strong>آدرس پروژه:</strong> ${escapeHtml(customerAddress)}</div>
       </div>
     </section>` : ''}
 

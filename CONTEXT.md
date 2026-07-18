@@ -809,6 +809,10 @@ _Avoid_: collapsing multi-part names, removing typed spacing, or replacing an ed
 The delivery schedule shown in customer-facing PDF and print output. It should prioritize readable delivered item names and a separate delivered amount/metrage column over operational fields that make the table wrap.
 _Avoid_: combining item name and delivered amount in one cramped cell when several delivery rows are present
 
+**مشخصات مشتری و پروژه چاپی**:
+The compact customer and project identity shown in customer-facing and accounting contract output. It includes the saved project name and address as separate two-column fields, while long project addresses wrap within their field; workshop output remains a separate minimal identity view.
+_Avoid_: omitting the saved project name, giving the project name or address an otherwise unnecessary full-width row, or expanding workshop output with the full customer/project section
+
 **سربرگ چاپی قرارداد**:
 The repeated customer-facing header on every PDF/print page, containing the Sabalan logo, contract number, contract date, print-time status, and page number.
 _Avoid_: showing the contract header only on the first page of a multi-page contract output, or letting page content overlap the repeated header

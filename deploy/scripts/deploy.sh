@@ -37,6 +37,30 @@ docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml build
 echo "Starting database first..."
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml up -d postgres
 
+BACKUP_DIR="${BACKUP_DIR:-backups}"
+BACKUP_TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+BACKUP_PATH="${BACKUP_DIR}/sabalanerp-before-deploy-${BACKUP_TIMESTAMP}.dump"
+BACKUP_TMP_PATH="${BACKUP_PATH}.tmp"
+
+mkdir -p "${BACKUP_DIR}"
+echo "Creating pre-migration database backup: ${BACKUP_PATH}"
+if ! docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml exec -T postgres \
+  sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner --no-acl' \
+  > "${BACKUP_TMP_PATH}"; then
+  rm -f "${BACKUP_TMP_PATH}"
+  echo "Database backup failed. Deployment aborted before migrations."
+  exit 1
+fi
+
+if [ ! -s "${BACKUP_TMP_PATH}" ]; then
+  rm -f "${BACKUP_TMP_PATH}"
+  echo "Database backup is empty. Deployment aborted before migrations."
+  exit 1
+fi
+
+mv "${BACKUP_TMP_PATH}" "${BACKUP_PATH}"
+echo "Database backup completed: ${BACKUP_PATH}"
+
 echo "Applying Prisma migrations..."
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml run --rm backend npm run db:migrate:deploy
 

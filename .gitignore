@@ -96,6 +96,7 @@ prisma/migrations/
 
 # Uploads
 uploads/
+backups/
 backend/uploads/
 !backend/uploads/
 backend/storage/contracts/*.pdf

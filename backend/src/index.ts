@@ -30,6 +30,7 @@ import inventoryRoutes from './routes/inventory';
 import accountingRoutes from './routes/accounting';
 import biRoutes from './routes/bi';
 import logisticsRoutes from './routes/logistics';
+import hrRoutes from './routes/hr';
 import workspacePermissionsRoutes from './routes/workspace-permissions';
 import permissionsRoutes from './routes/permissions';
 import productsRoutes from './routes/products';
@@ -132,6 +133,7 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/bi', biRoutes);
 app.use('/api/logistics', logisticsRoutes);
+app.use('/api/hr', hrRoutes);
 app.use('/api/workspace-permissions', workspacePermissionsRoutes);
 app.use('/api/permissions', permissionsRoutes);
 app.use('/api/catalog-excel', catalogExcelRoutes);
@@ -243,4 +245,3 @@ server.listen(PORT, () => {
 });
 
 export { io };
-

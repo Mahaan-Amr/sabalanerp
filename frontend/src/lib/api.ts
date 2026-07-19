@@ -110,6 +110,32 @@ export const personnelAPI = {
   deletePerson: (id: string) => api.delete(`/personnel/${id}`),
 };
 
+export const hrAPI = {
+  getDashboard: () => api.get('/hr/dashboard'),
+  getFoundation: () => api.get('/hr/foundation'),
+  createOrganizationalUnit: (data: any) => api.post('/hr/organizational-units', data),
+  updateOrganizationalUnit: (id: string, data: any) => api.put(`/hr/organizational-units/${id}`, data),
+  createWorkplace: (data: any) => api.post('/hr/workplaces', data),
+  updateWorkplace: (id: string, data: any) => api.put(`/hr/workplaces/${id}`, data),
+  createCostCenter: (data: any) => api.post('/hr/cost-centers', data),
+  updateCostCenter: (id: string, data: any) => api.put(`/hr/cost-centers/${id}`, data),
+  createJob: (data: any) => api.post('/hr/jobs', data),
+  updateJob: (id: string, data: any) => api.put(`/hr/jobs/${id}`, data),
+  createPosition: (data: any) => api.post('/hr/positions', data),
+  updatePosition: (id: string, data: any) => api.put(`/hr/positions/${id}`, data),
+  getPersonnel: (params?: any) => api.get('/hr/personnel', { params }),
+  createPersonnel: (data: any) => api.post('/hr/personnel', data),
+  updatePersonnel: (id: string, data: any) => api.put(`/hr/personnel/${id}`, data),
+  createRelationship: (personnelId: string, data: any) => api.post(`/hr/personnel/${personnelId}/relationships`, data),
+  updateRelationshipStatus: (id: string, data: any) => api.put(`/hr/relationships/${id}/status`, data),
+  createAssignment: (relationshipId: string, data: any) => api.post(`/hr/relationships/${relationshipId}/assignments`, data),
+  transferPrimaryAssignment: (relationshipId: string, data: any) => api.post(`/hr/relationships/${relationshipId}/transfer-primary`, data),
+  endAssignment: (id: string, effectiveTo: string) => api.put(`/hr/assignments/${id}/end`, { effectiveTo }),
+  getSupervisorCandidates: (params: any) => api.get('/hr/supervisor-candidates', { params }),
+  getMigrationPreview: () => api.get('/hr/migration/preview'),
+  applyMigration: (data: any) => api.post('/hr/migration/apply', data),
+};
+
 // Posts API
 export const postsAPI = {
   getPosts: (page = 1, limit = 10, published?: boolean) => {

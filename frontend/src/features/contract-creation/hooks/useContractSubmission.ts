@@ -16,6 +16,10 @@ import { normalizeMandatoryLongitudinalCuttingPricing } from '../utils/mandatory
 import { hasUnresolvedLegacyRemainingChildAddOns } from '../services/remainingStoneChildAddOnService';
 import { getContractGrossPayableTotal, reconcileContractProductPricing } from '../utils/contractProductPricing';
 import { reconcileContractProductGraph } from '../utils/contractProductGraphReconciliation';
+import {
+  hasUnconfirmedProductQuantityOverride,
+  normalizeProductFinishingCollection
+} from '../utils/productFinishingCollections';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
@@ -132,6 +136,12 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       setCurrentStep(5);
       return;
     }
+
+    if (wizardData.products.some(hasUnconfirmedProductQuantityOverride)) {
+      setErrors({ products: 'مقدار دستی ابزار یا پرداخت پس از تغییر هندسه نیاز به تأیید دارد.' });
+      setCurrentStep(5);
+      return;
+    }
     
     setIsSubmitting(true);
     setLoading(true);
@@ -159,9 +169,13 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         };
         const product = normalizeMandatoryLongitudinalCuttingPricing(productWithType);
         const finishing = normalizeProductFinishing(product);
-        if (!finishing) return reconcileContractProductPricing(product);
+        if (!finishing) return reconcileContractProductPricing({
+          ...product,
+          finishings: normalizeProductFinishingCollection(product)
+        });
         return reconcileContractProductPricing({
           ...product,
+          finishings: normalizeProductFinishingCollection(product),
           finishingCalculationBase: product.finishingCalculationBase || finishing.calculationBase,
           finishingUnitPrice: product.finishingUnitPrice ?? finishing.unitPrice,
           finishingQuantity: product.finishingQuantity ?? finishing.quantity,

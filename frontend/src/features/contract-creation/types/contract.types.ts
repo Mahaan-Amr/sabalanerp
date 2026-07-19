@@ -187,9 +187,31 @@ export interface StoneFinishing {
   description?: string;
   pricePerSquareMeter: number;
   unitPrice?: number | null;
-  calculationBase?: 'length' | 'squareMeters';
+  calculationBase?: 'length' | 'squareMeters' | 'count';
+  incompatibleWithIds?: string[];
   images?: string[];
   isActive: boolean;
+}
+
+export interface AppliedProductFinishing {
+  selectionId: string;
+  finishingId: string;
+  code?: string | null;
+  name: string;
+  calculationBase: 'length' | 'squareMeters' | 'count';
+  unitPrice: number;
+  automaticQuantity: number;
+  quantity: number;
+  quantityMode: 'auto' | 'manual';
+  overrideStatus: 'current' | 'requiresConfirmation' | 'confirmed';
+  cost: number;
+  targetEdges?: {
+    front?: boolean;
+    left?: boolean;
+    right?: boolean;
+    back?: boolean;
+    perimeter?: boolean;
+  };
 }
 
 export interface AppliedSubService {
@@ -510,6 +532,8 @@ export interface ContractProduct {
   finishingSearchTerm?: string;
   finishingCost?: number | null;
   finishingSquareMeters?: number | null;
+  /** Canonical collection; legacy singular finishing fields remain readable. */
+  finishings?: AppliedProductFinishing[];
   // CAD Design (for visual design storage)
   cadDesign?: any; // Stores the CAD design data for future reference
 }

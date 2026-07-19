@@ -847,6 +847,37 @@ const normalizeProducts = (
         });
       }
 
+      const primaryFinishingId = firstText(product?.finishingId, product?.meta?.finishing?.id);
+      (Array.isArray(product?.finishings) ? product.finishings : [])
+        .filter((finishing: any) => firstText(finishing?.finishingId, finishing?.id) !== primaryFinishingId)
+        .forEach((finishing: any) => {
+          const calculationBase = finishing?.calculationBase === 'length'
+            ? 'length'
+            : finishing?.calculationBase === 'count'
+              ? 'count'
+              : 'squareMeters';
+          const unitLabel = calculationBase === 'length'
+            ? 'متر طول'
+            : calculationBase === 'count'
+              ? 'عدد'
+              : 'متر مربع';
+          const quantity = toNumber(finishing?.quantity);
+          const unitPrice = toNumber(finishing?.unitPrice);
+          services.push({
+            code: firstText(finishing?.code),
+            sourceId: firstText(finishing?.finishingId, finishing?.id),
+            category: 'پرداخت سنگ',
+            name: firstText(finishing?.name, EMPTY),
+            selectedEdgesLabel: selectedEdgeLabels({ edges: finishing?.targetEdges }),
+            amount: quantity,
+            amountLabel: `${toFaNumber(quantity, 4)} ${unitLabel}`,
+            rate: unitPrice,
+            rateLabel: unitPrice ? `${toFaNumber(unitPrice)} تومان / ${unitLabel}` : EMPTY,
+            rateUnitLabel: unitLabel,
+            cost: toNumber(finishing?.cost) || quantity * unitPrice
+          });
+        });
+
       const tools: NormalizedProductTool[] = [
         ...(Array.isArray(product?.tools) ? product.tools : []),
         ...(Array.isArray(product?.meta?.tools) ? product.meta.tools : [])

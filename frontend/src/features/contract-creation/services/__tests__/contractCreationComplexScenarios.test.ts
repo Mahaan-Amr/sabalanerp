@@ -24,6 +24,13 @@ import {
 } from '../../utils/deliveryScheduleController';
 import { reconcileContractProductGraph } from '../../utils/contractProductGraphReconciliation';
 import {
+  changeFinishingCatalogItem,
+  confirmFinishingManualQuantity,
+  getFinishingCompatibilityConflicts,
+  refreshFinishingAutomaticQuantity,
+  resetFinishingToAutomaticQuantity
+} from '../../utils/productFinishingCollections';
+import {
   mergeEditedRemainingStoneState,
   resolveLongitudinalWidth,
   restoreRemainingStoneAfterChildRemoval
@@ -1087,6 +1094,41 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   assert.ok(invalidPayment.errors.some((error) => error.includes('تاریخ پرداخت')));
   assert.ok(invalidPayment.errors.some((error) => error.includes('نام صاحب چک')));
   assert.ok(invalidPayment.errors.some((error) => error.includes('تاریخ تحویل چک')));
+}
+
+{
+  const manualFinishing = {
+    selectionId: 'finish-a-selection',
+    finishingId: 'finish-a',
+    name: 'پرداخت الف',
+    calculationBase: 'squareMeters' as const,
+    unitPrice: 100_000,
+    automaticQuantity: 2,
+    quantity: 2,
+    quantityMode: 'manual' as const,
+    overrideStatus: 'current' as const,
+    cost: 200_000
+  };
+  const stale = refreshFinishingAutomaticQuantity(manualFinishing, 2.72);
+  assert.equal(stale.quantity, 2);
+  assert.equal(stale.automaticQuantity, 2.72);
+  assert.equal(stale.overrideStatus, 'requiresConfirmation');
+  assert.equal(confirmFinishingManualQuantity(stale).overrideStatus, 'confirmed');
+  assert.equal(resetFinishingToAutomaticQuantity(stale).quantity, 2.72);
+
+  const changedCatalog = changeFinishingCatalogItem(stale, {
+    finishingId: 'finish-b',
+    code: 'B',
+    name: 'پرداخت ب',
+    calculationBase: 'squareMeters',
+    unitPrice: 120_000
+  }, 2.72);
+  assert.equal(changedCatalog.quantityMode, 'auto');
+  assert.equal(changedCatalog.quantity, 2.72);
+  assert.deepEqual(getFinishingCompatibilityConflicts(
+    [changedCatalog, { ...manualFinishing, finishingId: 'finish-c' }],
+    { 'finish-b': ['finish-c'] }
+  ), [['finish-b', 'finish-c']]);
 }
 
 {

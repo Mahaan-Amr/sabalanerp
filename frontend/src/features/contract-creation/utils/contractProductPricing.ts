@@ -20,10 +20,15 @@ const getToolsCost = (product: ContractProduct): number => {
   return Math.max(snapshotTotal, rowTotal);
 };
 
-const getFinishingCost = (product: ContractProduct): number => Math.max(
-  toFiniteNumber(product.finishingCost),
-  toFiniteNumber((product.meta as any)?.finishing?.cost)
-);
+const getFinishingCost = (product: ContractProduct): number => {
+  if (Array.isArray(product.finishings)) {
+    return sumNumericValues(product.finishings, (finishing) => finishing.cost);
+  }
+  return Math.max(
+    toFiniteNumber(product.finishingCost),
+    toFiniteNumber((product.meta as any)?.finishing?.cost)
+  );
+};
 
 const isRemainingStoneChild = (product: ContractProduct): boolean => Boolean(
   product.parentProductRowId || (product.meta as any)?.remainingSource

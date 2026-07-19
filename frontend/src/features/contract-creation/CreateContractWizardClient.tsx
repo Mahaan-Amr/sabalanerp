@@ -141,7 +141,8 @@ import { getBillableCuttingCost } from '@/features/contract-creation/utils/manda
 import {
   getDeliverableProductEntries,
   getDeliveryTargetAmount as getContractDeliveryTargetAmount,
-  getSchedulableServiceEntries
+  getSchedulableServiceEntries,
+  reconcileDeliveryProductReferences
 } from '@/features/contract-creation/utils/deliveryScheduleController';
 import {
   resolveLongitudinalCustomerFields,
@@ -1479,10 +1480,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     return calculateFinishingCost(quantity, unitPrice);
   };
 
-  const normalizeWizardFinishingProducts = (data: ContractWizardData): ContractWizardData => ({
-    ...data,
-    serviceRows: data.serviceRows || [],
-    products: ensureContractProductRowIds((data.products || []).map((savedProduct) => {
+  const normalizeWizardFinishingProducts = (data: ContractWizardData): ContractWizardData => {
+    const products = ensureContractProductRowIds((data.products || []).map((savedProduct) => {
       const product = restoreLongitudinalCustomerRequest(savedProduct);
       const finishing = normalizeProductFinishing(product);
       if (!finishing) return product;
@@ -1497,8 +1496,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           (finishing.calculationBase === 'squareMeters' ? finishing.quantity : null),
         finishingCost: product.finishingCost ?? finishing.cost
       };
-    }))
-  });
+    }));
+    const deliveryReferences = reconcileDeliveryProductReferences(products, data.deliveries || []);
+    return {
+      ...data,
+      serviceRows: data.serviceRows || [],
+      products,
+      deliveries: deliveryReferences.deliveries
+    };
+  };
 
   useEffect(() => {
     if (!isContractEditMode || !initialWizardData) return;
@@ -3426,28 +3432,30 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     remainingStoneModal.setShowRemainingStoneModal(true);
   };
 
-  const removeProductFromDeliveries = (deliveries: DeliverySchedule[], removedIndex: number): DeliverySchedule[] =>
-    deliveries.map((delivery) => ({
+  const removeProductFromDeliveries = (deliveries: DeliverySchedule[], removedIndex: number): DeliverySchedule[] => {
+    const removedRowId = wizardData.products[removedIndex]?.rowId;
+    return deliveries.map((delivery) => ({
       ...delivery,
-      products: (delivery.products || [])
-        .filter((item) => item.rowType === 'service' || item.productIndex !== removedIndex)
-        .map((item) => (
-          item.rowType !== 'service' && typeof item.productIndex === 'number' && item.productIndex > removedIndex
-            ? { ...item, productIndex: item.productIndex - 1 }
-            : item
-        ))
+      products: (delivery.products || []).filter((item) => {
+        if (item.rowType === 'service') return true;
+        if (item.productRowId && removedRowId) return item.productRowId !== removedRowId;
+        return item.productIndex !== removedIndex;
+      })
     }));
+  };
 
   const removeProductsFromDeliveries = (deliveries: DeliverySchedule[], removedIndices: number[]): DeliverySchedule[] => {
     const removed = new Set(removedIndices);
+    const removedRowIds = new Set(
+      removedIndices.map((removedIndex) => wizardData.products[removedIndex]?.rowId).filter((rowId): rowId is string => !!rowId)
+    );
     return deliveries.map((delivery) => ({
       ...delivery,
       products: (delivery.products || [])
-        .filter((item) => item.rowType === 'service' || !removed.has(item.productIndex as number))
-        .map((item) => {
-          if (item.rowType === 'service' || typeof item.productIndex !== 'number') return item;
-          const shift = removedIndices.filter((removedIndex) => removedIndex < item.productIndex!).length;
-          return shift > 0 ? { ...item, productIndex: item.productIndex - shift } : item;
+        .filter((item) => {
+          if (item.rowType === 'service') return true;
+          if (item.productRowId) return !removedRowIds.has(item.productRowId);
+          return !removed.has(item.productIndex as number);
         })
     }));
   };
@@ -5367,7 +5375,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         if (wizardData.deliveries.length === 0) {
           newErrors.deliveries = 'تعیین حداقل یک تحویل الزامی است';
         } else {
-          wizardData.deliveries.forEach((delivery, index) => {
+          const deliveryReferences = reconcileDeliveryProductReferences(wizardData.products, wizardData.deliveries);
+          const deliveriesToValidate = deliveryReferences.deliveries;
+          if (deliveryReferences.conflicts.length > 0) {
+            newErrors.deliveries = `برنامه تحویل نیاز به بازبینی دارد: ${deliveryReferences.conflicts.map((conflict) => conflict.message).join(' | ')}`;
+          }
+
+          deliveriesToValidate.forEach((delivery, index) => {
             if (!delivery.deliveryDate) {
               newErrors[`delivery_${index}_date`] = 'تاریخ تحویل الزامی است';
             }
@@ -5406,16 +5420,18 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             remainingByProductIndex.set(productIndex, getDeliveryTargetAmount(product));
           });
 
-          wizardData.deliveries.forEach(delivery => {
+          deliveriesToValidate.forEach(delivery => {
             delivery.products.forEach(dp => {
-              if (dp.rowType === 'service' || typeof dp.productIndex !== 'number') return;
-              const current = remainingByProductIndex.get(dp.productIndex) || 0;
-              remainingByProductIndex.set(dp.productIndex, current - (dp.amount ?? dp.quantity ?? 0));
+              if (dp.rowType === 'service' || !dp.productRowId) return;
+              const productIndex = wizardData.products.findIndex((product) => product.rowId === dp.productRowId);
+              if (productIndex < 0) return;
+              const current = remainingByProductIndex.get(productIndex) || 0;
+              remainingByProductIndex.set(productIndex, current - (dp.amount ?? dp.quantity ?? 0));
             });
           });
 
           remainingByProductIndex.forEach((remaining, productIndex) => {
-            if (remaining < -0.01) {
+            if (remaining < -0.01 && !newErrors.deliveries) {
               const product = wizardData.products[productIndex];
               newErrors.deliveries = `مقدار تحویل برای محصول "${product.stoneName || product.product?.namePersian || 'نامشخص'}" بیشتر از مقدار کل است`;
             }
@@ -5431,7 +5447,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             }
           });
 
-          if (undistributedProducts.length > 0) {
+          if (undistributedProducts.length > 0 && !newErrors.deliveries) {
             newErrors.deliveries = `تمام محصولات باید در تحویل ها توزیع شوند. این موارد هنوز کامل توزیع نشده اند: ${undistributedProducts.join('، ')}`;
           }
         }
@@ -5744,7 +5760,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 amountLabel: `${formatDisplayNumber(quantity)} ${serviceRow ? getServiceRowUnitLabel(serviceRow.unit) : ''}`.trim()
               };
             }
-            const productIndex = deliveryProduct.productIndex ?? -1;
+            const productIndex = deliveryProduct.productRowId
+              ? wizardData.products.findIndex((product) => product.rowId === deliveryProduct.productRowId)
+              : (deliveryProduct.productIndex ?? -1);
             const quantity = toFiniteNumber(deliveryProduct.amount ?? deliveryProduct.quantity);
             const unitLabel = deliveryProduct.unit === 'meter'
               ? 'متر'

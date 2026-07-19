@@ -540,9 +540,10 @@ export interface ContractProduct {
 
 export interface DeliveryProductItem {
   rowType?: 'product' | 'service';
-  productIndex?: number; // Index in wizardData.products array
+  productRowId?: string; // Canonical stable identity of the contract product row
+  productIndex?: number; // Regenerated compatibility snapshot for legacy consumers
   serviceRowId?: string;
-  productId: string;
+  productId?: string;
   quantity: number; // Quantity for this specific delivery
   unit?: 'meter' | 'squareMeter' | 'ton' | 'count';
   amount?: number;

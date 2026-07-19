@@ -11,7 +11,7 @@ import { mapAxiosFormErrors } from '@/lib/formErrors';
 import { CONTRACT_DRAFT_STORAGE_KEY } from '../utils/contractDraftStorage';
 import { normalizeProductFinishing } from '../utils/finishingUtils';
 import { getPreparedQuantity, getPreparedUnit, isPreparedProductType, normalizeContractProductType } from '../utils/preparedProductUtils';
-import { getDeliverableProductEntries } from '../utils/deliveryScheduleController';
+import { getDeliverableProductEntries, reconcileDeliveryProductReferences } from '../utils/deliveryScheduleController';
 import { normalizeMandatoryLongitudinalCuttingPricing } from '../utils/mandatoryCuttingPricing';
 import { hasUnresolvedLegacyRemainingChildAddOns } from '../services/remainingStoneChildAddOnService';
 import { getContractGrossPayableTotal, reconcileContractProductPricing } from '../utils/contractProductPricing';
@@ -137,6 +137,15 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       return;
     }
 
+    const currentDeliveryReferences = reconcileDeliveryProductReferences(wizardData.products, wizardData.deliveries);
+    if (currentDeliveryReferences.conflicts.length > 0) {
+      setErrors({
+        deliveries: `برنامه تحویل نیاز به بازبینی دارد: ${currentDeliveryReferences.conflicts.map((conflict) => conflict.message).join(' | ')}`
+      });
+      setCurrentStep(5);
+      return;
+    }
+
     if (wizardData.products.some(hasUnconfirmedProductQuantityOverride)) {
       setErrors({ products: 'مقدار دستی ابزار یا پرداخت پس از تغییر هندسه نیاز به تأیید دارد.' });
       setCurrentStep(5);
@@ -188,15 +197,20 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       });
       const totalAmount = wizardData.payment.totalContractAmount ||
         getContractGrossPayableTotal(normalizedProducts, wizardData.serviceRows || []);
-      const deliverableProductIndices = new Set(getDeliverableProductEntries(normalizedProducts).map(({ productIndex }) => productIndex));
-      const contractDeliveries = deliverableProductIndices.size === 0
+      const normalizedDeliveryReferences = reconcileDeliveryProductReferences(normalizedProducts, currentDeliveryReferences.deliveries);
+      const deliverableProductRowIds = new Set(
+        getDeliverableProductEntries(normalizedProducts)
+          .map(({ product }) => product.rowId)
+          .filter((rowId): rowId is string => !!rowId)
+      );
+      const contractDeliveries = deliverableProductRowIds.size === 0
         ? []
-        : wizardData.deliveries.map((delivery) => ({
+        : normalizedDeliveryReferences.deliveries.map((delivery) => ({
           ...delivery,
           products: delivery.products.filter((product) =>
             product.rowType !== 'service' &&
-            typeof product.productIndex === 'number' &&
-            deliverableProductIndices.has(product.productIndex)
+            !!product.productRowId &&
+            deliverableProductRowIds.has(product.productRowId)
           )
         })).filter((delivery) => delivery.products.length > 0);
       
@@ -257,11 +271,11 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             vehicle: delivery.receiverName || null,
             notes: delivery.notes || null,
             products: delivery.products
-              .filter((dp) => dp.rowType !== 'service' && typeof dp.productIndex === 'number')
+              .filter((dp) => dp.rowType !== 'service' && !!dp.productRowId)
               .map((dp) => {
-              const product = normalizedProducts[dp.productIndex as number];
+              const product = normalizedProducts.find((candidate) => candidate.rowId === dp.productRowId);
               return {
-                productId: dp.productId,
+                productId: product?.productId || dp.productId,
                 quantity: dp.amount ?? dp.quantity,
                 notes: product?.description || null
               };
@@ -360,11 +374,11 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             vehicle: delivery.receiverName || undefined,
             notes: delivery.notes,
             products: delivery.products
-              .filter((dp) => dp.rowType !== 'service' && typeof dp.productIndex === 'number')
+              .filter((dp) => dp.rowType !== 'service' && !!dp.productRowId)
               .map(dp => {
-              const product = normalizedProducts[dp.productIndex as number];
+              const product = normalizedProducts.find((candidate) => candidate.rowId === dp.productRowId);
               return {
-                productId: dp.productId,
+                productId: product?.productId || dp.productId,
                 quantity: dp.quantity,
                 notes: product?.description || ''
               };

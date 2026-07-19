@@ -3,6 +3,30 @@ import { getPreparedQuantity, getPreparedUnitDeliveryValue, isPreparedProductTyp
 
 export type DeliveryUnit = NonNullable<DeliveryProductItem['unit']>;
 
+export type DeliveryProductReferenceConflictCode =
+  | 'missing-product-index'
+  | 'missing-product-row'
+  | 'duplicate-product-row-id'
+  | 'legacy-product-mismatch'
+  | 'non-deliverable-product';
+
+export interface DeliveryProductReferenceConflict {
+  code: DeliveryProductReferenceConflictCode;
+  deliveryIndex: number;
+  productItemIndex: number;
+  productRowId?: string;
+  productIndex?: number;
+  productId?: string;
+  quantity: number;
+  unit?: DeliveryUnit;
+  message: string;
+}
+
+export interface DeliveryProductReferenceReconciliation {
+  deliveries: DeliverySchedule[];
+  conflicts: DeliveryProductReferenceConflict[];
+}
+
 export const getDefaultProjectManagerName = (wizardData: ContractWizardData): string =>
   wizardData.project?.projectManagerName || wizardData.customer?.projectManagerName || '';
 
@@ -42,7 +66,7 @@ export const syncDeliveryDefaults = (
   }));
 };
 
-export const isDeliverableContractProduct = (product: ContractProduct | undefined): product is ContractProduct => {
+export const isDeliverableContractProduct = (product: ContractProduct | undefined): boolean => {
   if (!product) return false;
   // Stair layers are manufactured, loaded, and delivered as part of their
   // exact parent stair row. They must never create an independent cargo balance.
@@ -54,6 +78,168 @@ export const getDeliverableProductEntries = (products: ContractProduct[]): Array
   products
     .map((product, productIndex) => ({ product, productIndex }))
     .filter(({ product }) => isDeliverableContractProduct(product));
+
+export const isDeliveryItemForProduct = (
+  item: DeliveryProductItem,
+  product: ContractProduct,
+  productIndex: number
+): boolean => {
+  if (item.rowType === 'service') return false;
+  if (item.productRowId) return item.productRowId === product.rowId;
+  return item.productIndex === productIndex && item.productId === product.productId;
+};
+
+export const reconcileDeliveryProductReferences = (
+  products: ContractProduct[],
+  deliveries: DeliverySchedule[] = []
+): DeliveryProductReferenceReconciliation => {
+  const conflicts: DeliveryProductReferenceConflict[] = [];
+  const productIndexByRowId = new Map<string, number>();
+  const duplicateProductRowIds = new Set<string>();
+  products.forEach((product, productIndex) => {
+    if (!product.rowId) return;
+    if (productIndexByRowId.has(product.rowId)) duplicateProductRowIds.add(product.rowId);
+    productIndexByRowId.set(product.rowId, productIndex);
+  });
+
+  const reconciledDeliveries = deliveries.map((delivery, deliveryIndex) => ({
+    ...delivery,
+    products: (delivery.products || []).map((item, productItemIndex) => {
+      if (item.rowType === 'service') return item;
+
+      let productIndex: number | undefined;
+      let product: ContractProduct | undefined;
+
+      if (item.productRowId) {
+        if (duplicateProductRowIds.has(item.productRowId)) {
+          conflicts.push({
+            code: 'duplicate-product-row-id',
+            deliveryIndex,
+            productItemIndex,
+            productRowId: item.productRowId,
+            productIndex: item.productIndex,
+            productId: item.productId,
+            quantity: item.amount ?? item.quantity,
+            unit: item.unit,
+            message: `تحویل ${deliveryIndex + 1}: شناسه پایدار محصول بین چند ردیف تکراری است و تخصیص باید بازبینی شود.`
+          });
+          return item;
+        }
+        productIndex = productIndexByRowId.get(item.productRowId);
+        product = typeof productIndex === 'number' ? products[productIndex] : undefined;
+        if (!product) {
+          conflicts.push({
+            code: 'missing-product-row',
+            deliveryIndex,
+            productItemIndex,
+            productRowId: item.productRowId,
+            productIndex: item.productIndex,
+            productId: item.productId,
+            quantity: item.amount ?? item.quantity,
+            unit: item.unit,
+            message: `تحویل ${deliveryIndex + 1}: ردیف محصول متصل به این مقدار دیگر در قرارداد وجود ندارد.`
+          });
+          return item;
+        }
+      } else {
+        if (typeof item.productIndex !== 'number' || !products[item.productIndex]) {
+          conflicts.push({
+            code: 'missing-product-index',
+            deliveryIndex,
+            productItemIndex,
+            productIndex: item.productIndex,
+            productId: item.productId,
+            quantity: item.amount ?? item.quantity,
+            unit: item.unit,
+            message: `تحویل ${deliveryIndex + 1}: مرجع قدیمی محصول معتبر نیست و باید بازبینی شود.`
+          });
+          return item;
+        }
+
+        productIndex = item.productIndex;
+        product = products[productIndex];
+        if (product.productId !== item.productId) {
+          conflicts.push({
+            code: 'legacy-product-mismatch',
+            deliveryIndex,
+            productItemIndex,
+            productIndex,
+            productId: item.productId,
+            quantity: item.amount ?? item.quantity,
+            unit: item.unit,
+            message: `تحویل ${deliveryIndex + 1}: شناسه محصول ذخیره‌شده با ردیف فعلی قرارداد تطابق ندارد؛ تخصیص خودکار انجام نشد.`
+          });
+          return item;
+        }
+        if (!product.rowId || duplicateProductRowIds.has(product.rowId)) {
+          conflicts.push({
+            code: 'duplicate-product-row-id',
+            deliveryIndex,
+            productItemIndex,
+            productRowId: product.rowId,
+            productIndex,
+            productId: item.productId,
+            quantity: item.amount ?? item.quantity,
+            unit: item.unit,
+            message: `تحویل ${deliveryIndex + 1}: شناسه پایدار ردیف محصول موجود نیست یا تکراری است و مهاجرت خودکار انجام نشد.`
+          });
+          return item;
+        }
+      }
+
+      if (!isDeliverableContractProduct(product)) {
+        conflicts.push({
+          code: 'non-deliverable-product',
+          deliveryIndex,
+          productItemIndex,
+          productRowId: product.rowId,
+          productIndex,
+          productId: item.productId,
+          quantity: item.amount ?? item.quantity,
+          unit: item.unit,
+          message: `تحویل ${deliveryIndex + 1}: لایه پله نباید ردیف مستقل تحویل داشته باشد و نیاز به بازبینی دارد.`
+        });
+        return item;
+      }
+
+      const resolvedProductRowId = product.rowId || item.productRowId;
+      if (!resolvedProductRowId) {
+        conflicts.push({
+          code: 'missing-product-row',
+          deliveryIndex,
+          productItemIndex,
+          productIndex,
+          productId: item.productId,
+          quantity: item.amount ?? item.quantity,
+          unit: item.unit,
+          message: `تحویل ${deliveryIndex + 1}: ردیف محصول شناسه پایدار ندارد و باید بازبینی شود.`
+        });
+        return item;
+      }
+
+      return {
+        ...item,
+        productRowId: resolvedProductRowId,
+        productIndex,
+        productId: product.productId
+      };
+    })
+  }));
+
+  return { deliveries: reconciledDeliveries, conflicts };
+};
+
+export const removeInvalidDeliveryProductReference = (
+  deliveries: DeliverySchedule[],
+  deliveryIndex: number,
+  productItemIndex: number
+): DeliverySchedule[] => deliveries.map((delivery, currentDeliveryIndex) => {
+  if (currentDeliveryIndex !== deliveryIndex) return delivery;
+  return {
+    ...delivery,
+    products: (delivery.products || []).filter((_, currentProductItemIndex) => currentProductItemIndex !== productItemIndex)
+  };
+});
 
 export const getSchedulableServiceEntries = (serviceRows: ContractServiceRow[] = []): Array<{ serviceRow: ContractServiceRow; serviceIndex: number }> =>
   serviceRows.map((serviceRow, serviceIndex) => ({ serviceRow, serviceIndex }));

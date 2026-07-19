@@ -7,6 +7,7 @@ import { validateWizardStep } from '../services/validationService';
 import PersianCalendar from '@/lib/persian-calendar';
 import { ensureContractProductRowIds } from '../utils/contractProductIdentity';
 import { getContractGrossPayableTotal } from '../utils/contractProductPricing';
+import { reconcileDeliveryProductReferences } from '../utils/deliveryScheduleController';
 
 const getCurrentPersianDate = () => {
   try {
@@ -157,11 +158,20 @@ export const useContractWizard = () => {
 
   // Update wizard data
   const updateWizardData = useCallback((updates: Partial<ContractWizardData>) => {
-    setWizardData(prev => ({
-      ...prev,
-      ...updates,
-      products: updates.products ? ensureContractProductRowIds(updates.products) : prev.products
-    }));
+    setWizardData(prev => {
+      const products = updates.products ? ensureContractProductRowIds(updates.products) : prev.products;
+      const deliveryInput = updates.deliveries ?? prev.deliveries;
+      const deliveries = (updates.products || updates.deliveries)
+        ? reconcileDeliveryProductReferences(products, deliveryInput).deliveries
+        : prev.deliveries;
+
+      return {
+        ...prev,
+        ...updates,
+        products,
+        deliveries
+      };
+    });
   }, []);
 
   // Validate current step

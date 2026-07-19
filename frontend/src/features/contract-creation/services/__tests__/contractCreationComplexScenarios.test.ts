@@ -78,6 +78,7 @@ const product = (overrides: Partial<Product> = {}): Product => ({
 const contractProduct = (overrides: Partial<ContractProduct> = {}): ContractProduct => {
   const baseProduct = product();
   return {
+    rowId: 'contract-product-row-1',
     productId: baseProduct.id,
     product: baseProduct,
     productType: 'longitudinal',
@@ -1007,7 +1008,7 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
         receiverName: 'Receiver A',
         deliveryAddress: 'Tehran',
         products: [
-          { productIndex: 0, quantity: 9, amount: 9, unit: 'meter' },
+          { productIndex: 0, productId: productRow.productId, quantity: 9, amount: 9, unit: 'meter' },
           { rowType: 'service', serviceRowId: tool.id, quantity: 12, amount: 12, unit: 'meter' }
         ]
       },
@@ -1017,7 +1018,7 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
         receiverName: 'Receiver B',
         deliveryAddress: 'Tehran',
         products: [
-          { productIndex: 0, quantity: 9, amount: 9, unit: 'meter' },
+          { productIndex: 0, productId: productRow.productId, quantity: 9, amount: 9, unit: 'meter' },
           { rowType: 'service', serviceRowId: tool.id, quantity: 12, amount: 12, unit: 'meter' }
         ]
       }
@@ -1045,7 +1046,7 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
       {
         deliveryDate: '1405/04/10',
         receiverName: 'Receiver A',
-        products: [{ productIndex: 0, quantity: 17, amount: 17, unit: 'meter' }]
+        products: [{ productIndex: 0, productId: productRow.productId, quantity: 17, amount: 17, unit: 'meter' }]
       }
     ],
     payment: validWizard.payment

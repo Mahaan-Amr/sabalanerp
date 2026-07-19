@@ -4,6 +4,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { DeliverySchedule, DeliveryProductItem, ContractProduct } from '../types/contract.types';
 import { validateDelivery } from '../services/validationService';
+import { isDeliveryItemForProduct } from '../utils/deliveryScheduleController';
 
 export const useDeliverySchedule = (products: ContractProduct[]) => {
   const [deliveries, setDeliveries] = useState<DeliverySchedule[]>([]);
@@ -11,11 +12,13 @@ export const useDeliverySchedule = (products: ContractProduct[]) => {
 
   // Calculate total delivered quantity for a product
   const getTotalDeliveredQuantity = useCallback((productIndex: number): number => {
+    const product = products[productIndex];
+    if (!product) return 0;
     return deliveries.reduce((total, delivery) => {
-      const deliveryProduct = delivery.products.find(p => p.productIndex === productIndex);
+      const deliveryProduct = delivery.products.find((item) => isDeliveryItemForProduct(item, product, productIndex));
       return total + (deliveryProduct?.quantity || 0);
     }, 0);
-  }, [deliveries]);
+  }, [deliveries, products]);
 
   // Check if product is fully distributed
   const isProductFullyDistributed = useCallback((productIndex: number): boolean => {
@@ -59,26 +62,28 @@ export const useDeliverySchedule = (products: ContractProduct[]) => {
   const addProductToDelivery = useCallback((deliveryIndex: number, productIndex: number, quantity: number) => {
     setDeliveries(prev => prev.map((delivery, i) => {
       if (i !== deliveryIndex) return delivery;
-      
-      const existingProduct = delivery.products.find(p => p.productIndex === productIndex);
+      const product = products[productIndex];
+      if (!product?.rowId) return delivery;
+      const productRowId = product.rowId;
+      const existingProduct = delivery.products.find((item) => isDeliveryItemForProduct(item, product, productIndex));
       if (existingProduct) {
         // Update existing product quantity
         return {
           ...delivery,
-          products: delivery.products.map(p =>
-            p.productIndex === productIndex
-              ? { ...p, quantity }
-              : p
+          products: delivery.products.map(item =>
+            isDeliveryItemForProduct(item, product, productIndex)
+              ? { ...item, productRowId, productIndex, productId: product.productId, quantity }
+              : item
           )
         };
       } else {
         // Add new product
-        const product = products[productIndex];
         return {
           ...delivery,
           products: [
             ...delivery.products,
             {
+              productRowId,
               productIndex,
               productId: product?.productId || '',
               quantity
@@ -93,12 +98,14 @@ export const useDeliverySchedule = (products: ContractProduct[]) => {
   const removeProductFromDelivery = useCallback((deliveryIndex: number, productIndex: number) => {
     setDeliveries(prev => prev.map((delivery, i) => {
       if (i !== deliveryIndex) return delivery;
+      const product = products[productIndex];
+      if (!product) return delivery;
       return {
         ...delivery,
-        products: delivery.products.filter(p => p.productIndex !== productIndex)
+        products: delivery.products.filter((item) => !isDeliveryItemForProduct(item, product, productIndex))
       };
     }));
-  }, []);
+  }, [products]);
 
   // Validate all deliveries
   const validateDeliveries = useCallback((): { isValid: boolean; errors: Record<string, string> } => {
@@ -135,9 +142,10 @@ export const useDeliverySchedule = (products: ContractProduct[]) => {
       const newProducts: DeliveryProductItem[] = [...delivery.products];
       
       productIndices.forEach(productIndex => {
-        const existingIndex = newProducts.findIndex(p => p.productIndex === productIndex);
         const product = products[productIndex];
-        if (!product) return;
+        if (!product?.rowId) return;
+        const productRowId = product.rowId;
+        const existingIndex = newProducts.findIndex((item) => isDeliveryItemForProduct(item, product, productIndex));
         
         const alreadyDelivered = getTotalDeliveredQuantity(productIndex);
         const remaining = product.quantity - alreadyDelivered;
@@ -148,6 +156,7 @@ export const useDeliverySchedule = (products: ContractProduct[]) => {
         } else if (remaining > 0) {
           // Add new
           newProducts.push({
+            productRowId,
             productIndex,
             productId: product.productId,
             quantity: remaining
@@ -184,5 +193,4 @@ export const useDeliverySchedule = (products: ContractProduct[]) => {
     isProductFullyDistributed
   };
 };
-
 

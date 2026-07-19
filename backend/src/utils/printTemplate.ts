@@ -69,6 +69,7 @@ interface NormalizedSourceMaterial {
 
 interface NormalizedProduct {
   id: string;
+  rowId: string;
   code: string;
   name: string;
   productTypeCode: string;
@@ -953,6 +954,7 @@ const normalizeProducts = (
 
       return {
         id: `${product?.productId || 'product'}-${index}`,
+        rowId: String(product?.rowId || ''),
         code: product?.stoneCode || product?.product?.code || relationItem?.product?.code || EMPTY,
         name: product?.stoneName || product?.product?.namePersian || product?.product?.name || relationItem?.product?.namePersian || relationItem?.product?.name || EMPTY,
         productTypeCode: String(product?.productType || relationItem?.productType || ''),
@@ -989,6 +991,7 @@ const normalizeProducts = (
 
   return relationItems.map((item: any, index: number) => ({
     id: item?.id || `item-${index}`,
+    rowId: String(item?.productRowId || ''),
     code: item?.product?.code || EMPTY,
     name: item?.product?.namePersian || item?.product?.name || EMPTY,
     productTypeCode: String(item?.productType || ''),
@@ -1070,7 +1073,9 @@ const normalizeDeliveries = (
               };
             }
             const productIndex = toNumber(deliveryProduct?.productIndex);
-            const product = products[productIndex] ||
+            const product = (deliveryProduct?.productRowId
+              ? products.find((candidate) => candidate.rowId === deliveryProduct.productRowId)
+              : undefined) || products[productIndex] ||
               products.find((candidate) => candidate.id.startsWith(`${deliveryProduct?.productId || ''}-`));
             return {
               name: product?.name || EMPTY,
@@ -1107,15 +1112,16 @@ const normalizeDeliveries = (
       : [];
 
     const snapshotProducts = Array.isArray(snapshot?.products)
-      ? snapshot.products.map((deliveryProduct: any) => ({
-          name: products.find((product) => product.id.startsWith(`${deliveryProduct?.productId || ''}-`))?.name || `محصول ${toNumber(deliveryProduct?.productIndex) + 1}`,
-          quantity: toNumber(deliveryProduct?.quantity),
-          amountLabel: formatDeliveryAmount(
-            deliveryProduct,
-            products.find((product) => product.id.startsWith(`${deliveryProduct?.productId || ''}-`)),
-            deliveryProduct?.quantity
-          )
-        }))
+      ? snapshot.products.map((deliveryProduct: any) => {
+          const product = (deliveryProduct?.productRowId
+            ? products.find((candidate) => candidate.rowId === deliveryProduct.productRowId)
+            : undefined) || products.find((candidate) => candidate.id.startsWith(`${deliveryProduct?.productId || ''}-`));
+          return {
+            name: product?.name || `محصول ${toNumber(deliveryProduct?.productIndex) + 1}`,
+            quantity: toNumber(deliveryProduct?.quantity),
+            amountLabel: formatDeliveryAmount(deliveryProduct, product, deliveryProduct?.quantity)
+          };
+        })
       : [];
 
     rows.push({

@@ -3,7 +3,12 @@
 
 import type { ContractProduct, ContractServiceRow, DeliverySchedule, PaymentMethod, ContractWizardData } from '../types/contract.types';
 import { sumNumericValues, toFiniteNumber } from '@/lib/numberFormat';
-import { getDeliveryTargetAmount } from '../utils/deliveryScheduleController';
+import {
+  getDeliverableProductEntries,
+  getDeliveryTargetAmount,
+  isDeliveryItemForProduct,
+  reconcileDeliveryProductReferences
+} from '../utils/deliveryScheduleController';
 
 /**
  * Validate a product configuration
@@ -47,6 +52,9 @@ export const validateDelivery = (
   serviceRows: ContractServiceRow[] = []
 ): { isValid: boolean; errors: string[] } => {
   const errors: string[] = [];
+  const deliveryReferences = reconcileDeliveryProductReferences(products, [delivery]);
+  const normalizedDelivery = deliveryReferences.deliveries[0] || delivery;
+  errors.push(...deliveryReferences.conflicts.map((conflict) => conflict.message));
   
   if (!delivery.deliveryDate) {
     errors.push('تاریخ تحویل الزامی است');
@@ -56,17 +64,17 @@ export const validateDelivery = (
     errors.push('نام تحویل‌گیرنده الزامی است');
   }
   
-  if (!delivery.products || delivery.products.length === 0) {
+  if (!normalizedDelivery.products || normalizedDelivery.products.length === 0) {
     errors.push('حداقل یک ردیف برای تحویل یا اجرا انتخاب کنید');
   }
   
   // Validate product quantities don't exceed available quantities
-  if (delivery.products && delivery.products.length > 0) {
-    for (const deliveryProduct of delivery.products) {
+  if (normalizedDelivery.products && normalizedDelivery.products.length > 0) {
+    for (const deliveryProduct of normalizedDelivery.products) {
       if (deliveryProduct.rowType === 'service') {
         const serviceRow = serviceRows.find(row => row.id === deliveryProduct.serviceRowId);
         if (serviceRow) {
-          const totalDelivered = delivery.products
+          const totalDelivered = normalizedDelivery.products
             .filter(p => p.rowType === 'service' && p.serviceRowId === deliveryProduct.serviceRowId)
             .reduce((sum, p) => sum + toFiniteNumber(p.amount ?? p.quantity), 0);
 
@@ -77,10 +85,13 @@ export const validateDelivery = (
         continue;
       }
 
-      const product = typeof deliveryProduct.productIndex === 'number' ? products[deliveryProduct.productIndex] : undefined;
-      if (product && typeof deliveryProduct.productIndex === 'number') {
-        const totalDelivered = delivery.products
-          .filter(p => p.productIndex === deliveryProduct.productIndex)
+      const productIndex = deliveryProduct.productRowId
+        ? products.findIndex((product) => product.rowId === deliveryProduct.productRowId)
+        : deliveryProduct.productIndex;
+      const product = typeof productIndex === 'number' && productIndex >= 0 ? products[productIndex] : undefined;
+      if (product && typeof productIndex === 'number') {
+        const totalDelivered = normalizedDelivery.products
+          .filter((item) => isDeliveryItemForProduct(item, product, productIndex))
           .reduce((sum, p) => sum + toFiniteNumber(p.amount ?? p.quantity), 0);
         
         if (totalDelivered > getDeliveryTargetAmount(product)) {
@@ -204,9 +215,13 @@ export const validateWizardStep = (
       if (!wizardData.deliveries || wizardData.deliveries.length === 0) {
         errors.deliveries = 'حداقل یک برنامه تحویل تعریف کنید';
       } else {
+        const deliveryReferences = reconcileDeliveryProductReferences(wizardData.products, wizardData.deliveries);
+        if (deliveryReferences.conflicts.length > 0) {
+          errors.deliveries = `برنامه تحویل نیاز به بازبینی دارد: ${deliveryReferences.conflicts.map((conflict) => conflict.message).join(' | ')}`;
+        }
         // Validate all products are distributed
-        const totalProductQuantities = wizardData.products.reduce((acc, p, index) => {
-          acc[`product-${index}`] = getDeliveryTargetAmount(p);
+        const totalProductQuantities = getDeliverableProductEntries(wizardData.products).reduce((acc, { product }) => {
+          if (product.rowId) acc[`product-${product.rowId}`] = getDeliveryTargetAmount(product);
           return acc;
         }, {} as Record<string, number>);
         const totalServiceQuantities = (wizardData.serviceRows || []).reduce((acc, row) => {
@@ -215,11 +230,11 @@ export const validateWizardStep = (
         }, {} as Record<string, number>);
         
         const deliveredQuantities: Record<string, number> = {};
-        wizardData.deliveries.forEach(delivery => {
+        deliveryReferences.deliveries.forEach(delivery => {
           delivery.products.forEach(dp => {
             const key = dp.rowType === 'service'
               ? `service-${dp.serviceRowId}`
-              : `product-${dp.productIndex}`;
+              : `product-${dp.productRowId}`;
             if (!deliveredQuantities[key]) {
               deliveredQuantities[key] = 0;
             }
@@ -230,14 +245,14 @@ export const validateWizardStep = (
         // Check if all rows are fully distributed
         for (const [rowKey, totalQuantity] of Object.entries({ ...totalProductQuantities, ...totalServiceQuantities })) {
           const delivered = deliveredQuantities[rowKey] || 0;
-          if (delivered < totalQuantity) {
+          if (delivered < totalQuantity && !errors.deliveries) {
             errors.deliveries = `همه محصولات و خدمات باید در برنامه‌های تحویل/اجرا توزیع شوند`;
             break;
           }
         }
         
         // Validate each delivery
-        wizardData.deliveries.forEach((delivery, index) => {
+        deliveryReferences.deliveries.forEach((delivery, index) => {
           const deliveryValidation = validateDelivery(delivery, wizardData.products, wizardData.serviceRows || []);
           if (!deliveryValidation.isValid) {
             errors[`delivery_${index}`] = deliveryValidation.errors.join(', ');

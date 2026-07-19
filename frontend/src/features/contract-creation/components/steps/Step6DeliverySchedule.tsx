@@ -17,6 +17,9 @@ import {
   getDeliveryUnitLabel,
   getSchedulableServiceEntries,
   getServiceDeliveryTargetAmount,
+  isDeliveryItemForProduct,
+  reconcileDeliveryProductReferences,
+  removeInvalidDeliveryProductReference,
   syncDeliveryDefaults
 } from '../../utils/deliveryScheduleController';
 import { getServiceRowUnitLabel } from '../../utils/contractServiceRows';
@@ -48,6 +51,10 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
   const schedulableServiceEntries = useMemo(
     () => getSchedulableServiceEntries(wizardData.serviceRows || []),
     [wizardData.serviceRows]
+  );
+  const deliveryReferenceConflicts = useMemo(
+    () => reconcileDeliveryProductReferences(wizardData.products, wizardData.deliveries).conflicts,
+    [wizardData.products, wizardData.deliveries]
   );
 
   useEffect(() => {
@@ -83,6 +90,15 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
     updateWizardData({ deliveries: newDeliveries });
   };
 
+  const handleRemoveInvalidAssignment = (deliveryIndex: number, productItemIndex: number) => {
+    if (!window.confirm('این تخصیص نامعتبر از برنامه تحویل حذف می‌شود و مقدار آن باید دوباره به ردیف صحیح تخصیص داده شود. ادامه می‌دهید؟')) {
+      return;
+    }
+    updateWizardData({
+      deliveries: removeInvalidDeliveryProductReference(wizardData.deliveries, deliveryIndex, productItemIndex)
+    });
+  };
+
   const formatAmount = (value: number): string => formatDisplayNumber(value);
 
   const toWidthCm = (value: number | null | undefined, unit: 'cm' | 'm' | undefined): number => {
@@ -100,12 +116,14 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
 
   // Total delivery amount already assigned for a product across deliveries, optionally excluding one delivery
   const getTotalDeliveredForProduct = useCallback((productIndex: number, excludeDeliveryIndex?: number): number => {
+    const product = wizardData.products[productIndex];
+    if (!product) return 0;
     return wizardData.deliveries.reduce((sum, d, i) => {
       if (excludeDeliveryIndex !== undefined && i === excludeDeliveryIndex) return sum;
-      const dp = d.products?.find(p => p.productIndex === productIndex);
+      const dp = d.products?.find((item) => isDeliveryItemForProduct(item, product, productIndex));
       return sum + (dp?.amount ?? dp?.quantity ?? 0);
     }, 0);
-  }, [wizardData.deliveries]);
+  }, [wizardData.deliveries, wizardData.products]);
 
   const getTotalDeliveredForService = useCallback((serviceRowId: string, excludeDeliveryIndex?: number): number => {
     return wizardData.deliveries.reduce((sum, d, i) => {
@@ -115,21 +133,25 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
     }, 0);
   }, [wizardData.deliveries]);
 
-  const handleDeliveryProductQuantityChange = (deliveryIndex: number, productIndex: number, quantity: number, productId: string) => {
+  const handleDeliveryProductQuantityChange = (deliveryIndex: number, productIndex: number, quantity: number, productId?: string) => {
     const delivery = wizardData.deliveries[deliveryIndex];
+    const product = wizardData.products[productIndex];
+    if (!product?.rowId) return;
     const current = delivery.products ?? [];
-    const existing = current.find(p => p.productIndex === productIndex);
+    const existing = current.find((item) => isDeliveryItemForProduct(item, product, productIndex));
     let newProducts: DeliveryProductItem[];
     if (quantity <= 0) {
-      newProducts = current.filter(p => p.productIndex !== productIndex);
+      newProducts = current.filter((item) => !isDeliveryItemForProduct(item, product, productIndex));
     } else if (existing) {
       const unit = getDeliveryUnit(wizardData.products[productIndex]);
-      newProducts = current.map(p =>
-        p.productIndex === productIndex ? { ...p, productId, quantity, amount: quantity, unit } : p
+      newProducts = current.map(item =>
+        isDeliveryItemForProduct(item, product, productIndex)
+          ? { ...item, productRowId: product.rowId, productIndex, productId, quantity, amount: quantity, unit }
+          : item
       );
     } else {
       const unit = getDeliveryUnit(wizardData.products[productIndex]);
-      newProducts = [...current, { productIndex, productId, quantity, amount: quantity, unit }];
+      newProducts = [...current, { productRowId: product.rowId, productIndex, productId, quantity, amount: quantity, unit }];
     }
     handleUpdateDelivery(deliveryIndex, { products: newProducts });
   };
@@ -165,6 +187,29 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
           برنامه تحویل را مشخص کنید
         </p>
       </div>
+
+      {deliveryReferenceConflicts.length > 0 && (
+        <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:border-red-700 dark:bg-red-900/20 dark:text-red-200">
+          <p className="font-semibold">برنامه تحویل نیاز به بازبینی دارد</p>
+          <ul className="mt-2 list-disc space-y-1 pr-5">
+            {deliveryReferenceConflicts.map((conflict) => (
+              <li key={`${conflict.deliveryIndex}-${conflict.productItemIndex}-${conflict.code}`}>
+                <p>{conflict.message}</p>
+                <p className="mt-1 text-xs">
+                  شناسه کاتالوگ ذخیره‌شده: {conflict.productId || 'نامشخص'} — مقدار: {formatDisplayNumber(conflict.quantity)} {conflict.unit || ''}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveInvalidAssignment(conflict.deliveryIndex, conflict.productItemIndex)}
+                  className="mt-2 rounded-md border border-red-400 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 dark:bg-slate-900 dark:text-red-200"
+                >
+                  حذف تخصیص نامعتبر
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       
       <div className="max-w-4xl mx-auto">
         <div className="flex justify-between items-center mb-4">
@@ -302,7 +347,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                         const contractQty = getDeliveryTargetAmount(product);
                         const alreadyAssigned = getTotalDeliveredForProduct(productIndex, index);
                         const maxForThisDelivery = Math.max(0, contractQty - alreadyAssigned);
-                        const currentDeliveryProduct = delivery.products?.find(p => p.productIndex === productIndex);
+                        const currentDeliveryProduct = delivery.products?.find((item) => isDeliveryItemForProduct(item, product, productIndex));
                         const currentQty = currentDeliveryProduct?.amount ?? currentDeliveryProduct?.quantity ?? 0;
                         const remaining = maxForThisDelivery;
                         const productLabel = product.stoneName || product.product?.namePersian || `محصول ${productIndex + 1}`;
@@ -310,7 +355,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                         const setQty = (value: number) => handleDeliveryProductQuantityChange(index, productIndex, Math.max(0, Math.min(maxForThisDelivery, value)), product.productId);
                         return (
                           <div
-                            key={productIndex}
+                            key={product.rowId || productIndex}
                             className="p-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800/50 space-y-2"
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2">

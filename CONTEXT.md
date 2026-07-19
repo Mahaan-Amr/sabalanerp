@@ -313,6 +313,10 @@ _Avoid_: treating عرض مصرفی as the finished customer-requested width
 A contract row that can be assigned to the delivery schedule because it represents either a physical stone product to deliver or a standalone service row to execute for the customer.
 _Avoid_: representing service execution as a fake stone product, or assuming every scheduled row is physical inventory
 
+**هویت پایدار تخصیص تحویل**:
+A delivery quantity belongs to one exact contract product row through `productRowId`; `productIndex` and catalog `productId` are compatibility snapshots, not canonical identity. A legacy assignment is migrated automatically only when its saved index still points to a row with the same catalog product ID. A missing, duplicated, or contradictory identity blocks save and remains visibly invalid until the operator explicitly chooses «حذف تخصیص نامعتبر»; the removed quantity becomes unallocated and must be assigned manually.
+_Avoid_: matching deliveries by array position after products change, guessing from a similar stone, silently transferring quantity to another row, deleting an invalid assignment without confirmation, or allowing an unresolved/unallocated quantity through final save
+
 **مقدار زمان‌بندی خدمات قرارداد**:
 The amount of a standalone service row assigned to delivery/execution dates, using the same unit and total quantity as the selected service row.
 _Avoid_: scheduling a service in a different unit than its contract row, or allowing scheduled service amounts to exceed the selected service quantity

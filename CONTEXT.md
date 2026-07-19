@@ -51,7 +51,7 @@ A required confirmation step before a full Excel catalog sync removes missing re
 _Avoid_: silently removing catalog records during import
 
 **خوراک اره**:
-A per-contract-product material-consumption adjustment for physical cuttable stone. When enabled, the saved row carries `sawKerfEnabled: true` and `sawKerfCm: 0.3`; each actually cut axis consumes the finished requested dimension plus 3mm for source-material charge, smart packing, and remaining-stone geometry. Finished dimensions, delivery, standalone services, tools, and finishing calculations stay based on the customer-requested size.
+A per-contract-product material-consumption adjustment for physical cuttable stone. When enabled, the saved row carries `sawKerfEnabled: true` and `sawKerfCm: 0.3`; each actually cut axis consumes the finished requested dimension plus 3mm for source-material charge, smart packing, and remaining-stone geometry. Stair layers cut from the parent row's stone inherit that row's active saw kerf for packing, so a 35cm source fits seven finished 5cm strips without kerf but only six with 0.3cm kerf. Finished dimensions, delivery, standalone services, tools, and finishing calculations stay based on the customer-requested size.
 _Avoid_: applying kerf to service rows, applying it to a full-width/full-length axis with no cut, or changing printed finished dimensions.
 
 **برش کالیبر**:
@@ -246,7 +246,7 @@ _Avoid_: merging the source catalogs just because contract rows share one shape
 
 **تفکیک جمع محصولات و خدمات وابسته قرارداد**:
 The customer-facing confirmation and print summary show the non-service product subtotal separately from billable cutting, tools, finishing, and standalone service rows, while the persisted product `totalPrice` remains the canonical all-in product amount. The final payable total counts every billable fact exactly once.
-_Avoid_: omitting a priced operation from the final payable amount, adding a displayed dependent service on top of an already all-in product total, presenting physical non-billable حکمی cutting as a customer charge, or silently rewriting a finalized historical contract
+_Avoid_: omitting a priced operation from the final payable amount, adding a displayed dependent service on top of an already all-in product total, presenting non-billable حکمی cross-cutting as a customer charge, or silently rewriting a finalized historical contract
 
 **توضیحات ردیف خدمات قرارداد**:
 A per-contract note attached to a selected standalone service row, prefilled from the catalog description when available but editable without changing the catalog.
@@ -370,6 +370,54 @@ _Avoid_: using one shared stair-system note for all stair parts
 A stair contract may contain multiple independent rows of the same stair part type, such as several کف پله rows or several خیز rows, within the same stair session or contract.
 _Avoid_: treating stairPartType as a unique key, or overwriting an existing stair part row only because a new row has the same part type
 
+**مجموعه لایه پله**:
+The customer-facing quantity of a stair layer row: the parent stair quantity multiplied by تعداد لایه برای هر پله. Selected edges such as جلو and چپ are the physical pieces contained in each layer set, while their piece count and the number of source stones consumed remain separate production facts.
+_Avoid_: multiplying the layer-row quantity by the number of selected edges, or treating physical edge pieces as complete source stones
+
+**سنگ پرداخت‌شده و سنگ جدید لایه پله**:
+Layer pieces allocated from parent or remaining stone whose material was already charged add no second material charge; only their cutting, layer type, tools, and finishing remain billable. A layer shortage consumes and charges complete new source stones including unavoidable packing waste, saves every usable remainder as already-paid material, and does not charge that material again when the remainder is later allocated. Customer output distinguishes layer sets supplied from already-paid stone, layer sets supplied from new stone, and the quantity and area of new source stone consumed.
+_Avoid_: charging parent or reusable remaining material twice, charging only finished strip area when complete new source stones are consumed, discarding usable new-stone remainder, or hiding the material-source split from the customer
+
+**طول منبع لایه پله**:
+The charged and packed length of stone supplying stair layers. Automatically procured new stone uses the catalog standard/source length, while parent or remaining stone uses its exact saved available length and manually selected warehouse stone uses the explicitly entered available length; finished layer-piece lengths remain based on the stair's actual geometry.
+_Avoid_: charging automatic new stone at only the finished strip length, replacing exact remainder or warehouse dimensions with a catalog default, or printing the source length as the finished layer length
+
+**تخصیص منبع لایه پله**:
+A deterministic allocation from already-paid or new stone to one layer row. Compatible remainder owned by the exact parent row is consumed automatically first; compatible remainder from another contract row is only offered and consumed through explicit user selection, after which new source stone supplies any shortage. Every allocation keeps stable source-row identity, and a parent edit that invalidates an allocation rejects the complete edit with the affected layer identified instead of silently moving it to another source.
+_Avoid_: gathering and consuming sibling-row remainder automatically, identifying a source by stair part type or array position, changing allocation order during recalculation, partially applying an invalid parent edit, or silently replacing invalidated remainder with new stone
+
+**چرخه عمر لایه پله وابسته**:
+An attached layer belongs to one exact parent stair row through stable row identity. Parent edits atomically preview and recalculate attached layers, source allocations, remainders, cuts, add-ons, and totals while preserving independent layer selections and requiring renewed confirmation for affected manual overrides; any allocation conflict rejects the whole edit. Confirmed parent deletion removes its layers together, layer-only deletion restores its allocated remainder, and explicit duplication with layers creates new identities and recalculates allocations instead of sharing links.
+_Avoid_: linking a layer by stair type or position, partially saving a parent edit, leaving orphan layers, deleting attached layers without confirmation, losing restored remainder after layer deletion, or copying parent/layer source relationships into a duplicate
+
+**تحویل لایه پله وابسته**:
+A stair layer is a non-independent child manufactured and delivered as part of its exact parent stair row. Customer output nests its layer-set quantity and auditable material, cutting, tooling, finishing, and price details beneath the parent; accounting retains the linked pricing breakdown, workshop retains the physical strip plan, and logistics includes layer details in the parent loading identity without creating a separate delivery or loading balance.
+_Avoid_: scheduling or loading layer strips as independent cargo, printing physical strip count as layer-set quantity, hiding the child price breakdown, omitting production geometry from workshop output, or allowing parent delivery or deletion to leave an independent layer balance
+
+**دروازه تطبیق گراف محصول قرارداد**:
+A product-configuration change is complete only when one canonical recalculation produces a valid atomic parent/child graph and screen totals, saved contract data, reload state, customer and accounting output, workshop truth, delivery, and logistics reconcile exactly. Saving is blocked by orphan or unstable relationships, invalid source allocations, incompatible processing, unconfirmed stale overrides, or pricing mismatches; finalized history remains unchanged until authorized explicit edit and save.
+_Avoid_: accepting a UI-only correction, partially saving a graph mutation, duplicating formulas across consumers, treating passing legacy tests as sufficient evidence, or releasing without deterministic complex-scenario and rendered-output verification
+
+**برش مستقل لایه پله**:
+The physical and billable cutting plan owned by a stair layer row. It records actual longitudinal saw passes that create layer strips and cross cuts that shorten them from source length to finished edge-piece length, uses the applicable cutting catalog rates, and keeps saw kerf as source-consumption geometry rather than a separate service; layer cuts remain separate from parent cuts and ابزار.
+_Avoid_: returning zero or empty cutting details for physically cut layers, copying parent cutting totals, storing automatic layer cuts as ابزار, charging saw kerf as a service, or printing one cut in more than one category
+
+**ابزار و پرداخت مستقل لایه پله**:
+Tooling and stone finishing selected specifically for a stair layer row and calculated from that layer's finished physical pieces. A new layer starts without parent add-ons; copying selections from the parent stair row is an explicit user action and creates independently editable layer selections. Each layer ابزار or پرداخت explicitly targets one or more existing layer sides, such as جلو or چپ. ابزار meterage includes only targeted physical pieces; پرداخت quantity follows its catalog unit using the targeted finished geometry: area for متر مربع, length for متر طول, or physical-piece count for تعداد. A layer may carry multiple cumulative پرداخت selections, each with independent targets, quantity, unit price, and total; catalog-defined incompatibility prevents combinations that cannot coexist.
+_Avoid_: automatically inheriting parent ابزار or پرداخت, charging layer add-ons from full source-stone area, keeping copied add-ons linked to later parent changes, applying an add-on to untargeted layer sides, ignoring the پرداخت catalog unit, or collapsing cumulative processing into one finishing field
+
+**پرداخت‌های چندگانه محصول قرارداد**:
+A shared collection of independently priced stone-finishing selections available to طولی, main پله, لایه پله, اسلب, and remaining-stone child rows. Each selection preserves its catalog item, calculation unit, automatic quantity, optional explicit override, applicable target geometry, unit price, and total; کیوبیک and قطعات آماده remain outside this processing workflow. Non-overridden quantities recalculate with their geometry and targets. An explicit override remains unchanged after a relevant change, shows the current automatic comparison, and blocks final save until the user confirms the override or resets it to automatic; changing the catalog item creates a new selection without the old override. Legacy rows with one finishing are read as a one-entry collection without rewriting saved data; finalized historical contracts change shape only through an authorized explicit edit and save while retaining financially identical pre-save outputs.
+_Avoid_: implementing a different finishing shape for each supported product family, replacing cumulative operations with one finishing field, calculating a remaining-stone child's finishing from its parent, enabling cutting-workflow finishing on کیوبیک and قطعات آماده, silently replacing an explicit override, allowing a stale override through final save without confirmation, carrying an override to a different catalog item, silently migrating stored contracts, or changing historical totals merely by opening or printing a contract
+
+**سازگاری پرداخت‌های محصول قرارداد**:
+Explicit catalog-owned rules describing which stone-finishing operations may coexist on one contract product. Contract selection blocks a newly incompatible combination with its reason, while a later catalog-rule change does not rewrite finalized history; an authorized edit exposes any current conflict and requires resolution before save.
+_Avoid_: inferring incompatibility from names, hard-coding different compatibility rules in each product UI, removing historical processing after a catalog change, or saving a newly edited row with an unresolved conflict
+
+**مقدار دستی ابزار محصول قرارداد**:
+An explicit user quantity that replaces geometry-derived ابزار meterage for طولی, main پله, لایه پله, اسلب, or a remaining-stone child. After relevant geometry or target changes, the manual value remains visible beside the new automatic value and blocks final save until confirmed or reset; replacing the ابزار catalog item clears the old override.
+_Avoid_: silently recalculating an explicit tool override, accepting it after geometry changes without renewed confirmation, or transferring it to another tool
+
 **ویرایش ردیف سنگ پله**:
 Editing from the contract list opens the clicked stair product row as an individual row edit, preserving its exact stair part type and details without loading sibling rows from the same stair system.
 _Avoid_: opening کف پله when the clicked row is خیز پله, or rebuilding every row that shares the same stairSystemId when the user edits one row
@@ -476,13 +524,13 @@ _Avoid_: combining طول and عرض into one ابعاد column, repeating unit 
 An explicit percentage-based price increase applied to a contract product when the product is marked as mandatory.
 _Avoid_: printing or charging حکمی from a default percentage when the product is not explicitly marked mandatory
 
-**برش غیرقابل دریافت در حکمی**:
-A physical stone cut that remains part of the contract product's workshop and remaining-stone truth but has no separate billable cutting charge because the product is marked حکمی. The product may still show that it has a physical cut, but invoice-facing totals should not include a paid برش amount for that cut.
-_Avoid_: removing the cut geometry, hiding the workshop cut, charging both حکمی and برش for the same mandatory product row, or showing a priced برش line for a non-billable mandatory cut
+**برش حکمی**:
+A mandatory product retains the physical calculation for every cut and charges the customer for its actual longitudinal cutting, while cross cutting remains non-billable. Workshop and remaining-stone truth include both cut types; customer, accounting, summary, and invoice totals include only the longitudinal cutting amount.
+_Avoid_: zeroing all حکمی cutting charges, hiding either physical cut type, charging حکمی cross cutting, or treating the حکمی percentage as payment for longitudinal cutting
 
 **هزینه فیزیکی برش و مبلغ قابل دریافت برش**:
-هزینه فیزیکی برش ارزش محاسبه‌شده عملیات واقعی برای برنامه تولید و کنترل داخلی است؛ مبلغ قابل دریافت برش بخشی از همان عملیات است که طبق قواعد فروش از مشتری دریافت می‌شود. در محصول حکمی، عملیات و هزینه فیزیکی باقی می‌ماند اما مبلغ قابل دریافت برش صفر است.
-_Avoid_: استفاده از یک مبلغ مشترک برای حقیقت تولید و مبلغ فاکتور، حذف عملیات فیزیکی به دلیل رایگان‌بودن آن برای مشتری، یا استفاده از هزینه فیزیکی در جمع قابل پرداخت
+هزینه فیزیکی برش ارزش محاسبه‌شده عملیات واقعی برای برنامه تولید و کنترل داخلی است؛ مبلغ قابل دریافت برش بخشی از همان عملیات است که طبق قواعد فروش از مشتری دریافت می‌شود. در محصول حکمی، عملیات و هزینه فیزیکی برش طولی و عرضی باقی می‌ماند؛ مبلغ برش طولی از مشتری دریافت می‌شود و مبلغ برش عرضی صفر است.
+_Avoid_: استفاده از یک مبلغ مشترک برای حقیقت تولید و مبلغ فاکتور، حذف عملیات فیزیکی به دلیل رایگان‌بودن آن برای مشتری، صفرکردن مبلغ برش طولی حکمی، دریافت مبلغ برش عرضی حکمی، یا استفاده از هزینه فیزیکی عرضی در جمع قابل پرداخت
 
 **بازذخیره قیمت‌گذاری حکمی**:
 Opening an existing contract for editing and saving it again applies the current حکمی pricing rule to the saved product rows.

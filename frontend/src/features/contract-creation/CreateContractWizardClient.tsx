@@ -177,6 +177,7 @@ import {
   normalizeProductFinishing
 } from '@/features/contract-creation/utils/finishingUtils';
 import { SAW_KERF_CM } from '@/features/contract-creation/utils/sawKerf';
+import { calculateLayerSourcePlan } from '@/features/contract-creation/services/stairCalculationService';
 
 // Import all types from types file
 import type {
@@ -278,7 +279,10 @@ const getAttachedLayerIndicesForStairRow = (
 
   const directMatches = products
     .map((product, index) => ({ product, index }))
-    .filter(({ product }) => isStairLayerProduct(product) && product.parentProductIndex === parentIndex)
+    .filter(({ product }) => isStairLayerProduct(product) && (
+      (!!parent.rowId && product.parentProductRowId === parent.rowId) ||
+      product.parentProductIndex === parentIndex
+    ))
     .map(({ index }) => index);
 
   if (directMatches.length > 0) return directMatches;
@@ -747,13 +751,17 @@ export default function CreateContractWizard({
     const originalWidthCm = draft.stoneProduct?.widthValue || 0;
     const userWidthCm = draft.widthCm || 0;
     const quantity = draft.quantity || 0;
+    const sawKerfCm = draft.sawKerfEnabled && userWidthCm > 0 && userWidthCm < originalWidthCm
+      ? (draft.sawKerfCm || SAW_KERF_CM)
+      : 0;
+    const consumedPieceWidthCm = userWidthCm + sawKerfCm;
 
     let piecesPerStone = 1;
     let leftoverWidthCm = 0;
     let remainingStoneQuantity = 0;
 
     if (originalWidthCm > 0 && userWidthCm > 0) {
-      piecesPerStone = Math.max(1, Math.floor(originalWidthCm / userWidthCm));
+      piecesPerStone = Math.max(1, Math.floor(originalWidthCm / consumedPieceWidthCm));
     }
 
     const baseStoneQuantity = piecesPerStone > 0 ? Math.ceil(quantity / piecesPerStone) : quantity;
@@ -771,9 +779,9 @@ export default function CreateContractWizard({
     if (originalWidthCm > 0 && userWidthCm > 0 && quantity > 0 && baseStoneQuantity > 0) {
       const fullSourceStoneCount = Math.floor(quantity / piecesPerStone);
       const remainingRequestedPieces = quantity % piecesPerStone;
-      const leftoverFromFullSourceWidth = Math.max(0, originalWidthCm - piecesPerStone * userWidthCm);
+      const leftoverFromFullSourceWidth = Math.max(0, originalWidthCm - piecesPerStone * consumedPieceWidthCm);
       const leftoverFromPartialSourceWidth = remainingRequestedPieces > 0
-        ? Math.max(0, originalWidthCm - remainingRequestedPieces * userWidthCm)
+        ? Math.max(0, originalWidthCm - remainingRequestedPieces * consumedPieceWidthCm)
         : 0;
 
       addRemainingStoneGroup(leftoverFromFullSourceWidth, fullSourceStoneCount);
@@ -911,7 +919,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const findExistingLayerProduct = (
     sessionItems: ContractProduct[],
     draft: StairPartDraftV2,
-    parentPartType: StairStepperPart
+    parentPartType: StairStepperPart,
+    parentProductIndexInSession: number
   ): ContractProduct | null => {
     if (!draft.layerEdges || !draft.layerWidthCm || !draft.numberOfLayersPerStair) {
       return null;
@@ -923,6 +932,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       
       const itemLayerInfo = (item.meta as any)?.layerInfo;
       const itemLayerEdges = (item.meta as any)?.layerEdges;
+
+      if (itemLayerInfo?.parentProductIndexInSession !== parentProductIndexInSession) return false;
       
       // Check if same parent part
       if (itemLayerInfo?.parentPartType !== parentPartType) return false;
@@ -1059,6 +1070,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     availableRemainingStones: RemainingStone[];
     cuttingCostPerMeter: number;
     edgeDemands?: LayerEdgeDemand[];
+    sawKerfEnabled?: boolean;
+    sawKerfCm?: number;
   }): {
     layersFromRemainingStones: number;
     layersFromNewStones: number;
@@ -1070,6 +1083,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     squareMetersFromNew?: number;
     totalLayerDemand?: number;
     unfulfilledDemands?: Array<{ edge: LayerEdgeDemand['edge']; lengthM: number; quantity: number }>;
+    longitudinalCuttingMeters?: number;
+    crossCuttingMeters?: number;
   } => {
     const {
       totalLayers,
@@ -1078,6 +1093,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       availableRemainingStones,
       edgeDemands
     } = params;
+    const layerKerfCm = params.sawKerfEnabled ? (params.sawKerfCm || SAW_KERF_CM) : 0;
     
     if (layerWidthCm <= 0) {
       return {
@@ -1144,7 +1160,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
     availableRemainingStones.forEach(stone => {
       const quantity = stone.quantity && stone.quantity > 0 ? stone.quantity : 1;
-      const columnsPerStone = Math.floor(stone.width / layerWidthCm);
+      const columnsPerStone = Math.floor(stone.width / (layerWidthCm + layerKerfCm));
       const stoneLength = stone.length || 0;
       if (columnsPerStone <= 0 || stoneLength <= 0) {
         return;
@@ -1161,7 +1177,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         }
       }
 
-      const leftoverWidth = stone.width - (columnsPerStone * layerWidthCm);
+      const leftoverWidth = stone.width - (columnsPerStone * (layerWidthCm + layerKerfCm));
       if (leftoverWidth > 0) {
         residualWidthPieces.push({
           id: `layer_width_leftover_${stone.id}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
@@ -1194,6 +1210,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     let squareMetersFromRemaining = 0;
     let squareMetersFromNew = 0;
     const usageEntries: { source: RemainingStone; lengthM: number; quantity: number }[] = [];
+    const usedColumnIds = new Set<string>();
+    let crossCuttingMeters = 0;
     const unfulfilledDemands: Array<{ edge: LayerEdgeDemand['edge']; lengthM: number; quantity: number }> = [];
 
     const canUseRemainingForEdge = (_edge: LayerEdgeDemand['edge']) => true;
@@ -1207,20 +1225,22 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           if (needed <= 0) break;
           if (column.lengthRemaining + 1e-6 < demand.lengthM) continue;
 
-          const stripsPossible = Math.floor(column.lengthRemaining / demand.lengthM);
-          if (stripsPossible <= 0) continue;
-
-          const used = Math.min(needed, stripsPossible);
-          column.lengthRemaining = Math.max(0, column.lengthRemaining - used * demand.lengthM);
-          needed -= used;
-          layersFromRemainingStones += used;
-          squareMetersFromRemaining += used * demand.lengthM * widthMeters;
-
-          usageEntries.push({
-            source: column.source,
-            lengthM: demand.lengthM,
-            quantity: used
-          });
+          let used = 0;
+          while (needed > 0 && column.lengthRemaining + 1e-6 >= demand.lengthM) {
+            const needsCrossCut = demand.lengthM + 1e-6 < column.lengthRemaining;
+            const consumedLength = demand.lengthM + (needsCrossCut ? layerKerfCm / 100 : 0);
+            if (column.lengthRemaining + 1e-6 < consumedLength) break;
+            column.lengthRemaining = Math.max(0, column.lengthRemaining - consumedLength);
+            if (needsCrossCut) crossCuttingMeters += widthMeters;
+            needed -= 1;
+            used += 1;
+            layersFromRemainingStones += 1;
+            squareMetersFromRemaining += demand.lengthM * widthMeters;
+            usedColumnIds.add(column.id);
+          }
+          if (used > 0) {
+            usageEntries.push({ source: column.source, lengthM: demand.lengthM, quantity: used });
+          }
         }
       }
 
@@ -1267,7 +1287,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       squareMetersFromRemaining,
       squareMetersFromNew,
       totalLayerDemand,
-      unfulfilledDemands
+      unfulfilledDemands,
+      longitudinalCuttingMeters: columns
+        .filter((column) => usedColumnIds.has(column.id))
+        .reduce((sum, column) => sum + column.originalLength, 0),
+      crossCuttingMeters
     };
   };
   
@@ -1394,9 +1418,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       ? cuttingCostPerMeterLongitudinal
       : (cuttingCostCross > 0 ? cuttingCostPerMeterCross : 0);
 
-    const shouldChargeCuttingCost = !(isMandatoryEnabled && mandatoryPercentageValue > 0);
-    const billableCuttingCostLongitudinal = shouldChargeCuttingCost ? cuttingCostLongitudinal : 0;
-    const billableCuttingCostCross = shouldChargeCuttingCost ? cuttingCostCross : 0;
+    // Mandatory/Hukmi stone still bills longitudinal cutting. Cross cutting is
+    // the only free cutting service under ADR-0012.
+    const mandatoryCuttingPolicy = isMandatoryEnabled && mandatoryPercentageValue > 0;
+    const billableCuttingCostLongitudinal = cuttingCostLongitudinal;
+    const billableCuttingCostCross = mandatoryCuttingPolicy ? 0 : cuttingCostCross;
     const billableCuttingCost = billableCuttingCostLongitudinal + billableCuttingCostCross;
 
     const partTotal = materialPriceWithMandatory + toolsPrice + billableCuttingCost;
@@ -1424,7 +1450,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       billableCuttingCost,
       billableCuttingCostLongitudinal,
       billableCuttingCostCross,
-      shouldChargeCuttingCost
+      shouldChargeCuttingCost: billableCuttingCost > 0
     };
   };
 
@@ -2922,12 +2948,22 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       
       // Check if using new V2 flow
       if (useStairFlowV2) {
+        const clickedParentIndex = isStairLayerProduct(product)
+          ? wizardData.products.findIndex((candidate, candidateIndex) =>
+              isStairMainProduct(candidate) && (
+                (!!product.parentProductRowId && candidate.rowId === product.parentProductRowId) ||
+                candidateIndex === product.parentProductIndex
+              )
+            )
+          : index;
+        const safeParentIndex = clickedParentIndex >= 0 ? clickedParentIndex : index;
+        const parentProduct = wizardData.products[safeParentIndex] || product;
         const clickedPartType: StairStepperPart =
-          product.stairPartType === 'riser' || product.stairPartType === 'landing'
-            ? product.stairPartType
+          parentProduct.stairPartType === 'riser' || parentProduct.stairPartType === 'landing'
+            ? parentProduct.stairPartType
             : 'tread';
-        const scopedStairProducts = getStairRowWithAttachedLayers(wizardData.products, index);
-        const clickedMainProduct = scopedStairProducts.find(isStairMainProduct) || product;
+        const scopedStairProducts = getStairRowWithAttachedLayers(wizardData.products, safeParentIndex);
+        const clickedMainProduct = scopedStairProducts.find(isStairMainProduct) || parentProduct;
 
         // NEW V2 FLOW: Reconstruct only the clicked row and its attached layer.
         // Set session ID to existing stairSystemId
@@ -2969,6 +3005,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             widthCm: p.width,
             quantity: p.quantity,
             squareMeters: p.squareMeters,
+            sawKerfEnabled: !!p.sawKerfEnabled,
+            sawKerfCm: p.sawKerfEnabled ? (p.sawKerfCm || SAW_KERF_CM) : null,
             tools: tools.map((t: any) => ({
               toolId: t.toolId,
               name: t.name,
@@ -3069,7 +3107,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         updateWizardData({ selectedProductTypeForAddition: 'stair' });
         
         setIsEditMode(true);
-        setEditingProductIndex(index);
+        setEditingProductIndex(safeParentIndex);
         setTouchedFields(new Set());
         setErrors({});
         setShowProductModal(true);
@@ -3400,6 +3438,20 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         ))
     }));
 
+  const removeProductsFromDeliveries = (deliveries: DeliverySchedule[], removedIndices: number[]): DeliverySchedule[] => {
+    const removed = new Set(removedIndices);
+    return deliveries.map((delivery) => ({
+      ...delivery,
+      products: (delivery.products || [])
+        .filter((item) => item.rowType === 'service' || !removed.has(item.productIndex as number))
+        .map((item) => {
+          if (item.rowType === 'service' || typeof item.productIndex !== 'number') return item;
+          const shift = removedIndices.filter((removedIndex) => removedIndex < item.productIndex!).length;
+          return shift > 0 ? { ...item, productIndex: item.productIndex - shift } : item;
+        })
+    }));
+  };
+
   const handleDuplicateProduct = (index: number) => {
     const productsWithRowIds = ensureContractProductRowIds(wizardData.products);
     const source = productsWithRowIds[index];
@@ -3446,14 +3498,43 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
     const duplicateProducts = source.productType === 'stair' && source.stairSystemId
       ? (() => {
+          const parentIndex = isStairLayerProduct(source)
+            ? productsWithRowIds.findIndex((candidate, candidateIndex) =>
+                isStairMainProduct(candidate) && (
+                  (!!source.parentProductRowId && candidate.rowId === source.parentProductRowId) ||
+                  candidateIndex === source.parentProductIndex
+                )
+              )
+            : index;
+          if (parentIndex < 0) return [];
+          const scopedProducts = getStairRowWithAttachedLayers(productsWithRowIds, parentIndex);
+          if (!window.confirm('این پله همراه با لایه‌های وابسته، با شناسه‌های جدید و محاسبه مستقل تکثیر می‌شود. ادامه می‌دهید؟')) {
+            return [];
+          }
           const newStairSystemId = `stair_duplicate_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-          return wizardData.products
-            .map((product, productIndex) => ({ product, productIndex }))
-            .filter(({ product }) => product.productType === 'stair' && product.stairSystemId === source.stairSystemId)
-            .map(({ product, productIndex }) => cloneProduct(product, productIndex, newStairSystemId));
+          const clones = scopedProducts.map((product) =>
+            cloneProduct(product, productsWithRowIds.indexOf(product), newStairSystemId)
+          );
+          const clonedParent = clones.find(isStairMainProduct);
+          return clones.map((clone) => isStairLayerProduct(clone) && clonedParent
+            ? {
+                ...clone,
+                parentProductIndex: productsWithRowIds.length,
+                parentProductRowId: clonedParent.rowId,
+                meta: {
+                  ...clone.meta,
+                  layerInfo: {
+                    ...(clone.meta as any)?.layerInfo,
+                    parentProductRowId: clonedParent.rowId
+                  }
+                }
+              }
+            : clone
+          );
         })()
       : [cloneProduct(source, index, source.productType === 'stair' ? `stair_duplicate_${Date.now()}_${Math.random().toString(36).slice(2, 9)}` : undefined)];
 
+    if (duplicateProducts.length === 0) return;
     updateWizardData({
       products: [...productsWithRowIds, ...duplicateProducts]
     });
@@ -3485,21 +3566,41 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       const attachedChildren = productToRemove?.rowId
         ? productsWithRowIds.filter((product) => product.parentProductRowId === productToRemove.rowId)
         : [];
-      if (attachedChildren.length > 0) {
+      const attachedLayers = attachedChildren.filter(isStairLayerProduct);
+      const independentChildren = attachedChildren.filter((child) => !isStairLayerProduct(child));
+      if (independentChildren.length > 0) {
         setErrors({ products: `این محصول منبع دارای ${attachedChildren.length} محصول ساخته‌شده از باقی‌مانده است. ابتدا آن تخصیص‌ها را حذف کنید.` });
         return;
       }
 
-      const newProducts = productsWithRowIds.filter((_, i) => i !== index);
+      if (attachedLayers.length > 0 && !window.confirm('این پله و تمام لایه‌های وابسته به آن حذف می‌شوند. ادامه می‌دهید؟')) {
+        return;
+      }
+      const removedIndices = productsWithRowIds
+        .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
+        .filter(({ candidate, candidateIndex }) => candidateIndex === index || attachedLayers.includes(candidate))
+        .map(({ candidateIndex }) => candidateIndex);
+      const removedIndexSet = new Set(removedIndices);
+      const newProducts = productsWithRowIds.filter((_, productIndex) => !removedIndexSet.has(productIndex));
       updateWizardData({
         products: newProducts,
-        deliveries: removeProductFromDeliveries(wizardData.deliveries || [], index)
+        deliveries: removeProductsFromDeliveries(wizardData.deliveries || [], removedIndices)
       });
       return;
     }
 
     const candidateProducts = productsWithRowIds.filter((_, productIndex) => productIndex !== index);
-    const sourceProduct = candidateProducts.find((product) => product.rowId === sourceRowId);
+    const sourceProductIndex = candidateProducts.findIndex((product) => product.rowId === sourceRowId);
+    if (isStairLayerProduct(productToRemove) && sourceProductIndex >= 0) {
+      const sourceProduct = candidateProducts[sourceProductIndex];
+      candidateProducts[sourceProductIndex] = {
+        ...sourceProduct,
+        remainingStones: normalizeRemainingStoneCollection(
+          sourceProduct.remainingStoneSourceInventory || sourceProduct.remainingStones
+        )
+      };
+    }
+    const sourceProduct = sourceProductIndex >= 0 ? candidateProducts[sourceProductIndex] : undefined;
     const replay = replayRemainingStoneAllocations({
       products: candidateProducts,
       sourceRowId,
@@ -6756,6 +6857,27 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               </div>
                               
                               
+                              <div className="md:col-span-2 rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50/40 dark:bg-orange-900/10 px-4 py-3">
+                                <label className="flex items-start gap-2 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!draft.sawKerfEnabled}
+                                    onChange={(event) => setDraft({
+                                      ...draft,
+                                      sawKerfEnabled: event.target.checked,
+                                      sawKerfCm: event.target.checked ? (draft.sawKerfCm || SAW_KERF_CM) : null
+                                    })}
+                                    className="mt-0.5 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                                  />
+                                  <span>
+                                    <span className="block text-xs font-semibold text-gray-700 dark:text-gray-200">محاسبه خوراک اره برای پله و لایه</span>
+                                    <span className="mt-1 block text-[11px] text-gray-500 dark:text-gray-400">
+                                      عرض تمام‌شده لایه تغییر نمی‌کند؛ خوراک اره {formatDisplayNumber(draft.sawKerfCm || SAW_KERF_CM)} سانتی‌متر فقط در چیدمان منبع، باقیمانده و برش‌ها لحاظ می‌شود.
+                                    </span>
+                                  </span>
+                                </label>
+                              </div>
+
                               {stairSystemV2.layerTypes.length > 0 && (
                                 <div>
                                   <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -7222,11 +7344,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   : (draft.stoneProduct?.widthValue || 0);
                                 const stairLengthM = getActualLengthMeters(draft);
                                 
-                                    const stoneWidthM = stoneWidthCm / 100;
-                                const columnsPerStone = stoneWidthCm > 0 && layerWidthCm > 0
-                                  ? Math.max(1, Math.floor(stoneWidthCm / layerWidthCm))
-                                  : 0;
-                                
                                 const edgeDemandsPreview = getLayerEdgeDemands(stairSystemV2.stairActivePart, draft);
                                 const previewMainRemainingStones: RemainingStone[] = (() => {
                                   const usagePreview = computeTotalsV2(stairSystemV2.stairActivePart, draft);
@@ -7247,7 +7364,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 })();
                                 const previewAvailableRemainingStones = draft.layerUseDifferentStone
                                   ? []
-                                  : collectAvailableRemainingStones(stairSystemV2.stairSessionItems, previewMainRemainingStones);
+                                  : previewMainRemainingStones;
                                 const layerMetricsPreview = draft.layerUseDifferentStone
                                   ? {
                                       layersFromRemainingStones: 0,
@@ -7271,27 +7388,31 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       layerWidthCm,
                                       layerLengthM: layerManagement.getMaxLayerLengthM(stairSystemV2.stairActivePart, draft) || stairLengthM,
                                       availableRemainingStones: previewAvailableRemainingStones,
-                                      cuttingCostPerMeter: 0,
-                                      edgeDemands: edgeDemandsPreview
+                                       cuttingCostPerMeter: 0,
+                                      edgeDemands: edgeDemandsPreview,
+                                      sawKerfEnabled: !!draft.sawKerfEnabled,
+                                      sawKerfCm: draft.sawKerfCm || SAW_KERF_CM
                                     });
                                 
-                                const stoneAreaUsedSqm = (() => {
-                                  const unfulfilledDemands = (layerMetricsPreview.unfulfilledDemands && layerMetricsPreview.unfulfilledDemands.length)
-                                    ? layerMetricsPreview.unfulfilledDemands
-                                    : [];
-                                  if (!unfulfilledDemands.length || !columnsPerStone || !stairLengthM || !stoneWidthM) {
-                                    return 0;
-                                  }
-                                  let stonesNeeded = 0;
-                                  unfulfilledDemands.forEach(edge => {
-                                    if (edge.lengthM <= 0) return;
-                                    const stripsPerColumn = Math.max(1, Math.floor(stairLengthM / edge.lengthM));
-                                    const stripsPerStone = Math.max(1, stripsPerColumn * columnsPerStone);
-                                    stonesNeeded += Math.ceil(edge.quantity / stripsPerStone);
-                                  });
-                                  if (!stonesNeeded) return 0;
-                                  return stonesNeeded * stairLengthM * stoneWidthM;
-                                })();
+                                const previewSourceLengthM = draft.layerShortageSource === 'manualWarehouse'
+                                  ? (draft.layerManualSourceLengthM || 0)
+                                  : (getPricingLengthMeters(draft) || stairLengthM);
+                                const previewSourceWidthCm = draft.layerShortageSource === 'manualWarehouse'
+                                  ? (draft.layerManualSourceWidthCm || 0)
+                                  : stoneWidthCm;
+                                const previewSourcePlan = calculateLayerSourcePlan({
+                                  demands: (layerMetricsPreview.unfulfilledDemands || []) as Array<{
+                                    edge: LayerEdgeDemand['edge'];
+                                    lengthM: number;
+                                    quantity: number;
+                                  }>,
+                                  sourceWidthCm: previewSourceWidthCm,
+                                  sourceLengthM: previewSourceLengthM,
+                                  layerWidthCm,
+                                  sawKerfEnabled: !!draft.sawKerfEnabled,
+                                  sawKerfCm: draft.sawKerfCm || SAW_KERF_CM
+                                });
+                                const stoneAreaUsedSqm = previewSourcePlan.sourceAreaSqm;
                                 
                                 // Use the same price as the main stair part
                                 const pricePerSqm = draft.pricePerSquareMeter || 0;
@@ -7328,7 +7449,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           </>
                                         )}
                                       </div>
-                                      <div>متر مربع استفاده شده: {formatSquareMeters(totalLayerSqm)}</div>
+                                      <div>متر مربع تمام‌شده لایه: {formatSquareMeters(totalLayerSqm)}</div>
+                                      <div>سنگ منبع جدید: {formatDisplayNumber(previewSourcePlan.sourceStoneQuantity)} قطعه / {formatSquareMeters(previewSourcePlan.sourceAreaSqm)}</div>
+                                      <div>قطعات فیزیکی کارگاه: {formatDisplayNumber(edgeDemandsPreview.reduce((sum, demand) => sum + demand.layersNeeded, 0))} نوار</div>
                                       {!draft.layerUseDifferentStone && (
                                         <div className="text-teal-700 dark:text-teal-300">
                                           از باقی‌مانده سنگ اصلی: {formatDisplayNumber(layerMetricsPreview.layersFromRemainingStones || 0)} لایه
@@ -8042,6 +8165,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   
                   const storedLengthValue = convertMetersToUnit(actualLengthM, draft.lengthUnit || 'm');
                   const product: ContractProduct = {
+                    rowId: createContractProductRowId(),
                     productId: draft.stoneId!,
                     product: stoneProduct,
                     productType: 'stair',
@@ -8060,6 +8184,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     totalPrice: totalPrice,
                     description: draft.description || '',
                     images: [...(stoneProduct.images || [])],
+                    sawKerfEnabled: !!draft.sawKerfEnabled,
+                    sawKerfCm: draft.sawKerfEnabled ? (draft.sawKerfCm || SAW_KERF_CM) : null,
                     currency: 'تومان',
                     isMandatory: isDraftMandatory && mandatoryPercentageValue > 0,
                     mandatoryPercentage: isDraftMandatory && mandatoryPercentageValue > 0 ? mandatoryPercentageValue : 0,
@@ -8184,7 +8310,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       
                       // 🎯 STEP 1: Find existing layer product inside this session only.
                       // Stair rows can repeat independently, so matching contract rows must not merge across rows.
-                      const existingLayerInSession = findExistingLayerProduct(updatedItems, draft, stairSystemV2.stairActivePart);
+                      const existingLayerInSession = findExistingLayerProduct(
+                        updatedItems,
+                        draft,
+                        stairSystemV2.stairActivePart,
+                        mainStairPartIndex
+                      );
                       const existingLayerProduct = existingLayerInSession;
                       
                       // 🎯 STEP 2: Calculate layer metrics
@@ -8208,19 +8339,28 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         0;
                       
                       // 🎯 STEP 3: Collect all available remaining stones
+                      // Automatic allocation is intentionally limited to this exact
+                      // parent row. Compatible sibling remainders require an explicit
+                      // user choice; otherwise two simultaneous edits could consume
+                      // the same remainder.
                       const allAvailableRemainingStones = usingAlternateLayerStone
                         ? []
-                        : collectAvailableRemainingStones(updatedItems, []);
+                        : getAvailableRemainingStoneInventory(product);
                       
                       // 🎯 STEP 4: Calculate layer metrics (remaining stone usage, cutting costs, etc.)
                       const totalLayerDemand = layerEdgeDemands.length
                         ? layerEdgeDemands.reduce((sum, demand) => sum + demand.layersNeeded, 0)
                         : totalLayers;
+                      const physicalPiecesPerLayerSet = totalLayers > 0
+                        ? totalLayerDemand / totalLayers
+                        : 0;
                       const layerMetrics = usingAlternateLayerStone
                         ? {
                             layersFromRemainingStones: 0,
                             layersFromNewStones: totalLayerDemand,
                             totalLayerCuttingCost: 0,
+                            longitudinalCuttingMeters: 0,
+                            crossCuttingMeters: 0,
                             layerCutDetails: [] as StoneCut[],
                             usedRemainingStonesForLayers: [] as RemainingStone[],
                             layerRemainingPieces: [] as RemainingStone[],
@@ -8245,7 +8385,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             layerLengthM,
                             availableRemainingStones: allAvailableRemainingStones,
                             cuttingCostPerMeter: layerCuttingCostPerMeter,
-                            edgeDemands: layerEdgeDemands
+                            edgeDemands: layerEdgeDemands,
+                            sawKerfEnabled: !!draft.sawKerfEnabled,
+                            sawKerfCm: draft.sawKerfCm || SAW_KERF_CM
                           });
 
                       if (!usingAlternateLayerStone && layerMetrics.layersFromNewStones > 0 && !draft.layerShortageSource) {
@@ -8270,68 +8412,110 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       const totalLayerLengthM = totalLayerLengthPerStairM * draft.quantity;
                       const layerTypeCost = totalLayerLengthM * layerTypeUnitPrice;
                       
-                      const layerSqmFromNew = (() => {
-                        if (layerMetrics.squareMetersFromNew !== undefined) {
-                          return layerMetrics.squareMetersFromNew;
+                      const manualWarehouse = draft.layerShortageSource === 'manualWarehouse';
+                      const sourceWidthCm = manualWarehouse
+                        ? (draft.layerManualSourceWidthCm || 0)
+                        : (layerStoneProduct?.widthValue || originalWidthCm);
+                      // A newly charged source uses the catalog/standard pricing
+                      // length. Parent remainders already carry their exact length.
+                      const sourceLengthM = manualWarehouse
+                        ? (draft.layerManualSourceLengthM || 0)
+                        : (getPricingLengthMeters(draft) || mainStairLengthM);
+                      const inheritedSawKerfEnabled = !!draft.sawKerfEnabled;
+                      const inheritedSawKerfCm = inheritedSawKerfEnabled
+                        ? (draft.sawKerfCm || SAW_KERF_CM)
+                        : 0;
+                      const shortageDemands: Array<{
+                        edge: LayerEdgeDemand['edge'];
+                        lengthM: number;
+                        quantity: number;
+                      }> = (layerMetrics.unfulfilledDemands && layerMetrics.unfulfilledDemands.length)
+                        ? layerMetrics.unfulfilledDemands as Array<{
+                            edge: LayerEdgeDemand['edge'];
+                            lengthM: number;
+                            quantity: number;
+                          }>
+                        : [{
+                            edge: 'front' as LayerEdgeDemand['edge'],
+                            lengthM: layerLengthM,
+                            quantity: layerMetrics.layersFromNewStones
+                          }];
+                      const layerSourcePlan = calculateLayerSourcePlan({
+                        demands: shortageDemands,
+                        sourceWidthCm,
+                        sourceLengthM,
+                        layerWidthCm,
+                        sawKerfEnabled: inheritedSawKerfEnabled,
+                        sawKerfCm: inheritedSawKerfCm
+                      });
+                      const shortagePieceQuantity = shortageDemands.reduce((sum, demand) => sum + demand.quantity, 0);
+                      if (shortagePieceQuantity > 0 && (
+                        layerSourcePlan.sourceStoneQuantity <= 0 ||
+                        layerSourcePlan.physicalPieceQuantity !== shortagePieceQuantity
+                      )) {
+                        setErrors({ products: 'ابعاد سنگ منبع برای تولید لایه کافی نیست.' });
+                        return baseItems;
+                      }
+
+                      if (manualWarehouse && (draft.layerManualSourceQuantity || 0) < layerSourcePlan.sourceStoneQuantity) {
+                        setErrors({ products: `تعداد سنگ انبار کافی نیست؛ حداقل ${layerSourcePlan.sourceStoneQuantity} قطعه لازم است.` });
+                        return baseItems;
+                      }
+
+                      const longitudinalLayerRate =
+                        (layerStoneProduct as any)?.cuttingCostPerMeter ??
+                        getCuttingTypePricePerMeter('LONG') ??
+                        0;
+                      const crossLayerRate =
+                        (layerStoneProduct as any)?.crossCuttingCostPerMeter ??
+                        getCuttingTypePricePerMeter('CROSS') ??
+                        longitudinalLayerRate;
+                      const totalLongitudinalLayerMeters = layerSourcePlan.longitudinalCuttingMeters +
+                        (layerMetrics.longitudinalCuttingMeters || 0);
+                      const totalCrossLayerMeters = layerSourcePlan.crossCuttingMeters +
+                        (layerMetrics.crossCuttingMeters || 0);
+                      const longitudinalLayerCost = totalLongitudinalLayerMeters * longitudinalLayerRate;
+                      const crossLayerCost = totalCrossLayerMeters * crossLayerRate;
+                      const layerMandatoryCuttingPolicy = usingAlternateLayerStone
+                        ? ((draft.layerUseMandatory ?? true) && (draft.layerMandatoryPercentage ?? 0) > 0)
+                        : (isDraftMandatory && mandatoryPercentageValue > 0);
+                      const chargeableLayerCuttingCost = longitudinalLayerCost +
+                        (layerMandatoryCuttingPolicy ? 0 : crossLayerCost);
+                      const physicalLayerCuttingCost = longitudinalLayerCost + crossLayerCost;
+                      const layerCutDetails: StoneCut[] = [
+                        {
+                          id: `layer-long-${product.rowId}`,
+                          type: 'longitudinal',
+                          orientation: 'longitudinal',
+                          label: 'برش طولی لایه',
+                          meters: totalLongitudinalLayerMeters,
+                          rate: longitudinalLayerRate,
+                          cost: longitudinalLayerCost,
+                          originalWidth: sourceWidthCm,
+                          cutWidth: layerWidthCm,
+                          remainingWidth: Math.max(0, sourceWidthCm - layerWidthCm),
+                          length: sourceLengthM * 100,
+                          cuttingCost: longitudinalLayerCost,
+                          cuttingCostPerMeter: longitudinalLayerRate
+                        },
+                        {
+                          id: `layer-cross-${product.rowId}`,
+                          type: 'cross',
+                          orientation: 'cross',
+                          label: 'برش عرضی لایه',
+                          meters: totalCrossLayerMeters,
+                          rate: crossLayerRate,
+                          cost: crossLayerCost,
+                          originalWidth: sourceWidthCm,
+                          cutWidth: layerWidthCm,
+                          remainingWidth: Math.max(0, sourceWidthCm - layerWidthCm),
+                          length: sourceLengthM * 100,
+                          cuttingCost: crossLayerCost,
+                          cuttingCostPerMeter: crossLayerRate
                         }
-                        const totalDemand = layerMetrics.totalLayerDemand || totalLayerDemand || 0;
-                        if (totalDemand <= 0) {
-                          return 0;
-                        }
-                        return layerSqmPerStair * (layerMetrics.layersFromNewStones / totalDemand);
-                      })();
-                      
-                      const calculateStoneAreaUsed = (): number => {
-                        const manualWarehouse = draft.layerShortageSource === 'manualWarehouse';
-                        const stoneWidthCm = manualWarehouse
-                          ? (draft.layerManualSourceWidthCm || 0)
-                          : (layerStoneProduct?.widthValue || originalWidthCm);
-                        const stoneLengthM = manualWarehouse
-                          ? (draft.layerManualSourceLengthM || mainStairLengthM)
-                          : mainStairLengthM;
-                        if (stoneWidthCm <= 0 || layerWidthCm <= 0 || stoneLengthM <= 0) {
-                          return usingAlternateLayerStone ? totalLayerSqm : layerSqmFromNew;
-                        }
-                        
-                        const stoneWidthM = stoneWidthCm / 100;
-                        const columnsPerStone = Math.max(1, Math.floor(stoneWidthCm / layerWidthCm));
-                        const baseLength = Math.max(layerLengthM, stoneLengthM);
-                        
-                        const unfulfilledDemands = (layerMetrics.unfulfilledDemands && layerMetrics.unfulfilledDemands.length)
-                          ? layerMetrics.unfulfilledDemands
-                          : [{
-                              edge: 'front' as LayerEdgeDemand['edge'],
-                              lengthM: layerLengthM > 0 ? layerLengthM : stoneLengthM,
-                              quantity: layerMetrics.layersFromNewStones
-                            }];
-                        
-                        let totalStonesNeeded = 0;
-                        unfulfilledDemands.forEach(demand => {
-                          if (!demand.lengthM || demand.lengthM <= 0 || !demand.quantity) {
-                            return;
-                          }
-                          
-                          const stripsPerColumn = Math.max(1, Math.floor(stoneLengthM / demand.lengthM));
-                          const stripsPerStone = Math.max(1, stripsPerColumn * columnsPerStone);
-                          totalStonesNeeded += Math.ceil(demand.quantity / stripsPerStone);
-                        });
-                        
-                        if (totalStonesNeeded === 0) {
-                          return usingAlternateLayerStone ? totalLayerSqm : layerSqmFromNew;
-                        }
-                        
-                        return totalStonesNeeded * stoneLengthM * stoneWidthM;
-                      };
-                      
-                      const stoneAreaUsedSqm = usingAlternateLayerStone
-                        ? totalLayerSqm
-                        : calculateStoneAreaUsed();
-                      
-                      const pricingStoneAreaSqm = stoneAreaUsedSqm > 0 ? stoneAreaUsedSqm : layerSqmFromNew;
-                      
-                      const shouldChargeLayerCutting =
-                        !(usingAlternateLayerStone && (draft.layerUseMandatory ?? true) && (draft.layerMandatoryPercentage ?? 0) > 0);
-                      const chargeableLayerCuttingCost = shouldChargeLayerCutting ? layerMetrics.totalLayerCuttingCost : 0;
+                      ].filter(detail => (detail.meters || 0) > 0) as StoneCut[];
+                      const stoneAreaUsedSqm = layerSourcePlan.sourceAreaSqm;
+                      const pricingStoneAreaSqm = stoneAreaUsedSqm;
                       // 🎯 FIX: Layer material price should be based on stone area used, NOT layer square meters
                       // 🎯 NOTE: effectiveLayerPricePerSqm already includes mandatory pricing if applicable
                       // Example: stoneAreaUsedSqm (0.976 m²) × pricePerSqm (700,000) = 683,200 تومان
@@ -8353,7 +8537,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             layerMaterialPrice,
                             layerTypeCost,
                             totalLayerCuttingCost: chargeableLayerCuttingCost,
-                            layerCutDetails: layerMetrics.layerCutDetails,
+                            layerCutDetails,
                             usedRemainingStonesForLayers: layerMetrics.usedRemainingStonesForLayers,
                             layersFromRemainingStones: layerMetrics.layersFromRemainingStones,
                             layersFromNewStones: layerMetrics.layersFromNewStones,
@@ -8391,11 +8575,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           layersFromRemainingStones: layerMetrics.layersFromRemainingStones,
                           layersFromNewStones: layerMetrics.layersFromNewStones,
                           totalLayerCuttingCost: chargeableLayerCuttingCost,
-                          layerCutDetails: layerMetrics.layerCutDetails,
-                          layerRemainingPieces: layerMetrics.layerRemainingPieces,
+                          layerCutDetails,
+                          layerRemainingPieces: [
+                            ...(layerMetrics.layerRemainingPieces || []),
+                            ...layerSourcePlan.remainingStones
+                          ],
                           usedRemainingStonesForLayers: layerMetrics.usedRemainingStonesForLayers,
-                          originalWidthCm: layerStoneProduct?.widthValue || originalWidthCm,
-                          lengthM: mainStairLengthM,
+                          originalWidthCm: sourceWidthCm,
+                          lengthM: sourceLengthM,
                           layerCuttingCostPerMeter,
                           parentProductIndexInSession: mainStairPartIndex,
                           layerPricePerSquareMeter: effectiveLayerPricePerSqm,
@@ -8415,7 +8602,59 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           layerManualSourceQuantity: draft.layerManualSourceQuantity || null,
                           stoneAreaUsedSqm: stoneAreaUsedSqm
                         });
-                        updatedItems.push(newLayerProduct);
+                        updatedItems.push({
+                          ...newLayerProduct,
+                          rowId: createContractProductRowId(),
+                          parentProductRowId: product.rowId,
+                          sawKerfEnabled: inheritedSawKerfEnabled,
+                          sawKerfCm: inheritedSawKerfEnabled ? inheritedSawKerfCm : null,
+                          physicalCuttingCost: physicalLayerCuttingCost,
+                          cuttingBreakdown: [
+                            {
+                              type: 'longitudinal',
+                              meters: totalLongitudinalLayerMeters,
+                              rate: longitudinalLayerRate,
+                              cost: longitudinalLayerCost
+                            },
+                            {
+                              type: 'cross',
+                              meters: totalCrossLayerMeters,
+                              rate: crossLayerRate,
+                              cost: crossLayerCost
+                            }
+                          ].filter(entry => entry.meters > 0) as CuttingBreakdownEntry[],
+                          meta: {
+                            ...newLayerProduct.meta,
+                            layerInfo: {
+                              ...(newLayerProduct.meta as any)?.layerInfo,
+                              parentProductRowId: product.rowId,
+                              layerSetQuantity: totalLayers,
+                              physicalPieceQuantity: totalLayerDemand,
+                              physicalPiecesPerLayerSet,
+                              edges: draft.layerEdges
+                            },
+                            layerSourcePlan: {
+                              sourceStoneQuantity: layerSourcePlan.sourceStoneQuantity,
+                              sourceAreaSqm: layerSourcePlan.sourceAreaSqm,
+                              sourceWidthCm: layerSourcePlan.sourceWidthCm,
+                              sourceLengthM: layerSourcePlan.sourceLengthM,
+                              columnsPerStone: layerSourcePlan.columnsPerStone,
+                              physicalPieceQuantity: layerSourcePlan.physicalPieceQuantity,
+                              fromAlreadyPaidStone: layerMetrics.layersFromRemainingStones,
+                              fromNewStone: layerMetrics.layersFromNewStones,
+                              fromAlreadyPaidSets: physicalPiecesPerLayerSet > 0
+                                ? layerMetrics.layersFromRemainingStones / physicalPiecesPerLayerSet
+                                : 0,
+                              fromNewSets: physicalPiecesPerLayerSet > 0
+                                ? layerMetrics.layersFromNewStones / physicalPiecesPerLayerSet
+                                : 0,
+                              sawKerfEnabled: inheritedSawKerfEnabled,
+                              sawKerfCm: inheritedSawKerfEnabled ? inheritedSawKerfCm : null,
+                              mandatoryCuttingPolicy: layerMandatoryCuttingPolicy,
+                              allocations: layerSourcePlan.allocations
+                            }
+                          }
+                        });
                       }
                       
                       // 🎯 STEP 7: Update remaining stone usage tracking
@@ -8502,13 +8741,25 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     if (oldStairSystemId) {
                       const productsToAdd = stairSystemV2.stairSessionItems.map((item) => {
                         const isLayer = ((item.meta as any)?.isLayer) || false;
-                        return {
+                        const replacement = {
                           ...item,
                           rowId: !isLayer && item.stairPartType === oldProduct.stairPartType
                             ? oldProduct.rowId
                             : (item.rowId || createContractProductRowId()),
                           stairSystemId: oldStairSystemId,
-                          parentProductIndex: isLayer ? editingProductIndex : item.parentProductIndex
+                          parentProductIndex: isLayer ? editingProductIndex : item.parentProductIndex,
+                          parentProductRowId: isLayer ? oldProduct.rowId : item.parentProductRowId
+                        };
+                        if (!isLayer) return replacement;
+                        return {
+                          ...replacement,
+                          meta: {
+                            ...replacement.meta,
+                            layerInfo: {
+                              ...(replacement.meta as any)?.layerInfo,
+                              parentProductRowId: oldProduct.rowId
+                            }
+                          }
                         };
                       });
 

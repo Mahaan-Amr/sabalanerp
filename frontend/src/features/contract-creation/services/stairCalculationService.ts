@@ -291,6 +291,205 @@ export const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDra
   return demands;
 };
 
+export interface LayerSourcePlan {
+  sourceWidthCm: number;
+  sourceLengthM: number;
+  sourceStoneQuantity: number;
+  sourceAreaSqm: number;
+  columnsPerStone: number;
+  physicalPieceQuantity: number;
+  longitudinalCuttingMeters: number;
+  crossCuttingMeters: number;
+  remainingStones: RemainingStone[];
+  allocations: Array<{
+    edge: LayerEdgeDemand['edge'];
+    lengthM: number;
+    quantity: number;
+    sourceStoneIndex: number;
+  }>;
+}
+
+/**
+ * Packs only the layer shortage that must come from newly charged source stone.
+ * Already-paid parent/remainder allocations are handled before this function.
+ */
+export const calculateLayerSourcePlan = ({
+  demands,
+  sourceWidthCm,
+  sourceLengthM,
+  layerWidthCm,
+  sawKerfEnabled = false,
+  sawKerfCm = 0.3
+}: {
+  demands: Array<{ edge: LayerEdgeDemand['edge']; lengthM: number; quantity: number }>;
+  sourceWidthCm: number;
+  sourceLengthM: number;
+  layerWidthCm: number;
+  sawKerfEnabled?: boolean;
+  sawKerfCm?: number;
+}): LayerSourcePlan => {
+  const safeKerfCm = sawKerfEnabled ? Math.max(0, sawKerfCm) : 0;
+  const effectiveStripWidthCm = layerWidthCm + safeKerfCm;
+  const columnsPerStone = sourceWidthCm > 0 && effectiveStripWidthCm > 0
+    ? Math.floor(sourceWidthCm / effectiveStripWidthCm)
+    : 0;
+  const emptyPlan: LayerSourcePlan = {
+    sourceWidthCm,
+    sourceLengthM,
+    sourceStoneQuantity: 0,
+    sourceAreaSqm: 0,
+    columnsPerStone,
+    physicalPieceQuantity: 0,
+    longitudinalCuttingMeters: 0,
+    crossCuttingMeters: 0,
+    remainingStones: [],
+    allocations: []
+  };
+
+  if (columnsPerStone <= 0 || sourceLengthM <= 0 || layerWidthCm <= 0) {
+    return emptyPlan;
+  }
+
+  type Column = { remainingLengthM: number; used: boolean };
+  type SourceStone = { columns: Column[] };
+  const stones: SourceStone[] = [];
+  const placements: Array<{
+    edge: LayerEdgeDemand['edge'];
+    lengthM: number;
+    sourceStoneIndex: number;
+    columnIndex: number;
+    crossCutRequired: boolean;
+  }> = [];
+
+  const addStone = (): number => {
+    stones.push({
+      columns: Array.from({ length: columnsPerStone }, () => ({
+        remainingLengthM: sourceLengthM,
+        used: false
+      }))
+    });
+    return stones.length - 1;
+  };
+
+  demands
+    .filter((demand) => demand.quantity > 0 && demand.lengthM > 0)
+    .sort((left, right) => right.lengthM - left.lengthM || left.edge.localeCompare(right.edge))
+    .forEach((demand) => {
+      for (let pieceIndex = 0; pieceIndex < demand.quantity; pieceIndex++) {
+        let targetStoneIndex = -1;
+        let targetColumnIndex = -1;
+        let crossCutRequired = false;
+
+        for (let stoneIndex = 0; stoneIndex < stones.length && targetStoneIndex < 0; stoneIndex++) {
+          const columnIndex = stones[stoneIndex].columns.findIndex(
+            (column) => {
+              const needsCrossCut = demand.lengthM + 1e-6 < column.remainingLengthM;
+              const requiredLengthM = demand.lengthM + (needsCrossCut ? safeKerfCm / 100 : 0);
+              return column.remainingLengthM + 1e-6 >= requiredLengthM;
+            }
+          );
+          if (columnIndex >= 0) {
+            targetStoneIndex = stoneIndex;
+            targetColumnIndex = columnIndex;
+          }
+        }
+
+        if (targetStoneIndex < 0) {
+          if (demand.lengthM > sourceLengthM + 1e-6) {
+            continue;
+          }
+          targetStoneIndex = addStone();
+          targetColumnIndex = 0;
+        }
+
+        const column = stones[targetStoneIndex].columns[targetColumnIndex];
+        crossCutRequired = demand.lengthM + 1e-6 < column.remainingLengthM;
+        const consumedLengthM = demand.lengthM + (crossCutRequired ? safeKerfCm / 100 : 0);
+        column.used = true;
+        column.remainingLengthM = Math.max(0, column.remainingLengthM - consumedLengthM);
+        placements.push({
+          edge: demand.edge,
+          lengthM: demand.lengthM,
+          sourceStoneIndex: targetStoneIndex,
+          columnIndex: targetColumnIndex,
+          crossCutRequired
+        });
+      }
+    });
+
+  const allocations = placements.reduce<LayerSourcePlan['allocations']>((result, placement) => {
+    const existing = result.find((entry) =>
+      entry.edge === placement.edge &&
+      entry.sourceStoneIndex === placement.sourceStoneIndex &&
+      Math.abs(entry.lengthM - placement.lengthM) < 0.000001
+    );
+    if (existing) {
+      existing.quantity += 1;
+    } else {
+      result.push({
+        edge: placement.edge,
+        lengthM: placement.lengthM,
+        quantity: 1,
+        sourceStoneIndex: placement.sourceStoneIndex
+      });
+    }
+    return result;
+  }, []);
+
+  const remainingStones: RemainingStone[] = [];
+  stones.forEach((stone, stoneIndex) => {
+    const usedColumns = stone.columns.filter((column) => column.used);
+    usedColumns.forEach((column, columnIndex) => {
+      if (column.remainingLengthM > 1e-6) {
+        remainingStones.push({
+          id: `layer_new_length_${stoneIndex}_${columnIndex}`,
+          width: layerWidthCm,
+          length: column.remainingLengthM,
+          squareMeters: (layerWidthCm / 100) * column.remainingLengthM,
+          isAvailable: true,
+          sourceCutId: `layer_new_source_${stoneIndex}`,
+          quantity: 1
+        });
+      }
+    });
+
+    const residualWidthCm = Math.max(
+      0,
+      sourceWidthCm - usedColumns.length * effectiveStripWidthCm
+    );
+    if (residualWidthCm > 1e-6) {
+      remainingStones.push({
+        id: `layer_new_width_${stoneIndex}`,
+        width: residualWidthCm,
+        length: sourceLengthM,
+        squareMeters: (residualWidthCm / 100) * sourceLengthM,
+        isAvailable: true,
+        sourceCutId: `layer_new_source_${stoneIndex}`,
+        quantity: 1
+      });
+    }
+  });
+
+  const usedColumnCount = stones.reduce(
+    (sum, stone) => sum + stone.columns.filter((column) => column.used).length,
+    0
+  );
+  const crossCutCount = placements.filter((placement) => placement.crossCutRequired).length;
+
+  return {
+    sourceWidthCm,
+    sourceLengthM,
+    sourceStoneQuantity: stones.length,
+    sourceAreaSqm: stones.length * (sourceWidthCm / 100) * sourceLengthM,
+    columnsPerStone,
+    physicalPieceQuantity: placements.length,
+    longitudinalCuttingMeters: usedColumnCount * sourceLengthM,
+    crossCuttingMeters: crossCutCount * (layerWidthCm / 100),
+    remainingStones,
+    allocations
+  };
+};
+
 /**
  * Get layer stone product for draft (alternate stone or main stone)
  */
@@ -495,10 +694,11 @@ export const computeTotalsV2 = (
     ? cuttingCostPerMeterLongitudinal
     : (cuttingCostCross > 0 ? cuttingCostPerMeterCross : 0);
 
-  const shouldChargeCuttingCost = !(isMandatoryEnabled && mandatoryPercentageValue > 0);
-  const billableCuttingCostLongitudinal = shouldChargeCuttingCost ? cuttingCostLongitudinal : 0;
-  const billableCuttingCostCross = shouldChargeCuttingCost ? cuttingCostCross : 0;
+  const mandatoryCuttingPolicyActive = isMandatoryEnabled && mandatoryPercentageValue > 0;
+  const billableCuttingCostLongitudinal = cuttingCostLongitudinal;
+  const billableCuttingCostCross = mandatoryCuttingPolicyActive ? 0 : cuttingCostCross;
   const billableCuttingCost = billableCuttingCostLongitudinal + billableCuttingCostCross;
+  const shouldChargeCuttingCost = billableCuttingCost > 0;
 
   const partTotal = materialPriceWithMandatory + toolsPrice + billableCuttingCost;
   return {
@@ -758,7 +958,8 @@ export const calculateLayerMetrics = (params: {
 export const findExistingLayerProduct = (
   sessionItems: ContractProduct[],
   draft: StairPartDraftV2,
-  parentPartType: StairStepperPart
+  parentPartType: StairStepperPart,
+  parentProductIndexInSession?: number
 ): ContractProduct | null => {
   if (!draft.layerEdges || !draft.layerWidthCm || !draft.numberOfLayersPerStair) {
     return null;
@@ -770,6 +971,11 @@ export const findExistingLayerProduct = (
     
     const itemLayerInfo = (item.meta as any)?.layerInfo;
     const itemLayerEdges = (item.meta as any)?.layerEdges;
+
+    if (
+      parentProductIndexInSession !== undefined &&
+      itemLayerInfo?.parentProductIndexInSession !== parentProductIndexInSession
+    ) return false;
     
     // Check if same parent part
     if (itemLayerInfo?.parentPartType !== parentPartType) return false;

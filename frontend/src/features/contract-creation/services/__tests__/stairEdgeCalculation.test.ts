@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   computeLayerSqmV2,
   computeToolMetersForTool,
+  calculateLayerSourcePlan,
   getLayerEdgeDemands,
   getTotalLayerLengthPerStairM
 } from '../stairCalculationService';
@@ -71,6 +72,37 @@ for (const part of ['tread', 'riser', 'landing'] as StairStepperPart[]) {
   assert.deepEqual(demands.map((demand) => demand.edge), ['front', 'back', 'left', 'right']);
   approx(demands.find((demand) => demand.edge === 'front')?.lengthM || 0, 1.17);
   approx(demands.find((demand) => demand.edge === 'left')?.lengthM || 0, 0.145);
+}
+
+{
+  // Contract 100156 shape: 32 layer sets, each containing front + left.
+  const demands = [
+    { edge: 'front' as const, lengthM: 1.13, quantity: 32 },
+    { edge: 'left' as const, lengthM: 0.30, quantity: 32 }
+  ];
+  const withoutKerf = calculateLayerSourcePlan({
+    demands,
+    sourceWidthCm: 35,
+    sourceLengthM: 1.2,
+    layerWidthCm: 5
+  });
+  assert.equal(withoutKerf.columnsPerStone, 7);
+  assert.equal(withoutKerf.physicalPieceQuantity, 64);
+  assert.equal(withoutKerf.sourceStoneQuantity, 6);
+  approx(withoutKerf.sourceAreaSqm, 2.52);
+
+  const withKerf = calculateLayerSourcePlan({
+    demands,
+    sourceWidthCm: 35,
+    sourceLengthM: 1.2,
+    layerWidthCm: 5,
+    sawKerfEnabled: true,
+    sawKerfCm: 0.3
+  });
+  assert.equal(withKerf.columnsPerStone, 6);
+  assert.equal(withKerf.physicalPieceQuantity, 64);
+  assert.equal(withKerf.sourceStoneQuantity, 8);
+  approx(withKerf.sourceAreaSqm, 3.36);
 }
 
 console.log('stairEdgeCalculation tests passed');

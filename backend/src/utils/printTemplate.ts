@@ -94,6 +94,7 @@ interface NormalizedProduct {
   remainingSummary: string;
   sourceMaterialSummary: string;
   sourceMaterials: NormalizedSourceMaterial[];
+  isLayer: boolean;
 }
 
 interface NormalizedStandaloneService {
@@ -666,6 +667,43 @@ const buildPhysicalProductionNote = (product: any): string => {
 };
 
 const buildSourceMaterialRows = (product: any): NormalizedSourceMaterial[] => {
+  const layerSourcePlan = product?.meta?.layerSourcePlan;
+  if (product?.meta?.isLayer && layerSourcePlan) {
+    const rows: NormalizedSourceMaterial[] = [];
+    const alreadyPaidSets = toNumber(layerSourcePlan?.fromAlreadyPaidSets);
+    const newSets = toNumber(layerSourcePlan?.fromNewSets);
+    const sourceQuantity = toNumber(layerSourcePlan?.sourceStoneQuantity);
+    const sourceAreaSqm = toNumber(layerSourcePlan?.sourceAreaSqm);
+    const sourceWidthCm = toNumber(layerSourcePlan?.sourceWidthCm || product?.originalWidth);
+    const sourceLengthM = toNumber(layerSourcePlan?.sourceLengthM || product?.originalLength);
+    const kerfNote = layerSourcePlan?.sawKerfEnabled
+      ? `، خوراک اره ${toFaNumber(layerSourcePlan?.sawKerfCm || 0.3, 1)}cm`
+      : '';
+
+    if (alreadyPaidSets > 0) {
+      rows.push({
+        description: 'لایه از سنگ قبلاً محاسبه‌شده',
+        dimensionsOrAmount: 'بدون هزینه مجدد سنگ',
+        quantityOrArea: `${toFaNumber(alreadyPaidSets, 4)} ست`
+      });
+    }
+    if (newSets > 0) {
+      rows.push({
+        description: 'لایه از سنگ جدید',
+        dimensionsOrAmount: `عرض ${toFaNumber(sourceWidthCm, 4)}cm × طول ${toFaNumber(sourceLengthM, 4)}m${kerfNote}`,
+        quantityOrArea: `${toFaNumber(newSets, 4)} ست`
+      });
+    }
+    if (sourceQuantity > 0 || sourceAreaSqm > 0) {
+      rows.push({
+        description: 'سنگ جدید مصرفی لایه',
+        dimensionsOrAmount: `عرض ${toFaNumber(sourceWidthCm, 4)}cm × طول ${toFaNumber(sourceLengthM, 4)}m${kerfNote}`,
+        quantityOrArea: `${toFaNumber(sourceQuantity, 0)} عدد، جمع ${toFaNumber(sourceAreaSqm, 4)} متر مربع`
+      });
+    }
+    return rows;
+  }
+
   const smartCutPlan = product?.smartCutPlan || {};
   const sourceWidthCm = toNumber(smartCutPlan?.sourceWidthCm || product?.originalWidth);
   const productWidthCm = toNumber(product?.width);
@@ -736,13 +774,16 @@ const normalizeProducts = (
         (item?.stairPartType || null) === (product?.stairPartType || null)
       ) || relationItems[index];
 
+      const mandatoryCuttingPolicy = (
+        Boolean(product?.isMandatory) && toNumber(product?.mandatoryPercentage) > 0
+      ) || Boolean(product?.meta?.layerSourcePlan?.mandatoryCuttingPolicy);
       const cutsFromBreakdown: NormalizedCut[] = Array.isArray(product?.cuttingBreakdown)
         ? product.cuttingBreakdown.map((cut: any) => ({
           type: cut?.type === 'cross' ? 'برش عرضی' : 'برش طولی',
           code: firstText(cut?.code, cut?.sourceCode),
           meters: toNumber(cut?.meters),
-          rate: toNumber(cut?.rate),
-          cost: toNumber(cut?.cost)
+          rate: mandatoryCuttingPolicy && cut?.type === 'cross' ? 0 : toNumber(cut?.rate),
+          cost: mandatoryCuttingPolicy && cut?.type === 'cross' ? 0 : toNumber(cut?.cost)
           }))
         : [];
 
@@ -859,8 +900,22 @@ const normalizeProducts = (
         ? `${sourceMaterials[0].dimensionsOrAmount}، ${sourceMaterials[0].quantityOrArea}`
         : EMPTY;
       const physicalProductionNote = buildPhysicalProductionNote(product);
+      const layerInfo = product?.meta?.layerInfo || {};
+      const layerEdges = product?.meta?.layerEdges || {};
+      const layerEdgeLabels = layerEdges?.perimeter
+        ? ['محیط کامل']
+        : [
+            layerEdges?.front ? 'جلو' : '',
+            layerEdges?.back ? 'عقب' : '',
+            layerEdges?.left ? 'چپ' : '',
+            layerEdges?.right ? 'راست' : ''
+          ].filter(Boolean);
+      const layerProductionNote = product?.meta?.isLayer
+        ? `لایه وابسته به ${stairPartLabel(layerInfo?.parentPartType || product?.stairPartType)}: ${toFaNumber(layerInfo?.layerSetQuantity || product?.quantity, 4)} ست (${layerEdgeLabels.join(' + ') || EMPTY})، ${toFaNumber(layerInfo?.physicalPieceQuantity || 0, 0)} نوار فیزیکی`
+        : '';
       const description = [
         product?.description || relationItem?.description || '',
+        layerProductionNote,
         product?.sawKerfEnabled ? 'خوراک اره لحاظ شده' : '',
         physicalProductionNote
       ].filter(hasTextValue).join('، ') || EMPTY;
@@ -895,7 +950,8 @@ const normalizeProducts = (
           ? `باقی‌مانده: ${toFaNumber(remainingCount)}، مصرف‌شده: ${toFaNumber(usedRemainingCount)}`
           : EMPTY,
         sourceMaterialSummary,
-        sourceMaterials
+        sourceMaterials,
+        isLayer: Boolean(product?.meta?.isLayer)
       };
     });
   }
@@ -926,7 +982,8 @@ const normalizeProducts = (
     finishingSummary: EMPTY,
     remainingSummary: EMPTY,
     sourceMaterialSummary: EMPTY,
-    sourceMaterials: []
+    sourceMaterials: [],
+    isLayer: false
   }));
 };
 
@@ -1441,7 +1498,7 @@ const buildFlatProductRows = (
       ? `نوع: ${product.preparedKind}، واحد: ${product.preparedUnit}`
       : EMPTY;
     const productDescription = [
-      product.name,
+      product.isLayer ? `↳ ${product.name}` : product.name,
       preparedSummary
     ].filter(Boolean).join(' - ');
     const productQuantityColumns = buildProductQuantityColumns(product);

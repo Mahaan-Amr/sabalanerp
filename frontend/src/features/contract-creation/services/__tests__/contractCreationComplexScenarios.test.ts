@@ -17,10 +17,12 @@ import {
   recalculateContractServiceRow
 } from '../../utils/contractServiceRows';
 import {
+  getDeliverableProductEntries,
   getDeliveryTargetAmount,
   getDeliveryUnit,
   getServiceDeliveryTargetAmount
 } from '../../utils/deliveryScheduleController';
+import { reconcileContractProductGraph } from '../../utils/contractProductGraphReconciliation';
 import {
   mergeEditedRemainingStoneState,
   resolveLongitudinalWidth,
@@ -626,8 +628,8 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   approx(totals.cuttingMetersLongitudinalCalibration, 6);
   approx(totals.cuttingMetersLongitudinal, 18);
   approx(totals.cuttingCostLongitudinal, 900_000);
-  approx(totals.billableCuttingCostLongitudinal, 0);
-  assert.equal(totals.shouldChargeCuttingCost, false);
+  approx(totals.billableCuttingCostLongitudinal, 900_000);
+  assert.equal(totals.shouldChargeCuttingCost, true);
 }
 
 {
@@ -1085,6 +1087,48 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   assert.ok(invalidPayment.errors.some((error) => error.includes('تاریخ پرداخت')));
   assert.ok(invalidPayment.errors.some((error) => error.includes('نام صاحب چک')));
   assert.ok(invalidPayment.errors.some((error) => error.includes('تاریخ تحویل چک')));
+}
+
+{
+  const parent = contractProduct({
+    rowId: 'stair-parent',
+    productType: 'stair',
+    quantity: 32,
+    stairPartType: 'tread'
+  });
+  const layer = contractProduct({
+    rowId: 'stair-layer',
+    parentProductRowId: 'stair-parent',
+    productType: 'stair',
+    quantity: 32,
+    stairPartType: 'tread',
+    meta: {
+      isLayer: true,
+      layerInfo: {
+        numberOfLayersPerStair: 1,
+        layerSetQuantity: 32,
+        physicalPieceQuantity: 64,
+        edges: { front: true, left: true }
+      },
+      layerSourcePlan: {
+        fromNewStone: 64,
+        sourceStoneQuantity: 6,
+        sourceAreaSqm: 2.52
+      }
+    }
+  });
+  assert.deepEqual(reconcileContractProductGraph([parent, layer]), []);
+  assert.deepEqual(getDeliverableProductEntries([parent, layer]).map((entry) => entry.product.rowId), ['stair-parent']);
+
+  const staleLayer = {
+    ...layer,
+    meta: {
+      ...layer.meta,
+      layerInfo: { ...(layer.meta as any).layerInfo, physicalPieceQuantity: 144 }
+    }
+  };
+  assert.ok(reconcileContractProductGraph([parent, staleLayer]).some((conflict) => conflict.message.includes('نوار فیزیکی')));
+  assert.ok(reconcileContractProductGraph([layer]).some((conflict) => conflict.message.includes('متصل نیست')));
 }
 
 {

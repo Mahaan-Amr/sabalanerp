@@ -14,36 +14,51 @@ export const getPhysicalCuttingCost = (
 };
 
 export const getBillableCuttingCost = (
-  product: Pick<ContractProduct, 'productType' | 'isMandatory' | 'mandatoryPercentage' | 'cuttingCost'>
-): number => isMandatoryLongitudinalCuttingNonBillable(product) ? 0 : toFiniteNumber(product.cuttingCost);
+  product: Pick<ContractProduct, 'productType' | 'isMandatory' | 'mandatoryPercentage' | 'cuttingCost' | 'cutType' | 'cuttingBreakdown'>
+): number => {
+  if (!isMandatoryCuttingPolicyActive(product)) {
+    return toFiniteNumber(product.cuttingCost);
+  }
 
-export const isMandatoryLongitudinalCuttingNonBillable = (
+  const longitudinalBreakdown = product.cuttingBreakdown?.filter((cut) => cut.type === 'longitudinal') || [];
+  if (longitudinalBreakdown.length > 0) {
+    return longitudinalBreakdown.reduce((sum, cut) => sum + toFiniteNumber(cut.cost), 0);
+  }
+
+  return product.cutType === 'longitudinal' ? toFiniteNumber(product.cuttingCost) : 0;
+};
+
+export const isMandatoryCuttingPolicyActive = (
   product: Pick<ContractProduct, 'productType' | 'isMandatory' | 'mandatoryPercentage'>
 ): boolean =>
   product.isMandatory === true &&
   toFiniteNumber(product.mandatoryPercentage) > 0;
 
+/** @deprecated Mandatory longitudinal cutting is billable; only cross cutting is waived. */
+export const isMandatoryLongitudinalCuttingNonBillable = isMandatoryCuttingPolicyActive;
+
 export const normalizeMandatoryLongitudinalCuttingPricing = (
   product: ContractProduct
 ): ContractProduct => {
-  if (!isMandatoryLongitudinalCuttingNonBillable(product)) {
+  if (!isMandatoryCuttingPolicyActive(product)) {
     return product;
   }
 
   const previousCuttingCost = toFiniteNumber(product.cuttingCost);
   const physicalCuttingCost = getPhysicalCuttingCost(product);
-  if (previousCuttingCost <= 0) {
+  const billableCuttingCost = getBillableCuttingCost(product);
+  if (Math.abs(previousCuttingCost - billableCuttingCost) < 0.000001) {
     return {
       ...product,
-      cuttingCost: 0,
+      cuttingCost: billableCuttingCost,
       physicalCuttingCost
     };
   }
 
   return {
     ...product,
-    cuttingCost: 0,
+    cuttingCost: billableCuttingCost,
     physicalCuttingCost,
-    totalPrice: Math.max(toFiniteNumber(product.totalPrice) - previousCuttingCost, 0)
+    totalPrice: Math.max(toFiniteNumber(product.totalPrice) - previousCuttingCost + billableCuttingCost, 0)
   };
 };

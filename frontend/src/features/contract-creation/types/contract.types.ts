@@ -785,6 +785,10 @@ export interface StairPartDraftV2 {
   layerManualSourceWidthCm?: number | null;
   layerManualSourceLengthM?: number | null;
   layerManualSourceQuantity?: number | null;
+  // Layer strips inherit the parent stair's saw-kerf policy when they use the
+  // same source stone. Keeping it on the draft also makes edit/reload stable.
+  sawKerfEnabled?: boolean;
+  sawKerfCm?: number | null;
   standardLengthValue?: number | null;
   standardLengthUnit?: UnitType;
   // Finishing fields

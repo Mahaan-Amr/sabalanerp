@@ -44,6 +44,9 @@ export const syncDeliveryDefaults = (
 
 export const isDeliverableContractProduct = (product: ContractProduct | undefined): product is ContractProduct => {
   if (!product) return false;
+  // Stair layers are manufactured, loaded, and delivered as part of their
+  // exact parent stair row. They must never create an independent cargo balance.
+  if ((product.meta as any)?.isLayer) return false;
   return !['service', 'standalone-service'].includes(String(product.productType));
 };
 

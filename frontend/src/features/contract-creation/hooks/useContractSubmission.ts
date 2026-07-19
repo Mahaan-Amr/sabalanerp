@@ -15,6 +15,7 @@ import { getDeliverableProductEntries } from '../utils/deliveryScheduleControlle
 import { normalizeMandatoryLongitudinalCuttingPricing } from '../utils/mandatoryCuttingPricing';
 import { hasUnresolvedLegacyRemainingChildAddOns } from '../services/remainingStoneChildAddOnService';
 import { getContractGrossPayableTotal, reconcileContractProductPricing } from '../utils/contractProductPricing';
+import { reconcileContractProductGraph } from '../utils/contractProductGraphReconciliation';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
@@ -118,6 +119,15 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     if (unresolvedLegacyAddOnRows.length > 0) {
       setErrors({
         products: `${unresolvedLegacyAddOnRows.length} محصول باقی‌مانده دارای افزونه قدیمی تعیین‌تکلیف‌نشده است. در مرحله انتخاب محصولات، برای هر مورد «پذیرش و محاسبه مجدد» یا «حذف» را انتخاب کنید.`
+      });
+      setCurrentStep(5);
+      return;
+    }
+
+    const productGraphConflicts = reconcileContractProductGraph(wizardData.products);
+    if (productGraphConflicts.length > 0) {
+      setErrors({
+        products: `ثبت قرارداد متوقف شد: ${productGraphConflicts.map((conflict) => conflict.message).join(' | ')}`
       });
       setCurrentStep(5);
       return;

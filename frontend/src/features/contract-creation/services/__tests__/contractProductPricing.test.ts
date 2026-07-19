@@ -112,8 +112,8 @@ const product = (overrides: Partial<ContractProduct> = {}): ContractProduct => (
   });
   const components = getContractProductPriceComponents(mandatory);
   assert.equal(components.mandatoryAmount, 19_200_000);
-  assert.equal(components.cuttingCost, 0);
-  assert.equal(components.reconciledTotal, 115_200_000);
+  assert.equal(components.cuttingCost, 8_000_000);
+  assert.equal(components.reconciledTotal, 123_200_000);
 }
 
 {

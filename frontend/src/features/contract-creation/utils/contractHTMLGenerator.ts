@@ -13,6 +13,18 @@ import { restoreLongitudinalCustomerRequest } from './longitudinalOptimizerGeome
 export const generateContractHTML = (data: any): string => {
   const discount = data.discount || data.contractData?.discount || null;
   const getSourceMaterialSummary = (product: any): string => {
+    const layerSourcePlan = product?.meta?.layerSourcePlan;
+    if (product?.meta?.isLayer && layerSourcePlan) {
+      const paidSets = Number(layerSourcePlan.fromAlreadyPaidSets || 0);
+      const newSets = Number(layerSourcePlan.fromNewSets || 0);
+      const sourceQuantity = Number(layerSourcePlan.sourceStoneQuantity || 0);
+      const sourceAreaSqm = Number(layerSourcePlan.sourceAreaSqm || 0);
+      return [
+        paidSets > 0 ? `لایه از سنگ قبلاً محاسبه‌شده: ${formatDisplayNumber(paidSets)} ست` : '',
+        newSets > 0 ? `لایه از سنگ جدید: ${formatDisplayNumber(newSets)} ست` : '',
+        sourceQuantity > 0 ? `سنگ جدید مصرفی: ${formatDisplayNumber(sourceQuantity)} عدد / ${formatSquareMeters(sourceAreaSqm)}` : ''
+      ].filter(Boolean).join('، ');
+    }
     const smartCutPlan = product?.smartCutPlan || {};
     const stairMeta = product?.meta?.stair || {};
     const sourceWidthCm = Number(smartCutPlan.sourceWidthCm || product?.originalWidth || 0);
@@ -66,17 +78,18 @@ export const generateContractHTML = (data: any): string => {
           const product: any = restoreLongitudinalCustomerRequest(savedProduct);
           const sourceMaterialSummary = getSourceMaterialSummary(product);
           const physicalProductionSummary = getPhysicalProductionSummary(product);
-          const productName = product.product?.namePersian || product.product?.name || product.namePersian || product.name || 'نامشخص';
+          const isLayer = Boolean(product?.meta?.isLayer);
+          const productName = product.stoneName || product.product?.namePersian || product.product?.name || product.namePersian || product.name || 'نامشخص';
           const kerfNote = product.sawKerfEnabled ? ' - خوراک اره لحاظ شده' : '';
           const requestedDimensions = product.length && product.width
             ? `${formatDisplayNumber(product.length)}${product.lengthUnit || ''} × ${formatDisplayNumber(product.width)}${product.widthUnit || ''}`
             : 'نامشخص';
           return `
           <tr>
-            <td style="border: 1px solid #ddd; padding: 8px;">${productName}${product.description ? ` - ${product.description}` : ''}${kerfNote}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${isLayer ? '↳ ' : ''}${productName}${product.description ? ` - ${product.description}` : ''}${kerfNote}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${requestedDimensions}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatQuantity(product.quantity || 0)}</td>
-            <td style="border: 1px solid #ddd; padding: 8px;">${formatSquareMeters(product.product?.squareMeter || product.squareMeter || 0)}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${formatSquareMeters(product.squareMeters || product.product?.squareMeter || product.squareMeter || 0)}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${product.unitPrice ? formatPrice(product.unitPrice, product.currency || 'تومان') : 'نامشخص'}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${product.totalPrice ? formatPrice(product.totalPrice, product.currency || 'تومان') : 'نامشخص'}</td>
           </tr>

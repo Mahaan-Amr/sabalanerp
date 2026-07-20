@@ -20,6 +20,7 @@ import {
   isDeliveryItemForProduct,
   reconcileDeliveryProductReferences,
   removeInvalidDeliveryProductReference,
+  setDeliveryProductAmount,
   syncDeliveryDefaults
 } from '../../utils/deliveryScheduleController';
 import { getServiceRowUnitLabel } from '../../utils/contractServiceRows';
@@ -133,27 +134,14 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
     }, 0);
   }, [wizardData.deliveries]);
 
-  const handleDeliveryProductQuantityChange = (deliveryIndex: number, productIndex: number, quantity: number, productId?: string) => {
+  const handleDeliveryProductQuantityChange = (deliveryIndex: number, productIndex: number, quantity: number) => {
     const delivery = wizardData.deliveries[deliveryIndex];
-    const product = wizardData.products[productIndex];
-    if (!product?.rowId) return;
-    const current = delivery.products ?? [];
-    const existing = current.find((item) => isDeliveryItemForProduct(item, product, productIndex));
-    let newProducts: DeliveryProductItem[];
-    if (quantity <= 0) {
-      newProducts = current.filter((item) => !isDeliveryItemForProduct(item, product, productIndex));
-    } else if (existing) {
-      const unit = getDeliveryUnit(wizardData.products[productIndex]);
-      newProducts = current.map(item =>
-        isDeliveryItemForProduct(item, product, productIndex)
-          ? { ...item, productRowId: product.rowId, productIndex, productId, quantity, amount: quantity, unit }
-          : item
-      );
-    } else {
-      const unit = getDeliveryUnit(wizardData.products[productIndex]);
-      newProducts = [...current, { productRowId: product.rowId, productIndex, productId, quantity, amount: quantity, unit }];
-    }
-    handleUpdateDelivery(deliveryIndex, { products: newProducts });
+    handleUpdateDelivery(deliveryIndex, setDeliveryProductAmount(
+      delivery,
+      wizardData.products,
+      productIndex,
+      quantity
+    ));
   };
 
   const handleDeliveryServiceQuantityChange = (deliveryIndex: number, serviceRowId: string, quantity: number) => {
@@ -352,7 +340,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                         const remaining = maxForThisDelivery;
                         const productLabel = product.stoneName || product.product?.namePersian || `محصول ${productIndex + 1}`;
                         const widthSummary = getProductWidthSummary(product);
-                        const setQty = (value: number) => handleDeliveryProductQuantityChange(index, productIndex, Math.max(0, Math.min(maxForThisDelivery, value)), product.productId);
+                        const setQty = (value: number) => handleDeliveryProductQuantityChange(index, productIndex, Math.max(0, Math.min(maxForThisDelivery, value)));
                         return (
                           <div
                             key={product.rowId || productIndex}

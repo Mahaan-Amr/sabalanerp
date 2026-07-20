@@ -5,7 +5,7 @@ import { useState, useCallback, useMemo, useRef } from 'react';
 import type { ContractWizardData } from '../types/contract.types';
 import { validateWizardStep } from '../services/validationService';
 import PersianCalendar from '@/lib/persian-calendar';
-import { ensureContractProductRowIds } from '../utils/contractProductIdentity';
+import { normalizeContractProductRowIdentities } from '../utils/contractProductIdentity';
 import { getContractGrossPayableTotal } from '../utils/contractProductPricing';
 import { reconcileDeliveryProductReferences } from '../utils/deliveryScheduleController';
 
@@ -159,7 +159,9 @@ export const useContractWizard = () => {
   // Update wizard data
   const updateWizardData = useCallback((updates: Partial<ContractWizardData>) => {
     setWizardData(prev => {
-      const products = updates.products ? ensureContractProductRowIds(updates.products) : prev.products;
+      const products = updates.products
+        ? normalizeContractProductRowIdentities(updates.products).products
+        : prev.products;
       const deliveryInput = updates.deliveries ?? prev.deliveries;
       const deliveries = (updates.products || updates.deliveries)
         ? reconcileDeliveryProductReferences(products, deliveryInput).deliveries

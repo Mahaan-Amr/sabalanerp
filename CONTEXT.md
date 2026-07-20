@@ -315,6 +315,8 @@ _Avoid_: representing service execution as a fake stone product, or assuming eve
 
 **هویت پایدار تخصیص تحویل**:
 A delivery quantity belongs to one exact contract product row through `productRowId`; `productIndex` and catalog `productId` are compatibility snapshots, not canonical identity. A legacy assignment is migrated automatically only when its saved index still points to a row with the same catalog product ID. A missing, duplicated, or contradictory identity blocks save and remains visibly invalid until the operator explicitly chooses «حذف تخصیص نامعتبر»; the removed quantity becomes unallocated and must be assigned manually.
+Commercial product rows remain independent even when their catalog stone, dimensions, description, unit price, or total price are identical. If independent rows accidentally share an internal `productRowId`, every row in that collision receives a new unique identity without changing commercial data; any assignment carrying the old ambiguous identity remains invalid and must be removed and entered manually. If the duplicated identity is referenced by a layer or remaining-stone child as its parent/source, automatic repair is forbidden and the relationship must be reviewed explicitly.
+_Avoid_: treating similar commercial rows as duplicates, merging or deleting them, preserving one ambiguous row as the presumed delivery target, or guessing which duplicate parent owns a dependent child
 _Avoid_: matching deliveries by array position after products change, guessing from a similar stone, silently transferring quantity to another row, deleting an invalid assignment without confirmation, or allowing an unresolved/unallocated quantity through final save
 
 **مقدار زمان‌بندی خدمات قرارداد**:

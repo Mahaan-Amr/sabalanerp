@@ -114,6 +114,9 @@ import {
 import {
   createContractProductRowId,
   ensureContractProductRowIds,
+  normalizeContractProductRowIdentities,
+  prepareStairEditReplacementRowIdentities,
+  resolveEditedContractProductRowId,
   isRemainingStoneChild
 } from '@/features/contract-creation/utils/contractProductIdentity';
 import {
@@ -1481,7 +1484,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   };
 
   const normalizeWizardFinishingProducts = (data: ContractWizardData): ContractWizardData => {
-    const products = ensureContractProductRowIds((data.products || []).map((savedProduct) => {
+    const restoredProducts = (data.products || []).map((savedProduct) => {
       const product = restoreLongitudinalCustomerRequest(savedProduct);
       const finishing = normalizeProductFinishing(product);
       if (!finishing) return product;
@@ -1496,7 +1499,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           (finishing.calculationBase === 'squareMeters' ? finishing.quantity : null),
         finishingCost: product.finishingCost ?? finishing.cost
       };
-    }));
+    });
+    const products = normalizeContractProductRowIdentities(restoredProducts).products;
     const deliveryReferences = reconcileDeliveryProductReferences(products, data.deliveries || []);
     return {
       ...data,
@@ -8183,7 +8187,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   
                   const storedLengthValue = convertMetersToUnit(actualLengthM, draft.lengthUnit || 'm');
                   const product: ContractProduct = {
-                    rowId: createContractProductRowId(),
+                    rowId: isEditMode && editingProductIndex !== null
+                      ? resolveEditedContractProductRowId(wizardData.products, editingProductIndex)
+                      : createContractProductRowId(),
                     productId: draft.stoneId!,
                     product: stoneProduct,
                     productType: 'stair',
@@ -8757,29 +8763,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     const oldStairSystemId = oldProduct?.stairSystemId;
                     
                     if (oldStairSystemId) {
-                      const productsToAdd = stairSystemV2.stairSessionItems.map((item) => {
-                        const isLayer = ((item.meta as any)?.isLayer) || false;
-                        const replacement = {
-                          ...item,
-                          rowId: !isLayer && item.stairPartType === oldProduct.stairPartType
-                            ? oldProduct.rowId
-                            : (item.rowId || createContractProductRowId()),
-                          stairSystemId: oldStairSystemId,
-                          parentProductIndex: isLayer ? editingProductIndex : item.parentProductIndex,
-                          parentProductRowId: isLayer ? oldProduct.rowId : item.parentProductRowId
-                        };
-                        if (!isLayer) return replacement;
-                        return {
-                          ...replacement,
-                          meta: {
-                            ...replacement.meta,
-                            layerInfo: {
-                              ...(replacement.meta as any)?.layerInfo,
-                              parentProductRowId: oldProduct.rowId
-                            }
-                          }
-                        };
-                      });
+                      const productsToAdd = prepareStairEditReplacementRowIdentities(
+                        stairSystemV2.stairSessionItems,
+                        oldProduct,
+                        editingProductIndex
+                      );
 
                       let nextProducts = replaceStairRowWithAttachedLayers(productsWithRowIds, editingProductIndex, productsToAdd);
                       const hasRemainingChildren = !!oldProduct.rowId && nextProducts.some((item) => item.parentProductRowId === oldProduct.rowId);

@@ -241,6 +241,49 @@ export const removeInvalidDeliveryProductReference = (
   };
 });
 
+export const setDeliveryProductAmount = (
+  delivery: DeliverySchedule,
+  products: ContractProduct[],
+  productIndex: number,
+  quantity: number
+): DeliverySchedule => {
+  const product = products[productIndex];
+  if (!product?.rowId) return delivery;
+
+  const current = delivery.products || [];
+  const unit = getDeliveryUnit(product);
+  const normalizedQuantity = Math.max(0, quantity);
+  const hasExisting = current.some((item) => isDeliveryItemForProduct(item, product, productIndex));
+  let nextProducts: DeliveryProductItem[];
+
+  if (normalizedQuantity <= 0) {
+    nextProducts = current.filter((item) => !isDeliveryItemForProduct(item, product, productIndex));
+  } else if (hasExisting) {
+    nextProducts = current.map((item) => isDeliveryItemForProduct(item, product, productIndex)
+      ? {
+          ...item,
+          productRowId: product.rowId,
+          productIndex,
+          productId: product.productId,
+          quantity: normalizedQuantity,
+          amount: normalizedQuantity,
+          unit
+        }
+      : item);
+  } else {
+    nextProducts = [...current, {
+      productRowId: product.rowId,
+      productIndex,
+      productId: product.productId,
+      quantity: normalizedQuantity,
+      amount: normalizedQuantity,
+      unit
+    }];
+  }
+
+  return { ...delivery, products: nextProducts };
+};
+
 export const getSchedulableServiceEntries = (serviceRows: ContractServiceRow[] = []): Array<{ serviceRow: ContractServiceRow; serviceIndex: number }> =>
   serviceRows.map((serviceRow, serviceIndex) => ({ serviceRow, serviceIndex }));
 

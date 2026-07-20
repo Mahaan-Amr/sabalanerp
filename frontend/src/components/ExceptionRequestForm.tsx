@@ -1,14 +1,17 @@
 ﻿'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FaCalendarAlt, FaClock, FaFileAlt, FaUser, FaPhone } from 'react-icons/fa';
 import PersianCalendarComponent from './PersianCalendar';
 import EnhancedDropdown from './EnhancedDropdown';
+import { personnelAPI } from '@/lib/api';
+import PersianCalendar from '@/lib/persian-calendar';
 
 interface ExceptionRequestFormProps {
   onSubmit: (data: any) => void;
   onCancel: () => void;
   loading?: boolean;
+  initialData?: any;
 }
 
 const exceptionTypes = [
@@ -19,20 +22,26 @@ const exceptionTypes = [
   { value: 'PERSONAL_LEAVE', label: 'مرخصی شخصی' }
 ];
 
-export default function ExceptionRequestForm({ onSubmit, onCancel, loading = false }: ExceptionRequestFormProps) {
+export default function ExceptionRequestForm({ onSubmit, onCancel, loading = false, initialData }: ExceptionRequestFormProps) {
   const [formData, setFormData] = useState({
-    exceptionType: '',
-    startDate: '',
-    endDate: '',
-    startTime: '',
-    endTime: '',
-    duration: '',
-    reason: '',
-    description: '',
-    emergencyContact: ''
+    personnelId: initialData?.personnelId || '',
+    exceptionType: initialData?.exceptionType || '',
+    startDate: initialData?.startDate || '',
+    endDate: initialData?.endDate || '',
+    startTime: initialData?.startTime || '',
+    endTime: initialData?.endTime || '',
+    duration: initialData?.duration || '',
+    reason: initialData?.reason || '',
+    description: initialData?.description || '',
+    emergencyContact: initialData?.emergencyContact || ''
   });
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
+  const [personnel, setPersonnel] = useState<any[]>([]);
+
+  useEffect(() => {
+    personnelAPI.getPersonnel({ includeInactive: false }).then((response) => setPersonnel(response.data.data || [])).catch(() => setPersonnel([]));
+  }, []);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -44,6 +53,7 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
   const validateForm = () => {
     const newErrors: { [key: string]: string } = {};
 
+    if (!formData.personnelId) newErrors.personnelId = 'انتخاب پرسنل الزامی است';
     if (!formData.exceptionType) newErrors.exceptionType = 'نوع استثناء الزامی است';
     if (!formData.startDate) newErrors.startDate = 'تاریخ شروع الزامی است';
     if (!formData.reason) newErrors.reason = 'دلیل الزامی است';
@@ -66,7 +76,7 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (validateForm()) {
-      onSubmit(formData);
+      onSubmit({ ...formData, duration: formData.duration ? Number(formData.duration) : undefined, startDate: PersianCalendar.toGregorianDateOnly(formData.startDate), endDate: formData.endDate ? PersianCalendar.toGregorianDateOnly(formData.endDate) : undefined });
     }
   };
 
@@ -75,9 +85,13 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
 
   return (
     <div className="glass-liquid-card p-6">
-      <h2 className="text-2xl font-bold text-primary mb-6 text-right">ثبت استثناء</h2>
+      <h2 className="text-2xl font-bold text-primary mb-6 text-right">{initialData ? 'ویرایش استثنای حضور و غیاب' : 'ثبت استثنای حضور و غیاب'}</h2>
       
       <form onSubmit={handleSubmit} className="space-y-6">
+        <div>
+          <label className="block text-sm font-medium text-primary mb-2 text-right">پرسنل *</label>
+          <EnhancedDropdown value={formData.personnelId} onChange={(value) => handleInputChange('personnelId', value)} placeholder="انتخاب پرسنل" options={personnel.map((person) => ({ value: person.id, label: `${person.firstName} ${person.lastName} (${person.department?.namePersian || 'بدون بخش'})` }))} searchable required error={errors.personnelId} />
+        </div>
         {/* Exception Type */}
         <div>
           <label className="block text-sm font-medium text-primary mb-2 text-right">
@@ -239,7 +253,7 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
             className="glass-liquid-btn-primary px-6 py-3"
             disabled={loading}
           >
-            {loading ? 'در حال ثبت...' : 'ثبت درخواست'}
+            {loading ? 'در حال ذخیره...' : initialData ? 'ذخیره تغییرات' : 'ثبت استثنا'}
           </button>
         </div>
       </form>

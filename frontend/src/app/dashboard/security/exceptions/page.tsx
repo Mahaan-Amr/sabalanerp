@@ -1,532 +1,120 @@
-﻿'use client';
+'use client';
 
-import { useState, useEffect } from 'react';
-import { 
-  FaExclamationTriangle, 
-  FaPlus, 
-  FaCheck, 
-  FaTimes, 
-  FaClock,
-  FaUser,
-  FaCalendarAlt,
-  FaEye
-} from 'react-icons/fa';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { FaCheck, FaEdit, FaPlane, FaPlus, FaTimes, FaTrash } from 'react-icons/fa';
+import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
+import ExceptionRequestForm from '@/components/ExceptionRequestForm';
+import MissionAssignmentForm from '@/components/MissionAssignmentForm';
+import { askSecurityAction, notifySecurity } from '@/components/SecurityNoticeHost';
+import PersianCalendar from '@/lib/persian-calendar';
 import { securityAPI } from '@/lib/api';
-import { notifySecurity, askSecurityAction } from '@/components/SecurityNoticeHost';
 
-interface ExceptionRequest {
-  id: string;
-  employee: {
-    id: string;
-    firstName: string;
-    lastName: string;
-    username: string;
-  };
-  exceptionType: string;
-  reason: string;
-  startDate: string;
-  endDate: string;
-  startTime?: string;
-  endTime?: string;
-  status: string;
-  notes?: string;
-  approvedBy?: {
-    firstName: string;
-    lastName: string;
-  };
-  rejectedBy?: {
-    firstName: string;
-    lastName: string;
-  };
-  rejectionReason?: string;
-  createdAt: string;
-  updatedAt: string;
-}
+type Kind = 'exception' | 'mission';
 
-interface MissionAssignment {
-  id: string;
-  employee: {
-    id: string;
-    firstName: string;
-    lastName: string;
-    username: string;
-  };
-  missionType: string;
-  missionLocation: string;
-  description: string;
-  startDate: string;
-  endDate: string;
-  startTime: string;
-  endTime: string;
-  status: string;
-  approvedBy?: {
-    firstName: string;
-    lastName: string;
-  };
-  createdAt: string;
-  updatedAt: string;
-}
+const statusLabel: Record<string, string> = { PENDING: 'در انتظار', APPROVED: 'تأییدشده', REJECTED: 'ردشده', CANCELLED: 'لغوشده' };
+const statusTone = (status: string) => status === 'APPROVED' ? 'success' : status === 'REJECTED' || status === 'CANCELLED' ? 'danger' : 'warning';
+const personName = (item: any) => `${item.personnel?.firstName || item.employee?.firstName || ''} ${item.personnel?.lastName || item.employee?.lastName || ''}`.trim() || '-';
+const initialFormData = (item: any) => ({
+  ...item,
+  personnelId: item.personnelId || item.employee?.personnelId || '',
+  startDate: item.startDate ? PersianCalendar.toPersian(item.startDate) : '',
+  endDate: item.endDate ? PersianCalendar.toPersian(item.endDate) : ''
+});
 
-export default function ExceptionsPage() {
-  const [exceptionRequests, setExceptionRequests] = useState<ExceptionRequest[]>([]);
-  const [missionAssignments, setMissionAssignments] = useState<MissionAssignment[]>([]);
+export default function SecurityExceptionsPage() {
+  const [kind, setKind] = useState<Kind>('exception');
+  const [exceptions, setExceptions] = useState<any[]>([]);
+  const [missions, setMissions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'exceptions' | 'missions'>('exceptions');
-  const [selectedRequest, setSelectedRequest] = useState<ExceptionRequest | null>(null);
-  const [selectedMission, setSelectedMission] = useState<MissionAssignment | null>(null);
-  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editor, setEditor] = useState<{ kind: Kind; item?: any; correction?: boolean } | null>(null);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    fetchExceptionsData();
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const [exceptionResult, missionResult] = await Promise.all([
+        securityAPI.getExceptionRequests({ limit: 250 }),
+        securityAPI.getMissionAssignments({ limit: 250 })
+      ]);
+      setExceptions(exceptionResult.data.data || []);
+      setMissions(missionResult.data.data || []);
+    } catch (requestError: any) {
+      setError(requestError.response?.data?.error || 'دریافت استثناها و ماموریت‌ها ناموفق بود.');
+    } finally { setLoading(false); }
   }, []);
 
-  const fetchExceptionsData = async () => {
+  useEffect(() => { void load(); }, [load]);
+  const items = useMemo(() => kind === 'exception' ? exceptions : missions, [kind, exceptions, missions]);
+
+  const submitEditor = async (data: any) => {
+    if (!editor) return;
+    setSaving(true); setError('');
     try {
-      setLoading(true);
-      setError(null);
-      
-      const [exceptionsResponse, missionsResponse] = await Promise.all([
-        securityAPI.getExceptionRequests({ limit: 50 }),
-        securityAPI.getMissionAssignments({ limit: 50 })
-      ]);
-      
-      if (exceptionsResponse.data.success) {
-        setExceptionRequests(exceptionsResponse.data.data);
-      }
-      
-      if (missionsResponse.data.success) {
-        setMissionAssignments(missionsResponse.data.data);
-      }
-    } catch (error: any) {
-      console.error('Error fetching exceptions data:', error);
-      setError(error.response?.data?.error || 'خطا در دریافت اطلاعات');
-    } finally {
-      setLoading(false);
-    }
+      let result: any;
+      if (!editor.item) {
+        if (editor.kind === 'exception') result = await securityAPI.createExceptionRequest(data);
+        else result = await securityAPI.createMissionAssignment(data);
+      } else if (editor.correction) {
+        const correctionReason = await askSecurityAction({ title: 'اصلاح حسابرسی‌شده', inputLabel: 'دلیل اصلاح' });
+        if (!correctionReason?.trim()) return;
+        if (editor.kind === 'exception') result = await securityAPI.correctException(editor.item.id, { ...data, correctionReason: correctionReason.trim() });
+        else result = await securityAPI.correctMissionAssignment(editor.item.id, { ...data, correctionReason: correctionReason.trim() });
+      } else if (editor.kind === 'exception') result = await securityAPI.updateException(editor.item.id, data);
+      else result = await securityAPI.updateMissionAssignment(editor.item.id, data);
+      notifySecurity(result?.data?.warning || 'اطلاعات با موفقیت ذخیره شد.');
+      setEditor(null); await load();
+    } catch (requestError: any) { setError(requestError.response?.data?.error || 'ذخیره اطلاعات ناموفق بود.'); }
+    finally { setSaving(false); }
   };
 
-  const handleApproveException = async (id: string, notes?: string) => {
-    try {
-      const response = await securityAPI.approveExceptionRequest(id, notes);
-      if (response.data.success) {
-        notifySecurity('درخواست با موفقیت تایید شد');
-        fetchExceptionsData();
-      }
-    } catch (error: any) {
-      console.error('Error approving exception:', error);
-      notifySecurity(error.response?.data?.error || 'خطا در ذخیره اطلاعات', 'error');
-    }
+  const approve = async (item: any) => {
+    try { kind === 'exception' ? await securityAPI.approveExceptionRequest(item.id) : await securityAPI.approveMissionAssignment(item.id); await load(); }
+    catch (requestError: any) { setError(requestError.response?.data?.error || 'تأیید ناموفق بود.'); }
+  };
+  const reject = async (item: any) => {
+    const reason = await askSecurityAction({ title: 'رد مورد', inputLabel: 'دلیل رد' }); if (!reason?.trim()) return;
+    try { kind === 'exception' ? await securityAPI.rejectExceptionRequest(item.id, reason.trim()) : await securityAPI.rejectMissionAssignment(item.id, reason.trim()); await load(); }
+    catch (requestError: any) { setError(requestError.response?.data?.error || 'رد مورد ناموفق بود.'); }
+  };
+  const cancel = async (item: any) => {
+    const reason = await askSecurityAction({ title: 'لغو مورد تأییدشده', inputLabel: 'دلیل لغو' }); if (!reason?.trim()) return;
+    try { kind === 'exception' ? await securityAPI.cancelException(item.id, reason.trim()) : await securityAPI.cancelMissionAssignment(item.id, reason.trim()); await load(); }
+    catch (requestError: any) { setError(requestError.response?.data?.error || 'لغو ناموفق بود.'); }
+  };
+  const remove = async (item: any) => {
+    const accepted = await askSecurityAction({ title: 'حذف مورد در انتظار', description: 'این مورد هنوز اثری بر حضور و غیاب ندارد و حذف می‌شود.' }); if (!accepted) return;
+    try { kind === 'exception' ? await securityAPI.deleteException(item.id) : await securityAPI.deleteMissionAssignment(item.id); await load(); }
+    catch (requestError: any) { setError(requestError.response?.data?.error || 'حذف ناموفق بود.'); }
   };
 
-  const handleRejectException = async (id: string, rejectionReason: string) => {
-    try {
-      const response = await securityAPI.rejectExceptionRequest(id, rejectionReason);
-      if (response.data.success) {
-        notifySecurity('درخواست با موفقیت رد شد');
-        fetchExceptionsData();
-      }
-    } catch (error: any) {
-      console.error('Error rejecting exception:', error);
-      notifySecurity(error.response?.data?.error || 'خطا در رد درخواست', 'error');
-    }
-  };
-
-  const handleApproveMission = async (id: string) => {
-    try {
-      const response = await securityAPI.approveMissionAssignment(id);
-      if (response.data.success) {
-        notifySecurity('ماموریت با موفقیت تایید شد');
-        fetchExceptionsData();
-      }
-    } catch (error: any) {
-      console.error('Error approving mission:', error);
-      notifySecurity(error.response?.data?.error || 'خطا در ذخیره اطلاعات', 'error');
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'PENDING': return 'در انتظار';
-      case 'APPROVED': return 'تایید شده';
-      case 'REJECTED': return 'رد شده';
-      default: return 'text-gray-500 bg-gray-500/20';
-    }
-  };
-
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'PENDING': return 'در انتظار';
-      case 'APPROVED': return 'تایید شده';
-      case 'REJECTED': return 'رد شده';
-      default: return 'نامشخص';
-    }
-  };
-
-  const getExceptionTypeLabel = (type: string) => {
-    switch (type) {
-      case 'HOURLY_LEAVE': return 'مرخصی ساعتی';
-      case 'SICK_LEAVE': return 'مرخصی استعلاجی';
-      case 'VACATION': return 'مرخصی روزانه';
-      case 'EMERGENCY': return 'اضطراری';
-      default: return type;
-    }
-  };
-
-  const openDetailsModal = (item: ExceptionRequest | MissionAssignment, type: 'exception' | 'mission') => {
-    if (type === 'exception') {
-      setSelectedRequest(item as ExceptionRequest);
-    } else {
-      setSelectedMission(item as MissionAssignment);
-    }
-    setShowDetailsModal(true);
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500"></div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
-        <div className="glass-liquid-card p-8 text-center">
-          <h2 className="text-xl font-bold text-primary mb-2">ورود و خروج</h2>
-          <p className="text-secondary mb-4">{error}</p>
-          <button 
-            onClick={fetchExceptionsData}
-            className="glass-liquid-btn-primary px-6 py-2"
-          >
-            تلاش مجدد
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="glass-liquid-card p-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4 space-x-reverse">
-            <FaExclamationTriangle className="h-8 w-8 text-teal-500" />
-            <div>
-              <h1 className="text-2xl font-bold text-primary">درخواست‌ها و ماموریت‌ها</h1>
-              <p className="text-secondary">مدیریت درخواست‌ها و ماموریت‌ها</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="glass-liquid-card p-6">
-        <div className="flex space-x-4 space-x-reverse border-b border-gray-700">
-          <button
-            onClick={() => setActiveTab('exceptions')}
-            className={`pb-3 px-4 font-medium transition-colors ${
-              activeTab === 'exceptions'
-                ? 'text-teal-400 border-b-2 border-teal-400'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            درخواست‌های استثنا ({exceptionRequests.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('missions')}
-            className={`pb-3 px-4 font-medium transition-colors ${
-              activeTab === 'missions'
-                ? 'text-teal-400 border-b-2 border-teal-400'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            ماموریت‌ها ({missionAssignments.length})
-          </button>
-        </div>
-      </div>
-
-      {/* Exception Requests */}
-      {activeTab === 'exceptions' && (
-        <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">درخواست‌های استثنا</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-700">
-                  <th className="text-right py-3 px-4 text-secondary">کارمند</th>
-                  <th className="text-right py-3 px-4 text-secondary">نوع درخواست</th>
-                  <th className="text-right py-3 px-4 text-secondary">تاریخ</th>
-                  <th className="text-right py-3 px-4 text-secondary">وضعیت</th>
-                  <th className="text-right py-3 px-4 text-secondary">دلیل</th>
-                  <th className="text-right py-3 px-4 text-secondary">عملیات</th>
-                </tr>
-              </thead>
-              <tbody>
-                {exceptionRequests.map((request) => (
-                  <tr key={request.id} className="border-b border-gray-800 hover:bg-white/5">
-                    <td className="py-3 px-4">
-                      <div>
-                        <div className="font-medium text-primary">
-                          {request.employee.firstName} {request.employee.lastName}
-                        </div>
-                        <div className="text-sm text-secondary">
-                          @{request.employee.username}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-primary">
-                      {getExceptionTypeLabel(request.exceptionType)}
-                    </td>
-                    <td className="py-3 px-4 text-secondary">
-                      <div className="max-w-xs truncate">
-                        {request.reason}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-secondary">
-                      <div className="text-sm">
-                        <div>{new Date(request.startDate).toLocaleDateString('fa-IR')}</div>
-                        {request.endDate !== request.startDate && (
-                          <div>تا {new Date(request.endDate).toLocaleDateString('fa-IR')}</div>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(request.status)}`}>
-                        {getStatusLabel(request.status)}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex space-x-2 space-x-reverse">
-                        <button
-                          onClick={() => openDetailsModal(request, 'exception')}
-                          className="glass-liquid-btn p-2"
-                          title="گزارش روزانه"
-                        >
-                          <FaEye />
-                        </button>
-                        {request.status === 'PENDING' && (
-                          <>
-                            <button
-                              onClick={() => handleApproveException(request.id)}
-                              className="glass-liquid-btn p-2 text-green-400"
-                              title="رد درخواست"
-                            >
-                              <FaCheck />
-                            </button>
-                            <button
-                              onClick={async () => {
-                                const reason = await askSecurityAction({ title: 'رد درخواست', inputLabel: 'دلیل رد' });
-                                if (reason) handleRejectException(request.id, reason);
-                              }}
-                              className="glass-liquid-btn p-2 text-red-400"
-                              title="مشاهده جزئیات"
-                            >
-                              <FaTimes />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          
-          {exceptionRequests.length === 0 && (
-            <div className="text-center py-8">
-              <p className="text-secondary">درخواستی ثبت نشده است</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Mission Assignments */}
-      {activeTab === 'missions' && (
-        <div className="glass-liquid-card p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">ماموریت‌ها</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-700">
-                  <th className="text-right py-3 px-4 text-secondary">کارمند</th>
-                  <th className="text-right py-3 px-4 text-secondary">نوع ماموریت</th>
-                  <th className="text-right py-3 px-4 text-secondary">مقصد</th>
-                  <th className="text-right py-3 px-4 text-secondary">تاریخ</th>
-                  <th className="text-right py-3 px-4 text-secondary">وضعیت</th>
-                  <th className="text-right py-3 px-4 text-secondary">عملیات</th>
-                </tr>
-              </thead>
-              <tbody>
-                {missionAssignments.map((mission) => (
-                  <tr key={mission.id} className="border-b border-gray-800 hover:bg-white/5">
-                    <td className="py-3 px-4">
-                      <div>
-                        <div className="font-medium text-primary">
-                          {mission.employee.firstName} {mission.employee.lastName}
-                        </div>
-                        <div className="text-sm text-secondary">
-                          @{mission.employee.username}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-primary">
-                      {mission.missionType}
-                    </td>
-                    <td className="py-3 px-4 text-secondary">
-                      <div className="max-w-xs truncate">
-                        {mission.missionLocation}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-secondary">
-                      <div className="text-sm">
-                        <div>{new Date(mission.startDate).toLocaleDateString('fa-IR')}</div>
-                        <div>{mission.startTime} - {mission.endTime}</div>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(mission.status)}`}>
-                        {getStatusLabel(mission.status)}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex space-x-2 space-x-reverse">
-                        <button
-                          onClick={() => openDetailsModal(mission, 'mission')}
-                          className="glass-liquid-btn p-2"
-                          title="گزارش روزانه"
-                        >
-                          <FaEye />
-                        </button>
-                        {mission.status === 'PENDING' && (
-                          <button
-                            onClick={() => handleApproveMission(mission.id)}
-                            className="glass-liquid-btn p-2 text-green-400"
-                            title="رد ماموریت"
-                          >
-                            <FaCheck />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          
-          {missionAssignments.length === 0 && (
-            <div className="text-center py-8">
-              <p className="text-secondary">ماموریتی برای نمایش وجود ندارد</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Details Modal */}
-      {showDetailsModal && (selectedRequest || selectedMission) && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="glass-liquid-card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-primary">جزئیات</h2>
-              <button
-                onClick={() => {
-                  setShowDetailsModal(false);
-                  setSelectedRequest(null);
-                  setSelectedMission(null);
-                }}
-                className="glass-liquid-btn p-2"
-              >
-                <FaTimes />
-              </button>
-            </div>
-            
-            {selectedRequest && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-secondary mb-1">کارمند</label>
-                    <p className="text-primary">
-                      {selectedRequest.employee.firstName} {selectedRequest.employee.lastName}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-secondary mb-1">نوع درخواست</label>
-                    <p className="text-primary">{getExceptionTypeLabel(selectedRequest.exceptionType)}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-secondary mb-1">تاریخ</label>
-                    <p className="text-primary">{selectedRequest.reason}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-secondary mb-1">وضعیت</label>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(selectedRequest.status)}`}>
-                      {getStatusLabel(selectedRequest.status)}
-                    </span>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-secondary mb-1">دلیل</label>
-                    <p className="text-primary">{new Date(selectedRequest.startDate).toLocaleDateString('fa-IR')}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-secondary mb-1">گزارش روزانه</label>
-                    <p className="text-primary">{new Date(selectedRequest.endDate).toLocaleDateString('fa-IR')}</p>
-                  </div>
-                </div>
-                {selectedRequest.notes && (
-                  <div>
-                    <label className="block text-sm text-secondary mb-1">پاسخ‌دهنده</label>
-                    <p className="text-primary">{selectedRequest.notes}</p>
-                  </div>
-                )}
-              </div>
-            )}
-            
-            {selectedMission && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-secondary mb-1">کارمند</label>
-                    <p className="text-primary">
-                      {selectedMission.employee.firstName} {selectedMission.employee.lastName}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-secondary mb-1">نوع ماموریت</label>
-                    <p className="text-primary">{selectedMission.missionType}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-secondary mb-1">مقصد</label>
-                    <p className="text-primary">{selectedMission.missionLocation}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-secondary mb-1">تاریخ شروع</label>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(selectedMission.status)}`}>
-                      {getStatusLabel(selectedMission.status)}
-                    </span>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-secondary mb-1">تاریخ پایان</label>
-                    <p className="text-primary">{new Date(selectedMission.startDate).toLocaleDateString('fa-IR')}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-secondary mb-1">وضعیت</label>
-                    <p className="text-primary">{selectedMission.startTime} - {selectedMission.endTime}</p>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm text-secondary mb-1">توضیحات</label>
-                  <p className="text-primary">{selectedMission.description}</p>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+  if (loading) return <ErpLoading />;
+  return <ErpPage eyebrow="حراست" title="استثناهای حضور و غیاب و ماموریت‌ها" description="ثبت، بررسی، تأیید و حسابرسی بازه‌های مجاز؛ تردد واقعی مستقل باقی می‌ماند.">
+    {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+    <div className="flex flex-wrap gap-2">
+      <ErpButton label={`استثناها (${exceptions.length.toLocaleString('fa-IR')})`} onClick={() => setKind('exception')} variant={kind === 'exception' ? 'solid' : 'soft'} />
+      <ErpButton label={`ماموریت‌ها (${missions.length.toLocaleString('fa-IR')})`} icon={FaPlane} onClick={() => setKind('mission')} variant={kind === 'mission' ? 'solid' : 'soft'} />
+      <ErpButton label={kind === 'exception' ? 'استثنای جدید' : 'ماموریت جدید'} icon={FaPlus} onClick={() => setEditor({ kind })} tone="success" />
     </div>
-  );
+    <ErpSection title={kind === 'exception' ? 'استثناهای حضور و غیاب' : 'ماموریت‌ها'}>
+      {!items.length ? <ErpEmptyState icon={kind === 'exception' ? FaCheck : FaPlane} title="موردی ثبت نشده است" /> : <div className="space-y-3">{items.map((item) => <ErpCard key={item.id} className="p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2"><p className="font-bold">{personName(item)}</p><ErpBadge tone={statusTone(item.status)}>{statusLabel[item.status] || item.status}</ErpBadge></div>
+            <p className="mt-2 text-sm text-slate-600">{kind === 'exception' ? item.exceptionType : `${item.missionType} · ${item.missionLocation}`}</p>
+            <p className="mt-1 text-sm">{new Date(item.startDate).toLocaleDateString('fa-IR')} {item.startTime || ''} تا {item.endDate ? new Date(item.endDate).toLocaleDateString('fa-IR') : ''} {item.endTime || ''}</p>
+            <p className="mt-2 text-sm text-slate-500">{kind === 'exception' ? item.reason : item.missionPurpose}</p>
+            {item.auditEvents?.length ? <p className="mt-2 text-xs text-slate-400">{item.auditEvents.length.toLocaleString('fa-IR')} رویداد حسابرسی</p> : null}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {item.status === 'PENDING' && <><ErpButton label="ویرایش" icon={FaEdit} onClick={() => setEditor({ kind, item })} variant="soft" /><ErpButton label="تأیید" icon={FaCheck} onClick={() => approve(item)} tone="success" /><ErpButton label="رد" icon={FaTimes} onClick={() => reject(item)} tone="warning" /><ErpButton label="حذف" icon={FaTrash} onClick={() => remove(item)} tone="danger" variant="soft" /></>}
+            {item.status === 'APPROVED' && <><ErpButton label="اصلاح حسابرسی‌شده" icon={FaEdit} onClick={() => setEditor({ kind, item, correction: true })} variant="soft" /><ErpButton label="لغو" icon={FaTimes} onClick={() => cancel(item)} tone="danger" variant="soft" /></>}
+          </div>
+        </div>
+      </ErpCard>)}</div>}
+    </ErpSection>
+    {editor && <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/55 p-4"><div className="mx-auto my-8 max-w-3xl rounded-xl bg-white p-2 shadow-2xl dark:bg-slate-900">{editor.kind === 'exception'
+      ? <ExceptionRequestForm key={`${editor.item?.id || 'new'}-${editor.correction || false}`} initialData={editor.item ? initialFormData(editor.item) : undefined} onSubmit={submitEditor} onCancel={() => setEditor(null)} loading={saving} />
+      : <MissionAssignmentForm key={`${editor.item?.id || 'new'}-${editor.correction || false}`} initialData={editor.item ? initialFormData(editor.item) : undefined} onSubmit={submitEditor} onCancel={() => setEditor(null)} loading={saving} />}</div></div>}
+  </ErpPage>;
 }
-

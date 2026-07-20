@@ -782,6 +782,10 @@ export const securityAPI = {
     api.post('/security/attendance/checkin', typeof entryTimeOrData === 'object' ? { employeeId, ...entryTimeOrData } : { employeeId, entryTime: entryTimeOrData }),
   checkOut: (employeeId: string, exitTimeOrData?: string | Record<string, any>) =>
     api.post('/security/attendance/checkout', typeof exitTimeOrData === 'object' ? { employeeId, ...exitTimeOrData } : { employeeId, exitTime: exitTimeOrData }),
+  correctAttendanceInterval: (intervalId: string, data: { enteredAt: string; exitedAt?: string | null; reason: string }) =>
+    api.put(`/security/attendance/intervals/${intervalId}`, data),
+  voidAttendanceInterval: (intervalId: string, reason: string) =>
+    api.post(`/security/attendance/intervals/${intervalId}/void`, { reason }),
   recordException: (data: any) => api.post('/security/attendance/exception', data),
   
   // Reports and dashboard
@@ -850,11 +854,20 @@ export const securityAPI = {
     api.put(`/security/exceptions/${id}/approve`, { notes }),
   rejectExceptionRequest: (id: string, rejectionReason: string) => 
     api.put(`/security/exceptions/${id}/reject`, { rejectionReason }),
+  updateException: (id: string, data: any) => api.put(`/security/exceptions/${id}`, data),
+  deleteException: (id: string) => api.delete(`/security/exceptions/${id}`),
+  cancelException: (id: string, reason: string) => api.put(`/security/exceptions/${id}/cancel`, { reason }),
+  correctException: (id: string, data: any) => api.put(`/security/exceptions/${id}/correct`, data),
 
   // Mission management
   createMissionAssignment: (data: any) => api.post('/security/missions/assign', data),
   getMissionAssignments: (params?: any) => api.get('/security/missions', { params }),
   approveMissionAssignment: (id: string) => api.put(`/security/missions/${id}/approve`),
+  updateMissionAssignment: (id: string, data: any) => api.put(`/security/missions/${id}`, data),
+  deleteMissionAssignment: (id: string) => api.delete(`/security/missions/${id}`),
+  rejectMissionAssignment: (id: string, reason: string) => api.put(`/security/missions/${id}/reject`, { reason }),
+  cancelMissionAssignment: (id: string, reason: string) => api.put(`/security/missions/${id}/cancel`, { reason }),
+  correctMissionAssignment: (id: string, data: any) => api.put(`/security/missions/${id}/correct`, data),
 
   // Digital signature management
   saveAttendanceSignature: (id: string, signatureData: string, signatureType?: string) => 

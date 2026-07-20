@@ -40,6 +40,9 @@ export default function SecuritySupervisorReportsPage() {
   const selectedCategory = useMemo(() => categories.find((category) => category.id === form.categoryId), [categories, form.categoryId]);
   const categoryTypes = useMemo(() => selectedCategory?.reportTypes || [], [selectedCategory]);
   const selectedType = useMemo(() => types.find((type) => type.id === form.reportTypeId), [types, form.reportTypeId]);
+  const showReportTypes = Boolean(selectedCategory?.useReportTypes);
+  const showRelatedPersonnel = Boolean(selectedCategory && (showReportTypes ? selectedType?.useRelatedPersonnel : selectedCategory.useRelatedPersonnel));
+  const hasMeaningfulDetail = Boolean(form.description.trim() || images.length || (showRelatedPersonnel && form.participantIds.length));
   const selectedParticipants = useMemo(
     () => participants.filter((user) => form.participantIds.includes(user.id)),
     [form.participantIds, participants]
@@ -88,6 +91,7 @@ export default function SecuritySupervisorReportsPage() {
     setError('');
     try {
       const payload = new FormData();
+      payload.append('categoryId', form.categoryId);
       payload.append('reportTypeId', form.reportTypeId);
       payload.append('description', form.description);
       payload.append('participantIds', JSON.stringify(form.participantIds));
@@ -192,7 +196,7 @@ export default function SecuritySupervisorReportsPage() {
                 <span className={labelClass}>دسته‌بندی گزارش لحظه‌ای</span>
                 <EnhancedDropdown
                   value={form.categoryId}
-                  onChange={(categoryId) => setForm((current) => ({ ...current, categoryId, reportTypeId: '' }))}
+                  onChange={(categoryId) => setForm((current) => ({ ...current, categoryId, reportTypeId: '', participantIds: [] }))}
                   placeholder="انتخاب دسته‌بندی"
                   options={categories.map((category) => ({ value: category.id, label: category.name }))}
                   searchable
@@ -200,7 +204,7 @@ export default function SecuritySupervisorReportsPage() {
                 />
                 {selectedCategory?.description && <p className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">{selectedCategory.description}</p>}
               </label>
-              <label className="block">
+              {showReportTypes && <label className="block">
                 <span className={labelClass}>نوع گزارش لحظه‌ای</span>
                 <EnhancedDropdown
                   value={form.reportTypeId}
@@ -212,8 +216,8 @@ export default function SecuritySupervisorReportsPage() {
                   disabled={!form.categoryId}
                 />
                 {selectedType?.description && <p className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">{selectedType.description}</p>}
-              </label>
-              <div className="space-y-3">
+              </label>}
+              {showRelatedPersonnel && <div className="space-y-3">
                 <div ref={participantPickerRef} className="relative">
                   <span className={labelClass}>افراد مرتبط</span>
                   <button
@@ -276,7 +280,7 @@ export default function SecuritySupervisorReportsPage() {
                     <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">روی انتخاب افراد مرتبط بزنید و هر نفر را جداگانه به گزارش اضافه کنید.</p>
                   )}
                 </div>
-              </div>
+              </div>}
             </div>
             <div className="mt-4 grid grid-cols-1 gap-4">
               <label className="block">
@@ -294,9 +298,9 @@ export default function SecuritySupervisorReportsPage() {
             </div>
             {images.length > 0 && <div className="mt-3 flex flex-wrap gap-3">{images.map((image, index) => <div key={`${image.name}-${index}`} className="relative"><img src={URL.createObjectURL(image)} alt={image.name} className="h-20 w-20 rounded-lg object-cover" /><button type="button" className="absolute -right-2 -top-2 rounded-full bg-red-600 px-2 py-1 text-xs text-white" onClick={() => setImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>}
             <div className="mt-4 flex flex-wrap justify-end gap-2">
-              <ErpButton label="ثبت گزارش" icon={FaPlus} onClick={createEntry} disabled={saving || !form.reportTypeId} variant="solid" />
+              <ErpButton label="ثبت گزارش" icon={FaPlus} onClick={createEntry} disabled={saving || !form.categoryId || (showReportTypes && !form.reportTypeId) || !hasMeaningfulDetail} variant="solid" />
             </div>
-            {types.length === 0 && <p className="mt-3 text-sm text-amber-700">ابتدا نوع گزارش لحظه‌ای را در تنظیمات حراست تعریف کنید.</p>}
+            {selectedCategory?.useReportTypes && categoryTypes.length === 0 && <p className="mt-3 text-sm text-amber-700">برای این دسته‌بندی هنوز نوع گزارش فعالی تعریف نشده است.</p>}
           </ErpSection>
 
           <ErpSection title="گشت‌زنی">
@@ -340,7 +344,7 @@ export default function SecuritySupervisorReportsPage() {
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-semibold text-slate-900 dark:text-white">ردیف {entry.rowNumber.toLocaleString('fa-IR')}</span>
-                          <ErpBadge tone={entry.status === 'VOIDED' ? 'danger' : 'info'}>{entry.status === 'VOIDED' ? 'باطل شده' : entry.reportType?.name}</ErpBadge>
+                          <ErpBadge tone={entry.status === 'VOIDED' ? 'danger' : 'info'}>{entry.status === 'VOIDED' ? 'باطل شده' : `${entry.categoryNameSnapshot}${entry.reportTypeNameSnapshot ? ` / ${entry.reportTypeNameSnapshot}` : ''}`}</ErpBadge>
                         </div>
                         {entry.reportType?.description && <p className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">توضیح نوع گزارش: {entry.reportType.description}</p>}
                         {entry.description && <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{entry.description}</p>}

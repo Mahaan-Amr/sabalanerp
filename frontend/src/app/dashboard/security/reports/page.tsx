@@ -25,11 +25,9 @@ export default function ReportsPage() {
   const [data, setData] = useState<any>(null);
   const [performance, setPerformance] = useState<any>(null);
   const [departments, setDepartments] = useState<any[]>([]);
-  const [shifts, setShifts] = useState<any[]>([]);
   const [personnel, setPersonnel] = useState<any[]>([]);
   const [range, setRange] = useState({ startDate: PersianCalendar.now(), endDate: PersianCalendar.now() });
   const [departmentId, setDepartmentId] = useState('');
-  const [shiftId, setShiftId] = useState('');
   const [personnelId, setPersonnelId] = useState('');
   const [sessionStatus, setSessionStatus] = useState('');
   const [coverageStatus, setCoverageStatus] = useState('');
@@ -42,8 +40,7 @@ export default function ReportsPage() {
   const baseParams = () => ({
     startDate: PersianCalendar.toGregorianDateOnly(range.startDate),
     endDate: PersianCalendar.toGregorianDateOnly(range.endDate),
-    departmentId: departmentId || undefined,
-    shiftId: shiftId || undefined
+    departmentId: departmentId || undefined
   });
 
   const performanceParams = () => ({
@@ -74,13 +71,12 @@ export default function ReportsPage() {
 
   useEffect(() => {
     load();
-  }, [scope, range, departmentId, shiftId, personnelId, sessionStatus, coverageStatus, activityType]);
+  }, [scope, range, departmentId, personnelId, sessionStatus, coverageStatus, activityType]);
 
   useEffect(() => {
-    Promise.all([departmentsAPI.getDepartments(), securityAPI.getShifts(), securityAPI.getOperationalPersonnel()])
-      .then(([departmentResponse, shiftResponse, personnelResponse]) => {
+    Promise.all([departmentsAPI.getDepartments(), securityAPI.getOperationalPersonnel()])
+      .then(([departmentResponse, personnelResponse]) => {
         setDepartments(departmentResponse.data.data || []);
-        setShifts(shiftResponse.data.data || []);
         setPersonnel(personnelResponse.data.data || []);
       })
       .catch(() => undefined);
@@ -182,7 +178,6 @@ export default function ReportsPage() {
   ];
 
   const departmentOptions = [{ value: '', label: 'همه بخش‌ها' }, ...departments.map((department) => ({ value: department.id, label: department.namePersian }))];
-  const shiftOptions = [{ value: '', label: 'همه شیفت‌ها' }, ...shifts.map((shift) => ({ value: shift.id, label: shift.namePersian }))];
   const personnelOptions = [{ value: '', label: 'همه نیروها' }, ...personnel.map((item) => ({ value: item.id, label: `${item.user.firstName} ${item.user.lastName}` }))];
   const statusOptions = [
     { value: '', label: 'همه وضعیت‌ها' },
@@ -226,7 +221,6 @@ export default function ReportsPage() {
           {scope === 'attendance' ? (
             <>
               <EnhancedDropdown label="بخش" value={departmentId} onChange={setDepartmentId} options={departmentOptions} searchable clearable={false} />
-              <EnhancedDropdown label="شیفت" value={shiftId} onChange={setShiftId} options={shiftOptions} searchable clearable={false} />
             </>
           ) : (
             <>

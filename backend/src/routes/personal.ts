@@ -113,7 +113,7 @@ router.post('/leave-requests', protect, [
       include: includeLeaveRelations
     });
 
-    if (request.status === ExceptionStatus.APPROVED) {
+    if (request.status === ExceptionStatus.APPROVED && request.employeeId) {
       await markSecuritySlotsForLeave(request.employeeId, request.id, request.startDate, request.endDate);
     }
 
@@ -173,7 +173,7 @@ router.put('/leave-requests/:id/approve', protect, async (req: AuthRequest, res:
       data: { status: ExceptionStatus.APPROVED, approvedBy: req.user!.id, approvedAt: new Date() },
       include: includeLeaveRelations
     });
-    await markSecuritySlotsForLeave(updated.employeeId, updated.id, updated.startDate, updated.endDate);
+    if (updated.employeeId) await markSecuritySlotsForLeave(updated.employeeId, updated.id, updated.startDate, updated.endDate);
     res.json({ success: true, data: updated });
   } catch (error) {
     console.error('Approve personal leave request error:', error);

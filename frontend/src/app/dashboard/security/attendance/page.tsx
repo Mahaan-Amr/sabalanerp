@@ -56,6 +56,14 @@ interface AttendanceRecord {
   delayMinutes?: number | null;
   overtimeMinutes?: number | null;
   overtimePending?: boolean;
+  intervals?: Array<{ id: string; enteredAt: string; exitedAt?: string | null; entryRecorder?: { firstName: string; lastName: string }; exitRecorder?: { firstName: string; lastName: string } | null }>;
+  movementTimeline?: Array<{ kind: 'PRESENCE' | 'OUTSIDE' | 'HOURLY_LEAVE'; startsAt: string; endsAt?: string | null }>;
+  physicalPresenceMinutes?: number;
+  outsideMinutes?: number;
+  presencePending?: boolean;
+  accountedWorkMinutes?: number | null;
+  approvedExceptions?: any[];
+  approvedMissions?: any[];
   shift?: {
     id: string;
     namePersian: string;
@@ -143,8 +151,8 @@ const getStatusLabel = (status: string) => {
   }
 };
 
-const canCheckIn = (record: AttendanceRecord) => !record.entryTime && ['ABSENT', 'PRESENT', 'PENDING', 'NON_WORKING_DAY'].includes(record.status);
-const canCheckOut = (record: AttendanceRecord) => Boolean(record.entryTime) && !record.exitTime && ['PRESENT', 'LATE'].includes(record.status);
+const canCheckIn = (record: AttendanceRecord) => !record.presencePending;
+const canCheckOut = (record: AttendanceRecord) => Boolean(record.presencePending);
 const isExceptionStatus = (status: string) => ['MISSION', 'HOURLY_LEAVE', 'SICK_LEAVE', 'VACATION'].includes(status);
 const currentTimeValue = () => new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
 const selectedDateIso = (date: string) => PersianCalendar.toGregorianDateOnly(date);
@@ -159,6 +167,22 @@ interface AttendanceDialogState {
   reason: string;
 }
 
+interface IntervalDialogState {
+  action: 'correct' | 'void';
+  interval: NonNullable<AttendanceRecord['intervals']>[number];
+  record: AttendanceRecord;
+  enteredAt: string;
+  exitedAt: string;
+  reason: string;
+}
+
+const localDateTimeValue = (value?: string | null) => {
+  if (!value) return '';
+  const date = new Date(value);
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+};
+
 export default function AttendancePage() {
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [stats, setStats] = useState<AttendanceStats | null>(null);
@@ -169,11 +193,10 @@ export default function AttendancePage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [departmentId, setDepartmentId] = useState('');
-  const [shiftId, setShiftId] = useState('');
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [shifts, setShifts] = useState<Shift[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [attendanceDialog, setAttendanceDialog] = useState<AttendanceDialogState | null>(null);
+  const [intervalDialog, setIntervalDialog] = useState<IntervalDialogState | null>(null);
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
 
   const fetchAttendanceData = async () => {
@@ -184,7 +207,6 @@ export default function AttendancePage() {
       const attendanceResponse = await securityAPI.getDailyAttendance({
         date: selectedDateIso(selectedDate),
         departmentId: departmentId || undefined,
-        shiftId: shiftId || undefined,
       });
 
       if (attendanceResponse.data.success) {
@@ -201,17 +223,15 @@ export default function AttendancePage() {
 
   useEffect(() => {
     fetchAttendanceData();
-  }, [selectedDate, departmentId, shiftId]);
+  }, [selectedDate, departmentId]);
 
   useEffect(() => {
     const loadFilters = async () => {
       try {
-        const [departmentsResponse, shiftsResponse] = await Promise.all([
+        const [departmentsResponse] = await Promise.all([
           departmentsAPI.getDepartments(),
-          securityAPI.getShifts(),
         ]);
         if (departmentsResponse.data.success) setDepartments(departmentsResponse.data.data || []);
-        if (shiftsResponse.data.success) setShifts(shiftsResponse.data.data || []);
       } catch (requestError) {
         console.error('Error loading attendance filters:', requestError);
       }
@@ -237,9 +257,9 @@ export default function AttendancePage() {
   const submitAttendanceDialog = async () => {
     if (!attendanceDialog) return;
     const { action, record, time, defaultTime, reason } = attendanceDialog;
-    const requiresReason = time !== defaultTime;
+    const requiresReason = action === 'close-previous';
     if (requiresReason && !reason.trim()) {
-      notifySecurity('برای تغییر زمان، دلیل کوتاه الزامی است.', 'error');
+      notifySecurity('برای ثبت خروج روز قبل، دلیل کوتاه الزامی است.', 'error');
       return;
     }
     setActionLoadingId(`${action}-${record.employee.id}`);
@@ -250,7 +270,7 @@ export default function AttendancePage() {
             date: action === 'close-previous' && record.openPreviousAttendance ? String(record.openPreviousAttendance.date).slice(0, 10) : selectedDateIso(selectedDate),
             attendanceId: action === 'close-previous' ? record.openPreviousAttendance?.id : undefined,
             exitTime: time,
-            reason: requiresReason || action === 'close-previous' ? reason.trim() || 'ثبت خروج فراموش‌شده' : undefined,
+            reason: reason.trim() || undefined,
           });
       if (response.data.success) {
         notifySecurity(response.data.message || (action === 'checkin' ? 'ورود ثبت شد' : 'خروج ثبت شد'));
@@ -259,6 +279,35 @@ export default function AttendancePage() {
       }
     } catch (requestError: any) {
       notifySecurity(requestError.response?.data?.error || 'ثبت عملیات ناموفق بود', 'error');
+    } finally {
+      setActionLoadingId('');
+    }
+  };
+
+  const openIntervalDialog = (record: AttendanceRecord, interval: NonNullable<AttendanceRecord['intervals']>[number], action: IntervalDialogState['action']) => {
+    setIntervalDialog({ action, record, interval, enteredAt: localDateTimeValue(interval.enteredAt), exitedAt: localDateTimeValue(interval.exitedAt), reason: '' });
+  };
+
+  const submitIntervalDialog = async () => {
+    if (!intervalDialog || !intervalDialog.reason.trim()) return;
+    if (intervalDialog.action === 'correct' && (!intervalDialog.enteredAt || (intervalDialog.exitedAt && intervalDialog.exitedAt <= intervalDialog.enteredAt))) {
+      notifySecurity('زمان‌های ورود و خروج را بررسی کنید.', 'error');
+      return;
+    }
+    setActionLoadingId(`interval-${intervalDialog.interval.id}`);
+    try {
+      const response = intervalDialog.action === 'void'
+        ? await securityAPI.voidAttendanceInterval(intervalDialog.interval.id, intervalDialog.reason.trim())
+        : await securityAPI.correctAttendanceInterval(intervalDialog.interval.id, {
+            enteredAt: new Date(intervalDialog.enteredAt).toISOString(),
+            exitedAt: intervalDialog.exitedAt ? new Date(intervalDialog.exitedAt).toISOString() : null,
+            reason: intervalDialog.reason.trim()
+          });
+      notifySecurity(response.data.message || 'تردد به‌روزرسانی شد.');
+      setIntervalDialog(null);
+      await fetchAttendanceData();
+    } catch (requestError: any) {
+      notifySecurity(requestError.response?.data?.error || 'به‌روزرسانی تردد ناموفق بود.', 'error');
     } finally {
       setActionLoadingId('');
     }
@@ -328,15 +377,6 @@ export default function AttendancePage() {
               <option value="">همه بخش‌ها</option>
               {departments.map((department) => (
                 <option key={department.id} value={department.id}>{department.namePersian}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span className={labelClass}>شیفت</span>
-            <select value={shiftId} onChange={(event) => setShiftId(event.target.value)} className={inputClass}>
-              <option value="">همه شیفت‌ها</option>
-              {shifts.map((shift) => (
-                <option key={shift.id} value={shift.id}>{shift.namePersian}</option>
               ))}
             </select>
           </label>
@@ -411,7 +451,11 @@ export default function AttendancePage() {
                       <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800/70">
                         <div><dt className="text-xs text-slate-500">ورود</dt><dd className="mt-1 font-semibold">{record.entryTime || '-'}</dd></div>
                         <div><dt className="text-xs text-slate-500">خروج</dt><dd className="mt-1 font-semibold">{record.exitTime || '-'}</dd></div>
-                        <div><dt className="text-xs text-slate-500">شیفت ثبت</dt><dd className="mt-1 font-semibold">{record.shift?.namePersian || '-'}</dd></div>
+                        <div><dt className="text-xs text-slate-500">حضور فیزیکی</dt><dd className="mt-1 font-semibold">{record.presencePending ? 'در حال حضور' : `${(record.physicalPresenceMinutes || 0).toLocaleString('fa-IR')} دقیقه`}</dd></div>
+                        <div><dt className="text-xs text-slate-500">خارج از محل</dt><dd className="mt-1 font-semibold">{(record.outsideMinutes || 0).toLocaleString('fa-IR')} دقیقه</dd></div>
+                        <div><dt className="text-xs text-slate-500">کارکرد محاسبه‌شده</dt><dd className="mt-1 font-semibold">{record.accountedWorkMinutes === null || record.accountedWorkMinutes === undefined ? 'در انتظار تکمیل' : `${record.accountedWorkMinutes.toLocaleString('fa-IR')} دقیقه`}</dd></div>
+                        {record.movementTimeline?.length ? <div className="col-span-2"><dt className="text-xs text-slate-500">خط زمانی روز</dt><dd className="mt-2 space-y-1">{record.movementTimeline.map((segment, index) => <p key={`${segment.kind}-${segment.startsAt}-${index}`} className="rounded bg-white px-2 py-1 text-xs dark:bg-slate-900"><strong>{segment.kind === 'PRESENCE' ? 'حضور در محل' : segment.kind === 'HOURLY_LEAVE' ? 'مرخصی ساعتی' : 'خارج از محل'}:</strong> {new Date(segment.startsAt).toLocaleString('fa-IR')} تا {segment.endsAt ? new Date(segment.endsAt).toLocaleString('fa-IR') : 'باز'}</p>)}</dd></div> : null}
+                        {record.intervals?.length ? <div className="col-span-2"><dt className="text-xs text-slate-500">جزئیات تردد</dt><dd className="mt-2 space-y-1">{record.intervals.map((interval, index) => <div key={interval.id} className="rounded bg-white px-2 py-2 text-xs dark:bg-slate-900"><p>{(index + 1).toLocaleString('fa-IR')}. {new Date(interval.enteredAt).toLocaleString('fa-IR')} تا {interval.exitedAt ? new Date(interval.exitedAt).toLocaleString('fa-IR') : 'باز'} · ثبت‌کننده ورود: {interval.entryRecorder ? `${interval.entryRecorder.firstName} ${interval.entryRecorder.lastName}` : '-'}</p><div className="mt-2 flex gap-2"><button type="button" className="font-semibold text-teal-700" onClick={() => openIntervalDialog(record, interval, 'correct')}>اصلاح</button><button type="button" className="font-semibold text-rose-700" onClick={() => openIntervalDialog(record, interval, 'void')}>ابطال</button></div></div>)}</dd></div> : null}
                         <div><dt className="text-xs text-slate-500">ساعت کاری</dt><dd className="mt-1 font-semibold" dir="ltr">{record.scheduledStartTime && record.scheduledEndTime ? `${formatTime12(record.scheduledStartTime)} – ${formatTime12(record.scheduledEndTime)}` : record.workScheduleStatus === 'NON_WORKING_DAY' ? 'روز غیرکاری' : 'تعریف نشده'}</dd></div>
                         <div><dt className="text-xs text-slate-500">تأخیر</dt><dd className="mt-1 font-semibold">{record.delayMinutes === null || record.delayMinutes === undefined ? '-' : `${record.delayMinutes.toLocaleString('fa-IR')} دقیقه`}</dd></div>
                         <div><dt className="text-xs text-slate-500">اضافه‌کار</dt><dd className="mt-1 font-semibold">{record.overtimePending ? 'در انتظار ثبت خروج' : record.overtimeMinutes === null || record.overtimeMinutes === undefined ? '-' : `${record.overtimeMinutes.toLocaleString('fa-IR')} دقیقه`}</dd></div>
@@ -420,8 +464,8 @@ export default function AttendancePage() {
                       </dl>
                     )}
                     {(checkingIn || checkingOut) && <p className="mt-2 text-xs font-semibold text-[#074747] dark:text-teal-200">در حال ثبت...</p>}
-                    {isExceptionStatus(record.status) && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">برای وضعیت‌های استثنا، ورود و خروج مستقیم از کارت پیشنهاد نمی‌شود.</p>}
-                    {record.entryTime && record.exitTime && <p className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300"><FaCheckCircle /> تکمیل شده</p>}
+                    {isExceptionStatus(record.status) && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">استثنای تأییدشده با تردد واقعی هم‌زمان نمایش داده می‌شود.</p>}
+                    {record.entryTime && !record.presencePending && <p className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300"><FaCheckCircle /> آخرین بازه تکمیل شده</p>}
                   </div>
                 );
               })}
@@ -439,7 +483,7 @@ export default function AttendancePage() {
                     <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">ساعت کاری</th>
                     <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">تأخیر</th>
                     <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">اضافه‌کار</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">شیفت ثبت</th>
+                    <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">حضور / خارج</th>
                     <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">یادداشت</th>
                     <th className="px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">عملیات</th>
                   </tr>
@@ -458,7 +502,7 @@ export default function AttendancePage() {
                       <td className="px-3 py-4 text-slate-600 dark:text-slate-300" dir="ltr">{record.scheduledStartTime && record.scheduledEndTime ? `${formatTime12(record.scheduledStartTime)} – ${formatTime12(record.scheduledEndTime)}` : record.workScheduleStatus === 'NON_WORKING_DAY' ? 'روز غیرکاری' : 'تعریف نشده'}</td>
                       <td className="px-3 py-4 text-amber-700">{record.delayMinutes === null || record.delayMinutes === undefined ? '-' : `${record.delayMinutes.toLocaleString('fa-IR')} دقیقه`}</td>
                       <td className="px-3 py-4 text-teal-700">{record.overtimePending ? 'در انتظار خروج' : record.overtimeMinutes === null || record.overtimeMinutes === undefined ? '-' : `${record.overtimeMinutes.toLocaleString('fa-IR')} دقیقه`}</td>
-                      <td className="px-3 py-4 text-slate-600 dark:text-slate-300">{record.shift?.namePersian || '-'}</td>
+                      <td className="px-3 py-4 text-slate-600 dark:text-slate-300">{record.presencePending ? 'در حال حضور' : `${(record.physicalPresenceMinutes || 0).toLocaleString('fa-IR')} / ${(record.outsideMinutes || 0).toLocaleString('fa-IR')} دقیقه`}</td>
                       <td className="px-3 py-4 text-slate-600 dark:text-slate-300">
                         {record.openPreviousAttendance ? (
                           <span className="font-semibold text-amber-700">خروج روز قبل ثبت نشده</span>
@@ -469,6 +513,13 @@ export default function AttendancePage() {
                           <ErpButton label="ورود" icon={FaSignInAlt} onClick={() => openAttendanceDialog(record, 'checkin')} disabled={!canCheckIn(record) || Boolean(actionLoadingId) || Boolean(record.openPreviousAttendance)} variant="soft" />
                           <ErpButton label="خروج" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'checkout')} disabled={!canCheckOut(record) || Boolean(actionLoadingId)} tone="neutral" variant="soft" />
                           {record.openPreviousAttendance && <ErpButton label="خروج قبلی" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'close-previous')} disabled={Boolean(actionLoadingId)} tone="warning" variant="soft" />}
+                          {record.intervals?.map((interval, index) => (
+                            <div key={interval.id} className="flex gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs dark:border-slate-700">
+                              <span className="text-slate-500">تردد {(index + 1).toLocaleString('fa-IR')}</span>
+                              <button type="button" className="font-semibold text-teal-700" onClick={() => openIntervalDialog(record, interval, 'correct')}>اصلاح</button>
+                              <button type="button" className="font-semibold text-rose-700" onClick={() => openIntervalDialog(record, interval, 'void')}>ابطال</button>
+                            </div>
+                          ))}
                         </div>
                       </td>
                     </tr>
@@ -497,13 +548,33 @@ export default function AttendancePage() {
               <span className={labelClass}>زمان</span>
               <PersianTimePicker value={attendanceDialog.time} onChange={(time) => setAttendanceDialog((current) => current ? { ...current, time } : current)} />
             </label>
-            <label className="mt-4 block">
-              <span className={labelClass}>دلیل {attendanceDialog.time !== attendanceDialog.defaultTime || attendanceDialog.action === 'close-previous' ? '(الزامی)' : '(اختیاری)'}</span>
+            {(attendanceDialog.action === 'close-previous' || attendanceDialog.time !== attendanceDialog.defaultTime) && <label className="mt-4 block">
+              <span className={labelClass}>دلیل {attendanceDialog.action === 'close-previous' ? '(الزامی)' : '(اختیاری)'}</span>
               <textarea value={attendanceDialog.reason} onChange={(event) => setAttendanceDialog((current) => current ? { ...current, reason: event.target.value } : current)} className={`${inputClass} min-h-24`} placeholder="مثلاً فراموشی ثبت در زمان واقعی" />
-            </label>
+            </label>}
             <div className="mt-5 flex flex-wrap justify-end gap-2">
               <ErpButton label="انصراف" onClick={() => setAttendanceDialog(null)} tone="neutral" variant="ghost" />
-              <ErpButton label="ثبت" onClick={submitAttendanceDialog} variant="solid" disabled={Boolean(actionLoadingId) || ((attendanceDialog.time !== attendanceDialog.defaultTime || attendanceDialog.action === 'close-previous') && !attendanceDialog.reason.trim())} />
+              <ErpButton label="ثبت" onClick={submitAttendanceDialog} variant="solid" disabled={Boolean(actionLoadingId) || (attendanceDialog.action === 'close-previous' && !attendanceDialog.reason.trim())} />
+            </div>
+          </div>
+        </div>
+      )}
+      {intervalDialog && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
+          <div role="dialog" aria-modal="true" className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">{intervalDialog.action === 'correct' ? 'اصلاح بازه تردد' : 'ابطال بازه تردد'}</h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{intervalDialog.record.employee.firstName} {intervalDialog.record.employee.lastName}</p>
+            {intervalDialog.action === 'correct' && (
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <label><span className={labelClass}>ورود</span><input type="datetime-local" value={intervalDialog.enteredAt} onChange={(event) => setIntervalDialog((current) => current ? { ...current, enteredAt: event.target.value } : current)} className={inputClass} /></label>
+                <label><span className={labelClass}>خروج (اختیاری)</span><input type="datetime-local" value={intervalDialog.exitedAt} onChange={(event) => setIntervalDialog((current) => current ? { ...current, exitedAt: event.target.value } : current)} className={inputClass} /></label>
+              </div>
+            )}
+            <label className="mt-4 block"><span className={labelClass}>دلیل (الزامی)</span><textarea value={intervalDialog.reason} onChange={(event) => setIntervalDialog((current) => current ? { ...current, reason: event.target.value } : current)} className={`${inputClass} min-h-24`} /></label>
+            <p className="mt-2 text-xs text-slate-500">سابقه قبلی حذف نمی‌شود و همراه عامل و دلیل در لاگ ممیزی باقی می‌ماند.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <ErpButton label="انصراف" onClick={() => setIntervalDialog(null)} tone="neutral" variant="ghost" />
+              <ErpButton label={intervalDialog.action === 'correct' ? 'ثبت اصلاح' : 'تأیید ابطال'} onClick={submitIntervalDialog} tone={intervalDialog.action === 'void' ? 'danger' : undefined} variant="solid" disabled={Boolean(actionLoadingId) || !intervalDialog.reason.trim()} />
             </div>
           </div>
         </div>

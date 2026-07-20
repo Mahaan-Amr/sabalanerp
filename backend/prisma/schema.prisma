@@ -73,6 +73,10 @@ model User {
   fulfilledLoadingDrivers                    LogisticsDriverRequest[]             @relation("LogisticsDriverRequestFulfilledBy")
   cancelledLoadingDrivers                    LogisticsDriverRequest[]             @relation("LogisticsDriverRequestCancelledBy")
   instantReportParticipants                  SecurityShiftLogParticipant[]
+  recordedAttendanceIntervalEntries          AttendanceInterval[]                 @relation("AttendanceIntervalEntryRecorder")
+  recordedAttendanceIntervalExits            AttendanceInterval[]                 @relation("AttendanceIntervalExitRecorder")
+  attendanceIntervalAuditEvents              AttendanceIntervalAudit[]            @relation("AttendanceIntervalAuditActor")
+  attendanceWorkflowEvents                   SecurityAttendanceWorkflowEvent[]    @relation("SecurityAttendanceWorkflowActor")
 
   @@map("users")
 }
@@ -91,6 +95,8 @@ model Personnel {
   workSchedules                       PersonnelWorkSchedule[]
   securityAttendanceRosterMemberships SecurityAttendanceRosterMembership[]
   instantReportParticipants           SecurityShiftLogParticipant[]
+  exceptionRequests                   ExceptionRequest[]
+  missionAssignments                  MissionAssignment[]
   user                                User?
   department                          Department?                          @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   hrEmploymentRelationships           HrEmploymentRelationship[]
@@ -438,9 +444,9 @@ model AttendanceRecord {
   id                    String                        @id @default(cuid())
   employeeId            String?
   personnelId           String?
-  securityPersonnelId   String
+  securityPersonnelId   String?
   date                  DateTime
-  shiftId               String
+  shiftId               String?
   entryTime             String?
   exitTime              String?
   status                AttendanceStatus              @default(PRESENT)
@@ -464,12 +470,54 @@ model AttendanceRecord {
   updatedAt             DateTime                      @updatedAt
   employee              User?                         @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   personnel             Personnel?                    @relation(fields: [personnelId], references: [id], onDelete: Restrict)
-  securityPersonnel     SecurityPersonnel             @relation(fields: [securityPersonnelId], references: [id], onDelete: Cascade)
-  shift                 Shift                         @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  securityPersonnel     SecurityPersonnel?            @relation(fields: [securityPersonnelId], references: [id], onDelete: SetNull)
+  shift                 Shift?                        @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  intervals             AttendanceInterval[]
 
   @@index([personnelId, date])
   @@index([employeeId, date])
   @@map("attendance_records")
+}
+
+model AttendanceInterval {
+  id                 String                    @id @default(cuid())
+  attendanceRecordId String
+  enteredAt          DateTime
+  exitedAt           DateTime?
+  entryRecordedBy    String
+  exitRecordedBy     String?
+  entryReason        String?
+  exitReason         String?
+  status             AttendanceIntervalStatus  @default(ACTIVE)
+  voidReason         String?
+  voidedAt           DateTime?
+  voidedBy           String?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  attendanceRecord   AttendanceRecord          @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  entryRecorder      User                      @relation("AttendanceIntervalEntryRecorder", fields: [entryRecordedBy], references: [id], onDelete: Restrict)
+  exitRecorder       User?                     @relation("AttendanceIntervalExitRecorder", fields: [exitRecordedBy], references: [id], onDelete: Restrict)
+  auditEvents        AttendanceIntervalAudit[]
+
+  @@index([attendanceRecordId, enteredAt])
+  @@index([status, enteredAt])
+  @@map("attendance_intervals")
+}
+
+model AttendanceIntervalAudit {
+  id         String             @id @default(cuid())
+  intervalId String
+  action     String
+  reason     String
+  beforeData Json
+  afterData  Json?
+  actorId    String
+  createdAt  DateTime           @default(now())
+  interval   AttendanceInterval @relation(fields: [intervalId], references: [id], onDelete: Cascade)
+  actor      User               @relation("AttendanceIntervalAuditActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([intervalId, createdAt])
+  @@map("attendance_interval_audits")
 }
 
 model SecurityAttendanceRosterMembership {
@@ -491,12 +539,13 @@ model SecurityAttendanceRosterMembership {
 }
 
 model ExceptionRequest {
-  id                 String          @id @default(cuid())
-  employeeId         String
+  id                 String                            @id @default(cuid())
+  employeeId         String?
+  personnelId        String?
   requestedBy        String?
   leaveType          String?
   exceptionType      ExceptionType
-  status             ExceptionStatus @default(PENDING)
+  status             ExceptionStatus                   @default(PENDING)
   startDate          DateTime
   endDate            DateTime?
   startTime          String?
@@ -514,41 +563,73 @@ model ExceptionRequest {
   cancelledBy        String?
   cancelledAt        DateTime?
   cancellationReason String?
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
-  approver           User?           @relation("ExceptionApprover", fields: [approvedBy], references: [id])
-  canceller          User?           @relation("ExceptionCanceller", fields: [cancelledBy], references: [id])
-  creator            User?           @relation("ExceptionCreatedBy", fields: [requestedBy], references: [id])
-  employee           User            @relation("ExceptionEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
-  rejecter           User?           @relation("ExceptionRejecter", fields: [rejectedBy], references: [id])
+  createdAt          DateTime                          @default(now())
+  updatedAt          DateTime                          @updatedAt
+  approver           User?                             @relation("ExceptionApprover", fields: [approvedBy], references: [id])
+  canceller          User?                             @relation("ExceptionCanceller", fields: [cancelledBy], references: [id])
+  creator            User?                             @relation("ExceptionCreatedBy", fields: [requestedBy], references: [id])
+  employee           User?                             @relation("ExceptionEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+  personnel          Personnel?                        @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  rejecter           User?                             @relation("ExceptionRejecter", fields: [rejectedBy], references: [id])
+  auditEvents        SecurityAttendanceWorkflowEvent[]
 
+  @@index([personnelId, status, startDate])
   @@index([requestedBy])
   @@index([status, startDate])
   @@map("exception_requests")
 }
 
 model MissionAssignment {
-  id              String          @id @default(cuid())
-  employeeId      String
-  assignedBy      String
-  missionType     String
-  missionLocation String
-  missionPurpose  String
-  startDate       DateTime
-  endDate         DateTime?
-  startTime       String
-  endTime         String?
-  status          ExceptionStatus @default(PENDING)
-  approvedBy      String?
-  approvedAt      DateTime?
-  notes           String?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  approver        User?           @relation("MissionApprover", fields: [approvedBy], references: [id])
-  assigner        User            @relation("MissionAssigner", fields: [assignedBy], references: [id], onDelete: Cascade)
-  employee        User            @relation("MissionEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  id                 String                            @id @default(cuid())
+  employeeId         String?
+  personnelId        String?
+  assignedBy         String
+  missionType        String
+  missionLocation    String
+  missionPurpose     String
+  startDate          DateTime
+  endDate            DateTime?
+  startTime          String
+  endTime            String?
+  status             ExceptionStatus                   @default(PENDING)
+  approvedBy         String?
+  approvedAt         DateTime?
+  rejectedBy         String?
+  rejectedAt         DateTime?
+  rejectionReason    String?
+  cancelledBy        String?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  notes              String?
+  createdAt          DateTime                          @default(now())
+  updatedAt          DateTime                          @updatedAt
+  approver           User?                             @relation("MissionApprover", fields: [approvedBy], references: [id])
+  assigner           User                              @relation("MissionAssigner", fields: [assignedBy], references: [id], onDelete: Cascade)
+  employee           User?                             @relation("MissionEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+  personnel          Personnel?                        @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  auditEvents        SecurityAttendanceWorkflowEvent[]
 
+  @@index([personnelId, status, startDate])
   @@map("mission_assignments")
+}
+
+model SecurityAttendanceWorkflowEvent {
+  id          String             @id @default(cuid())
+  exceptionId String?
+  missionId   String?
+  action      String
+  reason      String?
+  beforeData  Json?
+  afterData   Json?
+  actorId     String
+  createdAt   DateTime           @default(now())
+  exception   ExceptionRequest?  @relation(fields: [exceptionId], references: [id], onDelete: Cascade)
+  mission     MissionAssignment? @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  actor       User               @relation("SecurityAttendanceWorkflowActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([exceptionId, createdAt])
+  @@index([missionId, createdAt])
+  @@map("security_attendance_workflow_events")
 }
 
 model WorkspacePermission {
@@ -1276,15 +1357,18 @@ model SecurityVehicleAttachment {
 }
 
 model SecurityInstantReportCategory {
-  id           String                      @id @default(cuid())
-  name         String
-  description  String?
-  displayOrder Int                         @default(0)
-  isActive     Boolean                     @default(true)
-  createdBy    String
-  createdAt    DateTime                    @default(now())
-  updatedAt    DateTime                    @updatedAt
-  reportTypes  SecurityInstantReportType[]
+  id                  String                      @id @default(cuid())
+  name                String
+  description         String?
+  displayOrder        Int                         @default(0)
+  isActive            Boolean                     @default(true)
+  useReportTypes      Boolean                     @default(true)
+  useRelatedPersonnel Boolean                     @default(true)
+  createdBy           String
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+  reportTypes         SecurityInstantReportType[]
+  logEntries          SecurityShiftLogEntry[]
 
   @@unique([name])
   @@index([isActive, displayOrder])
@@ -1292,17 +1376,18 @@ model SecurityInstantReportCategory {
 }
 
 model SecurityInstantReportType {
-  id           String                        @id @default(cuid())
-  categoryId   String
-  name         String
-  description  String?
-  displayOrder Int                           @default(0)
-  isActive     Boolean                       @default(true)
-  createdBy    String
-  createdAt    DateTime                      @default(now())
-  updatedAt    DateTime                      @updatedAt
-  category     SecurityInstantReportCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  logEntries   SecurityShiftLogEntry[]
+  id                  String                        @id @default(cuid())
+  categoryId          String
+  name                String
+  description         String?
+  displayOrder        Int                           @default(0)
+  isActive            Boolean                       @default(true)
+  useRelatedPersonnel Boolean                       @default(true)
+  createdBy           String
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+  category            SecurityInstantReportCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  logEntries          SecurityShiftLogEntry[]
 
   @@unique([categoryId, name])
   @@index([categoryId, isActive, displayOrder])
@@ -1311,25 +1396,30 @@ model SecurityInstantReportType {
 }
 
 model SecurityShiftLogEntry {
-  id           String                        @id @default(cuid())
-  sessionId    String
-  reportTypeId String
-  rowNumber    Int
-  description  String?
-  status       SecurityShiftLogStatus        @default(ACTIVE)
-  createdBy    String
-  createdAt    DateTime                      @default(now())
-  voidedBy     String?
-  voidedAt     DateTime?
-  voidReason   String?
-  session      SecurityShiftSession          @relation(fields: [sessionId], references: [id], onDelete: Restrict)
-  reportType   SecurityInstantReportType     @relation(fields: [reportTypeId], references: [id], onDelete: Restrict)
-  participants SecurityShiftLogParticipant[]
-  attachments  SecurityShiftLogAttachment[]
+  id                     String                        @id @default(cuid())
+  sessionId              String
+  categoryId             String
+  reportTypeId           String?
+  categoryNameSnapshot   String
+  reportTypeNameSnapshot String?
+  rowNumber              Int
+  description            String?
+  status                 SecurityShiftLogStatus        @default(ACTIVE)
+  createdBy              String
+  createdAt              DateTime                      @default(now())
+  voidedBy               String?
+  voidedAt               DateTime?
+  voidReason             String?
+  session                SecurityShiftSession          @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  category               SecurityInstantReportCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  reportType             SecurityInstantReportType?    @relation(fields: [reportTypeId], references: [id], onDelete: Restrict)
+  participants           SecurityShiftLogParticipant[]
+  attachments            SecurityShiftLogAttachment[]
 
   @@unique([sessionId, rowNumber])
   @@index([sessionId, createdAt])
   @@index([reportTypeId])
+  @@index([categoryId])
   @@index([status])
   @@map("security_shift_log_entries")
 }
@@ -2180,6 +2270,11 @@ enum AttendanceWorkScheduleStatus {
   UNCONFIGURED
   NON_WORKING_DAY
   WORKDAY
+}
+
+enum AttendanceIntervalStatus {
+  ACTIVE
+  VOIDED
 }
 
 enum ExceptionStatus {

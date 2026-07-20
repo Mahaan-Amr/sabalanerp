@@ -1705,3 +1705,31 @@ _Avoid_: Organizational Unit, Cost Center
 **Cost Center**:
 The accounting classification to which workforce cost is attributed, independent of the Organizational Unit and Workplace hierarchies.
 _Avoid_: Department, Workplace, deriving accounting ownership only from organizational placement
+
+**گزارش لحظه‌ای دسته‌محور حراست**:
+An immutable timestamped Security shift-log observation whose category is always recorded directly and whose report type is present only when that category uses report types. Category and type names are preserved as they were at recording time. Description is optional, but every report must contain at least one meaningful detail through description, an image, or related personnel when that field is enabled.
+_Avoid_: manufacturing a “without type” type, changing old classifications when settings change, or accepting an empty category-only row
+
+**سیاست فیلدهای گزارش لحظه‌ای**:
+Manager-controlled category and type policy for new report entry. A category decides whether report types appear and decides related-personnel visibility for category-only reports; when types are used, the selected type decides related-personnel visibility. Description remains visible and optional and images remain visible and optional in every category.
+_Avoid_: showing irrelevant selectors, hiding the description or image controls, or applying new visibility policy retroactively to history
+
+**بازه حضور فیزیکی پرسنل**:
+One factual entry-to-exit interval inside a personnel attendance day. A day may have multiple ordered intervals, only one interval may be open for a person at a time, and an interval crossing midnight belongs to the date on which entry occurred. Gaps between intervals represent time outside the premises without assuming a fixed rest schedule.
+_Avoid_: limiting a person to one entry and exit per day, hard-coding a lunch break, splitting an overnight interval, or allowing overlapping open intervals
+
+**خلاصه روزانه حضور چندبازه‌ای**:
+The personnel-day view derived from all physical intervals: first entry, final exit, total completed physical presence, total time outside between intervals, and whether the latest interval remains open. First entry determines lateness and final exit determines scheduled overtime, while detailed UI and outputs retain every movement.
+_Avoid_: reporting only one arbitrary interval, counting a gap as presence, finalizing totals while an interval is open, or letting PDF and Excel disagree with the daily view
+
+**استثنای حضور و غیاب حراست**:
+A Security-created operational authority that excuses expected attendance for a full day or a precise hourly window. In the current phase any authorized Security user may create and manage it. New items are pending; only approved items affect attendance. Pending items may be edited or deleted, while decided or attendance-linked history is cancelled or corrected through reasoned audit actions rather than overwritten.
+_Avoid_: calling it a personnel request, fabricating physical movements on approval, hard-deleting decided history, or letting pending/rejected/cancelled items change attendance
+
+**ماموریت پرسنل در حراست**:
+A Security-created precise time window of authorized work away from the premises. Only an approved mission contributes accounted work; it never pretends that the person was physically present, and actual entry/exit intervals remain visible alongside it. In the current phase any authorized Security user may create and manage missions.
+_Avoid_: converting mission time into fake attendance movements, hiding real presence, double-counting overlapping mission and presence, or treating an unapproved mission as worked time
+
+**تعارض زمانی استثنا و ماموریت**:
+Pending authorities may overlap with a visible warning, but approval rejects overlapping leaves, overlapping missions, or a leave/mission conflict for the same person. Adjacent missions are valid. Physical presence may overlap any authority because it records fact, and accounted work uses the union of presence and mission windows so time is counted once.
+_Avoid_: blocking factual entry/exit, approving contradictory authorities, counting overlapping work twice, or treating leave as worked time

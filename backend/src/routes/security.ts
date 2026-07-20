@@ -4,14 +4,14 @@ import path from 'path';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
 import { body, validationResult } from 'express-validator';
-import { AttendanceStatus, AttendanceWorkScheduleStatus, LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityPatrolStatus, SecurityShiftCoverageStatus, SecurityShiftLogStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
+import { AttendanceIntervalStatus, AttendanceStatus, AttendanceWorkScheduleStatus, ExceptionStatus, ExceptionType, LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityPatrolStatus, SecurityShiftCoverageStatus, SecurityShiftLogStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
 import { protect, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
 import { renderSecurityAttendanceReportHtml, securityAttendanceStatusLabel, SecurityAttendanceReportRow } from '../utils/securityAttendanceReport';
 import { addSecurityDays, parseSecurityBusinessDate, securityNowTime, securityPersianDate, securityPersianDateWithWeekday } from '../utils/securityBusinessDate';
-import { calculateDelayMinutes, calculatePresenceMinutes, calculateScheduledOvertime, loadApplicableWorkSchedules, resolveWorkScheduleDay, scheduledStartHasPassed } from '../utils/personnelWorkSchedule';
+import { calculateDelayMinutes, calculateScheduledOvertime, loadApplicableWorkSchedules, resolveWorkScheduleDay, scheduledStartHasPassed } from '../utils/personnelWorkSchedule';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -30,12 +30,46 @@ const parseDayQuery = parseSecurityBusinessDate;
 
 const currentAttendanceTime = () => securityNowTime();
 
+const businessInstant = (businessDate: Date, time: string, nextDay = false) => {
+  const [hour, minute] = String(time).split(':').map(Number);
+  const day = new Date(businessDate);
+  if (nextDay) day.setUTCDate(day.getUTCDate() + 1);
+  return new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hour, minute) - 210 * 60_000);
+};
+
+const securityTimeFromInstant = (value: Date) => securityNowTime(value);
+
+const intervalSummary = (intervals: any[]) => {
+  const active = intervals.filter((interval) => interval.status !== AttendanceIntervalStatus.VOIDED).sort((a, b) => new Date(a.enteredAt).getTime() - new Date(b.enteredAt).getTime());
+  const completed = active.filter((interval) => interval.exitedAt);
+  const firstEntry = active[0]?.enteredAt ? securityTimeFromInstant(new Date(active[0].enteredAt)) : null;
+  const finalExitInterval = [...active].reverse().find((interval) => interval.exitedAt);
+  const finalExit = finalExitInterval?.exitedAt ? securityTimeFromInstant(new Date(finalExitInterval.exitedAt)) : null;
+  const presenceMinutes = completed.reduce((sum, interval) => sum + Math.max(0, Math.floor((new Date(interval.exitedAt).getTime() - new Date(interval.enteredAt).getTime()) / 60_000)), 0);
+  const outsideMinutes = active.slice(1).reduce((sum, interval, index) => {
+    const previousExit = active[index]?.exitedAt;
+    return previousExit ? sum + Math.max(0, Math.floor((new Date(interval.enteredAt).getTime() - new Date(previousExit).getTime()) / 60_000)) : sum;
+  }, 0);
+  return { intervals: active, firstEntry, finalExit, presenceMinutes, outsideMinutes, isOpen: active.some((interval) => !interval.exitedAt) };
+};
+
 const appendManualAttendanceNote = (existingNote: string | null | undefined, actionLabel: string, reason?: unknown) => {
   const trimmedReason = String(reason || '').trim();
   if (!trimmedReason) return existingNote || null;
   const note = `${actionLabel}: ${trimmedReason}`;
   return existingNote ? `${existingNote}\n${note}` : note;
 };
+
+const intervalAuditSnapshot = (interval: any) => JSON.parse(JSON.stringify({
+  enteredAt: interval.enteredAt,
+  exitedAt: interval.exitedAt,
+  status: interval.status,
+  entryReason: interval.entryReason,
+  exitReason: interval.exitReason,
+  voidReason: interval.voidReason,
+  voidedAt: interval.voidedAt,
+  voidedBy: interval.voidedBy
+}));
 
 const scopedPersonnelWhere = (departmentId?: unknown, personnelId?: unknown) => ({
   isActive: true,
@@ -64,7 +98,18 @@ const attendanceInclude = {
       user: { select: { id: true, username: true, email: true } }
     }
   },
-  shift: true
+  shift: true,
+  intervals: {
+    include: {
+      entryRecorder: { select: { id: true, firstName: true, lastName: true, username: true } },
+      exitRecorder: { select: { id: true, firstName: true, lastName: true, username: true } },
+      auditEvents: {
+        include: { actor: { select: { id: true, firstName: true, lastName: true, username: true } } },
+        orderBy: { createdAt: 'desc' as const }
+      }
+    },
+    orderBy: { enteredAt: 'asc' as const }
+  }
 };
 
 const personnelSnapshot = (personnel: any) => ({
@@ -155,6 +200,49 @@ const loadAttendancePopulation = async (targetDate: Date, filters: { departmentI
   return Array.from(new Map(memberships.map((membership) => [membership.personnel.id, membership.personnel])).values());
 };
 
+const authorityBounds = (item: any) => {
+  const startDate = parseDayQuery(item.startDate);
+  const endDate = parseDayQuery(item.endDate || item.startDate, startDate);
+  const startsAt = item.startTime ? businessInstant(startDate, item.startTime) : businessInstant(startDate, '00:00');
+  const endsAt = item.endTime
+    ? businessInstant(endDate, item.endTime, !item.endDate && item.endTime <= (item.startTime || '00:00'))
+    : businessInstant(addDays(endDate, 1), '00:00');
+  return { startsAt, endsAt };
+};
+
+const unionMinutes = (windows: Array<{ startsAt: Date; endsAt: Date }>) => {
+  const sorted = windows.filter((window) => window.endsAt > window.startsAt).sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+  if (!sorted.length) return 0;
+  const merged = [{ ...sorted[0] }];
+  sorted.slice(1).forEach((window) => {
+    const last = merged[merged.length - 1];
+    if (window.startsAt <= last.endsAt) last.endsAt = new Date(Math.max(last.endsAt.getTime(), window.endsAt.getTime()));
+    else merged.push({ ...window });
+  });
+  return merged.reduce((sum, window) => sum + Math.floor((window.endsAt.getTime() - window.startsAt.getTime()) / 60_000), 0);
+};
+
+const movementSegments = (intervals: any[], hourlyLeaves: any[]) => {
+  const segments: Array<{ kind: 'PRESENCE' | 'OUTSIDE' | 'HOURLY_LEAVE'; startsAt: Date; endsAt: Date | null }> = [];
+  intervals.forEach((interval, index) => {
+    segments.push({ kind: 'PRESENCE', startsAt: new Date(interval.enteredAt), endsAt: interval.exitedAt ? new Date(interval.exitedAt) : null });
+    const gapStart = interval.exitedAt ? new Date(interval.exitedAt) : null;
+    const nextEntry = intervals[index + 1]?.enteredAt ? new Date(intervals[index + 1].enteredAt) : null;
+    if (!gapStart || !nextEntry || nextEntry <= gapStart) return;
+    let cursor = gapStart;
+    hourlyLeaves.map(authorityBounds).sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime()).forEach((leave) => {
+      const startsAt = new Date(Math.max(gapStart.getTime(), leave.startsAt.getTime()));
+      const endsAt = new Date(Math.min(nextEntry.getTime(), leave.endsAt.getTime()));
+      if (endsAt <= startsAt) return;
+      if (startsAt > cursor) segments.push({ kind: 'OUTSIDE', startsAt: cursor, endsAt: startsAt });
+      segments.push({ kind: 'HOURLY_LEAVE', startsAt, endsAt });
+      cursor = new Date(Math.max(cursor.getTime(), endsAt.getTime()));
+    });
+    if (cursor < nextEntry) segments.push({ kind: 'OUTSIDE', startsAt: cursor, endsAt: nextEntry });
+  });
+  return segments;
+};
+
 const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: unknown; shiftId?: unknown; employeeId?: unknown; personnelId?: unknown }) => {
   const targetDate = parseDayQuery(filters.date);
   const nextDay = addDays(targetDate, 1);
@@ -163,7 +251,6 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
   const workSchedules = await loadApplicableWorkSchedules(prisma, personnelIds, targetDate);
   const attendanceWhere = {
     date: { gte: targetDate, lt: nextDay },
-    ...(filters.shiftId ? { shiftId: String(filters.shiftId) } : {}),
     personnelId: { in: personnelIds }
   };
 
@@ -173,13 +260,44 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
     orderBy: { createdAt: 'asc' }
   });
 
+  const [exceptions, missions] = await Promise.all([
+    prisma.exceptionRequest.findMany({
+      where: {
+        status: ExceptionStatus.APPROVED,
+        startDate: { lt: nextDay },
+        AND: [
+          { OR: [{ personnelId: { in: personnelIds } }, { employee: { personnelId: { in: personnelIds } } }] },
+          { OR: [{ endDate: null }, { endDate: { gte: targetDate } }] }
+        ]
+      },
+      include: { personnel: true, employee: { select: { personnelId: true } } }
+    }),
+    prisma.missionAssignment.findMany({
+      where: {
+        status: ExceptionStatus.APPROVED,
+        startDate: { lt: nextDay },
+        AND: [
+          { OR: [{ personnelId: { in: personnelIds } }, { employee: { personnelId: { in: personnelIds } } }] },
+          { OR: [{ endDate: null }, { endDate: { gte: targetDate } }] }
+        ]
+      },
+      include: { personnel: true, employee: { select: { personnelId: true } } }
+    })
+  ]);
+  const overlapsDay = (item: any) => {
+    const { startsAt, endsAt } = authorityBounds(item);
+    const dayStart = businessInstant(targetDate, '00:00');
+    const dayEnd = businessInstant(nextDay, '00:00');
+    return startsAt < dayEnd && endsAt > dayStart;
+  };
+  const approvedExceptions = exceptions.filter(overlapsDay);
+  const approvedMissions = missions.filter(overlapsDay);
   const recordsByPersonnel = new Map(attendanceRecords.map((record) => [record.personnelId || record.employee?.personnelId || record.employeeId, record]));
   const openPreviousRecords = await prisma.attendanceRecord.findMany({
     where: {
       personnelId: { in: allPersonnel.map((personnel) => personnel.id) },
       date: { lt: targetDate },
-      entryTime: { not: null },
-      exitTime: null
+      intervals: { some: { status: AttendanceIntervalStatus.ACTIVE, exitedAt: null } }
     },
     include: attendanceInclude,
     orderBy: { date: 'desc' }
@@ -191,6 +309,11 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
 
   const attendanceSummary = allPersonnel.map((personnel) => {
     const record = recordsByPersonnel.get(personnel.id);
+    const movement = intervalSummary(record?.intervals || []);
+    const personExceptions = approvedExceptions.filter((item) => (item.personnelId || item.employee?.personnelId) === personnel.id);
+    const personMissions = approvedMissions.filter((item) => (item.personnelId || item.employee?.personnelId) === personnel.id);
+    const fullDayLeave = personExceptions.find((item) => item.exceptionType !== ExceptionType.HOURLY_LEAVE);
+    const hourlyLeaves = personExceptions.filter((item) => item.exceptionType === ExceptionType.HOURLY_LEAVE);
     const openPreviousAttendance = openPreviousByPersonnel.get(personnel.id);
     const resolvedSchedule = resolveWorkScheduleDay(workSchedules.get(personnel.id), targetDate);
     const scheduleStatus = record?.workScheduleStatus || resolvedSchedule.status;
@@ -201,31 +324,60 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
       : scheduleStatus === AttendanceWorkScheduleStatus.WORKDAY && scheduledStartTime && !scheduledStartHasPassed(targetDate, scheduledStartTime)
         ? AttendanceStatus.PENDING
         : AttendanceStatus.ABSENT;
+    const leaveStatus = fullDayLeave?.exceptionType === ExceptionType.SICK_LEAVE ? AttendanceStatus.SICK_LEAVE
+      : fullDayLeave ? AttendanceStatus.VACATION : null;
+    const firstEntry = movement.firstEntry || record?.entryTime || null;
+    const startAuthority = [...hourlyLeaves, ...personMissions].find((item) => {
+      if (!scheduledStartTime) return false;
+      const scheduledStart = businessInstant(targetDate, scheduledStartTime);
+      const bounds = authorityBounds(item);
+      return bounds.startsAt <= scheduledStart && bounds.endsAt > scheduledStart;
+    });
+    const adjustedDelay = firstEntry && scheduledStartTime
+      ? calculateDelayMinutes(firstEntry, startAuthority ? securityTimeFromInstant(authorityBounds(startAuthority).endsAt) : scheduledStartTime)
+      : record?.delayMinutes ?? null;
+    const derivedStatus = leaveStatus || (!movement.intervals.length && personMissions.length ? AttendanceStatus.MISSION
+      : movement.intervals.length ? (adjustedDelay && adjustedDelay > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT)
+        : missingStatus);
+    const dayStart = businessInstant(targetDate, '00:00');
+    const dayEnd = businessInstant(nextDay, '00:00');
+    const accountedWindows = [
+      ...movement.intervals.filter((interval: any) => interval.exitedAt).map((interval: any) => ({ startsAt: new Date(interval.enteredAt), endsAt: new Date(interval.exitedAt) })),
+      ...personMissions.map((mission) => authorityBounds(mission))
+    ].map((window) => ({ startsAt: new Date(Math.max(dayStart.getTime(), window.startsAt.getTime())), endsAt: new Date(Math.min(dayEnd.getTime(), window.endsAt.getTime())) }));
     return {
       id: record?.id || `absent-${personnel.id}-${targetDate.toISOString()}`,
       personnel,
       personnelId: personnel.id,
       employee: attendancePerson(personnel, record),
       attendance: record || null,
-      entryTime: record?.entryTime || null,
-      exitTime: record?.exitTime || null,
-      status: record?.status || missingStatus,
-      exceptionType: record?.exceptionType || null,
+      entryTime: firstEntry,
+      exitTime: movement.finalExit || record?.exitTime || null,
+      status: derivedStatus,
+      exceptionType: fullDayLeave?.exceptionType || hourlyLeaves[0]?.exceptionType || record?.exceptionType || null,
       notes: record?.notes || null,
       digitalSignature: record?.digitalSignature || null,
       createdAt: record?.createdAt || null,
-      shift: record?.shift || null,
+      shift: null,
+      intervals: movement.intervals,
+      movementTimeline: movementSegments(movement.intervals, hourlyLeaves),
+      physicalPresenceMinutes: movement.presenceMinutes,
+      outsideMinutes: movement.outsideMinutes,
+      presencePending: movement.isOpen,
+      accountedWorkMinutes: movement.isOpen ? null : unionMinutes(accountedWindows),
+      approvedExceptions: personExceptions,
+      approvedMissions: personMissions,
       workScheduleStatus: scheduleStatus,
       scheduledStartTime,
       scheduledEndTime,
-      delayMinutes: record?.delayMinutes ?? null,
+      delayMinutes: adjustedDelay,
       overtimeMinutes: record?.overtimeMinutes ?? null,
       overtimePending: record?.overtimePending || false,
       openPreviousAttendance: openPreviousAttendance ? {
         id: openPreviousAttendance.id,
         date: openPreviousAttendance.date,
-        entryTime: openPreviousAttendance.entryTime,
-        shift: openPreviousAttendance.shift,
+        entryTime: intervalSummary(openPreviousAttendance.intervals || []).firstEntry || openPreviousAttendance.entryTime,
+        shift: null,
         notes: openPreviousAttendance.notes
       } : null
     };
@@ -234,11 +386,11 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
   const expectedRows = attendanceSummary.filter((record) => record.status !== AttendanceStatus.NON_WORKING_DAY);
   const stats = {
     totalEmployees: expectedRows.length,
-    present: attendanceRecords.filter((record) => record.status === AttendanceStatus.PRESENT).length,
+    present: attendanceSummary.filter((record) => record.status === AttendanceStatus.PRESENT).length,
     absent: attendanceSummary.filter((record) => record.status === AttendanceStatus.ABSENT).length,
-    late: attendanceRecords.filter((record) => record.status === AttendanceStatus.LATE).length,
-    mission: attendanceRecords.filter((record) => record.status === AttendanceStatus.MISSION).length,
-    leave: attendanceRecords.filter((record) => leaveStatuses.includes(record.status)).length,
+    late: attendanceSummary.filter((record) => record.status === AttendanceStatus.LATE).length,
+    mission: attendanceSummary.filter((record) => record.approvedMissions.length > 0).length,
+    leave: attendanceSummary.filter((record) => record.approvedExceptions.length > 0).length,
     exception: attendanceSummary.filter((record) => record.status === AttendanceStatus.ABSENT || record.status === AttendanceStatus.LATE).length,
     signed: attendanceRecords.filter((record) => Boolean(record.digitalSignature)).length
   };
@@ -970,7 +1122,7 @@ const shiftLogReportTypeInclude = { include: { category: true } } as const;
 const effectivePersonnelId = (slot: any) => slot.replacementPersonnelId || slot.plannedPersonnelId;
 const getSelfPersonnel = (userId: string) => prisma.securityPersonnel.findUnique({ where: { userId } });
 const activeShiftLogInclude = {
-  logEntries: { include: { reportType: shiftLogReportTypeInclude, participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' as const } },
+  logEntries: { include: { category: true, reportType: shiftLogReportTypeInclude, participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' as const } },
   patrolSessions: { orderBy: { startedAt: 'desc' as const } },
   slot: { include: slotInclude },
   personnel: { include: { user: true } }
@@ -1213,7 +1365,9 @@ router.post('/instant-report-categories', protect, securityAdmin, [
   body('name').isString().trim().notEmpty(),
   body('description').optional({ values: 'falsy' }).isString(),
   body('displayOrder').optional().isInt({ min: 0 }),
-  body('isActive').optional().isBoolean()
+  body('isActive').optional().isBoolean(),
+  body('useReportTypes').optional().isBoolean(),
+  body('useRelatedPersonnel').optional().isBoolean()
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -1224,6 +1378,8 @@ router.post('/instant-report-categories', protect, securityAdmin, [
         description: String(req.body.description || '').trim() || null,
         displayOrder: Number(req.body.displayOrder || 0),
         isActive: req.body.isActive ?? true,
+        useReportTypes: req.body.useReportTypes ?? true,
+        useRelatedPersonnel: req.body.useRelatedPersonnel ?? true,
         createdBy: req.user!.id
       }
     });
@@ -1238,7 +1394,9 @@ router.put('/instant-report-categories/:id', protect, securityAdmin, [
   body('name').isString().trim().notEmpty(),
   body('description').optional({ values: 'falsy' }).isString(),
   body('displayOrder').optional().isInt({ min: 0 }),
-  body('isActive').isBoolean()
+  body('isActive').isBoolean(),
+  body('useReportTypes').isBoolean(),
+  body('useRelatedPersonnel').isBoolean()
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -1249,7 +1407,9 @@ router.put('/instant-report-categories/:id', protect, securityAdmin, [
         name: req.body.name.trim(),
         description: String(req.body.description || '').trim() || null,
         displayOrder: Number(req.body.displayOrder || 0),
-        isActive: Boolean(req.body.isActive)
+        isActive: Boolean(req.body.isActive),
+        useReportTypes: Boolean(req.body.useReportTypes),
+        useRelatedPersonnel: Boolean(req.body.useRelatedPersonnel)
       }
     });
     res.json({ success: true, data: category });
@@ -1283,7 +1443,8 @@ router.post('/instant-report-types', protect, securityAdmin, [
   body('name').isString().trim().notEmpty(),
   body('description').optional({ values: 'falsy' }).isString(),
   body('displayOrder').optional().isInt({ min: 0 }),
-  body('isActive').optional().isBoolean()
+  body('isActive').optional().isBoolean(),
+  body('useRelatedPersonnel').optional().isBoolean()
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -1297,6 +1458,7 @@ router.post('/instant-report-types', protect, securityAdmin, [
         description: String(req.body.description || '').trim() || null,
         displayOrder: Number(req.body.displayOrder || 0),
         isActive: req.body.isActive ?? true,
+        useRelatedPersonnel: req.body.useRelatedPersonnel ?? true,
         createdBy: req.user!.id
       },
       include: { category: true }
@@ -1313,7 +1475,8 @@ router.put('/instant-report-types/:id', protect, securityAdmin, [
   body('name').isString().trim().notEmpty(),
   body('description').optional({ values: 'falsy' }).isString(),
   body('displayOrder').optional().isInt({ min: 0 }),
-  body('isActive').isBoolean()
+  body('isActive').isBoolean(),
+  body('useRelatedPersonnel').isBoolean()
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -1327,7 +1490,8 @@ router.put('/instant-report-types/:id', protect, securityAdmin, [
         name: req.body.name.trim(),
         description: String(req.body.description || '').trim() || null,
         displayOrder: Number(req.body.displayOrder || 0),
-        isActive: Boolean(req.body.isActive)
+        isActive: Boolean(req.body.isActive),
+        useRelatedPersonnel: Boolean(req.body.useRelatedPersonnel)
       },
       include: { category: true }
     });
@@ -1462,30 +1626,40 @@ router.get('/shift-log/attachments/:id', protect, securityView, async (req: Auth
   res.type(attachment.mimeType).sendFile(path.join(shiftLogPhotoDir, attachment.storageName));
 });
 
-router.post('/shift-log/entries', protect, securityEdit, shiftLogPhotoUpload.array('images', 8), [body('reportTypeId').isString().trim().notEmpty(), body('description').optional({ values: 'falsy' }).isString()], async (req: AuthRequest, res: Response) => {
+router.post('/shift-log/entries', protect, securityEdit, shiftLogPhotoUpload.array('images', 8), [body('categoryId').isString().trim().notEmpty(), body('reportTypeId').optional({ values: 'falsy' }).isString(), body('description').optional({ values: 'falsy' }).isString()], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'نوع گزارش الزامی است.', details: errors.array() }); }
+    if (!errors.isEmpty()) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'دسته‌بندی گزارش الزامی است.', details: errors.array() }); }
     const { session } = await getActiveShiftSessionForUser(req.user!.id);
     if (!session) { removeStoredFiles(uploadedFiles(req)); return res.status(409).json({ success: false, error: 'شیفت فعال برای ثبت گزارش پیدا نشد.' }); }
-    const type = await prisma.securityInstantReportType.findFirst({ where: { id: req.body.reportTypeId, isActive: true, category: { isActive: true } } });
-    if (!type) { removeStoredFiles(uploadedFiles(req)); return res.status(404).json({ success: false, error: 'نوع گزارش فعال پیدا نشد.' }); }
+    const category = await prisma.securityInstantReportCategory.findFirst({ where: { id: req.body.categoryId, isActive: true } });
+    if (!category) { removeStoredFiles(uploadedFiles(req)); return res.status(404).json({ success: false, error: 'دسته‌بندی گزارش فعال پیدا نشد.' }); }
+    const type = req.body.reportTypeId ? await prisma.securityInstantReportType.findFirst({ where: { id: req.body.reportTypeId, categoryId: category.id, isActive: true } }) : null;
+    if (category.useReportTypes && !type) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'برای این دسته‌بندی انتخاب نوع گزارش الزامی است.' }); }
+    if (!category.useReportTypes && req.body.reportTypeId) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'این دسته‌بندی از نوع گزارش استفاده نمی‌کند.' }); }
     const participantIds = [...new Set(JSON.parse(String(req.body.participantIds || '[]')))].filter((id: any) => typeof id === 'string');
     const validParticipants = participantIds.length ? await prisma.personnel.count({ where: { id: { in: participantIds }, isActive: true } }) : 0;
     if (validParticipants !== participantIds.length) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'یکی از پرسنل انتخاب‌شده معتبر نیست.' }); }
+    const useRelatedPersonnel = category.useReportTypes ? Boolean(type?.useRelatedPersonnel) : category.useRelatedPersonnel;
+    if (!useRelatedPersonnel && participantIds.length) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'برای این طبقه‌بندی افراد مرتبط نمایش داده نمی‌شود.' }); }
+    const description = String(req.body.description || '').trim();
+    if (!description && !participantIds.length && !uploadedFiles(req).length) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'حداقل توضیح، تصویر یا فرد مرتبط برای ثبت گزارش لازم است.' }); }
     const entry = await prisma.$transaction(async (tx) => {
       const last = await tx.securityShiftLogEntry.findFirst({ where: { sessionId: session.id }, orderBy: { rowNumber: 'desc' } });
       return tx.securityShiftLogEntry.create({
         data: {
           sessionId: session.id,
-          reportTypeId: type.id,
+          categoryId: category.id,
+          reportTypeId: type?.id || null,
+          categoryNameSnapshot: category.name,
+          reportTypeNameSnapshot: type?.name || null,
           rowNumber: (last?.rowNumber || 0) + 1,
-          description: String(req.body.description || '').trim() || null,
+          description: description || null,
           createdBy: req.user!.id,
           participants: { create: participantIds.map((personnelId: string) => ({ personnelId })) },
           attachments: { create: uploadedFiles(req).map((file) => ({ storageName: file.filename, originalName: file.originalname, mimeType: file.mimetype, size: file.size })) }
         },
-        include: { reportType: shiftLogReportTypeInclude, participants: { include: { user: true, personnel: true } }, attachments: true }
+        include: { category: true, reportType: shiftLogReportTypeInclude, participants: { include: { user: true, personnel: true } }, attachments: true }
       });
     }, { isolationLevel: 'Serializable' });
     res.status(201).json({ success: true, data: entry });
@@ -1843,6 +2017,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
     const currentTime = entryTime || currentAttendanceTime();
     const targetDate = parseDayQuery(req.body.date);
     const nextDay = addDays(targetDate, 1);
+    const enteredAt = businessInstant(targetDate, currentTime);
     const [rosterPerson] = await loadAttendancePopulation(targetDate, { personnelId: personnel.id });
     if (!rosterPerson) return res.status(400).json({ success: false, error: 'این فرد در فهرست حضور و غیاب حراست برای این تاریخ نیست.' });
     const scheduleMap = await loadApplicableWorkSchedules(prisma, [personnel.id], targetDate);
@@ -1862,22 +2037,23 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
       overtimePending: resolvedSchedule.status !== AttendanceWorkScheduleStatus.UNCONFIGURED
     };
 
-    const openPreviousRecord = await prisma.attendanceRecord.findFirst({
+    const openRecord = await prisma.attendanceRecord.findFirst({
       where: {
         personnelId: personnel.id,
-        date: { lt: targetDate },
-        entryTime: { not: null },
-        exitTime: null
+        intervals: { some: { status: AttendanceIntervalStatus.ACTIVE, exitedAt: null } }
       },
       orderBy: { date: 'desc' },
       include: attendanceInclude
     });
 
-    if (openPreviousRecord) {
+    if (openRecord) {
+      if (openRecord.date >= targetDate && openRecord.date < nextDay) {
+        return res.json({ success: true, message: 'این فرد هم‌اکنون داخل مجموعه است.', data: openRecord });
+      }
       return res.status(409).json({
         success: false,
         error: 'ابتدا خروج ثبت‌نشده قبلی را ثبت کنید.',
-        data: { openPreviousAttendance: openPreviousRecord }
+        data: { openPreviousAttendance: openRecord }
       });
     }
 
@@ -1892,46 +2068,42 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
       include: attendanceInclude
     });
 
-    if (existingRecord && existingRecord.entryTime) {
-      return res.json({
-        success: true,
-        message: 'ورود قبلاً ثبت شده است.',
-        data: existingRecord
-      });
+    const previousInterval = existingRecord?.intervals.filter((interval) => interval.status !== AttendanceIntervalStatus.VOIDED).at(-1);
+    if (previousInterval?.exitedAt && enteredAt < new Date(previousInterval.exitedAt)) {
+      return res.status(400).json({ success: false, error: 'زمان ورود جدید نمی‌تواند قبل از خروج قبلی باشد.' });
     }
 
-    let attendanceRecord;
-    if (existingRecord) {
-      // Update existing record
-      attendanceRecord = await prisma.attendanceRecord.update({
-        where: { id: existingRecord.id },
-        data: {
-          entryTime: currentTime,
-          status: attendanceStatus,
-          notes: appendManualAttendanceNote(existingRecord.notes, 'ثبت دستی ورود', reason),
-          ...scheduleSnapshot,
-          ...personnelSnapshot(personnel)
-        },
-        include: attendanceInclude
-      });
-    } else {
-      // Create new record
-      attendanceRecord = await prisma.attendanceRecord.create({
+    const recordId = await prisma.$transaction(async (tx) => {
+      const record = existingRecord || await tx.attendanceRecord.create({
         data: {
           employeeId: personnel.user?.id || null,
           personnelId: personnel.id,
           securityPersonnelId: securityPersonnel.id,
-          shiftId: securityPersonnel.shiftId,
+          shiftId: null,
           date: targetDate,
-          entryTime: currentTime,
           status: attendanceStatus,
-          notes: appendManualAttendanceNote(null, 'ثبت دستی ورود', reason),
           ...scheduleSnapshot,
           ...personnelSnapshot(personnel)
-        },
-        include: attendanceInclude
+        }
       });
-    }
+      await tx.attendanceInterval.create({
+        data: { attendanceRecordId: record.id, enteredAt, entryRecordedBy: req.user!.id, entryReason: String(reason || '').trim() || null }
+      });
+      await tx.attendanceRecord.update({
+        where: { id: record.id },
+        data: {
+          entryTime: existingRecord?.entryTime || currentTime,
+          exitTime: null,
+          status: existingRecord?.delayMinutes && existingRecord.delayMinutes > 0 ? AttendanceStatus.LATE : existingRecord ? AttendanceStatus.PRESENT : attendanceStatus,
+          notes: appendManualAttendanceNote(record.notes, 'ثبت دستی ورود', reason),
+          ...scheduleSnapshot,
+          delayMinutes: existingRecord?.delayMinutes ?? scheduleSnapshot.delayMinutes,
+          ...personnelSnapshot(personnel)
+        }
+      });
+      return record.id;
+    });
+    const attendanceRecord = await prisma.attendanceRecord.findUnique({ where: { id: recordId }, include: attendanceInclude });
 
     res.status(201).json({
       success: true,
@@ -2010,28 +2182,36 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
       });
     }
 
-    if (attendanceRecord.exitTime) {
-      return res.json({
-        success: true,
-        message: 'خروج قبلاً ثبت شده است.',
-        data: attendanceRecord
-      });
-    }
+    const openInterval = [...attendanceRecord.intervals].reverse().find((interval) => interval.status !== AttendanceIntervalStatus.VOIDED && !interval.exitedAt);
+    if (!openInterval) return res.json({ success: true, message: 'برای این حضور خروج باز وجود ندارد.', data: attendanceRecord });
+    const isHistoricalClose = attendanceRecord.date < parseDayQuery();
+    if (isHistoricalClose && !String(reason || '').trim()) return res.status(400).json({ success: false, error: 'برای ثبت خروج روز قبل، دلیل الزامی است.' });
+    let exitedAt = businessInstant(attendanceRecord.date, currentTime);
+    if (exitedAt <= new Date(openInterval.enteredAt)) exitedAt = businessInstant(attendanceRecord.date, currentTime, true);
+    if (exitedAt <= new Date(openInterval.enteredAt)) return res.status(400).json({ success: false, error: 'زمان خروج باید بعد از زمان ورود باشد.' });
 
-    const updatedRecord = await prisma.attendanceRecord.update({
-      where: { id: attendanceRecord.id },
-      data: {
-        exitTime: currentTime,
-        overtimeMinutes: attendanceRecord.workScheduleStatus === AttendanceWorkScheduleStatus.NON_WORKING_DAY && attendanceRecord.entryTime
-          ? calculatePresenceMinutes(attendanceRecord.entryTime, currentTime)
-          : attendanceRecord.workScheduleStatus === AttendanceWorkScheduleStatus.WORKDAY && attendanceRecord.scheduledStartTime && attendanceRecord.scheduledEndTime
-            ? calculateScheduledOvertime(currentTime, attendanceRecord.scheduledStartTime, attendanceRecord.scheduledEndTime)
-            : null,
-        overtimePending: false,
-        notes: appendManualAttendanceNote(attendanceRecord.notes, 'ثبت دستی خروج', reason)
-      },
-      include: attendanceInclude
-    });
+    const completedPresenceMinutes = attendanceRecord.intervals.reduce((sum, interval) => {
+      if (interval.status === AttendanceIntervalStatus.VOIDED) return sum;
+      const intervalExit = interval.id === openInterval.id ? exitedAt : interval.exitedAt ? new Date(interval.exitedAt) : null;
+      return intervalExit ? sum + Math.max(0, Math.floor((intervalExit.getTime() - new Date(interval.enteredAt).getTime()) / 60_000)) : sum;
+    }, 0);
+    await prisma.$transaction([
+      prisma.attendanceInterval.update({ where: { id: openInterval.id }, data: { exitedAt, exitRecordedBy: req.user!.id, exitReason: String(reason || '').trim() || null } }),
+      prisma.attendanceRecord.update({
+        where: { id: attendanceRecord.id },
+        data: {
+          exitTime: currentTime,
+          overtimeMinutes: attendanceRecord.workScheduleStatus === AttendanceWorkScheduleStatus.NON_WORKING_DAY
+            ? completedPresenceMinutes
+            : attendanceRecord.workScheduleStatus === AttendanceWorkScheduleStatus.WORKDAY && attendanceRecord.scheduledStartTime && attendanceRecord.scheduledEndTime
+              ? calculateScheduledOvertime(currentTime, attendanceRecord.scheduledStartTime, attendanceRecord.scheduledEndTime)
+              : null,
+          overtimePending: false,
+          notes: appendManualAttendanceNote(attendanceRecord.notes, 'ثبت دستی خروج', reason)
+        }
+      })
+    ]);
+    const updatedRecord = await prisma.attendanceRecord.findUnique({ where: { id: attendanceRecord.id }, include: attendanceInclude });
 
     res.json({
       success: true,
@@ -2046,6 +2226,113 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
       error: 'Server error'
     });
     return;
+  }
+});
+
+const refreshAttendanceRecordFromIntervals = async (tx: any, recordId: string) => {
+  const record = await tx.attendanceRecord.findUnique({
+    where: { id: recordId },
+    include: { intervals: { where: { status: AttendanceIntervalStatus.ACTIVE }, orderBy: { enteredAt: 'asc' } } }
+  });
+  if (!record) return;
+  const summary = intervalSummary(record.intervals);
+  const firstEntry = summary.firstEntry;
+  const finalExit = summary.isOpen ? null : summary.finalExit;
+  const delayMinutes = firstEntry && record.workScheduleStatus === AttendanceWorkScheduleStatus.WORKDAY && record.scheduledStartTime
+    ? calculateDelayMinutes(firstEntry, record.scheduledStartTime)
+    : record.workScheduleStatus === AttendanceWorkScheduleStatus.NON_WORKING_DAY ? 0 : null;
+  const overtimeMinutes = summary.isOpen
+    ? null
+    : record.workScheduleStatus === AttendanceWorkScheduleStatus.NON_WORKING_DAY
+      ? summary.presenceMinutes
+      : finalExit && record.workScheduleStatus === AttendanceWorkScheduleStatus.WORKDAY && record.scheduledStartTime && record.scheduledEndTime
+        ? calculateScheduledOvertime(finalExit, record.scheduledStartTime, record.scheduledEndTime)
+        : null;
+  await tx.attendanceRecord.update({
+    where: { id: recordId },
+    data: {
+      entryTime: firstEntry,
+      exitTime: finalExit,
+      delayMinutes,
+      overtimeMinutes,
+      overtimePending: summary.isOpen,
+      status: firstEntry ? (delayMinutes && delayMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT) : AttendanceStatus.ABSENT
+    }
+  });
+};
+
+// Correct a saved movement without replacing its audit history.
+router.put('/attendance/intervals/:id', protect, securityView, [
+  body('enteredAt').isISO8601().withMessage('زمان ورود معتبر الزامی است.'),
+  body('exitedAt').optional({ nullable: true }).isISO8601().withMessage('زمان خروج معتبر نیست.'),
+  body('reason').trim().notEmpty().withMessage('دلیل اصلاح الزامی است.')
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    const interval = await prisma.attendanceInterval.findUnique({
+      where: { id: req.params.id },
+      include: { attendanceRecord: { select: { id: true, personnelId: true } } }
+    });
+    if (!interval || interval.status === AttendanceIntervalStatus.VOIDED) return res.status(404).json({ success: false, error: 'بازه حضور فعال پیدا نشد.' });
+    const enteredAt = new Date(req.body.enteredAt);
+    const exitedAt = req.body.exitedAt ? new Date(req.body.exitedAt) : null;
+    if (exitedAt && exitedAt <= enteredAt) return res.status(400).json({ success: false, error: 'زمان خروج باید بعد از زمان ورود باشد.' });
+    const overlapEnd = exitedAt || new Date('2100-01-01T00:00:00.000Z');
+    const conflict = await prisma.attendanceInterval.findFirst({
+      where: {
+        id: { not: interval.id },
+        status: AttendanceIntervalStatus.ACTIVE,
+        attendanceRecord: { personnelId: interval.attendanceRecord.personnelId },
+        enteredAt: { lt: overlapEnd },
+        OR: [{ exitedAt: null }, { exitedAt: { gt: enteredAt } }]
+      }
+    });
+    if (conflict) return res.status(409).json({ success: false, error: 'بازه اصلاح‌شده با یک تردد فعال دیگر هم‌پوشانی دارد.' });
+    const reason = String(req.body.reason).trim();
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.attendanceInterval.update({
+        where: { id: interval.id },
+        data: { enteredAt, exitedAt, entryReason: reason, exitReason: exitedAt ? reason : null, entryRecordedBy: req.user!.id, exitRecordedBy: exitedAt ? req.user!.id : null }
+      });
+      await tx.attendanceIntervalAudit.create({
+        data: { intervalId: interval.id, action: 'CORRECTED', reason, beforeData: intervalAuditSnapshot(interval), afterData: intervalAuditSnapshot(updated), actorId: req.user!.id }
+      });
+      await refreshAttendanceRecordFromIntervals(tx, interval.attendanceRecordId);
+    });
+    const record = await prisma.attendanceRecord.findUnique({ where: { id: interval.attendanceRecordId }, include: attendanceInclude });
+    return res.json({ success: true, message: 'بازه تردد با ثبت سابقه اصلاح شد.', data: record });
+  } catch (error) {
+    console.error('Correct attendance interval error:', error);
+    return res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// Void a saved movement; physical history remains available in the audit trail.
+router.post('/attendance/intervals/:id/void', protect, securityView, [
+  body('reason').trim().notEmpty().withMessage('دلیل ابطال الزامی است.')
+], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    const interval = await prisma.attendanceInterval.findUnique({ where: { id: req.params.id } });
+    if (!interval || interval.status === AttendanceIntervalStatus.VOIDED) return res.status(404).json({ success: false, error: 'بازه حضور فعال پیدا نشد.' });
+    const reason = String(req.body.reason).trim();
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.attendanceInterval.update({
+        where: { id: interval.id },
+        data: { status: AttendanceIntervalStatus.VOIDED, voidReason: reason, voidedAt: new Date(), voidedBy: req.user!.id }
+      });
+      await tx.attendanceIntervalAudit.create({
+        data: { intervalId: interval.id, action: 'VOIDED', reason, beforeData: intervalAuditSnapshot(interval), afterData: intervalAuditSnapshot(updated), actorId: req.user!.id }
+      });
+      await refreshAttendanceRecordFromIntervals(tx, interval.attendanceRecordId);
+    });
+    const record = await prisma.attendanceRecord.findUnique({ where: { id: interval.attendanceRecordId }, include: attendanceInclude });
+    return res.json({ success: true, message: 'بازه تردد با حفظ سابقه باطل شد.', data: record });
+  } catch (error) {
+    console.error('Void attendance interval error:', error);
+    return res.status(500).json({ success: false, error: 'Server error' });
   }
 });
 
@@ -2617,7 +2904,7 @@ router.get('/reports/security-personnel-performance', protect, securityAdmin, as
     });
     const selected = personnelId ? slots.flatMap((slot) => (slot.session ? [{ slot, session: slot.session }] : [])).flatMap(({ slot, session }) => {
       const evidence: any[] = [];
-      if (!activityType || activityType === 'log') evidence.push(...session.logEntries.map((entry: any) => ({ kind: 'گزارش لحظه‌ای', at: entry.createdAt, title: `${entry.reportType.category?.name ? `${entry.reportType.category.name} / ` : ''}${entry.reportType.name}`, description: entry.description, status: entry.status, slotId: slot.id })));
+      if (!activityType || activityType === 'log') evidence.push(...session.logEntries.map((entry: any) => ({ kind: 'گزارش لحظه‌ای', at: entry.createdAt, title: `${entry.categoryNameSnapshot}${entry.reportTypeNameSnapshot ? ` / ${entry.reportTypeNameSnapshot}` : ''}`, description: entry.description, status: entry.status, slotId: slot.id })));
       if (!activityType || activityType === 'patrol') evidence.push(...session.patrolSessions.filter((patrol: any) => patrol.personnelId === personnelId).map((patrol: any) => ({ kind: 'گشت‌زنی', at: patrol.startedAt, title: patrol.status === 'ACTIVE' ? 'فعال' : 'پایان‌یافته', description: patrol.description || '', status: patrol.status, slotId: slot.id })));
       if ((!activityType || activityType === 'closure') && session.closureSummary) evidence.push({ kind: 'پایان شیفت', at: session.endedAt || session.updatedAt, title: session.status, description: session.closureSummary, status: session.status, slotId: slot.id });
       return evidence;
@@ -2638,7 +2925,8 @@ router.get('/reports/security-personnel/:id/shift-history', protect, securityAdm
       include: { plan: { select: { title: true } }, plannedPersonnel: { include: { user: true } }, replacementPersonnel: { include: { user: true } }, attendance: { where: { personnelId: personnel.id } }, temporaryCoverage: { include: { personnel: { include: { user: true } } } }, session: { include: { logEntries: { include: { reportType: shiftLogReportTypeInclude, participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' } }, patrolSessions: { orderBy: { startedAt: 'asc' } } } } },
       orderBy: { session: { endedAt: 'desc' } }
     });
-    res.json({ success: true, data: { personnel: { id: personnel.id, name: `${personnel.user.firstName} ${personnel.user.lastName}`.trim() || personnel.user.username, shift: personnel.shift.namePersian }, shifts: slots } });
+    const compatibleSlots = slots.map((slot: any) => ({ ...slot, session: slot.session ? { ...slot.session, logEntries: slot.session.logEntries.map((entry: any) => ({ ...entry, reportType: { ...(entry.reportType || {}), name: `${entry.categoryNameSnapshot}${entry.reportTypeNameSnapshot ? ` / ${entry.reportTypeNameSnapshot}` : ''}` } })) } : slot.session }));
+    res.json({ success: true, data: { personnel: { id: personnel.id, name: `${personnel.user.firstName} ${personnel.user.lastName}`.trim() || personnel.user.username, shift: personnel.shift.namePersian }, shifts: compatibleSlots } });
   } catch (error: any) { res.status(500).json({ success: false, error: error.message || 'دریافت تاریخچه شیفت ناموفق بود.' }); }
 });
 
@@ -2750,7 +3038,7 @@ const renderDetailedSecurityShift = (slot: any) => {
     return `
       <tr>
         <td>${entry.rowNumber.toLocaleString('fa-IR')}</td>
-        <td>${securityEscapeHtml(`${entry.reportType.category?.name ? `${entry.reportType.category.name} / ` : ''}${entry.reportType.name}`)}${entry.reportType.description ? `<div class="muted">${securityEscapeHtml(entry.reportType.description)}</div>` : ''}</td>
+        <td>${securityEscapeHtml(`${entry.categoryNameSnapshot}${entry.reportTypeNameSnapshot ? ` / ${entry.reportTypeNameSnapshot}` : ''}`)}${entry.reportType?.description ? `<div class="muted">${securityEscapeHtml(entry.reportType.description)}</div>` : ''}</td>
         <td>${securityEscapeHtml(entry.description || '-')}</td>
         ${hasParticipants ? `<td>${participants || '-'}</td>` : ''}
         <td>${voided ? `<span class="badge voided">باطل‌شده</span>${entry.voidedAt ? `<div class="muted">زمان ابطال: ${formatSecurityDateTime(entry.voidedAt)}</div>` : ''}${entry.voidReason ? `<div class="muted">دلیل: ${securityEscapeHtml(entry.voidReason)}</div>` : ''}` : '<span class="badge">فعال</span>'}</td>
@@ -2952,7 +3240,14 @@ router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, re
         const previousAttendanceNote = record.openPreviousAttendance
           ? `خروج روز قبل ثبت نشده است (${record.openPreviousAttendance.entryTime || '-'})`
           : '';
-        const notes = [record.notes || record.exceptionType || '', previousAttendanceNote].filter(Boolean).join('\n') || '-';
+        const segmentLabel: Record<string, string> = { PRESENCE: 'حضور در محل', OUTSIDE: 'خارج از محل', HOURLY_LEAVE: 'مرخصی ساعتی' };
+        const movementTimeline = record.movementTimeline.map((segment: any) => `${segmentLabel[segment.kind] || segment.kind}: ${formatSecurityDateTime(segment.startsAt)} تا ${segment.endsAt ? formatSecurityDateTime(segment.endsAt) : 'باز'}`).join(' | ');
+        const presenceNote = record.intervals.length ? `ترددها: ${movementTimeline}\nحضور فیزیکی: ${record.physicalPresenceMinutes} دقیقه · خارج از محل: ${record.outsideMinutes} دقیقه · کارکرد محاسبه‌شده: ${record.accountedWorkMinutes ?? 'در انتظار تکمیل'}` : '';
+        const authorityNote = [
+          ...record.approvedExceptions.map((item: any) => { const bounds = authorityBounds(item); return `استثنا: ${item.exceptionType} · ${formatSecurityDateTime(bounds.startsAt)} تا ${formatSecurityDateTime(bounds.endsAt)}`; }),
+          ...record.approvedMissions.map((item: any) => { const bounds = authorityBounds(item); return `ماموریت: ${item.missionLocation} · ${formatSecurityDateTime(bounds.startsAt)} تا ${formatSecurityDateTime(bounds.endsAt)}`; })
+        ].join('\n');
+        const notes = [record.notes || record.exceptionType || '', presenceNote, authorityNote, previousAttendanceNote].filter(Boolean).join('\n') || '-';
         attendanceDetails.push({
           date: formattedDate,
           employee: `${record.employee.firstName} ${record.employee.lastName}`.trim() || record.employee.username || '-',
@@ -2960,12 +3255,16 @@ router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, re
           status: securityAttendanceStatusLabel(record.status),
           entryTime: record.entryTime || '-',
           exitTime: record.exitTime || '-',
-          shift: record.shift?.namePersian || '-',
+          shift: '-',
           notes,
           signature: record.digitalSignature ? 'ثبت شده' : '-',
           delayMinutes: record.delayMinutes,
           overtimeMinutes: record.overtimeMinutes,
-          overtimePending: record.overtimePending
+          overtimePending: record.overtimePending,
+          physicalPresenceMinutes: record.physicalPresenceMinutes,
+          outsideMinutes: record.outsideMinutes,
+          accountedWorkMinutes: record.accountedWorkMinutes,
+          movementTimeline
         });
       });
     }
@@ -2987,7 +3286,10 @@ router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, re
         'وضعیت': row.status,
         'ورود': row.entryTime,
         'خروج': row.exitTime,
-        'شیفت ثبت': row.shift,
+        'جزئیات تردد': row.movementTimeline || '-',
+        'حضور فیزیکی (دقیقه)': row.physicalPresenceMinutes ?? '-',
+        'خارج از محل (دقیقه)': row.outsideMinutes ?? '-',
+        'کارکرد محاسبه‌شده (دقیقه)': row.accountedWorkMinutes ?? 'در انتظار تکمیل',
         'تأخیر': row.delayMinutes === null ? '-' : row.delayMinutes,
         'اضافه‌کار': row.overtimePending ? 'در انتظار ثبت خروج' : row.overtimeMinutes === null ? '-' : row.overtimeMinutes,
         'یادداشت': row.notes,
@@ -2998,12 +3300,11 @@ router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, re
       res.setHeader('Content-Disposition', 'attachment; filename="security-report.xlsx"');
       return res.send(file);
     }
-    const exceptionRows = attendanceDetails.filter((row) => row.status === 'غایب' || Number(row.delayMinutes || 0) > 0 || Number(row.overtimeMinutes || 0) > 0);
     const htmlContent = renderSecurityAttendanceReportHtml({
       baseStyles: securityPdfStyles(),
       title,
       totals: { absent: totals.absent, late: totals.late },
-      rows: exceptionRows,
+      rows: attendanceDetails,
       showDateColumn: days > 1
     });
     const pdfPath = await generatePdfFromHtml({ fileName: `security-report-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent, margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
@@ -3016,10 +3317,55 @@ router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, re
 
 // ==================== EXCEPTION HANDLING SYSTEM ====================
 
+const workflowPersonId = (item: any) => item.personnelId || item.employee?.personnelId || null;
+const workflowSnapshot = (value: any) => JSON.parse(JSON.stringify(value));
+const exceptionWorkflowInclude = {
+  personnel: { select: personnelSelect },
+  employee: { select: { id: true, personnelId: true, firstName: true, lastName: true, username: true, department: { select: { namePersian: true } } } },
+  approver: { select: { firstName: true, lastName: true } },
+  rejecter: { select: { firstName: true, lastName: true } },
+  auditEvents: { include: { actor: { select: { firstName: true, lastName: true, username: true } } }, orderBy: { createdAt: 'asc' as const } }
+};
+const missionWorkflowInclude = {
+  personnel: { select: personnelSelect },
+  employee: { select: { id: true, personnelId: true, firstName: true, lastName: true, username: true, department: { select: { namePersian: true } } } },
+  assigner: { select: { firstName: true, lastName: true } },
+  approver: { select: { firstName: true, lastName: true } },
+  auditEvents: { include: { actor: { select: { firstName: true, lastName: true, username: true } } }, orderBy: { createdAt: 'asc' as const } }
+};
+const authorityOverlaps = (left: any, right: any) => {
+  const a = authorityBounds(left); const b = authorityBounds(right);
+  return a.startsAt < b.endsAt && b.startsAt < a.endsAt;
+};
+const hasValidAuthorityWindow = (item: any) => {
+  const bounds = authorityBounds(item);
+  return Number.isFinite(bounds.startsAt.getTime()) && Number.isFinite(bounds.endsAt.getTime()) && bounds.endsAt > bounds.startsAt;
+};
+const approvedAuthorityConflict = async (kind: 'exception' | 'mission', item: any) => {
+  const personnelId = workflowPersonId(item);
+  if (!personnelId) return null;
+  const [exceptions, missions] = await Promise.all([
+    prisma.exceptionRequest.findMany({ where: { status: ExceptionStatus.APPROVED, id: kind === 'exception' ? { not: item.id } : undefined, OR: [{ personnelId }, { employee: { personnelId } }] }, include: { employee: { select: { personnelId: true } } } }),
+    prisma.missionAssignment.findMany({ where: { status: ExceptionStatus.APPROVED, id: kind === 'mission' ? { not: item.id } : undefined, OR: [{ personnelId }, { employee: { personnelId } }] }, include: { employee: { select: { personnelId: true } } } })
+  ]);
+  return [...exceptions.map((value) => ({ kind: 'exception', value })), ...missions.map((value) => ({ kind: 'mission', value }))]
+    .find((candidate) => authorityOverlaps(item, candidate.value)) || null;
+};
+const pendingAuthorityOverlap = async (kind: 'exception' | 'mission', item: any) => {
+  const personnelId = workflowPersonId(item);
+  if (!personnelId) return null;
+  const [exceptions, missions] = await Promise.all([
+    prisma.exceptionRequest.findMany({ where: { status: { in: [ExceptionStatus.PENDING, ExceptionStatus.APPROVED] }, id: kind === 'exception' ? { not: item.id } : undefined, OR: [{ personnelId }, { employee: { personnelId } }] }, include: { employee: { select: { personnelId: true } } } }),
+    prisma.missionAssignment.findMany({ where: { status: { in: [ExceptionStatus.PENDING, ExceptionStatus.APPROVED] }, id: kind === 'mission' ? { not: item.id } : undefined, OR: [{ personnelId }, { employee: { personnelId } }] }, include: { employee: { select: { personnelId: true } } } })
+  ]);
+  return [...exceptions, ...missions].find((candidate) => authorityOverlaps(item, candidate)) || null;
+};
+
 // @desc    Create exception request (leave, sick leave, etc.)
 // @route   POST /api/security/exceptions/request
 // @access  Private/All Users
-router.post('/exceptions/request', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_REQUEST, FEATURE_PERMISSIONS.EDIT), [
+router.post('/exceptions/request', protect, securityView, [
+  body('personnelId').isString().trim().notEmpty().withMessage('Personnel is required'),
   body('exceptionType').isIn(['HOURLY_LEAVE', 'SICK_LEAVE', 'VACATION', 'EMERGENCY_LEAVE', 'PERSONAL_LEAVE']).withMessage('Invalid exception type'),
   body('startDate').isISO8601().withMessage('Start date must be valid'),
   body('endDate').optional().isISO8601().withMessage('End date must be valid'),
@@ -3052,9 +3398,15 @@ router.post('/exceptions/request', protect, requireWorkspaceAccess(WORKSPACES.SE
       emergencyContact
     } = req.body;
 
+    const personnel = await prisma.personnel.findUnique({ where: { id: req.body.personnelId }, include: { user: { select: { id: true } } } });
+    if (!personnel?.isActive) return res.status(404).json({ success: false, error: 'پرسنل فعال پیدا نشد.' });
+    if (exceptionType === ExceptionType.HOURLY_LEAVE && (!startTime || !endTime)) return res.status(400).json({ success: false, error: 'مرخصی ساعتی باید بازه شروع و پایان دقیق داشته باشد.' });
+    if (!hasValidAuthorityWindow({ startDate, endDate, startTime, endTime })) return res.status(400).json({ success: false, error: 'بازه زمانی استثنا معتبر نیست.' });
     const exceptionRequest = await prisma.exceptionRequest.create({
       data: {
-        employeeId: req.user!.id,
+        employeeId: personnel.user?.id || null,
+        personnelId: personnel.id,
+        requestedBy: req.user!.id,
         exceptionType,
         startDate: new Date(startDate),
         endDate: endDate ? new Date(endDate) : null,
@@ -3065,27 +3417,16 @@ router.post('/exceptions/request', protect, requireWorkspaceAccess(WORKSPACES.SE
         description,
         emergencyContact
       },
-      include: {
-        employee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            username: true,
-            department: {
-              select: {
-                namePersian: true
-              }
-            }
-          }
-        }
-      }
+      include: exceptionWorkflowInclude
     });
+    await prisma.securityAttendanceWorkflowEvent.create({ data: { exceptionId: exceptionRequest.id, action: 'CREATED', afterData: workflowSnapshot(exceptionRequest), actorId: req.user!.id } });
+    const overlap = await pendingAuthorityOverlap('exception', exceptionRequest);
 
     res.status(201).json({
       success: true,
       message: 'Exception request created successfully',
-      data: exceptionRequest
+      data: exceptionRequest,
+      warning: overlap ? 'این مورد در انتظار با یک استثنا یا مأموریت دیگر هم‌پوشانی دارد؛ تأیید تا رفع تعارض ممکن نیست.' : undefined
     });
     return;
   } catch (error) {
@@ -3101,43 +3442,16 @@ router.post('/exceptions/request', protect, requireWorkspaceAccess(WORKSPACES.SE
 // @desc    Get exception requests (for managers/approvers)
 // @route   GET /api/security/exceptions/requests
 // @access  Private/Managers
-router.get('/exceptions/requests', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
+router.get('/exceptions/requests', protect, securityView, async (req: AuthRequest, res: Response) => {
   try {
     const { status, type, page = 1, limit = 10 } = req.query;
-    const operationalUserIds = (await currentOperationalSecurityPersonnel()).map((person) => person.user.id);
-    const where: any = { employeeId: { in: operationalUserIds } };
+    const where: any = {};
     if (status) where.status = status;
     if (type) where.exceptionType = type;
 
     const exceptionRequests = await prisma.exceptionRequest.findMany({
       where,
-      include: {
-        employee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            username: true,
-            department: {
-              select: {
-                namePersian: true
-              }
-            }
-          }
-        },
-        approver: {
-          select: {
-            firstName: true,
-            lastName: true
-          }
-        },
-        rejecter: {
-          select: {
-            firstName: true,
-            lastName: true
-          }
-        }
-      },
+      include: exceptionWorkflowInclude,
       orderBy: { createdAt: 'desc' },
       skip: (parseInt(page as string) - 1) * parseInt(limit as string),
       take: parseInt(limit as string)
@@ -3147,7 +3461,7 @@ router.get('/exceptions/requests', protect, requireWorkspaceAccess(WORKSPACES.SE
 
     res.json({
       success: true,
-      data: exceptionRequests,
+      data: exceptionRequests.map((item) => ({ ...item, employee: item.personnel || item.employee })),
       pagination: {
         page: parseInt(page as string),
         limit: parseInt(limit as string),
@@ -3169,7 +3483,7 @@ router.get('/exceptions/requests', protect, requireWorkspaceAccess(WORKSPACES.SE
 // @desc    Approve exception request
 // @route   PUT /api/security/exceptions/:id/approve
 // @access  Private/Managers
-router.put('/exceptions/:id/approve', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_APPROVE, FEATURE_PERMISSIONS.EDIT), [
+router.put('/exceptions/:id/approve', protect, securityView, [
   body('notes').optional().isString().withMessage('Notes must be a string')
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -3185,7 +3499,11 @@ router.put('/exceptions/:id/approve', protect, requireWorkspaceAccess(WORKSPACES
     const { id } = req.params;
     const { notes } = req.body;
 
-    const existingRequest = await prisma.exceptionRequest.findUnique({ where: { id } });
+    const existingRequest = await prisma.exceptionRequest.findUnique({ where: { id }, include: { employee: { select: { personnelId: true } } } });
+    if (!existingRequest) return res.status(404).json({ success: false, error: 'استثنای حضور و غیاب پیدا نشد.' });
+    if (existingRequest.status !== ExceptionStatus.PENDING) return res.status(409).json({ success: false, error: 'فقط استثنای در انتظار قابل تأیید است.' });
+    const conflict = await approvedAuthorityConflict('exception', existingRequest);
+    if (conflict) return res.status(409).json({ success: false, error: 'این بازه با یک استثنا یا مأموریت تأییدشده تداخل دارد.', data: { conflictKind: conflict.kind, conflictId: conflict.value.id } });
     
     const exceptionRequest = await prisma.exceptionRequest.update({
       where: { id },
@@ -3195,24 +3513,12 @@ router.put('/exceptions/:id/approve', protect, requireWorkspaceAccess(WORKSPACES
         approvedAt: new Date(),
         description: notes ? `${existingRequest?.description || ''}\nApproval Notes: ${notes}` : existingRequest?.description
       },
-      include: {
-        employee: {
-          select: {
-            firstName: true,
-            lastName: true
-          }
-        },
-        approver: {
-          select: {
-            firstName: true,
-            lastName: true
-          }
-        }
-      }
+      include: exceptionWorkflowInclude
     });
+    await prisma.securityAttendanceWorkflowEvent.create({ data: { exceptionId: id, action: 'APPROVED', reason: String(notes || '').trim() || null, beforeData: workflowSnapshot(existingRequest), afterData: workflowSnapshot(exceptionRequest), actorId: req.user!.id } });
 
     if (existingRequest) {
-      const personnel = await prisma.securityPersonnel.findUnique({ where: { userId: existingRequest.employeeId } });
+      const personnel = existingRequest.employeeId ? await prisma.securityPersonnel.findUnique({ where: { userId: existingRequest.employeeId } }) : null;
       if (personnel) {
         const leaveEnd = existingRequest.endDate || new Date(existingRequest.startDate.getTime() + 24 * 60 * 60_000);
         const now = new Date();
@@ -3242,7 +3548,7 @@ router.put('/exceptions/:id/approve', protect, requireWorkspaceAccess(WORKSPACES
 // @desc    Reject exception request
 // @route   PUT /api/security/exceptions/:id/reject
 // @access  Private/Managers
-router.put('/exceptions/:id/reject', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_EXCEPTIONS_REJECT, FEATURE_PERMISSIONS.EDIT), [
+router.put('/exceptions/:id/reject', protect, securityView, [
   body('rejectionReason').notEmpty().withMessage('Rejection reason is required')
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -3258,6 +3564,9 @@ router.put('/exceptions/:id/reject', protect, requireWorkspaceAccess(WORKSPACES.
     const { id } = req.params;
     const { rejectionReason } = req.body;
 
+    const existingRequest = await prisma.exceptionRequest.findUnique({ where: { id } });
+    if (!existingRequest) return res.status(404).json({ success: false, error: 'استثنای حضور و غیاب پیدا نشد.' });
+    if (existingRequest.status !== ExceptionStatus.PENDING) return res.status(409).json({ success: false, error: 'فقط استثنای در انتظار قابل رد است.' });
     const exceptionRequest = await prisma.exceptionRequest.update({
       where: { id },
       data: {
@@ -3266,21 +3575,9 @@ router.put('/exceptions/:id/reject', protect, requireWorkspaceAccess(WORKSPACES.
         rejectedAt: new Date(),
         rejectionReason
       },
-      include: {
-        employee: {
-          select: {
-            firstName: true,
-            lastName: true
-          }
-        },
-        rejecter: {
-          select: {
-            firstName: true,
-            lastName: true
-          }
-        }
-      }
+      include: exceptionWorkflowInclude
     });
+    await prisma.securityAttendanceWorkflowEvent.create({ data: { exceptionId: id, action: 'REJECTED', reason: rejectionReason, beforeData: workflowSnapshot(existingRequest), afterData: workflowSnapshot(exceptionRequest), actorId: req.user!.id } });
 
     res.json({
       success: true,
@@ -3298,18 +3595,82 @@ router.put('/exceptions/:id/reject', protect, requireWorkspaceAccess(WORKSPACES.
   }
 });
 
+router.put('/exceptions/:id', protect, securityView, async (req: AuthRequest, res: Response) => {
+  try {
+    const existing = await prisma.exceptionRequest.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'استثنای حضور و غیاب پیدا نشد.' });
+    if (existing.status !== ExceptionStatus.PENDING) return res.status(409).json({ success: false, error: 'فقط استثنای در انتظار قابل ویرایش است.' });
+    const personnel = req.body.personnelId ? await prisma.personnel.findUnique({ where: { id: String(req.body.personnelId) }, include: { user: { select: { id: true } } } }) : null;
+    if (req.body.personnelId && !personnel?.isActive) return res.status(404).json({ success: false, error: 'پرسنل فعال پیدا نشد.' });
+    const candidate = { ...existing, ...req.body, startDate: req.body.startDate ? new Date(req.body.startDate) : existing.startDate, endDate: Object.prototype.hasOwnProperty.call(req.body, 'endDate') ? (req.body.endDate ? new Date(req.body.endDate) : null) : existing.endDate };
+    if (candidate.exceptionType === ExceptionType.HOURLY_LEAVE && (!candidate.startTime || !candidate.endTime)) return res.status(400).json({ success: false, error: 'مرخصی ساعتی باید بازه شروع و پایان دقیق داشته باشد.' });
+    if (!hasValidAuthorityWindow(candidate)) return res.status(400).json({ success: false, error: 'بازه زمانی استثنا معتبر نیست.' });
+    const updated = await prisma.exceptionRequest.update({
+      where: { id: existing.id },
+      data: {
+        ...(personnel ? { personnelId: personnel.id, employeeId: personnel.user?.id || null } : {}),
+        ...(req.body.exceptionType ? { exceptionType: req.body.exceptionType } : {}),
+        ...(req.body.startDate ? { startDate: new Date(req.body.startDate) } : {}),
+        ...(Object.prototype.hasOwnProperty.call(req.body, 'endDate') ? { endDate: req.body.endDate ? new Date(req.body.endDate) : null } : {}),
+        ...(Object.prototype.hasOwnProperty.call(req.body, 'startTime') ? { startTime: req.body.startTime || null } : {}),
+        ...(Object.prototype.hasOwnProperty.call(req.body, 'endTime') ? { endTime: req.body.endTime || null } : {}),
+        ...(req.body.reason ? { reason: String(req.body.reason).trim() } : {}),
+        ...(Object.prototype.hasOwnProperty.call(req.body, 'description') ? { description: String(req.body.description || '').trim() || null } : {})
+      }, include: exceptionWorkflowInclude
+    });
+    await prisma.securityAttendanceWorkflowEvent.create({ data: { exceptionId: existing.id, action: 'UPDATED', beforeData: workflowSnapshot(existing), afterData: workflowSnapshot(updated), actorId: req.user!.id } });
+    const overlap = await pendingAuthorityOverlap('exception', updated);
+    res.json({ success: true, data: updated, warning: overlap ? 'این مورد در انتظار با یک استثنا یا مأموریت دیگر هم‌پوشانی دارد؛ تأیید تا رفع تعارض ممکن نیست.' : undefined });
+  } catch (error: any) { res.status(500).json({ success: false, error: error.message || 'ویرایش استثنای حضور و غیاب ناموفق بود.' }); }
+});
+
+router.delete('/exceptions/:id', protect, securityView, async (req: AuthRequest, res: Response) => {
+  const existing = await prisma.exceptionRequest.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ success: false, error: 'استثنای حضور و غیاب پیدا نشد.' });
+  if (existing.status !== ExceptionStatus.PENDING) return res.status(409).json({ success: false, error: 'فقط استثنای در انتظار قابل حذف است.' });
+  await prisma.exceptionRequest.delete({ where: { id: existing.id } });
+  res.json({ success: true, message: 'استثنای در انتظار حذف شد.' });
+});
+
+router.put('/exceptions/:id/cancel', protect, securityView, [body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل لغو الزامی است.' });
+  const existing = await prisma.exceptionRequest.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ success: false, error: 'استثنای حضور و غیاب پیدا نشد.' });
+  if (existing.status !== ExceptionStatus.APPROVED) return res.status(409).json({ success: false, error: 'فقط استثنای تأییدشده قابل لغو است.' });
+  const updated = await prisma.exceptionRequest.update({ where: { id: existing.id }, data: { status: ExceptionStatus.CANCELLED, cancelledBy: req.user!.id, cancelledAt: new Date(), cancellationReason: req.body.reason.trim() }, include: exceptionWorkflowInclude });
+  await prisma.securityAttendanceWorkflowEvent.create({ data: { exceptionId: existing.id, action: 'CANCELLED', reason: req.body.reason.trim(), beforeData: workflowSnapshot(existing), afterData: workflowSnapshot(updated), actorId: req.user!.id } });
+  res.json({ success: true, data: updated });
+});
+
+router.put('/exceptions/:id/correct', protect, securityView, [body('correctionReason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل اصلاح الزامی است.' });
+  const existing = await prisma.exceptionRequest.findUnique({ where: { id: req.params.id }, include: { employee: { select: { personnelId: true } } } });
+  if (!existing) return res.status(404).json({ success: false, error: 'استثنای حضور و غیاب پیدا نشد.' });
+  if (existing.status !== ExceptionStatus.APPROVED) return res.status(409).json({ success: false, error: 'فقط استثنای تأییدشده قابل اصلاح حسابرسی‌شده است.' });
+  const candidate = { ...existing, ...req.body, startDate: req.body.startDate ? new Date(req.body.startDate) : existing.startDate, endDate: Object.prototype.hasOwnProperty.call(req.body, 'endDate') ? (req.body.endDate ? new Date(req.body.endDate) : null) : existing.endDate };
+  const correctionPersonnel = candidate.personnelId !== existing.personnelId ? await prisma.personnel.findUnique({ where: { id: String(candidate.personnelId) }, include: { user: { select: { id: true } } } }) : null;
+  if (candidate.personnelId !== existing.personnelId && !correctionPersonnel?.isActive) return res.status(404).json({ success: false, error: 'پرسنل فعال پیدا نشد.' });
+  if (candidate.exceptionType === ExceptionType.HOURLY_LEAVE && (!candidate.startTime || !candidate.endTime)) return res.status(400).json({ success: false, error: 'مرخصی ساعتی باید بازه شروع و پایان دقیق داشته باشد.' });
+  if (!hasValidAuthorityWindow(candidate)) return res.status(400).json({ success: false, error: 'بازه زمانی استثنا معتبر نیست.' });
+  const conflict = await approvedAuthorityConflict('exception', candidate);
+  if (conflict) return res.status(409).json({ success: false, error: 'اصلاح با یک استثنا یا مأموریت تأییدشده تداخل دارد.' });
+  const updated = await prisma.exceptionRequest.update({ where: { id: existing.id }, data: { ...(correctionPersonnel ? { personnelId: correctionPersonnel.id, employeeId: correctionPersonnel.user?.id || null } : {}), exceptionType: candidate.exceptionType, startDate: candidate.startDate, endDate: candidate.endDate, startTime: candidate.startTime || null, endTime: candidate.endTime || null, reason: candidate.reason, description: candidate.description || null }, include: exceptionWorkflowInclude });
+  await prisma.securityAttendanceWorkflowEvent.create({ data: { exceptionId: existing.id, action: 'CORRECTED', reason: req.body.correctionReason.trim(), beforeData: workflowSnapshot(existing), afterData: workflowSnapshot(updated), actorId: req.user!.id } });
+  res.json({ success: true, data: updated });
+});
+
 // @desc    Create mission assignment
 // @route   POST /api/security/missions/assign
 // @access  Private/Security Personnel
-router.post('/missions/assign', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_MISSIONS_ASSIGN, FEATURE_PERMISSIONS.EDIT), [
-  body('employeeId').notEmpty().withMessage('Employee ID is required'),
+router.post('/missions/assign', protect, securityView, [
+  body('personnelId').notEmpty().withMessage('Personnel ID is required'),
   body('missionType').isIn(['داخل شهری', 'خارج شهری']).withMessage('Invalid mission type'),
   body('missionLocation').notEmpty().withMessage('Mission location is required'),
   body('missionPurpose').notEmpty().withMessage('Mission purpose is required'),
   body('startDate').isISO8601().withMessage('Start date must be valid'),
   body('endDate').optional().isISO8601().withMessage('End date must be valid'),
   body('startTime').notEmpty().withMessage('Start time is required'),
-  body('endTime').optional().isString().withMessage('End time must be a string'),
+  body('endTime').notEmpty().isString().withMessage('End time is required'),
   body('notes').optional().isString().withMessage('Notes must be a string')
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -3322,20 +3683,8 @@ router.post('/missions/assign', protect, requireWorkspaceAccess(WORKSPACES.SECUR
       });
     }
 
-    // Check if user is security personnel
-    const securityPersonnel = await prisma.securityPersonnel.findUnique({
-      where: { userId: req.user!.id }
-    });
-
-    if (!securityPersonnel) {
-      return res.status(403).json({
-        success: false,
-        error: 'User is not authorized as security personnel'
-      });
-    }
-
     const {
-      employeeId,
+      personnelId,
       missionType,
       missionLocation,
       missionPurpose,
@@ -3346,9 +3695,14 @@ router.post('/missions/assign', protect, requireWorkspaceAccess(WORKSPACES.SECUR
       notes
     } = req.body;
 
+    const personnel = await prisma.personnel.findUnique({ where: { id: personnelId }, include: { user: { select: { id: true } } } });
+    if (!personnel?.isActive) return res.status(404).json({ success: false, error: 'پرسنل فعال پیدا نشد.' });
+    if (!hasValidAuthorityWindow({ startDate, endDate, startTime, endTime })) return res.status(400).json({ success: false, error: 'بازه زمانی مأموریت معتبر نیست.' });
+
     const missionAssignment = await prisma.missionAssignment.create({
       data: {
-        employeeId,
+        employeeId: personnel.user?.id || null,
+        personnelId: personnel.id,
         assignedBy: req.user!.id,
         missionType,
         missionLocation,
@@ -3359,33 +3713,16 @@ router.post('/missions/assign', protect, requireWorkspaceAccess(WORKSPACES.SECUR
         endTime,
         notes
       },
-      include: {
-        employee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            username: true,
-            department: {
-              select: {
-                namePersian: true
-              }
-            }
-          }
-        },
-        assigner: {
-          select: {
-            firstName: true,
-            lastName: true
-          }
-        }
-      }
+      include: missionWorkflowInclude
     });
+    await prisma.securityAttendanceWorkflowEvent.create({ data: { missionId: missionAssignment.id, action: 'CREATED', afterData: workflowSnapshot(missionAssignment), actorId: req.user!.id } });
+    const overlap = await pendingAuthorityOverlap('mission', missionAssignment);
 
     res.status(201).json({
       success: true,
       message: 'Mission assignment created successfully',
-      data: missionAssignment
+      data: missionAssignment,
+      warning: overlap ? 'این مأموریت در انتظار با یک استثنا یا مأموریت دیگر هم‌پوشانی دارد؛ تأیید تا رفع تعارض ممکن نیست.' : undefined
     });
     return;
   } catch (error) {
@@ -3401,42 +3738,15 @@ router.post('/missions/assign', protect, requireWorkspaceAccess(WORKSPACES.SECUR
 // @desc    Get mission assignments
 // @route   GET /api/security/missions
 // @access  Private/Security Personnel
-router.get('/missions', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_MISSIONS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
+router.get('/missions', protect, securityView, async (req: AuthRequest, res: Response) => {
   try {
     const { status, page = 1, limit = 10 } = req.query;
-    const operationalUserIds = (await currentOperationalSecurityPersonnel()).map((person) => person.user.id);
-    const where: any = { employeeId: { in: operationalUserIds } };
+    const where: any = {};
     if (status) where.status = status;
 
     const missionAssignments = await prisma.missionAssignment.findMany({
       where,
-      include: {
-        employee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            username: true,
-            department: {
-              select: {
-                namePersian: true
-              }
-            }
-          }
-        },
-        assigner: {
-          select: {
-            firstName: true,
-            lastName: true
-          }
-        },
-        approver: {
-          select: {
-            firstName: true,
-            lastName: true
-          }
-        }
-      },
+      include: missionWorkflowInclude,
       orderBy: { createdAt: 'desc' },
       skip: (parseInt(page as string) - 1) * parseInt(limit as string),
       take: parseInt(limit as string)
@@ -3446,7 +3756,7 @@ router.get('/missions', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WOR
 
     res.json({
       success: true,
-      data: missionAssignments,
+      data: missionAssignments.map((item) => ({ ...item, employee: item.personnel || item.employee })),
       pagination: {
         page: parseInt(page as string),
         limit: parseInt(limit as string),
@@ -3466,10 +3776,15 @@ router.get('/missions', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WOR
 // @desc    Approve mission assignment
 // @route   PUT /api/security/missions/:id/approve
 // @access  Private/Managers
-router.put('/missions/:id/approve', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN), requireFeatureAccess(FEATURES.SECURITY_MISSIONS_APPROVE, FEATURE_PERMISSIONS.EDIT), async (req: AuthRequest, res: Response) => {
+router.put('/missions/:id/approve', protect, securityView, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
 
+    const existing = await prisma.missionAssignment.findUnique({ where: { id }, include: { employee: { select: { personnelId: true } } } });
+    if (!existing) return res.status(404).json({ success: false, error: 'مأموریت پیدا نشد.' });
+    if (existing.status !== ExceptionStatus.PENDING) return res.status(409).json({ success: false, error: 'فقط مأموریت در انتظار قابل تأیید است.' });
+    const conflict = await approvedAuthorityConflict('mission', existing);
+    if (conflict) return res.status(409).json({ success: false, error: 'این بازه با یک استثنا یا مأموریت تأییدشده تداخل دارد.', data: { conflictKind: conflict.kind, conflictId: conflict.value.id } });
     const missionAssignment = await prisma.missionAssignment.update({
       where: { id },
       data: {
@@ -3477,21 +3792,9 @@ router.put('/missions/:id/approve', protect, requireWorkspaceAccess(WORKSPACES.S
         approvedBy: req.user!.id,
         approvedAt: new Date()
       },
-      include: {
-        employee: {
-          select: {
-            firstName: true,
-            lastName: true
-          }
-        },
-        approver: {
-          select: {
-            firstName: true,
-            lastName: true
-          }
-        }
-      }
+      include: missionWorkflowInclude
     });
+    await prisma.securityAttendanceWorkflowEvent.create({ data: { missionId: id, action: 'APPROVED', beforeData: workflowSnapshot(existing), afterData: workflowSnapshot(missionAssignment), actorId: req.user!.id } });
 
     res.json({
       success: true,
@@ -3507,6 +3810,74 @@ router.put('/missions/:id/approve', protect, requireWorkspaceAccess(WORKSPACES.S
     });
     return;
   }
+});
+
+router.put('/missions/:id', protect, securityView, async (req: AuthRequest, res: Response) => {
+  const existing = await prisma.missionAssignment.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ success: false, error: 'مأموریت پیدا نشد.' });
+  if (existing.status !== ExceptionStatus.PENDING) return res.status(409).json({ success: false, error: 'فقط مأموریت در انتظار قابل ویرایش است.' });
+  const personnel = req.body.personnelId ? await prisma.personnel.findUnique({ where: { id: String(req.body.personnelId) }, include: { user: { select: { id: true } } } }) : null;
+  if (req.body.personnelId && !personnel?.isActive) return res.status(404).json({ success: false, error: 'پرسنل فعال پیدا نشد.' });
+  const candidate = { ...existing, ...req.body, startDate: req.body.startDate ? new Date(req.body.startDate) : existing.startDate, endDate: Object.prototype.hasOwnProperty.call(req.body, 'endDate') ? (req.body.endDate ? new Date(req.body.endDate) : null) : existing.endDate };
+  if (!candidate.startTime || !candidate.endTime || !hasValidAuthorityWindow(candidate)) return res.status(400).json({ success: false, error: 'مأموریت باید بازه شروع و پایان معتبر و دقیق داشته باشد.' });
+  const updated = await prisma.missionAssignment.update({ where: { id: existing.id }, data: {
+    ...(personnel ? { personnelId: personnel.id, employeeId: personnel.user?.id || null } : {}),
+    ...(req.body.missionType ? { missionType: req.body.missionType } : {}),
+    ...(Object.prototype.hasOwnProperty.call(req.body, 'missionLocation') ? { missionLocation: req.body.missionLocation } : {}),
+    ...(Object.prototype.hasOwnProperty.call(req.body, 'missionPurpose') ? { missionPurpose: req.body.missionPurpose } : {}),
+    ...(req.body.startDate ? { startDate: new Date(req.body.startDate) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(req.body, 'endDate') ? { endDate: req.body.endDate ? new Date(req.body.endDate) : null } : {}),
+    ...(req.body.startTime ? { startTime: req.body.startTime } : {}),
+    ...(Object.prototype.hasOwnProperty.call(req.body, 'endTime') ? { endTime: req.body.endTime || null } : {}),
+    ...(Object.prototype.hasOwnProperty.call(req.body, 'notes') ? { notes: req.body.notes || null } : {})
+  }, include: missionWorkflowInclude });
+  await prisma.securityAttendanceWorkflowEvent.create({ data: { missionId: existing.id, action: 'UPDATED', beforeData: workflowSnapshot(existing), afterData: workflowSnapshot(updated), actorId: req.user!.id } });
+  const overlap = await pendingAuthorityOverlap('mission', updated);
+  res.json({ success: true, data: updated, warning: overlap ? 'این مأموریت در انتظار با یک استثنا یا مأموریت دیگر هم‌پوشانی دارد؛ تأیید تا رفع تعارض ممکن نیست.' : undefined });
+});
+
+router.delete('/missions/:id', protect, securityView, async (req: AuthRequest, res: Response) => {
+  const existing = await prisma.missionAssignment.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ success: false, error: 'مأموریت پیدا نشد.' });
+  if (existing.status !== ExceptionStatus.PENDING) return res.status(409).json({ success: false, error: 'فقط مأموریت در انتظار قابل حذف است.' });
+  await prisma.missionAssignment.delete({ where: { id: existing.id } });
+  res.json({ success: true, message: 'مأموریت در انتظار حذف شد.' });
+});
+
+router.put('/missions/:id/reject', protect, securityView, [body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل رد الزامی است.' });
+  const existing = await prisma.missionAssignment.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ success: false, error: 'مأموریت پیدا نشد.' });
+  if (existing.status !== ExceptionStatus.PENDING) return res.status(409).json({ success: false, error: 'فقط مأموریت در انتظار قابل رد است.' });
+  const updated = await prisma.missionAssignment.update({ where: { id: existing.id }, data: { status: ExceptionStatus.REJECTED, rejectedBy: req.user!.id, rejectedAt: new Date(), rejectionReason: req.body.reason.trim() }, include: missionWorkflowInclude });
+  await prisma.securityAttendanceWorkflowEvent.create({ data: { missionId: existing.id, action: 'REJECTED', reason: req.body.reason.trim(), beforeData: workflowSnapshot(existing), afterData: workflowSnapshot(updated), actorId: req.user!.id } });
+  res.json({ success: true, data: updated });
+});
+
+router.put('/missions/:id/cancel', protect, securityView, [body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل لغو الزامی است.' });
+  const existing = await prisma.missionAssignment.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ success: false, error: 'مأموریت پیدا نشد.' });
+  if (existing.status !== ExceptionStatus.APPROVED) return res.status(409).json({ success: false, error: 'فقط مأموریت تأییدشده قابل لغو است.' });
+  const updated = await prisma.missionAssignment.update({ where: { id: existing.id }, data: { status: ExceptionStatus.CANCELLED, cancelledBy: req.user!.id, cancelledAt: new Date(), cancellationReason: req.body.reason.trim() }, include: missionWorkflowInclude });
+  await prisma.securityAttendanceWorkflowEvent.create({ data: { missionId: existing.id, action: 'CANCELLED', reason: req.body.reason.trim(), beforeData: workflowSnapshot(existing), afterData: workflowSnapshot(updated), actorId: req.user!.id } });
+  res.json({ success: true, data: updated });
+});
+
+router.put('/missions/:id/correct', protect, securityView, [body('correctionReason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل اصلاح الزامی است.' });
+  const existing = await prisma.missionAssignment.findUnique({ where: { id: req.params.id }, include: { employee: { select: { personnelId: true } } } });
+  if (!existing) return res.status(404).json({ success: false, error: 'مأموریت پیدا نشد.' });
+  if (existing.status !== ExceptionStatus.APPROVED) return res.status(409).json({ success: false, error: 'فقط مأموریت تأییدشده قابل اصلاح حسابرسی‌شده است.' });
+  const candidate = { ...existing, ...req.body, startDate: req.body.startDate ? new Date(req.body.startDate) : existing.startDate, endDate: Object.prototype.hasOwnProperty.call(req.body, 'endDate') ? (req.body.endDate ? new Date(req.body.endDate) : null) : existing.endDate };
+  const correctionPersonnel = candidate.personnelId !== existing.personnelId ? await prisma.personnel.findUnique({ where: { id: String(candidate.personnelId) }, include: { user: { select: { id: true } } } }) : null;
+  if (candidate.personnelId !== existing.personnelId && !correctionPersonnel?.isActive) return res.status(404).json({ success: false, error: 'پرسنل فعال پیدا نشد.' });
+  if (!candidate.startTime || !candidate.endTime || !hasValidAuthorityWindow(candidate)) return res.status(400).json({ success: false, error: 'مأموریت باید بازه شروع و پایان معتبر و دقیق داشته باشد.' });
+  const conflict = await approvedAuthorityConflict('mission', candidate);
+  if (conflict) return res.status(409).json({ success: false, error: 'اصلاح با یک استثنا یا مأموریت تأییدشده تداخل دارد.' });
+  const updated = await prisma.missionAssignment.update({ where: { id: existing.id }, data: { ...(correctionPersonnel ? { personnelId: correctionPersonnel.id, employeeId: correctionPersonnel.user?.id || null } : {}), missionType: candidate.missionType, missionLocation: candidate.missionLocation, missionPurpose: candidate.missionPurpose, startDate: candidate.startDate, endDate: candidate.endDate, startTime: candidate.startTime, endTime: candidate.endTime || null, notes: candidate.notes || null }, include: missionWorkflowInclude });
+  await prisma.securityAttendanceWorkflowEvent.create({ data: { missionId: existing.id, action: 'CORRECTED', reason: req.body.correctionReason.trim(), beforeData: workflowSnapshot(existing), afterData: workflowSnapshot(updated), actorId: req.user!.id } });
+  res.json({ success: true, data: updated });
 });
 
 // ==================== DIGITAL SIGNATURE SYSTEM ====================

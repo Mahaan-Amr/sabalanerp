@@ -18,10 +18,24 @@ import {
   validateHiringFileSignature
 } from '../services/hrHiringFileStorage';
 import { compensationTotalRials, isValidIranianNationalCode, unresolvedActivationRequirements, validateHiringQuestionnaire } from '../services/hrHiringRules';
+import {
+  applicantOtpHash,
+  applicantSubjectHash,
+  generateApplicantOtp,
+  normalizeApplicantDigits,
+  normalizeApplicantMobile,
+  normalizeApplicantOtp
+} from '../services/hrCandidateAccess';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 const ACCESS_TTL_DAYS = 7;
+const PHONE_FAILURE_LIMIT = 5;
+const IP_FAILURE_LIMIT = 30;
+const ACCESS_WINDOW_MS = 15 * 60_000;
+const ACCESS_BLOCK_MS = 15 * 60_000;
+const INVALID_ACCESS_ERROR = 'شماره همراه یا کد ورود معتبر نیست، یا اعتبار دسترسی پایان یافته است. لطفاً اطلاعات را بررسی کنید یا با منابع انسانی تماس بگیرید.';
+const THROTTLED_ACCESS_ERROR = 'تعداد تلاش‌ها بیش از حد مجاز است. لطفاً ۱۵ دقیقه دیگر دوباره تلاش کنید.';
 const DOCUMENT_CATEGORIES = new Set(['BIRTH_CERTIFICATE_ALL_PAGES', 'BIRTH_CERTIFICATE_EXPLANATIONS', 'NATIONAL_ID_FRONT', 'NATIONAL_ID_BACK', 'MILITARY', 'EDUCATION', 'PHOTO', 'OTHER']);
 const COLLATERAL_TYPES = new Set(['PROMISSORY_NOTE', 'CHEQUE', 'GUARANTEE', 'UNDERTAKING', 'OTHER']);
 const permissionRank: Record<string, number> = { view: 1, edit: 2, admin: 3 };
@@ -37,13 +51,6 @@ const upload = multer({
   fileFilter: (_req, file, cb) => cb(null, HR_HIRING_ALLOWED_MIME.has(file.mimetype))
 });
 
-const hash = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
-const otpHash = (otp: string, token: string) => hash(`${otp}:${token}:${process.env.JWT_SECRET || 'development-secret'}`);
-const secureEqual = (left: string, right: string) => {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-};
 const plusDays = (days: number) => new Date(Date.now() + days * 86_400_000);
 const parseDate = (value: unknown, name: string) => {
   const date = new Date(String(value || ''));
@@ -137,8 +144,8 @@ const applicantSession = async (req: ApplicantRequest, res: Response, next: Next
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET || 'development-secret') as any;
     if (payload.kind !== 'HR_APPLICANT') throw new Error('Wrong token kind');
-    const invitation = await prisma.hrCandidateInvitation.findUnique({ where: { id: payload.invitationId } });
-    if (!invitation || invitation.applicationId !== payload.applicationId || invitation.revokedAt || invitation.expiresAt <= new Date()) throw new Error('Expired invitation');
+    const invitation = await prisma.hrCandidateInvitation.findUnique({ where: { id: payload.invitationId }, include: { application: { select: { stage: true } } } });
+    if (!invitation || invitation.applicationId !== payload.applicationId || invitation.revokedAt || invitation.expiresAt <= new Date() || invitation.application.stage === 'CLOSED') throw new Error('Expired invitation');
     req.applicant = { applicationId: payload.applicationId, invitationId: payload.invitationId };
     next();
   } catch {
@@ -146,19 +153,87 @@ const applicantSession = async (req: ApplicantRequest, res: Response, next: Next
   }
 };
 
-// Applicant invitation verification and self-service.
-router.post('/public/invitations/:token/verify', asyncHandler(async (req: express.Request, res: Response) => {
-  const invitation = await prisma.hrCandidateInvitation.findUnique({
-    where: { tokenHash: hash(req.params.token) }, include: { application: { include: { candidate: true } } }
-  });
-  if (!invitation || invitation.revokedAt || invitation.expiresAt <= new Date()) return res.status(410).json({ success: false, error: 'دعوت‌نامه منقضی یا لغو شده است.' });
-  if (invitation.blockedUntil && invitation.blockedUntil > new Date()) return res.status(429).json({ success: false, error: 'تلاش‌های ناموفق بیش از حد است؛ کمی بعد دوباره امتحان کنید.' });
-  if (!secureEqual(invitation.otpHash, otpHash(String(req.body.otp || ''), req.params.token))) {
-    const failedAttempts = invitation.failedAttempts + 1;
-    await prisma.hrCandidateInvitation.update({ where: { id: invitation.id }, data: { failedAttempts, blockedUntil: failedAttempts >= 5 ? new Date(Date.now() + 15 * 60_000) : null } });
-    return res.status(401).json({ success: false, error: 'کد تأیید نادرست است.' });
+type AccessSubjectKind = 'PHONE' | 'IP';
+
+const activeThrottle = async (subjectKind: AccessSubjectKind, subjectHash: string) => {
+  const throttle = await prisma.hrCandidateAccessThrottle.findUnique({ where: { subjectKind_subjectHash: { subjectKind, subjectHash } } });
+  return throttle?.blockedUntil && throttle.blockedUntil > new Date() ? throttle : null;
+};
+
+const registerAccessFailure = async (subjectKind: AccessSubjectKind, subjectHash: string, limit: number) => {
+  const now = new Date();
+  const windowThreshold = new Date(now.getTime() - ACCESS_WINDOW_MS);
+  const blockedUntil = new Date(now.getTime() + ACCESS_BLOCK_MS);
+  const rows = await prisma.$queryRaw<Array<{ failedAttempts: number; blockedUntil: Date | null }>>(Prisma.sql`
+    INSERT INTO "hr_candidate_access_throttles"
+      ("id", "subjectKind", "subjectHash", "failedAttempts", "windowStartedAt", "blockedUntil", "lastAttemptAt", "createdAt", "updatedAt")
+    VALUES
+      (${crypto.randomUUID()}, ${subjectKind}, ${subjectHash}, 1, ${now}, NULL, ${now}, ${now}, ${now})
+    ON CONFLICT ("subjectKind", "subjectHash") DO UPDATE SET
+      "failedAttempts" = CASE
+        WHEN "hr_candidate_access_throttles"."windowStartedAt" <= ${windowThreshold} THEN 1
+        ELSE "hr_candidate_access_throttles"."failedAttempts" + 1
+      END,
+      "windowStartedAt" = CASE
+        WHEN "hr_candidate_access_throttles"."windowStartedAt" <= ${windowThreshold} THEN ${now}
+        ELSE "hr_candidate_access_throttles"."windowStartedAt"
+      END,
+      "blockedUntil" = CASE
+        WHEN (CASE
+          WHEN "hr_candidate_access_throttles"."windowStartedAt" <= ${windowThreshold} THEN 1
+          ELSE "hr_candidate_access_throttles"."failedAttempts" + 1
+        END) >= ${limit} THEN ${blockedUntil}
+        ELSE NULL
+      END,
+      "lastAttemptAt" = ${now},
+      "updatedAt" = ${now}
+    RETURNING "failedAttempts", "blockedUntil"
+  `);
+  return rows[0];
+};
+
+const recordAccessAttempt = (req: express.Request, data: { mobileHash: string; ipHash: string; outcome: string; invitationId?: string; applicationId?: string }) =>
+  prisma.hrCandidateAccessAttempt.create({ data: { ...data, userAgent: req.get('user-agent') } });
+
+// Fixed public applicant entry: mobile identifies the recipient and OTP identifies one Application.
+router.post('/public/invitations/verify', asyncHandler(async (req: express.Request, res: Response) => {
+  const mobile = normalizeApplicantMobile(req.body.mobile);
+  const otp = normalizeApplicantOtp(req.body.otp);
+  const mobileThrottleValue = mobile || `INVALID:${normalizeApplicantDigits(req.body.mobile).slice(0, 32)}`;
+  const mobileHash = applicantSubjectHash('PHONE', mobileThrottleValue);
+  const ipHash = applicantSubjectHash('IP', req.ip || 'unknown');
+  const [phoneBlocked, ipBlocked] = await Promise.all([activeThrottle('PHONE', mobileHash), activeThrottle('IP', ipHash)]);
+  if (phoneBlocked || ipBlocked) {
+    await recordAccessAttempt(req, { mobileHash, ipHash, outcome: 'THROTTLED' });
+    return res.status(429).json({ success: false, error: THROTTLED_ACCESS_ERROR });
   }
-  await prisma.hrCandidateInvitation.update({ where: { id: invitation.id }, data: { lastVerifiedAt: new Date(), verificationCount: { increment: 1 }, failedAttempts: 0, blockedUntil: null } });
+
+  const invitation = mobile && otp ? await prisma.hrCandidateInvitation.findFirst({
+    where: {
+      mobileSnapshot: mobile,
+      otpHash: applicantOtpHash(mobile, otp),
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+      application: { stage: { not: 'CLOSED' } }
+    },
+    include: { application: { include: { candidate: true } } }
+  }) : null;
+
+  if (!invitation) {
+    const [phoneThrottle, ipThrottle] = await Promise.all([
+      registerAccessFailure('PHONE', mobileHash, PHONE_FAILURE_LIMIT),
+      registerAccessFailure('IP', ipHash, IP_FAILURE_LIMIT)
+    ]);
+    await recordAccessAttempt(req, { mobileHash, ipHash, outcome: 'REJECTED' });
+    const blocked = (phoneThrottle.blockedUntil && phoneThrottle.blockedUntil > new Date()) || (ipThrottle.blockedUntil && ipThrottle.blockedUntil > new Date());
+    return res.status(blocked ? 429 : 401).json({ success: false, error: blocked ? THROTTLED_ACCESS_ERROR : INVALID_ACCESS_ERROR });
+  }
+
+  await prisma.$transaction([
+    prisma.hrCandidateInvitation.update({ where: { id: invitation.id }, data: { lastVerifiedAt: new Date(), verificationCount: { increment: 1 } } }),
+    prisma.hrCandidateAccessThrottle.deleteMany({ where: { subjectKind: 'PHONE', subjectHash: mobileHash } }),
+    prisma.hrCandidateAccessAttempt.create({ data: { mobileHash, ipHash, invitationId: invitation.id, applicationId: invitation.applicationId, outcome: 'VERIFIED', userAgent: req.get('user-agent') } })
+  ]);
   await audit(invitation.applicationId, 'APPLICANT_OTP_VERIFIED', req, { invitationId: invitation.id }, 'CANDIDATE');
   const remainingSeconds = Math.max(1, Math.floor((invitation.expiresAt.getTime() - Date.now()) / 1000));
   const session = jwt.sign({ kind: 'HR_APPLICANT', applicationId: invitation.applicationId, invitationId: invitation.id }, process.env.JWT_SECRET || 'development-secret', { expiresIn: remainingSeconds });
@@ -387,21 +462,35 @@ router.post('/applications', requireAuthority('HR_PROCESSOR', 'HR_MANAGER'), asy
 router.post('/applications/:id/invitations', requireAuthority('HR_PROCESSOR', 'HR_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { candidate: true } });
   if (application.stage === 'CLOSED') throw new Error('برای پرونده بسته دعوت‌نامه صادر نمی‌شود.');
-  const token = crypto.randomBytes(32).toString('base64url');
-  const otp = String(crypto.randomInt(100000, 1000000));
-  await prisma.hrCandidateInvitation.updateMany({ where: { applicationId: application.id, revokedAt: null }, data: { revokedAt: new Date() } });
-  const invitation = await prisma.hrCandidateInvitation.create({ data: {
-    applicationId: application.id, tokenHash: hash(token), otpHash: otpHash(otp, token), expiresAt: plusDays(ACCESS_TTL_DAYS), createdBy: actorId(req)
-  }});
+  const mobile = normalizeApplicantMobile(application.candidate.mobile);
+  if (!mobile) throw new Error('شماره همراه متقاضی معتبر نیست.');
+  let otp = '';
+  let invitation: Awaited<ReturnType<typeof prisma.hrCandidateInvitation.create>> | null = null;
+  for (let attempt = 0; attempt < 20 && !invitation; attempt += 1) {
+    otp = generateApplicantOtp();
+    try {
+      invitation = await prisma.hrCandidateInvitation.create({ data: {
+        applicationId: application.id,
+        mobileSnapshot: mobile,
+        otpHash: applicantOtpHash(mobile, otp),
+        expiresAt: plusDays(ACCESS_TTL_DAYS),
+        createdBy: actorId(req)
+      }});
+    } catch (error: any) {
+      if (error?.code !== 'P2002') throw error;
+    }
+  }
+  if (!invitation) throw new Error('تولید کد ورود یکتا ناموفق بود؛ دوباره تلاش کنید.');
   const base = process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
-  const link = `${base.replace(/\/$/, '')}/apply/${token}`;
-  const sms = await smsService.sendHiringInvitation({ phoneNumber: application.candidate.mobile, code: otp, candidateName: `${application.candidate.firstName} ${application.candidate.lastName}`, link });
+  const entryUrl = `${base.replace(/\/$/, '')}/apply`;
+  const sms = await smsService.sendHiringInvitation({ phoneNumber: mobile, code: otp });
   if (!sms.success) {
     await prisma.hrCandidateInvitation.update({ where: { id: invitation.id }, data: { revokedAt: new Date() } });
     throw new Error(sms.error || 'ارسال پیامک دعوت ناموفق بود.');
   }
+  await prisma.hrCandidateInvitation.updateMany({ where: { applicationId: application.id, id: { not: invitation.id }, revokedAt: null }, data: { revokedAt: new Date() } });
   await audit(application.id, 'CANDIDATE_INVITATION_SENT', req, { invitationId: invitation.id, expiresAt: invitation.expiresAt });
-  res.status(201).json({ success: true, data: { link, expiresAt: invitation.expiresAt, debugOtp: process.env.SMS_IR_ENVIRONMENT === 'sandbox' ? otp : undefined } });
+  res.status(201).json({ success: true, data: { entryUrl, expiresAt: invitation.expiresAt, debugOtp: process.env.SMS_IR_ENVIRONMENT === 'sandbox' ? otp : undefined } });
 }));
 
 router.post('/applications/:id/form/return', requireAuthority('HR_PROCESSOR', 'HR_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -706,6 +795,7 @@ router.post('/applications/:id/convert', requireAuthority('HR_MANAGER'), asyncHa
       { applicationId: application.id, title: 'تنظیم مشارکت حقوق و دستمزد', ownerAuthority: 'HR_PAYROLL_MANAGER', activationBlocker: true, createdBy: actorId(req) },
       { applicationId: application.id, title: 'پیگیری ثبت بیمه', ownerAuthority: 'HR_PROCESSOR', activationBlocker: false, createdBy: actorId(req) }
     ] });
+    await tx.hrCandidateInvitation.updateMany({ where: { applicationId: application.id, revokedAt: null }, data: { revokedAt: new Date() } });
     await tx.hrJobApplication.update({ where: { id: application.id }, data: { convertedAt: new Date(), scheduledStartDate: startDate, stage: 'CLOSED', outcome: 'HIRED' } });
     return { personnel, relationship };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });

@@ -14,7 +14,8 @@ import {
   removeHiringFile,
   safeHiringStoragePath,
   scanHiringFile,
-  sha256File
+  sha256File,
+  validateHiringFileSignature
 } from '../services/hrHiringFileStorage';
 import { compensationTotalRials, isValidIranianNationalCode, unresolvedActivationRequirements, validateHiringQuestionnaire } from '../services/hrHiringRules';
 
@@ -420,6 +421,7 @@ router.post('/applications/:id/documents', requireAuthority('HR_PROCESSOR'), upl
   if (!req.file) throw new Error('فایل الزامی است.');
   try {
     if (!DOCUMENT_CATEGORIES.has(req.body.category) || !['ORIGINAL_SEEN', 'COPY_RECEIVED'].includes(req.body.inspectionSource)) throw new Error('دسته یا منبع مشاهده سند نامعتبر است.');
+    validateHiringFileSignature(req.file.path, req.file.mimetype);
     const scanStatus = await scanHiringFile(req.file.path);
     const digest = await sha256File(req.file.path);
     const aggregate = await prisma.hrHiringDocument.aggregate({ where: { applicationId: req.params.id, category: req.body.category, side: req.body.side || null }, _max: { version: true } });
@@ -534,6 +536,7 @@ router.post('/applications/:id/assessments', requireAuthority('HR_PROCESSOR'), u
   try {
     const resultJson = typeof req.body.resultJson === 'string' ? JSON.parse(req.body.resultJson) : req.body.resultJson;
     if (!resultJson || !['DISC', 'BIG_FIVE', 'EQ', 'OTHER'].includes(req.body.assessmentType)) throw new Error('نوع و نتیجه ارزیابی الزامی است.');
+    if (req.file) validateHiringFileSignature(req.file.path, req.file.mimetype);
     const scanStatus = req.file ? await scanHiringFile(req.file.path) : undefined;
     const digest = req.file ? await sha256File(req.file.path) : undefined;
     const row = await prisma.hrCandidateAssessment.create({ data: {
@@ -578,7 +581,11 @@ router.post('/applications/:id/collateral', requireAuthority('FINANCE_RECORDER')
     if (!application.acceptedOfferAt) throw new Error('دریافت وثیقه فقط پس از پذیرش پیشنهاد مجاز است.');
     if (!COLLATERAL_TYPES.has(req.body.type)) throw new Error('نوع وثیقه نامعتبر است.');
     if (!req.file || !req.body.receivedAt || !String(req.body.custodyLocation || '').trim()) throw new Error('اسکن، تاریخ دریافت و محل نگهداری اصل وثیقه الزامی است.');
-    if (req.file) { scanStatus = await scanHiringFile(req.file.path); digest = await sha256File(req.file.path); }
+    if (req.file) {
+      validateHiringFileSignature(req.file.path, req.file.mimetype);
+      scanStatus = await scanHiringFile(req.file.path);
+      digest = await sha256File(req.file.path);
+    }
     const itemData = {
       type: req.body.type, required: req.body.required !== 'false',
       amountRials: req.body.amountRials || null, identifier: req.body.identifier || null,
@@ -635,6 +642,7 @@ router.put('/applications/:id/collateral/:itemId/return', requireAuthority('FINA
   try {
     if (!req.file || !String(req.body.returnedTo || '').trim() || !String(req.body.returnEvidenceNote || '').trim()) throw new Error('تحویل‌گیرنده، شرح و فایل مدرک تحویل الزامی است.');
     const item = await prisma.hrCollateralItem.findFirstOrThrow({ where: { id: req.params.itemId, applicationId: req.params.id } });
+    validateHiringFileSignature(req.file.path, req.file.mimetype);
     const scanStatus = await scanHiringFile(req.file.path);
     const digest = await sha256File(req.file.path);
     const row = await prisma.hrCollateralItem.update({ where: { id: item.id }, data: {
@@ -714,6 +722,7 @@ router.post('/applications/:id/contracts', requireAuthority('FINANCE_RECORDER'),
     const effectiveFrom = parseDate(req.body.effectiveFrom, 'تاریخ شروع قرارداد');
     const effectiveTo = req.body.effectiveTo ? parseDate(req.body.effectiveTo, 'تاریخ پایان قرارداد') : null;
     if (effectiveTo && effectiveTo < effectiveFrom) throw new Error('تاریخ پایان قرارداد نمی‌تواند پیش از شروع باشد.');
+    validateHiringFileSignature(req.file.path, req.file.mimetype);
     const scanStatus = await scanHiringFile(req.file.path); const digest = await sha256File(req.file.path);
     const aggregate = await prisma.hrEmploymentContractDocument.aggregate({ where: { applicationId: req.params.id }, _max: { version: true } });
     const row = await prisma.hrEmploymentContractDocument.create({ data: {

@@ -9,6 +9,27 @@ const execFileAsync = promisify(execFile);
 export const HR_HIRING_STORAGE_DIR = path.join(process.cwd(), 'storage', 'hr-hiring');
 export const HR_HIRING_ALLOWED_MIME = new Set(['application/pdf', 'image/jpeg', 'image/png']);
 
+const matchesSignature = (mimeType: string, header: Buffer) => {
+  if (mimeType === 'application/pdf') return header.subarray(0, 5).toString('ascii') === '%PDF-';
+  if (mimeType === 'image/jpeg') return header.length >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+  if (mimeType === 'image/png') return header.length >= 8 && header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  return false;
+};
+
+export const validateHiringFileSignature = (filePath: string, mimeType: string) => {
+  if (!HR_HIRING_ALLOWED_MIME.has(mimeType)) throw new Error('Unsupported HR document type.');
+  const descriptor = fs.openSync(filePath, 'r');
+  try {
+    const header = Buffer.alloc(8);
+    const bytesRead = fs.readSync(descriptor, header, 0, header.length, 0);
+    if (!matchesSignature(mimeType, header.subarray(0, bytesRead))) {
+      throw new Error('HR document content does not match its declared file type.');
+    }
+  } finally {
+    fs.closeSync(descriptor);
+  }
+};
+
 export const ensureHrHiringStorage = () => {
   fs.mkdirSync(HR_HIRING_STORAGE_DIR, { recursive: true });
 };

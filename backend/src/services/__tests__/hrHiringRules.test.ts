@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { compensationTotalRials, unresolvedActivationRequirements, validateHiringQuestionnaire } from '../hrHiringRules';
+import { validateHiringFileSignature } from '../hrHiringFileStorage';
 
 const complete = {
   firstName: 'علی', lastName: 'احمدی', alias: 'ندارم', birthDate: '2000-01-01', birthPlace: 'تهران',
@@ -33,5 +37,17 @@ const blocked = unresolvedActivationRequirements({
   tasks: [{ title: 'آموزش ایمنی', activationBlocker: true, status: 'PENDING' }]
 }, new Date('2026-01-02'));
 assert.deepEqual(blocked, ['تاریخ شروع', 'تأیید هویت', 'تأیید قرارداد', 'مشارکت حقوق و دستمزد', 'آموزش ایمنی']);
+
+const uploadTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hr-hiring-upload-'));
+try {
+  const validPdf = path.join(uploadTestDir, 'valid.pdf');
+  const spoofedPdf = path.join(uploadTestDir, 'spoofed.pdf');
+  fs.writeFileSync(validPdf, Buffer.from('%PDF-1.4\n%%EOF', 'ascii'));
+  fs.writeFileSync(spoofedPdf, Buffer.from('not a pdf', 'ascii'));
+  assert.doesNotThrow(() => validateHiringFileSignature(validPdf, 'application/pdf'));
+  assert.throws(() => validateHiringFileSignature(spoofedPdf, 'application/pdf'), /does not match/);
+} finally {
+  fs.rmSync(uploadTestDir, { recursive: true, force: true });
+}
 
 console.log('HR hiring rule tests passed.');

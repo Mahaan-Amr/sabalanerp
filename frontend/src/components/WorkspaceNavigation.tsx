@@ -17,6 +17,7 @@ import {
   FaChartLine,
   FaCog,
   FaUser,
+  FaUserPlus,
   FaBuilding,
   FaFileAlt,
   FaHandshake,
@@ -454,8 +455,15 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             show: true
           },
           {
+            name: 'Recruitment',
+            namePersian: 'جذب و پرونده‌های متقاضیان',
+            href: '/dashboard/hr/hiring',
+            icon: FaUserPlus,
+            show: true
+          },
+          {
             name: 'Personnel',
-            namePersian: 'پرسنل و استخدام',
+            namePersian: 'پرسنل و روابط استخدامی',
             href: '/dashboard/hr/personnel',
             icon: FaUsers,
             show: true

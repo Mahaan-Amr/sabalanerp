@@ -97,6 +97,7 @@ export default function ApplicantFormPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [invitationUnavailable, setInvitationUnavailable] = useState(false);
 
   const submitted = application?.revision?.status === "SUBMITTED";
   const correctionFields: string[] = Array.isArray(
@@ -132,11 +133,21 @@ export default function ApplicantFormPage() {
   };
 
   useEffect(() => {
-    if (sessionStorage.getItem("hrApplicantSession")) {
+    const session = sessionStorage.getItem("hrApplicantSession");
+    const sessionInvitation = sessionStorage.getItem("hrApplicantInvitationToken");
+    if (session && sessionInvitation === token) {
       setVerified(true);
-      load().catch(() => sessionStorage.removeItem("hrApplicantSession"));
+      load().catch((err) => {
+        sessionStorage.removeItem("hrApplicantSession");
+        sessionStorage.removeItem("hrApplicantInvitationToken");
+        setVerified(false);
+        setError(hiringError(err));
+      });
+    } else if (session) {
+      sessionStorage.removeItem("hrApplicantSession");
+      sessionStorage.removeItem("hrApplicantInvitationToken");
     }
-  }, []);
+  }, [token]);
 
   const run = async (action: () => Promise<any>, success: string) => {
     try {
@@ -152,12 +163,23 @@ export default function ApplicantFormPage() {
     }
   };
 
-  const verify = () =>
-    run(async () => {
+  const verify = async () => {
+    try {
+      setBusy(true);
+      setError("");
       const result = await applicantHiringAPI.verify(token, otp);
       sessionStorage.setItem("hrApplicantSession", result.data.data.session);
+      sessionStorage.setItem("hrApplicantInvitationToken", token);
+      await load();
       setVerified(true);
-    }, "ورود با موفقیت انجام شد.");
+      setMessage("ورود با موفقیت انجام شد.");
+    } catch (err: any) {
+      if (err?.response?.status === 410) setInvitationUnavailable(true);
+      setError(hiringError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const set = (key: string, value: any) =>
     setData((old: any) => ({ ...old, [key]: value }));
@@ -190,27 +212,31 @@ export default function ApplicantFormPage() {
         <section className="mx-auto max-w-md rounded-3xl bg-white p-7 shadow-xl">
           <h1 className="text-2xl font-black">فرم استخدام سبلان</h1>
           <p className="mt-2 text-sm text-slate-500">
-            کد شش‌رقمی موجود در پیامک دعوت را وارد کنید.
+            {invitationUnavailable ? "اعتبار این دعوت پایان یافته یا دعوت با ارسال مجدد لغو شده است." : "کد شش‌رقمی موجود در همین پیامک دعوت را وارد کنید."}
           </p>
           {error && (
             <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">
               {error}
             </p>
           )}
-          <input
-            className={`${inputClass} mt-6 text-center text-xl tracking-[.5em]`}
-            inputMode="numeric"
-            maxLength={6}
-            value={otp}
-            onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
-          />
-          <button
-            disabled={busy || otp.length !== 6}
-            onClick={verify}
-            className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white disabled:opacity-50"
-          >
-            تأیید و ورود
-          </button>
+          {invitationUnavailable ? (
+            <p className="mt-6 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">برای دریافت لینک و کد جدید با واحد منابع انسانی تماس بگیرید. پیش‌نویس ذخیره‌شده شما حذف نمی‌شود.</p>
+          ) : <>
+            <input
+              className={`${inputClass} mt-6 text-center text-xl tracking-[.5em]`}
+              inputMode="numeric"
+              maxLength={6}
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+            />
+            <button
+              disabled={busy || otp.length !== 6}
+              onClick={verify}
+              className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white disabled:opacity-50"
+            >
+              تأیید و ورود
+            </button>
+          </>}
         </section>
       </main>
     );

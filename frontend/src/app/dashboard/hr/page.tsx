@@ -34,8 +34,8 @@ export default function HrDashboardPage() {
     {error && <HrMessage>{error}</HrMessage>}
     <ErpActionGrid columns={4} items={[
       { title: 'ساختار سازمانی', description: 'واحدها، محل‌های کار، مراکز هزینه، شغل‌ها و جایگاه‌های ظرفیت‌دار', href: '/dashboard/hr/structure', icon: FaBuilding, tone: 'primary' },
-      { title: 'استخدام و متقاضیان', description: 'فرم متقاضی، مدارک، تأییدها، وثیقه، قرارداد و فعال‌سازی', href: '/dashboard/hr/hiring', icon: FaUserPlus, tone: 'info' },
-      { title: 'پرسنل و استخدام', description: 'هویت پرسنلی، رابطه استخدامی و تخصیص‌های تاریخ‌دار', href: '/dashboard/hr/personnel', icon: FaUsers, tone: 'success' },
+      { title: 'جذب و پرونده‌های متقاضیان', description: 'فرم متقاضی، مدارک، تأییدها، وثیقه، قرارداد و فعال‌سازی', href: '/dashboard/hr/hiring', icon: FaUserPlus, tone: 'info' },
+      { title: 'پرسنل و روابط استخدامی', description: 'هویت پرسنلی، رابطه استخدامی و تخصیص‌های تاریخ‌دار', href: '/dashboard/hr/personnel', icon: FaUsers, tone: 'success' },
       { title: 'مهاجرت و تطبیق', description: 'پیش‌نمایش بدون تغییر، کنترل تعارض‌ها و انتقال قابل تکرار', href: '/dashboard/hr/migration', icon: FaClipboardCheck, tone: 'info' },
     ]} />
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">

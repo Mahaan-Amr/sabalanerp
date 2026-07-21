@@ -12,6 +12,21 @@ router.use(protect);
 const viewAccess = requireWorkspaceAccess(WORKSPACES.HR, WORKSPACE_PERMISSIONS.VIEW);
 const editAccess = requireWorkspaceAccess(WORKSPACES.HR, WORKSPACE_PERMISSIONS.EDIT);
 const adminAccess = requireWorkspaceAccess(WORKSPACES.HR, WORKSPACE_PERMISSIONS.ADMIN);
+const EXCEPTIONAL_PERSONNEL_SOURCES = new Set(['DATA_MIGRATION', 'HISTORICAL_CORRECTION', 'ORGANIZATIONAL_TRANSFER']);
+
+const requireHrManagerAuthority = async (req: WorkspaceRequest, res: Response, next: express.NextFunction) => {
+  try {
+    const authority = await prisma.hrHiringAuthority.findFirst({
+      where: { userId: req.user!.id, authority: 'HR_MANAGER', isActive: true }
+    });
+    if (!authority) {
+      return res.status(403).json({ success: false, error: 'اختیار سازمانی HR_MANAGER برای ثبت استثنایی پرسنل الزامی است.' });
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
 
 const textValue = (value: unknown) => String(value ?? '').trim();
 const nullableText = (value: unknown) => textValue(value) || null;
@@ -76,8 +91,12 @@ const personnelInclude = {
   },
   hrEmploymentRelationships: {
     orderBy: { effectiveFrom: 'desc' as const },
-    include: { assignments: { orderBy: { effectiveFrom: 'desc' as const }, include: assignmentInclude } }
-  }
+    include: {
+      assignments: { orderBy: { effectiveFrom: 'desc' as const }, include: assignmentInclude },
+      hiringApplication: { select: { id: true, stage: true, outcome: true, convertedAt: true, activatedAt: true } }
+    }
+  },
+  hrPersonnelAudits: { orderBy: { createdAt: 'desc' as const }, take: 10 }
 } as const;
 
 const assertActiveReference = async (client: any, model: 'hrOrganizationalUnit' | 'hrWorkplace' | 'hrCostCenter' | 'hrJob', id: string | null, label: string) => {
@@ -319,10 +338,14 @@ router.get('/personnel', viewAccess, async (req, res) => {
   } catch (error) { handleError(res, error, 'List HR personnel'); }
 });
 
-router.post('/personnel', editAccess, async (req: WorkspaceRequest, res) => {
+router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, async (req: WorkspaceRequest, res) => {
   try {
     const firstName = textValue(req.body.firstName); const lastName = textValue(req.body.lastName);
     if (!firstName || !lastName) throw new Error('نام و نام خانوادگی الزامی است.');
+    const sourceCategory = textValue(req.body.sourceCategory);
+    const reason = textValue(req.body.reason);
+    if (!EXCEPTIONAL_PERSONNEL_SOURCES.has(sourceCategory)) throw new Error('دسته منبع ثبت استثنایی معتبر نیست.');
+    if (reason.length < 10) throw new Error('دلیل ثبت استثنایی باید روشن و حداقل ۱۰ نویسه باشد.');
     const nationalCode = nullableText(req.body.nationalCode);
     if (nationalCode && !isValidIranianNationalCode(nationalCode)) throw new Error('کد ملی معتبر نیست.');
     const duplicate = await prisma.personnel.findFirst({ where: { firstName: { equals: firstName, mode: 'insensitive' }, lastName: { equals: lastName, mode: 'insensitive' } }, select: { id: true, firstName: true, lastName: true, employeeNumber: true } });
@@ -332,7 +355,7 @@ router.post('/personnel', editAccess, async (req: WorkspaceRequest, res) => {
     if (status === 'ACTIVE' && effectiveFrom > new Date()) throw new Error('استخدام با تاریخ شروع آینده باید برنامه‌ریزی‌شده باشد.');
     const positionId = textValue(req.body.positionId); if (!positionId) throw new Error('تخصیص اصلی اولیه الزامی است.');
     const result = await prisma.$transaction(async (tx) => {
-      const personnel = await tx.personnel.create({ data: { firstName, lastName, nationalCode, employeeNumber: nullableText(req.body.employeeNumber), isActive: true } });
+      const personnel = await tx.personnel.create({ data: { firstName, lastName, nationalCode, employeeNumber: nullableText(req.body.employeeNumber), isActive: status === 'ACTIVE' } });
       if (req.body.userId) {
         const user = await tx.user.findUnique({ where: { id: textValue(req.body.userId) }, select: { personnelId: true } });
         if (!user || user.personnelId) throw new Error('کاربر انتخاب‌شده پیدا نشد یا قبلاً به پرسنل متصل است.');
@@ -341,10 +364,24 @@ router.post('/personnel', editAccess, async (req: WorkspaceRequest, res) => {
       const relationship = await tx.hrEmploymentRelationship.create({ data: { personnelId: personnel.id, status, effectiveFrom, originalStartDate: effectiveFrom, startDateVerified: true, createdBy: actorId(req) } });
       const validated = await validateAssignment(tx, { relationshipId: relationship.id, positionId, type: 'PRIMARY', effectiveFrom, effectiveTo: null, responsibleSupervisorAssignmentId: nullableText(req.body.responsibleSupervisorAssignmentId) });
       await tx.hrEmploymentAssignment.create({ data: { employmentRelationshipId: relationship.id, positionId, type: 'PRIMARY', effectiveFrom, organizationalUnitId: validated.position.organizationalUnitId, workplaceId: validated.position.workplaceId, costCenterId: validated.position.costCenterId, responsibleSupervisorAssignmentId: validated.supervisorAssignmentId, createdBy: actorId(req) } });
+      await tx.hrPersonnelAudit.create({ data: {
+        personnelId: personnel.id,
+        actorUserId: actorId(req),
+        eventType: 'EXCEPTIONAL_PERSONNEL_REGISTERED',
+        sourceCategory,
+        reason,
+        payloadJson: {
+          relationshipId: relationship.id,
+          positionId,
+          status,
+          effectiveFrom: effectiveFrom.toISOString(),
+          linkedUser: Boolean(req.body.userId)
+        }
+      } });
       return tx.personnel.findUniqueOrThrow({ where: { id: personnel.id }, include: personnelInclude });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.status(201).json({ success: true, data: result });
-  } catch (error) { handleError(res, error, 'Create HR personnel'); }
+  } catch (error) { handleError(res, error, 'Create exceptional HR personnel'); }
 });
 
 router.put('/personnel/:id', editAccess, async (req: WorkspaceRequest, res) => {
@@ -427,6 +464,7 @@ router.put('/relationships/:id/status', editAccess, async (req: WorkspaceRequest
   try {
     if (!['PLANNED', 'ACTIVE', 'SUSPENDED'].includes(req.body.status)) throw new Error('پایان استخدام فقط از جریان مستقل Offboarding انجام می‌شود.');
     const existing = await prisma.hrEmploymentRelationship.findUnique({ where: { id: req.params.id } }); if (!existing) throw new Error('رابطه استخدامی پیدا نشد.');
+    if (req.body.status === 'ACTIVE' && existing.status === 'PLANNED' && existing.hiringApplicationId) throw new Error('فعال‌سازی نیروی جذب‌شده فقط از پرونده جذب و پس از تکمیل همه پیش‌نیازها انجام می‌شود.');
     if (req.body.status === 'ACTIVE' && existing.effectiveFrom > new Date()) throw new Error('رابطه برنامه‌ریزی‌شده پیش از تاریخ شروع قابل فعال‌سازی نیست.');
     const effectiveTo = existing.effectiveTo;
     if (effectiveTo && effectiveTo < existing.effectiveFrom) throw new Error('تاریخ پایان استخدام معتبر نیست.');

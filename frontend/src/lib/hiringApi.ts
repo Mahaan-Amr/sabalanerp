@@ -115,8 +115,8 @@ export const hiringAPI = {
 };
 
 export const applicantHiringAPI = {
-  verify: (token: string, otp: string) =>
-    axios.post(`${baseURL}/public/invitations/${token}/verify`, { otp }),
+  verify: (mobile: string, otp: string) =>
+    axios.post(`${baseURL}/public/invitations/verify`, { mobile, otp }),
   get: () => applicant.get("/public/application"),
   saveDraft: (data: any) => applicant.put("/public/application/draft", data),
   submit: (data: any) => applicant.post("/public/application/submit", data),

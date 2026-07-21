@@ -64,11 +64,14 @@ const validateProductionEnvironment = () => {
 
   const jwtSecret = process.env.JWT_SECRET || '';
   const hasWeakJwtSecret = jwtSecret.length < 32 || jwtSecret.includes('your-super-secret');
-  const requiredVars = ['DATABASE_URL', 'JWT_SECRET', 'FRONTEND_URL', 'PUBLIC_APP_URL', 'SMS_IR_HIRING_INVITATION_TEMPLATE_ID'];
+  const requiredVars = ['DATABASE_URL', 'JWT_SECRET', 'FRONTEND_URL', 'PUBLIC_APP_URL', 'SMS_IR_API_KEY', 'SMS_IR_HIRING_INVITATION_TEMPLATE_ID', 'SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS'];
   const missingVars = requiredVars.filter((key) => !process.env[key]);
   const hiringTemplateId = process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID || '';
   const genericTemplateId = process.env.SMS_IR_TEMPLATE_ID || '135816';
   const hasInvalidHiringTemplate = !/^\d+$/.test(hiringTemplateId) || Number(hiringTemplateId) <= 0 || hiringTemplateId === genericTemplateId;
+  const hiringTemplateParameters = (process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS || '').split(',').map((value) => value.trim()).filter(Boolean);
+  const hasInvalidHiringTemplateParameters = hiringTemplateParameters.length !== 1 || hiringTemplateParameters[0] !== 'Code';
+  const hasInvalidSmsEnvironment = process.env.SMS_IR_ENVIRONMENT !== 'production';
   let hasInvalidPublicAppUrl = false;
   try {
     const publicAppUrl = new URL(process.env.PUBLIC_APP_URL || '');
@@ -77,12 +80,14 @@ const validateProductionEnvironment = () => {
     hasInvalidPublicAppUrl = true;
   }
 
-  if (missingVars.length > 0 || hasWeakJwtSecret || hasInvalidHiringTemplate || hasInvalidPublicAppUrl) {
+  if (missingVars.length > 0 || hasWeakJwtSecret || hasInvalidHiringTemplate || hasInvalidHiringTemplateParameters || hasInvalidSmsEnvironment || hasInvalidPublicAppUrl) {
     const details = [
       missingVars.length > 0 ? `Missing vars: ${missingVars.join(', ')}` : '',
       hasWeakJwtSecret ? 'JWT_SECRET must be at least 32 chars and not a placeholder.' : '',
       hasInvalidHiringTemplate ? 'SMS_IR_HIRING_INVITATION_TEMPLATE_ID must be a dedicated positive numeric template ID and must not equal SMS_IR_TEMPLATE_ID.' : '',
-      hasInvalidPublicAppUrl ? 'PUBLIC_APP_URL must be a valid HTTPS origin used to build applicant links.' : ''
+      hasInvalidHiringTemplateParameters ? 'SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS must be exactly Code.' : '',
+      hasInvalidSmsEnvironment ? 'SMS_IR_ENVIRONMENT must be production.' : '',
+      hasInvalidPublicAppUrl ? 'PUBLIC_APP_URL must be a valid HTTPS origin used for the fixed applicant entry page.' : ''
     ].filter(Boolean);
     throw new Error(`Invalid production environment. ${details.join(' ')}`);
   }

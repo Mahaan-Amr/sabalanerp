@@ -1,0 +1,3 @@
+# Use a fixed Applicant entry page with mobile and OTP
+
+Iranian SMS template controls do not reliably permit dynamic personal links, so Candidate Mobile Invitations use the literal public `/apply` address and a six-digit Application-specific OTP rather than `/apply/[token]`. The Candidate's normalized destination mobile plus OTP identifies exactly one open Job Application; uniform errors, mobile/IP throttling, seven-day expiry, browser-session access, and HR-only replacement compensate for removing the high-entropy URL token. Legacy token invitations are revoked at cutover and their URLs only redirect to the fixed entry page, while saved Application Form drafts remain intact.

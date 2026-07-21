@@ -3152,20 +3152,52 @@ model HrJobApplication {
 model HrCandidateInvitation {
   id                String           @id @default(cuid())
   applicationId     String
-  tokenHash         String           @unique
+  mobileSnapshot    String
   otpHash           String
   expiresAt         DateTime
   revokedAt         DateTime?
   lastVerifiedAt    DateTime?
   verificationCount Int              @default(0)
-  failedAttempts    Int              @default(0)
-  blockedUntil      DateTime?
   createdBy         String
   createdAt         DateTime         @default(now())
   application       HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
+  @@unique([mobileSnapshot, otpHash])
   @@index([applicationId, expiresAt])
+  @@index([mobileSnapshot, expiresAt, revokedAt])
   @@map("hr_candidate_invitations")
+}
+
+model HrCandidateAccessThrottle {
+  id              String    @id @default(cuid())
+  subjectKind     String
+  subjectHash     String
+  failedAttempts  Int       @default(0)
+  windowStartedAt DateTime  @default(now())
+  blockedUntil    DateTime?
+  lastAttemptAt   DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([subjectKind, subjectHash])
+  @@index([blockedUntil])
+  @@map("hr_candidate_access_throttles")
+}
+
+model HrCandidateAccessAttempt {
+  id            String   @id @default(cuid())
+  mobileHash    String
+  ipHash        String
+  invitationId  String?
+  applicationId String?
+  outcome       String
+  userAgent     String?
+  createdAt     DateTime @default(now())
+
+  @@index([mobileHash, createdAt])
+  @@index([ipHash, createdAt])
+  @@index([applicationId, createdAt])
+  @@map("hr_candidate_access_attempts")
 }
 
 model HrApplicationFormRevision {

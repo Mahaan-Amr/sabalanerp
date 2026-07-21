@@ -267,21 +267,15 @@ class SmsService {
   async sendHiringInvitation(params: {
     phoneNumber: string;
     code: string;
-    candidateName: string;
-    link: string;
   }): Promise<{ success: boolean; messageId?: number; error?: string; rawResponse?: unknown }> {
     if (this.environment === 'sandbox' && !this.apiKey) {
       console.info('[sms.ir] sandbox hiring invitation', {
-        mobile: maskPhoneNumber(params.phoneNumber),
-        link: params.link,
-        code: params.code
+        mobile: maskPhoneNumber(params.phoneNumber)
       });
       return { success: true };
     }
     const formattedPhone = this.formatPhoneNumber(params.phoneNumber);
     return this.sendTemplate(formattedPhone, this.hiringInvitationTemplateId, [
-      { name: 'Name', value: params.candidateName },
-      { name: 'Link', value: params.link },
       { name: 'Code', value: params.code }
     ]);
   }

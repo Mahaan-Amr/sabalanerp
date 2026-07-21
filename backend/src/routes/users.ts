@@ -5,7 +5,7 @@ import { protect, authorize, AuthRequest } from '../middleware/auth';
 import bcrypt from 'bcryptjs';
 import { WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { FEATURE_PERMISSIONS, FEATURE_WORKSPACE_MAP, FEATURES } from '../middleware/feature';
-import { savePersonnelWorkSchedule } from '../utils/personnelWorkSchedule';
+import { resolveExistingPersonnelLink } from '../services/hrPersonnelBoundary';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -24,9 +24,6 @@ const getFeatureWorkspace = (feature: string): string | null => {
 
 const hasAdminPermissionLevel = (permissions: Array<{ permissionLevel?: string }>) =>
   permissions.some((permission) => permission.permissionLevel === WORKSPACE_PERMISSIONS.ADMIN);
-
-const isScheduleValidationError = (error: unknown) => error instanceof Error
-  && ['ساعت کاری', 'روز کاری', 'تاریخ اجرای'].some((part) => error.message.includes(part));
 
 const normalizePhone = (value?: string | null) => {
   const trimmed = String(value || '').trim();
@@ -54,75 +51,6 @@ const personnelSelect = {
     orderBy: { effectiveFrom: 'desc' as const },
     take: 1
   }
-};
-
-const samePersonnelWhere = (firstName: string, lastName: string, departmentId?: string | null) => ({
-  firstName,
-  lastName,
-  departmentId: departmentId || null
-});
-
-const ensurePersonnelForUser = async (
-  tx: any,
-  input: {
-    firstName: string;
-    lastName: string;
-    departmentId?: string | null;
-    isActive: boolean;
-    personnelMode?: string;
-    personnelId?: string;
-    currentUserId?: string;
-  }
-) => {
-  const firstName = String(input.firstName || '').trim();
-  const lastName = String(input.lastName || '').trim();
-  const departmentId = input.departmentId || null;
-
-  if (input.personnelMode === 'existing' && input.personnelId) {
-    const existing = await tx.personnel.findUnique({
-      where: { id: input.personnelId },
-      include: { user: { select: { id: true } } }
-    });
-    if (!existing) throw new Error('پرسنل انتخاب‌شده پیدا نشد.');
-    if (existing.user && existing.user.id !== input.currentUserId) throw new Error('این پرسنل قبلاً به کاربر دیگری متصل شده است.');
-    return tx.personnel.update({
-      where: { id: existing.id },
-      data: { firstName, lastName, departmentId, isActive: input.isActive },
-      select: { id: true }
-    });
-  }
-
-  if (input.personnelId) {
-    const linked = await tx.personnel.findUnique({
-      where: { id: input.personnelId },
-      include: { user: { select: { id: true } } }
-    });
-    if (linked && (!linked.user || linked.user.id === input.currentUserId)) {
-      return tx.personnel.update({
-        where: { id: linked.id },
-        data: { firstName, lastName, departmentId, isActive: input.isActive },
-        select: { id: true }
-      });
-    }
-  }
-
-  const matching = await tx.personnel.findFirst({
-    where: samePersonnelWhere(firstName, lastName, departmentId),
-    include: { user: { select: { id: true } } }
-  });
-  if (matching) {
-    if (matching.user && matching.user.id !== input.currentUserId) throw new Error('پرسنل هم‌نام در همین بخش قبلاً به کاربر دیگری متصل شده است.');
-    return tx.personnel.update({
-      where: { id: matching.id },
-      data: { firstName, lastName, departmentId, isActive: input.isActive },
-      select: { id: true }
-    });
-  }
-
-  return tx.personnel.create({
-    data: { firstName, lastName, departmentId, isActive: input.isActive },
-    select: { id: true }
-  });
 };
 
 // @desc    Get all users
@@ -205,9 +133,8 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
     .custom((value) => CUID_REGEX.test(value))
     .withMessage('Invalid department ID'),
   body('isActive').optional().isBoolean(),
-  body('personnelMode').optional().isIn(['auto', 'existing']),
+  body('personnelMode').optional().isIn(['none', 'existing', 'auto']),
   body('personnelId').optional({ values: 'falsy' }).isString(),
-  body('workSchedule').optional().isObject(),
   body('workspacePermissions').optional().isArray(),
   body('workspacePermissions.*.workspace')
     .optional()
@@ -259,12 +186,33 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
       role = 'USER',
       departmentId,
       isActive = true,
-      personnelMode = 'auto',
+      personnelMode = 'none',
       personnelId,
-      workSchedule,
       workspacePermissions = [],
       featurePermissions = []
     } = req.body;
+
+    if (req.body.workSchedule !== undefined) {
+      return res.status(409).json({
+        success: false,
+        code: 'HR_WORK_SCHEDULE_OWNED',
+        error: 'برنامه کاری از مدیریت کاربر قابل تغییر نیست؛ آن را در پرونده پرسنلی منابع انسانی ثبت کنید.',
+        canonicalPath: '/dashboard/hr/personnel'
+      });
+    }
+
+    if (personnelMode === 'auto') {
+      return res.status(409).json({
+        success: false,
+        code: 'LEGACY_PERSONNEL_AUTO_CREATION_DISABLED',
+        error: 'ساخت خودکار پرسنل از حساب کاربری متوقف شده است؛ حالت بدون اتصال یا اتصال به پرسنل موجود را انتخاب کنید.',
+        canonicalPath: '/dashboard/hr/personnel'
+      });
+    }
+
+    if (personnelMode === 'existing' && !personnelId) {
+      return res.status(400).json({ success: false, error: 'برای اتصال حساب، انتخاب پرسنل موجود الزامی است.' });
+    }
 
     const normalizedWorkspacePermissions = Array.from(
       new Map(
@@ -351,15 +299,9 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
     const normalizedPhone = normalizePhone(phone);
 
     const user = await prisma.$transaction(async (tx) => {
-      const personnel = await ensurePersonnelForUser(tx, {
-        firstName,
-        lastName,
-        departmentId: departmentId || null,
-        isActive,
-        personnelMode,
-        personnelId
-      });
-      await savePersonnelWorkSchedule(tx, personnel.id, workSchedule);
+      const linkedPersonnelId = personnelMode === 'existing' || personnelId
+        ? await resolveExistingPersonnelLink(tx, { personnelId })
+        : null;
 
       const createdUser = await tx.user.create({
         data: {
@@ -370,7 +312,7 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
           lastName,
           role,
           departmentId: departmentId || null,
-          personnelId: personnel.id,
+          personnelId: linkedPersonnelId,
           isActive,
           ...(normalizedPhone && {
             profile: {
@@ -442,10 +384,9 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
     });
   } catch (error: any) {
     console.error('Create user error:', error);
-    const invalidSchedule = isScheduleValidationError(error);
-    res.status(invalidSchedule ? 400 : error.message?.includes('پرسنل') ? 409 : 500).json({
+    res.status(error.message?.includes('پرسنل') ? 409 : 500).json({
       success: false,
-      error: invalidSchedule || error.message?.includes('پرسنل') ? error.message : 'Server error during user creation'
+      error: error.message?.includes('پرسنل') ? error.message : 'Server error during user creation'
     });
   }
 });
@@ -530,9 +471,8 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
     .custom((value) => CUID_REGEX.test(value))
     .withMessage('Invalid department ID'),
   body('isActive').optional().isBoolean(),
-  body('personnelMode').optional().isIn(['auto', 'existing']),
+  body('personnelMode').optional().isIn(['none', 'existing', 'auto']),
   body('personnelId').optional({ values: 'falsy' }).isString(),
-  body('workSchedule').optional().isObject(),
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -544,7 +484,29 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
-    const { firstName, lastName, email, username, phone, role, departmentId, isActive, personnelMode, personnelId, workSchedule } = req.body;
+    const { firstName, lastName, email, username, phone, role, departmentId, isActive, personnelMode, personnelId } = req.body;
+
+    if (req.body.workSchedule !== undefined) {
+      return res.status(409).json({
+        success: false,
+        code: 'HR_WORK_SCHEDULE_OWNED',
+        error: 'برنامه کاری از مدیریت کاربر قابل تغییر نیست؛ آن را در پرونده پرسنلی منابع انسانی ثبت کنید.',
+        canonicalPath: '/dashboard/hr/personnel'
+      });
+    }
+
+    if (personnelMode === 'auto') {
+      return res.status(409).json({
+        success: false,
+        code: 'LEGACY_PERSONNEL_AUTO_CREATION_DISABLED',
+        error: 'ساخت خودکار پرسنل از حساب کاربری متوقف شده است؛ حالت بدون اتصال یا اتصال به پرسنل موجود را انتخاب کنید.',
+        canonicalPath: '/dashboard/hr/personnel'
+      });
+    }
+
+    if (personnelMode === 'existing' && !personnelId) {
+      return res.status(400).json({ success: false, error: 'برای اتصال حساب، انتخاب پرسنل موجود الزامی است.' });
+    }
 
     if (departmentId) {
       const department = await prisma.department.findUnique({
@@ -625,21 +587,10 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
     const normalizedPhone = phone !== undefined ? normalizePhone(phone) : undefined;
 
     const updatedUser = await prisma.$transaction(async (tx) => {
-      const nextFirstName = firstName || existingUser.firstName;
-      const nextLastName = lastName || existingUser.lastName;
-      const nextDepartmentId = departmentId !== undefined ? departmentId || null : existingUser.departmentId;
-      const nextIsActive = isActive !== undefined ? Boolean(isActive) : existingUser.isActive;
       const shouldRelink = personnelMode === 'existing' && personnelId;
-      const linkedPersonnel = await ensurePersonnelForUser(tx, {
-        firstName: nextFirstName,
-        lastName: nextLastName,
-        departmentId: nextDepartmentId,
-        isActive: nextIsActive,
-        personnelMode: shouldRelink ? 'existing' : 'auto',
-        personnelId: shouldRelink ? personnelId : existingUser.personnelId || undefined,
-        currentUserId: existingUser.id
-      });
-      await savePersonnelWorkSchedule(tx, linkedPersonnel.id, workSchedule);
+      const linkedPersonnelId = shouldRelink
+        ? await resolveExistingPersonnelLink(tx, { personnelId, currentUserId: existingUser.id })
+        : existingUser.personnelId;
 
       return tx.user.update({
         where: { id: req.params.id },
@@ -649,7 +600,7 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
           ...(email && { email }),
           ...(username && { username }),
           ...(role && { role }),
-          personnelId: linkedPersonnel.id,
+          personnelId: linkedPersonnelId,
           ...(departmentId !== undefined && { departmentId: departmentId || null }),
           ...(isActive !== undefined && { isActive }),
           ...(normalizedPhone !== undefined && {
@@ -690,10 +641,9 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
     });
   } catch (error: any) {
     console.error('Update user error:', error);
-    const invalidSchedule = isScheduleValidationError(error);
-    res.status(invalidSchedule ? 400 : error.message?.includes('پرسنل') ? 409 : 500).json({
+    res.status(error.message?.includes('پرسنل') ? 409 : 500).json({
       success: false,
-      error: invalidSchedule || error.message?.includes('پرسنل') ? error.message : 'Server error'
+      error: error.message?.includes('پرسنل') ? error.message : 'Server error'
     });
   }
 });

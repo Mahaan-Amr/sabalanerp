@@ -1,0 +1,3 @@
+# Use lifecycle-safe CRUD for Phase 2 HR
+
+Phase 2 provides complete CRUD capabilities according to each record's lifecycle rather than universal hard deletion. Unused drafts may be updated or deleted, referenced master data is retired or deactivated, effective-dated workforce records are corrected by closing or replacing versions, approved payroll records are corrected through Supplemental or Reversal Runs, and submitted performance reviews are corrected through linked Revised Performance Reviews; destructive deletion is forbidden whenever it would erase evidence, approvals, financial history, or the basis of a historical decision.

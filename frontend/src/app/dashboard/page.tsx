@@ -256,7 +256,7 @@ export default function DashboardPage() {
                   columns={3}
                   items={[
                     { title: 'مدیریت کاربران', description: 'ایجاد، ویرایش و کنترل وضعیت کاربران', href: '/dashboard/users', icon: FaUserCog, tone: 'info' },
-                    { title: 'مدیریت پرسنل', description: 'ثبت پرسنل سازمانی مستقل از حساب کاربری', href: '/dashboard/personnel', icon: FaUsers, tone: 'primary' },
+                    { title: 'مدیریت پرسنل', description: 'پرونده، استخدام و برنامه کاری در مرجع منابع انسانی', href: '/dashboard/hr/personnel', icon: FaUsers, tone: 'primary' },
                     { title: 'مدیریت دسترسی‌ها', description: 'تنظیم مجوزها و نقش‌های سیستمی', href: '/dashboard/admin/permissions', icon: FaShieldAlt, tone: 'purple' },
                     { title: 'مدیریت بخش‌ها', description: 'واحدهای سازمانی و ارتباط آنها با کاربران', href: '/dashboard/departments', icon: FaBuilding, tone: 'success' },
                     { title: 'تنظیمات سیستم', description: 'پیکربندی عمومی ERP', href: '/dashboard/admin/settings', icon: FaCog, tone: 'warning' },

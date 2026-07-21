@@ -218,9 +218,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         },
         {
           name: 'مدیریت پرسنل',
-          href: '/dashboard/personnel',
+          href: '/dashboard/hr/personnel',
           icon: FaUsers,
-          show: true
+          show: user.role === 'ADMIN' || accessibleWorkspaces.some((workspace) => workspace.id === 'hr')
         },
         {
           name: 'سطوح دسترسی',

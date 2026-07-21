@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { FaCheck, FaTimes, FaUserEdit } from 'react-icons/fa';
 import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
 import { authAPI, departmentsAPI, usersAPI } from '@/lib/api';
-import WorkScheduleEditor, { emptyWorkSchedule, workScheduleFromApi, workSchedulePayload, type WorkScheduleValue } from '@/components/WorkScheduleEditor';
 
 interface Department {
   id: string;
@@ -23,7 +22,6 @@ interface UserFormState {
   role: string;
   departmentId: string;
   isActive: boolean;
-  workSchedule: WorkScheduleValue;
 }
 
 const initialFormState: UserFormState = {
@@ -35,7 +33,6 @@ const initialFormState: UserFormState = {
   role: 'USER',
   departmentId: '',
   isActive: true,
-  workSchedule: emptyWorkSchedule(),
 };
 
 export default function EditUserPage({ params }: { params: { id: string } }) {
@@ -71,7 +68,6 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
             role: user.role || 'USER',
             departmentId: user.department?.id || '',
             isActive: Boolean(user.isActive),
-            workSchedule: workScheduleFromApi(user.personnel?.workSchedules?.[0]),
           });
         }
 
@@ -133,7 +129,6 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
         role: formData.role,
         departmentId: formData.departmentId,
         isActive: formData.isActive,
-        workSchedule: workSchedulePayload(formData.workSchedule),
       });
 
       if (response.data.success) {
@@ -167,7 +162,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
     <ErpPage
       eyebrow="مدیریت سیستم"
       title="ویرایش کاربر"
-      description="اطلاعات حساب، نقش، بخش و شماره تماس ورود را بروزرسانی کنید."
+      description="اطلاعات حساب، نقش، بخش و شماره تماس ورود را بروزرسانی کنید؛ پرونده و برنامه کاری پرسنل فقط در HR تغییر می‌کند."
       backHref={`/dashboard/users/${params.id}`}
     >
       {managerEditingAdmin ? (
@@ -208,7 +203,6 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
                 <input type="tel" name="phone" value={formData.phone} onChange={handleInputChange} className="glass-liquid-input w-full" dir="ltr" />
               </label>
             </div>
-            <div className="mt-5"><WorkScheduleEditor value={formData.workSchedule} onChange={(workSchedule) => setFormData((current) => ({ ...current, workSchedule }))} /></div>
           </ErpSection>
 
           <ErpSection title="نقش و وضعیت">

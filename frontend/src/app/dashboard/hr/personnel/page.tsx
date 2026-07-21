@@ -7,6 +7,7 @@ import {
   FaPlus, FaSearch, FaStop, FaSync, FaUserPlus, FaUsers,
 } from 'react-icons/fa';
 import PersianCalendarComponent from '@/components/PersianCalendar';
+import WorkScheduleEditor, { workScheduleFromApi, workSchedulePayload, type WorkScheduleValue } from '@/components/WorkScheduleEditor';
 import {
   ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection,
 } from '@/components/erp';
@@ -212,6 +213,7 @@ function PersonnelCard(props: any) {
             <Info label="وضعیت" value={relationship ? employmentStatusLabel[relationship.status] : '—'} />
             <Info label="تعداد تخصیص‌ها" value={(relationship?.assignments?.length || 0).toLocaleString('fa-IR')} />
           </div>
+          <PersonnelScheduleEditor key={person.workSchedules?.[0]?.id || 'new-schedule'} person={person} saving={saving} run={run} />
           {relationship && (
             <>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -233,6 +235,28 @@ function PersonnelCard(props: any) {
         </div>
       )}
     </ErpCard>
+  );
+}
+
+function PersonnelScheduleEditor({ person, saving, run }: any) {
+  const schedule = person.workSchedules?.[0];
+  const [value, setValue] = useState<WorkScheduleValue>(() => workScheduleFromApi(schedule));
+
+  return (
+    <div className="mt-4">
+      <WorkScheduleEditor value={value} onChange={setValue} />
+      <div className="mt-3">
+        <ErpButton
+          label="ثبت نسخه جدید برنامه کاری"
+          icon={FaSync}
+          disabled={saving || !value.effectiveDate}
+          onClick={() => run(
+            () => hrAPI.updatePersonnelWorkSchedule(person.id, workSchedulePayload(value)),
+            'نسخه برنامه کاری از مرجع منابع انسانی ثبت شد.'
+          )}
+        />
+      </div>
+    </div>
   );
 }
 

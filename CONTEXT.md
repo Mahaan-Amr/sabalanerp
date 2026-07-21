@@ -1630,6 +1630,46 @@ _Avoid_: vacancy-specific decisions, internal interviewer notes, duplicating the
 The Position- or Recruitment Request-specific candidate responses for one Job Application, including availability, desired compensation, declarations, and configured questions.
 _Avoid_: copying every historical paper field into every application, storing reusable Candidate facts repeatedly, exposing internal assessment content
 
+**Candidate Questionnaire Scope**:
+The candidate-facing questionnaire contains the applicable personal and contact information, address and postal code, education, employment history, skills, languages, work preferences, requested Position, desired compensation, declaration, and configured written questions. Full name, alias response, birth date and place, military-service status, father's name and occupation, marital status, residential address, mobile and home-phone responses, latest education level, field of study, graduation year, social-media response, and Iranian National Code are required for Human Resources record completeness; number of children and spouse's occupation appear and become required only when the Candidate is married, while a Candidate to whom National Code does not apply supplies a classified foreign identity type and number instead, and none of the family or social details may drive automated scoring, filtering, or rejection.
+_Avoid_: exposing internal assessments to the Candidate, silently using family or social details as screening criteria, automatic rejection from record-completeness fields, an undocumented reviewer decision based on sensitive details
+
+**Required Candidate Response**:
+A questionnaire requirement satisfied by a valid value or, where the information may legitimately be absent or unavailable, a structured reason such as none, unknown, deceased, or cannot provide, with an explanation when the selected reason requires context.
+_Avoid_: invented placeholder data, treating absence as an empty string, free-text variants when a controlled reason applies, accepting an unexplained exceptional reason
+
+**Candidate Social-Security History Indicator**:
+The Candidate's required yes-or-no response to whether they have prior تأمین اجتماعی insurance history, together with an HR-reviewed state and optional note. The first version collects no insurance number, provider, history detail, attachment, or external verification and does not block hiring or activation.
+_Avoid_: treating the response as verified insurance eligibility, requiring future-detail fields prematurely, making a yes or no answer an employment blocker
+
+**Candidate Identity Document Checklist**:
+The versioned Human Resources-owned requirements for identity evidence, including every birth-certificate page, a separate conditional explanation-section scan when it contains information, both sides of the National ID card, and applicable foreign identity, military-service, education, photograph, or Job-specific evidence. Each item is missing, received, unreadable, mismatched, verified, or not applicable, and a replacement creates a new version rather than overwriting rejected evidence; Iranian National Code is compared with the National ID evidence before identity verification.
+_Avoid_: one unchangeable document list, merging multi-side evidence into an ambiguous attachment, deleting an unreadable or mismatched version, verifying a conditional document without recording applicability
+
+**HR-Captured Candidate Document**:
+Private, versioned recruitment evidence scanned and uploaded only by an HR Processor after recording whether the original was inspected or only a copy was received. The Candidate portal exposes safe missing or replacement requests but not internal comparison notes; files are malware-checked and available only through authorized, audited delivery rather than public links.
+_Avoid_: Candidate-uploaded identity evidence in the first version, a scan without inspection-source metadata, public file URLs, replacing a rejected version, exposing internal reviewer notes
+
+**Candidate Identity Verification**:
+The field-level Human Resources comparison of an Application Form Submission with received identity evidence: an HR Processor records documents and marks each check as matching, mismatched, or unverifiable with its note, while only the designated HR Manager grants final identity clearance. A mismatch or unverifiable required fact blocks clearance until Human Resources returns the identified Candidate fields for resubmission or requests replacement evidence; generic HR workspace or Admin access does not confer approval authority, and Human Resources never silently edits the Candidate's submission.
+_Avoid_: one unexplained overall checkbox, self-approval by the processor, generic permission as business authority, approving unresolved discrepancies, changing Candidate answers on their behalf, replacing evidence without version history
+
+**Deferred Candidate Postal-Code Verification**:
+The required 10-digit postal-code response whose basic format is validated while external verification remains explicitly not performed. Its deferred status is visible but blocks no recruitment, conversion, contract, or activation transition; a future verification service may queue historical values without retroactively invalidating completed hires.
+_Avoid_: labeling format validation as external verification, blocking today's workflow on an unavailable service, dropping the field, treating a later failed check as automatic retroactive termination
+
+**Candidate Mobile Invitation**:
+The Application-scoped access link and OTP delivered together to the Candidate's recorded mobile number, valid as a reusable pair for seven days so the Candidate can authorize more than one device. Each successful verification opens only that Job Application's candidate-facing form through its own application-only session; after invitation expiry, Human Resources must issue a new pair without discarding saved answers.
+_Avoid_: treating the invitation as a User login or independent second factor, opening another Candidate's Application, granting HR workspace access, unlimited validity, losing draft data when access is reissued
+
+**Application Form Submission**:
+An immutable, timestamped version of the Application Form created by the Candidate's final submission. Human Resources may return it with a reason and explicitly identified fields for correction; only the Candidate revises those fields and resubmits as a new preserved version.
+_Avoid_: editing a final submission in place, Human Resources silently changing Candidate answers, reopening every field without reason, losing earlier submissions or timestamps
+
+**Candidate Submission Declaration**:
+The Candidate's explicit truthfulness attestation made by accepting the declaration, typing their full name, and submitting from an OTP-verified Application session. Its audit evidence retains the submission version, timestamp, masked mobile number, and available IP and device metadata, but it is not the employment contract signature.
+_Avoid_: an implicit declaration, treating OTP access alone as acceptance, replacing the later paper contract signature, losing the declaration evidence when the form is corrected
+
 **Internal Candidate Assessment**:
 Restricted recruitment evidence created by authorized Sabalan reviewers, including interview notes, psychological or aptitude test results, management assessment, and hiring recommendations.
 _Avoid_: candidate-editable assessment, exposing confidential notes in candidate-facing views, treating assessment evidence as reusable Candidate identity data
@@ -1647,8 +1687,8 @@ The audit evidence produced whenever protected candidate identity, document, psy
 _Avoid_: auditing only edits, untracked document downloads, relying on hidden interface controls as privacy enforcement
 
 **Recruitment Data Retention**:
-The configurable period and disposition for closed Job Applications and Candidate data. Essential decision and audit history remains for the approved period; talent-bank searchability requires recorded consent, non-consented reusable profile data is anonymized or removed after retention, and especially sensitive documents or assessments may expire sooner.
-_Avoid_: immediate deletion of defensible history, indefinite retention by default, keeping a Candidate searchable without consent, forcing every recruitment data group to share one retention duration
+The configurable period and disposition for closed Job Applications and Candidate data. Rejected or withdrawn case evidence—including sensitive documents, DISC/BIG FIVE/EQ results, insurance information, decisions, and audit history—remains stored under its category-specific restricted retention policy; the initial Candidate declaration provides notice and recorded consent for only the ordinary Candidate Profile to remain talent-bank searchable without a second permission request after closure, while sensitive evidence is excluded from talent-bank search and may expire sooner.
+_Avoid_: immediate deletion of defensible history, indefinite retention by default, searchable sensitive documents or assessments, a second post-rejection permission flow, forcing every recruitment data group to share one retention duration
 
 **Verified Hire Transfer**:
 The explicit mapping that links or creates Personnel from a hired Candidate and transfers only approved, verified identity, contact, education, skill, certificate, and required document data with source provenance. Conflicting existing Personnel values require Human Resources review, while Internal Candidate Assessments remain in restricted Recruitment history.
@@ -1658,13 +1698,49 @@ _Avoid_: copying the entire recruitment file into Personnel, silently overwritin
 The Candidate's recorded acceptance while the Job Application remains in the Offer stage pending successful employment conversion. It does not by itself create Personnel employment, reserve capacity, or mean Hired.
 _Avoid_: treating verbal or recorded acceptance as completed hiring, closing the Application before employment records exist, partially creating employment after acceptance
 
+**Offer Compensation Summary**:
+The itemized ریال-denominated snapshot of proposed base salary and each recurring benefit or allowance, prepared before contract signing and explicitly accepted by the Candidate as part of the offer. The signed contract references or includes this approved snapshot, and the post-contract salary-and-benefits table displays the same immutable rows and calculated total; later changes require a new effective-dated Compensation Agreement.
+_Avoid_: entering compensation only after signing, a manually typed total without components, different offer and contract values, editing the accepted snapshot for a later raise
+
+**Offer Compensation Approval**:
+The sequential authorization in which the Hiring Manager proposes the package, an HR/Payroll Processor classifies its components, the designated HR/Payroll Manager approves payroll and policy correctness, and the Finance Manager approves the financial commitment before Candidate presentation. A participant cannot approve their own preparation, and Finance later compares the signed contract with this snapshot without editing it.
+_Avoid_: Candidate presentation before all approvals, self-approval, an unclassified lump sum, Finance changing HR/Payroll components during contract verification
+
+**Pre-Hire Collateral Clearance**:
+The Finance-owned review of required collateral and obligations that begins only after Candidate selection and Accepted Offer. A Finance recorder registers receipt, custody details, and scans, while the designated Finance Manager alone verifies and approves the clearance required before Hire Conversion; Candidates who are rejected, withdrawn, or still under assessment are not asked to provide collateral.
+_Avoid_: collecting collateral from every applicant, self-approval by the recorder, Human Resources or a generic Admin approving Finance evidence, converting to Personnel before manager clearance, treating offer acceptance as collateral approval
+
+**Pre-Hire Collateral Checklist**:
+The versioned Finance-owned template selected for a Job or Position that defines required and optional collateral items such as promissory notes, cheques, guarantees, undertakings, or an explicitly classified other item. Each received item retains its applicable amount, identifier, issuer or guarantor, receipt date, original custody location, versioned scans, verification result, and eventual return or release status.
+_Avoid_: one hardcoded checklist for every Job, an unclassified attachment, a scan without original-custody evidence, losing an instrument's return history
+
+**Signed Employment Contract Clearance**:
+The Finance-owned evidence that every required page of the paper employment contract was signed and uploaded with its contract metadata by a Finance Processor, then checked for signatures, completeness, dates, and readability and approved only by the designated Finance Manager. Human Resources may view the contract and status but cannot substitute for approval; replacements create new versions, and manager clearance is an Employment activation blocker.
+_Avoid_: processor self-approval, partial-page evidence, Human Resources or generic Admin approval, overwriting an earlier scan, activating employment from an unapproved contract
+
+**Collateral Data Scope**:
+The access boundary in which Human Resources sees checklist progress, item categories, coordination reasons for missing or rejected items, and the final clearance decision, while instrument identifiers, amounts, guarantor details, custody locations, and scans remain restricted to authorized Finance users. Viewing or downloading protected collateral data produces audit evidence.
+_Avoid_: broad HR or Admin access to instrument details, client-side-only hiding, unaudited views or downloads, exposing Finance evidence merely to coordinate checklist progress
+
 **Hire Conversion**:
-The atomic operation that links or creates Personnel, creates the Planned Employment Relationship and capacity-bearing primary Employment Assignment, reserves committed capacity, links the source Application and Recruitment Request, and opens onboarding. The Application receives the Hired outcome only after the whole conversion succeeds.
-_Avoid_: partial hiring records, marking Hired before conversion completes, consuming an opening or capacity without the linked employment foundation
+The atomic operation available after HR identity clearance and Finance collateral clearance that links or creates Personnel, creates the Planned Employment Relationship and capacity-bearing primary Employment Assignment, reserves committed capacity, links the source Application and Recruitment Request, and opens onboarding without creating a User account. The Application receives the Hired outcome only after the whole conversion succeeds; onboarding tasks and planned duties may be tracked, but ordinary work, payroll participation, and employment activation remain blocked until contract approval unless a valid Pre-Activation Activity Permit authorizes limited activity.
+_Avoid_: partial hiring records, marking Hired before conversion completes, consuming an opening or capacity without the linked employment foundation, creating login access implicitly, treating planned employment as active work authorization
+
+**Pre-Activation Hiring Cancellation**:
+The reasoned closure when a selected Candidate withdraws or is rejected before Employment activation: the Application receives its exact outcome, any Planned Employment Relationship and assignment are cancelled without deleting Personnel, committed capacity is released, and pending User provisioning is cancelled. Administrative completion remains blocked until Finance returns or releases every collateral original with recipient, date, handover proof, and Finance Manager confirmation.
+_Avoid_: deleting converted Personnel, leaving Position capacity committed, retaining collateral without an open obligation, generic closure without outcome, enabling a pending User after cancellation
+
+**Employment User Provisioning Request**:
+The Responsible Supervisor's request for ERP access when the Personnel's Position requires it, approved by the relevant workspace or data owners and fulfilled by an authorized User administrator by linking one User to the existing Personnel identity. Hire Conversion never creates the User automatically; the account remains disabled until its approved access-start time and receives only explicitly approved permissions.
+_Avoid_: deriving login access from Personnel or Position alone, creating a second Personnel identity, enabling access before its approved start, generic default workspace permissions
 
 **Onboarding Case**:
 The new hire's effective onboarding file created by Hire Conversion from snapshots of the current company-wide checklist and the applicable Job or Position checklist. Later template changes do not rewrite an active or completed case.
 _Avoid_: one universal checklist for every Job, recalculating active onboarding from current templates, losing which requirements applied when hiring occurred
+
+**Unified Hiring Case View**:
+The Human Resources-facing page and chronological progress view that presents the linked Candidate and Job Application before Hire Conversion, the resulting Personnel, Planned Employment Relationship, and Onboarding Case afterward, and cross-functional Finance tasks with their ownership and data restrictions intact. Candidate self-service exposes only Candidate actions and appropriate statuses, never internal assessments or protected Finance details.
+_Avoid_: one duplicated master record, losing the Application-to-Personnel link, copying Finance evidence into HR data, exposing internal or financial details through the Candidate portal
 
 **Onboarding Task**:
 A company-wide or Job-specific onboarding requirement with mandatory or optional classification, accountable owner, due date, status, and completion evidence. Job-specific tasks cover training, safety, operational readiness, and authorizations without duplicating common administrative tasks.
@@ -1682,6 +1758,14 @@ _Avoid_: confusing employment activation with equipment authorization, allowing 
 The condition in which a Planned Employment Relationship reaches its intended start date while an Activation Blocker remains incomplete. Employment stays Planned, Position capacity remains committed, Human Resources and the hiring manager are urgently alerted, and resolution requires completing the blocker or formally changing the start date.
 _Avoid_: automatic activation to hide incomplete onboarding, releasing committed capacity, silently moving the start date, ignoring an overdue blocker
 
+**Employment Activation Authorization**:
+The designated HR Manager's explicit authorization to change a Planned Employment Relationship to Active on or after its scheduled start date, available only after approved identity and collateral clearances, accepted and approved compensation, signed-contract clearance, configured Payroll Participation, and completion of every Onboarding Activation Blocker. Reaching the date never activates employment automatically; unresolved requirements produce an urgent Onboarding-Blocked Start alert.
+_Avoid_: date-only automatic activation, generic Admin authority, activation without payroll configuration or contract clearance, hiding an unresolved blocker by changing status
+
+**Employment Insurance Enrollment**:
+The HR-managed onboarding record for company insurance setup after Hire Conversion, with a state of not started, in progress, active, or exempt/not applicable, plus effective date, due date, and optional note. The first version has no insurance number, provider details, attachments, or external integration; it raises overdue alerts as a required onboarding task but does not block Employment activation.
+_Avoid_: overwriting the Candidate's prior-insurance response, pretending external enrollment was verified, premature insurance subsystem detail, silently ignoring an overdue setup task
+
 **Pre-Activation Attendance Evidence**:
 Immutable actual presence recorded by Security for Personnel whose Employment Relationship has not yet been authorized to become Active. The record exposes the policy discrepancy and is never deleted or altered to make onboarding appear compliant.
 _Avoid_: blocking Security from recording physical reality, treating attendance recording as employment authorization, deleting evidence after Human Resources resolves the onboarding problem
@@ -1693,6 +1777,134 @@ _Avoid_: deriving permission from attendance, a broad permission to work normall
 **Pre-Activation Permit Approval**:
 The scope-dependent authorization for a Pre-Activation Activity Permit: Human Resources and the Responsible Supervisor approve every permit, with additional safety or equipment authority for hazardous work and system or data owner approval for ERP or sensitive access. Security verifies a valid permit at entry but does not approve it; self-approval is forbidden, approvals retain actor snapshots, and the permit expires automatically.
 _Avoid_: one generic approver for every risk, Security authorizing employment, self-approval, access continuing after permit expiry
+
+**Payroll Participation**:
+The effective-dated authorization that includes an Employment Relationship in payroll for a defined period, independently of Personnel activity, system access, Security roster membership, or recorded attendance.
+_Avoid_: a mutable payroll-eligible flag, deriving payroll population from User, Personnel.isActive, roster, or attendance
+
+**Compensation Agreement**:
+The effective-dated agreement governing base pay and recurring person-level benefits for one Employment Relationship. Assignment-specific compensation is separate, and at most one Compensation Agreement governs a relationship at a moment.
+_Avoid_: salary stored directly on Personnel, overlapping governing agreements, a second base salary for every Assignment
+
+**Assignment Compensation Component**:
+An effective-dated earning or allowance attributable to one Employment Assignment, such as responsibility, acting duty, shift, location, or hazardous-work compensation.
+_Avoid_: base salary, inferring assignment compensation only from attendance, automatically paying every secondary assignment
+
+**Payroll Policy Version**:
+An approved effective-dated set of sourced statutory parameters, calculation rules, rounding behavior, and payroll-calendar policy that governs payroll for a period.
+_Avoid_: hardcoded annual values, editing an active version in place, a policy value without source or effective date
+
+**Payroll Policy Owner**:
+The explicitly assigned person accountable for maintaining sourced Payroll Policy Versions, whose proposed version requires approval by a separate authorized reviewer before use.
+_Avoid_: generic ADMIN authority, self-approved policy changes, software deployment as the ordinary annual policy process
+
+**Payroll Component**:
+A classified earning, deduction, employer contribution, or informational amount calculated by a controlled, explainable rule and displayed in ریال.
+_Avoid_: an opaque net adjustment, arbitrary executable formula, an amount without classification or calculation trace
+
+**Payroll Period**:
+The Jalali calendar month for which a regular Payroll Run calculates compensation and deductions under an explicit cutoff and policy version.
+_Avoid_: an unlabeled date range, Gregorian-month substitution, deriving the period from payment date
+
+**Payroll Cutoff**:
+The declared boundary through which finalized and approved workforce evidence is eligible to be snapshotted into a Payroll Run.
+_Avoid_: querying mutable live data during approval, silently including later corrections, an implicit current-time boundary
+
+**Payroll Run**:
+The controlled calculation for one payroll period and run type, containing its snapshotted population, inputs, policy versions, component results, exceptions, approvals, and downstream status.
+_Avoid_: a mutable spreadsheet total, recomputing an approved result from current data, one record that hides employee-level calculations
+
+**Payroll Input Snapshot**:
+The immutable population, employment, compensation, schedule, attendance, leave, overtime, mission, obligation, and policy evidence used by one Payroll Run.
+_Avoid_: a live query presented as historical payroll truth, a value without source and version, replacing evidence after approval
+
+**Payroll Blocking Exception**:
+An unresolved condition for a payroll participant, such as missing exit, conflicting schedule, unresolved attendance correction, or pending overtime decision, that prevents the participant from being finalized.
+_Avoid_: silently paying from incomplete evidence, omitting the employee, blocking review work for every unaffected employee
+
+**Payroll Deferral**:
+The authorized, reasoned decision to exclude one unresolved participant from final payment in the regular run and carry the obligation into a linked Supplemental Payroll Run.
+_Avoid_: silent omission, deleting the participant, approving an incomplete run without an accountable decision
+
+**Supplemental Payroll Run**:
+A linked payroll calculation that pays or corrects amounts not finalized in the regular run without changing the approved original.
+_Avoid_: reopening an approved run, an unlinked manual payment, overwriting the original payslip
+
+**Payroll Reversal Run**:
+A linked payroll calculation that formally reverses all or part of an approved payroll result while preserving the original calculation and financial history.
+_Avoid_: deleting an approved result, negative free-text adjustment without source, changing posted lines in place
+
+**Approved Payroll Run**:
+A Payroll Run whose population, evidence, policies, calculations, approvals, and results are immutable and ready for controlled Accounting consumption.
+_Avoid_: editable approved payroll, approval with unresolved or undeferred participants, treating calculation completion as approval
+
+**Payroll Separation of Duties**:
+The rule that preparation, material adjustment, policy activation, and final approval require appropriately distinct accountable actors, including during ordinary administrator operation.
+_Avoid_: self-approval, generic ADMIN bypass, one person controlling policy, calculation, approval, and payment
+
+**Payroll Accounting Handoff**:
+The immutable, idempotent transfer of an Approved Payroll Run summary and proposed accounting attribution from HR Payroll to Accounting for posting and settlement.
+_Avoid_: Accounting editing employee calculation lines, duplicate financial posting, sending an unapproved payroll result
+
+**Released Payslip**:
+The employee-scoped, immutable statement from an Approved Payroll Run that becomes visible only after explicit authorized publication. A later correction creates a linked payslip rather than replacing it.
+_Avoid_: draft calculation shown as a payslip, bulk unrestricted access, overwriting the original after a correction
+
+**Payroll Obligation**:
+An approved loan or advance balance whose installments, payroll deductions, pauses, adjustments, and settlement are recorded as an auditable ledger.
+_Avoid_: directly editable remaining balance, deduction without an approved source, a full loan-origination workflow inside Payroll
+
+**Job Evaluation Template**:
+The versioned standard criteria and expectations shared by people performing the same Job.
+_Avoid_: Position-specific operating context, one universal company template, changing active reviews when a template changes
+
+**Position Evaluation Addendum**:
+The versioned line-, shift-, location-, or responsibility-specific criteria added by a Position to its Job Evaluation Template.
+_Avoid_: duplicating the complete Job template, silently replacing shared criteria, person-specific favoritism
+
+**Review Template Snapshot**:
+The immutable combination of the applicable Job Evaluation Template and Position Evaluation Addendum governing one performance review period.
+_Avoid_: calculating a historical review from current templates, changing criteria or weights after the review opens
+
+**Operational Evaluation Evidence**:
+Traceable read-only facts supplied by the operational system that owns them, with source, definition, period, extraction time, version, and data-quality state retained for review context.
+_Avoid_: editable evidence on the evaluation page, unreviewed data used directly as a rating, a number without provenance
+
+**Employee Self-Assessment**:
+The employee's criterion-level input and context for a review, distinct from the formal evaluation authored by the Responsible Supervisor.
+_Avoid_: formal rating, employee approval of the outcome, substituting self-report for supervisor judgment
+
+**Formal Performance Review**:
+The Responsible Supervisor's documented, criterion-level judgment using the Review Template Snapshot, relevant evidence, contextual explanation, and transparent weighting.
+_Avoid_: an automatically generated operational score, an opaque overall number, an automatic compensation or employment decision
+
+**Performance Acknowledgement**:
+The employee's confirmation that the formal review was received, without implying agreement with its findings.
+_Avoid_: acceptance of the score, waiver of response or objection, forced agreement
+
+**Employee Evaluation Response**:
+The employee's recorded comment on a formal review that does not by itself open the formal objection process.
+_Avoid_: Performance Acknowledgement, Formal Performance Objection, silent replacement of supervisor comments
+
+**Formal Performance Objection**:
+The employee's time-bounded request for authorized reconsideration of a formal review while the original review remains intact.
+_Avoid_: deleting the original, editing the supervisor review in place, treating every employee comment as an objection
+
+**Revised Performance Review**:
+An authorized, reasoned version linked to the original review when a formal objection or exceptional review decision changes the outcome.
+_Avoid_: overwriting history, an unlinked replacement, revision without accountable actors and reason
+
+**Controlled Payroll Cutover**:
+The transition after two reconciled parallel periods in which the new HR/payroll system becomes the sole ordinary writer and the first live payroll must be approved, posted, paid, and reconciled before the stability window begins.
+_Avoid_: dual ordinary writers, cutover before reconciliation, treating parallel calculation alone as production proof
+
+**Controlled Return Window**:
+The 30-day critical-discrepancy-free period following complete reconciliation of the first live payroll, after which HR Payroll, Accounting, and the System Owner may authorize permanent removal of legacy editing.
+_Avoid_: starting the clock at deployment, retiring fallback before the first live payroll proves stable, an exit without joint sign-off
+
+**Legacy Break-Glass Access**:
+Time-limited, least-privilege legacy editing available only to a named technical administrator for a documented critical incident, with full audit, automatic four-hour expiry, independent review, and mandatory reconciliation into the new system.
+_Avoid_: normal legacy editing after cutover, standing emergency access, returning to normal operation before reconciliation
 
 **Organizational Unit**:
 A typed node in Sabalan's single organizational hierarchy, covering levels such as company, division, department, workshop, production line, and administrative section.

@@ -2,6 +2,7 @@ import express, { Response } from 'express';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
+import { savePersonnelWorkSchedule } from '../utils/personnelWorkSchedule';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -68,6 +69,11 @@ const assignmentInclude = {
 
 const personnelInclude = {
   user: { select: { id: true, username: true, email: true, isActive: true } },
+  workSchedules: {
+    include: { days: { orderBy: { weekday: 'asc' as const } } },
+    orderBy: { effectiveFrom: 'desc' as const },
+    take: 1
+  },
   hrEmploymentRelationships: {
     orderBy: { effectiveFrom: 'desc' as const },
     include: { assignments: { orderBy: { effectiveFrom: 'desc' as const }, include: assignmentInclude } }
@@ -347,6 +353,18 @@ router.put('/personnel/:id', editAccess, async (req: WorkspaceRequest, res) => {
     const record = await prisma.personnel.update({ where: { id: req.params.id }, data: { firstName: textValue(req.body.firstName), lastName: textValue(req.body.lastName), nationalCode, employeeNumber: nullableText(req.body.employeeNumber) }, include: personnelInclude });
     res.json({ success: true, data: record });
   } catch (error) { handleError(res, error, 'Update HR personnel'); }
+});
+
+router.put('/personnel/:id/work-schedule', editAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const record = await prisma.$transaction(async (tx) => {
+      const personnel = await tx.personnel.findUnique({ where: { id: req.params.id }, select: { id: true } });
+      if (!personnel) throw new Error('پرسنل پیدا نشد.');
+      await savePersonnelWorkSchedule(tx, personnel.id, req.body);
+      return tx.personnel.findUniqueOrThrow({ where: { id: personnel.id }, include: personnelInclude });
+    });
+    res.json({ success: true, data: record });
+  } catch (error) { handleError(res, error, 'Update HR personnel work schedule'); }
 });
 
 router.post('/personnel/:id/relationships', editAccess, async (req: WorkspaceRequest, res) => {

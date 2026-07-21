@@ -55,8 +55,8 @@ A per-contract-product material-consumption adjustment for physical cuttable sto
 _Avoid_: applying kerf to service rows, applying it to a full-width/full-length axis with no cut, or changing printed finished dimensions.
 
 **برش کالیبر**:
-A cutting-charge modifier for طولی and stair product rows that adds one paid side-edge longitudinal cut for each consumed source band while leaving material area, delivery dimensions, and remaining-stone geometry unchanged. It is included inside the normal برش total and printed cutting details rather than shown as a separate add-on.
-_Avoid_: treating برش کالیبر as extra consumed material, a separate service row, or a separate printed line item
+A cutting-charge modifier for طولی and stair product rows that adds one paid side-edge longitudinal cut for each consumed source band while leaving material area, delivery dimensions, and remaining-stone geometry unchanged. It is included inside the normal برش total and printed cutting details rather than shown as a separate add-on. A newly configured row starts without calibration because this paid operation requires explicit selection; an existing or restored row preserves its saved choice, and a legacy missing choice retains the historical enabled meaning until an authorized edit and save.
+_Avoid_: treating برش کالیبر as extra consumed material, a separate service row, or a separate printed line item; enabling it implicitly on a new row; or interpreting a missing legacy value as a silent price reduction
 
 **برش قائم اسلب**:
 A paid edge-preparation cut applied to selected sides of each standard/source slab before the slab is cut to the customer's requested finished dimensions.
@@ -285,7 +285,7 @@ _Avoid_: فهمیدن طول صریح به عنوان تقاضای کل قابل
 _Avoid_: تغییر بی‌صدای یک بعد صریح، حدس‌زدن با اطلاعات ناکافی، یا ذخیره نتیجه بهینه‌سازی بدون نمایش ابعاد و قطعات فیزیکی محاسبه‌شده
 
 **تعداد صفر در برش هوشمند طولی**:
-فقط برای محصول سنگ طولی، تعداد خالی یا صفر اجازه یک برآورد داخلی برای جلوگیری از بیش‌برآورد هزینه است؛ تعداد، طول و عرض واردشده همچنان عین درخواست مشتری باقی می‌مانند. برای نمونه درخواست `40cm` منبع، `7cm` عرض، `50m` طول و تعداد صفر در همه ردیف‌ها و خروجی‌ها همان `0 / 50m / 7cm` می‌ماند و نتیجه بهینه‌ساز جایگزین آن نمی‌شود. در مقابل، تعداد مثبت صریح است و طول را به طول هر قطعه تبدیل می‌کند؛ `2 / 50m` یعنی دو قطعه 50 متری و مجموع 100 متر. ردیف قدیمی که مقادیر صفر را با خروجی بهینه‌ساز جایگزین کرده، هنگام خواندن از provenance بازسازی می‌شود و فقط با ذخیره صریح قرارداد اصلاح پایدار می‌گردد.
+فقط برای محصول سنگ طولی، تعداد خالی یا صفر اجازه یک برآورد داخلی برای جلوگیری از بیش‌برآورد هزینه است؛ محصول طولی که تازه از کاتالوگ برای یک ردیف جدید انتخاب می‌شود با تعداد واقعی صفر آغاز می‌شود تا این برآورد بدون تعامل اضافی فعال باشد. تعداد، طول و عرض واردشده همچنان عین درخواست مشتری باقی می‌مانند. برای نمونه درخواست `40cm` منبع، `7cm` عرض، `50m` طول و تعداد صفر در همه ردیف‌ها و خروجی‌ها همان `0 / 50m / 7cm` می‌ماند و نتیجه بهینه‌ساز جایگزین آن نمی‌شود. در مقابل، تعداد مثبت صریح است و طول را به طول هر قطعه تبدیل می‌کند؛ `2 / 50m` یعنی دو قطعه 50 متری و مجموع 100 متر. ردیف و پیش‌نویس موجود و ردیف تکثیرشده مقدار خود را حفظ می‌کنند. ردیف قدیمی که مقادیر صفر را با خروجی بهینه‌ساز جایگزین کرده، هنگام خواندن از provenance بازسازی می‌شود و فقط با ذخیره صریح قرارداد اصلاح پایدار می‌گردد.
 _Avoid_: تبدیل تعداد خالی یا صفر به یک یا تعداد محاسبه‌شده، تبدیل طول کل مشتری به طول قطعه محاسبه‌شده، تعمیم این معنا به انواع دیگر محصول، نمایش برآورد داخلی به‌عنوان خواسته مشتری، یا مهاجرت بی‌صدای قراردادهای نهایی‌شده
 
 **چیدمان عرضی قطعات صریح سنگ طولی**:
@@ -535,8 +535,8 @@ A mandatory product retains the physical calculation for every cut and charges t
 _Avoid_: zeroing all حکمی cutting charges, hiding either physical cut type, charging حکمی cross cutting, or treating the حکمی percentage as payment for longitudinal cutting
 
 **هزینه فیزیکی برش و مبلغ قابل دریافت برش**:
-هزینه فیزیکی برش ارزش محاسبه‌شده عملیات واقعی برای برنامه تولید و کنترل داخلی است؛ مبلغ قابل دریافت برش بخشی از همان عملیات است که طبق قواعد فروش از مشتری دریافت می‌شود. در محصول حکمی، عملیات و هزینه فیزیکی برش طولی و عرضی باقی می‌ماند؛ مبلغ برش طولی از مشتری دریافت می‌شود و مبلغ برش عرضی صفر است.
-_Avoid_: استفاده از یک مبلغ مشترک برای حقیقت تولید و مبلغ فاکتور، حذف عملیات فیزیکی به دلیل رایگان‌بودن آن برای مشتری، صفرکردن مبلغ برش طولی حکمی، دریافت مبلغ برش عرضی حکمی، یا استفاده از هزینه فیزیکی عرضی در جمع قابل پرداخت
+هزینه فیزیکی برش ارزش محاسبه‌شده عملیات واقعی برای برنامه تولید و کنترل داخلی است؛ مبلغ قابل دریافت برش بخشی از همان عملیات است که طبق قواعد فروش از مشتری دریافت می‌شود. در محصول حکمی، عملیات و هزینه فیزیکی برش طولی و عرضی باقی می‌ماند؛ مبلغ برش طولی از مشتری دریافت می‌شود و مبلغ برش عرضی صفر است. خروجی‌های مالی نرخ و مبلغ ذخیره‌شده قرارداد را نشان می‌دهند، برش فیزیکی رایگان را با نرخ و مبلغ صفر نمایش می‌دهند و هیچ نرخ جاری کاتالوگ را هنگام چاپ جایگزین نمی‌کنند؛ خروجی کارگاه فقط حقیقت فیزیکی را بدون ستون مالی نگه می‌دارد. ردیف‌های خلاصه فقط وقتی ادغام می‌شوند که نوع و نرخ ذخیره‌شده یکسان باشد.
+_Avoid_: استفاده از یک مبلغ مشترک برای حقیقت تولید و مبلغ فاکتور، حذف عملیات فیزیکی به دلیل رایگان‌بودن آن برای مشتری، صفرکردن مبلغ برش طولی حکمی، دریافت مبلغ برش عرضی حکمی، استفاده از هزینه فیزیکی عرضی در جمع قابل پرداخت، خالی‌گذاشتن مبلغ برش رایگان، میانگین‌گیری نرخ‌های متفاوت، یا قیمت‌گذاری مجدد قرارداد هنگام چاپ
 
 **بازذخیره قیمت‌گذاری حکمی**:
 Opening an existing contract for editing and saving it again applies the current حکمی pricing rule to the saved product rows.

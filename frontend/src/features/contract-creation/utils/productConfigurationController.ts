@@ -19,6 +19,26 @@ export interface ContractQuantityInputPolicy {
   optimizerRequested: boolean;
 }
 
+export interface FreshContractProductDefaults {
+  quantity: number;
+  calibrationCutEnabled?: boolean;
+}
+
+export const getFreshContractProductDefaults = (
+  productType: ContractUsageType | null | undefined
+): FreshContractProductDefaults => {
+  if (productType === 'longitudinal') {
+    return { quantity: 0, calibrationCutEnabled: false };
+  }
+  if (productType === 'stair') {
+    return { quantity: 1, calibrationCutEnabled: false };
+  }
+  return { quantity: 1 };
+};
+
+export const resolveExistingCalibrationCutEnabled = (value: boolean | null | undefined): boolean =>
+  value ?? true;
+
 export const getContractQuantityInputPolicy = (
   productType: ContractUsageType | null | undefined,
   value: number | null | undefined

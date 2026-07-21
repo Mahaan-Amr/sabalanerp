@@ -1198,9 +1198,7 @@ const normalizeFinancials = (
 ): NormalizedFinancials => {
   const currency = String(contract.currency || contract.contractData?.payment?.currency || 'تومان');
   const productsTotal = products.reduce((sum, product) => {
-    const billableCuts = hasNonBillableMandatoryLongitudinalCuts(product)
-      ? 0
-      : product.cuts.reduce((cutSum, cut) => cutSum + toNumber(cut.cost), 0);
+    const billableCuts = product.cuts.reduce((cutSum, cut) => cutSum + toNumber(cut.cost), 0);
     const tools = product.tools.reduce((toolSum, tool) => toolSum + toNumber(tool.cost), 0);
     const services = product.services.reduce((serviceSum, service) => serviceSum + toNumber(service.cost), 0);
     return sum + Math.max(toNumber(product.totalPrice) - billableCuts - tools - services, 0);
@@ -1213,7 +1211,6 @@ const normalizeFinancials = (
   }, 0);
   const standaloneServicesTotal = standaloneServices.reduce((sum, row) => sum + toNumber(row.totalPrice), 0);
   const cutsTotal = products.reduce((sum, product) => {
-    if (hasNonBillableMandatoryLongitudinalCuts(product)) return sum;
     return sum + product.cuts.reduce((cutSum, cut) => cutSum + toNumber(cut.cost), 0);
   }, 0);
   const finishingTotal = products.reduce((sum, product) => {
@@ -1256,12 +1253,6 @@ const normalizeFinancials = (
 const isMeaningfulCut = (cut: NormalizedCut): boolean =>
   cut.meters > 0 || cut.rate > 0 || cut.cost > 0;
 
-const hasNonBillableMandatoryLongitudinalCuts = (
-  product: Pick<NormalizedProduct, 'productTypeCode' | 'isMandatory' | 'mandatoryPercentage'>
-): boolean =>
-  product.isMandatory === true &&
-  product.mandatoryPercentage > 0;
-
 const isMeaningfulService = (service: NormalizedService): boolean =>
   hasTextValue(service.name) || service.amount > 0 || service.rate > 0 || service.cost > 0;
 
@@ -1277,6 +1268,7 @@ type SummaryAddOnInput = {
   unitLabel?: string;
   rate: number;
   total: number;
+  groupByRate?: boolean;
 };
 
 type SummaryAddOnGroup = {
@@ -1293,10 +1285,11 @@ type SummaryAddOnGroup = {
 const buildSummaryAddOnKey = (addOn: SummaryAddOnInput): string => {
   const category = normalizeAddOnIdentity(addOn.category);
   const code = normalizeAddOnIdentity(addOn.code);
-  if (category && code) return `code::${category}::${code}`;
+  const rateKey = addOn.groupByRate ? `::rate::${toNumber(addOn.rate)}` : '';
+  if (category && code) return `code::${category}::${code}${rateKey}`;
 
   const sourceId = normalizeAddOnIdentity(addOn.sourceId);
-  if (category && sourceId) return `id::${category}::${sourceId}`;
+  if (category && sourceId) return `id::${category}::${sourceId}${rateKey}`;
 
   return [
     'fallback',
@@ -1326,7 +1319,7 @@ const addSummaryAddOn = (
       description: addOn.description || EMPTY,
       amount,
       total,
-      rates: new Set(rate > 0 ? [rate] : []),
+      rates: new Set(addOn.groupByRate || rate > 0 ? [rate] : []),
       unitLabels: new Set(addOn.unitLabel ? [addOn.unitLabel] : [])
     };
     groups.set(key, group);
@@ -1335,7 +1328,7 @@ const addSummaryAddOn = (
 
   existing.amount += amount;
   existing.total += total;
-  if (rate > 0) existing.rates.add(rate);
+  if (addOn.groupByRate || rate > 0) existing.rates.add(rate);
   if (addOn.unitLabel) existing.unitLabels.add(addOn.unitLabel);
 };
 
@@ -1473,8 +1466,7 @@ const buildFlatProductRows = (
   const summaryAddOnGroups = new Map<string, SummaryAddOnGroup>();
 
   products.forEach((product, productIndex) => {
-    const nonBillableMandatoryLongitudinalCuts = hasNonBillableMandatoryLongitudinalCuts(product);
-    const billableCuts = nonBillableMandatoryLongitudinalCuts ? [] : product.cuts;
+    const billableCuts = product.cuts;
     const addOnsTotal =
       billableCuts.reduce((sum, cut) => sum + toNumber(cut.cost), 0) +
       product.tools.reduce((sum, tool) => sum + toNumber(tool.cost), 0) +
@@ -1500,7 +1492,8 @@ const buildFlatProductRows = (
           amount: cut.meters,
           unitLabel: 'متر طول',
           rate: cut.rate,
-          total: cut.cost
+          total: cut.cost,
+          groupByRate: true
         });
       });
       product.tools.filter(isMeaningfulTool).forEach((tool) => {
@@ -1606,8 +1599,8 @@ const buildFlatProductRows = (
         linearMeasurement: toFaNumber(cut.meters, 4),
         squareMeasurement: '',
         count: '',
-        rate: nonBillableMandatoryLongitudinalCuts ? '' : formatPrintMoneyCell(cut.rate, currency, options),
-        total: nonBillableMandatoryLongitudinalCuts ? '' : formatPrintMoneyCell(cut.cost, currency, options)
+        rate: formatPrintMoneyCell(cut.rate, currency, options),
+        total: formatPrintMoneyCell(cut.cost, currency, options)
       });
     });
 

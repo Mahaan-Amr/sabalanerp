@@ -242,7 +242,7 @@ export default function ReportsPage() {
           </ErpCard>
         </ErpSection>
       ) : (
-        <ErpSection title="خلاصه عملکرد نیروها" description="با دکمه تاریخچه، جزئیات کامل شیفت‌های همان نیرو را ببینید. PDF این بخش فقط شیفت‌های پایان‌یافته را خروجی می‌گیرد.">
+        <ErpSection title="خلاصه عملکرد نیروها" description="PDF این بخش فقط شیفت‌های پایان‌یافته را خروجی می‌گیرد.">
           <ErpCard className="overflow-x-auto p-0">
             <table className="w-full min-w-[980px] text-right text-sm">
               <thead className="bg-slate-50"><tr>{['نیرو','شیفت','برنامه','حضور','تأخیر','عدم حضور','تکمیل','بسته مدیر','گشت','گزارش',''].map((heading, index) => <th key={`${heading}-${index}`} className="px-4 py-3">{heading}</th>)}</tr></thead>

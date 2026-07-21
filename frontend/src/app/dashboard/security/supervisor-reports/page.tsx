@@ -261,7 +261,7 @@ export default function SecuritySupervisorReportsPage() {
                   )}
                 </div>
                 <div className="min-h-28 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900/70">
-                  {selectedParticipants.length ? (
+                  {selectedParticipants.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {selectedParticipants.map((user) => (
                         <button
@@ -276,8 +276,6 @@ export default function SecuritySupervisorReportsPage() {
                         </button>
                       ))}
                     </div>
-                  ) : (
-                    <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">روی انتخاب افراد مرتبط بزنید و هر نفر را جداگانه به گزارش اضافه کنید.</p>
                   )}
                 </div>
               </div>}

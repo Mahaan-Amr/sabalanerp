@@ -33,7 +33,7 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
     lengthUnit: 'm',
     tools: [],
     finishingEnabled: false,
-    calibrationCutEnabled: true,
+    calibrationCutEnabled: false,
     useMandatory: false,
     mandatoryPercentage: null,
     description: ''
@@ -43,7 +43,7 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
     lengthUnit: 'm',
     tools: [],
     finishingEnabled: false,
-    calibrationCutEnabled: true,
+    calibrationCutEnabled: false,
     useMandatory: true,
     mandatoryPercentage: 20,
     description: ''
@@ -53,7 +53,7 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
     lengthUnit: 'm',
     tools: [],
     finishingEnabled: false,
-    calibrationCutEnabled: true,
+    calibrationCutEnabled: false,
     useMandatory: true,
     mandatoryPercentage: 20,
     description: ''
@@ -319,9 +319,9 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
 
   // Reset all state
   const reset = useCallback(() => {
-    setDraftTread({ lengthUnit: 'm', tools: [], finishingEnabled: false, calibrationCutEnabled: true, useMandatory: false, mandatoryPercentage: null, description: '' });
-    setDraftRiser({ lengthUnit: 'm', tools: [], finishingEnabled: false, calibrationCutEnabled: true, useMandatory: true, mandatoryPercentage: 20, description: '' });
-    setDraftLanding({ lengthUnit: 'm', tools: [], finishingEnabled: false, calibrationCutEnabled: true, useMandatory: true, mandatoryPercentage: 20, description: '' });
+    setDraftTread({ lengthUnit: 'm', tools: [], finishingEnabled: false, calibrationCutEnabled: false, useMandatory: false, mandatoryPercentage: null, description: '' });
+    setDraftRiser({ lengthUnit: 'm', tools: [], finishingEnabled: false, calibrationCutEnabled: false, useMandatory: true, mandatoryPercentage: 20, description: '' });
+    setDraftLanding({ lengthUnit: 'm', tools: [], finishingEnabled: false, calibrationCutEnabled: false, useMandatory: true, mandatoryPercentage: 20, description: '' });
     setStairActivePart('tread');
     setStoneSearchTerm('');
     setStoneSearchResults([]);
@@ -413,5 +413,4 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
     reset
   };
 };
-
 

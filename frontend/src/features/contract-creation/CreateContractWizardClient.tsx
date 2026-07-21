@@ -107,7 +107,9 @@ import {
   hasSlabGeometryChanged
 } from '@/features/contract-creation/services/remainingStoneService';
 import {
+  getFreshContractProductDefaults,
   mergeEditedRemainingStoneState,
+  resolveExistingCalibrationCutEnabled,
   resolveLongitudinalQuantityOptimizationFailure,
   resolveLongitudinalWidth
 } from '@/features/contract-creation/utils/productConfigurationController';
@@ -268,7 +270,7 @@ const createEmptyStairDraft = (part: StairStepperPart): StairPartDraftV2 => ({
   lengthUnit: 'm',
   tools: [],
   finishingEnabled: false,
-  calibrationCutEnabled: true,
+  calibrationCutEnabled: getFreshContractProductDefaults('stair').calibrationCutEnabled,
   useMandatory: part === 'riser' || part === 'landing',
   mandatoryPercentage: part === 'riser' || part === 'landing' ? 20 : null,
   description: ''
@@ -2603,6 +2605,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }
 
     if (selectedProductType === 'stair') {
+      const freshStairDefaults = getFreshContractProductDefaults('stair');
       if (useStairFlowV2) {
         const [currentDraft, setCurrentDraft] = getActiveDraft();
         const productLabel = product.namePersian || product.name || '';
@@ -2614,7 +2617,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           stoneProduct: product,
           pricePerSquareMeter: product.basePrice || 0,
           thicknessCm: product.thicknessValue || null,
-          calibrationCutEnabled: currentDraft.calibrationCutEnabled ?? true
+          calibrationCutEnabled: currentDraft.calibrationCutEnabled ?? freshStairDefaults.calibrationCutEnabled
         });
 
         stairSystemV2.setStoneSearchTerm(productLabel);
@@ -2636,7 +2639,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           diameterOrWidth: product.widthValue,
           length: 0,
           width: 0,
-          quantity: 1,
+          quantity: freshStairDefaults.quantity,
           squareMeters: 0,
           pricePerSquareMeter: product.basePrice || 0,
           totalPrice: 0,
@@ -2644,7 +2647,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           currency: 'تومان',
           sawKerfEnabled: false,
           sawKerfCm: null,
-          calibrationCutEnabled: true,
+          calibrationCutEnabled: freshStairDefaults.calibrationCutEnabled,
           lengthUnit: 'm',
           widthUnit: 'cm',
           isMandatory: false,
@@ -2742,6 +2745,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return;
     }
 
+    const freshLongitudinalDefaults = getFreshContractProductDefaults('longitudinal');
     const defaultConfig: Partial<ContractProduct> = {
       productId: product.id,
       product,
@@ -2751,7 +2755,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       diameterOrWidth: product.widthValue,
       length: 0,
       width: 0,
-      quantity: 1,
+      quantity: freshLongitudinalDefaults.quantity,
       squareMeters: 0,
       pricePerSquareMeter: product.basePrice || 0,
       totalPrice: 0,
@@ -2759,7 +2763,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       currency: 'تومان',
       sawKerfEnabled: false,
       sawKerfCm: null,
-      calibrationCutEnabled: true,
+      calibrationCutEnabled: freshLongitudinalDefaults.calibrationCutEnabled,
       isCut: false,
       originalWidth: product.widthValue,
       originalLength: 0,
@@ -3048,7 +3052,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             finishingUnitPrice: p.finishingUnitPrice || p.finishingPricePerSquareMeter || metaFinishing.unitPrice || null,
             finishingCalculationBase: p.finishingCalculationBase || metaFinishing.calculationBase || 'squareMeters',
             finishingQuantity: p.finishingQuantity || p.finishingSquareMeters || metaFinishing.quantity || null,
-            calibrationCutEnabled: p.calibrationCutEnabled ?? true,
+            calibrationCutEnabled: resolveExistingCalibrationCutEnabled(p.calibrationCutEnabled),
             description: p.description || ''
           };
         };
@@ -5127,9 +5131,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           previousProduct: previousLongitudinalProduct
         });
     const missingCuttingRateWarning = shouldCutByGeometry && finalCuttingCostPerMeter <= 0;
-    const shouldChargeCuttingCost = !(isMandatory && mandatoryPercentage > 0);
     const calculatedCuttingCost = smartCutPlan.enabled ? smartCutPlan.totalCuttingCost : finalCuttingCost;
-    const billableCuttingCost = shouldChargeCuttingCost ? calculatedCuttingCost : 0;
+    const billableCuttingCost = getBillableCuttingCost({
+      productType: 'longitudinal',
+      isMandatory: editingRemainingStoneChild ? false : isMandatory,
+      mandatoryPercentage: editingRemainingStoneChild ? 0 : mandatoryPercentage,
+      cuttingCost: calculatedCuttingCost,
+      cutType: shouldCutByGeometry ? 'longitudinal' : null,
+      cuttingBreakdown: smartCutPlan.enabled ? smartCutPlan.cuttingBreakdown : undefined
+    });
     
     // Create final product configuration for longitudinal stone
     const finalProduct: ContractProduct = {

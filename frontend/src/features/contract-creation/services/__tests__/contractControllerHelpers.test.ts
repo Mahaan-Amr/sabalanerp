@@ -14,8 +14,10 @@ import {
   parseContractAutosaveDraft
 } from '../../utils/contractDraftStorage';
 import {
+  getFreshContractProductDefaults,
   getContractQuantityInputPolicy,
   mergeEditedRemainingStoneState,
+  resolveExistingCalibrationCutEnabled,
   resolveLongitudinalQuantityOptimizationFailure,
   resolveLongitudinalWidth
 } from '../../utils/productConfigurationController';
@@ -168,6 +170,20 @@ assert.deepEqual(getContractQuantityInputPolicy('longitudinal', 3), {
   calculationQuantity: 3,
   optimizerRequested: false
 });
+assert.deepEqual(getFreshContractProductDefaults('longitudinal'), {
+  quantity: 0,
+  calibrationCutEnabled: false
+});
+assert.deepEqual(getFreshContractProductDefaults('stair'), {
+  quantity: 1,
+  calibrationCutEnabled: false
+});
+assert.deepEqual(getFreshContractProductDefaults('slab'), {
+  quantity: 1
+});
+assert.equal(resolveExistingCalibrationCutEnabled(undefined), true);
+assert.equal(resolveExistingCalibrationCutEnabled(true), true);
+assert.equal(resolveExistingCalibrationCutEnabled(false), false);
 const zeroQuantityPolicy = getContractQuantityInputPolicy('longitudinal', 0);
 assert.equal(
   handleSmartCalculation(

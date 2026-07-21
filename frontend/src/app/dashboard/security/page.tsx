@@ -357,7 +357,7 @@ export default function SecurityDashboardPage() {
         />
       </ErpSection>
 
-      <ErpSection title="ثبت ورود و خروج" description="برای ثبت دستی عملیات، ابتدا کارمند را از لیست همان روز انتخاب کنید.">
+      <ErpSection title="ثبت ورود و خروج">
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <label className="block">
             <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">انتخاب کارمند</span>

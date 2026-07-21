@@ -345,7 +345,7 @@ export default function AttendancePage() {
         { label: 'مرخصی', value: stats?.leave.toLocaleString('fa-IR') || '۰', icon: FaCalendarAlt, tone: 'purple' },
       ]}
     >
-      <ErpSection title="فیلترها" description="در موبایل فیلترها فشرده می‌شوند تا لیست عملیات همیشه در دسترس بماند.">
+      <ErpSection title="فیلترها">
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <label>
             <span className={labelClass}>جستجو</span>

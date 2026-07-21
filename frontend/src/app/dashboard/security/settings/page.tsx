@@ -190,7 +190,7 @@ export default function SecuritySettingsPage() {
 
       <ErpSection
         title="فهرست حضور و غیاب کارکنان"
-        description="افراد این فهرست در ورود و خروج روزانه و خروجی‌های حضور و غیاب دیده می‌شوند. تغییرات از امروز اعمال می‌شود و سوابق قبلی محفوظ می‌ماند."
+        description="تغییرات از امروز اعمال می‌شود و سوابق قبلی محفوظ می‌ماند."
       >
         {attendanceRoster.length === 0 ? (
           <ErpEmptyState icon={FaUsers} title="پرسنل فعالی برای تنظیم فهرست وجود ندارد" />

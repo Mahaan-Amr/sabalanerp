@@ -8,6 +8,7 @@ import { normalizeProductFinishing } from '../utils/finishingUtils';
 import { getServiceRowUnitLabel } from '../utils/contractServiceRows';
 import { getPreparedKindLabel, getPreparedQuantity, getPreparedUnit, isPreparedProductType } from '../utils/preparedProductUtils';
 import { getContractGrossPayableTotal, getContractProductPayableTotal } from '../utils/contractProductPricing';
+import { getBillableCuttingBreakdown } from '../utils/mandatoryCuttingPricing';
 
 interface ServiceEntry {
   key: string;
@@ -164,9 +165,8 @@ export const useContractSummary = (
       }
 
       // Cutting costs
-      const billableCuttingCost = toFiniteNumber(product.cuttingCost);
-      if (product.isCut && billableCuttingCost > 0) {
-        const breakdown = product.cuttingBreakdown && product.cuttingBreakdown.length > 0
+      if (product.isCut) {
+        const physicalBreakdown = product.cuttingBreakdown && product.cuttingBreakdown.length > 0
           ? product.cuttingBreakdown
           : [{
               type: product.cutType || 'longitudinal',
@@ -174,12 +174,15 @@ export const useContractSummary = (
               rate: product.cuttingCostPerMeter || 0,
               cost: product.cuttingCost || 0
             }];
+        const breakdown = getBillableCuttingBreakdown({
+          ...product,
+          cuttingBreakdown: physicalBreakdown
+        });
 
         // Count cross cuts to determine if we should use singular or plural cross-cut labels.
         const crossCuts = breakdown.filter(cut => cut.type === 'cross');
         const hasOnlyOneCrossCut = crossCuts.length === 1 && breakdown.length === 1;
 
-        const physicalBreakdownTotal = breakdown.reduce((sum, cut) => sum + toFiniteNumber(cut.cost), 0);
         breakdown.forEach((cut, cutIndex) => {
           const metersLabel = `${formatDisplayNumber(cut.meters || 0)} متر`;
           // Use singular label if there is only one cross cut.
@@ -192,11 +195,9 @@ export const useContractSummary = (
             productName: productLabel,
             description: cutDescription,
             amountLabel: metersLabel,
-            cost: physicalBreakdownTotal > 0
-              ? billableCuttingCost * (toFiniteNumber(cut.cost) / physicalBreakdownTotal)
-              : 0,
+            cost: toFiniteNumber(cut.cost),
             meta: {
-              rateLabel: cut.rate ? `${formatPrice(cut.rate, 'تومان')}/متر` : undefined
+              rateLabel: `${formatPrice(cut.rate, 'تومان')}/متر`
             }
           });
         });

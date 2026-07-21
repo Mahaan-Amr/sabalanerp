@@ -14,6 +14,7 @@ import {
   parseContractAutosaveDraft
 } from '../../utils/contractDraftStorage';
 import {
+  createFreshStairPartDraft,
   getFreshContractProductDefaults,
   getContractQuantityInputPolicy,
   mergeEditedRemainingStoneState,
@@ -180,6 +181,15 @@ assert.deepEqual(getFreshContractProductDefaults('stair'), {
 });
 assert.deepEqual(getFreshContractProductDefaults('slab'), {
   quantity: 1
+});
+assert.deepEqual(createFreshStairPartDraft('riser'), {
+  lengthUnit: 'm',
+  tools: [],
+  finishingEnabled: false,
+  calibrationCutEnabled: false,
+  useMandatory: true,
+  mandatoryPercentage: 20,
+  description: ''
 });
 assert.equal(resolveExistingCalibrationCutEnabled(undefined), true);
 assert.equal(resolveExistingCalibrationCutEnabled(true), true);

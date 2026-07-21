@@ -107,6 +107,7 @@ import {
   hasSlabGeometryChanged
 } from '@/features/contract-creation/services/remainingStoneService';
 import {
+  createFreshStairPartDraft,
   getFreshContractProductDefaults,
   mergeEditedRemainingStoneState,
   resolveExistingCalibrationCutEnabled,
@@ -142,7 +143,7 @@ import {
   getContractProductsPayableTotal,
   reconcileContractProductPricing
 } from '@/features/contract-creation/utils/contractProductPricing';
-import { getBillableCuttingCost } from '@/features/contract-creation/utils/mandatoryCuttingPricing';
+import { getBillableCuttingBreakdown, getBillableCuttingCost } from '@/features/contract-creation/utils/mandatoryCuttingPricing';
 import {
   getDeliverableProductEntries,
   getDeliveryTargetAmount as getContractDeliveryTargetAmount,
@@ -265,16 +266,6 @@ const isGeneratedStairCutTool = (tool: any): boolean => {
   const toolId = String(tool?.toolId || tool?.id || '');
   return toolId.startsWith('cut-cross-') || toolId.startsWith('cut-longitudinal-');
 };
-
-const createEmptyStairDraft = (part: StairStepperPart): StairPartDraftV2 => ({
-  lengthUnit: 'm',
-  tools: [],
-  finishingEnabled: false,
-  calibrationCutEnabled: getFreshContractProductDefaults('stair').calibrationCutEnabled,
-  useMandatory: part === 'riser' || part === 'landing',
-  mandatoryPercentage: part === 'riser' || part === 'landing' ? 20 : null,
-  description: ''
-});
 
 const getAttachedLayerIndicesForStairRow = (
   products: ContractProduct[],
@@ -2617,7 +2608,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           stoneProduct: product,
           pricePerSquareMeter: product.basePrice || 0,
           thicknessCm: product.thicknessValue || null,
-          calibrationCutEnabled: currentDraft.calibrationCutEnabled ?? freshStairDefaults.calibrationCutEnabled
+          calibrationCutEnabled: freshStairDefaults.calibrationCutEnabled
         });
 
         stairSystemV2.setStoneSearchTerm(productLabel);
@@ -3105,9 +3096,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         
         const baseDraft = productToDraft(clickedMainProduct, clickedPartType);
         const scopedDraft = layerManagement.normalizeLayerAltStoneSettings(mergeLayerInfo(baseDraft, clickedPartType));
-        stairSystemV2.setDraftTread(clickedPartType === 'tread' ? scopedDraft : createEmptyStairDraft('tread'));
-        stairSystemV2.setDraftRiser(clickedPartType === 'riser' ? scopedDraft : createEmptyStairDraft('riser'));
-        stairSystemV2.setDraftLanding(clickedPartType === 'landing' ? scopedDraft : createEmptyStairDraft('landing'));
+        stairSystemV2.setDraftTread(clickedPartType === 'tread' ? scopedDraft : createFreshStairPartDraft('tread'));
+        stairSystemV2.setDraftRiser(clickedPartType === 'riser' ? scopedDraft : createFreshStairPartDraft('riser'));
+        stairSystemV2.setDraftLanding(clickedPartType === 'landing' ? scopedDraft : createFreshStairPartDraft('landing'));
         stairSystemV2.setStairActivePart(clickedPartType);
         
         // Set product config for modal type detection
@@ -5716,20 +5707,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             });
           });
 
-          const physicalCuttingTotal = sumNumericValues(product.cuttingBreakdown || [], (cut) => cut.cost);
-          const billableCuttingTotal = getBillableCuttingCost(product);
-          (product.cuttingBreakdown || []).forEach((cut, cutIndex) => {
-            const billableCutCost = physicalCuttingTotal > 0
-              ? billableCuttingTotal * (toFiniteNumber(cut.cost) / physicalCuttingTotal)
-              : 0;
+          getBillableCuttingBreakdown(product).forEach((cut, cutIndex) => {
             serviceDetails.push({
               id: `cut-${productIndex}-${cutIndex}`,
               productName,
               category: 'برش',
               name: cut.type === 'cross' ? 'برش عرضی' : 'برش طولی',
               amountLabel: `${toFiniteNumber(cut.meters)} متر`,
-              rateLabel: billableCuttingTotal > 0 && cut.rate ? `${cut.rate}` : '—',
-              cost: billableCutCost
+              rateLabel: `${toFiniteNumber(cut.rate)}`,
+              cost: toFiniteNumber(cut.cost)
             });
           });
 

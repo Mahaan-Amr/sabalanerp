@@ -12,6 +12,7 @@ import type {
 } from '../types/contract.types';
 import { validateDraftNumericFields, validateDraftRequiredFields, clearDraftFieldError as clearDraftFieldErrorUtil } from '../services/stairValidationService';
 import { generateFullProductName } from '../utils/productUtils';
+import { createFreshStairPartDraft } from '../utils/productConfigurationController';
 import { servicesAPI, dashboardAPI } from '@/lib/api';
 
 interface UseStairSystemV2Options {
@@ -29,35 +30,11 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
   }, [onError]);
 
   // Draft states for each part
-  const [draftTread, setDraftTread] = useState<StairPartDraftV2>({
-    lengthUnit: 'm',
-    tools: [],
-    finishingEnabled: false,
-    calibrationCutEnabled: false,
-    useMandatory: false,
-    mandatoryPercentage: null,
-    description: ''
-  });
+  const [draftTread, setDraftTread] = useState<StairPartDraftV2>(() => createFreshStairPartDraft('tread'));
   
-  const [draftRiser, setDraftRiser] = useState<StairPartDraftV2>({
-    lengthUnit: 'm',
-    tools: [],
-    finishingEnabled: false,
-    calibrationCutEnabled: false,
-    useMandatory: true,
-    mandatoryPercentage: 20,
-    description: ''
-  });
+  const [draftRiser, setDraftRiser] = useState<StairPartDraftV2>(() => createFreshStairPartDraft('riser'));
   
-  const [draftLanding, setDraftLanding] = useState<StairPartDraftV2>({
-    lengthUnit: 'm',
-    tools: [],
-    finishingEnabled: false,
-    calibrationCutEnabled: false,
-    useMandatory: true,
-    mandatoryPercentage: 20,
-    description: ''
-  });
+  const [draftLanding, setDraftLanding] = useState<StairPartDraftV2>(() => createFreshStairPartDraft('landing'));
 
   // Active part selector
   const [stairActivePart, setStairActivePart] = useState<StairStepperPart>('tread');
@@ -319,9 +296,9 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
 
   // Reset all state
   const reset = useCallback(() => {
-    setDraftTread({ lengthUnit: 'm', tools: [], finishingEnabled: false, calibrationCutEnabled: false, useMandatory: false, mandatoryPercentage: null, description: '' });
-    setDraftRiser({ lengthUnit: 'm', tools: [], finishingEnabled: false, calibrationCutEnabled: false, useMandatory: true, mandatoryPercentage: 20, description: '' });
-    setDraftLanding({ lengthUnit: 'm', tools: [], finishingEnabled: false, calibrationCutEnabled: false, useMandatory: true, mandatoryPercentage: 20, description: '' });
+    setDraftTread(createFreshStairPartDraft('tread'));
+    setDraftRiser(createFreshStairPartDraft('riser'));
+    setDraftLanding(createFreshStairPartDraft('landing'));
     setStairActivePart('tread');
     setStoneSearchTerm('');
     setStoneSearchResults([]);
@@ -413,4 +390,3 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
     reset
   };
 };
-

@@ -3,6 +3,8 @@ import type {
   ContractUsageType,
   Product,
   RemainingStone,
+  StairPartDraftV2,
+  StairStepperPart,
   SmartLongitudinalCutPlan
 } from '../types/contract.types';
 import { recalculateUsedRemainingDimensions } from './dimensionUtils';
@@ -38,6 +40,16 @@ export const getFreshContractProductDefaults = (
 
 export const resolveExistingCalibrationCutEnabled = (value: boolean | null | undefined): boolean =>
   value ?? true;
+
+export const createFreshStairPartDraft = (part: StairStepperPart): StairPartDraftV2 => ({
+  lengthUnit: 'm',
+  tools: [],
+  finishingEnabled: false,
+  calibrationCutEnabled: getFreshContractProductDefaults('stair').calibrationCutEnabled,
+  useMandatory: part === 'riser' || part === 'landing',
+  mandatoryPercentage: part === 'riser' || part === 'landing' ? 20 : null,
+  description: ''
+});
 
 export const getContractQuantityInputPolicy = (
   productType: ContractUsageType | null | undefined,

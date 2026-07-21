@@ -1,5 +1,5 @@
 import { toFiniteNumber } from '@/lib/numberFormat';
-import type { ContractProduct } from '../types/contract.types';
+import type { ContractProduct, CuttingBreakdownEntry } from '../types/contract.types';
 
 export const getPhysicalCuttingCost = (
   product: Pick<ContractProduct, 'physicalCuttingCost' | 'cuttingBreakdown' | 'cuttingCost'>
@@ -33,6 +33,18 @@ export const isMandatoryCuttingPolicyActive = (
 ): boolean =>
   product.isMandatory === true &&
   toFiniteNumber(product.mandatoryPercentage) > 0;
+
+export const getBillableCuttingBreakdown = (
+  product: Pick<ContractProduct, 'productType' | 'isMandatory' | 'mandatoryPercentage' | 'cuttingBreakdown'>
+): CuttingBreakdownEntry[] => {
+  const breakdown = product.cuttingBreakdown || [];
+  if (!isMandatoryCuttingPolicyActive(product)) return breakdown;
+
+  return breakdown.map((cut) => cut.type === 'cross'
+    ? { ...cut, rate: 0, cost: 0 }
+    : cut
+  );
+};
 
 /** @deprecated Mandatory longitudinal cutting is billable; only cross cutting is waived. */
 export const isMandatoryLongitudinalCuttingNonBillable = isMandatoryCuttingPolicyActive;

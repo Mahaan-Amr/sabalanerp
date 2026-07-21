@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import type { ContractProduct } from '../../types/contract.types';
 import {
+  getBillableCuttingBreakdown,
   getBillableCuttingCost,
   getPhysicalCuttingCost,
   normalizeMandatoryLongitudinalCuttingPricing
@@ -40,9 +41,14 @@ assert.equal(getPhysicalCuttingCost(normalizedMixed), 800);
 assert.equal(getBillableCuttingCost(normalizedMixed), 600);
 assert.equal(normalizedMixed.cuttingCost, 600);
 assert.equal(normalizedMixed.totalPrice, 1800);
+assert.deepEqual(getBillableCuttingBreakdown(mandatoryMixed), [
+  { type: 'longitudinal', meters: 6, rate: 100, cost: 600 },
+  { type: 'cross', meters: 2, rate: 0, cost: 0 }
+]);
 
 const ordinary = { ...product, isMandatory: false };
 assert.equal(getBillableCuttingCost(ordinary), 600);
+assert.deepEqual(getBillableCuttingBreakdown({ ...mandatoryMixed, isMandatory: false }), mandatoryMixed.cuttingBreakdown);
 assert.equal(normalizeMandatoryLongitudinalCuttingPricing(ordinary), ordinary);
 
 console.log('cuttingPricingPolicy tests passed');

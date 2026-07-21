@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { FaBuilding, FaCog, FaDownload, FaEdit, FaEye, FaPlus, FaShieldAlt, FaTimes, FaTrash, FaUserCheck, FaUserTimes, FaUsers } from 'react-icons/fa';
+import { FaBuilding, FaCog, FaDownload, FaEdit, FaEye, FaPlus, FaShieldAlt, FaTrash, FaUserCheck, FaUserTimes, FaUsers } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpListPage, ErpLoading, ErpSection, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
 import { authAPI, departmentsAPI, usersAPI, workspacePermissionsAPI } from '@/lib/api';
+import { WORKSPACE_CONFIG } from '@/contexts/WorkspaceContext';
 
 interface User {
   id: string;
@@ -16,6 +17,9 @@ interface User {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  creatorDisplayNameSnapshot?: string | null;
+  creatorUsernameSnapshot?: string | null;
+  createdByUser?: { erasedAt?: string | null } | null;
   department?: {
     id: string;
     name: string;
@@ -90,8 +94,12 @@ export default function UsersManagementPage() {
   const [selectedStatus, setSelectedStatus] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkOperation, setBulkOperation] = useState('DEACTIVATE');
+  const [bulkValue, setBulkValue] = useState('');
+  const [bulkPreview, setBulkPreview] = useState<any>(null);
+  const [bulkResult, setBulkResult] = useState<any>(null);
+  const [bulkWorkspacePermissions, setBulkWorkspacePermissions] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchData();
@@ -149,24 +157,7 @@ export default function UsersManagementPage() {
   };
 
   const handleDeleteUser = (user: User) => {
-    setUserToDelete(user);
-    setShowDeleteModal(true);
-  };
-
-  const confirmDeleteUser = async () => {
-    if (!userToDelete) return;
-
-    try {
-      await usersAPI.deleteUser(userToDelete.id);
-      alert('کاربر با موفقیت حذف شد');
-      fetchData();
-    } catch (error: any) {
-      console.error('Error deleting user:', error);
-      alert(error.response?.data?.error || 'خطا در حذف کاربر');
-    } finally {
-      setShowDeleteModal(false);
-      setUserToDelete(null);
-    }
+    window.location.href = `/dashboard/users/${user.id}`;
   };
 
   const getUserWorkspacePermissions = (userId: string) => permissions.filter((permission) => permission.userId === userId && permission.isActive);
@@ -296,6 +287,12 @@ export default function UsersManagementPage() {
 
   const columns: ErpColumn<User>[] = [
     {
+      id: 'selection',
+      header: <input aria-label="انتخاب همه کاربران" type="checkbox" checked={filteredUsers.length > 0 && filteredUsers.every((item) => selectedIds.includes(item.id))} onChange={(event) => setSelectedIds(event.target.checked ? filteredUsers.map((item) => item.id) : [])} />,
+      priority: 'secondary',
+      cell: (user) => <input aria-label={`انتخاب ${user.firstName} ${user.lastName}`} type="checkbox" checked={selectedIds.includes(user.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? Array.from(new Set([...current, user.id])) : current.filter((id) => id !== user.id))} />,
+    },
+    {
       id: 'user',
       header: 'کاربر',
       priority: 'primary',
@@ -350,6 +347,15 @@ export default function UsersManagementPage() {
       mobileLabel: 'وضعیت',
       priority: 'meta',
       cell: (user) => <ErpBadge tone={user.isActive ? 'success' : 'danger'}>{user.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge>,
+    },
+    {
+      id: 'creator',
+      header: 'ایجادکننده',
+      mobileLabel: 'ایجادکننده',
+      priority: 'meta',
+      cell: (user) => user.creatorDisplayNameSnapshot
+        ? <span>{user.createdByUser?.erasedAt ? `کاربر حذف‌شده — ${user.creatorDisplayNameSnapshot}` : `${user.creatorDisplayNameSnapshot}${user.creatorUsernameSnapshot ? ` (@${user.creatorUsernameSnapshot})` : ''}`}</span>
+        : <ErpBadge tone="warning">نامشخص — داده تاریخی</ErpBadge>,
     },
     {
       id: 'createdAt',
@@ -444,7 +450,7 @@ export default function UsersManagementPage() {
             { label: 'مشاهده جزئیات', href: `/dashboard/users/${user.id}`, icon: FaEye, title: 'مشاهده جزئیات' },
             { label: 'ویرایش', href: `/dashboard/users/${user.id}/edit`, icon: FaEdit, disabled: disableAdminActions, title: disableAdminActions ? 'دسترسی برای مدیر فروش محدود است' : 'ویرایش' },
             { label: 'مدیریت دسترسی‌ها', href: `/dashboard/admin/permissions?userId=${user.id}`, icon: FaCog, disabled: disableAdminActions, title: disableAdminActions ? 'دسترسی برای مدیر فروش محدود است' : 'مدیریت دسترسی‌ها' },
-            { label: 'حذف', onClick: () => handleDeleteUser(user), icon: FaTrash, tone: 'danger', disabled: disableAdminActions, title: disableAdminActions ? 'دسترسی برای مدیر فروش محدود است' : 'حذف' },
+            { label: 'امنیت و حذف حساب', onClick: () => handleDeleteUser(user), icon: FaTrash, tone: 'danger', disabled: currentUserRole !== 'ADMIN', title: currentUserRole === 'ADMIN' ? 'امنیت و حذف حساب' : 'فقط مدیر سیستم' },
           ];
         }}
         emptyState={<ErpEmptyState icon={FaUserTimes} title="هیچ کاربری یافت نشد" description="عبارت جستجو یا فیلترها را تغییر دهید." />}
@@ -462,6 +468,17 @@ export default function UsersManagementPage() {
           ) : null
         }
       >
+        <ErpSection title="عملیات گروهی کاربران" description="اجرای نهایی فقط پس از پیش‌نمایش و بررسی تعارض‌ها انجام می‌شود.">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <select className="min-h-12 rounded-lg border border-slate-200 bg-slate-50 px-3" value={bulkOperation} onChange={(e) => { setBulkOperation(e.target.value); setBulkValue(''); setBulkPreview(null); setBulkResult(null); }}><option value="ACTIVATE">فعال‌سازی</option><option value="DEACTIVATE">غیرفعال‌سازی</option><option value="ASSIGN_DEPARTMENT">تخصیص بخش</option>{currentUserRole === 'ADMIN' && <><option value="ASSIGN_ROLE">تخصیص نقش</option><option value="APPLY_WORKSPACE_PERMISSIONS">اعمال دسترسی فضاهای کاری</option></>}</select>
+            {bulkOperation === 'ASSIGN_DEPARTMENT' && <select className="min-h-12 rounded-lg border border-slate-200 bg-slate-50 px-3" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}><option value="">بدون بخش</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.namePersian}</option>)}</select>}
+            {bulkOperation === 'ASSIGN_ROLE' && <select className="min-h-12 rounded-lg border border-slate-200 bg-slate-50 px-3" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}><option value="USER">کاربر</option><option value="SALES">فروش</option><option value="MODERATOR">ناظر</option><option value="MANAGER">مدیر</option><option value="ADMIN">مدیر سیستم</option></select>}
+            <div className="flex flex-wrap items-center gap-2 md:col-span-2"><ErpBadge tone="info">{selectedIds.length.toLocaleString('fa-IR')} انتخاب</ErpBadge><ErpButton label="پیش‌نمایش" disabled={!selectedIds.length} onClick={async () => { const workspacePermissions = Object.entries(bulkWorkspacePermissions).filter(([, level]) => level).map(([workspace, permissionLevel]) => ({ workspace, permissionLevel })); const response = await usersAPI.previewBulk({ ids: selectedIds, operation: bulkOperation, departmentId: bulkOperation === 'ASSIGN_DEPARTMENT' ? bulkValue || null : undefined, role: bulkOperation === 'ASSIGN_ROLE' ? bulkValue || 'USER' : undefined, workspacePermissions: bulkOperation === 'APPLY_WORKSPACE_PERMISSIONS' ? workspacePermissions : undefined }); setBulkPreview(response.data.data); setBulkResult(null); }} /></div>
+          </div>
+          {bulkOperation === 'APPLY_WORKSPACE_PERMISSIONS' && <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">{Object.values(WORKSPACE_CONFIG).map((workspace) => <label key={workspace.id} className="flex items-center justify-between gap-3 rounded-lg border p-3"><span>{workspace.namePersian}</span><select className="rounded-lg border px-2 py-1" value={bulkWorkspacePermissions[workspace.id] || ''} onChange={(event) => setBulkWorkspacePermissions((current) => ({ ...current, [workspace.id]: event.target.value }))}><option value="">بدون دسترسی مستقیم</option><option value="view">مشاهده</option><option value="edit">ویرایش</option><option value="admin">مدیریت</option></select></label>)}</div>}
+          {bulkPreview && <div className="mt-4 rounded-xl border p-4"><div className="flex flex-wrap gap-2"><ErpBadge tone="success">قابل اجرا: {bulkPreview.eligible.length.toLocaleString('fa-IR')}</ErpBadge><ErpBadge tone="neutral">ردشده: {bulkPreview.skipped.length.toLocaleString('fa-IR')}</ErpBadge><ErpBadge tone="danger">متعارض: {bulkPreview.conflicting.length.toLocaleString('fa-IR')}</ErpBadge></div><div className="mt-3"><ErpButton label="تایید و اجرا" tone="success" disabled={!bulkPreview.eligible.length} onClick={async () => { const response = await usersAPI.executeBulk({ previewToken: bulkPreview.previewToken }); setBulkResult(response.data.data); setBulkPreview(null); setSelectedIds([]); await fetchData(); }} /></div></div>}
+          {bulkResult && <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4"><div className="flex flex-wrap gap-2"><ErpBadge tone="success">اعمال‌شده: {bulkResult.applied.length.toLocaleString('fa-IR')}</ErpBadge><ErpBadge tone="neutral">ردشده: {bulkResult.skipped.length.toLocaleString('fa-IR')}</ErpBadge><ErpBadge tone="danger">متعارض: {bulkResult.conflicting.length.toLocaleString('fa-IR')}</ErpBadge></div><div className="mt-3"><ErpButton label="دانلود نتیجه" icon={FaDownload} variant="outline" onClick={() => { const blob = new Blob([JSON.stringify(bulkResult, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `user-bulk-${Date.now()}.json`; anchor.click(); URL.revokeObjectURL(url); }} /></div></div>}
+        </ErpSection>
         {createdUserId && (
           <ErpCard tone="primary" className="p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -481,28 +498,6 @@ export default function UsersManagementPage() {
           </ErpCard>
         )}
       </ErpListPage>
-
-      {showDeleteModal && userToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
-          <ErpSection className="w-full max-w-md">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white">تایید حذف</h2>
-              <ErpButton label="بستن" onClick={() => setShowDeleteModal(false)} icon={FaTimes} variant="ghost" tone="neutral" />
-            </div>
-            <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
-              آیا مطمئن هستید که می‌خواهید کاربر{' '}
-              <span className="font-semibold text-slate-900 dark:text-white">
-                {userToDelete.firstName} {userToDelete.lastName}
-              </span>{' '}
-              را حذف کنید؟ این عمل قابل بازگشت نیست.
-            </p>
-            <div className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <ErpButton label="حذف" onClick={confirmDeleteUser} tone="danger" variant="solid" />
-              <ErpButton label="لغو" onClick={() => setShowDeleteModal(false)} tone="neutral" variant="outline" />
-            </div>
-          </ErpSection>
-        </div>
-      )}
     </>
   );
 }

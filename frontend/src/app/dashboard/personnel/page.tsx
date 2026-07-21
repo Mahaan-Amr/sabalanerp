@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { FaBuilding, FaLink, FaPlus, FaRedo, FaSave, FaTrash, FaUserTie, FaUsers } from 'react-icons/fa';
+import { FaBuilding, FaDownload, FaEdit, FaLink, FaPlus, FaRedo, FaSave, FaTrash, FaUserCheck, FaUserTie, FaUserTimes, FaUsers } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpListPage, ErpLoading, ErpSection, type ErpColumn, type ErpMetric } from '@/components/erp';
 import { departmentsAPI, personnelAPI } from '@/lib/api';
 import WorkScheduleEditor, { emptyWorkSchedule, workScheduleFromApi, workSchedulePayload, type WorkScheduleValue } from '@/components/WorkScheduleEditor';
@@ -43,6 +43,11 @@ export default function PersonnelManagementPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkOperation, setBulkOperation] = useState('DEACTIVATE');
+  const [bulkDepartmentId, setBulkDepartmentId] = useState('');
+  const [bulkPreview, setBulkPreview] = useState<any>(null);
+  const [bulkResult, setBulkResult] = useState<any>(null);
 
   const load = async () => {
     setLoading(true);
@@ -140,7 +145,10 @@ export default function PersonnelManagementPage() {
     setSaving(true);
     setError('');
     try {
-      await personnelAPI.updatePerson(person.id, { isActive: !person.isActive });
+      const deactivateLinkedUser = person.isActive && person.user
+        ? window.confirm('حساب کاربری متصل نیز غیرفعال شود؟ «تایید» حساب را هم غیرفعال می‌کند؛ «لغو» فقط پرسنل را غیرفعال می‌کند.')
+        : false;
+      await personnelAPI.updatePerson(person.id, { isActive: !person.isActive, deactivateLinkedUser });
       setMessage(person.isActive ? 'پرسنل غیرفعال شد.' : 'پرسنل فعال شد.');
       await load();
     } catch (err: any) {
@@ -170,6 +178,12 @@ export default function PersonnelManagementPage() {
   };
 
   const columns: ErpColumn<Personnel>[] = [
+    {
+      id: 'selection',
+      header: <input aria-label="انتخاب همه" type="checkbox" checked={filteredRows.length > 0 && filteredRows.every((item) => selectedIds.includes(item.id))} onChange={(event) => setSelectedIds(event.target.checked ? filteredRows.map((item) => item.id) : [])} />,
+      priority: 'secondary',
+      cell: (person) => <input aria-label={`انتخاب ${person.firstName} ${person.lastName}`} type="checkbox" checked={selectedIds.includes(person.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? Array.from(new Set([...current, person.id])) : current.filter((id) => id !== person.id))} />,
+    },
     {
       id: 'person',
       header: 'پرسنل',
@@ -251,14 +265,23 @@ export default function PersonnelManagementPage() {
       rowKey={(person) => person.id}
       columns={columns}
       rowActions={(person) => [
-        { label: 'ویرایش', onClick: () => edit(person), icon: FaSave, title: 'ویرایش' },
-        { label: person.isActive ? 'غیرفعال‌سازی' : 'فعال‌سازی', onClick: () => toggleStatus(person), tone: person.isActive ? 'warning' : 'success', title: person.isActive ? 'غیرفعال‌سازی' : 'فعال‌سازی' },
+        { label: 'ویرایش', onClick: () => edit(person), icon: FaEdit, title: 'ویرایش اطلاعات و برنامه کاری' },
+        { label: person.isActive ? 'غیرفعال‌سازی' : 'فعال‌سازی', onClick: () => toggleStatus(person), icon: person.isActive ? FaUserTimes : FaUserCheck, tone: person.isActive ? 'warning' : 'success', title: person.isActive ? 'غیرفعال‌سازی' : 'فعال‌سازی' },
         { label: 'حذف', onClick: () => remove(person), icon: FaTrash, tone: 'danger', disabled: !person.canDelete, title: person.canDelete ? 'حذف' : 'دارای سابقه یا کاربر متصل' },
       ]}
       emptyState={<ErpEmptyState icon={FaUserTie} title="پرسنلی پیدا نشد" description="فیلترها را تغییر دهید یا پرسنل جدید ثبت کنید." />}
     >
       {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{message}</div>}
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
+      <ErpSection title="عملیات گروهی" description="ابتدا رکوردها را انتخاب کنید؛ پیش‌نمایش، موارد قابل اجرا و تعارض‌ها را قبل از تایید نشان می‌دهد.">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <select className={inputClass} value={bulkOperation} onChange={(event) => { setBulkOperation(event.target.value); setBulkPreview(null); setBulkResult(null); }}><option value="ACTIVATE">فعال‌سازی</option><option value="DEACTIVATE">غیرفعال‌سازی</option><option value="CHANGE_DEPARTMENT">تغییر بخش</option><option value="APPLY_WORK_SCHEDULE">اعمال برنامه کاری فرم پایین</option></select>
+          {bulkOperation === 'CHANGE_DEPARTMENT' && <select className={inputClass} value={bulkDepartmentId} onChange={(event) => setBulkDepartmentId(event.target.value)}><option value="">بدون بخش</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.namePersian}</option>)}</select>}
+          <div className="md:col-span-2 flex flex-wrap items-center gap-2"><ErpBadge tone="info">{selectedIds.length.toLocaleString('fa-IR')} انتخاب</ErpBadge><ErpButton label="ساخت پیش‌نمایش" disabled={!selectedIds.length || saving} onClick={async () => { const response = await personnelAPI.previewBulk({ ids: selectedIds, operation: bulkOperation, departmentId: bulkDepartmentId || null, workSchedule: bulkOperation === 'APPLY_WORK_SCHEDULE' ? workSchedulePayload(form.workSchedule) : undefined, deactivateLinkedUsers: true }); setBulkPreview(response.data.data); }} /></div>
+        </div>
+        {bulkPreview && <div className="mt-4 rounded-xl border border-slate-200 p-4"><div className="flex flex-wrap gap-3"><ErpBadge tone="success">قابل اجرا: {bulkPreview.eligible.length.toLocaleString('fa-IR')}</ErpBadge><ErpBadge tone="neutral">ردشده: {bulkPreview.skipped.length.toLocaleString('fa-IR')}</ErpBadge><ErpBadge tone="danger">متعارض: {bulkPreview.conflicting.length.toLocaleString('fa-IR')}</ErpBadge></div>{bulkPreview.conflicting.length > 0 && <p className="mt-3 text-sm text-red-600">{bulkPreview.conflicting.map((item: any) => `${item.id}: ${item.reason}`).join('، ')}</p>}<div className="mt-4"><ErpButton label="تایید و اجرای اتمی" disabled={!bulkPreview.eligible.length || saving} tone="success" onClick={async () => { setSaving(true); try { const response = await personnelAPI.executeBulk({ previewToken: bulkPreview.previewToken }); setBulkResult(response.data.data); setMessage('عملیات گروهی کامل شد.'); setBulkPreview(null); setSelectedIds([]); await load(); } catch (err: any) { setError(err.response?.data?.error || 'اجرای عملیات گروهی ناموفق بود.'); } finally { setSaving(false); } }} /></div></div>}
+        {bulkResult && <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4"><div className="flex flex-wrap gap-3"><ErpBadge tone="success">اعمال‌شده: {bulkResult.applied.length.toLocaleString('fa-IR')}</ErpBadge><ErpBadge tone="neutral">ردشده: {bulkResult.skipped.length.toLocaleString('fa-IR')}</ErpBadge><ErpBadge tone="danger">متعارض: {bulkResult.conflicting.length.toLocaleString('fa-IR')}</ErpBadge></div><div className="mt-3"><ErpButton label="دانلود نتیجه" icon={FaDownload} variant="outline" onClick={() => { const blob = new Blob([JSON.stringify(bulkResult, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `personnel-bulk-${Date.now()}.json`; anchor.click(); URL.revokeObjectURL(url); }} /></div></div>}
+      </ErpSection>
       <ErpSection title={form.id ? 'ویرایش پرسنل' : 'پرسنل جدید'} description="فقط اطلاعات پایه پرسنل در نسخه اول ثبت می‌شود. حساب کاربری از مدیریت کاربران جداست.">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(220px,0.8fr)_auto] md:items-end">
           <label>

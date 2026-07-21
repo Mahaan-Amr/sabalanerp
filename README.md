@@ -17,7 +17,7 @@ A comprehensive Enterprise Resource Planning system built with modern technologi
 - **Runtime**: Node.js
 - **Framework**: Express.js
 - **Language**: TypeScript
-- **Authentication**: JWT (JSON Web Tokens)
+- **Authentication**: Opaque, revocable server-side sessions in secure HttpOnly cookies
 - **API Design**: RESTful APIs
 - **Real-time Communication**: Socket.io server
 - **File Processing**: Multer (for file uploads)
@@ -81,8 +81,6 @@ sabalanerp/
    Edit `backend/.env` with your configuration:
    ```env
    DATABASE_URL="postgresql://postgres:postgres@localhost:5432/sabalanerp?schema=public"
-   JWT_SECRET="your-super-secret-jwt-key-here"
-   JWT_EXPIRES_IN="7d"
    PORT=5000
    NODE_ENV="development"
    FRONTEND_URL="http://localhost:3000"
@@ -128,15 +126,16 @@ This will start:
 ## API Endpoints
 
 ### Authentication
-- `POST /api/auth/register` - Register a new user
-- `POST /api/auth/login` - Login user
+- `POST /api/auth/login` - Login and create an HttpOnly session
 - `GET /api/auth/me` - Get current user
+- `POST /api/auth/logout` - Revoke the current session
+- `GET /api/auth/sessions` - List the current user's sessions
 
 ### Users
 - `GET /api/users` - Get all users (Admin only)
 - `GET /api/users/:id` - Get user by ID
 - `PUT /api/users/:id` - Update user
-- `DELETE /api/users/:id` - Delete user (Admin only)
+- `POST /api/users/:id/erase` - Reviewed account erasure that preserves business history (Admin only)
 
 ### Posts
 - `GET /api/posts` - Get all posts

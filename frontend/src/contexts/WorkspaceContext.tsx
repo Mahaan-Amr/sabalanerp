@@ -185,15 +185,6 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
     try {
       setLoading(true);
       
-      // Permissions are token-backed. On first login the provider may already be
-      // mounted, so do not depend on the initial user snapshot being present.
-      const token = localStorage.getItem('token');
-      if (!token) {
-        setUserPermissions(initializePermissions());
-        setAccessibleWorkspaces([]);
-        return;
-      }
-      
       // Fetch real workspace permissions from API
       const response = await workspacePermissionsAPI.getUserWorkspaces();
       
@@ -310,7 +301,7 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
     setCurrentWorkspaceState(workspace);
     if (workspace) localStorage.setItem(LAST_WORKSPACE_STORAGE_KEY, workspace);
 
-    if (pathname.startsWith('/dashboard') && localStorage.getItem('token')) {
+    if (pathname.startsWith('/dashboard')) {
       loadUserPermissions();
     }
   }, [pathname, determineCurrentWorkspace, loadUserPermissions]);

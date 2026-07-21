@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
+import { parseCookies, resolveAuthoritativeSession, SESSION_COOKIE } from '../services/identitySessionService';
 
 const prisma = new PrismaClient();
 
@@ -12,15 +12,13 @@ export interface AuthRequest extends Request {
     role: string;
     departmentId: string | null;
     isActive: boolean;
+    mustChangePassword: boolean;
   };
+  sessionId?: string;
 }
 
 export const protect = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
-  let token: string | undefined;
-
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-    token = req.headers.authorization.split(' ')[1];
-  }
+  const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
 
   if (!token) {
     res.status(401).json({
@@ -31,19 +29,8 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
-    
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.id },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        role: true,
-        departmentId: true,
-        isActive: true
-      }
-    });
+    const session = await resolveAuthoritativeSession(prisma, token);
+    const user = session?.user;
 
     if (!user || !user.isActive) {
       res.status(401).json({
@@ -59,8 +46,15 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
       username: user.username,
       role: user.role,
       departmentId: user.departmentId,
-      isActive: user.isActive
+      isActive: user.isActive,
+      mustChangePassword: user.mustChangePassword
     };
+    req.sessionId = session!.id;
+    const allowedDuringPasswordChange = ['/api/auth/me', '/api/auth/change-password', '/api/auth/logout'];
+    if (user.mustChangePassword && !allowedDuringPasswordChange.some((path) => req.originalUrl.startsWith(path))) {
+      res.status(403).json({ success: false, error: 'PASSWORD_CHANGE_REQUIRED', mustChangePassword: true });
+      return;
+    }
     next();
   } catch (error) {
     res.status(401).json({

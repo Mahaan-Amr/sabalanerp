@@ -61,11 +61,7 @@ export default function LoginPage() {
       const data = response.data;
 
       if (data.success) {
-        // Store token and user data
-        localStorage.setItem('token', data.data.token);
-        localStorage.setItem('user', JSON.stringify(data.data.user));
-        
-        router.push('/dashboard');
+        router.push(data.data.mustChangePassword ? '/change-password' : '/dashboard');
       } else {
         setErrors({ general: data.error || 'ورود ناموفق بود' });
       }
@@ -193,9 +189,7 @@ export default function LoginPage() {
         <div className="text-center mt-6">
           <p className="text-gray-300">
             حساب کاربری ندارید؟{' '}
-            <Link href="/register" className="text-teal-400 hover:text-teal-300 font-medium">
-              ثبت‌نام کنید
-            </Link>
+            <span className="text-slate-400">ساخت حساب توسط مدیر سیستم انجام می‌شود</span>
           </p>
         </div>
 

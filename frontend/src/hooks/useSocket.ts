@@ -18,21 +18,12 @@ export const useSocket = () => {
         : apiUrl.replace(/\/api\/?$/, '');
 
       // Initialize socket connection
-      const newSocket = io(socketUrl, {
-        auth: {
-          token: localStorage.getItem('token') || document.cookie
-            .split('; ')
-            .find(row => row.startsWith('token='))
-            ?.split('=')[1]
-        }
-      });
+      const newSocket = io(socketUrl, { withCredentials: true });
 
       newSocket.on('connect', () => {
         console.log('Socket connected:', newSocket.id);
         setConnected(true);
         
-        // Join user-specific room
-        newSocket.emit('join-user-room', user.id);
       });
 
       newSocket.on('disconnect', () => {
@@ -49,7 +40,6 @@ export const useSocket = () => {
       setSocket(newSocket);
 
       return () => {
-        newSocket.emit('leave-user-room', user.id);
         newSocket.disconnect();
         socketRef.current = null;
         setSocket(null);

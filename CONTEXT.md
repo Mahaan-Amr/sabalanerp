@@ -1706,6 +1706,86 @@ _Avoid_: Organizational Unit, Cost Center
 The accounting classification to which workforce cost is attributed, independent of the Organizational Unit and Workplace hierarchies.
 _Avoid_: Department, Workplace, deriving accounting ownership only from organizational placement
 
+**User Creation Provenance**:
+The immutable origin of a system user account. Public self-registration is disabled, and managed accounts created after provenance tracking is introduced record their creation source and exact creating user when one exists. Existing accounts without trustworthy historical evidence are shown as `Unknown — Historical Data`; an administrator may record a historical creator only as an explicitly manual, timestamped, audited correction.
+_Avoid_: guessing a creator from timestamps, roles, permissions, or the administrator who probably created the account; presenting a manual correction as automatically captured history
+
+**Recognized Login Session**:
+A server-tracked authorization created only after successful authentication. It represents one browser profile or client session rather than a guaranteed physical device, and records inferred browser, operating system, device category, IP address, login time, last activity, status, and revocation history. Active sessions may be revoked individually.
+_Avoid_: claiming browser metadata proves a hardware identity, creating a recognized device from a failed login, or deleting session history when access is revoked
+
+**Failed Authentication Event**:
+A security-log record for an unsuccessful login attempt, kept separately from Recognized Login Sessions. It records the attempted identifier, time, IP address, available client metadata, and a safe failure classification without storing the submitted password.
+_Avoid_: showing a failed attempt as an authorized device, recording plaintext credentials, or exposing overly specific failure details to the unauthenticated caller
+
+**Authentication Security Log Access**:
+Every authenticated user may view and revoke their own active Recognized Login Sessions through Personal Affairs. Only an ADMIN may inspect another user's active sessions, login history, and Failed Authentication Events or revoke that user's individual or complete set of sessions; managerial role alone does not grant access.
+_Avoid_: exposing organization-wide IP and login history to ordinary users or managers, preventing users from securing their own account, or making remote revocation an unaudited action
+
+**Authoritative Server Session**:
+The server-side authentication state referenced by a secure HttpOnly cookie and checked on every protected request. Revocation takes effect immediately because an otherwise valid browser cookie cannot authorize access after its server session is revoked. Introducing this model invalidates legacy stateless JWT access and requires every user to sign in again once at deployment.
+_Avoid_: treating the session list as informational only, retaining authentication secrets in browser JavaScript storage, or allowing legacy seven-day JWTs to bypass revocation
+
+**Session Lifetime**:
+An Authoritative Server Session expires after 12 hours without activity and always expires no later than 7 days after authentication, even with continuous use. Browser closure alone does not revoke it, there is no permanent remember-me mode in the initial version, and last activity is persisted at a controlled interval rather than on every request.
+_Avoid_: indefinite sessions, extending a session beyond its absolute expiry, treating a closed browser as proven logout, or writing the database on every authenticated request solely to update activity
+
+**Security-Sensitive Session Revocation**:
+Changing one's own password revokes every other session while retaining the verified current session. An administrator resetting another user's password, or deactivating that user, revokes all of the affected user's sessions immediately; reactivation requires a fresh login. Every manual or automatic revocation retains actor, time, reason, and scope.
+_Avoid_: leaving suspected sessions active after a password reset, allowing a deactivated account to retain access, or revoking sessions without accountable audit evidence
+
+**Personnel Record Retirement**:
+A completely unused Personnel record created by mistake may be hard-deleted. Once linked to a User or referenced by attendance, mission, leave, shift, report, Human Resources, or other operational history, the Personnel identity is retained and retired through deactivation or archival instead.
+_Avoid_: hard-deleting a real organizational identity, relying on attendance count alone to decide deletability, or removing historical attribution to satisfy CRUD expectations
+
+**Personnel Bulk Operation**:
+An administrator or otherwise authorized operator's reviewed action over selected Personnel records. Initial operations are activate, deactivate, change department, and apply work schedule; every submission first previews selected, eligible, skipped, and conflicting records and requires confirmation tied to that exact preview. Any intervening selected-record change invalidates the whole operation. Confirmed eligible changes execute atomically while skipped and conflicting records remain untouched, with a parent audit event, per-record before/after results, completion counts, and downloadable results. Bulk hard-delete is not supported.
+_Avoid_: applying an unpreviewed or stale mass mutation, partially committing eligible changes, silently ignoring conflicts, or treating bulk selection as permission to destroy personnel history
+
+**Administrator Password Reset**:
+An ADMIN-only User Management action that replaces another user's password with an administrator-entered temporary password, never displays that password after submission, revokes all of the affected user's sessions, and records the accountable security event.
+_Avoid_: placing password reset in Personnel Management, generating or logging a retrievable plaintext password, leaving existing sessions active, or granting the action to managers automatically
+
+**Linked Personnel and User Deactivation**:
+Personnel and User remain separate identities. Deactivating Personnel offers an explicit, default-selected choice to also deactivate its linked User and previews the resulting loss of access; the operator may deliberately leave the account active. Reactivating Personnel never automatically reactivates the linked User, and bulk deactivation follows the same previewed rule.
+_Avoid_: silently coupling every personnel status change to login access, hiding which accounts a bulk action disables, or restoring system access merely because a personnel record was reactivated
+
+**Temporary Password State**:
+After an Administrator Password Reset, the affected User must replace the temporary password immediately after the next successful authentication. Until replacement, that session is restricted to the forced password-change screen and logout; completing the change clears the state and is audited without retaining either plaintext password.
+_Avoid_: allowing normal ERP access with an administrator-known temporary password, logging either password, or clearing the forced-change requirement before a successful owner-selected replacement
+
+**User Account Erasure**:
+An ADMIN-only irreversible removal for a User who is no longer part of the system. It permanently removes credentials, sessions, personal profile data, and access permissions while unlinking and preserving Personnel and all business records. Historical attribution survives only through an inert actor snapshot containing the former user ID, display name, and deletion time and is displayed as `Deleted user — [name]`; the erased account cannot be reactivated, and a returning person receives a new User account. Execution requires administrator password confirmation, impact preview, mandatory reason, and audit evidence, and cannot target the acting administrator or the last active administrator.
+_Avoid_: cascading account deletion into business records, retaining usable credentials after erasure, reactivating an erased identity, deleting oneself, or removing the final active administrator
+
+**Authentication Evidence Retention**:
+Active sessions remain while authorized; successful, expired, and revoked session history remains for 180 days after session end; Failed Authentication Events remain for 90 days. Account-erasure and administrator-revocation audit events remain permanently. Scheduled cleanup enforces the finite periods, and administrator views separate active sessions, session history, and failed attempts.
+_Avoid_: mixing failed attempts into device history, retaining ordinary IP and client metadata indefinitely, or deleting permanent administrator-accountability evidence during routine cleanup
+
+**Recognized Browser Profile**:
+A random identifier stored in a secure cookie after successful authentication and used to recognize later sessions from the same browser profile without fingerprinting the physical device. A missing identifier marks the successful login as new; clearing cookies or using another browser or profile creates a new identity. New-browser login produces an in-app security notification, and `This wasn't me` immediately revokes the reported session while recommending—but not requiring—a password change. Recognition never grants additional access.
+_Avoid_: treating browser recognition as proof of hardware identity, silently fingerprinting users, trusting a recognized browser with extra permission, or forcing a password change after every user-reported session
+
+**User and Personnel Administration Boundary**:
+ADMIN and MANAGER may create and edit non-admin Users and may create, edit, activate, deactivate, and run approved bulk operations for Personnel. Only ADMIN may hard-delete an unused Personnel record, reset passwords, erase accounts, inspect organization-wide authentication evidence, revoke another user's sessions, correct historical creator attribution, change roles, or apply bulk permissions. Managers may never modify, deactivate, or erase an ADMIN.
+_Avoid_: granting sensitive identity or authentication control through the manager role, blocking managers from routine personnel maintenance, or allowing a manager to affect an administrator account
+
+**Failed Login Monitoring Without Throttling**:
+Failed logins never permanently lock an account and do not trigger request rate limits or progressive delays. A successful login resets the applicable failure counter. Unauthenticated callers receive only a generic failure response, while ADMIN-visible security evidence retains a safe internal category and repeated failures generate administrator alerts.
+_Avoid_: exposing whether an account exists through login errors, automatically locking legitimate users through hostile attempts, claiming alerts prevent brute force, or silently introducing throttling contrary to the accepted policy
+
+**Suspicious Failed Login Alert**:
+An administrator alert produced when one account identifier receives 10 failed attempts within 15 minutes or one IP address produces 25 failed attempts within 15 minutes. Matching alerts are deduplicated for one hour while every underlying Failed Authentication Event remains recorded.
+_Avoid_: discarding attempts because an alert was deduplicated, treating the alert as automatic prevention, or revealing threshold details to unauthenticated callers
+
+**User Creator Attribution Display**:
+User lists identify the creator by display name and username, while User details also expose creator ID, creation source, account creation time, and whether attribution was automatic or manually asserted. Unknown legacy attribution displays as `Unknown — Historical Data`. ADMIN may add a historical creator with a mandatory reason as a separate audited assertion, but automatically captured provenance is immutable. Erased creators display through their snapshot as `Deleted user — [name]`.
+_Avoid_: presenting raw IDs as the primary identity, disguising manual attribution as captured evidence, changing automatic provenance, or losing creator display after account erasure
+
+**Authentication Approximate Location**:
+Authentication views show the recorded IP address and may derive only an approximate country and city from a locally maintained IP database, clearly labeled as approximate. They never request browser GPS permission or send login IP addresses to a third-party geolocation service. Private addresses display as `Internal network`, and users viewing their own sessions receive the same IP and approximate-location context available to administrators.
+_Avoid_: presenting IP geolocation as precise physical location, transmitting authentication metadata to an external lookup service, or hiding session network context from the account owner
+
 **گزارش لحظه‌ای دسته‌محور حراست**:
 An immutable timestamped Security shift-log observation whose category is always recorded directly and whose report type is present only when that category uses report types. Category and type names are preserved as they were at recording time. Description is optional, but every report must contain at least one meaningful detail through description, an image, or related personnel when that field is enabled.
 _Avoid_: manufacturing a “without type” type, changing old classifications when settings change, or accepting an empty category-only row

@@ -13,34 +13,18 @@ export const resolveBackendAssetUrl = (url?: string | null) => {
 // Create axios instance
 const api = axios.create({
   baseURL: API_BASE,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
 });
-
-// Request interceptor to add auth token
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
 
 // Response interceptor to handle errors
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Token expired or invalid
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) window.location.href = '/login';
     }
     return Promise.reject(error);
   }
@@ -51,15 +35,14 @@ export const authAPI = {
   login: (identifier: string, password: string) =>
     api.post('/auth/login', { identifier, email: identifier, password }),
   
-  register: (userData: {
-    email: string;
-    username: string;
-    password: string;
-    firstName: string;
-    lastName: string;
-  }) => api.post('/auth/register', userData),
-  
   getMe: () => api.get('/auth/me'),
+  logout: () => api.post('/auth/logout'),
+  getSessions: () => api.get('/auth/sessions'),
+  revokeSession: (id: string) => api.delete(`/auth/sessions/${id}`),
+  revokeOtherSessions: () => api.post('/auth/sessions/revoke-others'),
+  changePassword: (data: { currentPassword: string; newPassword: string }) => api.post('/auth/change-password', data),
+  getSecurityNotifications: () => api.get('/auth/security-notifications'),
+  markSecurityNotificationRead: (id: string) => api.put(`/auth/security-notifications/${id}/read`),
 };
 
 // Users API
@@ -99,6 +82,15 @@ export const usersAPI = {
     api.put(`/users/${id}`, userData),
   
   deleteUser: (id: string) => api.delete(`/users/${id}`),
+  getAuthentication: (id: string, params?: any) => api.get(`/users/${id}/authentication`, { params }),
+  revokeUserSession: (id: string, sessionId: string, reason: string) => api.post(`/users/${id}/sessions/${sessionId}/revoke`, { reason }),
+  revokeAllUserSessions: (id: string, reason: string) => api.post(`/users/${id}/sessions/revoke-all`, { reason }),
+  resetPassword: (id: string, data: { temporaryPassword: string; adminPassword: string; requireChange?: boolean }) => api.post(`/users/${id}/reset-password`, data),
+  getErasurePreview: (id: string) => api.get(`/users/${id}/erasure-preview`),
+  eraseUser: (id: string, data: { reason: string; adminPassword: string }) => api.post(`/users/${id}/erase`, data),
+  attributeCreator: (id: string, data: { creatorId: string; reason: string }) => api.post(`/users/${id}/creator-attribution`, data),
+  previewBulk: (data: any) => api.post('/users/bulk/preview', data),
+  executeBulk: (data: any) => api.post('/users/bulk/execute', data),
 };
 
 export const personnelAPI = {
@@ -108,6 +100,8 @@ export const personnelAPI = {
   createPerson: (data: any) => api.post('/personnel', data),
   updatePerson: (id: string, data: any) => api.put(`/personnel/${id}`, data),
   deletePerson: (id: string) => api.delete(`/personnel/${id}`),
+  previewBulk: (data: any) => api.post('/personnel/bulk/preview', data),
+  executeBulk: (data: any) => api.post('/personnel/bulk/execute', data),
 };
 
 export const hrAPI = {

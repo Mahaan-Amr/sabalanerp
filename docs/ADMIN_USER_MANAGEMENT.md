@@ -63,7 +63,8 @@ The Admin User Management System provides comprehensive user and department mana
 - `GET /api/users` - List all users (Admin only)
 - `GET /api/users/:id` - Get user details
 - `PUT /api/users/:id` - Update user information
-- `DELETE /api/users/:id` - Delete user (Admin only)
+- `GET /api/users/:id/erasure-preview` - Preview irreversible erasure impact (Admin only)
+- `POST /api/users/:id/erase` - Erase credentials and personal access data while preserving business history (Admin only)
 
 #### Workspace Permissions
 - `GET /api/workspace-permissions` - List all permissions (Admin only)
@@ -91,7 +92,7 @@ The Admin User Management System provides comprehensive user and department mana
 - **ADMIN**: Administrative access to workspace
 
 ### Security Features
-- **Authentication Required**: All endpoints require valid JWT token
+- **Authentication Required**: Protected endpoints require a valid, revocable HttpOnly session cookie
 - **Role Validation**: Server-side role checking
 - **Input Validation**: Comprehensive form validation
 - **Error Handling**: Secure error messages
@@ -109,7 +110,7 @@ The Admin User Management System provides comprehensive user and department mana
 - **User Cards**: Clean user information display
 - **Permission Matrix**: Visual workspace permission management
 - **Filter System**: Advanced search and filtering
-- **Confirmation Modals**: Safe deletion confirmations
+- **Confirmation and impact previews**: Version-bound bulk confirmations and reviewed account-erasure previews
 - **Status Indicators**: Visual role and status indicators
 
 ## 📊 Features in Detail
@@ -128,7 +129,7 @@ The Admin User Management System provides comprehensive user and department mana
 - **Role Filter**: Filter by user role
 - **Status Filter**: Filter by active/inactive status
 - **Pagination**: Efficient large dataset handling
-- **Bulk Operations**: Future-ready for bulk actions
+- **Bulk Operations**: Activate, deactivate, department/role changes, and workspace permissions use an exact preview token and one atomic transaction
 
 ### Permission Management
 - **Visual Matrix**: Easy-to-understand permission grid
@@ -156,7 +157,7 @@ The Admin User Management System provides comprehensive user and department mana
 - **Express.js**: RESTful API server
 - **Prisma**: Database ORM
 - **PostgreSQL**: Primary database
-- **JWT**: Authentication tokens
+- **Opaque sessions**: Revocable server-side sessions delivered through HttpOnly cookies
 - **bcrypt**: Password hashing
 
 ### Database Schema
@@ -261,7 +262,7 @@ Department {
 
 ### Data Protection
 - Password hashing with bcrypt
-- JWT token expiration
+- Session idle and absolute expiration, with administrator/user revocation
 - Input sanitization
 - SQL injection prevention
 

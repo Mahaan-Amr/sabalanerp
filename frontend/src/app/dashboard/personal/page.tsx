@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { FaCalendarAlt, FaCheck, FaEdit, FaPlus, FaTimes, FaUser, FaUserClock } from 'react-icons/fa';
+import { FaCalendarAlt, FaCheck, FaDesktop, FaEdit, FaPlus, FaShieldAlt, FaTimes, FaUser, FaUserClock } from 'react-icons/fa';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
-import { dashboardAPI, personalAPI } from '@/lib/api';
+import { authAPI, dashboardAPI, personalAPI } from '@/lib/api';
 import { PersianCalendar } from '@/lib/persian-calendar';
 
 const leaveTypes = ['استحقاقی', 'استعلاجی', 'استعلاجی سازمانی', 'بدون حقوق'];
@@ -42,6 +42,8 @@ export default function PersonalPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [securityNotifications, setSecurityNotifications] = useState<any[]>([]);
 
   const isManager = currentUser?.role === 'ADMIN' || currentUser?.role === 'MANAGER';
   const pendingCount = requests.filter((item) => item.status === 'PENDING').length;
@@ -59,12 +61,16 @@ export default function PersonalPage() {
       const profileResponse = await dashboardAPI.getProfile();
       const profile = profileResponse.data.data;
       setCurrentUser(profile);
-      const [requestsResponse, usersResponse] = await Promise.all([
+      const [requestsResponse, usersResponse, sessionsResponse, notificationsResponse] = await Promise.all([
         personalAPI.getLeaveRequests(),
-        ['ADMIN', 'MANAGER'].includes(profile.role) ? personalAPI.getLeaveUsers() : Promise.resolve({ data: { success: true, data: [] } })
+        ['ADMIN', 'MANAGER'].includes(profile.role) ? personalAPI.getLeaveUsers() : Promise.resolve({ data: { success: true, data: [] } }),
+        authAPI.getSessions(),
+        authAPI.getSecurityNotifications(),
       ]);
       if (requestsResponse.data.success) setRequests(requestsResponse.data.data || []);
       if (usersResponse.data.success) setUsers(usersResponse.data.data || []);
+      if (sessionsResponse.data.success) setSessions(sessionsResponse.data.data || []);
+      if (notificationsResponse.data.success) setSecurityNotifications(notificationsResponse.data.data || []);
     } catch (err: any) {
       setError(err.response?.data?.error || 'دریافت اطلاعات امور شخص ناموفق بود.');
     } finally {
@@ -77,6 +83,13 @@ export default function PersonalPage() {
   }, []);
 
   const resetForm = () => setForm({ ...emptyForm, employeeId: '' });
+
+  const revokeSession = async (session: any) => {
+    if (!window.confirm(`دسترسی ${session.browser || 'مرورگر'} · ${session.operatingSystem || ''} قطع شود؟`)) return;
+    await authAPI.revokeSession(session.id);
+    if (session.isCurrent) window.location.href = '/login';
+    else await loadData();
+  };
 
   const submit = async () => {
     if (!form.leaveType || !form.startDate || !form.endDate || !form.reason.trim()) {
@@ -179,6 +192,27 @@ export default function PersonalPage() {
     >
       {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{message}</div>}
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
+
+      <ErpSection title="دستگاه‌ها و نشست‌های فعال" description="هر ردیف یک نشست مرورگر است؛ نام سخت‌افزار از مرورگر قابل تشخیص قطعی نیست.">
+        {securityNotifications.filter((item) => !item.readAt).map((item) => <div key={item.id} className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <span><FaShieldAlt className="ml-2 inline" />{item.title}: {item.message}</span>
+          <div className="flex gap-2">{item.type === 'NEW_BROWSER_LOGIN' && item.referenceId && <ErpButton label="این من نبودم" tone="danger" variant="outline" onClick={async () => { await authAPI.revokeSession(item.referenceId); await authAPI.markSecurityNotificationRead(item.id); const change = window.confirm('نشست لغو شد. آیا مایلید اکنون رمز عبور خود را نیز تغییر دهید؟'); if (change) window.location.href = '/change-password'; else await loadData(); }} />}<ErpButton label="خواندم" tone="warning" variant="outline" onClick={async () => { await authAPI.markSecurityNotificationRead(item.id); await loadData(); }} /></div>
+        </div>)}
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {sessions.filter((item) => !item.revokedAt).map((session) => <ErpCard key={session.id} className="p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold"><FaDesktop className="ml-2 inline" />{session.browser || 'مرورگر نامشخص'} · {session.operatingSystem || 'سیستم نامشخص'}</p>
+                <p className="mt-2 text-xs text-slate-500" dir="ltr">{session.ipAddress || '—'} · {session.approximateLocation || 'مکان تقریبی نامشخص'}</p>
+                <p className="mt-1 text-xs text-slate-500">آخرین فعالیت: {new Date(session.lastActivityAt).toLocaleString('fa-IR')}</p>
+                <div className="mt-2 flex gap-2">{session.isCurrent && <ErpBadge tone="success">نشست فعلی</ErpBadge>}{session.isNewBrowser && <ErpBadge tone="warning">مرورگر جدید</ErpBadge>}</div>
+              </div>
+              <ErpButton label={session.isCurrent ? 'خروج' : 'قطع دسترسی'} tone="danger" variant="outline" onClick={() => revokeSession(session)} />
+            </div>
+          </ErpCard>)}
+        </div>
+        {sessions.some((item) => !item.revokedAt && !item.isCurrent) && <div className="mt-4"><ErpButton label="قطع همه نشست‌های دیگر" tone="warning" variant="outline" onClick={async () => { await authAPI.revokeOtherSessions(); await loadData(); }} /></div>}
+      </ErpSection>
 
       <ErpSection title={form.id ? 'ویرایش درخواست مرخصی' : 'ثبت درخواست مرخصی'}>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

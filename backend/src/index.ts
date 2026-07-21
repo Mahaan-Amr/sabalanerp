@@ -7,6 +7,7 @@ import path from 'path';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
+import { parseCookies, resolveAuthoritativeSession, SESSION_COOKIE } from './services/identitySessionService';
 
 // Import routes
 import authRoutes from './routes/auth';
@@ -47,11 +48,13 @@ import uploadsRoutes from './routes/uploads';
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
+import { startAuthenticationRetentionCleanup } from './services/authenticationRetentionService';
 
 // Load environment variables
 dotenv.config();
 
 const prisma = new PrismaClient();
+startAuthenticationRetentionCleanup(prisma);
 const app = express();
 app.set('trust proxy', 1);
 const server = createServer(app);
@@ -61,15 +64,12 @@ const configuredFrontendUrl = process.env.FRONTEND_URL;
 const validateProductionEnvironment = () => {
   if (!isProduction) return;
 
-  const jwtSecret = process.env.JWT_SECRET || '';
-  const hasWeakJwtSecret = jwtSecret.length < 32 || jwtSecret.includes('your-super-secret');
-  const requiredVars = ['DATABASE_URL', 'JWT_SECRET', 'FRONTEND_URL'];
+  const requiredVars = ['DATABASE_URL', 'FRONTEND_URL'];
   const missingVars = requiredVars.filter((key) => !process.env[key]);
 
-  if (missingVars.length > 0 || hasWeakJwtSecret) {
+  if (missingVars.length > 0) {
     const details = [
-      missingVars.length > 0 ? `Missing vars: ${missingVars.join(', ')}` : '',
-      hasWeakJwtSecret ? 'JWT_SECRET must be at least 32 chars and not a placeholder.' : ''
+      missingVars.length > 0 ? `Missing vars: ${missingVars.join(', ')}` : ''
     ].filter(Boolean);
     throw new Error(`Invalid production environment. ${details.join(' ')}`);
   }
@@ -92,7 +92,8 @@ const resolveCorsOrigin = () => {
 const io = new Server(server, {
   cors: {
     origin: resolveCorsOrigin(),
-    methods: ["GET", "POST"]
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
@@ -215,23 +216,29 @@ app.get('/api/ready', async (req, res) => {
   }
 });
 
+// Socket.io connections use the same authoritative, revocable session cookie as HTTP.
+io.use(async (socket, next) => {
+  try {
+    const token = parseCookies(socket.handshake.headers.cookie)[SESSION_COOKIE];
+    if (!token) return next(new Error('Authentication required'));
+    const session = await resolveAuthoritativeSession(prisma, token);
+    if (!session) return next(new Error('Authentication required'));
+    socket.data.userId = session.userId;
+    next();
+  } catch {
+    next(new Error('Authentication required'));
+  }
+});
+
 // Socket.io connection handling
 io.on('connection', (socket) => {
   if (!isProduction) console.log('User connected:', socket.id);
+  socket.join(`user-${socket.data.userId}`);
 
   socket.on('disconnect', () => {
     if (!isProduction) console.log('User disconnected:', socket.id);
   });
 
-  // Join room for user-specific updates
-  socket.on('join-user-room', (userId: string) => {
-    socket.join(`user-${userId}`);
-  });
-
-  // Leave room
-  socket.on('leave-user-room', (userId: string) => {
-    socket.leave(`user-${userId}`);
-  });
 });
 
 // Error handling middleware

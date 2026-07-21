@@ -24,7 +24,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
 import { WorkspaceNavigation } from '@/components/WorkspaceNavigation';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
-import { dashboardAPI } from '@/lib/api';
+import { authAPI, dashboardAPI } from '@/lib/api';
 import { SecurityNoticeHost } from '@/components/SecurityNoticeHost';
 
 interface User {
@@ -123,31 +123,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   const checkAuth = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const userData = localStorage.getItem('user');
-
-      if (!token || !userData) {
-        router.push('/login');
+      const response = await dashboardAPI.getProfile();
+      if (!response.data.success) throw new Error('Authentication required');
+      if (response.data.data.mustChangePassword) {
+        router.push('/change-password');
         return;
       }
-
-      // Try to fetch fresh user data from API
-      try {
-        const response = await dashboardAPI.getProfile();
-        if (response.data.success) {
-          setUser(response.data.data);
-          // Update localStorage with fresh data
-          localStorage.setItem('user', JSON.stringify(response.data.data));
-        } else {
-          // Fallback to localStorage data
-          const parsedUser = JSON.parse(userData);
-          setUser(parsedUser);
-        }
-      } catch (apiError) {
-        // Fallback to localStorage data if API fails
-        const parsedUser = JSON.parse(userData);
-        setUser(parsedUser);
-      }
+      setUser(response.data.data);
     } catch (error) {
       console.error('Auth check error:', error);
       router.push('/login');
@@ -156,9 +138,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+  const handleLogout = async () => {
+    await authAPI.logout().catch(() => undefined);
     setProfileDropdownOpen(false);
     router.push('/login');
   };

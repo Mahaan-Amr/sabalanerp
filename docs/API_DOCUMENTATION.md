@@ -6,11 +6,7 @@ This document provides comprehensive documentation for all API endpoints in the 
 
 ## 🔐 Authentication
 
-All API endpoints require JWT authentication. Include the token in the Authorization header:
-
-```
-Authorization: Bearer <jwt_token>
-```
+Protected API endpoints use the `sabalan_session` HttpOnly cookie returned by login. Browser clients must send requests with credentials enabled. Sessions are revocable, expire after 12 hours of inactivity, and have a 7-day absolute lifetime. Public registration is disabled; ADMIN or MANAGER users provision accounts through User Management.
 
 ## 🏗️ Workspace-Specific API Endpoints
 
@@ -18,9 +14,13 @@ Authorization: Bearer <jwt_token>
 
 | Method | Endpoint | Description | Body/Query |
 |--------|----------|-------------|------------|
-| POST | `/api/auth/register` | Create a new user account | `email`, `username`, `password`, `firstName`, `lastName` |
-| POST | `/api/auth/login` | Authenticate an existing user | `email`, `password` |
+| POST | `/api/auth/login` | Authenticate an existing user and create a session | `identifier`, `password` |
 | GET | `/api/auth/me` | Retrieve the authenticated user profile | – |
+| POST | `/api/auth/logout` | Revoke the current session | – |
+| GET | `/api/auth/sessions` | List the current user's active and historical sessions | – |
+| DELETE | `/api/auth/sessions/:id` | Revoke one of the current user's sessions | – |
+| POST | `/api/auth/sessions/revoke-others` | Revoke every session except the current one | – |
+| POST | `/api/auth/change-password` | Change own password and revoke other sessions | `currentPassword`, `newPassword` |
 
 ### 👥 User Management (`/api/users/`)
 
@@ -30,7 +30,12 @@ Authorization: Bearer <jwt_token>
 | GET | `/api/users/:id` | Get user by ID | - |
 | POST | `/api/users` | Create user (Admin) | User data |
 | PUT | `/api/users/:id` | Update user | User data |
-| DELETE | `/api/users/:id` | Delete user (Admin) | - |
+| POST | `/api/users/:id/reset-password` | Reset password and revoke sessions (ADMIN) | `temporaryPassword`, `adminPassword`, optional `requireChange` |
+| GET | `/api/users/:id/authentication` | View sessions or authentication evidence (ADMIN) | `tab=active|history|failed` |
+| GET | `/api/users/:id/erasure-preview` | Preview irreversible account erasure impact (ADMIN) | - |
+| POST | `/api/users/:id/erase` | Erase credentials/profile/access while preserving historical attribution (ADMIN) | `reason`, `adminPassword` |
+| POST | `/api/users/bulk/preview` | Preview a version-bound bulk operation | Selection and operation payload |
+| POST | `/api/users/bulk/execute` | Execute the exact preview atomically | `previewToken` |
 
 ### 🏢 Department Management (`/api/departments/`)
 

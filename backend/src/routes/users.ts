@@ -3,9 +3,12 @@ import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { FEATURE_PERMISSIONS, FEATURE_WORKSPACE_MAP, FEATURES } from '../middleware/feature';
 import { savePersonnelWorkSchedule } from '../utils/personnelWorkSchedule';
+import { newOpaqueToken, revokeSessions, serializeSession } from '../services/identitySessionService';
+import { selectionVersionHash } from '../services/personnelBulkPolicy';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -14,6 +17,17 @@ const FEATURE_EXCEPTION_PERMISSION_LEVELS = [
   FEATURE_PERMISSIONS.VIEW,
   FEATURE_PERMISSIONS.EDIT
 ];
+const provenanceSelect = {
+  creationSource: true,
+  creatorAttributionKind: true,
+  createdByUserId: true,
+  creatorDisplayNameSnapshot: true,
+  creatorUsernameSnapshot: true,
+  creatorAttributionReason: true,
+  creatorAttributedAt: true,
+  erasedAt: true,
+  createdByUser: { select: { id: true, firstName: true, lastName: true, username: true, erasedAt: true, erasedDisplayName: true } },
+};
 
 const getFeatureWorkspace = (feature: string): string | null => {
   if (!Object.values(FEATURES).includes(feature as any)) {
@@ -135,8 +149,8 @@ router.get('/', protect, authorize('ADMIN', 'MANAGER'), async (req: AuthRequest,
     const skip = (page - 1) * limit;
 
     const whereClause = req.user?.role === 'MANAGER'
-      ? { role: { not: 'ADMIN' as const } }
-      : undefined;
+      ? { role: { not: 'ADMIN' as const }, erasedAt: null }
+      : { erasedAt: null };
 
     const users = await prisma.user.findMany({
       where: whereClause,
@@ -152,6 +166,7 @@ router.get('/', protect, authorize('ADMIN', 'MANAGER'), async (req: AuthRequest,
         isActive: true,
         createdAt: true,
         updatedAt: true,
+        ...provenanceSelect,
         department: {
           select: {
             id: true,
@@ -349,6 +364,7 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
     const normalizedPhone = normalizePhone(phone);
+    const creationActor = await prisma.user.findUniqueOrThrow({ where: { id: req.user!.id }, select: { firstName: true, lastName: true, username: true } });
 
     const user = await prisma.$transaction(async (tx) => {
       const personnel = await ensurePersonnelForUser(tx, {
@@ -372,6 +388,12 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
           departmentId: departmentId || null,
           personnelId: personnel.id,
           isActive,
+          creationSource: 'MANAGED',
+          creatorAttributionKind: 'AUTOMATIC',
+          createdByUserId: req.user!.id,
+          creatorDisplayNameSnapshot: `${creationActor.firstName} ${creationActor.lastName}`.trim(),
+          creatorUsernameSnapshot: creationActor.username,
+          creatorAttributedAt: new Date(),
           ...(normalizedPhone && {
             profile: {
               create: {
@@ -390,6 +412,7 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
           isActive: true,
           createdAt: true,
           updatedAt: true,
+          ...provenanceSelect,
           department: {
             select: {
               id: true,
@@ -450,6 +473,94 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
   }
 });
 
+const USER_BULK_OPERATIONS = ['ACTIVATE', 'DEACTIVATE', 'ASSIGN_ROLE', 'ASSIGN_DEPARTMENT', 'APPLY_WORKSPACE_PERMISSIONS'];
+
+router.post('/bulk/preview', protect, authorize('ADMIN', 'MANAGER'), [body('ids').isArray({ min: 1, max: 500 }), body('operation').isIn(USER_BULK_OPERATIONS)], async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Bulk selection or operation is invalid' });
+  if (req.user!.role !== 'ADMIN' && ['ASSIGN_ROLE', 'APPLY_WORKSPACE_PERMISSIONS'].includes(req.body.operation)) return res.status(403).json({ success: false, error: 'Only administrators can perform this bulk operation' });
+  const ids = Array.from(new Set(req.body.ids.map(String))) as string[];
+  const records = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, updatedAt: true, role: true, isActive: true, erasedAt: true } });
+  const eligible: any[] = [];
+  const conflicting: any[] = [];
+  const activeAdmins = await prisma.user.count({ where: { role: 'ADMIN', isActive: true, erasedAt: null } });
+  const selectedActiveAdmins = records.filter((item) => item.role === 'ADMIN' && item.isActive).length;
+  const removesAdministratorAccess = req.body.operation === 'DEACTIVATE'
+    || (req.body.operation === 'ASSIGN_ROLE' && req.body.role !== 'ADMIN');
+  for (const record of records) {
+    const reason = record.erasedAt ? 'ERASED_ACCOUNT'
+      : record.id === req.user!.id && removesAdministratorAccess ? 'CANNOT_AFFECT_SELF'
+        : req.user!.role === 'MANAGER' && record.role === 'ADMIN' ? 'MANAGER_CANNOT_AFFECT_ADMIN'
+          : record.role === 'ADMIN' && record.isActive && removesAdministratorAccess && activeAdmins <= selectedActiveAdmins ? 'CANNOT_REMOVE_LAST_ADMIN'
+            : null;
+    (reason ? conflicting : eligible).push(reason ? { id: record.id, reason } : { id: record.id });
+  }
+  const preview = { selected: records.map(({ id }) => ({ id })), eligible, skipped: ids.filter((id) => !records.some((record) => record.id === id)).map((id) => ({ id, reason: 'NOT_FOUND' })), conflicting, selectionHash: selectionVersionHash(records) };
+  const previewToken = newOpaqueToken();
+  await prisma.userBulkOperation.create({ data: { actorId: req.user!.id, operation: req.body.operation, previewToken, selectionHash: preview.selectionHash, status: 'PREVIEWED', requestedData: req.body, previewData: preview } });
+  res.json({ success: true, data: { ...preview, previewToken } });
+});
+
+router.post('/bulk/execute', protect, authorize('ADMIN', 'MANAGER'), [body('previewToken').isString().notEmpty()], async (req: AuthRequest, res: Response) => {
+  const stored = await prisma.userBulkOperation.findFirst({ where: { previewToken: req.body.previewToken, actorId: req.user!.id, status: 'PREVIEWED' } });
+  if (!stored) return res.status(404).json({ success: false, error: 'Bulk preview not found or already used' });
+  const preview: any = stored.previewData;
+  const requested: any = stored.requestedData || {};
+  const selectedIds = preview.selected.map((item: any) => item.id);
+  const eligibleIds = preview.eligible.map((item: any) => item.id);
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const claimed = await tx.userBulkOperation.updateMany({ where: { id: stored.id, status: 'PREVIEWED' }, data: { status: 'EXECUTING' } });
+      if (claimed.count !== 1) throw new Error('Bulk preview has already been used');
+      const current = await tx.user.findMany({ where: { id: { in: selectedIds } }, select: { id: true, updatedAt: true, role: true, isActive: true, erasedAt: true } });
+      if (current.length !== selectedIds.length || selectionVersionHash(current) !== stored.selectionHash) throw new Error('Bulk preview is stale; refresh and confirm again');
+      const removesAdministratorAccess = stored.operation === 'DEACTIVATE'
+        || (stored.operation === 'ASSIGN_ROLE' && requested.role !== 'ADMIN');
+      if (current.some((item) => eligibleIds.includes(item.id) && item.id === req.user!.id && removesAdministratorAccess)) throw new Error('Bulk preview is stale; refresh and confirm again');
+      if (req.user!.role === 'MANAGER' && current.some((item) => eligibleIds.includes(item.id) && item.role === 'ADMIN')) throw new Error('Bulk preview is stale; refresh and confirm again');
+      if (removesAdministratorAccess) {
+        const selectedActiveAdmins = current.filter((item) => eligibleIds.includes(item.id) && item.role === 'ADMIN' && item.isActive).length;
+        if (selectedActiveAdmins) {
+          const activeAdmins = await tx.user.count({ where: { role: 'ADMIN', isActive: true, erasedAt: null } });
+          if (activeAdmins <= selectedActiveAdmins) throw new Error('Bulk preview is stale; refresh and confirm again');
+        }
+      }
+      const userAuditSelect = { id: true, role: true, isActive: true, departmentId: true, personnelId: true, workspacePermissions: { select: { workspace: true, permissionLevel: true, expiresAt: true }, orderBy: { workspace: 'asc' as const } } };
+      const before = await tx.user.findMany({ where: { id: { in: eligibleIds } }, select: userAuditSelect });
+      if (stored.operation === 'ACTIVATE') await tx.user.updateMany({ where: { id: { in: eligibleIds } }, data: { isActive: true } });
+      if (stored.operation === 'DEACTIVATE') {
+        await tx.user.updateMany({ where: { id: { in: eligibleIds } }, data: { isActive: false } });
+        for (const id of eligibleIds) await revokeSessions(tx, { userId: id, actorId: req.user!.id, reason: 'USER_BULK_DEACTIVATION' });
+      }
+      if (stored.operation === 'ASSIGN_ROLE') {
+        if (!['USER', 'MODERATOR', 'ADMIN', 'SALES', 'MANAGER'].includes(requested.role)) throw new Error('Invalid role');
+        await tx.user.updateMany({ where: { id: { in: eligibleIds } }, data: { role: requested.role } });
+      }
+      if (stored.operation === 'ASSIGN_DEPARTMENT') {
+        const department = requested.departmentId ? await tx.department.findFirst({ where: { id: requested.departmentId, isActive: true } }) : null;
+        if (requested.departmentId && !department) throw new Error('Selected department is unavailable');
+        await tx.user.updateMany({ where: { id: { in: eligibleIds } }, data: { departmentId: requested.departmentId || null } });
+        const personnelIds = before.map((item) => item.personnelId).filter(Boolean) as string[];
+        if (personnelIds.length) await tx.personnel.updateMany({ where: { id: { in: personnelIds } }, data: { departmentId: requested.departmentId || null } });
+      }
+      if (stored.operation === 'APPLY_WORKSPACE_PERMISSIONS') {
+        const permissions = Array.isArray(requested.workspacePermissions) ? requested.workspacePermissions : [];
+        await tx.workspacePermission.deleteMany({ where: { userId: { in: eligibleIds } } });
+        if (permissions.length) await tx.workspacePermission.createMany({ data: eligibleIds.flatMap((userId: string) => permissions.map((permission: any) => ({ userId, workspace: permission.workspace, permissionLevel: permission.permissionLevel, grantedBy: req.user!.id, expiresAt: permission.expiresAt ? new Date(permission.expiresAt) : null }))) });
+      }
+      const after = await tx.user.findMany({ where: { id: { in: eligibleIds } }, select: userAuditSelect });
+      const resultData = { operation: stored.operation, applied: after.map((item) => ({ id: item.id, before: before.find((old) => old.id === item.id), after: item })), skipped: preview.skipped, conflicting: preview.conflicting };
+      await tx.userBulkOperation.update({ where: { id: stored.id }, data: { status: 'COMPLETED', confirmedAt: new Date(), resultData } });
+      return resultData;
+    }, { isolationLevel: 'Serializable' });
+    res.json({ success: true, data: result });
+  } catch (error: any) {
+    const stale = error.message?.includes('stale') || error.message?.includes('already been used') || error.code === 'P2034';
+    if (stale) await prisma.userBulkOperation.updateMany({ where: { id: stored.id, status: 'PREVIEWED' }, data: { status: 'STALE' } });
+    res.status(stale ? 409 : 400).json({ success: false, error: stale ? 'Bulk preview is stale; refresh and confirm again' : error.message || 'Bulk execution failed' });
+  }
+});
+
 // @desc    Get user by ID
 // @route   GET /api/users/:id
 // @access  Private
@@ -467,6 +578,8 @@ router.get('/:id', protect, async (req: AuthRequest, res: Response) => {
         isActive: true,
         createdAt: true,
         updatedAt: true,
+        mustChangePassword: true,
+        ...provenanceSelect,
         department: {
           select: {
             id: true,
@@ -580,6 +693,12 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
         error: 'Not authorized to update this user'
       });
     }
+    if (existingUser.erasedAt) return res.status(409).json({ success: false, error: 'Erased users cannot be changed' });
+    if (isActive === false && existingUser.id === req.user!.id) return res.status(409).json({ success: false, error: 'You cannot deactivate your own account' });
+    if (isActive === false && existingUser.role === 'ADMIN') {
+      const activeAdmins = await prisma.user.count({ where: { role: 'ADMIN', isActive: true, erasedAt: null } });
+      if (activeAdmins <= 1) return res.status(409).json({ success: false, error: 'The last active administrator cannot be deactivated' });
+    }
 
     if (req.user!.role === 'MANAGER' && existingUser.role === 'ADMIN') {
       return res.status(403).json({
@@ -588,10 +707,10 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
-    if (req.user!.role === 'MANAGER' && role && ['ADMIN', 'MANAGER'].includes(role)) {
+    if (req.user!.role === 'MANAGER' && role) {
       return res.status(403).json({
         success: false,
-        error: 'Managers cannot assign admin or manager role'
+        error: 'Only administrators can change roles'
       });
     }
 
@@ -625,6 +744,12 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
     const normalizedPhone = phone !== undefined ? normalizePhone(phone) : undefined;
 
     const updatedUser = await prisma.$transaction(async (tx) => {
+      const removesActiveAdministrator = existingUser.role === 'ADMIN' && existingUser.isActive
+        && ((role && role !== 'ADMIN') || isActive === false);
+      if (removesActiveAdministrator) {
+        const activeAdmins = await tx.user.count({ where: { role: 'ADMIN', isActive: true, erasedAt: null } });
+        if (activeAdmins <= 1) throw new Error('The last active administrator cannot lose administrator access');
+      }
       const nextFirstName = firstName || existingUser.firstName;
       const nextLastName = lastName || existingUser.lastName;
       const nextDepartmentId = departmentId !== undefined ? departmentId || null : existingUser.departmentId;
@@ -641,7 +766,7 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
       });
       await savePersonnelWorkSchedule(tx, linkedPersonnel.id, workSchedule);
 
-      return tx.user.update({
+      const updated = await tx.user.update({
         where: { id: req.params.id },
         data: {
           ...(firstName && { firstName }),
@@ -671,6 +796,8 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
           isActive: true,
           createdAt: true,
           updatedAt: true,
+          mustChangePassword: true,
+          ...provenanceSelect,
           department: {
             select: {
               id: true,
@@ -682,7 +809,9 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
           personnel: { select: personnelSelect },
         }
       });
-    });
+      if (isActive === false) await revokeSessions(tx, { userId: existingUser.id, actorId: req.user!.id, reason: 'USER_DEACTIVATED' });
+      return updated;
+    }, { isolationLevel: 'Serializable' });
 
     res.json({
       success: true,
@@ -691,51 +820,145 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
   } catch (error: any) {
     console.error('Update user error:', error);
     const invalidSchedule = isScheduleValidationError(error);
-    res.status(invalidSchedule ? 400 : error.message?.includes('پرسنل') ? 409 : 500).json({
+    const conflict = error.message?.includes('پرسنل') || error.message?.includes('last active administrator');
+    res.status(invalidSchedule ? 400 : conflict ? 409 : 500).json({
       success: false,
-      error: invalidSchedule || error.message?.includes('پرسنل') ? error.message : 'Server error'
+      error: invalidSchedule || conflict ? error.message : 'Server error'
     });
   }
 });
 
-// @desc    Delete user
-// @route   DELETE /api/users/:id
-// @access  Private/Admin
-router.delete('/:id', protect, authorize('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.params.id }
+router.get('/:id/authentication', protect, authorize('ADMIN'), async (req: AuthRequest, res: Response) => {
+  const target = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, email: true, username: true } });
+  if (!target) return res.status(404).json({ success: false, error: 'User not found' });
+  const tab = String(req.query.tab || 'active');
+  if (tab === 'failed') {
+    const data = await prisma.authenticationEvent.findMany({
+      where: { type: 'LOGIN_FAILED', OR: [{ userId: target.id }, { attemptedIdentifier: { in: [target.email, target.username] } }] },
+      orderBy: { createdAt: 'desc' }, take: 200,
     });
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: 'User not found'
-      });
-    }
-
-    if ((req as AuthRequest).user?.role === 'MANAGER' && user.role === 'ADMIN') {
-      return res.status(403).json({
-        success: false,
-        error: 'Managers cannot delete admin users'
-      });
-    }
-
-    await prisma.user.delete({
-      where: { id: req.params.id }
-    });
-
-    res.json({
-      success: true,
-      message: 'User deleted successfully'
-    });
-  } catch (error) {
-    console.error('Delete user error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error'
-    });
+    return res.json({ success: true, data });
   }
+  const now = new Date();
+  const sessions = await prisma.authSession.findMany({
+    where: { userId: target.id, ...(tab === 'active' ? { revokedAt: null, idleExpiresAt: { gt: now }, absoluteExpiresAt: { gt: now } } : {}) },
+    include: { browserProfile: true, revokedBy: { select: { id: true, firstName: true, lastName: true, username: true } } },
+    orderBy: { lastActivityAt: 'desc' }, take: 200,
+  });
+  res.json({ success: true, data: sessions.map((session) => serializeSession(session)) });
 });
+
+router.post('/:id/sessions/:sessionId/revoke', protect, authorize('ADMIN'), [body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Revocation reason is required' });
+  const count = await revokeSessions(prisma, { userId: req.params.id, actorId: req.user!.id, sessionId: req.params.sessionId, reason: req.body.reason.trim() });
+  if (!count) return res.status(404).json({ success: false, error: 'Active session not found' });
+  res.json({ success: true });
+});
+
+router.post('/:id/sessions/revoke-all', protect, authorize('ADMIN'), [body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Revocation reason is required' });
+  const revoked = await revokeSessions(prisma, { userId: req.params.id, actorId: req.user!.id, reason: req.body.reason.trim() });
+  res.json({ success: true, data: { revoked } });
+});
+
+router.post('/:id/reset-password', protect, authorize('ADMIN'), [
+  body('temporaryPassword').isLength({ min: 8 }), body('adminPassword').isString().notEmpty(),
+  body('requireChange').optional().isBoolean(),
+], async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Temporary password must be at least 8 characters' });
+  if (req.params.id === req.user!.id) return res.status(409).json({ success: false, error: 'Use your personal password-change action' });
+  const [actor, target] = await Promise.all([
+    prisma.user.findUnique({ where: { id: req.user!.id }, select: { password: true } }),
+    prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, erasedAt: true } }),
+  ]);
+  if (!target || target.erasedAt) return res.status(404).json({ success: false, error: 'Active user account not found' });
+  if (!actor || !(await bcrypt.compare(req.body.adminPassword, actor.password))) return res.status(403).json({ success: false, error: 'Administrator password is incorrect' });
+  const password = await bcrypt.hash(req.body.temporaryPassword, 12);
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: target.id }, data: { password, mustChangePassword: req.body.requireChange === true } });
+    await revokeSessions(tx, { userId: target.id, actorId: req.user!.id, reason: 'ADMIN_PASSWORD_RESET' });
+    await tx.authenticationEvent.create({ data: { type: 'ADMIN_PASSWORD_RESET', userId: target.id, actorId: req.user!.id } });
+  });
+  res.json({ success: true });
+});
+
+router.post('/:id/creator-attribution', protect, authorize('ADMIN'), [body('creatorId').isString().notEmpty(), body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Creator and reason are required' });
+  const [target, creator] = await Promise.all([
+    prisma.user.findUnique({ where: { id: req.params.id } }),
+    prisma.user.findUnique({ where: { id: req.body.creatorId } }),
+  ]);
+  if (!target || !creator) return res.status(404).json({ success: false, error: 'User or creator not found' });
+  if (target.creatorAttributionKind !== 'UNKNOWN') return res.status(409).json({ success: false, error: 'Captured creator attribution is immutable' });
+  const updated = await prisma.$transaction(async (tx) => {
+    const user = await tx.user.update({ where: { id: target.id }, data: {
+      createdByUserId: creator.id, creatorAttributionKind: 'MANUAL',
+      creatorDisplayNameSnapshot: `${creator.firstName} ${creator.lastName}`.trim(), creatorUsernameSnapshot: creator.username,
+      creatorAttributedById: req.user!.id, creatorAttributionReason: req.body.reason.trim(), creatorAttributedAt: new Date(),
+    }, select: { id: true, ...provenanceSelect } });
+    await tx.authenticationEvent.create({ data: { type: 'HISTORICAL_CREATOR_ATTRIBUTED', userId: target.id, actorId: req.user!.id, reason: req.body.reason.trim(), details: { creatorId: creator.id } } });
+    return user;
+  });
+  res.json({ success: true, data: updated });
+});
+
+router.get('/:id/erasure-preview', protect, authorize('ADMIN'), async (req: AuthRequest, res: Response) => {
+  const target = await prisma.user.findUnique({ where: { id: req.params.id }, include: { personnel: { select: { id: true, firstName: true, lastName: true } }, _count: { select: {
+    authSessions: true, workspacePermissions: true, grantedPermissions: true, createdContracts: true,
+    createdSalesContracts: true, createdCrmCustomers: true, missionAssignments: true, attendanceRecords: true,
+  } } } });
+  if (!target) return res.status(404).json({ success: false, error: 'User not found' });
+  res.json({ success: true, data: { id: target.id, displayName: `${target.firstName} ${target.lastName}`.trim(), username: target.username, role: target.role, personnel: target.personnel, references: target._count, blocked: target.id === req.user!.id } });
+});
+
+router.post('/:id/erase', protect, authorize('ADMIN'), [body('reason').isString().trim().isLength({ min: 3 }), body('adminPassword').isString().notEmpty()], async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Reason and administrator password are required' });
+  if (req.params.id === req.user!.id) return res.status(409).json({ success: false, error: 'You cannot erase your own account' });
+  const [actor, target] = await Promise.all([
+    prisma.user.findUnique({ where: { id: req.user!.id }, select: { password: true } }),
+    prisma.user.findUnique({ where: { id: req.params.id } }),
+  ]);
+  if (!target || target.erasedAt) return res.status(404).json({ success: false, error: 'User account not found' });
+  if (!actor || !(await bcrypt.compare(req.body.adminPassword, actor.password))) return res.status(403).json({ success: false, error: 'Administrator password is incorrect' });
+  if (target.role === 'ADMIN') {
+    const activeAdmins = await prisma.user.count({ where: { role: 'ADMIN', isActive: true, erasedAt: null } });
+    if (activeAdmins <= 1) return res.status(409).json({ success: false, error: 'The last active administrator cannot be erased' });
+  }
+  const erasedAt = new Date();
+  const displayName = `${target.firstName} ${target.lastName}`.trim() || target.username;
+  const randomPassword = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
+  await prisma.$transaction(async (tx) => {
+    const currentTarget = await tx.user.findUnique({ where: { id: target.id }, select: { role: true, isActive: true, erasedAt: true } });
+    if (!currentTarget || currentTarget.erasedAt) throw new Error('User account is no longer available');
+    if (currentTarget.role === 'ADMIN' && currentTarget.isActive) {
+      const activeAdmins = await tx.user.count({ where: { role: 'ADMIN', isActive: true, erasedAt: null } });
+      if (activeAdmins <= 1) throw new Error('The last active administrator cannot be erased');
+    }
+    await revokeSessions(tx, { userId: target.id, actorId: req.user!.id, reason: 'ACCOUNT_ERASURE' });
+    await tx.authSession.deleteMany({ where: { userId: target.id } });
+    await tx.recognizedBrowserProfile.deleteMany({ where: { userId: target.id } });
+    await tx.securityNotification.deleteMany({ where: { userId: target.id } });
+    await tx.authenticationEvent.deleteMany({ where: { userId: target.id, type: { in: ['LOGIN_FAILED', 'LOGIN_SUCCEEDED'] } } });
+    await tx.workspacePermission.deleteMany({ where: { userId: target.id } });
+    await tx.featurePermission.deleteMany({ where: { userId: target.id } });
+    await tx.profile.deleteMany({ where: { userId: target.id } });
+    await tx.securityPersonnel.updateMany({ where: { userId: target.id }, data: { isActive: false } });
+    await tx.user.update({ where: { id: target.id }, data: {
+      email: `deleted-${target.id}@invalid.local`, username: `deleted_${target.id}`, password: randomPassword,
+      firstName: 'Deleted', lastName: 'User', isActive: false, mustChangePassword: false, departmentId: null, personnelId: null,
+      erasedAt, erasureReason: req.body.reason.trim(), erasedById: req.user!.id,
+      erasedDisplayName: displayName, erasedUsernameSnapshot: null,
+    } });
+    await tx.authenticationEvent.create({ data: { type: 'USER_ACCOUNT_ERASED', userId: target.id, actorId: req.user!.id, reason: req.body.reason.trim(), details: { formerUserId: target.id, displayName, erasedAt: erasedAt.toISOString() } } });
+  }, { isolationLevel: 'Serializable' });
+  res.json({ success: true });
+});
+
+router.delete('/:id', protect, authorize('ADMIN'), (_req, res) => res.status(405).json({ success: false, error: 'Use the reviewed account-erasure workflow' }));
 
 export default router;

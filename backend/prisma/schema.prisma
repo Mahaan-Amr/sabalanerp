@@ -21,6 +21,20 @@ model User {
   updatedAt                                  DateTime                             @updatedAt
   departmentId                               String?
   personnelId                                String?                              @unique
+  mustChangePassword                         Boolean                              @default(false)
+  creationSource                             UserCreationSource                   @default(LEGACY)
+  creatorAttributionKind                     CreatorAttributionKind               @default(UNKNOWN)
+  createdByUserId                            String?
+  creatorDisplayNameSnapshot                 String?
+  creatorUsernameSnapshot                    String?
+  creatorAttributedById                      String?
+  creatorAttributionReason                   String?
+  creatorAttributedAt                        DateTime?
+  erasedAt                                   DateTime?
+  erasureReason                              String?
+  erasedById                                 String?
+  erasedDisplayName                          String?
+  erasedUsernameSnapshot                     String?
   attendanceRecords                          AttendanceRecord[]
   comments                                   Comment[]
   createdTemplates                           ContractTemplate[]
@@ -77,8 +91,165 @@ model User {
   recordedAttendanceIntervalExits            AttendanceInterval[]                 @relation("AttendanceIntervalExitRecorder")
   attendanceIntervalAuditEvents              AttendanceIntervalAudit[]            @relation("AttendanceIntervalAuditActor")
   attendanceWorkflowEvents                   SecurityAttendanceWorkflowEvent[]    @relation("SecurityAttendanceWorkflowActor")
+  createdByUser                              User?                                @relation("UserCreationActor", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdUsers                               User[]                               @relation("UserCreationActor")
+  creatorAttributedBy                        User?                                @relation("UserCreatorAttributionActor", fields: [creatorAttributedById], references: [id], onDelete: SetNull)
+  creatorAttributions                        User[]                               @relation("UserCreatorAttributionActor")
+  erasedBy                                   User?                                @relation("UserErasureActor", fields: [erasedById], references: [id], onDelete: SetNull)
+  erasedUsers                                User[]                               @relation("UserErasureActor")
+  authSessions                               AuthSession[]                        @relation("AuthSessionOwner")
+  revokedAuthSessions                        AuthSession[]                        @relation("AuthSessionRevoker")
+  browserProfiles                            RecognizedBrowserProfile[]
+  authenticationEvents                       AuthenticationEvent[]                @relation("AuthenticationEventUser")
+  authenticationActions                      AuthenticationEvent[]                @relation("AuthenticationEventActor")
+  securityNotifications                      SecurityNotification[]
+  personnelBulkOperations                    PersonnelBulkOperation[]             @relation("PersonnelBulkOperationActor")
+  userBulkOperations                         UserBulkOperation[]                  @relation("UserBulkOperationActor")
 
+  @@index([createdByUserId])
+  @@index([erasedAt])
   @@map("users")
+}
+
+enum UserCreationSource {
+  LEGACY
+  MANAGED
+  IMPORTED
+  SYSTEM_SEEDED
+}
+
+enum CreatorAttributionKind {
+  UNKNOWN
+  AUTOMATIC
+  MANUAL
+}
+
+model RecognizedBrowserProfile {
+  id              String        @id @default(cuid())
+  publicId        String
+  userId          String
+  label           String?
+  browser         String?
+  operatingSystem String?
+  deviceCategory  String?
+  firstSeenAt     DateTime      @default(now())
+  lastSeenAt      DateTime      @default(now())
+  firstIp         String?
+  lastIp          String?
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions        AuthSession[]
+
+  @@index([userId, lastSeenAt])
+  @@unique([userId, publicId])
+  @@map("recognized_browser_profiles")
+}
+
+model AuthSession {
+  id                  String                    @id @default(cuid())
+  tokenHash           String                    @unique
+  userId              String
+  browserProfileId    String?
+  ipAddress           String?
+  userAgent           String?
+  browser             String?
+  operatingSystem     String?
+  deviceCategory      String?
+  approximateLocation String?
+  isNewBrowser        Boolean                   @default(false)
+  authenticatedAt     DateTime                  @default(now())
+  lastActivityAt      DateTime                  @default(now())
+  idleExpiresAt       DateTime
+  absoluteExpiresAt   DateTime
+  revokedAt           DateTime?
+  revokedById         String?
+  revocationReason    String?
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  user                User                      @relation("AuthSessionOwner", fields: [userId], references: [id], onDelete: Cascade)
+  browserProfile      RecognizedBrowserProfile? @relation(fields: [browserProfileId], references: [id], onDelete: SetNull)
+  revokedBy           User?                     @relation("AuthSessionRevoker", fields: [revokedById], references: [id], onDelete: SetNull)
+
+  @@index([userId, revokedAt, absoluteExpiresAt])
+  @@index([lastActivityAt])
+  @@map("auth_sessions")
+}
+
+model AuthenticationEvent {
+  id                  String   @id @default(cuid())
+  type                String
+  userId              String?
+  actorId             String?
+  attemptedIdentifier String?
+  ipAddress           String?
+  userAgent           String?
+  browser             String?
+  operatingSystem     String?
+  deviceCategory      String?
+  approximateLocation String?
+  safeCategory        String?
+  sessionIdSnapshot   String?
+  reason              String?
+  details             Json?
+  createdAt           DateTime @default(now())
+  user                User?    @relation("AuthenticationEventUser", fields: [userId], references: [id], onDelete: SetNull)
+  actor               User?    @relation("AuthenticationEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([type, createdAt])
+  @@index([userId, createdAt])
+  @@index([attemptedIdentifier, createdAt])
+  @@index([ipAddress, createdAt])
+  @@map("authentication_events")
+}
+
+model SecurityNotification {
+  id          String    @id @default(cuid())
+  userId      String
+  type        String
+  title       String
+  message     String
+  referenceId String?
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@map("security_notifications")
+}
+
+model PersonnelBulkOperation {
+  id            String    @id @default(cuid())
+  actorId       String
+  operation     String
+  previewToken  String    @unique
+  selectionHash String
+  status        String
+  requestedData Json?
+  previewData   Json
+  resultData    Json?
+  confirmedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  actor         User      @relation("PersonnelBulkOperationActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([actorId, createdAt])
+  @@map("personnel_bulk_operations")
+}
+
+model UserBulkOperation {
+  id            String    @id @default(cuid())
+  actorId       String
+  operation     String
+  previewToken  String    @unique
+  selectionHash String
+  status        String
+  requestedData Json?
+  previewData   Json
+  resultData    Json?
+  confirmedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  actor         User      @relation("UserBulkOperationActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([actorId, createdAt])
+  @@map("user_bulk_operations")
 }
 
 model Personnel {

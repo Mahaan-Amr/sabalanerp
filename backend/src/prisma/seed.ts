@@ -74,6 +74,7 @@ async function main() {
       firstName: 'مدیر',
       lastName: 'سیستم',
       role: 'ADMIN',
+      creationSource: 'SYSTEM_SEEDED',
       departmentId: (await prisma.department.findUnique({ where: { name: 'Management' } }))?.id
     }
   });

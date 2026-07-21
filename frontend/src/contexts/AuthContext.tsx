@@ -1,7 +1,6 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import Cookies from 'js-cookie';
 import { authAPI } from '@/lib/api';
 
 interface User {
@@ -19,20 +18,10 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
-  token: string | null;
   login: (identifier: string, password: string) => Promise<void>;
-  register: (userData: RegisterData) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   loading: boolean;
   isAuthenticated: boolean;
-}
-
-interface RegisterData {
-  email: string;
-  username: string;
-  password: string;
-  firstName: string;
-  lastName: string;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -51,22 +40,15 @@ interface AuthProviderProps {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const initAuth = async () => {
-      const savedToken = Cookies.get('token');
-      if (savedToken) {
-        setToken(savedToken);
-        try {
-          const response = await authAPI.getMe();
-          setUser(response.data.data);
-        } catch (error) {
-          console.error('Auth initialization error:', error);
-          Cookies.remove('token');
-          setToken(null);
-        }
+      try {
+        const response = await authAPI.getMe();
+        setUser(response.data.data);
+      } catch (error) {
+        setUser(null);
       }
       setLoading(false);
     };
@@ -77,43 +59,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const login = async (identifier: string, password: string) => {
     try {
       const response = await authAPI.login(identifier, password);
-      const { user: userData, token: userToken } = response.data.data;
-      
+      const { user: userData } = response.data.data;
       setUser(userData);
-      setToken(userToken);
-      Cookies.set('token', userToken, { expires: 7 }); // 7 days
     } catch (error: any) {
       throw new Error(error.response?.data?.error || 'Login failed');
     }
   };
 
-  const register = async (userData: RegisterData) => {
-    try {
-      const response = await authAPI.register(userData);
-      const { user: newUser, token: userToken } = response.data.data;
-      
-      setUser(newUser);
-      setToken(userToken);
-      Cookies.set('token', userToken, { expires: 7 }); // 7 days
-    } catch (error: any) {
-      throw new Error(error.response?.data?.error || 'Registration failed');
-    }
-  };
-
-  const logout = () => {
+  const logout = async () => {
+    await authAPI.logout().catch(() => undefined);
     setUser(null);
-    setToken(null);
-    Cookies.remove('token');
   };
 
   const value: AuthContextType = {
     user,
-    token,
     login,
-    register,
     logout,
     loading,
-    isAuthenticated: !!user && !!token,
+    isAuthenticated: !!user,
   };
 
   return (

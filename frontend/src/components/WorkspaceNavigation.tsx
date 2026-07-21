@@ -188,9 +188,9 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           {
             name: 'Personnel Management',
             namePersian: 'مدیریت پرسنل',
-            href: '/dashboard/personnel',
+            href: '/dashboard/hr/personnel',
             icon: FaUserTie,
-            show: true
+            show: currentUser.role === 'ADMIN' || hasPermission(WORKSPACES.HR, 'view' as any)
           },
           {
             name: 'Permissions',

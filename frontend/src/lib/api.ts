@@ -62,9 +62,8 @@ export const usersAPI = {
     role?: string;
     departmentId?: string;
     isActive?: boolean;
-    personnelMode?: 'auto' | 'existing';
+    personnelMode?: 'none' | 'existing';
     personnelId?: string;
-    workSchedule?: any;
     workspacePermissions?: Array<{
       workspace: string;
       permissionLevel: string;
@@ -97,11 +96,6 @@ export const personnelAPI = {
   getPersonnel: (params?: { includeInactive?: boolean; search?: string; departmentId?: string }) =>
     api.get('/personnel', { params }),
   getPerson: (id: string) => api.get(`/personnel/${id}`),
-  createPerson: (data: any) => api.post('/personnel', data),
-  updatePerson: (id: string, data: any) => api.put(`/personnel/${id}`, data),
-  deletePerson: (id: string) => api.delete(`/personnel/${id}`),
-  previewBulk: (data: any) => api.post('/personnel/bulk/preview', data),
-  executeBulk: (data: any) => api.post('/personnel/bulk/execute', data),
 };
 
 export const hrAPI = {
@@ -120,6 +114,7 @@ export const hrAPI = {
   getPersonnel: (params?: any) => api.get('/hr/personnel', { params }),
   createPersonnel: (data: any) => api.post('/hr/personnel', data),
   updatePersonnel: (id: string, data: any) => api.put(`/hr/personnel/${id}`, data),
+  updatePersonnelWorkSchedule: (id: string, data: any) => api.put(`/hr/personnel/${id}/work-schedule`, data),
   createRelationship: (personnelId: string, data: any) => api.post(`/hr/personnel/${personnelId}/relationships`, data),
   updateRelationshipStatus: (id: string, data: any) => api.put(`/hr/relationships/${id}/status`, data),
   createAssignment: (relationshipId: string, data: any) => api.post(`/hr/relationships/${relationshipId}/assignments`, data),

@@ -14,7 +14,6 @@ import {
   FaEyeSlash
 } from 'react-icons/fa';
 import { authAPI, usersAPI, departmentsAPI, personnelAPI } from '@/lib/api';
-import WorkScheduleEditor, { emptyWorkSchedule, workScheduleFromApi, workSchedulePayload } from '@/components/WorkScheduleEditor';
 
 interface Department {
   id: string;
@@ -42,7 +41,6 @@ interface Personnel {
     id: string;
     username: string;
   } | null;
-  workSchedule?: any;
 }
 
 const WORKSPACES = {
@@ -205,9 +203,8 @@ export default function CreateUserPage() {
   });
 
   const [workspacePermissions, setWorkspacePermissions] = useState<WorkspacePermission[]>([]);
-  const [personnelMode, setPersonnelMode] = useState<'auto' | 'existing'>('auto');
+  const [personnelMode, setPersonnelMode] = useState<'none' | 'existing'>('none');
   const [selectedPersonnelId, setSelectedPersonnelId] = useState('');
-  const [workSchedule, setWorkSchedule] = useState(emptyWorkSchedule);
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const selectedPreset = PERMISSION_PRESETS.find(item => item.id === selectedPresetId) || null;
   const canGrantAdminPermissions = currentUserRole !== 'MANAGER';
@@ -384,7 +381,6 @@ export default function CreateUserPage() {
         isActive: formData.isActive,
         personnelMode,
         personnelId: personnelMode === 'existing' ? selectedPersonnelId : undefined,
-        workSchedule: workSchedulePayload(workSchedule),
         workspacePermissions
       });
 
@@ -551,7 +547,6 @@ export default function CreateUserPage() {
               </div>
             </div>
           </div>
-          <div className="mt-6"><WorkScheduleEditor value={workSchedule} onChange={setWorkSchedule} /></div>
         </div>
 
         {/* Role and Department */}
@@ -704,17 +699,17 @@ export default function CreateUserPage() {
             حساب کاربری برای ورود به سیستم است؛ پرسنل برای حضور و غیاب و عملیات سازمانی استفاده می‌شود.
           </p>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <label className={`rounded-lg border p-4 transition ${personnelMode === 'auto' ? 'border-[#074747]/50 bg-[#074747]/10 dark:border-teal-500/50 dark:bg-teal-500/15' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/40'}`}>
+            <label className={`rounded-lg border p-4 transition ${personnelMode === 'none' ? 'border-[#074747]/50 bg-[#074747]/10 dark:border-teal-500/50 dark:bg-teal-500/15' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/40'}`}>
               <span className="flex items-center gap-2">
                 <input
                   type="radio"
-                  checked={personnelMode === 'auto'}
-                  onChange={() => setPersonnelMode('auto')}
+                  checked={personnelMode === 'none'}
+                  onChange={() => setPersonnelMode('none')}
                   className="text-[#074747] focus:ring-[#074747]"
                 />
-                <span className="font-semibold text-primary">ساخت پرسنل از اطلاعات کاربر</span>
+                <span className="font-semibold text-primary">بدون اتصال پرسنلی</span>
               </span>
-              <span className="mt-2 block text-sm text-secondary">گزینه پیش‌فرض؛ نام، نام خانوادگی و دپارتمان کاربر برای پرسنل هم ثبت می‌شود.</span>
+              <span className="mt-2 block text-sm text-secondary">حساب فقط هویت دسترسی است؛ HR می‌تواند بعداً آن را به پرونده پرسنلی متصل کند.</span>
             </label>
             <label className={`rounded-lg border p-4 transition ${personnelMode === 'existing' ? 'border-[#074747]/50 bg-[#074747]/10 dark:border-teal-500/50 dark:bg-teal-500/15' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/40'}`}>
               <span className="flex items-center gap-2">
@@ -737,7 +732,6 @@ export default function CreateUserPage() {
                   onChange={(event) => {
                     const nextId = event.target.value;
                     setSelectedPersonnelId(nextId);
-                    setWorkSchedule(workScheduleFromApi(personnel.find((person) => person.id === nextId)?.workSchedule));
                   }}
                 className="glass-liquid-input w-full"
               >
@@ -764,7 +758,7 @@ export default function CreateUserPage() {
               <p className="text-secondary mt-1">{formData.email || 'ایمیل وارد نشده'}</p>
               <p className="text-secondary mt-2">نقش انتخاب‌شده: {formData.role}</p>
               <p className="text-secondary mt-2">
-                پرسنل مرتبط: {personnelMode === 'auto' ? 'ساخت/اتصال خودکار' : personnel.find((person) => person.id === selectedPersonnelId) ? `${personnel.find((person) => person.id === selectedPersonnelId)?.firstName} ${personnel.find((person) => person.id === selectedPersonnelId)?.lastName}` : 'انتخاب نشده'}
+                پرسنل مرتبط: {personnelMode === 'none' ? 'بدون اتصال؛ قابل تکمیل توسط HR' : personnel.find((person) => person.id === selectedPersonnelId) ? `${personnel.find((person) => person.id === selectedPersonnelId)?.firstName} ${personnel.find((person) => person.id === selectedPersonnelId)?.lastName}` : 'انتخاب نشده'}
               </p>
               {selectedPreset && selectedPreset.recommendedRole !== formData.role && (
                 <p className="mt-2 font-medium text-amber-700 dark:text-amber-300">
@@ -824,5 +818,3 @@ export default function CreateUserPage() {
     </div>
   );
 }
-
-

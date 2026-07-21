@@ -19,6 +19,7 @@ export type ErpAction = {
   variant?: 'solid' | 'soft' | 'outline' | 'ghost';
   disabled?: boolean;
   title?: string;
+  className?: string;
 };
 
 export type ErpMetric = {
@@ -163,10 +164,12 @@ export function ErpButton({
   variant = 'soft',
   disabled,
   title,
+  className: extraClassName,
 }: ErpAction) {
   const className = cx(
     'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50',
-    buttonClasses(tone, variant)
+    buttonClasses(tone, variant),
+    extraClassName
   );
 
   const content = (

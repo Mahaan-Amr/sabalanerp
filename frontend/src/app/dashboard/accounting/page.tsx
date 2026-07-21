@@ -11,6 +11,7 @@ import {
   FaReceipt,
   FaSync,
   FaUserClock,
+  FaUserPlus,
 } from 'react-icons/fa';
 import {
   ErpActionGrid,
@@ -102,6 +103,20 @@ export default function AccountingDashboardPage() {
             icon: FaReceipt,
             tone: 'success',
             badge: <StatusBadge label={(commandCenter.openReceivables?.count || 0).toLocaleString('fa-IR')} tone="success" />,
+          },
+          {
+            title: 'استخدام: وثیقه و قرارداد',
+            description: 'ثبت و تأیید وثیقه، تعهدات، جبران خدمات و قرارداد متقاضیان منتخب.',
+            href: '/dashboard/hr/hiring',
+            icon: FaUserPlus,
+            tone: 'info',
+          },
+          {
+            title: 'قالب وثیقه استخدام',
+            description: 'ساخت نسخه‌های چک‌لیست وثیقه و تعهدات توسط مدیر مالی.',
+            href: '/dashboard/hr/hiring/collateral-templates',
+            icon: FaClipboardCheck,
+            tone: 'neutral',
           },
           {
             title: 'مالیات و سامانه مودیان',

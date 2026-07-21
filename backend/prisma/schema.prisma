@@ -271,6 +271,8 @@ model Personnel {
   user                                User?
   department                          Department?                          @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   hrEmploymentRelationships           HrEmploymentRelationship[]
+  hiringCandidate                     HrCandidate?
+  hiringOnboardingTasks               HrOnboardingTask[]
 
   @@index([isActive, departmentId])
   @@index([lastName, firstName])
@@ -2926,6 +2928,7 @@ model HrPosition {
   supervisorPosition   HrPosition?              @relation("HrPositionReporting", fields: [supervisorPositionId], references: [id], onDelete: Restrict)
   subordinatePositions HrPosition[]             @relation("HrPositionReporting")
   assignments          HrEmploymentAssignment[]
+  hiringApplications   HrJobApplication[]
 
   @@index([organizationalUnitId, isActive])
   @@index([jobId, isActive])
@@ -2934,22 +2937,24 @@ model HrPosition {
 }
 
 model HrEmploymentRelationship {
-  id                String                   @id @default(cuid())
-  personnelId       String
-  status            HrEmploymentStatus
-  effectiveFrom     DateTime
-  effectiveTo       DateTime?
-  originalStartDate DateTime?
-  startDateVerified Boolean                  @default(false)
-  endReason         String?
-  sourceSystem      String?
-  sourceId          String?
-  migratedAt        DateTime?
-  createdBy         String
-  createdAt         DateTime                 @default(now())
-  updatedAt         DateTime                 @updatedAt
-  personnel         Personnel                @relation(fields: [personnelId], references: [id], onDelete: Restrict)
-  assignments       HrEmploymentAssignment[]
+  id                  String                   @id @default(cuid())
+  personnelId         String
+  status              HrEmploymentStatus
+  effectiveFrom       DateTime
+  effectiveTo         DateTime?
+  originalStartDate   DateTime?
+  startDateVerified   Boolean                  @default(false)
+  endReason           String?
+  sourceSystem        String?
+  sourceId            String?
+  migratedAt          DateTime?
+  createdBy           String
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  hiringApplicationId String?                  @unique
+  personnel           Personnel                @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  assignments         HrEmploymentAssignment[]
+  hiringApplication   HrJobApplication?        @relation(fields: [hiringApplicationId], references: [id], onDelete: SetNull)
 
   @@unique([sourceSystem, sourceId])
   @@index([personnelId, status, effectiveFrom, effectiveTo])
@@ -2983,4 +2988,458 @@ model HrEmploymentAssignment {
   @@index([positionId, effectiveFrom, effectiveTo])
   @@index([responsibleSupervisorAssignmentId])
   @@map("hr_employment_assignments")
+}
+
+enum HrApplicationStage {
+  RECEIVED
+  SCREENING
+  ASSESSMENT
+  OFFER
+  CLOSED
+}
+
+enum HrApplicationOutcome {
+  HIRED
+  REJECTED
+  WITHDRAWN
+  REQUEST_CANCELLED
+}
+
+enum HrFormRevisionStatus {
+  DRAFT
+  SUBMITTED
+  RETURNED
+}
+
+enum HrEvidenceStatus {
+  MISSING
+  RECEIVED
+  UNREADABLE
+  MISMATCH
+  VERIFIED
+  NOT_APPLICABLE
+}
+
+enum HrInspectionSource {
+  ORIGINAL_SEEN
+  COPY_RECEIVED
+}
+
+enum HrHiringAuthorityType {
+  HR_PROCESSOR
+  HR_MANAGER
+  HR_PAYROLL_PROCESSOR
+  HR_PAYROLL_MANAGER
+  FINANCE_RECORDER
+  FINANCE_MANAGER
+  HIRING_MANAGER
+}
+
+enum HrClearanceStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+}
+
+enum HrInsuranceEnrollmentStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  ACTIVE
+  EXEMPT
+}
+
+enum HrOnboardingTaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETE
+  WAIVED
+}
+
+enum HrAssessmentType {
+  DISC
+  BIG_FIVE
+  EQ
+  OTHER
+}
+
+model HrCandidate {
+  id                       String             @id @default(cuid())
+  firstName                String
+  lastName                 String
+  mobile                   String
+  nationalCode             String?            @unique
+  foreignIdentityType      String?
+  foreignIdentityNumber    String?
+  postalCode               String?
+  hasSocialSecurityHistory Boolean?
+  profileJson              Json?
+  talentBankSearchable     Boolean            @default(true)
+  privacyNoticeAcceptedAt  DateTime?
+  linkedPersonnelId        String?            @unique
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+  linkedPersonnel          Personnel?         @relation(fields: [linkedPersonnelId], references: [id], onDelete: SetNull)
+  applications             HrJobApplication[]
+
+  @@unique([foreignIdentityType, foreignIdentityNumber])
+  @@index([lastName, firstName])
+  @@index([mobile])
+  @@map("hr_candidates")
+}
+
+model HrJobApplication {
+  id                         String                         @id @default(cuid())
+  candidateId                String
+  positionId                 String
+  stage                      HrApplicationStage             @default(RECEIVED)
+  outcome                    HrApplicationOutcome?
+  outcomeReason              String?
+  currentRevisionNumber      Int                            @default(0)
+  identityClearance          HrClearanceStatus              @default(NOT_STARTED)
+  collateralClearance        HrClearanceStatus              @default(NOT_STARTED)
+  contractClearance          HrClearanceStatus              @default(NOT_STARTED)
+  compensationClearance      HrClearanceStatus              @default(NOT_STARTED)
+  acceptedOfferAt            DateTime?
+  convertedAt                DateTime?
+  scheduledStartDate         DateTime?
+  activatedAt                DateTime?
+  postalVerificationDeferred Boolean                        @default(true)
+  createdBy                  String
+  createdAt                  DateTime                       @default(now())
+  updatedAt                  DateTime                       @updatedAt
+  candidate                  HrCandidate                    @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  position                   HrPosition                     @relation(fields: [positionId], references: [id], onDelete: Restrict)
+  employmentRelationship     HrEmploymentRelationship?
+  invitations                HrCandidateInvitation[]
+  formRevisions              HrApplicationFormRevision[]
+  documents                  HrHiringDocument[]
+  identityChecks             HrIdentityCheck[]
+  collateralItems            HrCollateralItem[]
+  compensationSnapshots      HrCompensationSnapshot[]
+  contracts                  HrEmploymentContractDocument[]
+  insuranceEnrollment        HrInsuranceEnrollment?
+  payrollParticipation       HrPayrollParticipation?
+  onboardingTasks            HrOnboardingTask[]
+  audits                     HrHiringAudit[]
+  assessments                HrCandidateAssessment[]
+  collateralTemplateId       String?
+  collateralTemplate         HrCollateralChecklistTemplate? @relation(fields: [collateralTemplateId], references: [id], onDelete: SetNull)
+
+  @@index([stage, outcome, updatedAt])
+  @@index([candidateId, createdAt])
+  @@index([positionId, stage])
+  @@map("hr_job_applications")
+}
+
+model HrCandidateInvitation {
+  id                String           @id @default(cuid())
+  applicationId     String
+  tokenHash         String           @unique
+  otpHash           String
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  lastVerifiedAt    DateTime?
+  verificationCount Int              @default(0)
+  failedAttempts    Int              @default(0)
+  blockedUntil      DateTime?
+  createdBy         String
+  createdAt         DateTime         @default(now())
+  application       HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, expiresAt])
+  @@map("hr_candidate_invitations")
+}
+
+model HrApplicationFormRevision {
+  id                   String               @id @default(cuid())
+  applicationId        String
+  revisionNumber       Int
+  status               HrFormRevisionStatus @default(DRAFT)
+  dataJson             Json
+  correctionFieldsJson Json?
+  correctionReason     String?
+  declarationAccepted  Boolean              @default(false)
+  declarationFullName  String?
+  submittedAt          DateTime?
+  submittedIp          String?
+  submittedUserAgent   String?
+  returnedAt           DateTime?
+  returnedBy           String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  application          HrJobApplication     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, revisionNumber])
+  @@index([applicationId, status])
+  @@map("hr_application_form_revisions")
+}
+
+model HrHiringAuthority {
+  id        String                @id @default(cuid())
+  userId    String
+  authority HrHiringAuthorityType
+  isActive  Boolean               @default(true)
+  createdBy String
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  @@unique([userId, authority])
+  @@index([authority, isActive])
+  @@map("hr_hiring_authorities")
+}
+
+model HrHiringDocument {
+  id                String             @id @default(cuid())
+  applicationId     String
+  category          String
+  side              String?
+  version           Int
+  status            HrEvidenceStatus   @default(RECEIVED)
+  inspectionSource  HrInspectionSource
+  storageName       String
+  originalName      String
+  mimeType          String
+  size              Int
+  sha256            String
+  malwareScanStatus String
+  note              String?
+  uploadedBy        String
+  verifiedBy        String?
+  verifiedAt        DateTime?
+  createdAt         DateTime           @default(now())
+  application       HrJobApplication   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, category, side, version])
+  @@index([applicationId, category, status])
+  @@map("hr_hiring_documents")
+}
+
+model HrIdentityCheck {
+  id            String           @id @default(cuid())
+  applicationId String
+  fieldKey      String
+  status        HrEvidenceStatus
+  note          String?
+  reviewedBy    String
+  reviewedAt    DateTime         @default(now())
+  application   HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, fieldKey])
+  @@index([applicationId, status])
+  @@map("hr_identity_checks")
+}
+
+model HrCollateralItem {
+  id                              String                             @id @default(cuid())
+  applicationId                   String
+  type                            String
+  required                        Boolean                            @default(true)
+  amountRials                     Decimal?                           @db.Decimal(18, 0)
+  identifier                      String?
+  issuerOrGuarantor               String?
+  receivedAt                      DateTime?
+  custodyLocation                 String?
+  status                          HrEvidenceStatus                   @default(MISSING)
+  version                         Int                                @default(1)
+  storageName                     String?
+  originalName                    String?
+  mimeType                        String?
+  size                            Int?
+  sha256                          String?
+  malwareScanStatus               String?
+  note                            String?
+  coordinationReason              String?
+  recordedBy                      String
+  approvedBy                      String?
+  approvedAt                      DateTime?
+  returnedAt                      DateTime?
+  returnedTo                      String?
+  returnedBy                      String?
+  returnEvidenceNote              String?
+  returnEvidenceStorageName       String?
+  returnEvidenceOriginalName      String?
+  returnEvidenceMimeType          String?
+  returnEvidenceSize              Int?
+  returnEvidenceSha256            String?
+  returnEvidenceMalwareScanStatus String?
+  returnConfirmedBy               String?
+  returnConfirmedAt               DateTime?
+  createdAt                       DateTime                           @default(now())
+  updatedAt                       DateTime                           @updatedAt
+  application                     HrJobApplication                   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  templateItemId                  String?
+  supersedesItemId                String?                            @unique
+  templateItem                    HrCollateralChecklistTemplateItem? @relation(fields: [templateItemId], references: [id], onDelete: SetNull)
+  supersedesItem                  HrCollateralItem?                  @relation("HrCollateralReplacement", fields: [supersedesItemId], references: [id], onDelete: SetNull)
+  supersededBy                    HrCollateralItem?                  @relation("HrCollateralReplacement")
+
+  @@index([applicationId, status])
+  @@map("hr_collateral_items")
+}
+
+model HrCollateralChecklistTemplate {
+  id           String                              @id @default(cuid())
+  name         String
+  version      Int
+  scopeType    String                              @default("GLOBAL")
+  scopeId      String?
+  isActive     Boolean                             @default(true)
+  createdBy    String
+  createdAt    DateTime                            @default(now())
+  items        HrCollateralChecklistTemplateItem[]
+  applications HrJobApplication[]
+
+  @@unique([name, version])
+  @@index([scopeType, scopeId, isActive])
+  @@map("hr_collateral_checklist_templates")
+}
+
+model HrCollateralChecklistTemplateItem {
+  id                 String                        @id @default(cuid())
+  templateId         String
+  type               String
+  label              String
+  required           Boolean                       @default(true)
+  defaultAmountRials Decimal?                      @db.Decimal(18, 0)
+  sortOrder          Int                           @default(0)
+  template           HrCollateralChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  collateralItems    HrCollateralItem[]
+
+  @@index([templateId, sortOrder])
+  @@map("hr_collateral_checklist_template_items")
+}
+
+model HrCandidateAssessment {
+  id                String           @id @default(cuid())
+  applicationId     String
+  assessmentType    HrAssessmentType
+  resultJson        Json
+  storageName       String?
+  originalName      String?
+  mimeType          String?
+  size              Int?
+  sha256            String?
+  malwareScanStatus String?
+  recordedBy        String
+  recordedAt        DateTime         @default(now())
+  application       HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, assessmentType, recordedAt])
+  @@map("hr_candidate_assessments")
+}
+
+model HrCompensationSnapshot {
+  id                    String           @id @default(cuid())
+  applicationId         String
+  version               Int
+  currency              String           @default("IRR")
+  componentsJson        Json
+  totalRials            Decimal          @db.Decimal(18, 0)
+  proposedBy            String
+  preparedBy            String?
+  hrApprovedBy          String?
+  hrApprovedAt          DateTime?
+  financeApprovedBy     String?
+  financeApprovedAt     DateTime?
+  candidateAcceptedAt   DateTime?
+  candidateAcceptedName String?
+  createdAt             DateTime         @default(now())
+  application           HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, version])
+  @@index([applicationId, createdAt])
+  @@map("hr_compensation_snapshots")
+}
+
+model HrEmploymentContractDocument {
+  id                String           @id @default(cuid())
+  applicationId     String
+  version           Int
+  contractNumber    String
+  effectiveFrom     DateTime
+  effectiveTo       DateTime?
+  storageName       String
+  originalName      String
+  mimeType          String
+  size              Int
+  sha256            String
+  malwareScanStatus String
+  uploadedBy        String
+  approvedBy        String?
+  approvedAt        DateTime?
+  note              String?
+  createdAt         DateTime         @default(now())
+  application       HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, version])
+  @@index([applicationId, createdAt])
+  @@map("hr_employment_contract_documents")
+}
+
+model HrInsuranceEnrollment {
+  id            String                      @id @default(cuid())
+  applicationId String                      @unique
+  status        HrInsuranceEnrollmentStatus @default(NOT_STARTED)
+  effectiveDate DateTime?
+  dueDate       DateTime?
+  note          String?
+  updatedBy     String
+  createdAt     DateTime                    @default(now())
+  updatedAt     DateTime                    @updatedAt
+  application   HrJobApplication            @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([status, dueDate])
+  @@map("hr_insurance_enrollments")
+}
+
+model HrPayrollParticipation {
+  id            String           @id @default(cuid())
+  applicationId String           @unique
+  effectiveFrom DateTime
+  configuredBy  String
+  configuredAt  DateTime         @default(now())
+  application   HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@map("hr_payroll_participations")
+}
+
+model HrOnboardingTask {
+  id                  String                 @id @default(cuid())
+  applicationId       String
+  title               String
+  ownerAuthority      HrHiringAuthorityType
+  activationBlocker   Boolean                @default(false)
+  dueDate             DateTime?
+  status              HrOnboardingTaskStatus @default(PENDING)
+  evidenceNote        String?
+  completedBy         String?
+  completedAt         DateTime?
+  createdBy           String
+  assigneePersonnelId String?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  application         HrJobApplication       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  assigneePersonnel   Personnel?             @relation(fields: [assigneePersonnelId], references: [id], onDelete: SetNull)
+
+  @@index([applicationId, status, activationBlocker])
+  @@index([assigneePersonnelId, status])
+  @@map("hr_onboarding_tasks")
+}
+
+model HrHiringAudit {
+  id            String           @id @default(cuid())
+  applicationId String
+  actorUserId   String?
+  actorKind     String
+  eventType     String
+  payloadJson   Json?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime         @default(now())
+  application   HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, createdAt])
+  @@index([eventType, createdAt])
+  @@map("hr_hiring_audits")
 }

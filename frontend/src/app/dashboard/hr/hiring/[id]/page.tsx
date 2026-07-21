@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { FaCheck, FaFileUpload, FaSync } from "react-icons/fa";
 import {
   ErpBadge,
@@ -245,6 +246,17 @@ export default function HiringCasePage() {
           value={data.employmentRelationship?.status || "CANDIDATE"}
         />
       </div>
+      {data.employmentRelationship?.personnel && (
+        <ErpSection title="ادامه چرخه در پرونده پرسنلی" description="تبدیل انجام شده است؛ پرونده جذب و سابقه محرمانه آن مستقل باقی می‌ماند.">
+          <ErpCard className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <div>
+              <p className="font-bold">{data.employmentRelationship.personnel.firstName} {data.employmentRelationship.personnel.lastName}</p>
+              <p className="mt-1 text-xs text-slate-500">رابطه استخدامی: {data.employmentRelationship.status} · نتیجه پرونده: {data.outcome || 'HIRED'}</p>
+            </div>
+            <Link className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white" href={`/dashboard/hr/personnel?focus=${data.employmentRelationship.personnel.id}`}>مشاهده در پرسنل و روابط استخدامی</Link>
+          </ErpCard>
+        </ErpSection>
+      )}
       {canHrSensitive && (
         <>
           <ErpSection

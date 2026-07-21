@@ -2,7 +2,7 @@
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import dotenv from 'dotenv';
+import 'dotenv/config';
 import path from 'path';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -51,9 +51,6 @@ import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import { startAuthenticationRetentionCleanup } from './services/authenticationRetentionService';
 
-// Load environment variables
-dotenv.config();
-
 const prisma = new PrismaClient();
 startAuthenticationRetentionCleanup(prisma);
 const app = express();
@@ -65,12 +62,27 @@ const configuredFrontendUrl = process.env.FRONTEND_URL;
 const validateProductionEnvironment = () => {
   if (!isProduction) return;
 
-  const requiredVars = ['DATABASE_URL', 'FRONTEND_URL'];
+  const jwtSecret = process.env.JWT_SECRET || '';
+  const hasWeakJwtSecret = jwtSecret.length < 32 || jwtSecret.includes('your-super-secret');
+  const requiredVars = ['DATABASE_URL', 'JWT_SECRET', 'FRONTEND_URL', 'PUBLIC_APP_URL', 'SMS_IR_HIRING_INVITATION_TEMPLATE_ID'];
   const missingVars = requiredVars.filter((key) => !process.env[key]);
+  const hiringTemplateId = process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID || '';
+  const genericTemplateId = process.env.SMS_IR_TEMPLATE_ID || '135816';
+  const hasInvalidHiringTemplate = !/^\d+$/.test(hiringTemplateId) || Number(hiringTemplateId) <= 0 || hiringTemplateId === genericTemplateId;
+  let hasInvalidPublicAppUrl = false;
+  try {
+    const publicAppUrl = new URL(process.env.PUBLIC_APP_URL || '');
+    hasInvalidPublicAppUrl = publicAppUrl.protocol !== 'https:';
+  } catch {
+    hasInvalidPublicAppUrl = true;
+  }
 
-  if (missingVars.length > 0) {
+  if (missingVars.length > 0 || hasWeakJwtSecret || hasInvalidHiringTemplate || hasInvalidPublicAppUrl) {
     const details = [
-      missingVars.length > 0 ? `Missing vars: ${missingVars.join(', ')}` : ''
+      missingVars.length > 0 ? `Missing vars: ${missingVars.join(', ')}` : '',
+      hasWeakJwtSecret ? 'JWT_SECRET must be at least 32 chars and not a placeholder.' : '',
+      hasInvalidHiringTemplate ? 'SMS_IR_HIRING_INVITATION_TEMPLATE_ID must be a dedicated positive numeric template ID and must not equal SMS_IR_TEMPLATE_ID.' : '',
+      hasInvalidPublicAppUrl ? 'PUBLIC_APP_URL must be a valid HTTPS origin used to build applicant links.' : ''
     ].filter(Boolean);
     throw new Error(`Invalid production environment. ${details.join(' ')}`);
   }

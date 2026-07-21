@@ -51,7 +51,7 @@ class SmsService {
       10
     );
     this.hiringInvitationTemplateId = parseInt(
-      process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID || process.env.SMS_IR_TEMPLATE_ID || '135816',
+      process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID || '135816',
       10
     );
     this.environment = process.env.SMS_IR_ENVIRONMENT || 'sandbox';

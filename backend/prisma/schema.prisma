@@ -273,10 +273,27 @@ model Personnel {
   hrEmploymentRelationships           HrEmploymentRelationship[]
   hiringCandidate                     HrCandidate?
   hiringOnboardingTasks               HrOnboardingTask[]
+  hrPersonnelAudits                   HrPersonnelAudit[]
 
   @@index([isActive, departmentId])
   @@index([lastName, firstName])
   @@map("personnel")
+}
+
+model HrPersonnelAudit {
+  id             String    @id @default(cuid())
+  personnelId    String
+  actorUserId    String
+  eventType      String
+  sourceCategory String
+  reason         String
+  payloadJson    Json?
+  createdAt      DateTime  @default(now())
+  personnel      Personnel @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+
+  @@index([personnelId, createdAt])
+  @@index([eventType, createdAt])
+  @@map("hr_personnel_audits")
 }
 
 model PersonnelWorkSchedule {

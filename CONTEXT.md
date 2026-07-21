@@ -1662,6 +1662,18 @@ _Avoid_: labeling format validation as external verification, blocking today's w
 The Application-scoped access link and OTP delivered together to the Candidate's recorded mobile number, valid as a reusable pair for seven days so the Candidate can authorize more than one device. Each successful verification opens only that Job Application's candidate-facing form through its own application-only session; after invitation expiry, Human Resources must issue a new pair without discarding saved answers.
 _Avoid_: treating the invitation as a User login or independent second factor, opening another Candidate's Application, granting HR workspace access, unlimited validity, losing draft data when access is reissued
 
+**Candidate Recruitment Case**:
+The continuous pre-employment record presented under `جذب و پرونده‌های متقاضیان`, linking the Candidate, Job Application, cross-functional clearances, Hire Conversion, onboarding, and activation while preserving each record's ownership and confidentiality boundary.
+_Avoid_: استخدام و متقاضیان, a disconnected applicant list, copying confidential recruitment evidence into the general Personnel profile
+
+**Personnel and Employment Relationships**:
+The post-conversion workforce view presented under `پرسنل و روابط استخدامی`, containing enduring Personnel identity and effective-dated Employment Relationships and Assignments, with a permanent link to the originating Candidate Recruitment Case when one exists.
+_Avoid_: پرسنل و استخدام, treating Personnel and an employment period as one record, losing recruitment provenance
+
+**Exceptional Personnel Registration**:
+A reasoned, audited creation of Personnel and initial employment foundation by an assigned Human Resources Manager for data migration, historical correction, or organizational transfer when no ordinary Candidate Recruitment Case applies.
+_Avoid_: a routine shortcut around recruitment controls, an unlabeled direct hire, generic HR edit permission, unaudited manual creation
+
 **Application Form Submission**:
 An immutable, timestamped version of the Application Form created by the Candidate's final submission. Human Resources may return it with a reason and explicitly identified fields for correction; only the Candidate revises those fields and resubmits as a new preserved version.
 _Avoid_: editing a final submission in place, Human Resources silently changing Candidate answers, reopening every field without reason, losing earlier submissions or timestamps

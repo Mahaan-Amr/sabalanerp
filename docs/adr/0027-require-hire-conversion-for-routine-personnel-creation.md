@@ -1,0 +1,3 @@
+# Require Hire Conversion for routine Personnel creation
+
+Ordinary new employees must become Personnel through their Candidate Recruitment Case so identity, offer, collateral, contract, onboarding, capacity, and activation evidence remain connected and enforceable. Direct creation is retained only as a separately labeled Exceptional Personnel Registration for data migration, historical correction, or organizational transfer, requires assigned HR Manager authority plus a recorded reason, and produces permanent audit evidence; recruitment-confidential data remains in the source case rather than being copied into the general Personnel profile.

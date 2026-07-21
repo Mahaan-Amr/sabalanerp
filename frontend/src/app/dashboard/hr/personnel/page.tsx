@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import moment from 'moment-jalaali';
+import Link from 'next/link';
 import {
   FaBriefcase, FaChevronDown, FaChevronUp, FaPause, FaPlay,
   FaPlus, FaSearch, FaStop, FaSync, FaUserPlus, FaUsers,
@@ -12,6 +13,7 @@ import {
   ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection,
 } from '@/components/erp';
 import { hrAPI } from '@/lib/api';
+import { hiringAPI } from '@/lib/hiringApi';
 import {
   apiError, assignmentTypeLabel, dateFa, employmentStatusLabel,
   fieldClass, HrField, HrMessage, toIsoDate,
@@ -21,6 +23,7 @@ const today = () => moment().format('jYYYY/jMM/jDD');
 const blankPerson = () => ({
   firstName: '', lastName: '', nationalCode: '', employeeNumber: '', userId: '',
   status: 'ACTIVE', effectiveFrom: today(), positionId: '', responsibleSupervisorAssignmentId: '', confirmDuplicate: false,
+  sourceCategory: '', reason: '',
 });
 const blankAssignment = () => ({
   positionId: '', type: 'SECONDARY', effectiveFrom: today(), effectiveTo: '',
@@ -42,17 +45,21 @@ export default function HrPersonnelPage() {
   const [assignment, setAssignment] = useState(blankAssignment);
   const [assignmentSupervisors, setAssignmentSupervisors] = useState<any[]>([]);
   const [endDates, setEndDates] = useState<Record<string, string>>({});
+  const [authorities, setAuthorities] = useState<string[]>([]);
+  const canCreateExceptionalPersonnel = authorities.includes('HR_MANAGER');
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
-      const [people, base] = await Promise.all([
+      const [people, base, authorityResponse] = await Promise.all([
         hrAPI.getPersonnel(search ? { search } : undefined),
         hrAPI.getFoundation(),
+        hiringAPI.myAuthorities(),
       ]);
       setRows(people.data.data);
       setFoundation(base.data.data);
+      setAuthorities(authorityResponse.data.data || []);
     } catch (err) {
       setError(apiError(err));
     } finally {
@@ -61,6 +68,10 @@ export default function HrPersonnelPage() {
   }, [search]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const focus = new URLSearchParams(window.location.search).get('focus');
+    if (focus) setExpanded(focus);
+  }, []);
   useEffect(() => {
     const fetchCandidates = async () => {
       if (!form.positionId || !form.effectiveFrom) return setSupervisors([]);
@@ -105,7 +116,7 @@ export default function HrPersonnelPage() {
   return (
     <ErpPage
       eyebrow="منابع انسانی · پرسنل"
-      title="پرسنل و پایه استخدام"
+      title="پرسنل و روابط استخدامی"
       description="هویت فرد از دسترسی سامانه جداست؛ رابطه استخدامی و تخصیص جایگاه تاریخ خود را حفظ می‌کنند."
       actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: load, tone: 'neutral' }]}
       backHref="/dashboard/hr"
@@ -113,7 +124,7 @@ export default function HrPersonnelPage() {
       {error && <HrMessage>{error}</HrMessage>}
       {success && <HrMessage tone="success">{success}</HrMessage>}
 
-      <ErpSection title="ثبت پرسنل با استخدام اولیه" description="حداقل جریان: هویت، وضعیت شروع و یک تخصیص اصلی ظرفیت‌دار.">
+      {canCreateExceptionalPersonnel ? <ErpSection title="ثبت استثنایی پرسنل" description="فقط برای مهاجرت داده، اصلاح سابقه یا انتقال سازمانی؛ جذب عادی باید از پرونده متقاضی انجام شود.">
         <ErpCard className="p-4 sm:p-5">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             <HrField label="نام" required><input className={fieldClass} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></HrField>
@@ -152,20 +163,38 @@ export default function HrPersonnelPage() {
               <input type="checkbox" checked={form.confirmDuplicate} onChange={(e) => setForm({ ...form, confirmDuplicate: e.target.checked })} />
               نام‌های مشابه را بررسی کرده‌ام
             </label>
+            <HrField label="منبع ثبت استثنایی" required>
+              <select className={fieldClass} value={form.sourceCategory} onChange={(e) => setForm({ ...form, sourceCategory: e.target.value })}>
+                <option value="">انتخاب منبع</option>
+                <option value="DATA_MIGRATION">مهاجرت داده</option>
+                <option value="HISTORICAL_CORRECTION">اصلاح سابقه</option>
+                <option value="ORGANIZATIONAL_TRANSFER">انتقال سازمانی</option>
+              </select>
+            </HrField>
+            <div className="md:col-span-2 xl:col-span-3">
+              <HrField label="دلیل ثبت استثنایی" required hint="این توضیح به‌صورت دائمی در رویداد ممیزی نگهداری می‌شود.">
+                <textarea className={fieldClass} rows={2} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
+              </HrField>
+            </div>
           </div>
           <div className="mt-4">
             <ErpButton
-              label="ثبت پرسنل و استخدام" icon={FaUserPlus}
-              disabled={saving || !form.firstName.trim() || !form.lastName.trim() || !form.positionId || !form.effectiveFrom || (supervisors.length > 1 && !form.responsibleSupervisorAssignmentId)}
+              label="ثبت استثنایی پرسنل" icon={FaUserPlus}
+              disabled={saving || !form.firstName.trim() || !form.lastName.trim() || !form.positionId || !form.effectiveFrom || !form.sourceCategory || form.reason.trim().length < 10 || (supervisors.length > 1 && !form.responsibleSupervisorAssignmentId)}
               onClick={() => run(
-                () => hrAPI.createPersonnel({ ...form, effectiveFrom: toIsoDate(form.effectiveFrom) }),
-                'پرسنل، رابطه استخدامی و تخصیص اصلی ثبت شد.',
+                () => hrAPI.createExceptionalPersonnel({ ...form, effectiveFrom: toIsoDate(form.effectiveFrom) }),
+                'پرسنل استثنایی، رابطه استخدامی، تخصیص اصلی و رویداد ممیزی ثبت شد.',
                 () => setForm(blankPerson()),
               )}
             />
           </div>
         </ErpCard>
-      </ErpSection>
+      </ErpSection> : <ErpSection title="ایجاد پرسنل جدید" description="مسیر عادی ایجاد پرسنل از پرونده جذب و پس از تکمیل کنترل‌های استخدام انجام می‌شود.">
+        <ErpCard className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <p className="text-sm text-slate-600 dark:text-slate-300">برای نیروی جدید، ابتدا پرونده متقاضی را ایجاد و چرخه جذب را کامل کنید.</p>
+          <Link className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white" href="/dashboard/hr/hiring">رفتن به جذب و پرونده‌های متقاضیان</Link>
+        </ErpCard>
+      </ErpSection>}
 
       <ErpSection title="فهرست پرسنل" description={`${rows.length.toLocaleString('fa-IR')} پرونده`} actions={[{ label: 'جستجو', icon: FaSearch, onClick: load, tone: 'neutral' }]}>
         <div className="mb-4"><input className={fieldClass} placeholder="نام، کد ملی یا شماره پرسنلی" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
@@ -205,6 +234,8 @@ function PersonnelCard(props: any) {
         </div>
         {open ? <FaChevronUp /> : <FaChevronDown />}
       </button>
+      {relationship?.hiringApplication && <Link className="mt-2 inline-block text-xs font-bold text-emerald-700 hover:underline" href={`/dashboard/hr/hiring/${relationship.hiringApplication.id}`}>ایجادشده از پرونده جذب · مشاهده پرونده</Link>}
+      {!relationship?.hiringApplication && person.hrPersonnelAudits?.[0]?.eventType === 'EXCEPTIONAL_PERSONNEL_REGISTERED' && <p className="mt-2 text-xs font-bold text-amber-700">ثبت استثنایی · {person.hrPersonnelAudits[0].reason}</p>}
       {open && (
         <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-700">
           <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
@@ -217,7 +248,8 @@ function PersonnelCard(props: any) {
           {relationship && (
             <>
               <div className="mt-4 flex flex-wrap gap-2">
-                {relationship.status === 'PLANNED' && <ErpButton label="فعال‌سازی" icon={FaPlay} tone="success" variant="soft" onClick={() => run(() => hrAPI.updateRelationshipStatus(relationship.id, { status: 'ACTIVE' }), 'رابطه استخدامی فعال شد.')} />}
+                {relationship.status === 'PLANNED' && !relationship.hiringApplication && <ErpButton label="فعال‌سازی" icon={FaPlay} tone="success" variant="soft" onClick={() => run(() => hrAPI.updateRelationshipStatus(relationship.id, { status: 'ACTIVE' }), 'رابطه استخدامی فعال شد.')} />}
+                {relationship.status === 'PLANNED' && relationship.hiringApplication && <Link className="rounded-xl bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700" href={`/dashboard/hr/hiring/${relationship.hiringApplication.id}`}>تکمیل پیش‌نیازها و فعال‌سازی در پرونده جذب</Link>}
                 {relationship.status === 'ACTIVE' && <ErpButton label="تعلیق" icon={FaPause} tone="warning" variant="soft" onClick={() => run(() => hrAPI.updateRelationshipStatus(relationship.id, { status: 'SUSPENDED' }), 'رابطه استخدامی معلق شد.')} />}
                 {relationship.status === 'SUSPENDED' && <ErpButton label="بازگشت به فعال" icon={FaPlay} tone="success" variant="soft" onClick={() => run(() => hrAPI.updateRelationshipStatus(relationship.id, { status: 'ACTIVE' }), 'رابطه استخدامی دوباره فعال شد.')} />}
                 <ErpButton label="افزودن مسئولیت" icon={FaPlus} variant="soft" onClick={() => { setAssignmentRelationship(assignmentRelationship === relationship.id ? null : relationship.id); setAssignment(blankAssignment()); }} />

@@ -74,7 +74,7 @@ COPY public ./public
 COPY scripts ./scripts
 COPY excel ./excel
 
-RUN mkdir -p /app/storage/contracts /app/uploads
+RUN mkdir -p /app/storage/contracts /app/storage/hr-hiring /app/uploads
 
 EXPOSE 5000
 

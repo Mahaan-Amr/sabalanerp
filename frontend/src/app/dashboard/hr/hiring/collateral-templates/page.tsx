@@ -1,0 +1,195 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { FaPlus, FaSync } from "react-icons/fa";
+import { ErpButton, ErpCard, ErpLoading, ErpPage } from "@/components/erp";
+import { hiringAPI, hiringError } from "@/lib/hiringApi";
+
+const field =
+  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900";
+
+export default function CollateralTemplatesPage() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [name, setName] = useState("");
+  const [items, setItems] = useState<any[]>([
+    {
+      type: "PROMISSORY_NOTE",
+      label: "سفته",
+      required: true,
+      defaultAmountRials: "",
+    },
+  ]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = async () => {
+    try {
+      setRows((await hiringAPI.collateralTemplates()).data.data);
+    } catch (e) {
+      setError(hiringError(e));
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+  const save = async () => {
+    try {
+      setBusy(true);
+      setError("");
+      await hiringAPI.createCollateralTemplate({ name, items });
+      setName("");
+      await load();
+    } catch (e) {
+      setError(hiringError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const toggle = async (row: any) => {
+    try {
+      setBusy(true);
+      await hiringAPI.setCollateralTemplateActive(row.id, !row.isActive);
+      await load();
+    } catch (e) {
+      setError(hiringError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!rows) return <ErpLoading />;
+  return (
+    <ErpPage
+      eyebrow="امور مالی · استخدام"
+      title="قالب‌های چک‌لیست وثیقه"
+      description="هر تغییر یک نسخه جدید و غیرقابل بازنویسی می‌سازد."
+      backHref="/dashboard/hr/hiring"
+      actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: load }]}
+    >
+      {error && (
+        <p className="rounded-xl bg-rose-50 p-3 text-rose-700">{error}</p>
+      )}
+      <ErpCard className="space-y-3 p-4">
+        <input
+          className={field}
+          placeholder="نام قالب"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        {items.map((item, index) => (
+          <div key={index} className="grid gap-2 md:grid-cols-4">
+            <select
+              className={field}
+              value={item.type}
+              onChange={(e) =>
+                setItems(
+                  items.map((x, i) =>
+                    i === index ? { ...x, type: e.target.value } : x,
+                  ),
+                )
+              }
+            >
+              <option value="PROMISSORY_NOTE">سفته</option>
+              <option value="CHEQUE">چک</option>
+              <option value="GUARANTEE">ضمانت‌نامه</option>
+              <option value="UNDERTAKING">تعهدنامه</option>
+              <option value="OTHER">سایر</option>
+            </select>
+            <input
+              className={field}
+              placeholder="عنوان قلم"
+              value={item.label}
+              onChange={(e) =>
+                setItems(
+                  items.map((x, i) =>
+                    i === index ? { ...x, label: e.target.value } : x,
+                  ),
+                )
+              }
+            />
+            <input
+              className={field}
+              inputMode="numeric"
+              placeholder="مبلغ پیش‌فرض ریال"
+              value={item.defaultAmountRials}
+              onChange={(e) =>
+                setItems(
+                  items.map((x, i) =>
+                    i === index
+                      ? {
+                          ...x,
+                          defaultAmountRials: e.target.value.replace(/\D/g, ""),
+                        }
+                      : x,
+                  ),
+                )
+              }
+            />
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={item.required}
+                onChange={(e) =>
+                  setItems(
+                    items.map((x, i) =>
+                      i === index ? { ...x, required: e.target.checked } : x,
+                    ),
+                  )
+                }
+              />
+              الزامی
+            </label>
+          </div>
+        ))}
+        <div className="flex gap-2">
+          <ErpButton
+            label="افزودن قلم"
+            icon={FaPlus}
+            onClick={() =>
+              setItems([
+                ...items,
+                {
+                  type: "OTHER",
+                  label: "",
+                  required: true,
+                  defaultAmountRials: "",
+                },
+              ])
+            }
+          />
+          <ErpButton
+            label="ذخیره نسخه جدید"
+            disabled={busy || !name || items.some((item) => !item.label)}
+            onClick={save}
+            tone="success"
+          />
+        </div>
+      </ErpCard>
+      <div className="grid gap-3 md:grid-cols-2">
+        {rows.map((row) => (
+          <ErpCard key={row.id} className="p-4">
+            <div className="flex justify-between">
+              <b>{row.name}</b>
+              <span className="flex items-center gap-2">
+                نسخه {row.version}
+                <button
+                  disabled={busy}
+                  onClick={() => toggle(row)}
+                  className="rounded border px-2 py-1 text-xs"
+                >
+                  {row.isActive ? "غیرفعال‌کردن" : "فعال‌کردن"}
+                </button>
+              </span>
+            </div>
+            <ul className="mt-2 text-sm">
+              {row.items.map((item: any) => (
+                <li key={item.id}>
+                  • {item.label}
+                  {item.required ? " (الزامی)" : ""}
+                </li>
+              ))}
+            </ul>
+          </ErpCard>
+        ))}
+      </div>
+    </ErpPage>
+  );
+}

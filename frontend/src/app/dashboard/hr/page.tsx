@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { FaBuilding, FaClipboardCheck, FaExclamationTriangle, FaSync, FaUserTie, FaUsers } from 'react-icons/fa';
+import { FaBuilding, FaClipboardCheck, FaExclamationTriangle, FaSync, FaUserPlus, FaUserTie, FaUsers } from 'react-icons/fa';
 import { ErpActionGrid, ErpBadge, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
 import { hrAPI } from '@/lib/api';
 import { apiError, HrMessage } from '@/features/hr/hrUi';
@@ -32,8 +32,9 @@ export default function HrDashboardPage() {
     ]}
   >
     {error && <HrMessage>{error}</HrMessage>}
-    <ErpActionGrid columns={3} items={[
+    <ErpActionGrid columns={4} items={[
       { title: 'ساختار سازمانی', description: 'واحدها، محل‌های کار، مراکز هزینه، شغل‌ها و جایگاه‌های ظرفیت‌دار', href: '/dashboard/hr/structure', icon: FaBuilding, tone: 'primary' },
+      { title: 'استخدام و متقاضیان', description: 'فرم متقاضی، مدارک، تأییدها، وثیقه، قرارداد و فعال‌سازی', href: '/dashboard/hr/hiring', icon: FaUserPlus, tone: 'info' },
       { title: 'پرسنل و استخدام', description: 'هویت پرسنلی، رابطه استخدامی و تخصیص‌های تاریخ‌دار', href: '/dashboard/hr/personnel', icon: FaUsers, tone: 'success' },
       { title: 'مهاجرت و تطبیق', description: 'پیش‌نمایش بدون تغییر، کنترل تعارض‌ها و انتقال قابل تکرار', href: '/dashboard/hr/migration', icon: FaClipboardCheck, tone: 'info' },
     ]} />

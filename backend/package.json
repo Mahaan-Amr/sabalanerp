@@ -19,6 +19,7 @@
     "backfill:crm-customer-owners:dry": "tsx scripts/backfill-crm-customer-owners.ts",
     "backfill:crm-customer-owners:apply": "tsx scripts/backfill-crm-customer-owners.ts --apply",
     "verify:security-shifts": "tsx scripts/verify-security-shift-planning.ts",
+    "verify:security-attendance-migration": "tsx scripts/verify-security-attendance-migration.ts",
     "sync:opc-products:dry": "node scripts/sync-products-from-opc.js",
     "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"
   },

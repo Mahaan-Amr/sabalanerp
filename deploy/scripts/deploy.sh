@@ -58,11 +58,22 @@ if [ ! -s "${BACKUP_TMP_PATH}" ]; then
   exit 1
 fi
 
+if ! docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml exec -T postgres \
+  pg_restore --list < "${BACKUP_TMP_PATH}" > /dev/null; then
+  rm -f "${BACKUP_TMP_PATH}"
+  echo "Database backup is not a readable PostgreSQL custom-format archive. Deployment aborted before migrations."
+  exit 1
+fi
+
 mv "${BACKUP_TMP_PATH}" "${BACKUP_PATH}"
 echo "Database backup completed: ${BACKUP_PATH}"
 
 echo "Applying Prisma migrations..."
-docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml run --rm backend npm run db:migrate:deploy
+if ! docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml run --rm backend npm run db:migrate:deploy; then
+  echo "Database migration failed. The verified backup is retained at ${BACKUP_PATH}."
+  echo "The application stack was not recreated. Do not run prisma migrate reset on this database."
+  exit 1
+fi
 
 echo "Starting full stack..."
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml up -d

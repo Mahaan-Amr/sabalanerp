@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { FaBuilding, FaCog, FaDownload, FaEdit, FaEye, FaPlus, FaShieldAlt, FaTrash, FaUserCheck, FaUserTimes, FaUsers } from 'react-icons/fa';
+import { FaBuilding, FaCog, FaDownload, FaEdit, FaEye, FaPlus, FaShieldAlt, FaTimes, FaTrash, FaUserCheck, FaUserTimes, FaUsers } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpListPage, ErpLoading, ErpSection, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
 import { authAPI, departmentsAPI, usersAPI, workspacePermissionsAPI } from '@/lib/api';
 import { WORKSPACE_CONFIG } from '@/contexts/WorkspaceContext';
@@ -88,6 +88,7 @@ export default function UsersManagementPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [selectedRole, setSelectedRole] = useState('');
@@ -100,6 +101,11 @@ export default function UsersManagementPage() {
   const [bulkPreview, setBulkPreview] = useState<any>(null);
   const [bulkResult, setBulkResult] = useState<any>(null);
   const [bulkWorkspacePermissions, setBulkWorkspacePermissions] = useState<Record<string, string>>({});
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -114,6 +120,7 @@ export default function UsersManagementPage() {
       const response = await authAPI.getMe();
       if (response.data.success) {
         setCurrentUserRole(response.data.data.role);
+        setCurrentUserId(response.data.data.id);
       }
     } catch (error) {
       console.error('Error fetching current user:', error);
@@ -157,7 +164,28 @@ export default function UsersManagementPage() {
   };
 
   const handleDeleteUser = (user: User) => {
-    window.location.href = `/dashboard/users/${user.id}`;
+    setUserToDelete(user);
+    setDeleteConfirmation('');
+    setDeleteError('');
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!userToDelete || deleteConfirmation !== userToDelete.username) return;
+    try {
+      setDeleting(true);
+      setDeleteError('');
+      await usersAPI.deleteUser(userToDelete.id, deleteConfirmation);
+      setShowDeleteModal(false);
+      setUserToDelete(null);
+      setDeleteConfirmation('');
+      await fetchData();
+    } catch (error: any) {
+      console.error('Error deleting user:', error);
+      setDeleteError(error.response?.data?.error || 'خطا در حذف کاربر');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const getUserWorkspacePermissions = (userId: string) => permissions.filter((permission) => permission.userId === userId && permission.isActive);
@@ -446,11 +474,12 @@ export default function UsersManagementPage() {
         columns={columns}
         rowActions={(user) => {
           const disableAdminActions = currentUserRole === 'MANAGER' && user.role === 'ADMIN';
+          const disableDelete = currentUserRole !== 'ADMIN' || user.id === currentUserId;
           return [
             { label: 'مشاهده جزئیات', href: `/dashboard/users/${user.id}`, icon: FaEye, title: 'مشاهده جزئیات' },
             { label: 'ویرایش', href: `/dashboard/users/${user.id}/edit`, icon: FaEdit, disabled: disableAdminActions, title: disableAdminActions ? 'دسترسی برای مدیر فروش محدود است' : 'ویرایش' },
             { label: 'مدیریت دسترسی‌ها', href: `/dashboard/admin/permissions?userId=${user.id}`, icon: FaCog, disabled: disableAdminActions, title: disableAdminActions ? 'دسترسی برای مدیر فروش محدود است' : 'مدیریت دسترسی‌ها' },
-            { label: 'امنیت و حذف حساب', onClick: () => handleDeleteUser(user), icon: FaTrash, tone: 'danger', disabled: currentUserRole !== 'ADMIN', title: currentUserRole === 'ADMIN' ? 'امنیت و حذف حساب' : 'فقط مدیر سیستم' },
+            { label: 'حذف حساب استفاده‌نشده', onClick: () => handleDeleteUser(user), icon: FaTrash, tone: 'danger', disabled: disableDelete, title: user.id === currentUserId ? 'حذف حساب فعلی مجاز نیست' : currentUserRole !== 'ADMIN' ? 'فقط مدیر سیستم می‌تواند حساب را حذف کند' : 'حذف قطعی فقط در صورت نداشتن سابقه عملیاتی' },
           ];
         }}
         emptyState={<ErpEmptyState icon={FaUserTimes} title="هیچ کاربری یافت نشد" description="عبارت جستجو یا فیلترها را تغییر دهید." />}
@@ -498,6 +527,35 @@ export default function UsersManagementPage() {
           </ErpCard>
         )}
       </ErpListPage>
+
+      {showDeleteModal && userToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <ErpSection className="w-full max-w-md">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">تأیید حذف حساب استفاده‌نشده</h2>
+              <ErpButton label="بستن" onClick={() => setShowDeleteModal(false)} icon={FaTimes} variant="ghost" tone="neutral" disabled={deleting} />
+            </div>
+            <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
+              حساب <span className="font-semibold text-slate-900 dark:text-white">{userToDelete.firstName} {userToDelete.lastName}</span> فقط در صورتی حذف می‌شود که هیچ سابقه عملیاتی نداشته باشد. برای حساب‌های استفاده‌شده، از صفحه جزئیات و جریان حذف هویت ممیزی‌شده استفاده کنید.
+            </p>
+            <label className="mt-4 block text-sm font-medium text-slate-700 dark:text-slate-200">
+              برای تأیید، نام کاربری <span dir="ltr" className="font-bold">{userToDelete.username}</span> را وارد کنید.
+              <input
+                dir="ltr"
+                autoComplete="off"
+                value={deleteConfirmation}
+                onChange={(event) => setDeleteConfirmation(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-left text-sm outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100 dark:border-slate-700 dark:bg-slate-900"
+              />
+            </label>
+            {deleteError && <p className="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{deleteError}</p>}
+            <div className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <ErpButton label={deleting ? 'در حال حذف...' : 'حذف قطعی حساب'} onClick={confirmDeleteUser} tone="danger" variant="solid" disabled={deleting || deleteConfirmation !== userToDelete.username} />
+              <ErpButton label="لغو" onClick={() => setShowDeleteModal(false)} tone="neutral" variant="outline" disabled={deleting} />
+            </div>
+          </ErpSection>
+        </div>
+      )}
     </>
   );
 }

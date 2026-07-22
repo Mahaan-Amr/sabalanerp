@@ -80,7 +80,8 @@ export const usersAPI = {
   updateUser: (id: string, userData: any) =>
     api.put(`/users/${id}`, userData),
   
-  deleteUser: (id: string) => api.delete(`/users/${id}`),
+  deleteUser: (id: string, confirmationUsername: string) =>
+    api.delete(`/users/${id}`, { data: { confirmationUsername } }),
   getAuthentication: (id: string, params?: any) => api.get(`/users/${id}/authentication`, { params }),
   revokeUserSession: (id: string, sessionId: string, reason: string) => api.post(`/users/${id}/sessions/${sessionId}/revoke`, { reason }),
   revokeAllUserSessions: (id: string, reason: string) => api.post(`/users/${id}/sessions/revoke-all`, { reason }),

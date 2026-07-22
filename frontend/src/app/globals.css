@@ -201,6 +201,27 @@ body {
   color: #020617 !important;
 }
 
+/* Dark semantic surfaces keep their own foreground contrast in every theme. */
+[data-theme="light"] .dashboard-shell [data-erp-dark-surface] [data-erp-on-dark="primary"] {
+  color: #ffffff !important;
+}
+
+[data-theme="light"] .dashboard-shell [data-erp-dark-surface] [data-erp-on-dark="secondary"] {
+  color: #ccfbf1 !important;
+}
+
+[data-theme="light"] .dashboard-shell [data-erp-dark-surface] [data-erp-on-dark="success"] {
+  color: #d1fae5 !important;
+}
+
+[data-theme="light"] .dashboard-shell [data-erp-dark-surface] [data-erp-on-dark="warning"] {
+  color: #fef3c7 !important;
+}
+
+[data-theme="light"] .dashboard-shell [data-erp-dark-surface] [data-erp-on-dark="neutral"] {
+  color: #e2e8f0 !important;
+}
+
 [data-theme="light"] .dashboard-shell :where(
   .from-gray-900,
   .from-gray-800,

@@ -174,12 +174,14 @@ export function ErpCurrentShiftPanel({
   const titleId = useId();
   const badge = state === 'ACTIVE' ? 'فعال' : state === 'SCHEDULED_NOT_STARTED' ? 'شروع نشده' : 'بدون شیفت';
   const badgeClass = state === 'ACTIVE'
-    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/45 dark:text-emerald-100'
+    ? 'border border-emerald-300/20 bg-emerald-400/15 text-emerald-100'
     : overdue
-      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/45 dark:text-amber-100'
-      : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200';
+      ? 'border border-amber-300/20 bg-amber-400/15 text-amber-100'
+      : 'border border-white/10 bg-white/10 text-slate-100';
+  const badgeContrast = state === 'ACTIVE' ? 'success' : overdue ? 'warning' : 'neutral';
   return (
     <motion.section
+      data-erp-dark-surface
       aria-labelledby={titleId}
       initial={reduceMotion ? false : { opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
@@ -189,18 +191,18 @@ export function ErpCurrentShiftPanel({
       <div className="absolute -left-10 -top-14 h-36 w-36 rounded-full bg-teal-300/10 blur-2xl" aria-hidden="true" />
       <div className="relative flex items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-white/10 text-teal-100"><FaShieldAlt className="h-4 w-4" /></span>
+          <span data-erp-on-dark="secondary" className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-white/10 text-teal-100"><FaShieldAlt className="h-4 w-4" /></span>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 id={titleId} className="text-sm font-bold">شیفت جاری حراست</h2>
-              <span className={cx('rounded-full px-2.5 py-1 text-[11px] font-bold', badgeClass)}>{badge}</span>
+              <h2 id={titleId} data-erp-on-dark="primary" className="text-sm font-bold">شیفت جاری حراست</h2>
+              <span data-erp-on-dark={badgeContrast} className={cx('rounded-full px-2.5 py-1 text-[11px] font-bold', badgeClass)}>{badge}</span>
               {overdue && <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-200"><FaExclamationTriangle className="h-3 w-3" /> شروع شیفت به تأخیر افتاده است</span>}
             </div>
             {state === 'NONE' ? (
               <p className="mt-3 text-sm text-teal-50/80">شیفت فعال یا برنامه‌ریزی‌شده‌ای وجود ندارد</p>
             ) : (
               <>
-                <p className="mt-3 truncate text-lg font-black">{personnelName}</p>
+                <p data-erp-on-dark="primary" className="mt-3 truncate text-lg font-black">{personnelName}</p>
                 <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-teal-50/70">
                   {personnelPosition && <span>{personnelPosition}</span>}
                   {coverageLabel && <span>{coverageLabel}</span>}

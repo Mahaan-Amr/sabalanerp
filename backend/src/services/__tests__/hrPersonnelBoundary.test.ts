@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { resolveExistingPersonnelLink, type PersonnelLinkClient } from '../hrPersonnelBoundary';
+import { assertSubsequentEmploymentRelationship, resolveExistingPersonnelLink, type PersonnelLinkClient } from '../hrPersonnelBoundary';
 
 const client = (record: { id: string; user: { id: string } | null } | null) => {
   let calls = 0;
@@ -15,6 +15,9 @@ const client = (record: { id: string; user: { id: string } | null } | null) => {
 };
 
 const run = async () => {
+  assert.throws(() => assertSubsequentEmploymentRelationship(0), /پرونده جذب یا مسیر صریح ثبت استثنایی/);
+  assert.doesNotThrow(() => assertSubsequentEmploymentRelationship(1));
+
   {
     const db = client(null);
     const result = await resolveExistingPersonnelLink(db as unknown as PersonnelLinkClient, { personnelId: null });

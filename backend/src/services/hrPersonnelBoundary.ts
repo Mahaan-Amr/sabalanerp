@@ -27,3 +27,9 @@ export const resolveExistingPersonnelLink = async (
   }
   return personnel.id;
 };
+
+export const assertSubsequentEmploymentRelationship = (existingRelationshipCount: number) => {
+  if (existingRelationshipCount < 1) {
+    throw new Error('رابطه استخدامی اولیه باید از پرونده جذب یا مسیر صریح ثبت استثنایی ایجاد شود.');
+  }
+};

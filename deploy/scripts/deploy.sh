@@ -34,8 +34,8 @@ git submodule update --init --recursive
 echo "Building images..."
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml build
 
-echo "Starting database first..."
-docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml up -d postgres
+echo "Starting database and antivirus services first..."
+docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml up -d postgres clamav
 
 BACKUP_DIR="${BACKUP_DIR:-backups}"
 BACKUP_TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
@@ -79,4 +79,23 @@ echo "Starting full stack..."
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml up -d
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml up -d --force-recreate --no-deps nginx
 
-echo "Deployment completed."
+echo "Verifying HR document antivirus scanning..."
+if ! docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml exec -T backend sh -c '
+  set -eu
+  test "${HR_HIRING_ANTIVIRUS_COMMAND:-}" = "/app/scripts/hr-clamdscan.sh"
+  command -v clamdscan >/dev/null
+  test -x "${HR_HIRING_ANTIVIRUS_COMMAND}"
+  test_file="/tmp/sabalanerp-antivirus-healthcheck.txt"
+  printf "Sabalan ERP clean antivirus deployment check\n" > "${test_file}"
+  if ! "${HR_HIRING_ANTIVIRUS_COMMAND}" "${test_file}"; then
+    rm -f "${test_file}"
+    exit 1
+  fi
+  rm -f "${test_file}"
+'; then
+  echo "HR document antivirus verification failed."
+  echo "Inspect it with: docker compose --env-file ${ENV_FILE} -f docker-compose.prod.yml logs clamav backend"
+  exit 1
+fi
+
+echo "Deployment completed. HR document antivirus scanning is healthy."

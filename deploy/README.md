@@ -20,9 +20,16 @@ This script:
 - Fetches latest code from `origin/main` and fast-forwards the working tree
 - Initializes and updates Git submodules
 - Builds images
-- Starts Postgres
+- Starts Postgres and the private ClamAV service
 - Runs `prisma migrate deploy`
-- Starts full stack (`nginx`, `frontend`, `backend`, `inquiry`, `postgres`)
+- Starts full stack (`nginx`, `frontend`, `backend`, `inquiry`, `postgres`, `clamav`)
+- Verifies that the backend can stream and scan a clean HR document
+
+ClamAV definitions are persisted in a Docker volume and refreshed automatically. No ClamAV package or public port is required on the Ubuntu host. On a new server, the first deployment can take several minutes while ClamAV initializes. If antivirus verification fails, inspect the private service with:
+
+```bash
+docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml logs clamav backend
+```
 
 ## 3) Issue TLS certificate (Let's Encrypt)
 ```bash

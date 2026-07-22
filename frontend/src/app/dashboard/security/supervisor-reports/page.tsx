@@ -3,14 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FaBan, FaCheck, FaChevronDown, FaClipboardCheck, FaClock, FaPaperclip, FaPlus, FaRedo, FaRoute, FaStop, FaTimes, FaUserPlus } from 'react-icons/fa';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
-import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpShiftTimeline } from '@/components/erp';
 import { securityAPI } from '@/lib/api';
 import { askSecurityAction } from '@/components/SecurityNoticeHost';
+import PersianCalendar from '@/lib/persian-calendar';
 
 const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
 const labelClass = 'mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200';
 
-const dateTimeFa = (value?: string | null) => value ? new Date(value).toLocaleString('fa-IR') : '-';
+const dateTimeFa = (value?: string | null) => value ? PersianCalendar.formatForDisplay(value, true) : '-';
 const durationMinutes = (start?: string, end?: string | null) => {
   if (!start) return 0;
   const to = end ? new Date(end).getTime() : Date.now();
@@ -34,6 +35,7 @@ export default function SecuritySupervisorReportsPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [participantPickerOpen, setParticipantPickerOpen] = useState(false);
+  const [readOnly, setReadOnly] = useState(false);
   const participantPickerRef = useRef<HTMLDivElement>(null);
 
   const activePatrol = useMemo(() => session?.patrolSessions?.find((patrol: any) => patrol.status === 'ACTIVE'), [session]);
@@ -47,6 +49,19 @@ export default function SecuritySupervisorReportsPage() {
     () => participants.filter((user) => form.participantIds.includes(user.id)),
     [form.participantIds, participants]
   );
+  const timelineEntries = useMemo(() => (session?.logEntries || []).map((entry: any) => ({
+    id: entry.id,
+    rowNumber: entry.rowNumber,
+    status: entry.status,
+    title: `${entry.categoryNameSnapshot}${entry.reportTypeNameSnapshot ? ` / ${entry.reportTypeNameSnapshot}` : ''}`,
+    typeDescription: entry.reportType?.description || null,
+    description: entry.description || null,
+    participants: (entry.participants || []).map(logParticipantName),
+    createdAt: entry.createdAt,
+    voidReason: entry.voidReason || null,
+    voidedAt: entry.voidedAt || null,
+    attachments: (entry.attachments || []).map((attachment: any) => ({ id: attachment.id, name: attachment.originalName })),
+  })), [session]);
 
   useEffect(() => {
     if (!participantPickerOpen) return;
@@ -73,6 +88,7 @@ export default function SecuritySupervisorReportsPage() {
       if (logResponse.data.success) {
         setSession(logResponse.data.data.session);
         setPersonnel(logResponse.data.data.personnel);
+        setReadOnly(Boolean(logResponse.data.data.readOnly));
       }
       if (participantResponse.data.success) setParticipants(participantResponse.data.data || []);
     } catch (err: any) {
@@ -169,21 +185,22 @@ export default function SecuritySupervisorReportsPage() {
     <ErpPage
       eyebrow="حراست"
       title="گزارش شیفت"
-      description="ثبت گزارش‌های لحظه‌ای و گشت‌زنی‌های شیفت فعال با زمان دقیق و سابقه ابطال."
+      description={readOnly ? 'نمایش فقط‌خواندنی گزارش کامل شیفت فعال' : 'ثبت گزارش‌های لحظه‌ای و گشت‌زنی‌های شیفت فعال با زمان دقیق و سابقه ابطال.'}
       actions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: loadData, tone: 'neutral' }]}
       metrics={[
         { label: 'گزارش‌ها', value: (session?.logEntries?.length || 0).toLocaleString('fa-IR'), icon: FaClipboardCheck, tone: 'info' },
         { label: 'گشت‌زنی‌ها', value: (session?.patrolSessions?.length || 0).toLocaleString('fa-IR'), icon: FaRoute, tone: activePatrol ? 'warning' : 'success' },
       ]}
     >
-      {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{message}</div>}
+      {!readOnly && message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{message}</div>}
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
+      {readOnly && session && <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-800 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">این گزارش برای مدیر فقط‌خواندنی است و هیچ عملیات شیفتی از این صفحه در دسترس نیست.</div>}
 
       {!session ? (
         <ErpEmptyState icon={FaClock} title="شیفت فعال برای شما پیدا نشد" description={personnel ? 'برای ثبت گزارش، ابتدا شیفت برنامه‌ریزی‌شده خود را شروع کنید.' : 'کاربر فعلی جزو نفرات حراست نیست.'} />
       ) : (
         <>
-          <ErpSection title="ثبت گزارش لحظه‌ای" description="هر ردیف به شیفت فعال اضافه می‌شود و افراد مرتبط به صورت انتخابی کنار همان گزارش ذخیره می‌شوند.">
+          {!readOnly && <ErpSection title="ثبت گزارش لحظه‌ای" description="هر ردیف به شیفت فعال اضافه می‌شود و افراد مرتبط به صورت انتخابی کنار همان گزارش ذخیره می‌شوند.">
             {activePatrol && (
               <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
                 <p className="text-sm font-semibold text-amber-800 dark:text-amber-100">
@@ -299,10 +316,10 @@ export default function SecuritySupervisorReportsPage() {
               <ErpButton label="ثبت گزارش" icon={FaPlus} onClick={createEntry} disabled={saving || !form.categoryId || (showReportTypes && !form.reportTypeId) || !hasMeaningfulDetail} variant="solid" />
             </div>
             {selectedCategory?.useReportTypes && categoryTypes.length === 0 && <p className="mt-3 text-sm text-amber-700">برای این دسته‌بندی هنوز نوع گزارش فعالی تعریف نشده است.</p>}
-          </ErpSection>
+          </ErpSection>}
 
           <ErpSection title="گشت‌زنی">
-            {!activePatrol ? (
+            {!readOnly && (!activePatrol ? (
               <ErpButton label="شروع گشت‌زنی" icon={FaRoute} onClick={startPatrol} disabled={saving} variant="solid" tone="success" />
             ) : (
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
@@ -313,7 +330,7 @@ export default function SecuritySupervisorReportsPage() {
                 </label>
                 <ErpButton label="پایان گشت‌زنی" icon={FaStop} onClick={finishPatrol} disabled={saving || !patrolDescription.trim()} tone="warning" variant="solid" />
               </div>
-            )}
+            ))}
 
             <div className="mt-4 space-y-3">
               {(session.patrolSessions || []).map((patrol: any) => (
@@ -331,33 +348,14 @@ export default function SecuritySupervisorReportsPage() {
             </div>
           </ErpSection>
 
-          <ErpSection title="ردیف‌های گزارش شیفت">
-            {session.logEntries?.length === 0 ? (
-              <ErpEmptyState icon={FaClipboardCheck} title="گزارش لحظه‌ای ثبت نشده است" />
-            ) : (
-              <div className="space-y-3">
-                {session.logEntries.map((entry: any) => (
-                  <ErpCard key={entry.id} className={`p-4 ${entry.status === 'VOIDED' ? 'opacity-75' : ''}`}>
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-semibold text-slate-900 dark:text-white">ردیف {entry.rowNumber.toLocaleString('fa-IR')}</span>
-                          <ErpBadge tone={entry.status === 'VOIDED' ? 'danger' : 'info'}>{entry.status === 'VOIDED' ? 'باطل شده' : `${entry.categoryNameSnapshot}${entry.reportTypeNameSnapshot ? ` / ${entry.reportTypeNameSnapshot}` : ''}`}</ErpBadge>
-                        </div>
-                        {entry.reportType?.description && <p className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">توضیح نوع گزارش: {entry.reportType.description}</p>}
-                        {entry.description && <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{entry.description}</p>}
-                        {entry.participants?.length > 0 && <p className="mt-2 text-xs text-slate-500">افراد مرتبط: {entry.participants.map(logParticipantName).join('، ')}</p>}
-                        {entry.attachments?.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{entry.attachments.map((attachment: any) => <img key={attachment.id} src={`/api/security/shift-log/attachments/${attachment.id}`} alt={attachment.originalName} className="h-20 w-20 rounded-lg object-cover" />)}</div>}
-                        <p className="mt-2 text-xs text-slate-500">ثبت: {dateTimeFa(entry.createdAt)}</p>
-                        {entry.status === 'VOIDED' && <p className="mt-2 text-sm text-red-700 dark:text-red-300">دلیل ابطال: {entry.voidReason} · زمان ابطال: {dateTimeFa(entry.voidedAt)}</p>}
-                      </div>
-                      {entry.status !== 'VOIDED' && <ErpButton label="ابطال گزارش" icon={FaBan} tone="danger" variant="soft" onClick={() => voidEntry(entry)} disabled={saving} />}
-                    </div>
-                  </ErpCard>
-                ))}
-              </div>
-            )}
-          </ErpSection>
+          <ErpShiftTimeline
+            title="ردیف‌های گزارش شیفت"
+            entries={timelineEntries}
+            formatTimestamp={dateTimeFa}
+            showAttachmentImages
+            attachmentHref={(attachmentId) => `/api/security/shift-log/attachments/${attachmentId}`}
+            onVoid={readOnly ? undefined : voidEntry}
+          />
         </>
       )}
     </ErpPage>

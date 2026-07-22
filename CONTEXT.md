@@ -1239,6 +1239,14 @@ _Avoid_: using a static date input, showing a guard the entire team's rota, or o
 The workspace feedback pattern: inline validation for field-level corrections, non-blocking in-app notices for routine outcomes, and explicit in-app confirmation or reason dialogs for destructive or audited actions.
 _Avoid_: native browser alerts or prompts, generic errors detached from their operation, or confirmations for harmless navigation
 
+**داشبورد حراست**:
+A shared operational-awareness surface for users of the حراست workspace. Permitted users receive today's attendance conditions and navigation, while active-shift identity and live reports are visible only to the active guard and security managers/admins; managers/admins remain read-only on the dashboard and complete shift-report view.
+_Avoid_: treating the entire dashboard as manager-only, duplicating attendance or shift-report operations on it, exposing another guard's active-shift identity or records to ordinary read-only users, or preventing managers/admins from observing the active shift
+
+**وضعیت امروز حراست**:
+The dashboard's calendar-day attendance summary for today's roster, limited to غایب، تأخیر، مأموریت، and مرخصی. These are independent operational conditions rather than parts of one total: غایب and تأخیر use the derived attendance classification, while مأموریت and مرخصی count approved authorizations overlapping today, so one person may contribute to more than one value. The summary is independent of the active security shift, whose live-report timeline may cross midnight.
+_Avoid_: including total or present personnel, adding a dashboard date picker, redefining the summary around the active shift session, forcing the four values to be mutually exclusive, or filtering مأموریت and مرخصی only by the primary attendance status
+
 **طراحی عملیاتی موبایل حراست**:
 Core حراست operational pages must follow Sabalan ERP's shared design system, mobile-first RTL layout, teal primary actions, neutral surfaces, and semantic status tones. The deepest mobile-first treatment belongs to داشبورد حراست, حضور و غیاب, گزارش شیفت, خودرویی, and شیفت‌ها; manager/config/report pages remain responsive and consistent without becoming one-handed field workflows.
 _Avoid_: reviving the older red/rose security theme, table-only mobile attendance, cramped side-by-side fields that break Persian labels, or hiding the core action list behind horizontal scrolling
@@ -1284,6 +1292,10 @@ _Avoid_: exposing configuration candidates in normal dashboards and reports, or 
 **جایگزینی شیفت حراست**:
 A slot-specific exception that preserves the annual A→B→C baseline while assigning another eligible security user as the actual worker for an absent planned guard. Later planned assignments do not shift, and rest or overlap conflicts require a manager override reason.
 _Avoid_: regenerating the rotation after leave, transferring ownership of later slots to the substitute, or hiding rest violations created by coverage
+
+**نیروی مؤثر شیفت فعال حراست**:
+The person actually responsible for the current active shift session, whether they are the originally planned guard, a replacement, or temporary coverage. Authorized active-shift awareness identifies this person first and retains the planned-versus-coverage relationship as secondary context.
+_Avoid_: presenting the originally planned guard as currently on duty when someone else is operating the session, or flattening replacement and temporary coverage into an unexplained name
 
 **تحویل شیفت حراست**:
 The controlled boundary where the outgoing guard submits the shift report and ends the active session before the incoming assigned guard starts the next one. The first active session of a newly published current plan may be opened by publication itself; later boundaries are not auto-started in the first version and still require deliberate closure/start handling. A manager may force-close an unclosable session only with an audited reason.

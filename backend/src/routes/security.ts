@@ -12,6 +12,7 @@ import { generatePdfFromHtml } from '../utils/pdf';
 import { renderSecurityAttendanceReportHtml, securityAttendanceStatusLabel, SecurityAttendanceReportRow } from '../utils/securityAttendanceReport';
 import { addSecurityDays, parseSecurityBusinessDate, securityNowTime, securityPersianDate, securityPersianDateWithWeekday } from '../utils/securityBusinessDate';
 import { calculateDelayMinutes, calculateScheduledOvertime, loadApplicableWorkSchedules, resolveWorkScheduleDay, scheduledStartHasPassed } from '../utils/personnelWorkSchedule';
+import { buildDashboardRecentReports, buildSecurityDashboardAwareness } from '../services/securityDashboardAwareness';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -24,6 +25,13 @@ const leaveStatuses: AttendanceStatus[] = [
   AttendanceStatus.SICK_LEAVE,
   AttendanceStatus.VACATION
 ];
+const leaveExceptionTypes = new Set<ExceptionType>([
+  ExceptionType.HOURLY_LEAVE,
+  ExceptionType.SICK_LEAVE,
+  ExceptionType.VACATION,
+  ExceptionType.EMERGENCY_LEAVE,
+  ExceptionType.PERSONAL_LEAVE,
+]);
 
 const addDays = addSecurityDays;
 const parseDayQuery = parseSecurityBusinessDate;
@@ -311,9 +319,10 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
     const record = recordsByPersonnel.get(personnel.id);
     const movement = intervalSummary(record?.intervals || []);
     const personExceptions = approvedExceptions.filter((item) => (item.personnelId || item.employee?.personnelId) === personnel.id);
+    const personLeaves = personExceptions.filter((item) => leaveExceptionTypes.has(item.exceptionType));
     const personMissions = approvedMissions.filter((item) => (item.personnelId || item.employee?.personnelId) === personnel.id);
-    const fullDayLeave = personExceptions.find((item) => item.exceptionType !== ExceptionType.HOURLY_LEAVE);
-    const hourlyLeaves = personExceptions.filter((item) => item.exceptionType === ExceptionType.HOURLY_LEAVE);
+    const fullDayLeave = personLeaves.find((item) => item.exceptionType !== ExceptionType.HOURLY_LEAVE);
+    const hourlyLeaves = personLeaves.filter((item) => item.exceptionType === ExceptionType.HOURLY_LEAVE);
     const openPreviousAttendance = openPreviousByPersonnel.get(personnel.id);
     const resolvedSchedule = resolveWorkScheduleDay(workSchedules.get(personnel.id), targetDate);
     const scheduleStatus = record?.workScheduleStatus || resolvedSchedule.status;
@@ -366,6 +375,7 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
       presencePending: movement.isOpen,
       accountedWorkMinutes: movement.isOpen ? null : unionMinutes(accountedWindows),
       approvedExceptions: personExceptions,
+      approvedLeaves: personLeaves,
       approvedMissions: personMissions,
       workScheduleStatus: scheduleStatus,
       scheduledStartTime,
@@ -390,7 +400,7 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
     absent: attendanceSummary.filter((record) => record.status === AttendanceStatus.ABSENT).length,
     late: attendanceSummary.filter((record) => record.status === AttendanceStatus.LATE).length,
     mission: attendanceSummary.filter((record) => record.approvedMissions.length > 0).length,
-    leave: attendanceSummary.filter((record) => record.approvedExceptions.length > 0).length,
+    leave: attendanceSummary.filter((record) => record.approvedLeaves.length > 0).length,
     exception: attendanceSummary.filter((record) => record.status === AttendanceStatus.ABSENT || record.status === AttendanceStatus.LATE).length,
     signed: attendanceRecords.filter((record) => Boolean(record.digitalSignature)).length
   };
@@ -1199,6 +1209,46 @@ router.get('/shift-workflow/current', protect, securityView, async (_req: AuthRe
   res.json({ success: true, data: { activeSession, currentSlot } });
 });
 
+router.get('/dashboard/current-shift', protect, securityView, requireFeatureAccess(FEATURES.SECURITY_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
+  try {
+    await markProbableNoShows();
+    const now = new Date();
+    const [activeSession, currentSlot] = await Promise.all([
+      prisma.securityShiftSession.findFirst({
+        where: { status: SecurityShiftSessionStatus.ACTIVE },
+        include: activeShiftLogInclude,
+        orderBy: { startedAt: 'desc' },
+      }),
+      prisma.securityShiftPlanSlot.findFirst({
+        where: { plan: { status: SecurityShiftPlanStatus.PUBLISHED }, startsAt: { lte: now }, endsAt: { gt: now } },
+        include: slotInclude,
+        orderBy: { startsAt: 'desc' },
+      }),
+    ]);
+    const data = buildSecurityDashboardAwareness({
+      actor: {
+        userId: req.user!.id,
+        role: req.user!.role,
+        workspacePermission: (req as any).workspacePermission,
+      },
+      activeSession: activeSession as any,
+      currentSlot: currentSlot as any,
+      now,
+    });
+    if (!data.authorized) return res.json({ success: true, data });
+    res.json({
+      success: true,
+      data: {
+        ...data,
+        recentReports: data.overview?.state === 'ACTIVE' ? buildDashboardRecentReports((activeSession as any)?.logEntries || []) : [],
+      },
+    });
+  } catch (error) {
+    console.error('Get security dashboard current shift error:', error);
+    res.status(500).json({ success: false, error: 'دریافت وضعیت شیفت جاری ناموفق بود.' });
+  }
+});
+
 router.post('/shift-plans', protect, securityAdmin, [
   body('title').isString().trim().notEmpty(), body('persianYear').isInt(), body('anchorAt').isISO8601(), body('generateUntil').isISO8601(),
   body('slotDurationMinutes').isInt({ min: 60, max: 1440 }), body('earlyArrivalMinutes').isInt({ min: 0, max: 240 }), body('lateAlertMinutes').isInt({ min: 0, max: 240 }),
@@ -1599,9 +1649,21 @@ router.put('/attendance-roster/:personnelId/remove', protect, securityAdmin, [
 
 router.get('/shift-log/active', protect, securityView, async (req: AuthRequest, res: Response) => {
   try {
-    const { personnel, session } = await getActiveShiftSessionForUser(req.user!.id);
-    if (!personnel) return res.status(403).json({ success: false, error: 'کاربر جزو نفرات حراست نیست.' });
-    res.json({ success: true, data: { personnel, session } });
+    const own = await getActiveShiftSessionForUser(req.user!.id);
+    if (own.session) return res.json({ success: true, data: { personnel: own.personnel, session: own.session, readOnly: false } });
+
+    const manager = req.user!.role === 'ADMIN' || (req as any).workspacePermission === WORKSPACE_PERMISSIONS.ADMIN;
+    if (manager) {
+      const session = await prisma.securityShiftSession.findFirst({
+        where: { status: SecurityShiftSessionStatus.ACTIVE },
+        include: activeShiftLogInclude,
+        orderBy: { startedAt: 'desc' },
+      });
+      return res.json({ success: true, data: { personnel: session?.personnel || own.personnel, session, readOnly: true } });
+    }
+
+    if (!own.personnel) return res.status(403).json({ success: false, error: 'کاربر جزو نفرات حراست نیست.' });
+    res.json({ success: true, data: { personnel: own.personnel, session: null, readOnly: false } });
   } catch (error) {
     console.error('Get active shift log error:', error);
     res.status(500).json({ success: false, error: 'دریافت گزارش شیفت ناموفق بود.' });
@@ -2457,7 +2519,8 @@ router.get('/attendance/daily', protect, requireWorkspaceAccess(WORKSPACES.SECUR
 // @access  Private/Security Personnel
 router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SECURITY_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: AuthRequest, res: Response) => {
   try {
-    const [securityPersonnel, daily, operationalIds] = await Promise.all([
+    const now = new Date();
+    const [securityPersonnel, daily, operationalIds, activeShiftOperator, currentScheduledSlot] = await Promise.all([
       prisma.securityPersonnel.findUnique({
       where: { userId: req.user!.id },
       include: { 
@@ -2477,9 +2540,36 @@ router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SECURI
       }
       }),
       buildDailyAttendance(req.query),
-      currentOperationalSecurityIds()
+      currentOperationalSecurityIds(),
+      prisma.securityShiftSession.findFirst({
+        where: { status: SecurityShiftSessionStatus.ACTIVE },
+        select: { personnel: { select: { userId: true } } },
+        orderBy: { startedAt: 'desc' },
+      }),
+      prisma.securityShiftPlanSlot.findFirst({
+        where: { plan: { status: SecurityShiftPlanStatus.PUBLISHED }, startsAt: { lte: now }, endsAt: { gt: now } },
+        select: {
+          plannedPersonnel: { select: { userId: true } },
+          replacementPersonnel: { select: { userId: true } },
+          temporaryCoverage: {
+            where: { startsAt: { lte: now }, endsAt: { gt: now } },
+            select: { personnel: { select: { userId: true } } },
+            orderBy: { startsAt: 'desc' },
+            take: 1,
+          },
+        },
+        orderBy: { startsAt: 'desc' },
+      })
     ]);
     const visibleSecurityPersonnel = securityPersonnel && operationalIds.includes(securityPersonnel.id) ? securityPersonnel : null;
+    const isShiftManager = req.user!.role === 'ADMIN' || (req as any).workspacePermission === WORKSPACE_PERMISSIONS.ADMIN;
+    const scheduledOperatorId = currentScheduledSlot?.temporaryCoverage[0]?.personnel.userId
+      || currentScheduledSlot?.replacementPersonnel?.userId
+      || currentScheduledSlot?.plannedPersonnel.userId;
+    const shiftAwarenessEligible = isShiftManager
+      || (activeShiftOperator
+        ? activeShiftOperator.personnel.userId === req.user!.id
+        : scheduledOperatorId === req.user!.id);
 
     const stats = {
       currentShift: visibleSecurityPersonnel?.shift || null,
@@ -2488,6 +2578,7 @@ router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SECURI
         position: visibleSecurityPersonnel.position,
         department: visibleSecurityPersonnel.user.department?.namePersian
       } : null,
+      shiftAwarenessEligible,
       todayStats: daily.stats,
       recentActivity: daily.attendanceRecords.slice(-5).map(record => ({
         employeeId: record.personnelId || record.employeeId,

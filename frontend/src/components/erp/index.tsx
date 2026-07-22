@@ -785,3 +785,5 @@ export function ErpTwoColumn({ main, aside }: { main: React.ReactNode; aside: Re
     </div>
   );
 }
+
+export * from './DashboardPrimitives';

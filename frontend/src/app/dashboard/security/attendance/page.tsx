@@ -21,6 +21,11 @@ import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianTimePicker, { formatTime12 } from '@/components/PersianTimePicker';
 import { departmentsAPI, securityAPI } from '@/lib/api';
+import {
+  matchesAttendanceFilter,
+  parseAttendanceDashboardQuery,
+  type DashboardAttendanceCondition,
+} from '../securityDashboardViewModel';
 
 interface AttendanceRecord {
   id: string;
@@ -63,6 +68,7 @@ interface AttendanceRecord {
   presencePending?: boolean;
   accountedWorkMinutes?: number | null;
   approvedExceptions?: any[];
+  approvedLeaves?: any[];
   approvedMissions?: any[];
   shift?: {
     id: string;
@@ -139,7 +145,7 @@ const getStatusLabel = (status: string) => {
     case 'NON_WORKING_DAY':
       return 'روز غیرکاری';
     case 'MISSION':
-      return 'ماموریت';
+      return 'مأموریت';
     case 'HOURLY_LEAVE':
       return 'مرخصی ساعتی';
     case 'SICK_LEAVE':
@@ -192,6 +198,8 @@ export default function AttendancePage() {
   const [selectedDate, setSelectedDate] = useState<string>(PersianCalendar.now());
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [conditionFilter, setConditionFilter] = useState<DashboardAttendanceCondition | null>(null);
+  const [queryInitialized, setQueryInitialized] = useState(false);
   const [departmentId, setDepartmentId] = useState('');
   const [departments, setDepartments] = useState<Department[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -222,8 +230,16 @@ export default function AttendancePage() {
   };
 
   useEffect(() => {
-    fetchAttendanceData();
-  }, [selectedDate, departmentId]);
+    const query = parseAttendanceDashboardQuery(new URLSearchParams(window.location.search));
+    if (query.date) setSelectedDate(query.date);
+    setStatusFilter(query.status);
+    setConditionFilter(query.condition);
+    setQueryInitialized(true);
+  }, []);
+
+  useEffect(() => {
+    if (queryInitialized) fetchAttendanceData();
+  }, [selectedDate, departmentId, queryInitialized]);
 
   useEffect(() => {
     const loadFilters = async () => {
@@ -245,9 +261,9 @@ export default function AttendancePage() {
       record.employee.firstName.toLowerCase().includes(search) ||
       record.employee.lastName.toLowerCase().includes(search) ||
       (record.employee.username || '').toLowerCase().includes(search);
-    const matchesStatus = statusFilter === 'ALL' || record.status === statusFilter;
+    const matchesStatus = matchesAttendanceFilter(record, statusFilter, conditionFilter);
     return matchesSearch && matchesStatus;
-  }), [attendanceRecords, searchTerm, statusFilter]);
+  }), [attendanceRecords, searchTerm, statusFilter, conditionFilter]);
 
   const openAttendanceDialog = (record: AttendanceRecord, action: AttendanceAction) => {
     const defaultTime = currentTimeValue();
@@ -328,7 +344,7 @@ export default function AttendancePage() {
     );
   }
 
-  const rosterScopeEmpty = (stats?.totalEmployees || 0) === 0 && attendanceRecords.length === 0 && !searchTerm.trim() && statusFilter === 'ALL';
+  const rosterScopeEmpty = (stats?.totalEmployees || 0) === 0 && attendanceRecords.length === 0 && !searchTerm.trim() && statusFilter === 'ALL' && !conditionFilter;
 
   return (
     <ErpPage
@@ -340,8 +356,8 @@ export default function AttendancePage() {
         { label: 'کل کارکنان', value: stats?.totalEmployees.toLocaleString('fa-IR') || '۰', icon: FaUsers, tone: 'neutral' },
         { label: 'حاضر', value: stats?.present.toLocaleString('fa-IR') || '۰', icon: FaUserCheck, tone: 'success' },
         { label: 'غایب', value: stats?.absent.toLocaleString('fa-IR') || '۰', icon: FaUserTimes, tone: 'danger' },
-        { label: 'تاخیر', value: stats?.late.toLocaleString('fa-IR') || '۰', icon: FaClock, tone: 'warning' },
-        { label: 'ماموریت', value: stats?.mission.toLocaleString('fa-IR') || '۰', icon: FaClock, tone: 'info' },
+        { label: 'تأخیر', value: stats?.late.toLocaleString('fa-IR') || '۰', icon: FaClock, tone: 'warning' },
+        { label: 'مأموریت', value: stats?.mission.toLocaleString('fa-IR') || '۰', icon: FaClock, tone: 'info' },
         { label: 'مرخصی', value: stats?.leave.toLocaleString('fa-IR') || '۰', icon: FaCalendarAlt, tone: 'purple' },
       ]}
     >
@@ -382,15 +398,29 @@ export default function AttendancePage() {
           </label>
           <label>
             <span className={labelClass}>وضعیت</span>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className={inputClass}>
+            <select
+              value={conditionFilter ? `CONDITION_${conditionFilter}` : statusFilter}
+              onChange={(event) => {
+                if (event.target.value === 'CONDITION_MISSION' || event.target.value === 'CONDITION_LEAVE') {
+                  setStatusFilter('ALL');
+                  setConditionFilter(event.target.value === 'CONDITION_MISSION' ? 'MISSION' : 'LEAVE');
+                  return;
+                }
+                setConditionFilter(null);
+                setStatusFilter(event.target.value);
+              }}
+              className={inputClass}
+            >
               <option value="ALL">همه وضعیت‌ها</option>
               <option value="PRESENT">حاضر</option>
               <option value="ABSENT">غایب</option>
-              <option value="LATE">تاخیر</option>
+              <option value="LATE">تأخیر</option>
               <option value="PENDING">در انتظار شروع</option>
               <option value="NON_WORKING_DAY">روز غیرکاری</option>
-              <option value="MISSION">ماموریت</option>
+              <option value="MISSION">مأموریت</option>
               <option value="HOURLY_LEAVE">مرخصی ساعتی</option>
+              <option value="CONDITION_MISSION">دارای مأموریت تأییدشده</option>
+              <option value="CONDITION_LEAVE">دارای مرخصی تأییدشده</option>
             </select>
           </label>
         </div>

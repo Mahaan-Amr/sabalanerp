@@ -784,6 +784,7 @@ export const securityAPI = {
     return api.get('/security/attendance/daily', { params });
   },
   getDashboardStats: (params?: any) => api.get('/security/dashboard/stats', { params }),
+  getDashboardCurrentShift: () => api.get('/security/dashboard/current-shift'),
   getOperationalPersonnel: () => api.get('/security/operational-personnel'),
   getSecurityReportSummary: (params?: any) => api.get('/security/reports/summary', { params }),
   getSecurityPersonnelPerformance: (params?: any) => api.get('/security/reports/security-personnel-performance', { params }),

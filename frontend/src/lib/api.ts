@@ -97,7 +97,8 @@ export const usersAPI = {
   updateUser: (id: string, userData: any) =>
     api.put(`/users/${id}`, userData),
   
-  deleteUser: (id: string) => api.delete(`/users/${id}`),
+  deleteUser: (id: string, confirmationUsername: string) =>
+    api.delete(`/users/${id}`, { data: { confirmationUsername } }),
 };
 
 export const personnelAPI = {

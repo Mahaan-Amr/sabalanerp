@@ -1,11 +1,12 @@
-import express, { Request, Response } from 'express';
+import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import bcrypt from 'bcryptjs';
 import { WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { FEATURE_PERMISSIONS, FEATURE_WORKSPACE_MAP, FEATURES } from '../middleware/feature';
 import { resolveExistingPersonnelLink } from '../services/hrPersonnelBoundary';
+import { assertUserCanBeDeleted, collectUserDeletionBlockers, UserDeletionPolicyError } from '../services/userDeletionPolicy';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -651,10 +652,19 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
 // @desc    Delete user
 // @route   DELETE /api/users/:id
 // @access  Private/Admin
-router.delete('/:id', protect, authorize('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
+router.delete('/:id', protect, authorize('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
     const user = await prisma.user.findUnique({
-      where: { id: req.params.id }
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        isActive: true,
+        personnelId: true,
+        securityPersonnel: { select: { id: true } },
+        _count: true
+      }
     });
 
     if (!user) {
@@ -664,26 +674,76 @@ router.delete('/:id', protect, authorize('ADMIN', 'MANAGER'), async (req: Reques
       });
     }
 
-    if ((req as AuthRequest).user?.role === 'MANAGER' && user.role === 'ADMIN') {
-      return res.status(403).json({
+    const [adminCount, activeAdminCount] = user.role === 'ADMIN'
+      ? await Promise.all([
+        prisma.user.count({ where: { role: 'ADMIN' } }),
+        prisma.user.count({ where: { role: 'ADMIN', isActive: true } })
+      ])
+      : [0, 0];
+
+    assertUserCanBeDeleted({
+      actor: req.user!,
+      target: user,
+      confirmationUsername: req.body?.confirmationUsername,
+      adminCount,
+      activeAdminCount
+    });
+
+    const operationalBlockers = collectUserDeletionBlockers(
+      user._count as unknown as Record<string, number>,
+      { hasSecurityPersonnel: Boolean(user.securityPersonnel) }
+    );
+    if (operationalBlockers.length > 0) {
+      return res.status(409).json({
         success: false,
-        error: 'Managers cannot delete admin users'
+        code: 'USER_DELETE_OPERATIONAL_HISTORY',
+        error: 'این حساب به سوابق عملیاتی متصل است و حذف آن ممکن است داده‌های کاری را از بین ببرد. حساب را غیرفعال کنید.',
+        details: { relations: operationalBlockers }
       });
     }
 
-    await prisma.user.delete({
-      where: { id: req.params.id }
+    const cleanup = await prisma.$transaction(async (tx) => {
+      const [workspacePermissions, featurePermissions, hiringAuthorities] = await Promise.all([
+        tx.workspacePermission.count({ where: { userId: user.id } }),
+        tx.featurePermission.count({ where: { userId: user.id } }),
+        tx.hrHiringAuthority.count({ where: { userId: user.id } })
+      ]);
+
+      await tx.hrHiringAuthority.deleteMany({ where: { userId: user.id } });
+      await tx.featurePermission.deleteMany({ where: { userId: user.id } });
+      await tx.workspacePermission.deleteMany({ where: { userId: user.id } });
+      await tx.user.delete({ where: { id: user.id } });
+
+      return {
+        workspacePermissions,
+        featurePermissions,
+        hiringAuthorities,
+        personnelPreserved: Boolean(user.personnelId)
+      };
     });
 
     res.json({
       success: true,
-      message: 'User deleted successfully'
+      message: 'حساب کاربری و دسترسی‌های وابسته با موفقیت حذف شدند.',
+      data: { deletedUserId: user.id, cleanup }
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Delete user error:', error);
+    if (error instanceof UserDeletionPolicyError) {
+      return res.status(error.status).json({ success: false, code: error.code, error: error.message });
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
+      return res.status(409).json({
+        success: false,
+        code: 'USER_DELETE_OPERATIONAL_HISTORY',
+        error: 'این حساب به سوابق عملیاتی متصل است و حذف کامل آن امن نیست. ابتدا حساب را غیرفعال کنید یا وابستگی اعلام‌شده را بررسی کنید.',
+        details: error.meta
+      });
+    }
     res.status(500).json({
       success: false,
-      error: 'Server error'
+      code: 'USER_DELETE_FAILED',
+      error: 'حذف حساب کاربری ناموفق بود.'
     });
   }
 });

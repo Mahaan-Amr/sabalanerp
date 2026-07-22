@@ -1,11 +1,25 @@
 # Issue tracker: GitHub
 
-Issues and PRDs for this repository live in GitHub Issues. Use the `gh` CLI for all operations and infer the repository from `origin`.
+Issues and specifications for this repository live as GitHub Issues. Use the `gh` CLI for all operations and infer the repository from the current clone and its GitHub remote.
 
 ## Conventions
 
-- Create, read, update, comment on, label, and close issues with `gh issue`.
-- When a skill says "publish to the issue tracker," create a GitHub issue.
-- When a skill says "fetch the relevant ticket," retrieve the complete issue body, labels, and comments.
-- Publish ticket dependencies using GitHub's native issue dependencies when available; otherwise include an explicit `Blocked by` section.
-- Pull requests are not used as a request or triage surface.
+- Create an issue with `gh issue create --title "..." --body-file <file>`.
+- Read an issue and its discussion with `gh issue view <number> --comments`.
+- List work with `gh issue list`, including appropriate state and label filters.
+- Comment with `gh issue comment <number> --body "..."`.
+- Apply or remove labels with `gh issue edit <number> --add-label "..."` or `--remove-label "..."`.
+- Close completed work with `gh issue close <number> --comment "..."`.
+
+## Pull requests as a triage surface
+
+**PRs as a request surface: no.** Pull requests are not used as a request or triage surface.
+
+## Publishing and fetching
+
+- When a skill says “publish to the issue tracker,” create a GitHub Issue.
+- When a skill says “fetch the relevant ticket,” retrieve the complete issue body, labels, and comments with `gh issue view <number> --comments`.
+
+## Dependencies
+
+Prefer GitHub's native issue dependencies. If the repository does not support them, put a `Blocked by: #<number>` line near the top of the dependent issue body.

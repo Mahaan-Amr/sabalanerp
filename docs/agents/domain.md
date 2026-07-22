@@ -1,12 +1,12 @@
-# Domain Docs
+# Domain docs
 
 This repository uses a single-context domain model.
 
-## Before exploring
+## Before exploring or changing
 
-- Read the root `CONTEXT.md`.
-- Read relevant decisions under `docs/adr/` when that directory exists.
-- If either source is absent, proceed silently.
+- Read root `CONTEXT.md`.
+- Read ADRs under `docs/adr/` that concern the area being changed.
+- Proceed silently if either resource does not exist.
 
 ## Vocabulary
 
@@ -14,4 +14,15 @@ Use the canonical terms defined in `CONTEXT.md` in specs, tickets, tests, and im
 
 ## Decisions
 
-Surface any conflict with an existing ADR rather than silently overriding it.
+Surface any conflict with an existing ADR instead of silently overriding it.
+
+## Layout
+
+```text
+/
+├── CONTEXT.md
+├── docs/
+│   └── adr/
+├── backend/
+└── frontend/
+```

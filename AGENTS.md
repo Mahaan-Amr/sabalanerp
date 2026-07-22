@@ -2,8 +2,12 @@
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues for `Mahaan-Amr/sabalanerp`. See `docs/agents/issue-tracker.md`.
+Specs, implementation tickets, and PRDs are tracked as GitHub Issues using the `gh` CLI for `Mahaan-Amr/sabalanerp`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The repository uses the standard five-role triage vocabulary. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-This repository uses a single-context domain model. See `docs/agents/domain.md`.
+This is a single-context repository using root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.

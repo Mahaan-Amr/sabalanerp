@@ -27,6 +27,7 @@ import {
   normalizeApplicantMobile,
   normalizeApplicantOtp
 } from '../services/hrCandidateAccess';
+import { buildHiringQueueItem, projectHiringLifecycle, summarizeHiringLifecycle } from '../services/hrHiringLifecycle';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -391,9 +392,11 @@ router.patch('/collateral-templates/:id/active', requireAuthority('FINANCE_MANAG
 
 router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response) => {
   const search = String(req.query.search || '').trim();
-  const rows = await prisma.hrJobApplication.findMany({
+  const [rows, authorityRows] = await Promise.all([
+    prisma.hrJobApplication.findMany({
     where: {
       stage: req.query.stage ? req.query.stage as any : undefined,
+      outcome: req.query.outcome ? req.query.outcome as any : undefined,
       OR: search ? [
         { candidate: { firstName: { contains: search, mode: 'insensitive' } } },
         { candidate: { lastName: { contains: search, mode: 'insensitive' } } },
@@ -401,10 +404,36 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
         { candidate: { nationalCode: { contains: search } } }
       ] : undefined
     },
-    include: { candidate: { select: { id: true, firstName: true, lastName: true, mobile: true, talentBankSearchable: true, linkedPersonnelId: true, createdAt: true, updatedAt: true } }, position: { include: { job: true, organizationalUnit: true } }, employmentRelationship: { include: { personnel: true } } },
+    include: {
+      candidate: { select: { id: true, firstName: true, lastName: true, mobile: true, talentBankSearchable: true, linkedPersonnelId: true, createdAt: true, updatedAt: true } },
+      position: { include: { job: true, organizationalUnit: true } },
+      formRevisions: { select: { status: true }, orderBy: { revisionNumber: 'desc' }, take: 4 },
+      assessments: { select: { id: true } },
+      compensationSnapshots: { select: { hrApprovedAt: true, financeApprovedAt: true, candidateAcceptedAt: true }, orderBy: { version: 'desc' }, take: 1 },
+      collateralItems: { select: { required: true, status: true } },
+      contracts: { select: { approvedAt: true }, orderBy: { version: 'desc' }, take: 1 },
+      payrollParticipation: { select: { id: true } },
+      onboardingTasks: { select: { activationBlocker: true, status: true, ownerAuthority: true, title: true } },
+      employmentRelationship: { include: { personnel: true } }
+    },
     orderBy: { updatedAt: 'desc' }
+    }),
+    prisma.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true }, select: { authority: true } })
+  ]);
+  const authorities = authorityRows.map((item) => item.authority);
+  const requestedPhase = String(req.query.phase || '').trim();
+  const requestedStatus = String(req.query.lifecycleStatus || '').trim();
+  const myActions = String(req.query.myActions || '') === 'true';
+  const projected = rows.map((row) => buildHiringQueueItem(
+    row,
+    summarizeHiringLifecycle(projectHiringLifecycle(row, authorities))
+  )).filter((row) => {
+    if (requestedPhase && row.lifecycleSummary.phaseId !== requestedPhase) return false;
+    if (requestedStatus && row.lifecycleSummary.status !== requestedStatus) return false;
+    if (myActions && row.lifecycleSummary.status !== 'ACTION_REQUIRED') return false;
+    return true;
   });
-  res.json({ success: true, data: rows });
+  res.json({ success: true, data: projected });
 }));
 
 router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -416,6 +445,7 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   const canSeeFinanceSensitive = authorities.has('FINANCE_RECORDER') || authorities.has('FINANCE_MANAGER');
   const canSeeCompensation = canSeeFinanceSensitive || authorities.has('HIRING_MANAGER') || authorities.has('HR_PAYROLL_PROCESSOR') || authorities.has('HR_PAYROLL_MANAGER') || authorities.has('HR_MANAGER');
   const data: any = row;
+  data.lifecycle = projectHiringLifecycle(row, authorities);
   data.documents = canSeeHrSensitive ? data.documents.map(({ storageName: _storageName, sha256: _sha256, ...document }: any) => document) : [];
   data.assessments = canSeeHrSensitive ? data.assessments.map(({ storageName: _storageName, sha256: _sha256, ...assessment }: any) => assessment) : [];
   if (!canSeeHrSensitive) {

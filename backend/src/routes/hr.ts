@@ -3,6 +3,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
 import { savePersonnelWorkSchedule } from '../utils/personnelWorkSchedule';
+import { assertSubsequentEmploymentRelationship } from '../services/hrPersonnelBoundary';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -410,6 +411,8 @@ router.post('/personnel/:id/relationships', editAccess, async (req: WorkspaceReq
     if (req.body.status !== 'PLANNED' && effectiveFrom > new Date()) throw new Error('رابطه با تاریخ شروع آینده باید برنامه‌ریزی‌شده باشد.');
     const effectiveTo = optionalDate(req.body.effectiveTo, 'تاریخ پایان');
     const record = await prisma.$transaction(async (tx) => {
+      const existingRelationshipCount = await tx.hrEmploymentRelationship.count({ where: { personnelId: req.params.id } });
+      assertSubsequentEmploymentRelationship(existingRelationshipCount);
       const overlap = await tx.hrEmploymentRelationship.findFirst({ where: { personnelId: req.params.id, ...overlaps(effectiveFrom, effectiveTo) } });
       if (overlap) throw new Error('رابطه استخدامی هم‌پوشان برای این فرد مجاز نیست.');
       return tx.hrEmploymentRelationship.create({ data: { personnelId: req.params.id, status: req.body.status === 'PLANNED' ? 'PLANNED' : 'ACTIVE', effectiveFrom, effectiveTo, originalStartDate: optionalDate(req.body.originalStartDate, 'تاریخ استخدام'), startDateVerified: Boolean(req.body.startDateVerified), createdBy: actorId(req) } });

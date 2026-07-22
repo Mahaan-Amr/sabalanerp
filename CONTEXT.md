@@ -1626,8 +1626,8 @@ The minimal visible phase of a Job Application: Received, Screening, Assessment,
 _Avoid_: turning every recruitment activity into a status, forcing every Candidate through irrelevant steps, losing activity history because only the current stage is stored
 
 **Application Outcome**:
-The reason a Job Application is Closed: Hired, Rejected, Withdrawn, or Recruitment Request Cancelled. Outcome is separate from stage so closure meaning is explicit and does not overload the pipeline.
-_Avoid_: a generic closed state without reason, treating withdrawal as rejection, deleting an Application when its Recruitment Request is cancelled
+The reason a Job Application is Closed: Hired, Rejected, Withdrawn, or Recruitment Request Cancelled. Hired closes recruitment selection but its Guided Hiring Lifecycle continues through Planned Employment preparation and activation; the other outcomes terminate the lifecycle without reopening or deleting the Application.
+_Avoid_: a generic closed state without reason, treating Hired as completed Employment activation, treating withdrawal as rejection, reopening or deleting closed recruitment history
 
 **Recruitment Checklist Template**:
 The Job- or Position-specific definition of required and optional screening, interview, test, reference, certificate, and approval activities inside the fixed Application Stages. A Job Application snapshots the applicable template version when entering the pipeline so later template changes do not rewrite its required work or history.
@@ -1764,6 +1764,22 @@ _Avoid_: one universal checklist for every Job, recalculating active onboarding 
 **Unified Hiring Case View**:
 The Human Resources-facing page and chronological progress view that presents the linked Candidate and Job Application before Hire Conversion, the resulting Personnel, Planned Employment Relationship, and Onboarding Case afterward, and cross-functional Finance tasks with their ownership and data restrictions intact. Candidate self-service exposes only Candidate actions and appropriate statuses, never internal assessments or protected Finance details.
 _Avoid_: one duplicated master record, losing the Application-to-Personnel link, copying Finance evidence into HR data, exposing internal or financial details through the Candidate portal
+
+**Guided Hiring Lifecycle**:
+The evidence-derived progress and navigation model inside a Unified Hiring Case View, grouping the case into Formation and Applicant Form, Identity Review, Assessment, Offer and Acceptance, Collateral and Hire Conversion, Start Preparation, and Employment Activation. It reports phase position and completed mandatory items rather than a false global percentage, and guides work across ownership boundaries without allowing manual phase advancement or replacing the underlying domain controls.
+_Avoid_: a manually advanced form wizard, treating every recruitment activity as an Application Stage, implying parallel work is strictly sequential, bypassing backend controls with next/previous navigation
+
+**Hiring Lifecycle Phase Status**:
+The single visible condition of a Guided Hiring Lifecycle phase: Completed, Action Required by You, Waiting, Blocked, Upcoming, or Terminated. Waiting is a healthy dependency on another participant, date, or event; Blocked means correction or intervention is required before the case can progress.
+_Avoid_: presenting every delay as an error, hiding actionable work inside generic in-progress status, treating a rejected or withdrawn case as successful completion
+
+**Hiring Lifecycle Completion Gate**:
+The mandatory evidence that completes one Guided Hiring Lifecycle phase without inventing a new business approval. Optional assessments, non-blocking insurance work, and optional onboarding tasks remain visible but cannot block progress unless an explicit policy makes them mandatory.
+_Avoid_: equating every checklist item with a blocker, hiding a rejected mandatory requirement, changing hiring policy through presentation logic
+
+**Hiring Lifecycle Guidance Scope**:
+The sanitized phase status, responsible function, explanation, and permitted next work visible to an authorized hiring participant. It prioritizes one unblocked action the participant can perform, retains other available parallel actions as secondary work, and shares the lifecycle map while Recruitment Data Scope continues to protect underlying details.
+_Avoid_: hiding whole phases from non-owners, exposing protected evidence through progress explanations, confusing visibility of a phase with authority to act
 
 **Onboarding Task**:
 A company-wide or Job-specific onboarding requirement with mandatory or optional classification, accountable owner, due date, status, and completion evidence. Job-specific tasks cover training, safety, operational readiness, and authorizations without duplicating common administrative tasks.

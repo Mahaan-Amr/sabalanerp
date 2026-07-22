@@ -10,6 +10,7 @@
     "test:hr-personnel-boundary": "tsx src/services/__tests__/hrPersonnelBoundary.test.ts",
     "test:hr-candidate-access": "tsx src/services/__tests__/hrCandidateAccess.test.ts",
     "test:hr-candidate-assessment": "tsx src/services/__tests__/hrCandidateAssessment.test.ts",
+    "test:hr-hiring-lifecycle": "tsx src/services/__tests__/hrHiringLifecycle.test.ts",
     "test:user-deletion-policy": "tsx src/services/__tests__/userDeletionPolicy.test.ts",
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",

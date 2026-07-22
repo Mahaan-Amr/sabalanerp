@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   FaCalendarAlt,
   FaCheckCircle,
   FaClock,
-  FaDownload,
+  FaRedo,
   FaExclamationTriangle,
   FaFilter,
   FaSearch,
@@ -15,7 +16,7 @@ import {
   FaUserTimes,
   FaUsers,
 } from 'react-icons/fa';
-import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
+import { ErpButton, ErpEmptyState, ErpInlineState, ErpSection, ErpSheet, ErpSkeleton, ErpStatus, ErpWorkspacePage } from '@/components/erp';
 import { notifySecurity } from '@/components/SecurityNoticeHost';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -185,11 +186,14 @@ interface IntervalDialogState {
 const localDateTimeValue = (value?: string | null) => {
   if (!value) return '';
   const date = new Date(value);
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+  return `${PersianCalendar.toPersian(date)} ${date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
 };
 
+const persianDateTimeIso = (value: string) => PersianCalendar.toGregorian(value, 'jYYYY/jMM/jDD HH:mm').toISOString();
+
 export default function AttendancePage() {
+  const router = useRouter();
+  const pathname = usePathname();
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [stats, setStats] = useState<AttendanceStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -207,9 +211,9 @@ export default function AttendancePage() {
   const [intervalDialog, setIntervalDialog] = useState<IntervalDialogState | null>(null);
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
 
-  const fetchAttendanceData = async () => {
+  const fetchAttendanceData = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError(null);
 
       const attendanceResponse = await securityAPI.getDailyAttendance({
@@ -225,21 +229,45 @@ export default function AttendancePage() {
       console.error('Error fetching attendance data:', requestError);
       setError(requestError.response?.data?.error || 'خطا در دریافت اطلاعات');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    const query = parseAttendanceDashboardQuery(new URLSearchParams(window.location.search));
+    const params = new URLSearchParams(window.location.search);
+    const query = parseAttendanceDashboardQuery(params);
     if (query.date) setSelectedDate(query.date);
     setStatusFilter(query.status);
     setConditionFilter(query.condition);
+    setSearchTerm(params.get('q') || '');
+    setDepartmentId(params.get('department') || '');
     setQueryInitialized(true);
   }, []);
 
   useEffect(() => {
+    if (!queryInitialized) return;
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams();
+      if (selectedDate !== PersianCalendar.now()) params.set('date', selectedDate);
+      if (searchTerm.trim()) params.set('q', searchTerm.trim());
+      if (departmentId) params.set('department', departmentId);
+      if (statusFilter !== 'ALL') params.set('status', statusFilter);
+      if (conditionFilter) params.set('condition', conditionFilter);
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [conditionFilter, departmentId, pathname, queryInitialized, router, searchTerm, selectedDate, statusFilter]);
+
+  useEffect(() => {
     if (queryInitialized) fetchAttendanceData();
   }, [selectedDate, departmentId, queryInitialized]);
+
+  useEffect(() => {
+    if (!queryInitialized || selectedDate !== PersianCalendar.now()) return undefined;
+    const timer = window.setInterval(() => { void fetchAttendanceData(true); }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [departmentId, queryInitialized, selectedDate]);
 
   useEffect(() => {
     const loadFilters = async () => {
@@ -315,8 +343,8 @@ export default function AttendancePage() {
       const response = intervalDialog.action === 'void'
         ? await securityAPI.voidAttendanceInterval(intervalDialog.interval.id, intervalDialog.reason.trim())
         : await securityAPI.correctAttendanceInterval(intervalDialog.interval.id, {
-            enteredAt: new Date(intervalDialog.enteredAt).toISOString(),
-            exitedAt: intervalDialog.exitedAt ? new Date(intervalDialog.exitedAt).toISOString() : null,
+            enteredAt: persianDateTimeIso(intervalDialog.enteredAt),
+            exitedAt: intervalDialog.exitedAt ? persianDateTimeIso(intervalDialog.exitedAt) : null,
             reason: intervalDialog.reason.trim()
           });
       notifySecurity(response.data.message || 'تردد به‌روزرسانی شد.');
@@ -329,39 +357,33 @@ export default function AttendancePage() {
     }
   };
 
-  if (loading) return <ErpLoading />;
-
-  if (error) {
-    return (
-      <ErpPage eyebrow="حراست" title="ورود و خروج" description="گزارش حضور و غیاب روزانه">
-        <ErpEmptyState
-          icon={FaExclamationTriangle}
-          title="اطلاعات حضور و غیاب دریافت نشد"
-          description={error}
-          action={{ label: 'تلاش مجدد', onClick: fetchAttendanceData, variant: 'solid' }}
-        />
-      </ErpPage>
-    );
-  }
-
   const rosterScopeEmpty = (stats?.totalEmployees || 0) === 0 && attendanceRecords.length === 0 && !searchTerm.trim() && statusFilter === 'ALL' && !conditionFilter;
 
+  const filterControls = (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <label><span className={labelClass}>تاریخ</span><PersianCalendarComponent value={selectedDate} onChange={setSelectedDate} placeholder="انتخاب تاریخ" clearable={false} /></label>
+      <label><span className={labelClass}>بخش</span><select value={departmentId} onChange={(event) => setDepartmentId(event.target.value)} className={inputClass}><option value="">همه بخش‌ها</option>{departments.map((department) => <option key={department.id} value={department.id}>{department.namePersian}</option>)}</select></label>
+      <label className="sm:col-span-2"><span className={labelClass}>وضعیت</span><select value={conditionFilter ? `CONDITION_${conditionFilter}` : statusFilter} onChange={(event) => { if (event.target.value === 'CONDITION_MISSION' || event.target.value === 'CONDITION_LEAVE') { setStatusFilter('ALL'); setConditionFilter(event.target.value === 'CONDITION_MISSION' ? 'MISSION' : 'LEAVE'); return; } setConditionFilter(null); setStatusFilter(event.target.value); }} className={inputClass}>
+        <option value="ALL">همه وضعیت‌ها</option><option value="PRESENT">حاضر</option><option value="ABSENT">غایب</option><option value="LATE">تأخیر</option><option value="PENDING">در انتظار شروع</option><option value="NON_WORKING_DAY">روز غیرکاری</option><option value="MISSION">مأموریت</option><option value="HOURLY_LEAVE">مرخصی ساعتی</option><option value="CONDITION_MISSION">دارای مأموریت تأییدشده</option><option value="CONDITION_LEAVE">دارای مرخصی تأییدشده</option>
+      </select></label>
+    </div>
+  );
+
+  const activeFilterCount = Number(Boolean(departmentId)) + Number(statusFilter !== 'ALL') + Number(Boolean(conditionFilter));
+
   return (
-    <ErpPage
-      eyebrow="حراست"
-      title="ورود و خروج"
-      description={`گزارش روز ${PersianCalendar.formatForDisplay(selectedDate)}`}
-      actions={[{ label: 'به‌روزرسانی', icon: FaDownload, onClick: fetchAttendanceData, tone: 'neutral' }]}
-      metrics={[
-        { label: 'کل کارکنان', value: stats?.totalEmployees.toLocaleString('fa-IR') || '۰', icon: FaUsers, tone: 'neutral' },
-        { label: 'حاضر', value: stats?.present.toLocaleString('fa-IR') || '۰', icon: FaUserCheck, tone: 'success' },
-        { label: 'غایب', value: stats?.absent.toLocaleString('fa-IR') || '۰', icon: FaUserTimes, tone: 'danger' },
-        { label: 'تأخیر', value: stats?.late.toLocaleString('fa-IR') || '۰', icon: FaClock, tone: 'warning' },
-        { label: 'مأموریت', value: stats?.mission.toLocaleString('fa-IR') || '۰', icon: FaClock, tone: 'info' },
-        { label: 'مرخصی', value: stats?.leave.toLocaleString('fa-IR') || '۰', icon: FaCalendarAlt, tone: 'purple' },
-      ]}
-    >
-      <ErpSection title="فیلترها">
+    <ErpWorkspacePage title="حضور و غیاب" context={PersianCalendar.formatForDisplay(selectedDate)} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: fetchAttendanceData, tone: 'neutral' }]}>
+      {loading && attendanceRecords.length === 0 ? <ErpSkeleton lines={6} /> : error && attendanceRecords.length === 0 ? <ErpInlineState kind="error" title={error} action={{ label: 'تلاش مجدد', onClick: fetchAttendanceData }} /> : <>
+      {error && attendanceRecords.length > 0 && <ErpInlineState kind="stale" title="آخرین به‌روزرسانی ناموفق بود؛ اطلاعات قبلی نمایش داده می‌شود." action={{ label: 'تلاش مجدد', onClick: fetchAttendanceData }} />}
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/70">
+        <div className="grid grid-cols-2 divide-x divide-x-reverse divide-y divide-slate-100 dark:divide-slate-800 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
+          {[
+            ['کل کارکنان', stats?.totalEmployees || 0, 'neutral'], ['حاضر', stats?.present || 0, 'success'], ['غایب', stats?.absent || 0, 'danger'], ['تأخیر', stats?.late || 0, 'warning'], ['مأموریت', stats?.mission || 0, 'info'], ['مرخصی', stats?.leave || 0, 'purple'],
+          ].map(([label, value, tone]) => <div key={String(label)} className="p-3 sm:p-4"><p className="text-xs font-semibold text-slate-500">{label}</p><div className="mt-2 flex items-center justify-between gap-2"><strong className="text-xl text-slate-950 dark:text-white">{Number(value).toLocaleString('fa-IR')}</strong><ErpStatus label={String(label)} tone={tone as any} /></div></div>)}
+        </div>
+      </div>
+
+      <ErpSection>
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <label>
             <span className={labelClass}>جستجو</span>
@@ -377,56 +399,15 @@ export default function AttendancePage() {
             </div>
           </label>
           <div className="flex flex-wrap gap-2 lg:justify-end">
-            <ErpButton label={filtersOpen ? 'بستن فیلترها' : 'فیلترها'} icon={FaFilter} onClick={() => setFiltersOpen((current) => !current)} tone="neutral" />
-            <ErpButton label="به‌روزرسانی" icon={FaDownload} onClick={fetchAttendanceData} variant="solid" />
+            <ErpButton label={activeFilterCount ? `فیلترها (${activeFilterCount.toLocaleString('fa-IR')})` : 'فیلترها'} icon={FaFilter} onClick={() => setFiltersOpen(true)} tone="neutral" className="lg:hidden" />
           </div>
         </div>
-
-        <div className={`mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 ${filtersOpen ? '' : 'hidden lg:grid'}`}>
-          <label>
-            <span className={labelClass}>تاریخ</span>
-            <PersianCalendarComponent value={selectedDate} onChange={setSelectedDate} placeholder="انتخاب تاریخ" />
-          </label>
-          <label>
-            <span className={labelClass}>بخش</span>
-            <select value={departmentId} onChange={(event) => setDepartmentId(event.target.value)} className={inputClass}>
-              <option value="">همه بخش‌ها</option>
-              {departments.map((department) => (
-                <option key={department.id} value={department.id}>{department.namePersian}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span className={labelClass}>وضعیت</span>
-            <select
-              value={conditionFilter ? `CONDITION_${conditionFilter}` : statusFilter}
-              onChange={(event) => {
-                if (event.target.value === 'CONDITION_MISSION' || event.target.value === 'CONDITION_LEAVE') {
-                  setStatusFilter('ALL');
-                  setConditionFilter(event.target.value === 'CONDITION_MISSION' ? 'MISSION' : 'LEAVE');
-                  return;
-                }
-                setConditionFilter(null);
-                setStatusFilter(event.target.value);
-              }}
-              className={inputClass}
-            >
-              <option value="ALL">همه وضعیت‌ها</option>
-              <option value="PRESENT">حاضر</option>
-              <option value="ABSENT">غایب</option>
-              <option value="LATE">تأخیر</option>
-              <option value="PENDING">در انتظار شروع</option>
-              <option value="NON_WORKING_DAY">روز غیرکاری</option>
-              <option value="MISSION">مأموریت</option>
-              <option value="HOURLY_LEAVE">مرخصی ساعتی</option>
-              <option value="CONDITION_MISSION">دارای مأموریت تأییدشده</option>
-              <option value="CONDITION_LEAVE">دارای مرخصی تأییدشده</option>
-            </select>
-          </label>
-        </div>
+        <div className="mt-4 hidden lg:block">{filterControls}</div>
+        {activeFilterCount > 0 && <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">{departmentId && <button type="button" onClick={() => setDepartmentId('')} className="min-h-9 rounded-full bg-slate-100 px-3 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">بخش ×</button>}{(statusFilter !== 'ALL' || conditionFilter) && <button type="button" onClick={() => { setStatusFilter('ALL'); setConditionFilter(null); }} className="min-h-9 rounded-full bg-slate-100 px-3 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">وضعیت ×</button>}<button type="button" onClick={() => { setDepartmentId(''); setStatusFilter('ALL'); setConditionFilter(null); }} className="min-h-9 px-2 font-bold text-[#074747] dark:text-teal-200">پاک‌کردن همه</button></div>}
       </ErpSection>
 
-      <ErpSection title="لیست حضور و غیاب" description={`${filteredRecords.length.toLocaleString('fa-IR')} نفر در فیلتر فعلی`}>
+      <ErpSection title="کارکنان" actions={[]}>
+        <p className="mb-3 text-xs font-semibold text-slate-500">{filteredRecords.length.toLocaleString('fa-IR')} نتیجه</p>
         {filteredRecords.length === 0 && rosterScopeEmpty ? (
           <ErpEmptyState
             icon={FaUsers}
@@ -451,32 +432,13 @@ export default function AttendancePage() {
                         </p>
                       </div>
                       <p className="truncate text-xs text-slate-500 dark:text-slate-400">{record.employee.department?.namePersian || 'بدون بخش'}</p>
-                      <ErpBadge tone={getStatusTone(record.status)}>{getStatusLabel(record.status)}</ErpBadge>
+                      <ErpStatus tone={getStatusTone(record.status)} label={getStatusLabel(record.status)} />
                     </div>
 
                     <div className="mt-2 flex flex-wrap gap-2">
-                      <ErpButton
-                        label="ورود"
-                        icon={FaSignInAlt}
-                        onClick={() => openAttendanceDialog(record, 'checkin')}
-                        disabled={!canCheckIn(record) || Boolean(actionLoadingId) || Boolean(record.openPreviousAttendance)}
-                        variant="soft"
-                      />
-                      <ErpButton
-                        label="خروج"
-                        icon={FaSignOutAlt}
-                        onClick={() => openAttendanceDialog(record, 'checkout')}
-                        disabled={!canCheckOut(record) || Boolean(actionLoadingId)}
-                        tone="neutral"
-                        variant="soft"
-                      />
+                      {record.openPreviousAttendance ? <ErpButton label="ثبت خروج قبلی" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'close-previous')} tone="warning" variant="solid" disabled={Boolean(actionLoadingId)} /> : canCheckOut(record) ? <ErpButton label="خروج" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'checkout')} disabled={Boolean(actionLoadingId)} tone="neutral" variant="soft" /> : canCheckIn(record) ? <ErpButton label="ورود" icon={FaSignInAlt} onClick={() => openAttendanceDialog(record, 'checkin')} disabled={Boolean(actionLoadingId)} variant="soft" /> : null}
                       <ErpButton label={expanded ? 'بستن جزئیات' : 'جزئیات'} onClick={() => setExpandedRecordId(expanded ? null : record.id)} tone="neutral" variant="ghost" />
                     </div>
-                    {record.openPreviousAttendance && (
-                      <div className="mt-2">
-                        <ErpButton label="ثبت خروج قبلی" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'close-previous')} tone="warning" variant="solid" disabled={Boolean(actionLoadingId)} />
-                      </div>
-                    )}
                     {expanded && (
                       <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800/70">
                         <div><dt className="text-xs text-slate-500">ورود</dt><dd className="mt-1 font-semibold">{record.entryTime || '-'}</dd></div>
@@ -526,7 +488,7 @@ export default function AttendancePage() {
                         {record.employee.username && <div className="text-xs text-slate-500 dark:text-slate-400">@{record.employee.username}</div>}
                       </td>
                       <td className="px-3 py-4 text-slate-600 dark:text-slate-300">{record.employee.department?.namePersian || '-'}</td>
-                      <td className="px-3 py-4"><ErpBadge tone={getStatusTone(record.status)}>{getStatusLabel(record.status)}</ErpBadge></td>
+                      <td className="px-3 py-4"><ErpStatus tone={getStatusTone(record.status)} label={getStatusLabel(record.status)} /></td>
                       <td className="px-3 py-4 text-slate-900 dark:text-white">{record.entryTime || '-'}</td>
                       <td className="px-3 py-4 text-slate-900 dark:text-white">{record.exitTime || '-'}</td>
                       <td className="px-3 py-4 text-slate-600 dark:text-slate-300" dir="ltr">{record.scheduledStartTime && record.scheduledEndTime ? `${formatTime12(record.scheduledStartTime)} – ${formatTime12(record.scheduledEndTime)}` : record.workScheduleStatus === 'NON_WORKING_DAY' ? 'روز غیرکاری' : 'تعریف نشده'}</td>
@@ -560,12 +522,12 @@ export default function AttendancePage() {
           </>
         )}
       </ErpSection>
+      </>}
+      <ErpSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} title="فیلترهای حضور و غیاب" footer={<div className="flex justify-end"><ErpButton label="مشاهده نتایج" onClick={() => setFiltersOpen(false)} variant="solid" /></div>}>
+        {filterControls}
+      </ErpSheet>
       {attendanceDialog && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
-          <div role="dialog" aria-modal="true" className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-              {attendanceDialog.action === 'checkin' ? 'ثبت ورود' : attendanceDialog.action === 'checkout' ? 'ثبت خروج' : 'ثبت خروج قبلی'}
-            </h2>
+        <ErpSheet open onClose={() => setAttendanceDialog(null)} title={attendanceDialog.action === 'checkin' ? 'ثبت ورود' : attendanceDialog.action === 'checkout' ? 'ثبت خروج' : 'ثبت خروج قبلی'} footer={<div className="flex flex-wrap justify-end gap-2"><ErpButton label="انصراف" onClick={() => setAttendanceDialog(null)} tone="neutral" variant="ghost" /><ErpButton label="ثبت" onClick={submitAttendanceDialog} variant="solid" disabled={Boolean(actionLoadingId) || (attendanceDialog.action === 'close-previous' && !attendanceDialog.reason.trim())} /></div>}>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               {attendanceDialog.record.employee.firstName} {attendanceDialog.record.employee.lastName}
             </p>
@@ -582,33 +544,21 @@ export default function AttendancePage() {
               <span className={labelClass}>دلیل {attendanceDialog.action === 'close-previous' ? '(الزامی)' : '(اختیاری)'}</span>
               <textarea value={attendanceDialog.reason} onChange={(event) => setAttendanceDialog((current) => current ? { ...current, reason: event.target.value } : current)} className={`${inputClass} min-h-24`} placeholder="مثلاً فراموشی ثبت در زمان واقعی" />
             </label>}
-            <div className="mt-5 flex flex-wrap justify-end gap-2">
-              <ErpButton label="انصراف" onClick={() => setAttendanceDialog(null)} tone="neutral" variant="ghost" />
-              <ErpButton label="ثبت" onClick={submitAttendanceDialog} variant="solid" disabled={Boolean(actionLoadingId) || (attendanceDialog.action === 'close-previous' && !attendanceDialog.reason.trim())} />
-            </div>
-          </div>
-        </div>
+        </ErpSheet>
       )}
       {intervalDialog && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
-          <div role="dialog" aria-modal="true" className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white">{intervalDialog.action === 'correct' ? 'اصلاح بازه تردد' : 'ابطال بازه تردد'}</h2>
+        <ErpSheet open onClose={() => setIntervalDialog(null)} title={intervalDialog.action === 'correct' ? 'اصلاح بازه تردد' : 'ابطال بازه تردد'} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" onClick={() => setIntervalDialog(null)} tone="neutral" variant="ghost" /><ErpButton label={intervalDialog.action === 'correct' ? 'ثبت اصلاح' : 'تأیید ابطال'} onClick={submitIntervalDialog} tone={intervalDialog.action === 'void' ? 'danger' : undefined} variant="solid" disabled={Boolean(actionLoadingId) || !intervalDialog.reason.trim()} /></div>}>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{intervalDialog.record.employee.firstName} {intervalDialog.record.employee.lastName}</p>
             {intervalDialog.action === 'correct' && (
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <label><span className={labelClass}>ورود</span><input type="datetime-local" value={intervalDialog.enteredAt} onChange={(event) => setIntervalDialog((current) => current ? { ...current, enteredAt: event.target.value } : current)} className={inputClass} /></label>
-                <label><span className={labelClass}>خروج (اختیاری)</span><input type="datetime-local" value={intervalDialog.exitedAt} onChange={(event) => setIntervalDialog((current) => current ? { ...current, exitedAt: event.target.value } : current)} className={inputClass} /></label>
+                <label><span className={labelClass}>ورود</span><PersianCalendarComponent showTime value={intervalDialog.enteredAt} onChange={(enteredAt) => setIntervalDialog((current) => current ? { ...current, enteredAt } : current)} /></label>
+                <label><span className={labelClass}>خروج (اختیاری)</span><PersianCalendarComponent showTime value={intervalDialog.exitedAt} onChange={(exitedAt) => setIntervalDialog((current) => current ? { ...current, exitedAt } : current)} clearable /></label>
               </div>
             )}
             <label className="mt-4 block"><span className={labelClass}>دلیل (الزامی)</span><textarea value={intervalDialog.reason} onChange={(event) => setIntervalDialog((current) => current ? { ...current, reason: event.target.value } : current)} className={`${inputClass} min-h-24`} /></label>
             <p className="mt-2 text-xs text-slate-500">سابقه قبلی حذف نمی‌شود و همراه عامل و دلیل در لاگ ممیزی باقی می‌ماند.</p>
-            <div className="mt-5 flex justify-end gap-2">
-              <ErpButton label="انصراف" onClick={() => setIntervalDialog(null)} tone="neutral" variant="ghost" />
-              <ErpButton label={intervalDialog.action === 'correct' ? 'ثبت اصلاح' : 'تأیید ابطال'} onClick={submitIntervalDialog} tone={intervalDialog.action === 'void' ? 'danger' : undefined} variant="solid" disabled={Boolean(actionLoadingId) || !intervalDialog.reason.trim()} />
-            </div>
-          </div>
-        </div>
+        </ErpSheet>
       )}
-    </ErpPage>
+    </ErpWorkspacePage>
   );
 }

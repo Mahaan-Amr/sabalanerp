@@ -791,6 +791,11 @@ export const securityAPI = {
   downloadSecurityPersonnelPerformancePdf: (params?: any) => api.get('/security/reports/security-personnel-performance.pdf', { params, responseType: 'blob' }),
   getLatestCompletedShiftReportStatus: () => api.get('/security/reports/latest-completed-shift'),
   downloadLatestCompletedShiftPdf: () => api.get('/security/reports/latest-completed-shift.pdf', { responseType: 'blob' }),
+  getCompletedSecurityShifts: (params?: { q?: string; status?: string; startDate?: string; endDate?: string }) => api.get('/security/reports/completed-shifts', { params }),
+  getCompletedSecurityShift: (id: string) => api.get(`/security/reports/completed-shifts/${id}`),
+  downloadCompletedSecurityShiftsPdf: (shiftIds: string[]) => api.post('/security/reports/completed-shifts.pdf', { shiftIds }, { responseType: 'blob' }),
+  previewSecurityShiftAttendance: (shiftIds: string[], personnelIds: string[] = []) => api.post('/security/reports/attendance-preview', { shiftIds, personnelIds }),
+  downloadSecurityShiftAttendancePdf: (shiftIds: string[], personnelIds: string[] = []) => api.post('/security/reports/attendance.pdf', { shiftIds, personnelIds }, { responseType: 'blob' }),
   getSecurityPersonnelShiftHistory: (id: string, params?: any) => api.get(`/security/reports/security-personnel/${id}/shift-history`, { params }),
   exportSecurityReport: (format: 'pdf' | 'excel', params?: any) => api.get('/security/reports/export', { params: { ...params, format }, responseType: 'blob' }),
   

@@ -3207,6 +3207,168 @@ const latestCompletedSecurityShift = (includeDetails = false) => includeDetails
       orderBy: { session: { endedAt: 'desc' } }
     });
 
+const normalizedSecurityIds = (value: unknown, maximum: number) => Array.from(new Set(
+  (Array.isArray(value) ? value : []).map((item) => String(item || '').trim()).filter(Boolean)
+)).slice(0, maximum);
+const securityCompletedShiftIds = (value: unknown, maximum = 40) => normalizedSecurityIds(value, maximum);
+const securityPersonnelIds = (value: unknown, maximum = 100) => normalizedSecurityIds(value, maximum);
+
+const securityShiftReportJson = (slot: any) => ({
+  id: slot.id,
+  title: slot.plan?.title || 'شیفت حراست',
+  status: slot.session?.status,
+  startsAt: slot.startsAt,
+  endsAt: slot.endsAt,
+  startedAt: slot.session?.startedAt,
+  endedAt: slot.session?.endedAt,
+  closureSummary: slot.session?.closureSummary || null,
+  forceCloseReason: slot.session?.forceCloseReason || null,
+  effectivePersonnel: slot.session?.personnel ? { id: slot.session.personnel.id, name: securityName(slot.session.personnel.user) } : null,
+  plannedPersonnel: slot.plannedPersonnel ? { id: slot.plannedPersonnel.id, name: securityName(slot.plannedPersonnel.user) } : null,
+  replacementPersonnel: slot.replacementPersonnel ? { id: slot.replacementPersonnel.id, name: securityName(slot.replacementPersonnel.user) } : null,
+  temporaryCoverage: (slot.temporaryCoverage || []).map((coverage: any) => ({ id: coverage.personnel.id, name: securityName(coverage.personnel.user), startsAt: coverage.startsAt, endsAt: coverage.endsAt })),
+  attendance: (slot.attendance || []).map((attendance: any) => ({ id: attendance.id, personnelId: attendance.personnelId, name: securityName(attendance.personnel?.user), arrivedAt: attendance.arrivedAt, delayMinutes: attendance.delayMinutes, correctedAt: attendance.correctedAt, correctionReason: attendance.correctionReason })),
+  patrols: (slot.session?.patrolSessions || []).map((patrol: any) => ({ id: patrol.id, name: securityName(patrol.personnel?.user), startedAt: patrol.startedAt, endedAt: patrol.endedAt, description: patrol.description, status: patrol.status })),
+  timeline: (slot.session?.logEntries || []).map((entry: any) => ({
+    id: entry.id,
+    rowNumber: entry.rowNumber,
+    status: entry.status,
+    title: `${entry.categoryNameSnapshot}${entry.reportTypeNameSnapshot ? ` / ${entry.reportTypeNameSnapshot}` : ''}`,
+    typeDescription: entry.reportType?.description || null,
+    description: entry.description || null,
+    participants: (entry.participants || []).map(participantDisplayName),
+    createdAt: entry.createdAt,
+    author: securityName(slot.session?.personnel?.user),
+    voidReason: entry.voidReason || null,
+    voidedAt: entry.voidedAt || null,
+    voidedBy: entry.voidedBy || null,
+    attachments: (entry.attachments || []).map((attachment: any) => ({ id: attachment.id, name: attachment.originalName }))
+  }))
+});
+
+const selectedCompletedSecurityShifts = async (shiftIds: string[]) => {
+  if (!shiftIds.length) return [];
+  const slots = await prisma.securityShiftPlanSlot.findMany({
+    where: { id: { in: shiftIds }, ...latestCompletedSecurityShiftWhere },
+    include: detailedShiftInclude
+  });
+  const positions = new Map(shiftIds.map((id, index) => [id, index]));
+  return slots.sort((left, right) => (positions.get(left.id) ?? 999) - (positions.get(right.id) ?? 999));
+};
+
+const selectedShiftAttendance = (slots: any[], requestedPersonnelIds: string[]) => {
+  const personnel = new Map<string, { id: string; name: string }>();
+  slots.forEach((slot) => {
+    [slot.plannedPersonnel, slot.replacementPersonnel, slot.session?.personnel, ...(slot.temporaryCoverage || []).map((coverage: any) => coverage.personnel), ...(slot.attendance || []).map((attendance: any) => attendance.personnel)]
+      .filter(Boolean)
+      .forEach((person: any) => personnel.set(person.id, { id: person.id, name: securityName(person.user) }));
+  });
+  const selectedIds = requestedPersonnelIds.length ? requestedPersonnelIds.filter((id) => personnel.has(id)) : Array.from(personnel.keys());
+  const rows: any[] = [];
+  slots.forEach((slot) => {
+    const relatedIds = new Set([slot.plannedPersonnelId, slot.replacementPersonnelId, slot.session?.personnelId, ...(slot.temporaryCoverage || []).map((coverage: any) => coverage.personnelId)].filter(Boolean));
+    selectedIds.filter((id) => relatedIds.has(id)).forEach((personnelId) => {
+      const attendance = (slot.attendance || []).find((item: any) => item.personnelId === personnelId);
+      rows.push({
+        shiftId: slot.id,
+        shiftTitle: slot.plan?.title || 'شیفت حراست',
+        shiftStartsAt: slot.startsAt,
+        shiftEndsAt: slot.endsAt,
+        personnelId,
+        personnelName: personnel.get(personnelId)?.name || '—',
+        state: attendance ? (attendance.delayMinutes > 0 ? 'LATE' : 'PRESENT') : 'ABSENT',
+        arrivedAt: attendance?.arrivedAt || null,
+        delayMinutes: attendance?.delayMinutes || 0,
+        correctedAt: attendance?.correctedAt || null,
+        correctionReason: attendance?.correctionReason || null
+      });
+    });
+  });
+  return { personnel: Array.from(personnel.values()), selectedPersonnelIds: selectedIds, rows };
+};
+
+router.get('/reports/completed-shifts', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const query = String(req.query.q || '').trim().toLocaleLowerCase('fa-IR');
+    const requestedStatus = String(req.query.status || '').trim();
+    const startDate = req.query.startDate ? parseDayQuery(req.query.startDate) : undefined;
+    const endDate = req.query.endDate ? parseDayQuery(req.query.endDate, startDate) : undefined;
+    const slots = await prisma.securityShiftPlanSlot.findMany({
+      where: {
+        ...latestCompletedSecurityShiftWhere,
+        ...(startDate || endDate ? {
+          startsAt: {
+            ...(startDate ? { gte: startDate } : {}),
+            ...(endDate ? { lt: addDays(endDate, 1) } : {})
+          }
+        } : {}),
+        ...(requestedStatus === SecurityShiftSessionStatus.CLOSED || requestedStatus === SecurityShiftSessionStatus.FORCE_CLOSED ? { session: { status: requestedStatus, endedAt: { not: null } } } : {})
+      },
+      include: detailedShiftInclude,
+      orderBy: { session: { endedAt: 'desc' } },
+      take: query ? undefined : 250
+    });
+    const matched = query ? slots.filter((slot: any) => {
+      const haystack = [slot.id, slot.plan?.title, securityName(slot.session?.personnel?.user), securityName(slot.plannedPersonnel?.user), securityName(slot.replacementPersonnel?.user), formatSecurityDateTime(slot.startsAt), formatSecurityDateTime(slot.session?.endedAt), slot.session?.status === SecurityShiftSessionStatus.FORCE_CLOSED ? 'بسته‌شده توسط مدیر' : 'تکمیل‌شده'].join(' ').toLocaleLowerCase('fa-IR');
+      return haystack.includes(query);
+    }) : slots;
+    res.json({ success: true, data: matched.map(securityShiftReportJson) });
+  } catch (error: any) {
+    console.error('Search completed security shifts error:', error);
+    res.status(500).json({ success: false, error: error.message || 'دریافت شیفت‌های پایان‌یافته ناموفق بود.' });
+  }
+});
+
+router.get('/reports/completed-shifts/:id', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const slots = await selectedCompletedSecurityShifts([req.params.id]);
+    if (!slots.length) return res.status(404).json({ success: false, error: 'شیفت پایان‌یافته پیدا نشد.' });
+    return res.json({ success: true, data: securityShiftReportJson(slots[0]) });
+  } catch (error: any) { return res.status(500).json({ success: false, error: error.message || 'دریافت گزارش شیفت ناموفق بود.' }); }
+});
+
+router.post('/reports/completed-shifts.pdf', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const shiftIds = securityCompletedShiftIds(req.body?.shiftIds);
+    if (!shiftIds.length) return res.status(400).json({ success: false, error: 'حداقل یک شیفت را انتخاب کنید.' });
+    const slots = await selectedCompletedSecurityShifts(shiftIds) as any[];
+    if (slots.length !== shiftIds.length) return res.status(400).json({ success: false, error: 'یک یا چند شیفت انتخاب‌شده در دسترس نیست.' });
+    const html = `${securityPdfStyles()}<div class="sheet"><header class="header"><div><h1>گزارش شیفت‌ها</h1><div class="meta">${slots.length.toLocaleString('fa-IR')} شیفت انتخاب‌شده · زمان تولید: ${formatSecurityDateTime(new Date())}</div></div></header>${slots.map(renderDetailedSecurityShift).join('')}</div>`;
+    const pdfPath = await generatePdfFromHtml({ fileName: `security-shifts-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '14mm', left: '5mm' }, displayHeaderFooter: true, headerTemplate: '<span></span>', footerTemplate: '<div style="width:100%;font-size:8px;color:#64748b;text-align:center;direction:rtl">گزارش شیفت‌ها · صفحه <span class="pageNumber"></span> از <span class="totalPages"></span></div>' });
+    return res.download(pdfPath, 'security-shifts.pdf', () => fs.unlink(pdfPath, () => undefined));
+  } catch (error: any) { console.error('Export selected security shifts error:', error); return res.status(500).json({ success: false, error: 'ساخت گزارش شیفت‌ها ناموفق بود.' }); }
+});
+
+router.post('/reports/attendance-preview', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const shiftIds = securityCompletedShiftIds(req.body?.shiftIds);
+    if (!shiftIds.length) return res.status(400).json({ success: false, error: 'حداقل یک شیفت را انتخاب کنید.' });
+    const slots = await selectedCompletedSecurityShifts(shiftIds) as any[];
+    if (slots.length !== shiftIds.length) return res.status(400).json({ success: false, error: 'یک یا چند شیفت انتخاب‌شده در دسترس نیست.' });
+    const attendance = selectedShiftAttendance(slots, securityPersonnelIds(req.body?.personnelIds));
+    const requestedPersonnelIds = securityPersonnelIds(req.body?.personnelIds);
+    if (requestedPersonnelIds.length && attendance.selectedPersonnelIds.length !== requestedPersonnelIds.length) return res.status(400).json({ success: false, error: 'یک یا چند نفر انتخاب‌شده در دامنه شیفت‌ها وجود ندارد.' });
+    return res.json({ success: true, data: { shifts: slots.map(securityShiftReportJson), ...attendance } });
+  } catch (error: any) { return res.status(500).json({ success: false, error: error.message || 'پیش‌نمایش حضور و غیاب ناموفق بود.' }); }
+});
+
+router.post('/reports/attendance.pdf', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const shiftIds = securityCompletedShiftIds(req.body?.shiftIds);
+    if (!shiftIds.length) return res.status(400).json({ success: false, error: 'حداقل یک شیفت را انتخاب کنید.' });
+    const slots = await selectedCompletedSecurityShifts(shiftIds) as any[];
+    if (slots.length !== shiftIds.length) return res.status(400).json({ success: false, error: 'یک یا چند شیفت انتخاب‌شده در دسترس نیست.' });
+    const requestedPersonnelIds = securityPersonnelIds(req.body?.personnelIds);
+    const result = selectedShiftAttendance(slots, requestedPersonnelIds);
+    if (requestedPersonnelIds.length && result.selectedPersonnelIds.length !== requestedPersonnelIds.length) return res.status(400).json({ success: false, error: 'یک یا چند نفر انتخاب‌شده در دامنه شیفت‌ها وجود ندارد.' });
+    const stateLabel: Record<string, string> = { PRESENT: 'حاضر', LATE: 'با تأخیر', ABSENT: 'غایب' };
+    const rows = result.rows.map((row) => `<tr><td>${securityEscapeHtml(row.personnelName)}</td><td>${securityEscapeHtml(row.shiftTitle)}</td><td>${formatSecurityDateTime(row.shiftStartsAt)} تا ${formatSecurityDateTime(row.shiftEndsAt)}</td><td>${stateLabel[row.state]}</td><td>${formatSecurityDateTime(row.arrivedAt)}</td><td>${row.delayMinutes ? `${row.delayMinutes.toLocaleString('fa-IR')} دقیقه` : '—'}</td></tr>`).join('');
+    const html = `${securityPdfStyles()}<div class="sheet"><header class="header"><div><h1>گزارش حضور و غیاب حراست</h1><div class="meta">${slots.length.toLocaleString('fa-IR')} شیفت · ${result.selectedPersonnelIds.length.toLocaleString('fa-IR')} نفر · زمان تولید: ${formatSecurityDateTime(new Date())}</div></div></header><table><thead><tr><th>نیرو</th><th>شیفت</th><th>بازه</th><th>وضعیت</th><th>حضور</th><th>تأخیر</th></tr></thead><tbody>${rows || '<tr><td colspan="6">داده‌ای در دامنه انتخاب‌شده وجود ندارد.</td></tr>'}</tbody></table></div>`;
+    const pdfPath = await generatePdfFromHtml({ fileName: `security-attendance-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '14mm', left: '5mm' }, displayHeaderFooter: true, headerTemplate: '<span></span>', footerTemplate: '<div style="width:100%;font-size:8px;color:#64748b;text-align:center;direction:rtl">گزارش حضور و غیاب حراست · صفحه <span class="pageNumber"></span> از <span class="totalPages"></span></div>' });
+    return res.download(pdfPath, 'security-attendance.pdf', () => fs.unlink(pdfPath, () => undefined));
+  } catch (error: any) { console.error('Export selected security attendance error:', error); return res.status(500).json({ success: false, error: 'ساخت گزارش حضور و غیاب حراست ناموفق بود.' }); }
+});
+
 router.get('/reports/latest-completed-shift', protect, securityAdmin, async (_req: AuthRequest, res: Response) => {
   try {
     const slot = await latestCompletedSecurityShift();

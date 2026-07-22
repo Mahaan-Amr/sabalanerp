@@ -1,400 +1,140 @@
-﻿'use client';
+'use client';
 
-import { useState, useEffect } from 'react';
-import { 
-  FaShieldAlt, 
-  FaPlus, 
-  FaEdit, 
-  FaTrash, 
-  FaUser,
-  FaClock,
-  FaCheckCircle,
-  FaTimesCircle
-} from 'react-icons/fa';
+import { useEffect, useMemo, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { FaClock, FaPlus, FaRedo, FaSearch, FaShieldAlt } from 'react-icons/fa';
+import { ErpButton, ErpEmptyState, ErpInlineState, ErpSection, ErpSheet, ErpSkeleton, ErpStatus, ErpWorkspacePage } from '@/components/erp';
 import { securityAPI } from '@/lib/api';
-import { notifySecurity } from '@/components/SecurityNoticeHost';
+import { askSecurityAction, notifySecurity } from '@/components/SecurityNoticeHost';
 
 interface SecurityPersonnel {
   id: string;
-  user: {
-    id: string;
-    firstName: string;
-    lastName: string;
-    username: string;
-    email: string;
-    role: string;
-    department?: {
-      name: string;
-      namePersian: string;
-    };
-  };
-  shift: {
-    id: string;
-    name: string;
-    namePersian: string;
-    startTime: string;
-    endTime: string;
-  };
+  user: { id: string; firstName: string; lastName: string; username: string; email: string; role: string; department?: { name: string; namePersian: string } };
+  shift: { id: string; name: string; namePersian: string; startTime: string; endTime: string };
   position: string;
   isActive: boolean;
   assignedAt?: string;
   createdAt?: string;
-  lastActivity?: string;
 }
 
-interface User {
-  id: string;
-  firstName: string;
-  lastName: string;
-  username: string;
-  email: string;
-  role: string;
-  department?: {
-    name: string;
-    namePersian: string;
-  };
-}
+interface User { id: string; firstName: string; lastName: string; username: string; email: string; role: string; department?: { name: string; namePersian: string } }
+interface Shift { id: string; name: string; namePersian: string; startTime: string; endTime: string; isActive: boolean }
 
-interface Shift {
-  id: string;
-  name: string;
-  namePersian: string;
-  startTime: string;
-  endTime: string;
-  isActive: boolean;
-}
+const inputClass = 'min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-900 dark:text-white';
+const formatTime = (time: string) => new Date(`2000-01-01T${time}`).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
 
 export default function PersonnelPage() {
+  const router = useRouter();
+  const pathname = usePathname();
   const [personnel, setPersonnel] = useState<SecurityPersonnel[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
   const [showAssignForm, setShowAssignForm] = useState(false);
-  const [assignFormData, setAssignFormData] = useState({
-    userId: '',
-    shiftId: '',
-    position: 'نگهبان'
-  });
+  const [search, setSearch] = useState('');
+  const [stateFilter, setStateFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [shiftFilter, setShiftFilter] = useState('');
+  const [detailPerson, setDetailPerson] = useState<SecurityPersonnel | null>(null);
+  const [assignFormData, setAssignFormData] = useState({ userId: '', shiftId: '', position: 'نگهبان' });
 
-  useEffect(() => {
-    fetchPersonnelData();
-  }, []);
-
-  const fetchPersonnelData = async () => {
+  const load = async () => {
+    setLoading(true); setError('');
     try {
-      setLoading(true);
-      setError(null);
-      
-      const [personnelResponse, shiftsResponse] = await Promise.all([
-        securityAPI.getPersonnel(),
-        securityAPI.getShifts(),
-      ]);
-      
-      if (personnelResponse.data.success) {
-        setPersonnel(personnelResponse.data.data);
-      }
-      
-      if (shiftsResponse.data.success) {
-        setShifts(shiftsResponse.data.data);
-      }
-      const usersResponse = await securityAPI.getEligiblePersonnelUsers();
-      if (usersResponse.data.success) {
-        setUsers(usersResponse.data.data);
-      }
-    } catch (error: any) {
-      console.error('Error fetching personnel data:', error);
-      setError(error.response?.data?.error || 'خطا در دریافت اطلاعات');
-    } finally {
-      setLoading(false);
-    }
+      const results = await Promise.allSettled([securityAPI.getPersonnel(), securityAPI.getShifts(), securityAPI.getEligiblePersonnelUsers()]);
+      if (results[0].status === 'fulfilled' && results[0].value.data.success) setPersonnel(results[0].value.data.data || []);
+      if (results[1].status === 'fulfilled' && results[1].value.data.success) setShifts(results[1].value.data.data || []);
+      if (results[2].status === 'fulfilled' && results[2].value.data.success) setUsers(results[2].value.data.data || []);
+      if (results.some((result) => result.status === 'rejected')) setError('بخشی از اطلاعات کارکنان دریافت نشد؛ اطلاعات موفق نمایش داده می‌شود.');
+    } finally { setLoading(false); }
   };
 
-  const handleAssignPersonnel = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setSearch(params.get('q') || '');
+    setShiftFilter(params.get('shift') || '');
+    const state = params.get('state');
+    if (state === 'active' || state === 'inactive') setStateFilter(state);
+    void load();
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams();
+      if (search.trim()) params.set('q', search.trim());
+      if (stateFilter !== 'all') params.set('state', stateFilter);
+      if (shiftFilter) params.set('shift', shiftFilter);
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [pathname, router, search, shiftFilter, stateFilter]);
+
+  const rows = useMemo(() => personnel.filter((person) => {
+    const query = search.trim().toLowerCase();
+    const identity = `${person.user.firstName} ${person.user.lastName} ${person.user.username} ${person.user.email}`.toLowerCase();
+    return (!query || identity.includes(query)) && (!shiftFilter || person.shift.id === shiftFilter) && (stateFilter === 'all' || person.isActive === (stateFilter === 'active'));
+  }), [personnel, search, shiftFilter, stateFilter]);
+
+  const assign = async (event: React.FormEvent) => {
+    event.preventDefault(); setSaving(true);
     try {
       const response = await securityAPI.assignPersonnel(assignFormData);
       if (response.data.success) {
-        setShowAssignForm(false);
-        setAssignFormData({ userId: '', shiftId: '', position: 'نگهبان' });
-        fetchPersonnelData();
-        notifySecurity('نیرو با موفقیت ثبت شد');
+        setShowAssignForm(false); setAssignFormData({ userId: '', shiftId: '', position: 'نگهبان' });
+        notifySecurity('نیرو با موفقیت ثبت شد.'); await load();
       }
-    } catch (error: any) {
-      console.error('Error assigning personnel:', error);
-      notifySecurity(error.response?.data?.error || 'خطا در ثبت اطلاعات', 'error');
-    }
+    } catch (requestError: any) { notifySecurity(requestError.response?.data?.error || 'ثبت نیرو ناموفق بود.', 'error'); }
+    finally { setSaving(false); }
   };
 
-  const handleToggleActive = async (personnelId: string, isActive: boolean) => {
-    try {
-      await securityAPI.updatePersonnelStatus(personnelId, !isActive);
-      await fetchPersonnelData();
-    } catch (error: any) {
-      console.error('Error toggling personnel status:', error);
-      notifySecurity(error.response?.data?.error || 'خطا در تغییر وضعیت نیرو', 'error');
-    }
+  const toggleActive = async (person: SecurityPersonnel) => {
+    const accepted = await askSecurityAction({ title: person.isActive ? 'غیرفعال‌کردن دسترسی عملیاتی' : 'فعال‌کردن دسترسی عملیاتی', description: person.isActive ? 'این نیرو از عملیات جدید حراست خارج می‌شود؛ سوابق او حفظ خواهد شد.' : 'این نیرو دوباره برای عملیات مجاز حراست فعال می‌شود.' });
+    if (!accepted) return;
+    try { await securityAPI.updatePersonnelStatus(person.id, !person.isActive); await load(); }
+    catch (requestError: any) { notifySecurity(requestError.response?.data?.error || 'تغییر وضعیت نیرو ناموفق بود.', 'error'); }
   };
-
-  const formatTime = (time: string) => {
-    return new Date(`2000-01-01T${time}`).toLocaleTimeString('fa-IR', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500"></div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
-        <div className="glass-liquid-card p-8 text-center">
-          <h2 className="text-xl font-bold text-primary mb-2">ورود و خروج</h2>
-          <p className="text-secondary mb-4">{error}</p>
-          <button 
-            onClick={fetchPersonnelData}
-            className="glass-liquid-btn-primary px-6 py-2"
-          >
-            تلاش مجدد
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="glass-liquid-card p-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4 space-x-reverse">
-            <FaShieldAlt className="h-8 w-8 text-teal-500" />
-            <div>
-              <h1 className="text-2xl font-bold text-primary">نیروهای حراست</h1>
-              <p className="text-secondary">مدیریت نیروهای حراست و شیفت‌ها</p>
-            </div>
+    <ErpWorkspacePage title="کارکنان حراست" primaryAction={{ label: 'افزودن نیرو', icon: FaPlus, onClick: () => setShowAssignForm(true), variant: 'solid' }} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: load }]}>
+      {loading && personnel.length === 0 ? <ErpSkeleton lines={6} /> : error && personnel.length === 0 ? <ErpInlineState kind="error" title={error} action={{ label: 'تلاش مجدد', onClick: load }} /> : <>
+        {error && <ErpInlineState kind="stale" title="آخرین به‌روزرسانی ناموفق بود؛ فهرست قبلی نمایش داده می‌شود." action={{ label: 'تلاش مجدد', onClick: load }} />}
+        <ErpSection>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_180px]">
+            <label className="relative"><span className="sr-only">جستجو</span><FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} className={`${inputClass} pr-10`} placeholder="نام، نام کاربری یا ایمیل" /></label>
+            <select value={shiftFilter} onChange={(event) => setShiftFilter(event.target.value)} className={inputClass} aria-label="فیلتر شیفت"><option value="">همه شیفت‌ها</option>{shifts.map((shift) => <option key={shift.id} value={shift.id}>{shift.namePersian}</option>)}</select>
+            <select value={stateFilter} onChange={(event) => setStateFilter(event.target.value as any)} className={inputClass} aria-label="فیلتر وضعیت"><option value="all">همه وضعیت‌ها</option><option value="active">فعال</option><option value="inactive">غیرفعال</option></select>
           </div>
-          <button
-            onClick={() => setShowAssignForm(true)}
-            className="glass-liquid-btn-primary px-4 py-2 flex items-center space-x-2 space-x-reverse"
-          >
-            <FaPlus />
-            <span>افزودن نیرو</span>
-          </button>
-        </div>
-      </div>
+        </ErpSection>
 
-      {/* Personnel Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="glass-liquid-card p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-secondary">در انتظار</p>
-              <p className="text-xl font-bold text-primary">{personnel.length}</p>
+        <ErpSection title="فهرست کارکنان">
+          <p className="mb-3 text-xs font-semibold text-slate-500">{rows.length.toLocaleString('fa-IR')} نتیجه</p>
+          {rows.length === 0 ? <ErpEmptyState icon={FaShieldAlt} title="نیرویی با این فیلترها پیدا نشد" action={{ label: 'پاک‌کردن فیلترها', onClick: () => { setSearch(''); setShiftFilter(''); setStateFilter('all'); } }} /> : <>
+            <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800 lg:hidden">
+              {rows.map((person) => <article key={person.id} className="bg-white p-4 dark:bg-slate-900/70"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="truncate font-bold text-slate-950 dark:text-white">{person.user.firstName} {person.user.lastName}</h2><p className="mt-1 truncate text-xs text-slate-500">{person.position} · {person.shift.namePersian}</p></div><ErpStatus label={person.isActive ? 'فعال' : 'غیرفعال'} tone={person.isActive ? 'success' : 'neutral'} /></div><div className="mt-3 flex gap-2"><ErpButton label="جزئیات" onClick={() => setDetailPerson(person)} tone="neutral" variant="ghost" /><ErpButton label={person.isActive ? 'غیرفعال‌کردن' : 'فعال‌کردن'} onClick={() => toggleActive(person)} tone={person.isActive ? 'neutral' : 'success'} variant="soft" /></div></article>)}
             </div>
-            <FaUser className="h-6 w-6 text-blue-500" />
-          </div>
-        </div>
-        <div className="glass-liquid-card p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-secondary">فعال</p>
-              <p className="text-xl font-bold text-green-500">
-                {personnel.filter(p => p.isActive).length}
-              </p>
-            </div>
-            <FaCheckCircle className="h-6 w-6 text-green-500" />
-          </div>
-        </div>
-        <div className="glass-liquid-card p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-secondary">غیرفعال</p>
-              <p className="text-xl font-bold text-red-500">
-                {personnel.filter(p => !p.isActive).length}
-              </p>
-            </div>
-            <FaTimesCircle className="h-6 w-6 text-red-500" />
-          </div>
-        </div>
-        <div className="glass-liquid-card p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-secondary">شیفت‌ها</p>
-              <p className="text-xl font-bold text-teal-500">
-                {shifts.filter(s => s.isActive).length}
-              </p>
-            </div>
-            <FaClock className="h-6 w-6 text-teal-500" />
-          </div>
-        </div>
-      </div>
+            <div className="hidden lg:block"><table className="w-full text-sm"><thead><tr className="border-b border-slate-200 text-right text-xs text-slate-500 dark:border-slate-800"><th className="px-3 py-3">نیرو</th><th className="px-3 py-3">سمت و بخش</th><th className="px-3 py-3">شیفت</th><th className="px-3 py-3">حساب</th><th className="px-3 py-3">وضعیت</th><th className="px-3 py-3">عملیات</th></tr></thead><tbody>{rows.map((person) => <tr key={person.id} className="border-b border-slate-100 dark:border-slate-800"><td className="px-3 py-4 font-bold">{person.user.firstName} {person.user.lastName}</td><td className="px-3 py-4">{person.position} · {person.user.department?.namePersian || '—'}</td><td className="px-3 py-4"><span className="font-semibold">{person.shift.namePersian}</span><span className="mt-1 block text-xs text-slate-500">{formatTime(person.shift.startTime)} تا {formatTime(person.shift.endTime)}</span></td><td className="px-3 py-4">@{person.user.username}</td><td className="px-3 py-4"><ErpStatus label={person.isActive ? 'فعال' : 'غیرفعال'} tone={person.isActive ? 'success' : 'neutral'} /></td><td className="px-3 py-4"><div className="flex gap-1"><ErpButton label="جزئیات" onClick={() => setDetailPerson(person)} tone="neutral" variant="ghost" /><ErpButton label={person.isActive ? 'غیرفعال‌کردن' : 'فعال‌کردن'} onClick={() => toggleActive(person)} tone={person.isActive ? 'neutral' : 'success'} variant="ghost" /></div></td></tr>)}</tbody></table></div>
+          </>}
+        </ErpSection>
+      </>}
 
-      {/* Personnel Table */}
-      <div className="glass-liquid-card p-6">
-        <h2 className="text-xl font-bold text-primary mb-4">لیست نیروهای حراست</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-700">
-                <th className="text-right py-3 px-4 text-secondary">نام نیرو</th>
-                <th className="text-right py-3 px-4 text-secondary">سمت</th>
-                <th className="text-right py-3 px-4 text-secondary">بخش</th>
-                <th className="text-right py-3 px-4 text-secondary">شیفت</th>
-                <th className="text-right py-3 px-4 text-secondary">وضعیت</th>
-                <th className="text-right py-3 px-4 text-secondary">تاریخ شروع</th>
-                <th className="text-right py-3 px-4 text-secondary">عملیات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {personnel.map((person) => (
-                <tr key={person.id} className="border-b border-gray-800 hover:bg-white/5">
-                  <td className="py-3 px-4">
-                    <div>
-                      <div className="font-medium text-primary">
-                        {person.user.firstName} {person.user.lastName}
-                      </div>
-                      <div className="text-sm text-secondary">
-                        @{person.user.username}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {person.user.email}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="py-3 px-4 text-secondary">
-                    {person.position || '-'}
-                  </td>
-                  <td className="py-3 px-4 text-secondary">
-                    {person.user.department?.namePersian || '-'}
-                  </td>
-                  <td className="py-3 px-4">
-                    <div>
-                      <div className="text-primary font-medium">
-                        {person.shift.namePersian}
-                      </div>
-                      <div className="text-sm text-secondary">
-                        {person.shift.name}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="py-3 px-4 text-secondary">
-                    <div className="text-sm">
-                      <div>{formatTime(person.shift.startTime)} - {formatTime(person.shift.endTime)}</div>
-                    </div>
-                  </td>
-                  <td className="py-3 px-4">
-                    <button
-                      onClick={() => handleToggleActive(person.id, person.isActive)}
-                      className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                        person.isActive 
-                          ? 'bg-green-500/20 text-green-500 hover:bg-green-500/30' 
-                          : 'bg-gray-500/20 text-gray-500 hover:bg-gray-500/30'
-                      }`}
-                    >
-                      {person.isActive ? 'فعال' : 'غیرفعال'}
-                    </button>
-                  </td>
-                  <td className="py-3 px-4 text-secondary">
-                    {person.assignedAt || person.createdAt ? new Date(person.assignedAt || person.createdAt || '').toLocaleDateString('fa-IR') : '-'}
-                  </td>
-                  <td className="py-3 px-4">
-                    <div className="flex space-x-2 space-x-reverse">
-                      <button className="glass-liquid-btn p-2">
-                        <FaEdit />
-                      </button>
-                      <button className="glass-liquid-btn p-2 text-red-400">
-                        <FaTrash />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <ErpSheet open={showAssignForm} onClose={() => setShowAssignForm(false)} title="افزودن نیروی حراست">
+        <form onSubmit={assign} className="space-y-4">
+          <label className="block"><span className="mb-2 block text-sm font-semibold">کاربر</span><select value={assignFormData.userId} onChange={(event) => setAssignFormData({ ...assignFormData, userId: event.target.value })} className={inputClass} required><option value="">انتخاب کاربر واجد شرایط</option>{users.map((user) => <option key={user.id} value={user.id}>{user.firstName} {user.lastName} ({user.department?.namePersian || user.role})</option>)}</select>{users.length === 0 && <p className="mt-2 text-xs text-slate-500">کاربر واجد شرایطی برای افزودن وجود ندارد.</p>}</label>
+          <label className="block"><span className="mb-2 block text-sm font-semibold">سمت</span><input value={assignFormData.position} onChange={(event) => setAssignFormData({ ...assignFormData, position: event.target.value })} className={inputClass} required /></label>
+          <label className="block"><span className="mb-2 block text-sm font-semibold">شیفت</span><select value={assignFormData.shiftId} onChange={(event) => setAssignFormData({ ...assignFormData, shiftId: event.target.value })} className={inputClass} required><option value="">انتخاب شیفت</option>{shifts.map((shift) => <option key={shift.id} value={shift.id}>{shift.namePersian} ({formatTime(shift.startTime)} تا {formatTime(shift.endTime)})</option>)}</select></label>
+          <div className="flex justify-end gap-2 pt-2"><ErpButton label="انصراف" onClick={() => setShowAssignForm(false)} tone="neutral" variant="ghost" /><button type="submit" disabled={saving || !assignFormData.userId || !assignFormData.shiftId} className="min-h-11 rounded-xl bg-[#074747] px-4 text-sm font-bold text-white disabled:opacity-50">{saving ? 'در حال ثبت…' : 'ثبت نیرو'}</button></div>
+        </form>
+      </ErpSheet>
+      {detailPerson && <ErpSheet open onClose={() => setDetailPerson(null)} title={`${detailPerson.user.firstName} ${detailPerson.user.lastName}`}>
+        <div className="space-y-6">
+          <section><h3 className="font-bold">پروفایل</h3><dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-xs text-slate-500">حساب</dt><dd className="mt-1 font-semibold">@{detailPerson.user.username}</dd></div><div><dt className="text-xs text-slate-500">بخش</dt><dd className="mt-1 font-semibold">{detailPerson.user.department?.namePersian || '—'}</dd></div><div className="col-span-2"><dt className="text-xs text-slate-500">ایمیل</dt><dd className="mt-1 break-all font-semibold">{detailPerson.user.email || '—'}</dd></div></dl></section>
+          <section className="border-t border-slate-200 pt-5 dark:border-slate-800"><h3 className="font-bold">تخصیص عملیاتی</h3><p className="mt-3 text-sm">{detailPerson.position} · {detailPerson.shift.namePersian} · {formatTime(detailPerson.shift.startTime)} تا {formatTime(detailPerson.shift.endTime)}</p><ErpStatus label={detailPerson.isActive ? 'دسترسی عملیاتی فعال' : 'دسترسی عملیاتی غیرفعال'} tone={detailPerson.isActive ? 'success' : 'neutral'} /></section>
+          <section className="border-t border-slate-200 pt-5 dark:border-slate-800"><h3 className="font-bold">نقش و مجوز</h3><dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-xs text-slate-500">نقش سامانه</dt><dd className="mt-1 font-semibold">{detailPerson.user.role}</dd></div><div><dt className="text-xs text-slate-500">مدیریت مجوزها</dt><dd className="mt-1 font-semibold">جدا از اطلاعات پرسنلی</dd></div></dl></section>
+          <section className="border-t border-slate-200 pt-5 dark:border-slate-800"><h3 className="font-bold">سابقه</h3><p className="mt-3 text-sm text-slate-500">شروع تخصیص: {detailPerson.assignedAt || detailPerson.createdAt ? new Date(detailPerson.assignedAt || detailPerson.createdAt || '').toLocaleString('fa-IR') : '—'}</p></section>
         </div>
-        
-        {personnel.length === 0 && (
-          <div className="text-center py-8">
-            <p className="text-secondary">هنوز نیروی حراست ثبت نشده است</p>
-          </div>
-        )}
-      </div>
-
-      {/* Assign Personnel Modal */}
-      {showAssignForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="glass-liquid-card p-6 w-full max-w-md">
-              <h2 className="text-xl font-bold text-primary mb-4">نیروهای این شیفت</h2>
-            <form onSubmit={handleAssignPersonnel} className="space-y-4">
-              <div>
-                <label className="block text-sm text-secondary mb-2">کاربر</label>
-                <select
-                  value={assignFormData.userId}
-                  onChange={(e) => setAssignFormData({ ...assignFormData, userId: e.target.value })}
-                  className="glass-liquid-input w-full"
-                  required
-                >
-                  <option value="">کارمند را انتخاب کنید</option>
-                  {users.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.firstName} {user.lastName} ({user.department?.namePersian || user.role})
-                    </option>
-                  ))}
-                </select>
-                {users.length === 0 && <p className="mt-2 text-xs text-secondary">کاربر واجد شرایط حراست برای افزودن وجود ندارد.</p>}
-              </div>
-              <div>
-                <label className="block text-sm text-secondary mb-2">سمت</label>
-                <input
-                  value={assignFormData.position}
-                  onChange={(e) => setAssignFormData({ ...assignFormData, position: e.target.value })}
-                  className="glass-liquid-input w-full"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-secondary mb-2">شیفت</label>
-                <select
-                  value={assignFormData.shiftId}
-                  onChange={(e) => setAssignFormData({ ...assignFormData, shiftId: e.target.value })}
-                  className="glass-liquid-input w-full"
-                  required
-                >
-                  <option value="">شیفت را انتخاب کنید</option>
-                  {shifts.map((shift) => (
-                    <option key={shift.id} value={shift.id}>
-                      {shift.namePersian} ({formatTime(shift.startTime)} - {formatTime(shift.endTime)})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex space-x-4 space-x-reverse">
-                <button
-                  type="submit"
-                  className="flex-1 glass-liquid-btn-primary px-4 py-2"
-                >
-                  ثبت نیرو
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowAssignForm(false)}
-                  className="flex-1 glass-liquid-btn px-4 py-2"
-                >
-                  انصراف
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+      </ErpSheet>}
+    </ErpWorkspacePage>
   );
 }
-

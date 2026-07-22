@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FaBan, FaCheck, FaChevronDown, FaClipboardCheck, FaClock, FaPaperclip, FaPlus, FaRedo, FaRoute, FaStop, FaTimes, FaUserPlus } from 'react-icons/fa';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
-import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpShiftTimeline } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpSection, ErpSheet, ErpShiftTimeline, ErpSkeleton, ErpStatus, ErpWorkspacePage } from '@/components/erp';
 import { securityAPI } from '@/lib/api';
 import { askSecurityAction } from '@/components/SecurityNoticeHost';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -36,6 +36,7 @@ export default function SecuritySupervisorReportsPage() {
   const [error, setError] = useState('');
   const [participantPickerOpen, setParticipantPickerOpen] = useState(false);
   const [readOnly, setReadOnly] = useState(false);
+  const [entrySheetOpen, setEntrySheetOpen] = useState(false);
   const participantPickerRef = useRef<HTMLDivElement>(null);
 
   const activePatrol = useMemo(() => session?.patrolSessions?.find((patrol: any) => patrol.status === 'ACTIVE'), [session]);
@@ -58,10 +59,12 @@ export default function SecuritySupervisorReportsPage() {
     description: entry.description || null,
     participants: (entry.participants || []).map(logParticipantName),
     createdAt: entry.createdAt,
+    author: participantName(session?.personnel?.user || personnel?.user || personnel || {}),
     voidReason: entry.voidReason || null,
     voidedAt: entry.voidedAt || null,
+    voidedBy: entry.voidedBy || null,
     attachments: (entry.attachments || []).map((attachment: any) => ({ id: attachment.id, name: attachment.originalName })),
-  })), [session]);
+  })), [personnel, session]);
 
   useEffect(() => {
     if (!participantPickerOpen) return;
@@ -72,25 +75,31 @@ export default function SecuritySupervisorReportsPage() {
     return () => document.removeEventListener('mousedown', closeOnOutsideClick);
   }, [participantPickerOpen]);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError('');
     try {
-      const [typesResponse, logResponse, participantResponse] = await Promise.all([
+      const results = await Promise.allSettled([
         securityAPI.getInstantReportCategories(false),
         securityAPI.getActiveShiftLog(), securityAPI.getShiftLogParticipants(),
       ]);
-      if (typesResponse.data.success) {
+      const [typesResult, logResult, participantResult] = results;
+      const typesResponse = typesResult.status === 'fulfilled' ? typesResult.value : null;
+      const logResponse = logResult.status === 'fulfilled' ? logResult.value : null;
+      const participantResponse = participantResult.status === 'fulfilled' ? participantResult.value : null;
+      if (typesResponse?.data.success) {
         const nextCategories = typesResponse.data.data || [];
         setCategories(nextCategories);
         setTypes(nextCategories.flatMap((category: any) => category.reportTypes || []));
       }
-      if (logResponse.data.success) {
+      if (logResponse?.data.success) {
         setSession(logResponse.data.data.session);
         setPersonnel(logResponse.data.data.personnel);
         setReadOnly(Boolean(logResponse.data.data.readOnly));
+        setError('');
       }
-      if (participantResponse.data.success) setParticipants(participantResponse.data.data || []);
+      if (participantResponse?.data.success) setParticipants(participantResponse.data.data || []);
+      if (results.some((result) => result.status === 'rejected')) setError('بخشی از اطلاعات گزارش شیفت دریافت نشد؛ اطلاعات موفق نمایش داده می‌شود.');
     } catch (err: any) {
       setError(err.response?.data?.error || 'دریافت گزارش شیفت ناموفق بود.');
     } finally {
@@ -101,6 +110,12 @@ export default function SecuritySupervisorReportsPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    const timer = window.setInterval(() => { void loadData(true); }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [session?.id]);
 
   const createEntry = async () => {
     setSaving(true);
@@ -116,6 +131,7 @@ export default function SecuritySupervisorReportsPage() {
       setForm({ categoryId: '', reportTypeId: '', description: '', participantIds: [] });
       setImages([]);
       setMessage('گزارش لحظه‌ای ثبت شد.');
+      setEntrySheetOpen(false);
       await loadData();
     } catch (err: any) {
       setError(err.response?.data?.error || 'ثبت گزارش لحظه‌ای ناموفق بود.');
@@ -179,28 +195,18 @@ export default function SecuritySupervisorReportsPage() {
     }));
   };
 
-  if (loading) return <ErpLoading />;
-
   return (
-    <ErpPage
-      eyebrow="حراست"
-      title="گزارش شیفت"
-      description={readOnly ? 'نمایش فقط‌خواندنی گزارش کامل شیفت فعال' : 'ثبت گزارش‌های لحظه‌ای و گشت‌زنی‌های شیفت فعال با زمان دقیق و سابقه ابطال.'}
-      actions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: loadData, tone: 'neutral' }]}
-      metrics={[
-        { label: 'گزارش‌ها', value: (session?.logEntries?.length || 0).toLocaleString('fa-IR'), icon: FaClipboardCheck, tone: 'info' },
-        { label: 'گشت‌زنی‌ها', value: (session?.patrolSessions?.length || 0).toLocaleString('fa-IR'), icon: FaRoute, tone: activePatrol ? 'warning' : 'success' },
-      ]}
-    >
-      {!readOnly && message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{message}</div>}
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
-      {readOnly && session && <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-800 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">این گزارش برای مدیر فقط‌خواندنی است و هیچ عملیات شیفتی از این صفحه در دسترس نیست.</div>}
+    <ErpWorkspacePage title="گزارش شیفت" context={session ? `${dateTimeFa(session.slot?.startsAt)} تا ${dateTimeFa(session.slot?.endsAt)}` : undefined} primaryAction={!readOnly && session ? { label: 'ثبت گزارش', icon: FaPlus, onClick: () => setEntrySheetOpen(true), variant: 'solid' } : undefined} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: () => loadData() }]}>
+      {loading && !session ? <ErpSkeleton lines={6} /> : <>
+      {!readOnly && message && <ErpInlineState kind="success" title={message} />}
+      {error && <ErpInlineState kind={session ? 'stale' : 'error'} title={session ? 'آخرین به‌روزرسانی ناموفق بود؛ گزارش قبلی نمایش داده می‌شود.' : error} action={{ label: 'تلاش مجدد', onClick: () => loadData() }} />}
+      {readOnly && session && <div className="flex items-center gap-2"><ErpStatus label="فقط‌خواندنی مدیر" tone="info" /><span className="text-xs text-slate-500">کنترل‌های عملیاتی در دسترس نیست.</span></div>}
 
       {!session ? (
         <ErpEmptyState icon={FaClock} title="شیفت فعال برای شما پیدا نشد" description={personnel ? 'برای ثبت گزارش، ابتدا شیفت برنامه‌ریزی‌شده خود را شروع کنید.' : 'کاربر فعلی جزو نفرات حراست نیست.'} />
       ) : (
         <>
-          {!readOnly && <ErpSection title="ثبت گزارش لحظه‌ای" description="هر ردیف به شیفت فعال اضافه می‌شود و افراد مرتبط به صورت انتخابی کنار همان گزارش ذخیره می‌شوند.">
+          {!readOnly && <ErpSheet open={entrySheetOpen} onClose={() => setEntrySheetOpen(false)} title="ثبت گزارش لحظه‌ای">
             {activePatrol && (
               <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
                 <p className="text-sm font-semibold text-amber-800 dark:text-amber-100">
@@ -316,7 +322,7 @@ export default function SecuritySupervisorReportsPage() {
               <ErpButton label="ثبت گزارش" icon={FaPlus} onClick={createEntry} disabled={saving || !form.categoryId || (showReportTypes && !form.reportTypeId) || !hasMeaningfulDetail} variant="solid" />
             </div>
             {selectedCategory?.useReportTypes && categoryTypes.length === 0 && <p className="mt-3 text-sm text-amber-700">برای این دسته‌بندی هنوز نوع گزارش فعالی تعریف نشده است.</p>}
-          </ErpSection>}
+          </ErpSheet>}
 
           <ErpSection title="گشت‌زنی">
             {!readOnly && (!activePatrol ? (
@@ -358,6 +364,7 @@ export default function SecuritySupervisorReportsPage() {
           />
         </>
       )}
-    </ErpPage>
+      </>}
+    </ErpWorkspacePage>
   );
 }

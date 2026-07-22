@@ -1118,17 +1118,16 @@ Shift closure is blocked while any patrol session in that shift is still active.
 _Avoid_: requiring patrol notes before the patrol happens, storing patrols as free-text shift notes, allowing accidental overlapping active patrols for the same user, or auto-ending patrols during shift closure
 
 **گزارش‌های حراست**:
-A reporting workspace for aggregate operational data such as attendance, exceptions, missions, shift sessions, and signatures over a selected date range. It is separate from گزارش شیفت حراست and should be filterable by date range, department, shift, and personnel when those dimensions apply.
-Across a date range, absence is derived per day from the current A/B/C operational population minus people with an attendance record for that day; it is not limited to stored ABSENT rows.
-_Avoid_: using mock analytics, mixing narrative shift closure reports into aggregate KPIs, or showing labels that do not match the underlying metric
+A manager-focused reporting workspace with exactly two report products: گزارش شیفت‌ها and گزارش حضور و غیاب حراست. It is separate from the active گزارش شیفت حراست workflow: managers search completed shifts directly, preview the selected evidence, and generate a scoped PDF instead of first choosing an analytical date range or report format.
+_Avoid_: mock analytics, decorative KPI collections, performance-report mode as a competing third product, requiring a date range before a manager can find a completed shift, or showing labels that do not match the exported evidence
 
 **شیفت قبل حراست**:
 The finished security shift session with the most recent actual `endedAt`, whether normally closed or force-closed by a manager. It is based on actual completion order rather than the previous planned rota slot.
 _Avoid_: selecting the prior scheduled slot when another session finished later, or excluding force-closed sessions from the latest completed shift
 
-**خروجی شیفت قبل حراست**:
-A quick report action that immediately downloads a PDF for شیفت قبل حراست. The PDF includes only sections backed by actual recorded data or activity and omits empty sections, placeholder rows, and irrelevant zero-value summaries; when no completed shift exists, the visible action is disabled with «هنوز شیفت پایان‌یافته‌ای برای دریافت گزارش وجود ندارد».
-_Avoid_: opening an intermediate detail page, exporting a date-range report, generating an empty PDF, or returning a generic error when no completed shift exists
+**گزارش شیفت‌ها**:
+The manager-only completed-shift report product. It lists completed shifts newest-first, supports direct search by shift identity, guard, Jalali date, or operational state, and allows one or several shifts to be selected, previewed with their complete read-only timelines, and exported as one scoped PDF. Date range is an optional advanced filter rather than the required entry point.
+_Avoid_: limiting reporting to only شیفت قبل حراست, immediately downloading before preview, requiring a date range for ordinary retrieval, exporting active shifts, or flattening evidence from different shifts into an unscoped feed
 
 **بخش‌های مبتنی بر شواهد در PDF تفصیلی حراست**:
 Both the latest-shift PDF and personnel-performance PDF omit empty per-shift patrol, attendance, closure-summary, participant, and image sections, while retaining sections with real recorded activity. The standalone date-range attendance PDF keeps its consistent analytical structure because zero attendance values are meaningful data there.
@@ -1248,24 +1247,24 @@ The dashboard's calendar-day attendance summary for today's roster, limited to �
 _Avoid_: including total or present personnel, adding a dashboard date picker, redefining the summary around the active shift session, forcing the four values to be mutually exclusive, or filtering مأموریت and مرخصی only by the primary attendance status
 
 **طراحی عملیاتی موبایل حراست**:
-Core حراست operational pages must follow Sabalan ERP's shared design system, mobile-first RTL layout, teal primary actions, neutral surfaces, and semantic status tones. The deepest mobile-first treatment belongs to داشبورد حراست, حضور و غیاب, گزارش شیفت, خودرویی, and شیفت‌ها; manager/config/report pages remain responsive and consistent without becoming one-handed field workflows.
-_Avoid_: reviving the older red/rose security theme, table-only mobile attendance, cramped side-by-side fields that break Persian labels, or hiding the core action list behind horizontal scrolling
+Every حراست route follows one minimal mobile-first RTL interaction language with compact Persian headings, teal primary actions, neutral surfaces, semantic labelled states, structured mobile lists, focused forms, independent data states, and purposeful motion. Desktop may retain compact semantic tables where row comparison matters, while mobile exposes essential row identity and state first and places secondary detail behind expansion without ordinary horizontal scrolling.
+_Avoid_: treating manager/config/report pages as a lower-quality responsive afterthought, reviving the older red/rose security theme, table-only mobile views, cramped side-by-side fields that break Persian labels, card-inside-card decoration, or using color without a Persian state label
 
 **خروجی گزارش‌های حراست**:
-A PDF or Excel rendition of the currently filtered security report. The attendance PDF contains summary metrics plus one detailed row per rostered personnel per day; it is not an export of shift logs, personal schedules, or other operational records whose report layouts have not been defined.
-_Avoid_: placeholder export buttons, ignoring active report filters, or exporting sensitive operational data under an ambiguous report name
+A PDF rendition of the exact shift and personnel scope that an authorized manager has selected and previewed. Its minimal identity contains the concise Persian report title, selected scope, essential timestamps and states, useful evidence rows or timeline, generation timestamp, and page numbering; decorative charts, helper text, controls, repeated metadata, empty columns, empty sections, and oversized branding are omitted.
+_Avoid_: ambiguous PDF buttons, downloading before preview, ignoring the selected scope, exporting sensitive operational data outside authorization, or filling the document with interface copy and decorative summaries
 
 **دو نوع خروجی گزارش حراست**:
-Security reporting has two distinct export families. The حضور و غیاب کارکنان scope exports personnel attendance details and summary metrics, while the عملکرد نیروهای حراست scope has its own manager-only detailed PDF for finished security shifts and operational evidence.
-_Avoid_: one ambiguous PDF button that sometimes exports attendance aggregates and sometimes exports detailed shift narratives.
+Security reporting has two distinct export families. گزارش شیفت‌ها exports complete read-only evidence for one or several selected completed shifts. گزارش حضور و غیاب حراست exports attendance for one or several selected shifts and either all, one, or several selected personnel within that scope.
+_Avoid_: a generic performance-report mode, one ambiguous PDF action that changes meaning, or applying a personnel filter to hide unrelated rows from a shift's canonical operational timeline
 
 **صادرکننده گزارش حراست**:
-A security manager, supervisor, or explicitly authorized read-only report viewer who may generate personnel attendance and security-performance exports. A regular guard may use personal scheduling and shift-report workflows but cannot export these reports.
+A security manager, admin, or explicitly authorized report viewer who may preview and generate گزارش شیفت‌ها and گزارش حضور و غیاب حراست within their authorized scope. A regular guard may operate their own active گزارش شیفت حراست but cannot gain report export access merely by working a shift.
 _Avoid_: granting personnel attendance export to every user who can work a security shift, or relying only on hidden front-end buttons to protect report data
 
 **محتوای خروجی گزارش حراست**:
-The attendance export contains the selected date range and filters, generation time, aggregate KPIs, and one row per rostered personnel per day with name, department, status, entry, exit, registered shift, notes, and signature state.
-_Avoid_: a report with no filter context, collapsing personnel into only one aggregate row per day, omitting absent roster members, or mixing security shift narratives into the attendance table
+The attendance export contains the selected shift identities and personnel scope, generation time, a concise useful summary, and the applicable attendance facts for each selected person and shift, including state, expected time, actual movements, and authorized mission or leave context when relevant. The shift export keeps each selected shift's complete timeline and audit context together.
+_Avoid_: a report with no scope identity, omitting selected absent personnel, treating mission or leave as fabricated physical presence, mixing different shifts into an unscoped activity feed, or printing fields with no value or decision relevance
 
 **تقویم سالیانه سبلان**:
 A company-wide calendar authority for marking days as holidays and recording events. It is informational until a specific workflow explicitly chooses to consume it, so existing attendance, shift, contract, and delivery behavior does not change implicitly.

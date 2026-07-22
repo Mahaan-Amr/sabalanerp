@@ -1,256 +1,122 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { FaChartLine, FaClock, FaExclamationTriangle, FaFileExcel, FaFilePdf, FaHistory, FaRedo, FaShieldAlt, FaUsers } from 'react-icons/fa';
-import EnhancedDropdown from '@/components/EnhancedDropdown';
+import { usePathname, useRouter } from 'next/navigation';
+import { FaClock, FaFilePdf, FaFilter, FaRedo, FaSearch, FaUsers } from 'react-icons/fa';
 import PersianCalendarComponent from '@/components/PersianCalendar';
-import { ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpSegmentedControl } from '@/components/erp';
-import { departmentsAPI, securityAPI } from '@/lib/api';
+import { ErpButton, ErpEmptyState, ErpInlineState, ErpSection, ErpSegmentedControl, ErpShiftTimeline, ErpSkeleton, ErpStatus, ErpWorkspacePage } from '@/components/erp';
+import { securityAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 
-type Scope = 'attendance' | 'performance';
+type ReportKind = 'shifts' | 'attendance';
+const inputClass = 'min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#074747] focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-900 dark:text-white';
+const downloadBlob = (blob: Blob, filename: string) => { const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 0); };
+const dateTime = (value?: string | null) => value ? PersianCalendar.formatForDisplay(value, true) : '—';
 
-const downloadBlob = (blob: Blob, filename: string) => {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
-};
+function ShiftReportPreview({ shift }: { shift: any }) {
+  const coverage = (shift.temporaryCoverage || []).map((item: any) => item.name).filter(Boolean).join('، ');
+  return <div className="space-y-5">
+    <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-bold">{shift.effectivePersonnel?.name || 'شیفت حراست'}</h3><p className="mt-1 text-xs text-slate-500">برنامه: {dateTime(shift.startsAt)} تا {dateTime(shift.endsAt)} · واقعی: {dateTime(shift.startedAt)} تا {dateTime(shift.endedAt)}</p></div><ErpStatus label={shift.status === 'FORCE_CLOSED' ? 'بسته‌شده توسط مدیر' : 'تکمیل‌شده'} tone="neutral" /></div>
+    <dl className="grid gap-3 text-sm sm:grid-cols-3"><div><dt className="text-xs text-slate-500">نیروی برنامه‌ریزی‌شده</dt><dd className="mt-1 font-semibold">{shift.plannedPersonnel?.name || '—'}</dd></div><div><dt className="text-xs text-slate-500">جایگزین</dt><dd className="mt-1 font-semibold">{shift.replacementPersonnel?.name || '—'}</dd></div><div><dt className="text-xs text-slate-500">پوشش موقت</dt><dd className="mt-1 font-semibold">{coverage || '—'}</dd></div></dl>
+    {(shift.forceCloseReason || shift.closureSummary) && <div className="border-y border-slate-100 py-3 text-sm leading-6 dark:border-slate-800">{shift.forceCloseReason && <p>دلیل بستن: {shift.forceCloseReason}</p>}{shift.closureSummary && <p>خلاصه پایان: {shift.closureSummary}</p>}</div>}
+    {shift.attendance?.length > 0 && <div><h4 className="text-sm font-bold">حضور شیفت</h4><div className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">{shift.attendance.map((item: any) => <div key={item.id} className="flex min-h-11 items-center justify-between gap-3 py-2"><span className="font-semibold">{item.name}</span><span className="text-xs text-slate-500">{dateTime(item.arrivedAt)}{item.delayMinutes ? ` · ${item.delayMinutes.toLocaleString('fa-IR')} دقیقه تأخیر` : ''}{item.correctedAt ? ` · اصلاح‌شده: ${dateTime(item.correctedAt)}` : ''}</span></div>)}</div></div>}
+    {shift.patrols?.length > 0 && <div><h4 className="text-sm font-bold">گشت‌زنی‌ها</h4><div className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">{shift.patrols.map((patrol: any) => <p key={patrol.id} className="py-2 text-sm">{patrol.name} · {dateTime(patrol.startedAt)} تا {dateTime(patrol.endedAt)}{patrol.description ? ` · ${patrol.description}` : ''}</p>)}</div></div>}
+    <ErpShiftTimeline title="خط زمانی" entries={shift.timeline || []} formatTimestamp={dateTime} showAttachmentImages attachmentHref={(attachmentId) => `/api/security/shift-log/attachments/${attachmentId}`} />
+  </div>;
+}
 
 export default function ReportsPage() {
-  const [scope, setScope] = useState<Scope>('attendance');
-  const [data, setData] = useState<any>(null);
-  const [performance, setPerformance] = useState<any>(null);
-  const [departments, setDepartments] = useState<any[]>([]);
-  const [personnel, setPersonnel] = useState<any[]>([]);
-  const [range, setRange] = useState({ startDate: PersianCalendar.now(), endDate: PersianCalendar.now() });
-  const [departmentId, setDepartmentId] = useState('');
-  const [personnelId, setPersonnelId] = useState('');
-  const [sessionStatus, setSessionStatus] = useState('');
-  const [coverageStatus, setCoverageStatus] = useState('');
-  const [activityType, setActivityType] = useState('');
-  const [latestShiftReport, setLatestShiftReport] = useState<{ authorized: boolean; available: boolean } | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
+  const [kind, setKind] = useState<ReportKind>('shifts');
+  const [shifts, setShifts] = useState<any[]>([]);
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [range, setRange] = useState({ startDate: '', endDate: '' });
+  const [selectedShiftIds, setSelectedShiftIds] = useState<string[]>([]);
+  const [selectedPersonnelIds, setSelectedPersonnelIds] = useState<string[]>([]);
+  const [attendancePreview, setAttendancePreview] = useState<any>(null);
+  const [selectedShiftDetails, setSelectedShiftDetails] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
-  const [exporting, setExporting] = useState<'attendance-pdf' | 'excel' | 'performance-pdf' | 'latest-shift-pdf' | null>(null);
+  const [previewError, setPreviewError] = useState('');
+  const [queryReady, setQueryReady] = useState(false);
 
-  const baseParams = () => ({
-    startDate: PersianCalendar.toGregorianDateOnly(range.startDate),
-    endDate: PersianCalendar.toGregorianDateOnly(range.endDate),
-    departmentId: departmentId || undefined
-  });
-
-  const performanceParams = () => ({
-    ...baseParams(),
-    personnelId: personnelId || undefined,
-    sessionStatus: sessionStatus || undefined,
-    coverageStatus: coverageStatus || undefined,
-    activityType: activityType || undefined
-  });
-
-  const load = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      if (scope === 'attendance') {
-        const result = await securityAPI.getSecurityReportSummary(baseParams());
-        setData(result.data.data);
-      } else {
-        const result = await securityAPI.getSecurityPersonnelPerformance(performanceParams());
-        setPerformance(result.data.data);
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'دریافت گزارش ناموفق بود.');
-    } finally {
-      setLoading(false);
-    }
+  const loadShifts = async () => {
+    setLoading(true); setError('');
+    try { const response = await securityAPI.getCompletedSecurityShifts({ q: search.trim() || undefined, status: status || undefined, startDate: range.startDate ? PersianCalendar.toGregorianDateOnly(range.startDate) : undefined, endDate: range.endDate ? PersianCalendar.toGregorianDateOnly(range.endDate) : undefined }); setShifts(response.data.data || []); }
+    catch (requestError: any) { setError(requestError.response?.data?.error || 'دریافت شیفت‌های پایان‌یافته ناموفق بود.'); }
+    finally { setLoading(false); }
   };
 
   useEffect(() => {
-    load();
-  }, [scope, range, departmentId, personnelId, sessionStatus, coverageStatus, activityType]);
-
-  useEffect(() => {
-    Promise.all([departmentsAPI.getDepartments(), securityAPI.getOperationalPersonnel()])
-      .then(([departmentResponse, personnelResponse]) => {
-        setDepartments(departmentResponse.data.data || []);
-        setPersonnel(personnelResponse.data.data || []);
-      })
-      .catch(() => undefined);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('report') === 'attendance') setKind('attendance');
+    setSearch(params.get('q') || ''); setStatus(params.get('status') || '');
+    const startDate = params.get('start') || ''; const endDate = params.get('end') || '';
+    setRange({ startDate, endDate }); setShowAdvanced(Boolean(startDate || endDate));
+    setSelectedShiftIds((params.get('shifts') || '').split(',').filter(Boolean));
+    setSelectedPersonnelIds((params.get('personnel') || '').split(',').filter(Boolean));
+    setQueryReady(true);
   }, []);
 
-  const loadLatestShiftStatus = async () => {
-    try {
-      const result = await securityAPI.getLatestCompletedShiftReportStatus();
-      setLatestShiftReport({ authorized: true, available: Boolean(result.data.data?.available) });
-    } catch (err: any) {
-      if (err.response?.status === 403) setLatestShiftReport({ authorized: false, available: false });
-    }
-  };
+  useEffect(() => { if (!queryReady) return; const timer = window.setTimeout(() => { void loadShifts(); }, 250); return () => window.clearTimeout(timer); }, [queryReady, range.endDate, range.startDate, search, status]);
+  useEffect(() => {
+    if (!queryReady) return;
+    const params = new URLSearchParams(); if (kind === 'attendance') params.set('report', kind); if (search.trim()) params.set('q', search.trim()); if (status) params.set('status', status); if (range.startDate) params.set('start', range.startDate); if (range.endDate) params.set('end', range.endDate); if (selectedShiftIds.length) params.set('shifts', selectedShiftIds.join(',')); if (kind === 'attendance' && selectedPersonnelIds.length) params.set('personnel', selectedPersonnelIds.join(','));
+    const query = params.toString(); router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }, [kind, pathname, queryReady, range.endDate, range.startDate, router, search, selectedPersonnelIds, selectedShiftIds, status]);
 
   useEffect(() => {
-    void loadLatestShiftStatus();
-  }, []);
+    if (kind !== 'attendance' || !selectedShiftIds.length) { setAttendancePreview(null); return; }
+    let active = true; setPreviewLoading(true); setPreviewError('');
+    securityAPI.previewSecurityShiftAttendance(selectedShiftIds, selectedPersonnelIds).then((response) => { if (active) setAttendancePreview(response.data.data); }).catch((requestError: any) => { if (active) setPreviewError(requestError.response?.data?.error || 'پیش‌نمایش حضور و غیاب ناموفق بود.'); }).finally(() => { if (active) setPreviewLoading(false); });
+    return () => { active = false; };
+  }, [kind, selectedPersonnelIds, selectedShiftIds]);
 
-  const preset = (days: number) => {
-    const end = new Date();
-    setRange({
-      startDate: PersianCalendar.toPersian(new Date(end.getTime() - (days - 1) * 86400000)),
-      endDate: PersianCalendar.toPersian(end)
-    });
+  useEffect(() => {
+    let active = true;
+    if (!selectedShiftIds.length) { setSelectedShiftDetails([]); return undefined; }
+    Promise.all(selectedShiftIds.map((id) => securityAPI.getCompletedSecurityShift(id)))
+      .then((responses) => { if (active) setSelectedShiftDetails(responses.map((response) => response.data.data)); })
+      .catch(() => { if (active) setSelectedShiftDetails([]); });
+    return () => { active = false; };
+  }, [selectedShiftIds]);
+
+  const selectedShifts = useMemo(() => selectedShiftIds.map((id) => selectedShiftDetails.find((shift) => shift.id === id)).filter(Boolean), [selectedShiftDetails, selectedShiftIds]);
+  const toggleShift = (id: string) => setSelectedShiftIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const togglePersonnel = (id: string) => setSelectedPersonnelIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+
+  const exportReport = async () => {
+    if (!selectedShiftIds.length || selectedShifts.length !== selectedShiftIds.length) return; setExporting(true); setError('');
+    try { const response = kind === 'shifts' ? await securityAPI.downloadCompletedSecurityShiftsPdf(selectedShiftIds) : await securityAPI.downloadSecurityShiftAttendancePdf(selectedShiftIds, selectedPersonnelIds); downloadBlob(response.data, kind === 'shifts' ? 'security-shifts.pdf' : 'security-attendance.pdf'); }
+    catch (requestError: any) { setError(requestError.response?.data?.error || 'ساخت PDF ناموفق بود.'); }
+    finally { setExporting(false); }
   };
 
-  const exportAttendance = async (format: 'pdf' | 'excel') => {
-    try {
-      setExporting(format === 'pdf' ? 'attendance-pdf' : 'excel');
-      const result = await securityAPI.exportSecurityReport(format, baseParams());
-      downloadBlob(result.data, `security-attendance-report.${format === 'pdf' ? 'pdf' : 'xlsx'}`);
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'ساخت خروجی ناموفق بود.');
-    } finally {
-      setExporting(null);
-    }
-  };
+  const exportLabel = kind === 'shifts' ? `دریافت PDF ${selectedShiftIds.length.toLocaleString('fa-IR')} شیفت` : `دریافت PDF ${selectedShiftIds.length.toLocaleString('fa-IR')} شیفت برای ${selectedPersonnelIds.length ? selectedPersonnelIds.length.toLocaleString('fa-IR') : 'همه'} نفر`;
 
-  const exportPerformancePdf = async () => {
-    try {
-      setExporting('performance-pdf');
-      const result = await securityAPI.downloadSecurityPersonnelPerformancePdf(performanceParams());
-      downloadBlob(result.data, 'security-personnel-performance.pdf');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'ساخت PDF عملکرد نیروهای حراست ناموفق بود.');
-    } finally {
-      setExporting(null);
-    }
-  };
+  return <ErpWorkspacePage title="گزارش‌ها" secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: loadShifts }]}>
+    <ErpSegmentedControl value={kind} onChange={(value) => { setKind(value); setSelectedPersonnelIds([]); }} options={[{ value: 'shifts', label: 'گزارش شیفت‌ها', icon: FaClock }, { value: 'attendance', label: 'گزارش حضور و غیاب حراست', icon: FaUsers }]} />
+    <ErpSection>
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]"><label className="relative"><span className="sr-only">جستجوی شیفت</span><FaSearch className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" /><input className={`${inputClass} pr-10`} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="شناسه شیفت، نام نگهبان یا تاریخ شمسی" /></label><select value={status} onChange={(event) => setStatus(event.target.value)} className={inputClass} aria-label="وضعیت شیفت"><option value="">همه وضعیت‌ها</option><option value="CLOSED">تکمیل‌شده</option><option value="FORCE_CLOSED">بسته‌شده توسط مدیر</option></select><ErpButton label="بازه اختیاری" icon={FaFilter} variant={showAdvanced ? 'soft' : 'outline'} onClick={() => setShowAdvanced((value) => !value)} /></div>
+      {showAdvanced && <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto]"><PersianCalendarComponent value={range.startDate} onChange={(startDate) => setRange((current) => ({ ...current, startDate }))} placeholder="از تاریخ" clearable /><PersianCalendarComponent value={range.endDate} onChange={(endDate) => setRange((current) => ({ ...current, endDate }))} placeholder="تا تاریخ" clearable />{(range.startDate || range.endDate) && <ErpButton label="پاک‌کردن بازه" variant="ghost" onClick={() => setRange({ startDate: '', endDate: '' })} />}</div>}
+      {selectedShiftIds.length > 0 && <div className="mt-3 flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-slate-500">دامنه:</span>{selectedShiftIds.map((id) => { const shift = shifts.find((item) => item.id === id); return <button key={id} type="button" onClick={() => toggleShift(id)} className="min-h-9 rounded-full bg-slate-100 px-3 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">{shift?.effectivePersonnel?.name || id.slice(0, 8)} ×</button>; })}<button type="button" onClick={() => setSelectedShiftIds([])} className="min-h-9 px-2 text-xs font-bold text-[#074747] dark:text-teal-200">پاک‌کردن</button></div>}
+    </ErpSection>
 
-  const exportLatestShiftPdf = async () => {
-    try {
-      setExporting('latest-shift-pdf');
-      const result = await securityAPI.downloadLatestCompletedShiftPdf();
-      downloadBlob(result.data, 'security-latest-completed-shift.pdf');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'ساخت PDF شیفت قبل ناموفق بود.');
-    } finally {
-      setExporting(null);
-    }
-  };
+    {loading && !shifts.length ? <ErpSkeleton lines={7} /> : error && !shifts.length ? <ErpInlineState kind="error" title={error} action={{ label: 'تلاش مجدد', onClick: loadShifts }} /> : <>
+      {error && <ErpInlineState kind="stale" title="آخرین جستجو ناموفق بود؛ نتایج قبلی نمایش داده می‌شود." action={{ label: 'تلاش مجدد', onClick: loadShifts }} />}
+      <ErpSection title="شیفت‌های پایان‌یافته"><p className="mb-3 text-xs font-semibold text-slate-500">{shifts.length.toLocaleString('fa-IR')} نتیجه · جدیدترین ابتدا</p>{!shifts.length ? <ErpEmptyState icon={FaClock} title="شیفت پایان‌یافته‌ای پیدا نشد" action={{ label: 'پاک‌کردن جستجو', onClick: () => { setSearch(''); setStatus(''); } }} /> : <div className="divide-y divide-slate-100 dark:divide-slate-800">{shifts.map((shift) => <article key={shift.id} className="flex items-start gap-3 py-4 first:pt-0 last:pb-0"><input type="checkbox" checked={selectedShiftIds.includes(shift.id)} onChange={() => toggleShift(shift.id)} className="mt-3 h-5 w-5 accent-[#074747]" aria-label={`انتخاب شیفت ${shift.effectivePersonnel?.name || ''}`} /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h2 className="font-bold text-slate-950 dark:text-white">{shift.effectivePersonnel?.name || 'شیفت حراست'}</h2><ErpStatus label={shift.status === 'FORCE_CLOSED' ? 'بسته‌شده توسط مدیر' : 'تکمیل‌شده'} tone="neutral" /></div><p className="mt-1 text-sm text-slate-500">{dateTime(shift.startsAt)} تا {dateTime(shift.endsAt)}</p><p className="mt-1 text-xs text-slate-400">پایان واقعی: {dateTime(shift.endedAt)} · {(shift.timeline?.length || 0).toLocaleString('fa-IR')} گزارش</p></div><Link href={`/dashboard/security/reports/shifts/${shift.id}`} className="inline-flex min-h-11 items-center rounded-xl px-3 text-sm font-bold text-[#074747] outline-none hover:bg-teal-50 focus-visible:ring-2 focus-visible:ring-[#074747] dark:text-teal-200 dark:hover:bg-teal-950/30">جزئیات</Link></article>)}</div>}</ErpSection>
+    </>}
 
-  const attendance = data?.attendance || {};
-  const trend = data?.attendanceTrend || [];
-  const summaries = performance?.summaries || [];
+    {kind === 'attendance' && selectedShiftIds.length > 0 && <ErpSection title="انتخاب کارکنان"><p className="mb-3 text-xs text-slate-500">انتخاب نکردن فرد به معنی همه کارکنان این شیفت‌هاست.</p>{previewLoading && !attendancePreview ? <ErpSkeleton lines={3} /> : attendancePreview && <div className="flex flex-wrap gap-2">{attendancePreview.personnel.map((person: any) => <button key={person.id} type="button" onClick={() => togglePersonnel(person.id)} className={`min-h-11 rounded-full border px-3 text-sm font-semibold transition ${selectedPersonnelIds.includes(person.id) ? 'border-[#074747] bg-[#074747] text-white' : 'border-slate-200 text-slate-700 dark:border-slate-700 dark:text-slate-200'}`}>{person.name}</button>)}</div>}</ErpSection>}
 
-  const metrics = scope === 'attendance'
-    ? [
-        { label: 'نرخ حضور', value: `${attendance.attendanceRate || 0}%`, icon: FaUsers, tone: 'success' as const },
-        { label: 'غیبت', value: attendance.absent || 0, icon: FaExclamationTriangle, tone: 'danger' as const },
-        { label: 'شیفت تکمیل‌شده', value: data?.shifts?.completedShifts || 0, icon: FaClock, tone: 'info' as const },
-        { label: 'درخواست در انتظار', value: data?.exceptions?.pending || 0, icon: FaChartLine, tone: 'warning' as const },
-      ]
-    : [
-        { label: 'نیروها', value: summaries.length, icon: FaUsers, tone: 'info' as const },
-        { label: 'تکمیل‌شده', value: summaries.reduce((n: number, item: any) => n + item.completed, 0), icon: FaClock, tone: 'success' as const },
-        { label: 'عدم حضور', value: summaries.reduce((n: number, item: any) => n + item.noShows, 0), icon: FaExclamationTriangle, tone: 'danger' as const },
-        { label: 'گزارش‌ها', value: summaries.reduce((n: number, item: any) => n + item.logEntries, 0), icon: FaShieldAlt, tone: 'warning' as const },
-      ];
-
-  const actions = [
-    { label: 'به‌روزرسانی', icon: FaRedo, tone: 'neutral' as const, onClick: () => { void load(); void loadLatestShiftStatus(); } },
-    ...(latestShiftReport?.authorized ? [{
-      label: exporting === 'latest-shift-pdf' ? 'در حال ساخت...' : 'گزارش‌های حراست شیفت قبل',
-      icon: FaFilePdf,
-      tone: 'info' as const,
-      onClick: exportLatestShiftPdf,
-      disabled: !!exporting || !latestShiftReport.available,
-      title: latestShiftReport.available ? undefined : 'هنوز شیفت پایان‌یافته‌ای برای دریافت گزارش وجود ندارد'
-    }] : []),
-    ...(scope === 'attendance'
-      ? [
-          { label: exporting === 'attendance-pdf' ? 'در حال ساخت...' : 'PDF حضور و غیاب', icon: FaFilePdf, onClick: () => exportAttendance('pdf'), disabled: !!exporting },
-          { label: exporting === 'excel' ? 'در حال ساخت...' : 'Excel', icon: FaFileExcel, tone: 'success' as const, onClick: () => exportAttendance('excel'), disabled: !!exporting },
-        ]
-      : [
-          { label: exporting === 'performance-pdf' ? 'در حال ساخت...' : 'PDF عملکرد نیروها', icon: FaFilePdf, onClick: exportPerformancePdf, disabled: !!exporting },
-        ])
-  ];
-
-  const departmentOptions = [{ value: '', label: 'همه بخش‌ها' }, ...departments.map((department) => ({ value: department.id, label: department.namePersian }))];
-  const personnelOptions = [{ value: '', label: 'همه نیروها' }, ...personnel.map((item) => ({ value: item.id, label: `${item.user.firstName} ${item.user.lastName}` }))];
-  const statusOptions = [
-    { value: '', label: 'همه وضعیت‌ها' },
-    { value: 'CLOSED', label: 'تکمیل‌شده' },
-    { value: 'FORCE_CLOSED', label: 'بسته‌شده مدیر' },
-    { value: 'ACTIVE', label: 'فعال' },
-  ];
-  const coverageOptions = [
-    { value: '', label: 'همه پوشش‌ها' },
-    { value: 'COVERED', label: 'کامل' },
-    { value: 'NEEDS_REPLACEMENT', label: 'جایگزین' },
-    { value: 'EMERGENCY_UNCOVERED', label: 'اضطراری' },
-  ];
-
-  if (loading) return <ErpLoading />;
-
-  if (error) {
-    return (
-      <ErpPage eyebrow="حراست" title="گزارش‌های حراست">
-        <ErpEmptyState title="گزارش در دسترس نیست" description={error} icon={FaExclamationTriangle} action={{ label: 'تلاش مجدد', icon: FaRedo, onClick: load }} />
-      </ErpPage>
-    );
-  }
-
-  return (
-    <ErpPage eyebrow="حراست" title="گزارش‌های حراست" description="حضور کارکنان و عملکرد عملیاتی نیروهای حراست" metrics={metrics} actions={actions}>
-      <ErpSegmentedControl value={scope} onChange={setScope} options={[
-        { value: 'attendance', label: 'حضور و غیاب کارکنان', icon: FaUsers },
-        { value: 'performance', label: 'عملکرد نیروهای حراست', icon: FaShieldAlt }
-      ]} />
-
-      <ErpSection title="فیلتر گزارش" description="فیلترها و بازه زمانی در گزارش و تاریخچه شیفت‌ها حفظ می‌شوند.">
-        <div className="mb-3 flex flex-wrap gap-2">
-          <ErpButton label="امروز" variant="soft" onClick={() => preset(1)} />
-          <ErpButton label="۷ روز اخیر" variant="soft" onClick={() => preset(7)} />
-          <ErpButton label="۳۰ روز اخیر" variant="soft" onClick={() => preset(30)} />
-        </div>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
-          <label><span className="mb-2 block text-sm font-medium">از تاریخ</span><PersianCalendarComponent value={range.startDate} onChange={(startDate) => setRange((old) => ({ ...old, startDate }))} /></label>
-          <label><span className="mb-2 block text-sm font-medium">تا تاریخ</span><PersianCalendarComponent value={range.endDate} onChange={(endDate) => setRange((old) => ({ ...old, endDate }))} /></label>
-          {scope === 'attendance' ? (
-            <>
-              <EnhancedDropdown label="بخش" value={departmentId} onChange={setDepartmentId} options={departmentOptions} searchable clearable={false} />
-            </>
-          ) : (
-            <>
-              <EnhancedDropdown label="نیروی حراست" value={personnelId} onChange={setPersonnelId} options={personnelOptions} searchable clearable={false} />
-              <EnhancedDropdown label="وضعیت شیفت" value={sessionStatus} onChange={setSessionStatus} options={statusOptions} searchable clearable={false} />
-              <EnhancedDropdown label="پوشش" value={coverageStatus} onChange={setCoverageStatus} options={coverageOptions} searchable clearable={false} />
-            </>
-          )}
-        </div>
-      </ErpSection>
-
-      {scope === 'attendance' ? (
-        <ErpSection title="روند روزانه">
-          <ErpCard className="overflow-x-auto p-0">
-            <table className="w-full min-w-[650px] text-right text-sm">
-              <thead className="bg-slate-50"><tr>{['تاریخ','کل','حاضر','غایب','تأخیر','ماموریت','مرخصی'].map((heading) => <th key={heading} className="px-4 py-3">{heading}</th>)}</tr></thead>
-              <tbody>{trend.map((item: any) => <tr key={item.date} className="border-t"><td className="px-4 py-3">{new Date(item.date).toLocaleDateString('fa-IR')}</td><td className="px-4 py-3">{item.total}</td><td className="px-4 py-3 text-emerald-600">{item.present}</td><td className="px-4 py-3 text-red-600">{item.absent}</td><td className="px-4 py-3 text-amber-600">{item.late}</td><td className="px-4 py-3">{item.mission}</td><td className="px-4 py-3">{item.leave}</td></tr>)}</tbody>
-            </table>
-          </ErpCard>
-        </ErpSection>
-      ) : (
-        <ErpSection title="خلاصه عملکرد نیروها" description="PDF این بخش فقط شیفت‌های پایان‌یافته را خروجی می‌گیرد.">
-          <ErpCard className="overflow-x-auto p-0">
-            <table className="w-full min-w-[980px] text-right text-sm">
-              <thead className="bg-slate-50"><tr>{['نیرو','شیفت','برنامه','حضور','تأخیر','عدم حضور','تکمیل','بسته مدیر','گشت','گزارش',''].map((heading, index) => <th key={`${heading}-${index}`} className="px-4 py-3">{heading}</th>)}</tr></thead>
-              <tbody>{summaries.map((item: any) => <tr key={item.id} className="border-t"><td className="px-4 py-3 font-semibold">{item.name}</td><td className="px-4 py-3">{item.shift}</td><td className="px-4 py-3">{item.plannedSlots}</td><td className="px-4 py-3">{item.attended}</td><td className="px-4 py-3 text-amber-600">{item.late}</td><td className="px-4 py-3 text-red-600">{item.noShows}</td><td className="px-4 py-3 text-emerald-600">{item.completed}</td><td className="px-4 py-3 text-red-600">{item.forceClosed}</td><td className="px-4 py-3">{item.patrols}</td><td className="px-4 py-3">{item.logEntries}</td><td className="px-4 py-3"><Link href={`/dashboard/security/reports/${item.id}?startDate=${encodeURIComponent(range.startDate)}&endDate=${encodeURIComponent(range.endDate)}`} className="inline-flex items-center gap-2 rounded-lg border border-[#074747]/30 px-3 py-2 text-xs font-semibold text-[#074747]"><FaHistory />تاریخچه شیفت‌ها</Link></td></tr>)}</tbody>
-            </table>
-          </ErpCard>
-        </ErpSection>
-      )}
-    </ErpPage>
-  );
+    {selectedShiftIds.length > 0 && <ErpSection title="پیش‌نمایش دقیق" actions={[{ label: exporting ? 'در حال ساخت…' : exportLabel, icon: FaFilePdf, onClick: exportReport, disabled: exporting || Boolean(previewError) || selectedShifts.length !== selectedShiftIds.length, variant: 'solid' }]}>
+      {kind === 'shifts' ? <div className="space-y-8">{selectedShifts.map((shift) => <ShiftReportPreview key={shift.id} shift={shift} />)}</div> : previewLoading ? <ErpSkeleton lines={5} /> : previewError ? <ErpInlineState kind="error" title={previewError} /> : attendancePreview?.rows?.length ? <div className="space-y-2">{attendancePreview.rows.map((row: any) => <div key={`${row.shiftId}-${row.personnelId}`} className="grid gap-2 border-b border-slate-100 py-3 last:border-0 dark:border-slate-800 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"><div><p className="font-bold">{row.personnelName}</p><p className="mt-1 text-xs text-slate-500">{row.shiftTitle}</p></div><p className="text-sm text-slate-600 dark:text-slate-300">حضور: {dateTime(row.arrivedAt)}{row.delayMinutes ? ` · ${row.delayMinutes.toLocaleString('fa-IR')} دقیقه تأخیر` : ''}</p><ErpStatus label={row.state === 'PRESENT' ? 'حاضر' : row.state === 'LATE' ? 'با تأخیر' : 'غایب'} tone={row.state === 'PRESENT' ? 'success' : row.state === 'LATE' ? 'warning' : 'danger'} /></div>)}</div> : <ErpEmptyState icon={FaUsers} title="داده‌ای در دامنه انتخاب‌شده وجود ندارد" />}
+    </ErpSection>}
+  </ErpWorkspacePage>;
 }

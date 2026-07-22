@@ -3,7 +3,8 @@
 import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FaArrowRight, FaSearch } from 'react-icons/fa';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { FaArrowRight, FaCheck, FaEllipsisV, FaExclamationTriangle, FaInfoCircle, FaRedo, FaSearch, FaTimes } from 'react-icons/fa';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 
 type IconType = React.ComponentType<{ className?: string }>;
@@ -783,6 +784,210 @@ export function ErpTwoColumn({ main, aside }: { main: React.ReactNode; aside: Re
       <div className="space-y-5">{main}</div>
       <aside className="space-y-5 lg:sticky lg:top-4 lg:self-start">{aside}</aside>
     </div>
+  );
+}
+
+export type ErpSemanticStatus = {
+  label: string;
+  tone?: ErpTone;
+  icon?: IconType;
+  emphasis?: 'compact' | 'strong';
+};
+
+export function ErpStatus({ label, tone = 'neutral', icon: Icon, emphasis = 'compact' }: ErpSemanticStatus) {
+  return (
+    <span
+      className={cx(
+        'inline-flex min-h-7 items-center gap-1.5 rounded-full border font-semibold',
+        emphasis === 'strong' ? 'px-3 py-1.5 text-sm' : 'px-2.5 py-1 text-xs',
+        toneClasses[tone].badge,
+      )}
+    >
+      {Icon && <Icon className="h-3.5 w-3.5" aria-hidden="true" />}
+      <span>{label}</span>
+    </span>
+  );
+}
+
+export function ErpWorkspacePage({
+  title,
+  context,
+  primaryAction,
+  secondaryActions = [],
+  backHref,
+  children,
+  className,
+}: WithChildren & {
+  title: React.ReactNode;
+  context?: React.ReactNode;
+  primaryAction?: ErpAction;
+  secondaryActions?: ErpAction[];
+  backHref?: string;
+}) {
+  const router = useRouter();
+  const reduceMotion = useReducedMotion();
+
+  const handleBack = React.useCallback(() => {
+    if (!backHref) return;
+    if (typeof window !== 'undefined' && window.history.length > 1) router.back();
+    else router.push(backHref);
+  }, [backHref, router]);
+
+  return (
+    <motion.main
+      className={cx('mx-auto w-full max-w-7xl space-y-5', className)}
+      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
+    >
+      <header className="flex min-h-14 items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2.5">
+          {backHref && <ErpIconButton label="بازگشت" onClick={handleBack} icon={FaArrowRight} tone="neutral" />}
+          <div className="min-w-0 py-0.5">
+            <h1 className="truncate text-2xl font-black tracking-tight text-slate-950 dark:text-white">{title}</h1>
+            {context && <div className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">{context}</div>}
+          </div>
+        </div>
+        {(primaryAction || secondaryActions.length > 0) && (
+          <div className="flex flex-shrink-0 items-center gap-2">
+            {primaryAction && <ErpButton {...primaryAction} className={cx('min-h-11', primaryAction.className)} />}
+            {secondaryActions.length > 0 && <ErpActionMenu label="اقدامات بیشتر" actions={secondaryActions} />}
+          </div>
+        )}
+      </header>
+      {children}
+    </motion.main>
+  );
+}
+
+export function ErpMotionSection({ children, className, delay = 0 }: WithChildren & { delay?: number }) {
+  const reduceMotion = useReducedMotion();
+  return (
+    <motion.section
+      className={className}
+      initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: reduceMotion ? 0 : 0.24, delay: reduceMotion ? 0 : Math.min(delay, 0.16), ease: [0.22, 1, 0.36, 1] }}
+    >
+      {children}
+    </motion.section>
+  );
+}
+
+export function ErpSkeleton({ lines = 3, className, label = 'در حال بارگذاری' }: { lines?: number; className?: string; label?: string }) {
+  return (
+    <div className={cx('animate-pulse space-y-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900/70', className)} role="status" aria-label={label}>
+      <span className="sr-only">{label}</span>
+      <div className="h-4 w-28 rounded-full bg-slate-200 dark:bg-slate-700" />
+      {Array.from({ length: lines }).map((_, index) => (
+        <div key={index} className={cx('h-11 rounded-xl bg-slate-100 dark:bg-slate-800', index === lines - 1 && 'w-4/5')} />
+      ))}
+    </div>
+  );
+}
+
+export function ErpInlineState({
+  kind,
+  title,
+  action,
+  className,
+}: {
+  kind: 'empty' | 'success' | 'error' | 'stale' | 'permission';
+  title: React.ReactNode;
+  action?: ErpAction;
+  className?: string;
+}) {
+  const config = {
+    empty: { Icon: FaInfoCircle, classes: 'border-slate-200 text-slate-600 dark:border-slate-800 dark:text-slate-300' },
+    success: { Icon: FaCheck, classes: 'border-emerald-200 text-emerald-700 dark:border-emerald-900 dark:text-emerald-200' },
+    error: { Icon: FaExclamationTriangle, classes: 'border-rose-200 text-rose-700 dark:border-rose-900 dark:text-rose-200' },
+    stale: { Icon: FaRedo, classes: 'border-amber-200 text-amber-700 dark:border-amber-900 dark:text-amber-200' },
+    permission: { Icon: FaInfoCircle, classes: 'border-slate-200 text-slate-600 dark:border-slate-800 dark:text-slate-300' },
+  }[kind];
+  const Icon = config.Icon;
+  return (
+    <div className={cx('flex min-h-12 items-center justify-between gap-3 border-y bg-transparent px-1 py-3 text-sm', config.classes, className)} role={kind === 'error' ? 'alert' : 'status'}>
+      <span className="inline-flex items-center gap-2 font-semibold"><Icon className="h-3.5 w-3.5" aria-hidden="true" />{title}</span>
+      {action && <ErpButton {...action} variant={action.variant || 'ghost'} className={cx('min-h-11', action.className)} />}
+    </div>
+  );
+}
+
+export function ErpActionMenu({ label, actions }: { label: string; actions: ErpAction[] }) {
+  const [open, setOpen] = React.useState(false);
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+  return (
+    <div ref={rootRef} className="relative">
+      <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={label} className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 outline-none transition hover:border-[#074747]/30 hover:text-[#074747] focus-visible:ring-2 focus-visible:ring-[#074747] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+        <FaEllipsisV className="h-4 w-4" />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div initial={{ opacity: 0, scale: 0.97, y: -4 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97, y: -4 }} transition={{ duration: 0.16 }} className="absolute left-0 z-40 mt-2 min-w-48 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+            {actions.map((action) => (
+              <div key={action.label} onClick={() => setOpen(false)}><ErpButton {...action} variant="ghost" className="w-full justify-start border-0" /></div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+export function ErpSheet({ open, onClose, title, children, footer }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode }) {
+  const closeButtonRef = React.useRef<HTMLButtonElement>(null);
+  const dialogRef = React.useRef<HTMLDivElement>(null);
+  const restoreFocusRef = React.useRef<HTMLElement | null>(null);
+  const onCloseRef = React.useRef(onClose);
+  const titleId = React.useId();
+  const reduceMotion = useReducedMotion();
+  React.useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  React.useEffect(() => {
+    if (!open) return;
+    restoreFocusRef.current = document.activeElement as HTMLElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.setTimeout(() => closeButtonRef.current?.focus(), 0);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseRef.current();
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'));
+      if (!focusable.length) return;
+      const first = focusable[0]; const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+      restoreFocusRef.current?.focus();
+    };
+  }, [open]);
+  return (
+    <AnimatePresence>
+      {open && (
+        <div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-stretch sm:justify-start" role="presentation">
+          <motion.button type="button" aria-label="بستن" onClick={onClose} className="absolute inset-0 bg-slate-950/45 backdrop-blur-[1px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
+          <motion.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} initial={reduceMotion ? false : { opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 24 }} transition={{ duration: reduceMotion ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }} className="relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950 sm:mr-auto sm:h-full sm:max-h-none sm:max-w-lg sm:rounded-none sm:rounded-r-3xl">
+            <header className="flex min-h-16 items-center justify-between gap-3 border-b border-slate-200 px-4 dark:border-slate-800">
+              <h2 id={titleId} className="text-base font-bold text-slate-950 dark:text-white">{title}</h2>
+              <button ref={closeButtonRef} type="button" onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-slate-500 outline-none transition hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-[#074747] dark:hover:bg-slate-800" aria-label="بستن"><FaTimes /></button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
+            {footer && <footer className="border-t border-slate-200 p-4 dark:border-slate-800">{footer}</footer>}
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
   );
 }
 

@@ -1,14 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { FaCalendarAlt, FaCheck, FaClock, FaExclamationTriangle, FaHistory, FaPlay, FaRedo, FaStop, FaTrash, FaUserEdit, FaUsers } from 'react-icons/fa';
-import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpSegmentedControl } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpSection, ErpSegmentedControl, ErpSkeleton, ErpStatus, ErpWorkspacePage } from '@/components/erp';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
 import { securityAPI } from '@/lib/api';
 import { askSecurityAction } from '@/components/SecurityNoticeHost';
 
-type ShiftView = 'mine' | 'coverage' | 'plans' | 'history';
+type ShiftView = 'current' | 'plans' | 'history';
 type DraftMode = 'replacement' | 'temporary' | 'force-close' | 'correction' | null;
 
 const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-teal-600 dark:border-slate-700 dark:bg-slate-800 dark:text-white';
@@ -36,8 +37,11 @@ const toIsoFromPersian = (date: string, time: string) => PersianCalendar.toGrego
 const elapsedMinutes = (from: string | Date, now: number) => Math.max(0, Math.floor((now - new Date(from).getTime()) / 60_000));
 
 export default function SecurityShiftsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
   const currentYear = Number(PersianCalendar.now().split('/')[0]);
-  const [view, setView] = useState<ShiftView>('mine');
+  const [view, setView] = useState<ShiftView>('current');
+  const [queryReady, setQueryReady] = useState(false);
   const [workflow, setWorkflow] = useState<any>(null);
   const [currentShift, setCurrentShift] = useState<any>(null);
   const [plans, setPlans] = useState<any[]>([]);
@@ -65,8 +69,8 @@ export default function SecurityShiftsPage() {
     primaryPersonnelIds: ['', '', ''],
   });
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError('');
     try {
       const from = new Date(Date.now() - 35 * 86_400_000).toISOString();
@@ -102,7 +106,7 @@ export default function SecurityShiftsPage() {
     } catch (err: any) {
       setError(err.response?.data?.error || 'دریافت برنامه شیفت ناموفق بود.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -121,6 +125,20 @@ export default function SecurityShiftsPage() {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
+  useEffect(() => {
+    if (view !== 'current') return undefined;
+    const timer = window.setInterval(() => { void load(true); }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [load, view]);
+  useEffect(() => {
+    const value = new URLSearchParams(window.location.search).get('view');
+    if (value === 'current' || value === 'plans' || value === 'history') setView(value);
+    setQueryReady(true);
+  }, []);
+  useEffect(() => {
+    if (!queryReady) return;
+    router.replace(view === 'current' ? pathname : `${pathname}?view=${view}`, { scroll: false });
+  }, [pathname, queryReady, router, view]);
 
   const personnelOptions = defaults?.personnel || [];
   const mySlots = useMemo(() => workflow?.slots || [], [workflow]);
@@ -139,6 +157,7 @@ export default function SecurityShiftsPage() {
     .sort((a, b) => new Date(b.session?.endedAt || b.startsAt).getTime() - new Date(a.session?.endedAt || a.startsAt).getTime()), [slots]);
   const activeShiftWorker = currentShift?.activeSession?.personnel || (currentShift?.activeSession?.slot ? slotWorker(currentShift.activeSession.slot) : null);
   const scheduledCurrentWorker = currentShift?.currentSlot ? slotWorker(currentShift.currentSlot) : null;
+  const publishedPlan = useMemo(() => plans.find((plan) => plan.status === 'PUBLISHED'), [plans]);
 
   const run = async (action: () => Promise<any>, success: string) => {
     try {
@@ -205,15 +224,7 @@ export default function SecurityShiftsPage() {
     await run(() => securityAPI.endPlannedShift(slot.id, closureSummary.trim() || '\u0628\u062f\u0648\u0646 \u0645\u0648\u0631\u062f \u062f\u06cc\u06af\u0631'), '\u0634\u06cc\u0641\u062a \u067e\u0627\u06cc\u0627\u0646 \u06cc\u0627\u0641\u062a.');
   };
 
-  const viewOptions = useMemo(() => {
-    const options: Array<{ value: ShiftView; label: string; icon: any }> = [{ value: 'mine', label: 'برنامه من', icon: FaCalendarAlt }];
-    if (defaults) {
-      options.push({ value: 'coverage', label: 'پوشش شیفت‌ها', icon: FaUsers });
-      options.push({ value: 'plans', label: 'برنامه سالانه', icon: FaClock });
-      options.push({ value: 'history', label: 'تاریخچه و حسابرسی', icon: FaHistory });
-    }
-    return options;
-  }, [defaults]);
+  const viewOptions = useMemo(() => [{ value: 'current' as ShiftView, label: 'شیفت جاری', icon: FaPlay }, { value: 'plans' as ShiftView, label: 'برنامه شیفت‌ها', icon: FaCalendarAlt }, { value: 'history' as ShiftView, label: 'سوابق', icon: FaHistory }], []);
 
   const slotStatusBadge = (slot: any) => {
     if (slot.session?.status === 'ACTIVE') return <ErpBadge tone="success">فعال</ErpBadge>;
@@ -224,23 +235,11 @@ export default function SecurityShiftsPage() {
     return <ErpBadge tone="info">در انتظار</ErpBadge>;
   };
 
-  if (loading) return <ErpLoading />;
-
   return (
-    <ErpPage
-      eyebrow="حراست"
-      title="شیفت‌ها"
-      description="برنامه سالانه، پوشش شیفت، حضور و غیاب، تحویل شیفت و تاریخچه حسابرسی"
-      actions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: load, tone: 'neutral' }]}
-      metrics={[
-        { label: 'شیفت بعدی من', value: nextSlot ? dateTimeFa(nextSlot.startsAt) : '—', icon: FaClock, tone: 'info' },
-        { label: 'نیازمند جایگزین', value: slots.filter((slot) => slot.coverageStatus === 'NEEDS_REPLACEMENT').length, icon: FaExclamationTriangle, tone: 'warning' },
-        { label: 'عدم حضور احتمالی', value: slots.filter((slot) => slot.probableNoShowAt).length, icon: FaExclamationTriangle, tone: 'danger' },
-        { label: 'شیفت فعال', value: workflow?.activeSession ? 1 : 0, icon: FaPlay, tone: 'success' },
-      ]}
-    >
-      {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{message}</div>}
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
+    <ErpWorkspacePage title="شیفت‌ها" primaryAction={defaults ? { label: 'برنامه جدید', icon: FaCalendarAlt, onClick: () => setView('plans'), variant: 'solid' } : undefined} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: load }]}>
+      {loading && !slots.length && !plans.length ? <ErpSkeleton lines={6} /> : <>
+      {message && <ErpInlineState kind="success" title={message} />}
+      {error && <ErpInlineState kind={slots.length || plans.length ? 'stale' : 'error'} title={error} action={{ label: 'تلاش مجدد', onClick: load }} />}
       <ErpSegmentedControl<ShiftView> value={view} onChange={setView} options={viewOptions} />
 
       <ErpCard className="p-4" tone={currentShift?.activeSession ? 'success' : currentShift?.currentSlot ? 'warning' : 'neutral'}>
@@ -271,8 +270,8 @@ export default function SecurityShiftsPage() {
         )}
       </ErpCard>
 
-      {view === 'mine' && (
-        <ErpSection title="برنامه من" description="نمای سال/ماه از شیفت‌ها، مرخصی، جایگزینی، حضور، تأخیر و شمارش انتظار">
+      {view === 'current' && (
+        <ErpSection title="برنامه من">
           <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[220px_minmax(0,1fr)]">
             <label>
               <span className={labelClass}>ماه برنامه</span>
@@ -336,8 +335,8 @@ export default function SecurityShiftsPage() {
         </ErpSection>
       )}
 
-      {view === 'coverage' && defaults && (
-        <ErpSection title="پوشش شیفت‌ها" description="نمای عملیاتی مدیر: پوشش، عدم حضور احتمالی، تحویل، جایگزین و پوشش موقت">
+      {view === 'current' && defaults && (
+        <ErpSection title="پوشش شیفت‌ها">
           <div className="space-y-3">
             {slots.map((slot) => {
               const worker = slotWorker(slot);
@@ -408,7 +407,8 @@ export default function SecurityShiftsPage() {
       )}
 
       {view === 'plans' && defaults && (
-        <ErpSection title="برنامه سالانه شیفت" description="تولید پیش‌نویس از نقطه شروع قابل تنظیم و انتشار پس از بازبینی">
+        <ErpSection title="برنامه شیفت‌ها">
+          {publishedPlan && <div className="mb-5 rounded-xl border border-slate-200 p-4 dark:border-slate-800"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold">جمعیت عملیاتی جاری</h3><ErpStatus label="برنامه منتشرشده" tone="success" /></div><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{personName(publishedPlan.primaryA)} ← {personName(publishedPlan.primaryB)} ← {personName(publishedPlan.primaryC)}</p></div>}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3 [&>label:nth-child(4)]:hidden [&>label:nth-child(6)]:hidden">
             <label><span className={labelClass}>عنوان</span><input className={inputClass} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
             <label><span className={labelClass}>سال شمسی</span><input className={inputClass} type="number" value={form.persianYear} onChange={(e) => setForm({ ...form, persianYear: Number(e.target.value) })} /></label>
@@ -452,7 +452,7 @@ export default function SecurityShiftsPage() {
       )}
 
       {view === 'history' && defaults && (
-        <ErpSection title="تاریخچه و حسابرسی شیفت‌ها" description="تعویض نیرو، پوشش موقت، حضور، اصلاح حضور، گزارش شیفت و بستن اجباری در یکجا دیده می‌شود.">
+        <ErpSection title="سوابق شیفت‌ها">
           <div className="space-y-3">
             {historySlots.map((slot) => (
               <ErpCard key={slot.id} className="p-4">
@@ -485,6 +485,7 @@ export default function SecurityShiftsPage() {
           </div>
         </ErpSection>
       )}
-    </ErpPage>
+      </>}
+    </ErpWorkspacePage>
   );
 }

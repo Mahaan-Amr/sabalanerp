@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { FaBan, FaCamera, FaCarSide, FaCheck, FaClipboardList, FaClock, FaEdit, FaPlus, FaRedo, FaSearch, FaTrash, FaTruck, FaUserShield } from 'react-icons/fa';
-import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpSegmentedControl } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpSection, ErpSegmentedControl, ErpSkeleton, ErpWorkspacePage } from '@/components/erp';
 import { crmAPI, securityAPI } from '@/lib/api';
 import { askSecurityAction } from '@/components/SecurityNoticeHost';
 
@@ -98,6 +99,8 @@ const statusTone = (status: string) => {
 type VehicleSection = 'registry' | 'queue' | 'movements' | 'inbound' | 'sales-exit';
 
 export default function SecurityVehiclesPage() {
+  const router = useRouter();
+  const pathname = usePathname();
   const [pairs, setPairs] = useState<any[]>([]);
   const [movements, setMovements] = useState<any[]>([]);
   const [readyExit, setReadyExit] = useState<any[]>([]);
@@ -117,7 +120,8 @@ export default function SecurityVehiclesPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [activeSection, setActiveSection] = useState<VehicleSection>('movements');
+  const [activeSection, setActiveSection] = useState<VehicleSection>('queue');
+  const [queryReady, setQueryReady] = useState(false);
 
   const activePairs = useMemo(() => pairs.filter((pair) => pair.isActive), [pairs]);
   const queuedPairIds = useMemo(() => new Set(queueTurns.filter((turn) => ['WAITING', 'ENTERED_LOADING_AREA', 'RESERVED'].includes(turn.status)).map((turn) => turn.vehiclePairId)), [queueTurns]);
@@ -129,26 +133,24 @@ export default function SecurityVehiclesPage() {
     return fieldsComplete && plateComplete && photosComplete;
   }, [editingPair, pairForm, pairPhotos, plateParts]);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError('');
     try {
-      const [pairResponse, movementResponse, readyResponse, queueResponse, queueHistoryResponse] = await Promise.all([
+      const results = await Promise.allSettled([
         securityAPI.getVehiclePairs({ includeInactive: true }),
         securityAPI.getVehicleMovements({ limit: 50 }),
         securityAPI.getReadyExitLoadings(),
         securityAPI.getDriverQueue(),
         securityAPI.getDriverQueue(true),
       ]);
-      if (pairResponse.data.success) setPairs(pairResponse.data.data);
-      if (movementResponse.data.success) setMovements(movementResponse.data.data);
-      if (readyResponse.data.success) setReadyExit(readyResponse.data.data);
-      if (queueResponse.data.success) setQueueTurns(queueResponse.data.data);
-      if (queueHistoryResponse.data.success) setQueueHistory(queueHistoryResponse.data.data);
+      const setters = [setPairs, setMovements, setReadyExit, setQueueTurns, setQueueHistory];
+      results.forEach((result, index) => { if (result.status === 'fulfilled' && result.value.data.success) setters[index](result.value.data.data); });
+      if (results.some((result) => result.status === 'rejected')) setError('بخشی از اطلاعات خودرویی دریافت نشد؛ اطلاعات موفق نمایش داده می‌شود.');
     } catch (err: any) {
       setError(err.response?.data?.error || 'دریافت اطلاعات خودرویی ناموفق بود.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -163,9 +165,26 @@ export default function SecurityVehiclesPage() {
 
   useEffect(() => {
     if (activeSection !== 'queue') return undefined;
-    const timer = window.setInterval(() => { void loadData(); }, 5000);
+    const timer = window.setInterval(() => { void loadData(true); }, 30_000);
     return () => window.clearInterval(timer);
   }, [activeSection]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const operation = params.get('operation') as VehicleSection | null;
+    if (operation && ['registry', 'queue', 'movements', 'inbound', 'sales-exit'].includes(operation)) setActiveSection(operation);
+    else if (params.get('view') === 'history') setActiveSection('movements');
+    setQueryReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!queryReady) return;
+    const params = new URLSearchParams();
+    if (activeSection === 'movements') params.set('view', 'history');
+    else if (activeSection !== 'queue') params.set('operation', activeSection);
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }, [activeSection, pathname, queryReady, router]);
 
   const searchCustomers = async () => {
     if (!customerSearch.trim()) return;
@@ -315,38 +334,24 @@ export default function SecurityVehiclesPage() {
     }
   };
 
-  if (loading) return <ErpLoading />;
-
   return (
-    <ErpPage
-      eyebrow="حراست"
-      title="خودرویی"
-      description="ترددها، تراکنش‌های ورودی و خروجی، نوبت‌دهی و ثبت راننده و خودرو."
-      actions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: loadData, tone: 'neutral' }]}
-      metrics={[
-        { label: 'راننده و خودروی واجد شرایط', value: activePairs.length, icon: FaTruck, tone: 'success' },
-        { label: 'رانندگان حاضر در صف', value: queueTurns.filter((turn) => turn.status === 'WAITING').length, icon: FaClock, tone: 'info' },
-        { label: 'ترددهای اخیر', value: movements.length, icon: FaClipboardList, tone: 'info' },
-        { label: 'آماده خروج', value: readyExit.length, icon: FaCarSide, tone: 'warning' },
-      ]}
-    >
-      {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{message}</div>}
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
+    <ErpWorkspacePage title="خودرویی" primaryAction={{ label: 'ثبت راننده و خودرو', icon: FaPlus, onClick: () => setActiveSection('registry'), variant: 'solid' }} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: loadData }]}>
+      {loading && !pairs.length && !movements.length ? <ErpSkeleton lines={6} /> : <>
+      {message && <ErpInlineState kind="success" title={message} />}
+      {error && <ErpInlineState kind={pairs.length || movements.length ? 'stale' : 'error'} title={error} action={{ label: 'تلاش مجدد', onClick: loadData }} />}
 
-      <ErpSegmentedControl<VehicleSection>
-        value={activeSection}
-        onChange={setActiveSection}
+      <ErpSegmentedControl<'current' | 'history'>
+        value={activeSection === 'movements' ? 'history' : 'current'}
+        onChange={(value) => setActiveSection(value === 'history' ? 'movements' : 'queue')}
         options={[
-          { value: 'movements', label: 'تردد خودرو', icon: FaClipboardList },
-          { value: 'sales-exit', label: 'تراکنش خروجی', icon: FaCheck },
-          { value: 'inbound', label: 'تراکنش ورودی', icon: FaCarSide },
-          { value: 'queue', label: 'نوبت‌دهی رانندگان', icon: FaClock },
-          { value: 'registry', label: 'ثبت راننده و خودرو', icon: FaTruck },
+          { value: 'current', label: 'تردد جاری', icon: FaClock },
+          { value: 'history', label: 'سوابق', icon: FaClipboardList },
         ]}
       />
+      {activeSection !== 'movements' && <div className="flex flex-wrap gap-2"><ErpButton label="صف رانندگان" onClick={() => setActiveSection('queue')} variant={activeSection === 'queue' ? 'solid' : 'soft'} /><ErpButton label="آماده خروج" onClick={() => setActiveSection('sales-exit')} variant={activeSection === 'sales-exit' ? 'solid' : 'soft'} /><ErpButton label="ثبت ورود" onClick={() => setActiveSection('inbound')} variant={activeSection === 'inbound' ? 'solid' : 'soft'} /><ErpButton label="رانندگان و خودروها" onClick={() => setActiveSection('registry')} variant={activeSection === 'registry' ? 'solid' : 'soft'} /></div>}
 
       {activeSection === 'queue' && (
-        <ErpSection title="نوبت‌دهی رانندگان" description="رانندگان حاضر بر اساس اولویت صف مدیریت می‌شوند؛ حراست می‌تواند آن‌ها را وارد محوطه بارگیری کند تا لجستیک از میان رانندگان آماده انتخاب کند.">
+        <ErpSection title="صف رانندگان">
           <div className="mb-4"><ErpButton label={showQueueHistory ? 'نمایش صف جاری' : 'تاریخچه نوبت‌ها'} icon={FaClipboardList} variant="soft" onClick={() => setShowQueueHistory((value) => !value)} /></div>
           {!showQueueHistory && <div className="mb-4 flex justify-end"><ErpButton label="به‌روزرسانی" icon={FaRedo} variant="soft" onClick={() => { void loadData(); }} /></div>}
           {!showQueueHistory && <>
@@ -371,7 +376,7 @@ export default function SecurityVehiclesPage() {
       )}
 
       {activeSection === 'registry' && (
-      <ErpSection title="ثبت راننده و خودرو" description="رکورد فعال و کامل می‌تواند توسط حراست وارد صف نوبت‌دهی شود.">
+      <ErpSection title="ثبت راننده و خودرو">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           {Object.entries({ firstName: 'نام', lastName: 'نام خانوادگی', vehicleType: 'نوع خودرو', phone: 'شماره موبایل', nationalCode: 'کد ملی', homeAddress: 'آدرس منزل', relativePhone: 'شماره موبایل بستگان' }).map(([field, label]) => (
             <label key={field}>
@@ -488,7 +493,7 @@ export default function SecurityVehiclesPage() {
       )}
 
       {activeSection === 'sales-exit' && (
-      <ErpSection title="تراکنش خروجی" description="این لیست از بارگیری‌های نهایی‌شده لجستیک می‌آید و زمان خروج را حراست ثبت می‌کند.">
+      <ErpSection title="آماده خروج">
         {readyExit.length === 0 ? (
           <ErpEmptyState icon={FaCarSide} title="بارگیری آماده خروج وجود ندارد" />
         ) : (
@@ -515,7 +520,7 @@ export default function SecurityVehiclesPage() {
       )}
 
       {activeSection === 'movements' && (
-      <ErpSection title="تردد خودرو">
+      <ErpSection title="سوابق تردد">
         <div className="space-y-3">
           {movements.map((movement) => (
             <ErpCard key={movement.id} className="p-4">
@@ -540,6 +545,7 @@ export default function SecurityVehiclesPage() {
       </ErpSection>
       )}
       {previewUrl && <div role="dialog" aria-modal="true" className="fixed inset-0 z-[100] grid place-items-center bg-black/80 p-4" onClick={() => setPreviewUrl('')}><div className="relative max-h-full max-w-5xl" onClick={(event) => event.stopPropagation()}><img src={previewUrl} alt="پیش‌نمایش تصویر" className="max-h-[90vh] max-w-full rounded-xl object-contain" /><button type="button" onClick={() => setPreviewUrl('')} className="absolute left-2 top-2 rounded-lg bg-white px-3 py-2 font-semibold text-slate-900">بستن</button></div></div>}
-    </ErpPage>
+      </>}
+    </ErpWorkspacePage>
   );
 }

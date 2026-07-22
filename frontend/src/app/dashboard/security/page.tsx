@@ -17,7 +17,7 @@ import {
   ErpCurrentShiftPanel,
   ErpDashboardSkeleton,
   ErpInlineError,
-  ErpPage,
+  ErpWorkspacePage,
   ErpQuickAccessGrid,
   ErpShiftTimeline,
   ErpStatusSummary,
@@ -180,7 +180,7 @@ export default function SecurityDashboardPage() {
       : null;
 
   return (
-    <ErpPage title="حراست" description={PersianCalendar.formatForDisplay(today)} metrics={[]}>
+    <ErpWorkspacePage title="حراست" context={PersianCalendar.formatForDisplay(today)}>
       {!permissionsLoading && showShiftShell && shiftLoading && !shiftAwareness && <ErpDashboardSkeleton variant="panel" />}
       {!permissionsLoading && showShiftShell && shiftError && !shiftAwareness && <ErpInlineError message={shiftError} onRetry={() => loadCurrentShift()} />}
       {shiftAwareness?.authorized && overview && (
@@ -251,6 +251,6 @@ export default function SecurityDashboardPage() {
           compact
         />
       )}
-    </ErpPage>
+    </ErpWorkspacePage>
   );
 }

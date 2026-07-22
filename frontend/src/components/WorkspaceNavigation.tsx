@@ -38,8 +38,8 @@ import {
   FaMoneyBillWave,
   FaTruck
 } from 'react-icons/fa';
-import { useWorkspace, WORKSPACES, WORKSPACE_CONFIG } from '@/contexts/WorkspaceContext';
-import { dashboardAPI } from '@/lib/api';
+import { useWorkspace, WORKSPACES, WORKSPACE_CONFIG, WORKSPACE_PERMISSIONS } from '@/contexts/WorkspaceContext';
+import { dashboardAPI, securityAPI } from '@/lib/api';
 
 interface NavigationItem {
   name: string;
@@ -47,6 +47,7 @@ interface NavigationItem {
   href: string;
   icon: any;
   show: boolean;
+  separatorBefore?: boolean;
   children?: NavigationItem[];
 }
 
@@ -70,6 +71,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
   const [internalCollapsed, setInternalCollapsed] = useState(false);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [canOpenSecurityShiftReport, setCanOpenSecurityShiftReport] = useState(false);
   const pathname = usePathname();
 
   const isControlled = typeof collapsedProp === 'boolean';
@@ -86,6 +88,22 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
   useEffect(() => {
     loadCurrentUser();
   }, []);
+
+  useEffect(() => {
+    if (currentWorkspace !== WORKSPACES.SECURITY) {
+      setCanOpenSecurityShiftReport(false);
+      return;
+    }
+    let active = true;
+    securityAPI.getDashboardCurrentShift()
+      .then((response) => {
+        if (!active) return;
+        const awareness = response.data?.data;
+        setCanOpenSecurityShiftReport(Boolean(awareness?.authorized && (awareness?.access === 'manager' || (awareness?.access === 'operator' && awareness?.overview?.state === 'ACTIVE'))));
+      })
+      .catch(() => { if (active) setCanOpenSecurityShiftReport(false); });
+    return () => { active = false; };
+  }, [currentWorkspace]);
 
   const loadCurrentUser = async () => {
     try {
@@ -593,38 +611,10 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             show: true
           },
           {
-            name: 'Vehicles',
-            namePersian: 'خودرویی',
-            href: '/dashboard/security/vehicles',
-            icon: FaTruck,
-            show: true
-          },
-          {
             name: 'Attendance',
-            namePersian: 'نفرات',
+            namePersian: 'حضور و غیاب',
             href: '/dashboard/security/attendance',
             icon: FaCalendarAlt,
-            show: true
-          },
-          {
-            name: 'Shifts',
-            namePersian: 'شیفت‌ها',
-            href: '/dashboard/security/shifts',
-            icon: FaClock,
-            show: true
-          },
-          {
-            name: 'Personnel',
-            namePersian: 'پرسنل',
-            href: '/dashboard/security/personnel',
-            icon: FaShieldAlt,
-            show: true
-          },
-          {
-            name: 'Exceptions',
-            namePersian: 'استثناها',
-            href: '/dashboard/security/exceptions',
-            icon: FaExclamationTriangle,
             show: true
           },
           {
@@ -632,21 +622,50 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             namePersian: 'گزارش شیفت',
             href: '/dashboard/security/supervisor-reports',
             icon: FaClipboardList,
+            show: hasPermission(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN) || canOpenSecurityShiftReport
+          },
+          {
+            name: 'Vehicles',
+            namePersian: 'خودرویی',
+            href: '/dashboard/security/vehicles',
+            icon: FaTruck,
             show: true
           },
           {
+            name: 'Exceptions',
+            namePersian: 'استثناها و مأموریت‌ها',
+            href: '/dashboard/security/exceptions',
+            icon: FaExclamationTriangle,
+            show: true
+          },
+          {
+            name: 'Shifts',
+            namePersian: 'شیفت‌ها',
+            href: '/dashboard/security/shifts',
+            icon: FaClock,
+            show: true,
+            separatorBefore: true
+          },
+          {
             name: 'Reports',
-            namePersian: 'گزارش‌های حراست',
+            namePersian: 'گزارش‌ها',
             href: '/dashboard/security/reports',
             icon: FaChartLine,
-            show: true
+            show: hasPermission(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN)
+          },
+          {
+            name: 'Personnel',
+            namePersian: 'کارکنان حراست',
+            href: '/dashboard/security/personnel',
+            icon: FaShieldAlt,
+            show: hasPermission(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN)
           },
           {
             name: 'Settings',
             namePersian: 'تنظیمات حراست',
             href: '/dashboard/security/settings',
             icon: FaCog,
-            show: true
+            show: hasPermission(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN)
           }
         ];
 
@@ -707,7 +726,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
     if (!item.show) return null;
 
     return (
-      <div key={itemKey}>
+      <div key={itemKey} className={item.separatorBefore && !collapsed ? 'mt-3 border-t border-slate-200 pt-3 dark:border-slate-800' : undefined}>
         <div
           className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
             level > 0 ? 'mr-4' : ''

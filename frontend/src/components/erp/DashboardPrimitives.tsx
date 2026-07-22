@@ -240,8 +240,10 @@ export interface ErpShiftTimelineEntry {
   description?: string | null;
   participants?: string[];
   createdAt: string;
+  author?: string | null;
   voidReason?: string | null;
   voidedAt?: string | null;
+  voidedBy?: string | null;
   attachmentCount?: number;
   attachments?: Array<{ id: string; name?: string | null }>;
 }
@@ -313,8 +315,8 @@ export function ErpShiftTimeline({
                           {attachments.map((attachment) => <img key={attachment.id} src={attachmentHref(attachment.id)} alt={attachment.name || 'پیوست گزارش'} className="h-20 w-20 rounded-lg object-cover" />)}
                         </div>
                       )}
-                      <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">ثبت: {formatTimestamp(entry.createdAt)}</p>
-                      {voided && entry.voidReason && <p className="mt-2 text-xs font-semibold text-rose-700 dark:text-rose-300">دلیل ابطال: {entry.voidReason}{entry.voidedAt ? ` · ${formatTimestamp(entry.voidedAt)}` : ''}</p>}
+                      <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">ثبت: {formatTimestamp(entry.createdAt)}{entry.author ? ` · توسط ${entry.author}` : ''}</p>
+                      {voided && entry.voidReason && <p className="mt-2 text-xs font-semibold text-rose-700 dark:text-rose-300">دلیل ابطال: {entry.voidReason}{entry.voidedAt ? ` · ${formatTimestamp(entry.voidedAt)}` : ''}{entry.voidedBy ? ` · عامل: ${entry.voidedBy}` : ''}</p>}
                     </div>
                     {!voided && onVoid && (
                       <button type="button" onClick={() => onVoid(entry)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 text-xs font-bold text-rose-700 outline-none transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-600 dark:text-rose-200 dark:hover:bg-rose-950/35">

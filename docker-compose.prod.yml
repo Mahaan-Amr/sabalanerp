@@ -32,6 +32,22 @@ services:
     profiles:
       - optional
 
+  clamav:
+    image: clamav/clamav:1.4
+    restart: unless-stopped
+    environment:
+      FRESHCLAM_CHECKS: "12"
+    volumes:
+      - clamav_database:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping=1"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 5m
+    networks:
+      - app_network
+
   backend:
     build:
       context: ./backend
@@ -66,8 +82,8 @@ services:
       CONTRACT_CONFIRM_RESEND_COOLDOWN_SECONDS: ${CONTRACT_CONFIRM_RESEND_COOLDOWN_SECONDS}
       VERIFICATION_CODE_EXPIRY_MINUTES: ${VERIFICATION_CODE_EXPIRY_MINUTES}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL}
-      HR_HIRING_ANTIVIRUS_COMMAND: ${HR_HIRING_ANTIVIRUS_COMMAND:-}
-      ALLOW_UNSCANNED_HR_FILES: ${ALLOW_UNSCANNED_HR_FILES:-false}
+      HR_HIRING_ANTIVIRUS_COMMAND: /app/scripts/hr-clamdscan.sh
+      ALLOW_UNSCANNED_HR_FILES: "false"
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
     volumes:
       - backend_storage_contracts:/app/storage/contracts
@@ -75,6 +91,8 @@ services:
       - backend_uploads:/app/uploads
     depends_on:
       postgres:
+        condition: service_healthy
+      clamav:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:5000/api/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1));\""]
@@ -185,6 +203,7 @@ volumes:
   inquiry_data:
   certbot_www:
   certbot_conf:
+  clamav_database:
 
 networks:
   app_network:

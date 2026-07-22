@@ -48,6 +48,7 @@ RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By:
   && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
   apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
   openssl \
+  clamdscan \
   ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
@@ -74,7 +75,9 @@ COPY public ./public
 COPY scripts ./scripts
 COPY excel ./excel
 
-RUN mkdir -p /app/storage/contracts /app/storage/hr-hiring /app/uploads
+RUN printf 'TCPSocket 3310\nTCPAddr clamav\n' > /etc/clamav/clamd-remote.conf \
+  && chmod +x /app/scripts/hr-clamdscan.sh \
+  && mkdir -p /app/storage/contracts /app/storage/hr-hiring /app/uploads
 
 EXPOSE 5000
 

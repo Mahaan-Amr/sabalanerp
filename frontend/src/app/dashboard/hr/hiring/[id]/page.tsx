@@ -42,6 +42,22 @@ const documentCategories = [
   "PHOTO",
   "OTHER",
 ];
+const assessmentScoreFields: Record<string, Array<{ key: string; label: string }>> = {
+  DISC: [
+    { key: "dominance", label: "تسلط‌گرایی (D)" },
+    { key: "influence", label: "تأثیرگذاری (I)" },
+    { key: "steadiness", label: "ثبات (S)" },
+    { key: "conscientiousness", label: "وظیفه‌شناسی (C)" },
+  ],
+  BIG_FIVE: [
+    { key: "openness", label: "پذیرش تجربه‌های جدید" },
+    { key: "conscientiousness", label: "وظیفه‌شناسی" },
+    { key: "extraversion", label: "برون‌گرایی" },
+    { key: "agreeableness", label: "توافق‌پذیری" },
+    { key: "neuroticism", label: "روان‌رنجوری" },
+  ],
+  EQ: [{ key: "score", label: "امتیاز کل هوش هیجانی" }],
+};
 
 export default function HiringCasePage() {
   const { id } = useParams<{ id: string }>();
@@ -75,7 +91,10 @@ export default function HiringCasePage() {
   const [templateId, setTemplateId] = useState("");
   const [assessment, setAssessment] = useState<any>({
     assessmentType: "DISC",
-    resultJson: "{}",
+    scores: {},
+    title: "",
+    result: "",
+    notes: "",
     file: null,
   });
   const [handover, setHandover] = useState({
@@ -168,6 +187,15 @@ export default function HiringCasePage() {
     values.some((value) => authorities.includes(value));
   const canHrSensitive = hasAuthority("HR_PROCESSOR", "HR_MANAGER");
   const canFinance = hasAuthority("FINANCE_RECORDER", "FINANCE_MANAGER");
+  const requiredAssessmentScores = assessmentScoreFields[assessment.assessmentType] || [];
+  const assessmentComplete = assessment.assessmentType === "OTHER"
+    ? Boolean(assessment.title.trim() && assessment.result.trim())
+    : requiredAssessmentScores.every(({ key }) => {
+        const rawValue = assessment.scores[key];
+        const numericValue = Number(rawValue);
+        return rawValue !== undefined && rawValue !== "" && Number.isFinite(numericValue)
+          && numericValue >= 0 && numericValue <= 100;
+      });
   const uploadDocument = () => {
     const fd = new FormData();
     fd.append("category", document.category);
@@ -202,7 +230,16 @@ export default function HiringCasePage() {
   const addAssessment = () => {
     const fd = new FormData();
     fd.append("assessmentType", assessment.assessmentType);
-    fd.append("resultJson", assessment.resultJson);
+    const result: Record<string, string | number> = assessment.assessmentType === "OTHER"
+      ? { title: assessment.title.trim(), result: assessment.result.trim() }
+      : Object.fromEntries(
+          (assessmentScoreFields[assessment.assessmentType] || []).map(({ key }) => [
+            key,
+            Number(assessment.scores[key]),
+          ]),
+        );
+    if (assessment.notes.trim()) result.notes = assessment.notes.trim();
+    fd.append("resultJson", JSON.stringify(result));
     if (assessment.file) fd.append("file", assessment.file);
     return run(() => hiringAPI.addAssessment(id, fd), "نتیجه ارزیابی ثبت شد.");
   };
@@ -474,43 +511,100 @@ export default function HiringCasePage() {
           </ErpSection>
           <ErpSection title="ارزیابی‌های DISC / BIG FIVE / EQ">
             <ErpCard className="p-4">
-              <div className="grid gap-2 md:grid-cols-4">
-                <select
-                  className={field}
-                  value={assessment.assessmentType}
-                  onChange={(e) =>
-                    setAssessment({
-                      ...assessment,
-                      assessmentType: e.target.value,
-                    })
-                  }
-                >
-                  <option value="DISC">DISC</option>
-                  <option value="BIG_FIVE">BIG FIVE</option>
-                  <option value="EQ">EQ</option>
-                  <option value="OTHER">سایر</option>
-                </select>
-                <textarea
-                  className={field}
-                  value={assessment.resultJson}
-                  onChange={(e) =>
-                    setAssessment({ ...assessment, resultJson: e.target.value })
-                  }
-                  placeholder='نتیجه JSON مانند {"score": 80}'
-                />
-                <input
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  className={field}
-                  onChange={(e) =>
-                    setAssessment({ ...assessment, file: e.target.files?.[0] })
-                  }
-                />
-                <ErpButton
-                  label="ثبت ارزیابی"
-                  onClick={addAssessment}
-                  disabled={busy || !assessment.resultJson}
-                />
+              <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
+                امتیازهای درج‌شده در گزارش رسمی ارزیابی را وارد کنید. همه امتیازها باید بین ۰ تا ۱۰۰ باشند.
+              </p>
+              <div className="grid gap-3 md:grid-cols-3">
+                <label className="text-sm font-medium">
+                  نوع ارزیابی
+                  <select
+                    className={`${field} mt-1`}
+                    value={assessment.assessmentType}
+                    onChange={(e) =>
+                      setAssessment({
+                        assessmentType: e.target.value,
+                        scores: {},
+                        title: "",
+                        result: "",
+                        notes: "",
+                        file: null,
+                      })
+                    }
+                  >
+                    <option value="DISC">DISC</option>
+                    <option value="BIG_FIVE">BIG FIVE</option>
+                    <option value="EQ">EQ</option>
+                    <option value="OTHER">سایر</option>
+                  </select>
+                </label>
+                {requiredAssessmentScores.map(({ key, label }) => (
+                  <label key={key} className="text-sm font-medium">
+                    {label} (۰ تا ۱۰۰)
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      inputMode="decimal"
+                      className={`${field} mt-1`}
+                      value={assessment.scores[key] ?? ""}
+                      onChange={(e) => setAssessment({
+                        ...assessment,
+                        scores: { ...assessment.scores, [key]: e.target.value },
+                      })}
+                      placeholder="مثلاً ۸۰"
+                    />
+                  </label>
+                ))}
+                {assessment.assessmentType === "OTHER" && (
+                  <>
+                    <label className="text-sm font-medium">
+                      عنوان ارزیابی
+                      <input
+                        className={`${field} mt-1`}
+                        value={assessment.title}
+                        onChange={(e) => setAssessment({ ...assessment, title: e.target.value })}
+                        placeholder="مثلاً آزمون تخصصی حسابداری"
+                      />
+                    </label>
+                    <label className="text-sm font-medium md:col-span-2">
+                      نتیجه ارزیابی
+                      <textarea
+                        className={`${field} mt-1`}
+                        value={assessment.result}
+                        onChange={(e) => setAssessment({ ...assessment, result: e.target.value })}
+                        placeholder="نتیجه را به زبان ساده بنویسید"
+                      />
+                    </label>
+                  </>
+                )}
+                <label className="text-sm font-medium md:col-span-2">
+                  توضیحات تکمیلی (اختیاری)
+                  <textarea
+                    className={`${field} mt-1`}
+                    value={assessment.notes}
+                    onChange={(e) => setAssessment({ ...assessment, notes: e.target.value })}
+                    placeholder="نکته یا توضیح تکمیلی گزارش"
+                  />
+                </label>
+                <label className="text-sm font-medium">
+                  فایل گزارش (اختیاری)
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    className={`${field} mt-1`}
+                    onChange={(e) =>
+                      setAssessment({ ...assessment, file: e.target.files?.[0] || null })
+                    }
+                  />
+                </label>
+                <div className="md:col-span-3">
+                  <ErpButton
+                    label="ثبت ارزیابی"
+                    onClick={addAssessment}
+                    disabled={busy || !assessmentComplete}
+                  />
+                </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {(data.assessments || []).map((item: any) => (

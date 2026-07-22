@@ -17,6 +17,7 @@ import {
   sha256File,
   validateHiringFileSignature
 } from '../services/hrHiringFileStorage';
+import { normalizeCandidateAssessmentResult } from '../services/hrCandidateAssessment';
 import { compensationTotalRials, isValidIranianNationalCode, unresolvedActivationRequirements, validateHiringQuestionnaire } from '../services/hrHiringRules';
 import {
   applicantOtpHash,
@@ -623,8 +624,13 @@ router.post('/applications/:id/compensation/:snapshotId/finance-approve', requir
 
 router.post('/applications/:id/assessments', requireAuthority('HR_PROCESSOR'), upload.single('file'), asyncHandler(async (req: AuthRequest, res: Response) => {
   try {
-    const resultJson = typeof req.body.resultJson === 'string' ? JSON.parse(req.body.resultJson) : req.body.resultJson;
-    if (!resultJson || !['DISC', 'BIG_FIVE', 'EQ', 'OTHER'].includes(req.body.assessmentType)) throw new Error('نوع و نتیجه ارزیابی الزامی است.');
+    let submittedResult: unknown;
+    try {
+      submittedResult = typeof req.body.resultJson === 'string' ? JSON.parse(req.body.resultJson) : req.body.resultJson;
+    } catch {
+      throw new Error('ساختار نتیجه ارزیابی معتبر نیست.');
+    }
+    const resultJson = normalizeCandidateAssessmentResult(req.body.assessmentType, submittedResult);
     if (req.file) validateHiringFileSignature(req.file.path, req.file.mimetype);
     const scanStatus = req.file ? await scanHiringFile(req.file.path) : undefined;
     const digest = req.file ? await sha256File(req.file.path) : undefined;

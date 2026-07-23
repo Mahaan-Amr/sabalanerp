@@ -33,6 +33,27 @@ export const validateHiringQuestionnaire = (data: any) => {
   return true;
 };
 
+export const validateHiringCorrection = (data: any, fields: string[]) => {
+  const missing = fields.filter((key) =>
+    data?.[key] === undefined ||
+    data?.[key] === null ||
+    String(data[key]).trim() === ''
+  );
+  if (missing.length) {
+    throw new Error(`فیلدهای درخواستی برای اصلاح ناقص‌اند: ${missing.join(', ')}`);
+  }
+  if (fields.includes('nationalCode') && data?.identityKind !== 'FOREIGN' && !isValidIranianNationalCode(data?.nationalCode)) {
+    throw new Error('کد ملی معتبر نیست.');
+  }
+  if (fields.includes('postalCode') && !/^\d{10}$/.test(String(data?.postalCode || ''))) {
+    throw new Error('کد پستی باید ۱۰ رقم باشد.');
+  }
+  if (fields.includes('mobile') && !/^09\d{9}$/.test(String(data?.mobile || ''))) {
+    throw new Error('شماره همراه معتبر نیست.');
+  }
+  return true;
+};
+
 export const compensationTotalRials = (components: Array<{ label?: string; amountRials: string | number }>) => {
   if (!Array.isArray(components) || !components.length) throw new Error('حداقل یک ردیف جبران خدمات لازم است.');
   return components.reduce((sum, item) => {

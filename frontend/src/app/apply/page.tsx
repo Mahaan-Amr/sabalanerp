@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { applicantHiringAPI, hiringError } from "@/lib/hiringApi";
 import { normalizeIranianMobile } from "@/lib/phoneFormat";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import PersianCalendarComponent from "@/components/PersianCalendar";
+import PersianCalendar from "@/lib/persian-calendar";
+import { toIsoDate } from "@/features/hr/hrUi";
 
 const questions = [
   "به چه فعالیت‌های هنری یا ورزشی علاقه دارید؟",
@@ -64,7 +68,7 @@ const blank = {
 };
 
 const inputClass =
-  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100";
+  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-400";
 
 function Field({
   label,
@@ -76,7 +80,7 @@ function Field({
   required?: boolean;
 }) {
   return (
-    <label className="block text-sm font-medium text-slate-700">
+    <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
       <span>
         {label}
         {required && <b className="mr-1 text-rose-600">*</b>}
@@ -93,6 +97,9 @@ export default function ApplicantFormPage() {
   const [data, setData] = useState<any>(blank);
   const [application, setApplication] = useState<any>();
   const [fullName, setFullName] = useState("");
+  const [offerFullName, setOfferFullName] = useState("");
+  const [offerAccepted, setOfferAccepted] = useState(false);
+  const [decline, setDecline] = useState({ category: "", note: "" });
   const [declaration, setDeclaration] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -105,6 +112,11 @@ export default function ApplicantFormPage() {
     ? application.revision.correctionFieldsJson
     : [];
   const isCorrection = correctionFields.length > 0 && !submitted;
+  const correctionDetails = Array.isArray(
+    application?.revision?.correctionDetailsJson,
+  )
+    ? application.revision.correctionDetailsJson
+    : [];
   const completion = useMemo(() => {
     const values = [
       data.firstName,
@@ -127,6 +139,9 @@ export default function ApplicantFormPage() {
       setData({
         ...blank,
         ...revisionData,
+        birthDate: revisionData.birthDate
+          ? PersianCalendar.toPersian(revisionData.birthDate)
+          : "",
         questions: revisionData.questions || blank.questions,
       });
   };
@@ -175,6 +190,18 @@ export default function ApplicantFormPage() {
 
   const set = (key: string, value: any) =>
     setData((old: any) => ({ ...old, [key]: value }));
+  const saveApplicationDraft = () => {
+    const normalizedData = {
+      ...data,
+      birthDate: data.birthDate ? toIsoDate(data.birthDate) : "",
+    };
+    const payload = isCorrection
+      ? Object.fromEntries(
+          correctionFields.map((field) => [field, normalizedData[field]]),
+        )
+      : normalizedData;
+    return applicantHiringAPI.saveDraft(payload);
+  };
   const setCorrectionValue = (key: string, value: string) => {
     if (typeof data[key] === "boolean") return set(key, value === "true");
     if (typeof data[key] === "number") return set(key, Number(value));
@@ -200,8 +227,9 @@ export default function ApplicantFormPage() {
 
   if (!verified)
     return (
-      <main dir="rtl" className="min-h-screen bg-slate-100 px-4 py-16">
+      <main dir="rtl" className="hr-applicant-shell min-h-screen bg-slate-100 px-4 py-16 dark:bg-slate-950 dark:text-slate-100">
         <section className="mx-auto max-w-md rounded-3xl bg-white p-7 shadow-xl">
+          <div className="mb-4 flex justify-end"><ThemeToggle /></div>
           <h1 className="text-2xl font-black">فرم استخدام سبلان</h1>
           <p className="mt-2 text-sm text-slate-500">
             شماره همراهی که پیامک را دریافت کرده و کد شش‌رقمی همان پیامک را وارد کنید.
@@ -250,7 +278,7 @@ export default function ApplicantFormPage() {
     );
 
   return (
-    <main dir="rtl" className="min-h-screen bg-slate-100 px-3 py-6 sm:px-6">
+    <main dir="rtl" className="hr-applicant-shell min-h-screen bg-slate-100 px-3 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6">
       <div className="mx-auto max-w-6xl">
         <header className="rounded-3xl bg-slate-900 p-6 text-white shadow-xl">
           <div className="flex items-start justify-between gap-4">
@@ -273,6 +301,7 @@ export default function ApplicantFormPage() {
             >
               خروج امن
             </button>
+            <ThemeToggle />
           </div>
           <div className="mt-5 h-2 rounded-full bg-slate-700">
             <div
@@ -296,8 +325,15 @@ export default function ApplicantFormPage() {
             فرم برای اصلاح بازگردانده شده است:{" "}
             {application.revision.correctionReason}
             <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {correctionFields.map((key) => (
-                <Field key={key} label={key}>
+              {correctionFields.map((key) => {
+                const detail = correctionDetails.find(
+                  (item: any) => item.fieldKey === key,
+                );
+                return (
+                <Field
+                  key={key}
+                  label={`${detail?.label || "فیلد نیازمند اصلاح"}${detail?.explanation ? ` — ${detail.explanation}` : ""}`}
+                >
                   <textarea
                     className={inputClass}
                     value={
@@ -308,7 +344,8 @@ export default function ApplicantFormPage() {
                     onChange={(e) => setCorrectionValue(key, e.target.value)}
                   />
                 </Field>
-              ))}
+                );
+              })}
             </div>
             <label className="mt-4 flex gap-2">
               <input
@@ -329,7 +366,7 @@ export default function ApplicantFormPage() {
                 disabled={busy}
                 onClick={() =>
                   run(
-                    () => applicantHiringAPI.saveDraft(data),
+                    saveApplicationDraft,
                     "اصلاحات ذخیره شد.",
                   )
                 }
@@ -341,7 +378,7 @@ export default function ApplicantFormPage() {
                 disabled={busy || !declaration || !fullName}
                 onClick={() =>
                   run(async () => {
-                    await applicantHiringAPI.saveDraft(data);
+                    await saveApplicationDraft();
                     await applicantHiringAPI.submit({
                       declarationAccepted: declaration,
                       declarationFullName: fullName,
@@ -383,11 +420,11 @@ export default function ApplicantFormPage() {
                 />
               </Field>
               <Field label="تاریخ تولد">
-                <input
-                  type="date"
-                  className={inputClass}
+                <PersianCalendarComponent
                   value={data.birthDate}
-                  onChange={(e) => set("birthDate", e.target.value)}
+                  onChange={(value) => set("birthDate", value)}
+                  enableYearSelection
+                  minYear={1300}
                 />
               </Field>
               <Field label="محل تولد">
@@ -800,7 +837,7 @@ export default function ApplicantFormPage() {
                 type="button"
                 onClick={() =>
                   run(
-                    () => applicantHiringAPI.saveDraft(data),
+                    saveApplicationDraft,
                     "پیش‌نویس ذخیره شد.",
                   )
                 }
@@ -813,7 +850,7 @@ export default function ApplicantFormPage() {
                 disabled={!declaration || !fullName}
                 onClick={() =>
                   run(async () => {
-                    await applicantHiringAPI.saveDraft(data);
+                    await saveApplicationDraft();
                     await applicantHiringAPI.submit({
                       declarationAccepted: declaration,
                       declarationFullName: fullName,
@@ -829,7 +866,7 @@ export default function ApplicantFormPage() {
         </fieldset>
         {submitted && (
           <p className="mt-5 rounded-2xl bg-emerald-50 p-5 text-emerald-800">
-            فرم نهایی ثبت شده و تا زمان درخواست اصلاح HR قفل است.
+            فرم نهایی ثبت شده و تا زمان درخواست اصلاح منابع انسانی قفل است.
           </p>
         )}
         {application?.compensation && (
@@ -856,18 +893,76 @@ export default function ApplicantFormPage() {
                 </b>
               </div>
             </div>
-            {!application.compensation.candidateAcceptedAt && (
-              <button
-                onClick={() =>
-                  run(
-                    () => applicantHiringAPI.acceptCompensation(fullName),
-                    "پیشنهاد جبران خدمات پذیرفته شد.",
-                  )
-                }
-                className="mt-3 rounded-xl bg-slate-900 px-5 py-2 font-bold text-white"
-              >
-                پذیرش پیشنهاد
-              </button>
+            {!application.compensation.candidateDecision && (
+              <div className="mt-4 space-y-3 border-t pt-4">
+                <label className="flex gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={offerAccepted}
+                    onChange={(event) => setOfferAccepted(event.target.checked)}
+                  />
+                  پیشنهاد همکاری را مطالعه کرده‌ام و می‌پذیرم.
+                </label>
+                <input
+                  className={inputClass}
+                  placeholder="نام کامل برای پذیرش پیشنهاد"
+                  value={offerFullName}
+                  onChange={(event) => setOfferFullName(event.target.value)}
+                />
+                <button
+                  disabled={!offerAccepted || !offerFullName.trim()}
+                  onClick={() =>
+                    run(
+                      () =>
+                        applicantHiringAPI.acceptCompensation(offerFullName),
+                      "پیشنهاد همکاری پذیرفته شد.",
+                    )
+                  }
+                  className="rounded-xl bg-slate-900 px-5 py-2 font-bold text-white disabled:opacity-50"
+                >
+                  پذیرش پیشنهاد
+                </button>
+                <div className="grid gap-2 border-t pt-3 md:grid-cols-2">
+                  <select
+                    className={inputClass}
+                    value={decline.category}
+                    onChange={(event) =>
+                      setDecline({ ...decline, category: event.target.value })
+                    }
+                  >
+                    <option value="">دلیل رد پیشنهاد</option>
+                    <option value="COMPENSATION">حقوق و مزایا</option>
+                    <option value="ROLE">شرح نقش یا مسئولیت‌ها</option>
+                    <option value="START_DATE">تاریخ شروع همکاری</option>
+                    <option value="PERSONAL">شرایط شخصی</option>
+                    <option value="OTHER">سایر</option>
+                  </select>
+                  <input
+                    className={inputClass}
+                    placeholder="توضیح تکمیلی (اختیاری)"
+                    value={decline.note}
+                    onChange={(event) =>
+                      setDecline({ ...decline, note: event.target.value })
+                    }
+                  />
+                  <button
+                    disabled={!decline.category}
+                    onClick={() =>
+                      run(
+                        () =>
+                          applicantHiringAPI.declineCompensation(
+                            decline.category,
+                            decline.note,
+                          ),
+                        "رد پیشنهاد همکاری ثبت شد.",
+                      )
+                    }
+                    className="rounded-xl border border-rose-300 px-5 py-2 font-bold text-rose-700 disabled:opacity-50"
+                  >
+                    رد پیشنهاد
+                  </button>
+                </div>
+              </div>
             )}
           </section>
         )}

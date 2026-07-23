@@ -724,3 +724,23 @@ body {
     page-break-inside: auto;
   }
 }
+@media (prefers-reduced-motion: no-preference) {
+  .hr-applicant-shell,
+  .hr-applicant-shell * {
+    transition-property: color, background-color, border-color;
+    transition-duration: 150ms;
+  }
+}
+
+[data-theme="dark"] .hr-applicant-shell :where(.bg-white) {
+  background-color: rgb(15 23 42) !important;
+  color: rgb(241 245 249);
+}
+
+[data-theme="dark"] .hr-applicant-shell :where(.text-slate-500, .text-slate-600, .text-slate-700) {
+  color: rgb(203 213 225) !important;
+}
+
+[data-theme="dark"] .hr-applicant-shell :where(.divide-y > :not([hidden]) ~ :not([hidden])) {
+  border-color: rgb(51 65 85);
+}

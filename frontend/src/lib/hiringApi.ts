@@ -32,6 +32,8 @@ export const hiringAPI = {
   invite: (id: string) => internal.post(`/applications/${id}/invitations`),
   returnForm: (id: string, data: any) =>
     internal.post(`/applications/${id}/form/return`, data),
+  retryCorrectionNotification: (id: string) =>
+    internal.post(`/applications/${id}/form/correction/retry`),
   uploadDocument: (id: string, data: FormData) =>
     internal.post(`/applications/${id}/documents`, data),
   downloadDocument: (id: string, documentId: string) =>
@@ -55,6 +57,15 @@ export const hiringAPI = {
     internal.post(
       `/applications/${id}/compensation/${snapshotId}/finance-approve`,
     ),
+  retryOfferNotification: (id: string, snapshotId: string) =>
+    internal.post(
+      `/applications/${id}/compensation/${snapshotId}/notification/retry`,
+    ),
+  recordOfflineOfferDecision: (id: string, snapshotId: string, data: any) =>
+    internal.post(
+      `/applications/${id}/compensation/${snapshotId}/offline-decision`,
+      data,
+    ),
   addCollateral: (id: string, data: FormData) =>
     internal.post(`/applications/${id}/collateral`, data),
   reviewCollateral: (id: string, itemId: string, data: any) =>
@@ -76,6 +87,18 @@ export const hiringAPI = {
     }),
   addAssessment: (id: string, data: FormData) =>
     internal.post(`/applications/${id}/assessments`, data),
+  completeAssessments: (id: string) =>
+    internal.post(`/applications/${id}/assessments/complete`),
+  reviseAssessment: (id: string, assessmentId: string, resultJson: any) =>
+    internal.post(`/applications/${id}/assessments/${assessmentId}/revise`, {
+      resultJson,
+    }),
+  voidAssessment: (id: string, assessmentId: string, reason: string) =>
+    internal.post(`/applications/${id}/assessments/${assessmentId}/void`, {
+      reason,
+    }),
+  acknowledgeAssessmentReview: (id: string) =>
+    internal.post(`/applications/${id}/assessments/review-acknowledge`),
   downloadAssessment: (id: string, assessmentId: string) =>
     internal.get(`/applications/${id}/assessments/${assessmentId}/download`, {
       responseType: "blob",
@@ -121,7 +144,15 @@ export const applicantHiringAPI = {
   saveDraft: (data: any) => applicant.put("/public/application/draft", data),
   submit: (data: any) => applicant.post("/public/application/submit", data),
   acceptCompensation: (fullName: string) =>
-    applicant.post("/public/application/compensation/accept", { fullName }),
+    applicant.post("/public/application/compensation/accept", {
+      fullName,
+      accepted: true,
+    }),
+  declineCompensation: (category: string, note: string) =>
+    applicant.post("/public/application/compensation/decline", {
+      category,
+      note,
+    }),
 };
 
 export const hiringError = (error: any) =>

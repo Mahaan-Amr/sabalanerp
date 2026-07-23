@@ -1,0 +1,222 @@
+import { expect, test } from "@playwright/test";
+
+const expectReadable = async (locator: import("@playwright/test").Locator) => {
+  const colors = await locator.evaluate((element) => {
+    const foreground = getComputedStyle(element).color;
+    let current: Element | null = element;
+    let background = "rgba(0, 0, 0, 0)";
+    while (current) {
+      background = getComputedStyle(current).backgroundColor;
+      if (!background.endsWith(", 0)") && background !== "transparent") break;
+      current = current.parentElement;
+    }
+    return { foreground, background };
+  });
+  expect(colors.foreground).not.toBe(colors.background);
+  expect(colors.foreground).not.toBe("rgba(0, 0, 0, 0)");
+};
+
+test("Candidate can enter the existing Job Application with its Application-specific OTP", async ({
+  page,
+}) => {
+  await page.goto("/apply");
+
+  await page.getByLabel("شماره همراه").fill("09120000001");
+  await page.getByLabel("کد ورود شش‌رقمی").fill("123456");
+  await page.getByRole("button", { name: "تأیید و ورود" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "جایگاه آزمایشی کارشناس حسابداری" }),
+  ).toBeVisible();
+});
+
+test("HR Processor can enter the hiring case and control the external SMS boundary", async ({
+  page,
+}) => {
+  await page.goto("/login");
+  await page
+    .locator('input[name="identifier"]')
+    .fill("hr.processor.e2e@sabalanerp.test");
+  await page.locator('input[name="password"]').fill("HrE2ePass123!");
+  const loginResponsePromise = page.waitForResponse((response) =>
+    response.url().endsWith("/api/auth/login"),
+  );
+  await page.locator("form").getByRole("button", { name: "ورود" }).click();
+  const loginResponse = await loginResponsePromise;
+  expect(loginResponse.status()).toBe(200);
+  expect(await loginResponse.json()).toMatchObject({
+    success: true,
+    data: { mustChangePassword: false },
+  });
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
+
+  await page.goto("/dashboard/hr/hiring");
+  await expect(page.getByText("متقاضی آزمایشی")).toBeVisible();
+
+  const controlResponse = await page.request.put(
+    "http://127.0.0.1:3100/api/test/hr-hiring-sms",
+    { data: { mode: "failure" } },
+  );
+  expect(controlResponse.ok()).toBe(true);
+
+  await page.getByRole("button", { name: "ارسال مجدد دعوت" }).click();
+  await expect(page.getByText("خطای آزمایشی ارسال پیامک")).toBeVisible();
+
+  const smsSnapshot = await page.request.get(
+    "http://127.0.0.1:3100/api/test/hr-hiring-sms",
+  );
+  expect(smsSnapshot.ok()).toBe(true);
+  expect(await smsSnapshot.json()).toMatchObject({
+    success: true,
+    data: {
+      mode: "failure",
+      messages: [{ phoneNumber: "09120000001" }],
+    },
+  });
+});
+
+test("HR sends one correction request and Candidate reuses the existing OTP", async ({
+  page,
+  browser,
+}) => {
+  await page.goto("/login");
+  await page
+    .locator('input[name="identifier"]')
+    .fill("hr.processor.e2e@sabalanerp.test");
+  await page.locator('input[name="password"]').fill("HrE2ePass123!");
+  await page.locator("form").getByRole("button", { name: "ورود" }).click();
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
+
+  await page.request.put("http://127.0.0.1:3100/api/test/hr-hiring-sms", {
+    data: { mode: "success", reset: true },
+  });
+  await page.goto("/dashboard/hr/hiring/hr-e2e-application?phase=IDENTITY");
+  const explanations = page.getByPlaceholder("توضیح مشکل و روش اصلاح");
+  await explanations.nth(0).fill("کد ملی با کارت ملی یکسان نیست.");
+  await explanations.nth(1).fill("کد پستی را با مدرک نشانی بررسی کنید.");
+  await page
+    .getByRole("button", { name: "ارسال درخواست اصلاح به متقاضی" })
+    .click();
+  await expect(page.getByText("درخواست اصلاح برای متقاضی ارسال شد.")).toBeVisible();
+
+  const snapshot = await page.request.get(
+    "http://127.0.0.1:3100/api/test/hr-hiring-sms",
+  );
+  const snapshotBody = await snapshot.json();
+  expect(snapshotBody.data.messages).toHaveLength(1);
+  expect(snapshotBody.data.messages[0]).toMatchObject({
+    kind: "correction",
+    phoneNumber: "09120000001",
+  });
+  expect(snapshotBody.data.messages[0].code).toBeUndefined();
+
+  const candidateContext = await browser.newContext({
+    locale: "fa-IR",
+    timezoneId: "Asia/Tehran",
+  });
+  const candidatePage = await candidateContext.newPage();
+  await candidatePage.goto("http://127.0.0.1:3100/apply");
+  await candidatePage.getByLabel("شماره همراه").fill("09120000001");
+  await candidatePage.getByLabel("کد ورود شش‌رقمی").fill("123456");
+  await candidatePage.getByRole("button", { name: "تأیید و ورود" }).click();
+  await expect(candidatePage.getByText("کد ملی با کارت ملی یکسان نیست.")).toBeVisible();
+  await expect(
+    candidatePage.getByText("کد پستی را با مدرک نشانی بررسی کنید."),
+  ).toBeVisible();
+  await candidatePage
+    .getByLabel(/کد ملی — کد ملی با کارت ملی یکسان نیست/)
+    .fill("0013547828");
+  await candidatePage
+    .getByLabel(/کد پستی — کد پستی را با مدرک نشانی بررسی کنید/)
+    .fill("1234567890");
+  await candidatePage
+    .getByLabel("صحت نسخه اصلاح‌شده را تأیید می‌کنم.")
+    .check();
+  await candidatePage
+    .getByPlaceholder("نام و نام خانوادگی", { exact: true })
+    .fill("متقاضی آزمایشی");
+  await candidatePage.getByRole("button", { name: "ارسال مجدد" }).click();
+  await expect(candidatePage.getByText("نسخه اصلاح‌شده ارسال شد.")).toBeVisible();
+  await candidateContext.close();
+});
+
+test("Candidate accepts the latest offer with fresh dedicated evidence", async ({
+  page,
+}) => {
+  await page.goto("/apply");
+  await page.getByLabel("شماره همراه").fill("09120000001");
+  await page.getByLabel("کد ورود شش‌رقمی").fill("123456");
+  await page.getByRole("button", { name: "تأیید و ورود" }).click();
+
+  await page
+    .getByPlaceholder("نام کامل برای پذیرش پیشنهاد")
+    .fill("متقاضي  آزمايشي");
+  await page
+    .getByLabel("پیشنهاد همکاری را مطالعه کرده‌ام و می‌پذیرم.")
+    .check();
+  await page.getByRole("button", { name: "پذیرش پیشنهاد" }).click();
+  await expect(page.getByText("پیشنهاد همکاری پذیرفته شد.")).toBeVisible();
+});
+
+test("localized assessment scores reject invalid values and accept 0 through 100", async ({
+  page,
+}) => {
+  await page.goto("/login");
+  await page
+    .locator('input[name="identifier"]')
+    .fill("hr.processor.e2e@sabalanerp.test");
+  await page.locator('input[name="password"]').fill("HrE2ePass123!");
+  await page.locator("form").getByRole("button", { name: "ورود" }).click();
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
+
+  await page.goto(
+    "/dashboard/hr/hiring/hr-e2e-application?phase=ASSESSMENT",
+  );
+  const scores = page.locator('input[inputmode="decimal"]');
+  await scores.nth(0).fill("۱۰۱");
+  await expect(page.getByText("امتیاز باید بین ۰ تا ۱۰۰ باشد.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "ثبت ارزیابی" })).toBeDisabled();
+
+  await scores.nth(0).fill("۰");
+  await scores.nth(1).fill("٢٥٫٥");
+  await scores.nth(2).fill("50.25");
+  await scores.nth(3).fill("۱۰۰");
+  await page.getByRole("button", { name: "ثبت ارزیابی" }).click();
+  await expect(page.getByText("نتیجه ارزیابی ثبت شد.")).toBeVisible();
+  await page.getByRole("button", { name: "تکمیل مرحله ارزیابی" }).click();
+  await expect(page.getByRole("button", { name: "ارزیابی تکمیل‌شده" })).toBeVisible();
+});
+
+test("Candidate portal and HR hiring remain readable in both remembered themes", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("hrApplicantTheme", "light");
+  });
+  await page.goto("/apply");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expectReadable(page.getByRole("heading", { name: "فرم استخدام سبلان" }));
+  await expectReadable(page.getByLabel("شماره همراه"));
+
+  await page.getByRole("button", { name: "فعال‌کردن حالت تیره" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expectReadable(page.getByRole("heading", { name: "فرم استخدام سبلان" }));
+  await expectReadable(page.getByLabel("شماره همراه"));
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("hrApplicantTheme")))
+    .toBe("dark");
+
+  await page.goto("/login");
+  await page
+    .locator('input[name="identifier"]')
+    .fill("hr.processor.e2e@sabalanerp.test");
+  await page.locator('input[name="password"]').fill("HrE2ePass123!");
+  await page.locator("form").getByRole("button", { name: "ورود" }).click();
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
+  await page.goto("/dashboard/hr/hiring");
+  await expectReadable(page.getByText("متقاضی آزمایشی"));
+  const visibleText = await page.locator("body").innerText();
+  expect(visibleText).not.toMatch(
+    /\b(?:HR_MANAGER|HR_PROCESSOR|APPROVED|NOT_STARTED|CANDIDATE)\b/,
+  );
+});

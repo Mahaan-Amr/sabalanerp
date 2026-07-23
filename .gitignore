@@ -35,6 +35,12 @@ logs
 
 # Codex scratch space
 .codex-tmp/
+.scratch/hr-hiring-e2e/
+.scratch/hr-hiring-reliability/
+
+# Browser test artifacts
+test-results/
+playwright-report/
 
 # Runtime data
 pids

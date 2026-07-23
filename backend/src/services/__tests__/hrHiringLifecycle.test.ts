@@ -32,6 +32,23 @@ const base = (
 
 {
   const result = projectHiringLifecycle(
+    base({
+      formRevisions: [submitted],
+      stage: "OFFER",
+      identityClearance: "APPROVED",
+      assessmentCompletedAt: new Date(),
+      compensationSnapshots: [{ proposedBy: "hiring-manager" }],
+    }),
+    ["HR_PAYROLL_PROCESSOR"],
+  );
+  assert.equal(result.phases[3].status, "ACTION_REQUIRED");
+  assert.equal(result.phases[3].primaryAction?.id, "PREPARE_OFFER_PAYROLL");
+  assert.equal(result.phases[3].requiredComplete, 1);
+  assert.equal(result.phases[3].requiredTotal, 5);
+}
+
+{
+  const result = projectHiringLifecycle(
     base({ formRevisions: [{ status: "RETURNED" }, submitted] }),
   );
   assert.equal(result.currentPhaseId, "APPLICATION");
@@ -71,11 +88,11 @@ const base = (
       stage: "ASSESSMENT",
       identityClearance: "APPROVED",
     }),
-    ["HIRING_MANAGER"],
+    ["HR_PROCESSOR"],
   );
   assert.equal(result.currentPhaseId, "ASSESSMENT");
   assert.equal(result.phases[2].status, "ACTION_REQUIRED");
-  assert.equal(result.phases[2].primaryAction?.id, "PROCEED_TO_OFFER");
+  assert.equal(result.phases[2].primaryAction?.id, "COMPLETE_ASSESSMENT");
 }
 
 {
@@ -84,20 +101,29 @@ const base = (
       formRevisions: [submitted],
       stage: "OFFER",
       identityClearance: "APPROVED",
+      assessmentCompletedAt: new Date(),
       compensationSnapshots: [
-        { hrApprovedAt: new Date(), financeApprovedAt: new Date() },
+        {
+          proposedBy: "hiring-manager",
+          preparedAt: new Date(),
+          hrApprovedAt: new Date(),
+          financeApprovedAt: new Date(),
+        },
       ],
     }),
   );
   assert.equal(result.currentPhaseId, "OFFER");
   assert.equal(result.phases[3].status, "WAITING");
-  assert.equal(result.phases[3].requiredComplete, 2);
+  assert.equal(result.phases[3].requiredComplete, 4);
+  assert.equal(result.phases[3].requiredTotal, 5);
   assert.equal(result.phases[3].primaryAction, null);
 }
 
 {
   const acceptedOffer = [
     {
+      proposedBy: "hiring-manager",
+      preparedAt: new Date(),
       hrApprovedAt: new Date(),
       financeApprovedAt: new Date(),
       candidateAcceptedAt: new Date(),
@@ -109,6 +135,7 @@ const base = (
       stage: "CLOSED",
       outcome: "HIRED",
       identityClearance: "APPROVED",
+      assessmentCompletedAt: new Date(),
       compensationClearance: "APPROVED",
       compensationSnapshots: acceptedOffer,
       collateralClearance: "APPROVED",
@@ -137,6 +164,8 @@ const base = (
 {
   const acceptedOffer = [
     {
+      proposedBy: "hiring-manager",
+      preparedAt: new Date(),
       hrApprovedAt: new Date(),
       financeApprovedAt: new Date(),
       candidateAcceptedAt: new Date(),
@@ -147,6 +176,7 @@ const base = (
       formRevisions: [submitted],
       stage: "OFFER",
       identityClearance: "APPROVED",
+      assessmentCompletedAt: new Date(),
       compensationClearance: "APPROVED",
       compensationSnapshots: acceptedOffer,
       collateralClearance: "IN_PROGRESS",
@@ -162,6 +192,8 @@ const base = (
 {
   const acceptedOffer = [
     {
+      proposedBy: "hiring-manager",
+      preparedAt: new Date(),
       hrApprovedAt: new Date(),
       financeApprovedAt: new Date(),
       candidateAcceptedAt: new Date(),
@@ -173,6 +205,7 @@ const base = (
       stage: "CLOSED",
       outcome: "HIRED",
       identityClearance: "APPROVED",
+      assessmentCompletedAt: new Date(),
       compensationClearance: "APPROVED",
       compensationSnapshots: acceptedOffer,
       collateralClearance: "APPROVED",
@@ -191,6 +224,8 @@ const base = (
 {
   const acceptedOffer = [
     {
+      proposedBy: "hiring-manager",
+      preparedAt: new Date(),
       hrApprovedAt: new Date(),
       financeApprovedAt: new Date(),
       candidateAcceptedAt: new Date(),
@@ -202,6 +237,7 @@ const base = (
       stage: "CLOSED",
       outcome: "HIRED",
       identityClearance: "APPROVED",
+      assessmentCompletedAt: new Date(),
       compensationClearance: "APPROVED",
       compensationSnapshots: acceptedOffer,
       collateralClearance: "APPROVED",
@@ -231,13 +267,15 @@ const base = (
       stage: "CLOSED",
       outcome: "REJECTED",
       identityClearance: "APPROVED",
+      assessmentCompletedAt: new Date(),
     }),
     ["HIRING_MANAGER"],
   );
-  assert.equal(result.currentPhaseId, "ASSESSMENT");
+  assert.equal(result.currentPhaseId, "OFFER");
   assert.equal(result.phases[0].status, "COMPLETED");
   assert.equal(result.phases[1].status, "COMPLETED");
-  assert.ok(result.phases.slice(2).every((phase) => phase.status === "ENDED"));
+  assert.equal(result.phases[2].status, "COMPLETED");
+  assert.ok(result.phases.slice(3).every((phase) => phase.status === "ENDED"));
   assert.equal(result.phases[2].primaryAction, null);
 }
 
@@ -269,9 +307,15 @@ const base = (
       formRevisions: [submitted],
       stage: "OFFER",
       identityClearance: "APPROVED",
+      assessmentCompletedAt: new Date(),
       compensationClearance: "REJECTED",
       compensationSnapshots: [
-        { hrApprovedAt: new Date(), financeApprovedAt: new Date() },
+        {
+          proposedBy: "hiring-manager",
+          preparedAt: new Date(),
+          hrApprovedAt: new Date(),
+          financeApprovedAt: new Date(),
+        },
       ],
     }),
     ["FINANCE_MANAGER"],

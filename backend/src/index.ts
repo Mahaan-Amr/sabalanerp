@@ -45,6 +45,7 @@ import stoneFinishingRoutes from './routes/stone-finishings';
 import catalogExcelRoutes from './routes/catalog-excel';
 import publicContractsRoutes from './routes/public-contracts';
 import uploadsRoutes from './routes/uploads';
+import testHrHiringSmsRoutes from './routes/test-hr-hiring-sms';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -173,6 +174,9 @@ if (!isProduction) console.log('? Registering stone finishing routes...');
 app.use('/api/stone-finishings', stoneFinishingRoutes);
 app.use('/api/uploads', uploadsRoutes);
 app.use('/api/public', publicContractsRoutes);
+if (process.env.NODE_ENV === 'test' && process.env.HR_HIRING_E2E === 'true') {
+  app.use('/api/test/hr-hiring-sms', testHrHiringSmsRoutes);
+}
 if (!isProduction) console.log('? All routes registered successfully');
 
 // Static files for generated PDFs (contracts)

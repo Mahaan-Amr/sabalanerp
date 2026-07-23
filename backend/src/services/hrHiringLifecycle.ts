@@ -82,6 +82,8 @@ interface FormRevisionLike {
   status: string;
 }
 interface CompensationLike {
+  proposedBy?: string | null;
+  preparedAt?: Date | string | null;
   hrApprovedAt?: Date | string | null;
   financeApprovedAt?: Date | string | null;
   candidateAcceptedAt?: Date | string | null;
@@ -106,6 +108,8 @@ export interface HiringLifecycleSource {
   formRevisions?: FormRevisionLike[];
   identityClearance?: string | null;
   assessments?: unknown[];
+  assessmentCompletedAt?: Date | string | null;
+  assessmentReviewRequired?: boolean;
   compensationClearance?: string | null;
   compensationSnapshots?: CompensationLike[];
   collateralClearance?: string | null;
@@ -229,20 +233,32 @@ const identityGate = (source: HiringLifecycleSource): Gate => {
 };
 
 const assessmentGate = (source: HiringLifecycleSource): Gate => {
-  const progressedToOffer =
-    source.stage === "OFFER" ||
-    source.outcome === "HIRED" ||
-    Boolean(source.compensationSnapshots?.length);
+  const complete = Boolean(source.assessmentCompletedAt);
+  const reviewRequired = Boolean(source.assessmentReviewRequired);
   return {
-    complete: progressedToOffer,
-    requiredComplete: progressedToOffer ? 1 : 0,
+    complete: complete && !reviewRequired,
+    requiredComplete: complete && !reviewRequired ? 1 : 0,
     requiredTotal: 1,
-    blockers: [],
-    action: action(
-      "PROCEED_TO_OFFER",
-      "ثبت تصمیم اولیه و ورود به پیشنهاد همکاری",
-      "HIRING_MANAGER",
-    ),
+    blockers: reviewRequired
+      ? [
+          blocker(
+            "ASSESSMENT_REVIEW_REQUIRED",
+            "ارزیابی پس از تغییر نیازمند تأیید دوباره مدیر استخدام‌کننده است.",
+            "HIRING_MANAGER",
+          ),
+        ]
+      : [],
+    action: !complete
+      ? action(
+          "COMPLETE_ASSESSMENT",
+          "تکمیل مرحله ارزیابی",
+          "HR_PROCESSOR",
+        )
+      : action(
+          "PROCEED_TO_OFFER",
+          "ثبت تصمیم اولیه و ورود به پیشنهاد همکاری",
+          "HIRING_MANAGER",
+        ),
     secondaryActions: [
       action("RECORD_ASSESSMENT", "ثبت نتیجه ارزیابی تکمیلی", "HR_PROCESSOR"),
     ],
@@ -251,18 +267,30 @@ const assessmentGate = (source: HiringLifecycleSource): Gate => {
 
 const offerGate = (source: HiringLifecycleSource): Gate => {
   const latest = source.compensationSnapshots?.[0];
+  const proposed = Boolean(latest?.proposedBy);
+  const prepared = Boolean(latest?.preparedAt);
   const hrApproved = Boolean(latest?.hrApprovedAt);
   const financeApproved = Boolean(latest?.financeApprovedAt);
   const candidateAccepted = Boolean(latest?.candidateAcceptedAt);
-  const completed = [hrApproved, financeApproved, candidateAccepted].filter(
-    Boolean,
-  ).length;
+  const completed = [
+    proposed,
+    prepared,
+    hrApproved,
+    financeApproved,
+    candidateAccepted,
+  ].filter(Boolean).length;
   let nextAction = action(
     "CREATE_OFFER",
     "ایجاد پیشنهاد همکاری",
     "HIRING_MANAGER",
   );
-  if (latest && !hrApproved)
+  if (latest && !prepared)
+    nextAction = action(
+      "PREPARE_OFFER_PAYROLL",
+      "آماده‌سازی پیشنهاد توسط کارشناس حقوق‌ودستمزد",
+      "HR_PAYROLL_PROCESSOR",
+    );
+  else if (latest && !hrApproved)
     nextAction = action(
       "APPROVE_OFFER_HR",
       "تأیید پیشنهاد توسط منابع انسانی و حقوق‌ودستمزد",
@@ -280,9 +308,9 @@ const offerGate = (source: HiringLifecycleSource): Gate => {
       "در انتظار پذیرش پیشنهاد توسط متقاضی",
     );
   return {
-    complete: completed === 3,
+    complete: completed === 5,
     requiredComplete: completed,
-    requiredTotal: 3,
+    requiredTotal: 5,
     blockers:
       source.compensationClearance === "REJECTED"
         ? [

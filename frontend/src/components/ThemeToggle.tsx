@@ -11,7 +11,7 @@ export const ThemeToggle: React.FC = () => {
     <button
       onClick={toggleTheme}
       className="theme-toggle animate-theme-transition"
-      aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+      aria-label={theme === 'dark' ? 'فعال‌کردن حالت روشن' : 'فعال‌کردن حالت تیره'}
     >
       {theme === 'dark' ? (
         <FaSun className="w-5 h-5 text-gold-500" />

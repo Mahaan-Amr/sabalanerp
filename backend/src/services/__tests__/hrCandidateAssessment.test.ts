@@ -14,6 +14,8 @@ expectInvalid('DISC', { dominance: 101, influence: 70, steadiness: 60, conscient
 expectInvalid('BIG_FIVE', {});
 expectInvalid('EQ', {});
 expectInvalid('EQ', { score: -1 });
+expectInvalid('EQ', { score: 100.001 });
+expectInvalid('EQ', { score: Number.POSITIVE_INFINITY });
 expectInvalid('OTHER', { title: '', result: '' });
 expectInvalid('UNKNOWN', { score: 50 });
 
@@ -52,6 +54,9 @@ assert.deepEqual(
 );
 
 assert.deepEqual(normalizeCandidateAssessmentResult('EQ', { score: 75 }), { score: 75 });
+assert.deepEqual(normalizeCandidateAssessmentResult('EQ', { score: '۱۰۰' }), { score: 100 });
+assert.deepEqual(normalizeCandidateAssessmentResult('EQ', { score: '٧٥٫٢٥' }), { score: 75.25 });
+assert.deepEqual(normalizeCandidateAssessmentResult('EQ', { score: '0.01' }), { score: 0.01 });
 assert.deepEqual(
   normalizeCandidateAssessmentResult('OTHER', { title: 'آزمون تخصصی', result: 'مناسب' }),
   { title: 'آزمون تخصصی', result: 'مناسب' },

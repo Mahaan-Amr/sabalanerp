@@ -6,6 +6,15 @@ const nextConfig = {
   experimental: {
     cpus: 1,
   },
+  async rewrites() {
+    if (!process.env.BACKEND_API_ORIGIN) return [];
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${process.env.BACKEND_API_ORIGIN}/api/:path*`,
+      },
+    ];
+  },
   // PWA Configuration
   async headers() {
     return [

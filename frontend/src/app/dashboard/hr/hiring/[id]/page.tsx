@@ -20,6 +20,19 @@ import {
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 import { HiringLifecycle } from "@/features/hr-hiring/HiringLifecycle";
 import { resolveSelectedHiringPhase } from "@/features/hr-hiring/hiringLifecycleViewModel";
+import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
+import PersianCalendarComponent from "@/components/PersianCalendar";
+import {
+  dateTimeFa,
+  fromIsoDate,
+  toIsoDate,
+  toIsoDateTime,
+} from "@/features/hr/hrUi";
+import {
+  assessmentTypeLabel,
+  authorityLabel,
+  hrDisplayLabel,
+} from "@/features/hr/hrDisplay";
 
 const field =
   "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900";
@@ -39,6 +52,39 @@ const identityFields = [
   "maritalStatus",
   "birthCertificateExplanations",
 ];
+const identityFieldLabels: Record<string, string> = {
+  firstName: "نام",
+  lastName: "نام خانوادگی",
+  birthDate: "تاریخ تولد",
+  birthPlace: "محل تولد",
+  fatherName: "نام پدر",
+  nationalCode: "کد ملی",
+  foreignIdentity: "اطلاعات هویتی اتباع",
+  militaryStatus: "وضعیت نظام وظیفه",
+  address: "نشانی",
+  postalCode: "کد پستی",
+  mobile: "شماره همراه",
+  educationLevel: "سطح تحصیلات",
+  maritalStatus: "وضعیت تأهل",
+  birthCertificateExplanations: "توضیحات شناسنامه",
+  alias: "نام مستعار یا نام رایج",
+  fatherOccupation: "شغل پدر",
+  childrenCount: "تعداد فرزندان",
+  spouseOccupation: "شغل همسر",
+  homePhone: "تلفن منزل",
+  email: "رایانامه",
+  socialMedia: "شبکه اجتماعی",
+  fieldOfStudy: "رشته تحصیلی",
+  graduationYear: "سال فراغت از تحصیل",
+  identityKind: "نوع هویت",
+  foreignIdentityType: "نوع مدرک هویت اتباع",
+  foreignIdentityNumber: "شماره مدرک هویت اتباع",
+  hasSocialSecurityHistory: "سابقه تأمین اجتماعی",
+  cooperationType: "نوع همکاری",
+  cooperationDuration: "مدت همکاری",
+  requestedPosition: "جایگاه درخواستی",
+  desiredSalary: "حقوق درخواستی",
+};
 const documentCategories = [
   "BIRTH_CERTIFICATE_ALL_PAGES",
   "BIRTH_CERTIFICATE_EXPLANATIONS",
@@ -68,7 +114,6 @@ const assessmentScoreFields: Record<
   ],
   EQ: [{ key: "score", label: "امتیاز کل هوش هیجانی" }],
 };
-
 export default function HiringCasePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -79,7 +124,9 @@ export default function HiringCasePage() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [authorities, setAuthorities] = useState<string[]>([]);
-  const [correction, setCorrection] = useState({ fields: "", reason: "" });
+  const [correctionExplanations, setCorrectionExplanations] = useState<
+    Record<string, string>
+  >({});
   const [document, setDocument] = useState<any>({
     category: "BIRTH_CERTIFICATE_ALL_PAGES",
     side: "",
@@ -109,6 +156,15 @@ export default function HiringCasePage() {
     result: "",
     notes: "",
     file: null,
+  });
+  const [editingAssessmentId, setEditingAssessmentId] = useState("");
+  const [offlineDecision, setOfflineDecision] = useState({
+    decision: "ACCEPTED",
+    communicationMethod: "PHONE",
+    communicatedAt: "",
+    offlineReason: "",
+    confirmedCandidateInformation: "",
+    note: "",
   });
   const [handover, setHandover] = useState({
     returnedTo: "",
@@ -153,11 +209,12 @@ export default function HiringCasePage() {
         setInsurance({
           ...insurance,
           ...result.data.data.insuranceEnrollment,
-          effectiveDate:
-            result.data.data.insuranceEnrollment.effectiveDate?.slice(0, 10) ||
-            "",
-          dueDate:
-            result.data.data.insuranceEnrollment.dueDate?.slice(0, 10) || "",
+          effectiveDate: fromIsoDate(
+            result.data.data.insuranceEnrollment.effectiveDate,
+          ),
+          dueDate: fromIsoDate(
+            result.data.data.insuranceEnrollment.dueDate,
+          ),
         });
     } catch (e) {
       setError(hiringError(e));
@@ -210,20 +267,18 @@ export default function HiringCasePage() {
   };
   const requiredAssessmentScores =
     assessmentScoreFields[assessment.assessmentType] || [];
+  const assessmentScoreValidation = Object.fromEntries(
+    requiredAssessmentScores.map(({ key }) => [
+      key,
+      parseLocalizedAssessmentScore(assessment.scores[key]),
+    ]),
+  );
   const assessmentComplete =
     assessment.assessmentType === "OTHER"
       ? Boolean(assessment.title.trim() && assessment.result.trim())
-      : requiredAssessmentScores.every(({ key }) => {
-          const rawValue = assessment.scores[key];
-          const numericValue = Number(rawValue);
-          return (
-            rawValue !== undefined &&
-            rawValue !== "" &&
-            Number.isFinite(numericValue) &&
-            numericValue >= 0 &&
-            numericValue <= 100
-          );
-        });
+      : requiredAssessmentScores.every(
+          ({ key }) => assessmentScoreValidation[key]?.value !== undefined,
+        );
   const uploadDocument = () => {
     const fd = new FormData();
     fd.append("category", document.category);
@@ -235,7 +290,12 @@ export default function HiringCasePage() {
   const addCollateral = () => {
     const fd = new FormData();
     Object.entries(collateral).forEach(([key, value]) => {
-      if (key !== "file" && value != null) fd.append(key, String(value));
+      if (key !== "file" && value != null) {
+        fd.append(
+          key,
+          key === "receivedAt" ? toIsoDate(String(value)) : String(value),
+        );
+      }
     });
     if (collateral.file) fd.append("file", collateral.file);
     return run(() => hiringAPI.addCollateral(id, fd), "وثیقه ثبت شد.");
@@ -250,7 +310,14 @@ export default function HiringCasePage() {
   const uploadContract = () => {
     const fd = new FormData();
     Object.entries(contract).forEach(([key, value]) => {
-      if (key !== "file" && value) fd.append(key, String(value));
+      if (key !== "file" && value) {
+        fd.append(
+          key,
+          key === "effectiveFrom" || key === "effectiveTo"
+            ? toIsoDate(String(value))
+            : String(value),
+        );
+      }
     });
     fd.append("file", contract.file);
     return run(() => hiringAPI.uploadContract(id, fd), "قرارداد بارگذاری شد.");
@@ -263,12 +330,18 @@ export default function HiringCasePage() {
         ? { title: assessment.title.trim(), result: assessment.result.trim() }
         : Object.fromEntries(
             (assessmentScoreFields[assessment.assessmentType] || []).map(
-              ({ key }) => [key, Number(assessment.scores[key])],
+              ({ key }) => [key, assessmentScoreValidation[key].value!],
             ),
           );
     if (assessment.notes.trim()) result.notes = assessment.notes.trim();
     fd.append("resultJson", JSON.stringify(result));
     if (assessment.file) fd.append("file", assessment.file);
+    if (editingAssessmentId) {
+      return run(
+        () => hiringAPI.reviseAssessment(id, editingAssessmentId, result),
+        "نسخه جدید ارزیابی ثبت شد.",
+      ).then(() => setEditingAssessmentId(""));
+    }
     return run(() => hiringAPI.addAssessment(id, fd), "نتیجه ارزیابی ثبت شد.");
   };
   const download = async (request: () => Promise<any>, fileName: string) => {
@@ -332,8 +405,9 @@ export default function HiringCasePage() {
                   {data.employmentRelationship.personnel.lastName}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
-                  رابطه استخدامی: {data.employmentRelationship.status} · نتیجه
-                  پرونده: {data.outcome || "HIRED"}
+                  رابطه استخدامی:{" "}
+                  {hrDisplayLabel(data.employmentRelationship.status)} · نتیجه
+                  پرونده: {hrDisplayLabel(data.outcome || "HIRED")}
                 </p>
               </div>
               <Link
@@ -350,7 +424,7 @@ export default function HiringCasePage() {
           {selectedLifecyclePhase === "APPLICATION" && (
             <ErpSection
               title="فرم متقاضی و کنترل اطلاعات"
-              description="HR پاسخ متقاضی را ویرایش نمی‌کند؛ فیلدهای دارای اشکال برای نسخه بعدی بازگردانده می‌شوند."
+              description="منابع انسانی پاسخ متقاضی را ویرایش نمی‌کند؛ فیلدهای دارای اشکال برای نسخه بعدی بازگردانده می‌شوند."
             >
               <ErpCard className="p-4">
                 <div className="grid gap-2 md:grid-cols-3">
@@ -364,45 +438,12 @@ export default function HiringCasePage() {
                         key={key}
                         className="rounded-lg bg-slate-50 p-2 text-xs dark:bg-slate-800"
                       >
-                        <span className="text-slate-500">{key}</span>
+                        <span className="text-slate-500">
+                          {identityFieldLabels[key] || "اطلاعات تکمیلی"}
+                        </span>
                         <p className="mt-1 font-bold">{String(value)}</p>
                       </div>
                     ))}
-                </div>
-                <div className="mt-4 grid gap-2 md:grid-cols-3">
-                  <input
-                    className={field}
-                    placeholder="فیلدها با کاما"
-                    value={correction.fields}
-                    onChange={(e) =>
-                      setCorrection({ ...correction, fields: e.target.value })
-                    }
-                  />
-                  <input
-                    className={field}
-                    placeholder="دلیل اصلاح"
-                    value={correction.reason}
-                    onChange={(e) =>
-                      setCorrection({ ...correction, reason: e.target.value })
-                    }
-                  />
-                  <ErpButton
-                    label="بازگرداندن برای اصلاح"
-                    disabled={busy || !correction.fields || !correction.reason}
-                    onClick={() =>
-                      run(
-                        () =>
-                          hiringAPI.returnForm(id, {
-                            fields: correction.fields
-                              .split(",")
-                              .map((x) => x.trim()),
-                            reason: correction.reason,
-                          }),
-                        "فرم برای اصلاح بازگردانده شد.",
-                      )
-                    }
-                    tone="warning"
-                  />
                 </div>
               </ErpCard>
             </ErpSection>
@@ -411,7 +452,7 @@ export default function HiringCasePage() {
             <ErpSection title="اسناد و تطبیق هویت">
               <div className="grid gap-4 xl:grid-cols-2">
                 <ErpCard className="p-4">
-                  <h3 className="font-black">اسکن HR</h3>
+                  <h3 className="font-black">بررسی منابع انسانی</h3>
                   {hasAuthority("HR_PROCESSOR") && (
                     <div className="mt-3 grid gap-2 md:grid-cols-2">
                       <select
@@ -422,7 +463,9 @@ export default function HiringCasePage() {
                         }
                       >
                         {documentCategories.map((x) => (
-                          <option key={x}>{x}</option>
+                          <option key={x} value={x}>
+                            {hrDisplayLabel(x)}
+                          </option>
                         ))}
                       </select>
                       <select
@@ -464,7 +507,7 @@ export default function HiringCasePage() {
                         className="flex justify-between rounded-lg border p-2 text-xs"
                       >
                         <span>
-                          {doc.category} · نسخه {doc.version}
+                          {hrDisplayLabel(doc.category)} · نسخه {doc.version}
                         </span>
                         <span className="flex gap-2">
                           <button
@@ -478,7 +521,7 @@ export default function HiringCasePage() {
                           >
                             دریافت
                           </button>
-                          <ErpBadge>{doc.status}</ErpBadge>
+                          <ErpBadge>{hrDisplayLabel(doc.status)}</ErpBadge>
                         </span>
                       </div>
                     ))}
@@ -486,6 +529,27 @@ export default function HiringCasePage() {
                 </ErpCard>
                 <ErpCard className="p-4">
                   <h3 className="font-black">کنترل فیلد به فیلد</h3>
+                  {data.formRevisions?.[0]?.correctionNotificationStatus ===
+                    "FAILED" && (
+                    <div className="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
+                      <p>
+                        {data.formRevisions[0].correctionNotificationError ||
+                          "ارسال پیامک درخواست اصلاح ناموفق بود."}
+                      </p>
+                      <ErpButton
+                        className="mt-2"
+                        label="ارسال مجدد پیامک درخواست اصلاح"
+                        disabled={busy}
+                        onClick={() =>
+                          run(
+                            () => hiringAPI.retryCorrectionNotification(id),
+                            "پیامک درخواست اصلاح ارسال شد.",
+                          )
+                        }
+                        tone="warning"
+                      />
+                    </div>
+                  )}
                   <div className="mt-3 space-y-2">
                     {identityFields.map((key) => {
                       const check = data.identityChecks.find(
@@ -496,7 +560,7 @@ export default function HiringCasePage() {
                           key={key}
                           className="flex items-center justify-between rounded-lg border p-2 text-sm"
                         >
-                          <span>{key}</span>
+                          <span>{identityFieldLabels[key]}</span>
                           <div className="flex gap-1">
                             {hasAuthority("HR_PROCESSOR") && (
                               <>
@@ -507,7 +571,7 @@ export default function HiringCasePage() {
                                         hiringAPI.setIdentityCheck(id, key, {
                                           status: "VERIFIED",
                                         }),
-                                      `${key} تأیید شد.`,
+                                      `${identityFieldLabels[key]} تأیید شد.`,
                                     )
                                   }
                                   className="rounded bg-emerald-100 px-2 py-1"
@@ -522,7 +586,7 @@ export default function HiringCasePage() {
                                           status: "MISMATCH",
                                           note: "نیازمند اصلاح متقاضی",
                                         }),
-                                      `${key} مغایر ثبت شد.`,
+                                      `${identityFieldLabels[key]} مغایر ثبت شد.`,
                                     )
                                   }
                                   className="rounded bg-rose-100 px-2 py-1"
@@ -540,7 +604,7 @@ export default function HiringCasePage() {
                                           hiringAPI.setIdentityCheck(id, key, {
                                             status: "NOT_APPLICABLE",
                                           }),
-                                        `${key} غیرقابل اعمال ثبت شد.`,
+                                        `${identityFieldLabels[key]} غیرقابل اعمال ثبت شد.`,
                                       )
                                     }
                                     className="rounded bg-slate-100 px-2 py-1"
@@ -550,22 +614,108 @@ export default function HiringCasePage() {
                                 )}
                               </>
                             )}
-                            <small>{check?.status}</small>
+                            <small>
+                              {check?.status === "VERIFIED"
+                                ? "مطابق"
+                                : check?.status === "MISMATCH"
+                                  ? "مغایرت"
+                                  : check?.status === "UNREADABLE"
+                                    ? "ناخوانا"
+                                    : check?.status === "NOT_APPLICABLE"
+                                      ? "نامرتبط"
+                                      : "بررسی‌نشده"}
+                            </small>
                           </div>
                         </div>
                       );
                     })}
                   </div>
+                  {hasAuthority("HR_PROCESSOR") &&
+                    data.identityChecks.some((check: any) =>
+                      ["MISMATCH", "UNREADABLE"].includes(check.status),
+                    ) && (
+                      <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+                        <h4 className="font-bold">درخواست اصلاح یکپارچه</h4>
+                        <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                          برای هر مورد، توضیح فارسی قابل نمایش به متقاضی را وارد کنید.
+                          با ثبت نهایی فقط یک پیامک ارسال می‌شود.
+                        </p>
+                        <div className="mt-3 space-y-2">
+                          {data.identityChecks
+                            .filter((check: any) =>
+                              ["MISMATCH", "UNREADABLE"].includes(check.status),
+                            )
+                            .map((check: any) => (
+                              <label
+                                key={check.fieldKey}
+                                className="grid gap-1 text-sm md:grid-cols-[12rem_1fr]"
+                              >
+                                <span>{identityFieldLabels[check.fieldKey]}</span>
+                                <input
+                                  className={field}
+                                  placeholder="توضیح مشکل و روش اصلاح"
+                                  value={
+                                    correctionExplanations[check.fieldKey] || ""
+                                  }
+                                  onChange={(event) =>
+                                    setCorrectionExplanations((current) => ({
+                                      ...current,
+                                      [check.fieldKey]: event.target.value,
+                                    }))
+                                  }
+                                />
+                              </label>
+                            ))}
+                        </div>
+                        <ErpButton
+                          className="mt-3"
+                          label="ارسال درخواست اصلاح به متقاضی"
+                          disabled={
+                            busy ||
+                            data.identityChecks
+                              .filter((check: any) =>
+                                ["MISMATCH", "UNREADABLE"].includes(check.status),
+                              )
+                              .some(
+                                (check: any) =>
+                                  !correctionExplanations[
+                                    check.fieldKey
+                                  ]?.trim(),
+                              )
+                          }
+                          onClick={() =>
+                            run(
+                              () =>
+                                hiringAPI.returnForm(id, {
+                                  fields: data.identityChecks
+                                    .filter((check: any) =>
+                                      ["MISMATCH", "UNREADABLE"].includes(
+                                        check.status,
+                                      ),
+                                    )
+                                    .map((check: any) => ({
+                                      fieldKey: check.fieldKey,
+                                      explanation:
+                                        correctionExplanations[check.fieldKey],
+                                    })),
+                                }),
+                              "درخواست اصلاح برای متقاضی ارسال شد.",
+                            )
+                          }
+                          tone="warning"
+                        />
+                      </div>
+                    )}
                   {hasAuthority("HR_MANAGER") && (
                     <ErpButton
                       className="mt-3"
-                      label="تأیید نهایی مدیر HR"
+                      label="تأیید نهایی مدیر منابع انسانی"
                       icon={FaCheck}
                       disabled={busy}
                       onClick={() =>
                         run(
                           () => hiringAPI.approveIdentity(id),
-                          "هویت توسط مدیر HR تأیید شد.",
+                          "هویت توسط مدیر منابع انسانی تأیید شد.",
                         )
                       }
                       tone="success"
@@ -601,20 +751,20 @@ export default function HiringCasePage() {
                             })
                           }
                         >
-                          <option value="DISC">DISC</option>
-                          <option value="BIG_FIVE">BIG FIVE</option>
-                          <option value="EQ">EQ</option>
-                          <option value="OTHER">سایر</option>
+                          {["DISC", "BIG_FIVE", "EQ", "OTHER"].map(
+                            (value) => (
+                              <option key={value} value={value}>
+                                {assessmentTypeLabel(value)}
+                              </option>
+                            ),
+                          )}
                         </select>
                       </label>
                       {requiredAssessmentScores.map(({ key, label }) => (
                         <label key={key} className="text-sm font-medium">
                           {label} (۰ تا ۱۰۰)
                           <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="0.01"
+                            type="text"
                             inputMode="decimal"
                             className={`${field} mt-1`}
                             value={assessment.scores[key] ?? ""}
@@ -629,6 +779,13 @@ export default function HiringCasePage() {
                             }
                             placeholder="مثلاً ۸۰"
                           />
+                          {assessment.scores[key] !== undefined &&
+                            assessment.scores[key] !== "" &&
+                            assessmentScoreValidation[key]?.error && (
+                              <span className="mt-1 block text-xs text-rose-600 dark:text-rose-300">
+                                {assessmentScoreValidation[key].error}
+                              </span>
+                            )}
                         </label>
                       ))}
                       {assessment.assessmentType === "OTHER" && (
@@ -693,7 +850,11 @@ export default function HiringCasePage() {
                       </label>
                       <div className="md:col-span-3">
                         <ErpButton
-                          label="ثبت ارزیابی"
+                          label={
+                            editingAssessmentId
+                              ? "ثبت نسخه اصلاح‌شده"
+                              : "ثبت ارزیابی"
+                          }
                           onClick={addAssessment}
                           disabled={busy || !assessmentComplete}
                         />
@@ -703,8 +864,19 @@ export default function HiringCasePage() {
                 )}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {(data.assessments || []).map((item: any) => (
-                    <span key={item.id} className="flex items-center gap-2">
-                      <ErpBadge>{item.assessmentType}</ErpBadge>
+                    <span
+                      key={item.id}
+                      className="flex flex-wrap items-center gap-2 rounded-lg border p-2"
+                    >
+                      <ErpBadge>
+                        {assessmentTypeLabel(item.assessmentType)} · نسخه{" "}
+                        {item.version || 1} ·{" "}
+                        {item.status === "ACTIVE"
+                          ? "فعال"
+                          : item.status === "VOIDED"
+                            ? "باطل‌شده"
+                            : "جایگزین‌شده"}
+                      </ErpBadge>
                       {item.originalName && (
                         <button
                           onClick={() =>
@@ -718,9 +890,93 @@ export default function HiringCasePage() {
                           دریافت فایل
                         </button>
                       )}
+                      {hasAuthority("HR_PROCESSOR") &&
+                        item.status === "ACTIVE" && (
+                          <>
+                            <button
+                              type="button"
+                              className="text-xs text-amber-700"
+                              onClick={() => {
+                                const result = item.resultJson || {};
+                                setEditingAssessmentId(item.id);
+                                setAssessment({
+                                  assessmentType: item.assessmentType,
+                                  scores: result,
+                                  title: result.title || "",
+                                  result: result.result || "",
+                                  notes: result.notes || "",
+                                  file: null,
+                                });
+                              }}
+                            >
+                              ویرایش
+                            </button>
+                            <button
+                              type="button"
+                              className="text-xs text-rose-700"
+                              onClick={() => {
+                                const reason = window.prompt(
+                                  "دلیل حذف ارزیابی را وارد کنید:",
+                                );
+                                if (reason?.trim()) {
+                                  void run(
+                                    () =>
+                                      hiringAPI.voidAssessment(
+                                        id,
+                                        item.id,
+                                        reason.trim(),
+                                      ),
+                                    "ارزیابی با حفظ سابقه باطل شد.",
+                                  );
+                                }
+                              }}
+                            >
+                              حذف با حفظ سابقه
+                            </button>
+                          </>
+                        )}
                     </span>
                   ))}
                 </div>
+                {hasAuthority("HR_PROCESSOR") && (
+                  <ErpButton
+                    className="mt-4"
+                    label={
+                      data.assessmentCompletedAt
+                        ? "ارزیابی تکمیل‌شده"
+                        : "تکمیل مرحله ارزیابی"
+                    }
+                    disabled={
+                      busy ||
+                      Boolean(data.assessmentCompletedAt) ||
+                      !(data.assessments || []).some(
+                        (item: any) => item.status === "ACTIVE",
+                      )
+                    }
+                    onClick={() =>
+                      run(
+                        () => hiringAPI.completeAssessments(id),
+                        "مرحله ارزیابی تکمیل شد و برای تصمیم مدیر استخدام‌کننده آماده است.",
+                      )
+                    }
+                    tone="success"
+                  />
+                )}
+                {hasAuthority("HIRING_MANAGER") &&
+                  data.assessmentReviewRequired &&
+                  data.assessmentCompletedAt && (
+                    <ErpButton
+                      className="mt-4"
+                      label="تأیید بازبینی ارزیابی"
+                      disabled={busy}
+                      onClick={() =>
+                        run(
+                          () => hiringAPI.acknowledgeAssessmentReview(id),
+                          "بازبینی ارزیابی تأیید شد.",
+                        )
+                      }
+                    />
+                  )}
               </ErpCard>
             </ErpSection>
           )}
@@ -762,7 +1018,7 @@ export default function HiringCasePage() {
                           )
                         }
                       >
-                        <option value="">طبقه‌بندی Payroll</option>
+                        <option value="">طبقه‌بندی حقوق و دستمزد</option>
                         <option value="BASE_SALARY">حقوق پایه</option>
                         <option value="FIXED_BENEFIT">مزایای ثابت</option>
                         <option value="VARIABLE_BENEFIT">مزایای متغیر</option>
@@ -822,14 +1078,14 @@ export default function HiringCasePage() {
                   )}
                   {hasAuthority("HR_PAYROLL_PROCESSOR") && (
                     <ErpButton
-                      label="آماده‌سازی HR/Payroll"
+                      label="آماده‌سازی منابع انسانی و حقوق و دستمزد"
                       onClick={() =>
                         run(
                           () =>
                             hiringAPI.prepareCompensation(id, compensation.id, {
                               components,
                             }),
-                          "نسخه توسط Payroll آماده شد.",
+                          "نسخه توسط کارشناس حقوق و دستمزد آماده شد.",
                         )
                       }
                       disabled={busy || !compensation}
@@ -837,7 +1093,7 @@ export default function HiringCasePage() {
                   )}
                   {hasAuthority("HR_PAYROLL_MANAGER") && (
                     <ErpButton
-                      label="تأیید مدیر HR/Payroll"
+                      label="تأیید مدیر حقوق و دستمزد"
                       onClick={() =>
                         run(
                           () =>
@@ -845,7 +1101,7 @@ export default function HiringCasePage() {
                               id,
                               compensation.id,
                             ),
-                          "تأیید HR انجام شد.",
+                          "تأیید منابع انسانی انجام شد.",
                         )
                       }
                       disabled={busy || !compensation}
@@ -871,13 +1127,194 @@ export default function HiringCasePage() {
                   )}
                 </div>
                 {compensation && (
-                  <p className="mt-3 font-black">
-                    جمع:{" "}
-                    {Number(compensation.totalRials).toLocaleString("fa-IR")}{" "}
-                    ریال · آماده‌سازی Payroll:{" "}
-                    {compensation.preparedBy ? "بله" : "خیر"} · پذیرش متقاضی:{" "}
-                    {compensation.candidateAcceptedAt ? "بله" : "خیر"}
-                  </p>
+                  <>
+                    <p className="mt-3 font-black">
+                      جمع:{" "}
+                      {Number(compensation.totalRials).toLocaleString("fa-IR")}{" "}
+                      ریال
+                    </p>
+                    <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+                      {[
+                        {
+                          title: "ثبت پیشنهاد",
+                          role: "مدیر استخدام‌کننده",
+                          actor: compensation.proposedBy,
+                          at: compensation.createdAt,
+                        },
+                        {
+                          title: "آماده‌سازی حقوق و مزایا",
+                          role: "کارشناس حقوق و دستمزد",
+                          actor: compensation.preparedBy,
+                          at: compensation.preparedAt,
+                        },
+                        {
+                          title: "تأیید منابع انسانی و حقوق",
+                          role: "مدیر حقوق و دستمزد",
+                          actor: compensation.hrApprovedBy,
+                          at: compensation.hrApprovedAt,
+                        },
+                        {
+                          title: "تأیید مالی",
+                          role: "مدیر امور مالی",
+                          actor: compensation.financeApprovedBy,
+                          at: compensation.financeApprovedAt,
+                        },
+                        {
+                          title: "تصمیم متقاضی",
+                          role: "متقاضی",
+                          actor:
+                            compensation.candidateDecisionSource ===
+                            "HR_PROCESSOR_OFFLINE"
+                              ? compensation.candidateDecisionBy
+                              : compensation.candidateDecision
+                                ? "متقاضی"
+                                : null,
+                          at: compensation.candidateDecisionAt,
+                        },
+                      ].map((step) => (
+                        <div
+                          key={step.title}
+                          className="rounded-xl border p-3 text-sm"
+                        >
+                          <b>{step.title}</b>
+                          {step.actor ? (
+                            <p className="mt-1 text-emerald-700 dark:text-emerald-300">
+                              {data.compensationParticipants?.[step.actor] ||
+                                step.actor}
+                              {step.at
+                                ? ` · ${dateTimeFa(step.at)}`
+                                : ""}
+                            </p>
+                          ) : (
+                            <p className="mt-1 text-amber-700 dark:text-amber-300">
+                              در انتظار {step.role}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {compensation.candidateNotificationStatus === "FAILED" && (
+                      <div className="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
+                        <p>
+                          {compensation.candidateNotificationError ||
+                            "ارسال پیامک پیشنهاد همکاری ناموفق بود."}
+                        </p>
+                        {hasAuthority("HR_PROCESSOR", "HR_MANAGER") && (
+                          <ErpButton
+                            className="mt-2"
+                            label="ارسال مجدد پیامک پیشنهاد"
+                            onClick={() =>
+                              run(
+                                () =>
+                                  hiringAPI.retryOfferNotification(
+                                    id,
+                                    compensation.id,
+                                  ),
+                                "پیامک پیشنهاد همکاری ارسال شد.",
+                              )
+                            }
+                            disabled={busy}
+                          />
+                        )}
+                      </div>
+                    )}
+                    {hasAuthority("HR_PROCESSOR") &&
+                      compensation.hrApprovedAt &&
+                      compensation.financeApprovedAt &&
+                      !compensation.candidateDecision && (
+                        <div className="mt-4 grid gap-2 rounded-xl border p-3 md:grid-cols-2">
+                          <h4 className="font-bold md:col-span-2">
+                            ثبت تصمیم آفلاین متقاضی
+                          </h4>
+                          <select
+                            className={field}
+                            value={offlineDecision.decision}
+                            onChange={(event) =>
+                              setOfflineDecision({
+                                ...offlineDecision,
+                                decision: event.target.value,
+                              })
+                            }
+                          >
+                            <option value="ACCEPTED">پذیرش</option>
+                            <option value="DECLINED">رد پیشنهاد</option>
+                          </select>
+                          <select
+                            className={field}
+                            value={offlineDecision.communicationMethod}
+                            onChange={(event) =>
+                              setOfflineDecision({
+                                ...offlineDecision,
+                                communicationMethod: event.target.value,
+                              })
+                            }
+                          >
+                            <option value="PHONE">تماس تلفنی</option>
+                            <option value="IN_PERSON">جلسه حضوری</option>
+                            <option value="VIDEO_CALL">تماس تصویری</option>
+                            <option value="OTHER">روش دیگر</option>
+                          </select>
+                          <PersianCalendarComponent
+                            showTime
+                            value={offlineDecision.communicatedAt}
+                            onChange={(communicatedAt) =>
+                              setOfflineDecision({
+                                ...offlineDecision,
+                                communicatedAt,
+                              })
+                            }
+                          />
+                          {[
+                            ["offlineReason", "دلیل استفاده از مسیر آفلاین"],
+                            [
+                              "confirmedCandidateInformation",
+                              "نام کامل متقاضی که تأیید شد",
+                            ],
+                            ["note", "شرح گفت‌وگو و تصمیم"],
+                          ].map(([key, placeholder]) => (
+                            <input
+                              key={key}
+                              className={field}
+                              placeholder={placeholder}
+                              value={(offlineDecision as any)[key]}
+                              onChange={(event) =>
+                                setOfflineDecision({
+                                  ...offlineDecision,
+                                  [key]: event.target.value,
+                                })
+                              }
+                            />
+                          ))}
+                          <ErpButton
+                            label="ثبت نهایی تصمیم آفلاین"
+                            disabled={
+                              busy ||
+                              !offlineDecision.communicatedAt ||
+                              !offlineDecision.offlineReason.trim() ||
+                              !offlineDecision.confirmedCandidateInformation.trim() ||
+                              !offlineDecision.note.trim()
+                            }
+                            onClick={() =>
+                              run(
+                                () =>
+                                  hiringAPI.recordOfflineOfferDecision(
+                                    id,
+                                    compensation.id,
+                                    {
+                                      ...offlineDecision,
+                                      communicatedAt: toIsoDateTime(
+                                        offlineDecision.communicatedAt,
+                                      ),
+                                    },
+                                  ),
+                                "تصمیم آفلاین متقاضی با سابقه حسابرسی ثبت شد.",
+                              )
+                            }
+                            tone="warning"
+                          />
+                        </div>
+                      )}
+                  </>
                 )}
               </ErpCard>
             </ErpSection>
@@ -976,14 +1413,12 @@ export default function HiringCasePage() {
                       })
                     }
                   />
-                  <input
-                    type="date"
-                    className={field}
+                  <PersianCalendarComponent
                     value={collateral.receivedAt}
-                    onChange={(e) =>
+                    onChange={(receivedAt) =>
                       setCollateral({
                         ...collateral,
-                        receivedAt: e.target.value,
+                        receivedAt,
                       })
                     }
                   />
@@ -1042,8 +1477,8 @@ export default function HiringCasePage() {
                   {data.collateralItems.map((item: any) => (
                     <div key={item.id} className="rounded-lg border p-3">
                       <div className="flex justify-between">
-                        <b>{item.type}</b>
-                        <ErpBadge>{item.status}</ErpBadge>
+                        <b>{hrDisplayLabel(item.type)}</b>
+                        <ErpBadge>{hrDisplayLabel(item.status)}</ErpBadge>
                       </div>
                       <p className="text-xs">
                         {item.identifier} · {item.custodyLocation}
@@ -1198,14 +1633,12 @@ export default function HiringCasePage() {
           <>
             <ErpSection title="تبدیل به پرسنل برنامه‌ریزی‌شده">
               <ErpCard className="grid gap-3 p-4 md:grid-cols-3">
-                <input
-                  type="date"
-                  className={field}
+                <PersianCalendarComponent
                   value={conversion.scheduledStartDate}
-                  onChange={(e) =>
+                  onChange={(scheduledStartDate) =>
                     setConversion({
                       ...conversion,
-                      scheduledStartDate: e.target.value,
+                      scheduledStartDate,
                     })
                   }
                 />
@@ -1220,25 +1653,32 @@ export default function HiringCasePage() {
                     })
                   }
                 />
-                <input
-                  type="date"
-                  className={field}
+                <PersianCalendarComponent
                   value={conversion.insuranceDueDate}
-                  onChange={(e) =>
+                  onChange={(insuranceDueDate) =>
                     setConversion({
                       ...conversion,
-                      insuranceDueDate: e.target.value,
+                      insuranceDueDate,
                     })
                   }
                 />
                 <ErpButton
-                  label="تبدیل Candidate به Personnel"
+                  label="تبدیل متقاضی به پرسنل"
                   disabled={
                     busy || !conversion.scheduledStartDate || !!data.convertedAt
                   }
                   onClick={() =>
                     run(
-                      () => hiringAPI.convert(id, conversion),
+                      () =>
+                        hiringAPI.convert(id, {
+                          ...conversion,
+                          scheduledStartDate: toIsoDate(
+                            conversion.scheduledStartDate,
+                          ),
+                          insuranceDueDate: toIsoDate(
+                            conversion.insuranceDueDate,
+                          ),
+                        }),
                       "پرسنل و رابطه استخدامی برنامه‌ریزی‌شده ساخته شد.",
                     )
                   }
@@ -1251,7 +1691,7 @@ export default function HiringCasePage() {
       {selectedLifecyclePhase === "ONBOARDING" && (
         <ErpSection
           title="وظایف موقت پیش از فعال‌سازی"
-          description="وظیفه به Personnel برنامه‌ریزی‌شده متصل می‌شود و هیچ User یا شناسه ورود ایجاد نمی‌کند."
+          description="وظیفه به پرسنل برنامه‌ریزی‌شده متصل می‌شود و هیچ کاربر یا شناسه ورود ایجاد نمی‌کند."
         >
           {hasAuthority("HR_MANAGER") && (
             <ErpCard className="grid gap-2 p-4 md:grid-cols-4">
@@ -1268,23 +1708,25 @@ export default function HiringCasePage() {
                   setTask({ ...task, ownerAuthority: e.target.value })
                 }
               >
-                <option value="HR_MANAGER">مدیر HR</option>
+                <option value="HR_MANAGER">مدیر منابع انسانی</option>
                 <option value="HIRING_MANAGER">مدیر استخدام‌کننده</option>
-                <option value="HR_PROCESSOR">کارشناس HR</option>
+                <option value="HR_PROCESSOR">کارشناس منابع انسانی</option>
                 <option value="FINANCE_MANAGER">مدیر مالی</option>
               </select>
-              <input
-                type="date"
-                className={field}
+              <PersianCalendarComponent
                 value={task.dueDate}
-                onChange={(e) => setTask({ ...task, dueDate: e.target.value })}
+                onChange={(dueDate) => setTask({ ...task, dueDate })}
               />
               <ErpButton
                 label="واگذاری وظیفه"
                 disabled={!task.title || !data.convertedAt}
                 onClick={() =>
                   run(
-                    () => hiringAPI.addOnboardingTask(id, task),
+                    () =>
+                      hiringAPI.addOnboardingTask(id, {
+                        ...task,
+                        dueDate: toIsoDate(task.dueDate),
+                      }),
                     "وظیفه به پرسنل برنامه‌ریزی‌شده واگذار شد.",
                   )
                 }
@@ -1300,7 +1742,8 @@ export default function HiringCasePage() {
                 <span>
                   <b>{item.title}</b>
                   <small className="block text-slate-500">
-                    {item.ownerAuthority} · {item.status}
+                    {authorityLabel(item.ownerAuthority)} ·{" "}
+                    {hrDisplayLabel(item.status)}
                   </small>
                 </span>
                 {item.status !== "COMPLETE" &&
@@ -1344,25 +1787,21 @@ export default function HiringCasePage() {
                         })
                       }
                     />
-                    <input
-                      type="date"
-                      className={field}
+                    <PersianCalendarComponent
                       value={contract.effectiveFrom}
-                      onChange={(e) =>
+                      onChange={(effectiveFrom) =>
                         setContract({
                           ...contract,
-                          effectiveFrom: e.target.value,
+                          effectiveFrom,
                         })
                       }
                     />
-                    <input
-                      type="date"
-                      className={field}
+                    <PersianCalendarComponent
                       value={contract.effectiveTo}
-                      onChange={(e) =>
+                      onChange={(effectiveTo) =>
                         setContract({
                           ...contract,
-                          effectiveTo: e.target.value,
+                          effectiveTo,
                         })
                       }
                     />
@@ -1432,23 +1871,19 @@ export default function HiringCasePage() {
                       <option value="ACTIVE">فعال</option>
                       <option value="EXEMPT">معاف/غیرقابل اعمال</option>
                     </select>
-                    <input
-                      type="date"
-                      className={field}
+                    <PersianCalendarComponent
                       value={insurance.effectiveDate}
-                      onChange={(e) =>
+                      onChange={(effectiveDate) =>
                         setInsurance({
                           ...insurance,
-                          effectiveDate: e.target.value,
+                          effectiveDate,
                         })
                       }
                     />
-                    <input
-                      type="date"
-                      className={field}
+                    <PersianCalendarComponent
                       value={insurance.dueDate}
-                      onChange={(e) =>
-                        setInsurance({ ...insurance, dueDate: e.target.value })
+                      onChange={(dueDate) =>
+                        setInsurance({ ...insurance, dueDate })
                       }
                     />
                     <textarea
@@ -1463,7 +1898,12 @@ export default function HiringCasePage() {
                       label="ذخیره وضعیت بیمه"
                       onClick={() =>
                         run(
-                          () => hiringAPI.setInsurance(id, insurance),
+                          () =>
+                            hiringAPI.setInsurance(id, {
+                              ...insurance,
+                              effectiveDate: toIsoDate(insurance.effectiveDate),
+                              dueDate: toIsoDate(insurance.dueDate),
+                            }),
                           "بیمه به‌روزرسانی شد.",
                         )
                       }
@@ -1473,20 +1913,18 @@ export default function HiringCasePage() {
                 {hasAuthority("HR_PAYROLL_MANAGER") && (
                   <ErpCard className="space-y-2 p-4">
                     <p className="font-bold">مشارکت حقوق و دستمزد</p>
-                    <input
-                      type="date"
-                      className={field}
+                    <PersianCalendarComponent
                       value={payrollDate}
-                      onChange={(e) => setPayrollDate(e.target.value)}
+                      onChange={setPayrollDate}
                     />
                     <ErpButton
-                      label="تنظیم Payroll Participation"
+                      label="تنظیم مشارکت حقوق و دستمزد"
                       disabled={!payrollDate}
                       onClick={() =>
                         run(
                           () =>
                             hiringAPI.setPayroll(id, {
-                              effectiveFrom: payrollDate,
+                              effectiveFrom: toIsoDate(payrollDate),
                             }),
                           "مشارکت حقوق تنظیم شد.",
                         )
@@ -1502,7 +1940,7 @@ export default function HiringCasePage() {
                     </p>
                     <ErpButton
                       className="mt-4"
-                      label="تأیید و فعال‌سازی مدیر HR"
+                      label="تأیید و فعال‌سازی مدیر منابع انسانی"
                       onClick={() =>
                         run(() => hiringAPI.activate(id), "استخدام فعال شد.")
                       }
@@ -1549,7 +1987,7 @@ export default function HiringCasePage() {
                   }
                 />
                 <ErpButton
-                  label="بستن پرونده توسط مدیر HR"
+                  label="بستن پرونده توسط مدیر منابع انسانی"
                   tone="danger"
                   disabled={busy || !closure.reason || data.outcome === "HIRED"}
                   onClick={() =>

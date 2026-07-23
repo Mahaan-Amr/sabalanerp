@@ -9,6 +9,8 @@
     "test:contract-print": "tsx src/utils/__tests__/printTemplateLongitudinalOptimizer.test.ts && tsx src/utils/__tests__/printTemplateProjectName.test.ts && tsx src/utils/__tests__/printTemplateStairLayer.test.ts",
     "test:hr-personnel-boundary": "tsx src/services/__tests__/hrPersonnelBoundary.test.ts",
     "test:hr-candidate-access": "tsx src/services/__tests__/hrCandidateAccess.test.ts",
+    "test:hr-candidate-correction": "tsx src/services/__tests__/hrCandidateCorrection.test.ts",
+    "test:hr-offer-decision": "tsx src/services/__tests__/hrOfferDecision.test.ts",
     "test:hr-candidate-assessment": "tsx src/services/__tests__/hrCandidateAssessment.test.ts",
     "test:hr-hiring-lifecycle": "tsx src/services/__tests__/hrHiringLifecycle.test.ts",
     "test:user-deletion-policy": "tsx src/services/__tests__/userDeletionPolicy.test.ts",

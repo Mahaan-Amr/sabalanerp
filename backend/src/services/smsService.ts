@@ -36,6 +36,8 @@ class SmsService {
   private templateId: number;
   private contractConfirmationTemplateId: number;
   private hiringInvitationTemplateId: number;
+  private hiringCorrectionTemplateId: number;
+  private hiringOfferTemplateId: number;
   private environment: string;
   private requestTimeoutMs: number;
   private dnsServers: string[];
@@ -52,6 +54,14 @@ class SmsService {
     );
     this.hiringInvitationTemplateId = parseInt(
       process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID || '135816',
+      10
+    );
+    this.hiringCorrectionTemplateId = parseInt(
+      process.env.SMS_IR_HIRING_CORRECTION_TEMPLATE_ID || '0',
+      10
+    );
+    this.hiringOfferTemplateId = parseInt(
+      process.env.SMS_IR_HIRING_OFFER_TEMPLATE_ID || '0',
       10
     );
     this.environment = process.env.SMS_IR_ENVIRONMENT || 'sandbox';
@@ -278,6 +288,31 @@ class SmsService {
     return this.sendTemplate(formattedPhone, this.hiringInvitationTemplateId, [
       { name: 'Code', value: params.code }
     ]);
+  }
+
+  async sendHiringCorrection(params: {
+    phoneNumber: string;
+    details: string;
+    replacementCode?: string;
+  }): Promise<{ success: boolean; messageId?: number; error?: string; rawResponse?: unknown }> {
+    if (this.environment === 'sandbox' && !this.apiKey) return { success: true };
+    if (!Number.isInteger(this.hiringCorrectionTemplateId) || this.hiringCorrectionTemplateId <= 0) {
+      return { success: false, error: 'قالب پیامک درخواست اصلاح استخدام تنظیم نشده است.' };
+    }
+    const formattedPhone = this.formatPhoneNumber(params.phoneNumber);
+    const parameters = [{ name: 'Details', value: params.details }];
+    if (params.replacementCode) parameters.push({ name: 'Code', value: params.replacementCode });
+    return this.sendTemplate(formattedPhone, this.hiringCorrectionTemplateId, parameters);
+  }
+
+  async sendHiringOfferReady(params: {
+    phoneNumber: string;
+  }): Promise<{ success: boolean; messageId?: number; error?: string; rawResponse?: unknown }> {
+    if (this.environment === 'sandbox' && !this.apiKey) return { success: true };
+    if (!Number.isInteger(this.hiringOfferTemplateId) || this.hiringOfferTemplateId <= 0) {
+      return { success: false, error: 'قالب پیامک آماده‌شدن پیشنهاد همکاری تنظیم نشده است.' };
+    }
+    return this.sendTemplate(this.formatPhoneNumber(params.phoneNumber), this.hiringOfferTemplateId, []);
   }
 
   private async sendTemplate(

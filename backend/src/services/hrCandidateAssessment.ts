@@ -8,10 +8,22 @@ const isRecord = (value: unknown): value is ResultRecord => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
+const normalizeLocalizedScore = (value: unknown): number | null => {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  const normalized = String(value)
+    .trim()
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/[٫,٬]/g, '.');
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
+  const score = Number(normalized);
+  return Number.isFinite(score) ? score : null;
+};
+
 const requiredScore = (result: ResultRecord, key: string, label: string) => {
-  const value = result[key];
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < SCORE_MIN || value > SCORE_MAX) {
-    throw new Error(`امتیاز «${label}» باید عددی بین ۰ تا ۱۰۰ باشد.`);
+  const value = normalizeLocalizedScore(result[key]);
+  if (value === null || value < SCORE_MIN || value > SCORE_MAX) {
+    throw new Error(`امتیاز «${label}» باید عددی بین ۰ تا ۱۰۰ و با حداکثر دو رقم اعشار باشد.`);
   }
   return value;
 };

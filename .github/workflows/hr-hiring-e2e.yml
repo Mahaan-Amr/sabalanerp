@@ -1,0 +1,67 @@
+name: HR hiring browser workflow
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "tests/hr-hiring/**"
+      - "playwright.hr-hiring.config.ts"
+      - "docker-compose.e2e.yml"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/hr-hiring-e2e.yml"
+  workflow_dispatch:
+
+jobs:
+  hiring-workflow:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sabalanerp_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sabalanerp_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/sabalanerp_e2e?schema=public
+      JWT_SECRET: hr-hiring-e2e-secret-with-at-least-32-characters
+      FRONTEND_URL: http://127.0.0.1:3100
+      PUBLIC_APP_URL: http://127.0.0.1:3100
+      NEXT_PUBLIC_API_URL: /api
+      BACKEND_API_ORIGIN: http://127.0.0.1:5100
+      HR_HIRING_E2E: "true"
+      HR_HIRING_SMS_ADAPTER: memory
+      SMS_IR_ENVIRONMENT: sandbox
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npx playwright install --with-deps chrome
+      - run: npm run test:hr-hiring:e2e:ci
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: hr-hiring-playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
 
 export type Theme = 'light' | 'dark';
 
@@ -27,23 +28,24 @@ interface ThemeProviderProps {
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const [theme, setThemeState] = useState<Theme>('dark'); // Default dark mode
   const [mounted, setMounted] = useState(false);
+  const pathname = usePathname();
+  const isApplicantPortal = pathname.startsWith('/apply');
+  const preferenceKey = isApplicantPortal ? 'hrApplicantTheme' : 'theme';
 
   useEffect(() => {
     // Check for saved theme preference or default to dark
-    const savedTheme = localStorage.getItem('theme') as Theme;
-    if (savedTheme) {
-      setThemeState(savedTheme);
-    }
+    const savedTheme = localStorage.getItem(preferenceKey) as Theme;
+    setThemeState(savedTheme || (isApplicantPortal ? 'light' : 'dark'));
     setMounted(true);
-  }, []);
+  }, [isApplicantPortal, preferenceKey]);
 
   useEffect(() => {
     if (mounted) {
       // Apply theme to document
       document.documentElement.setAttribute('data-theme', theme);
-      localStorage.setItem('theme', theme);
+      localStorage.setItem(preferenceKey, theme);
     }
-  }, [theme, mounted]);
+  }, [theme, mounted, preferenceKey]);
 
   const toggleTheme = () => {
     setThemeState(prevTheme => prevTheme === 'light' ? 'dark' : 'light');

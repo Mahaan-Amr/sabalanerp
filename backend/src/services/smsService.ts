@@ -300,8 +300,15 @@ class SmsService {
       return { success: false, error: 'قالب پیامک درخواست اصلاح استخدام تنظیم نشده است.' };
     }
     const formattedPhone = this.formatPhoneNumber(params.phoneNumber);
-    const parameters = [{ name: 'Details', value: params.details }];
-    if (params.replacementCode) parameters.push({ name: 'Code', value: params.replacementCode });
+    const parameters = [
+      { name: 'Details', value: params.details },
+      {
+        name: 'Code',
+        value: params.replacementCode
+          ? `کد ورود جدید: ${params.replacementCode}`
+          : 'کد ورود قبلی شما همچنان معتبر است.'
+      }
+    ];
     return this.sendTemplate(formattedPhone, this.hiringCorrectionTemplateId, parameters);
   }
 

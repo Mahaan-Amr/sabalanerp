@@ -3,6 +3,8 @@ export * from './productModalState';
 export * from './LongitudinalProductSection';
 export * from './SlabProductSection';
 export * from './slabProductState';
+export * from './PreparedProductSection';
+export * from './preparedProductState';
 export * from './OperationCollectionsSection';
 export * from './ContractRemaindersSection';
 export * from './StairProductSection';

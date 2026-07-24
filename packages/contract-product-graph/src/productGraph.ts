@@ -2,16 +2,22 @@ import { hashCanonicalValue } from './canonicalHash';
 import { findGraphIntegrityConflicts } from './graphIntegrity';
 import {
   cloneCanonicalJson,
+  normalizeLegacyJson,
   stableCanonicalJson,
   type CanonicalJsonObject
 } from './canonicalJson';
-import type { CanonicalDecimal } from './canonicalDecimal';
+import { parseCanonicalDecimal, type CanonicalDecimal } from './canonicalDecimal';
 import type { StableIdentity } from './stableIdentity';
 import {
   parseCanonicalProductGraph,
   parseProductGraphCommand
 } from './productGraphSerialization';
 import { calculatePricing } from './packingPricing';
+import {
+  calculateLongitudinalProduct,
+  parseLongitudinalProductInput,
+  type LongitudinalProductInput
+} from './longitudinalPolicy';
 
 export const CONTRACT_PRODUCT_GRAPH_SCHEMA_VERSION = 1 as const;
 
@@ -47,6 +53,7 @@ export interface CanonicalCommercialFacts {
   readonly baseRateToman?: CanonicalDecimal;
   readonly baseAmountToman?: CanonicalDecimal;
   readonly totalAmountToman?: CanonicalDecimal;
+  readonly calculationSnapshot?: CanonicalJsonObject;
   readonly legacySnapshot?: CanonicalJsonObject;
 }
 
@@ -130,6 +137,7 @@ export interface CanonicalProductGraph {
 
 export interface AddRowSellerIntent {
   readonly row: CanonicalProductRow;
+  readonly productPolicyInput?: LongitudinalProductInput;
 }
 
 export interface AddRowCommand {
@@ -141,7 +149,16 @@ export interface AddRowCommand {
   readonly catalogSnapshots: readonly CatalogSnapshot[];
 }
 
-export type ProductGraphCommand = AddRowCommand;
+export interface ReplaceRowCommand {
+  readonly commandId: AuditMutationId;
+  readonly type: 'replace-row';
+  readonly baseRevision: number;
+  readonly calculationPolicy: CalculationPolicySnapshot;
+  readonly sellerIntent: AddRowSellerIntent;
+  readonly catalogSnapshots: readonly CatalogSnapshot[];
+}
+
+export type ProductGraphCommand = AddRowCommand | ReplaceRowCommand;
 
 export interface ProductGraphCommandRequest {
   readonly graph: CanonicalProductGraph;
@@ -157,6 +174,8 @@ export type ProductGraphConflictCode =
   | 'invalid-canonical-graph'
   | 'orphan-graph-reference'
   | 'orphan-product-reference'
+  | 'product-row-missing'
+  | 'product-policy-conflict'
   | 'policy-version-conflict'
   | 'revision-conflict';
 
@@ -191,6 +210,9 @@ export type ProductGraphCommandResult =
 
 const cloneCommercialFacts = (facts: CanonicalCommercialFacts): CanonicalCommercialFacts => ({
   ...facts,
+  ...(facts.calculationSnapshot
+    ? { calculationSnapshot: cloneCanonicalJson(facts.calculationSnapshot) }
+    : {}),
   ...(facts.legacySnapshot
     ? { legacySnapshot: cloneCanonicalJson(facts.legacySnapshot) }
     : {})
@@ -334,8 +356,100 @@ export const executeProductGraphCommand = (
     return { ok: false, conflicts: [policyConflict] };
   }
 
-  const nextRow = command.sellerIntent.row;
-  if (graph.rows.some(existingRow => existingRow.productRowId === nextRow.productRowId)) {
+  const requestedRow = command.sellerIntent.row;
+  let nextRow = requestedRow;
+  if (
+    command.sellerIntent.productPolicyInput &&
+    requestedRow.productType !== 'longitudinal'
+  ) {
+    return {
+      ok: false,
+      conflicts: [{
+        code: 'product-policy-conflict',
+        path: ['sellerIntent', 'productPolicyInput'],
+        productRowId: requestedRow.productRowId,
+        message: 'Longitudinal policy input can only be applied to a longitudinal row.'
+      }]
+    };
+  }
+  if (requestedRow.productType === 'longitudinal' && command.sellerIntent.productPolicyInput) {
+    let policyInput;
+    try {
+      policyInput = parseLongitudinalProductInput(command.sellerIntent.productPolicyInput);
+    } catch (error) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'product-policy-conflict',
+          path: ['sellerIntent', 'productPolicyInput'],
+          productRowId: requestedRow.productRowId,
+          message: error instanceof Error ? error.message : 'Longitudinal input is invalid.'
+        }]
+      };
+    }
+    const expectedVersions = {
+      calculationPolicyVersion: graph.calculationPolicy.calculation,
+      packingPolicyVersion: graph.calculationPolicy.packing,
+      pricingPolicyVersion: graph.calculationPolicy.pricing,
+      roundingPolicyVersion: graph.calculationPolicy.rounding
+    };
+    const mismatchedVersion = Object.entries(expectedVersions).find(
+      ([key, expected]) => policyInput[key as keyof typeof expectedVersions] !== expected
+    );
+    if (mismatchedVersion) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'policy-version-conflict',
+          path: ['sellerIntent', 'productPolicyInput', mismatchedVersion[0]],
+          productRowId: requestedRow.productRowId,
+          message: 'Longitudinal policy input does not match the graph policy.',
+          expected: mismatchedVersion[1],
+          received: String(policyInput[
+            mismatchedVersion[0] as keyof typeof expectedVersions
+          ])
+        }]
+      };
+    }
+    const calculation = calculateLongitudinalProduct(policyInput);
+    if (!calculation.ok) {
+      return {
+        ok: false,
+        conflicts: calculation.conflicts.map(conflict => ({
+          code: 'product-policy-conflict' as const,
+          path: ['sellerIntent', 'productPolicyInput', conflict.field],
+          productRowId: requestedRow.productRowId,
+          message: conflict.message
+        }))
+      };
+    }
+    const calculationSnapshot = normalizeLegacyJson(
+      calculation.result
+    ) as CanonicalJsonObject;
+    nextRow = {
+      ...requestedRow,
+      commercial: {
+        requestedLengthMeters: calculation.result.lengthMeters,
+        requestedWidthMeters: calculation.result.widthMeters,
+        requestedAreaSquareMeters: calculation.result.requestedAreaSquareMeters,
+        ...(calculation.result.quantity === undefined
+          ? {}
+          : {
+              requestedQuantity: parseCanonicalDecimal(
+                String(calculation.result.quantity)
+              )
+            }),
+        baseRateToman: policyInput.baseRateToman,
+        baseAmountToman: calculation.result.baseAmountToman,
+        totalAmountToman: calculation.result.totalAmountToman,
+        calculationSnapshot
+      }
+    };
+  }
+  const existingRowIndex = graph.rows.findIndex(
+    existingRow => existingRow.productRowId === nextRow.productRowId
+  );
+  if (command.type === 'add-row' && existingRowIndex >= 0) {
     return {
       ok: false,
       conflicts: [{
@@ -345,6 +459,49 @@ export const executeProductGraphCommand = (
         message: 'Contract product row identity already exists.'
       }]
     };
+  }
+  if (command.type === 'replace-row' && existingRowIndex < 0) {
+    return {
+      ok: false,
+      conflicts: [{
+        code: 'product-row-missing',
+        path: ['rows', nextRow.productRowId],
+        productRowId: nextRow.productRowId,
+        message: 'Contract product row does not exist for replacement.'
+      }]
+    };
+  }
+  if (command.type === 'replace-row') {
+    const existingRow = graph.rows[existingRowIndex];
+    if (
+      existingRow.productType !== nextRow.productType ||
+      existingRow.catalogProductId !== nextRow.catalogProductId ||
+      existingRow.catalogSnapshotVersion !== nextRow.catalogSnapshotVersion
+    ) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'product-policy-conflict',
+          path: ['sellerIntent', 'row', 'catalogIdentity'],
+          productRowId: nextRow.productRowId,
+          message: 'Editing a row cannot change its product type or catalog identity.'
+        }]
+      };
+    }
+    if (
+      existingRow.commercial.calculationSnapshot &&
+      !command.sellerIntent.productPolicyInput
+    ) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'product-policy-conflict',
+          path: ['sellerIntent', 'productPolicyInput'],
+          productRowId: nextRow.productRowId,
+          message: 'Editing a canonical longitudinal row requires its complete policy input.'
+        }]
+      };
+    }
   }
 
   const matchingCatalogSnapshots = command.catalogSnapshots.filter(snapshot =>
@@ -399,16 +556,32 @@ export const executeProductGraphCommand = (
       ...nextGraphBase.catalogSnapshots,
       ...(alreadyHasCatalogSnapshot ? [] : [cloneCatalogSnapshot(matchingCatalogSnapshot)])
     ],
-    rows: [
-      ...nextGraphBase.rows,
-      {
+    rows: command.type === 'add-row'
+      ? [
+          ...nextGraphBase.rows,
+          {
+            ...nextRow,
+            commercial: command.sellerIntent.productPolicyInput &&
+              nextRow.productType === 'longitudinal'
+              ? cloneCommercialFacts(nextRow.commercial)
+              : calculateAuthoritativeCommercialFacts(
+                  nextRow.commercial,
+                  graph.calculationPolicy
+                )
+          }
+        ]
+      : nextGraphBase.rows.map((existingRow, index) => index === existingRowIndex
+        ? {
         ...nextRow,
-        commercial: calculateAuthoritativeCommercialFacts(
-          nextRow.commercial,
-          graph.calculationPolicy
-        )
-      }
-    ]
+        commercial: command.sellerIntent.productPolicyInput &&
+          nextRow.productType === 'longitudinal'
+          ? cloneCommercialFacts(nextRow.commercial)
+          : calculateAuthoritativeCommercialFacts(
+              nextRow.commercial,
+              graph.calculationPolicy
+            )
+          }
+        : existingRow)
   };
 
   const integrityConflicts = findGraphIntegrityConflicts(nextGraph);

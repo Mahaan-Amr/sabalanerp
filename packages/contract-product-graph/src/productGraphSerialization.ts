@@ -19,6 +19,7 @@ import type {
   CatalogTechnicalFacts
 } from './productGraph';
 import { parseStableIdentity, type StableIdentityKind } from './stableIdentity';
+import { parseLongitudinalProductInput } from './longitudinalPolicy';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -148,6 +149,14 @@ const commercialAt = (value: unknown, path: string): CanonicalCommercialFacts =>
     ...withOptionalDecimal(record, 'baseRateToman', path),
     ...withOptionalDecimal(record, 'baseAmountToman', path),
     ...withOptionalDecimal(record, 'totalAmountToman', path),
+    ...(record.calculationSnapshot !== undefined
+      ? {
+          calculationSnapshot: canonicalObjectAt(
+            record.calculationSnapshot,
+            `${path}.calculationSnapshot`
+          )
+        }
+      : {}),
     ...(record.legacySnapshot !== undefined
       ? { legacySnapshot: canonicalObjectAt(record.legacySnapshot, `${path}.legacySnapshot`) }
       : {})
@@ -346,8 +355,8 @@ export const serializeCanonicalProductGraph = (graph: CanonicalProductGraph): st
 
 export const parseProductGraphCommand = (value: unknown): ProductGraphCommand => {
   const record = recordAt(value, 'command');
-  if (record.type !== 'add-row') {
-    throw new TypeError('command.type must be add-row.');
+  if (record.type !== 'add-row' && record.type !== 'replace-row') {
+    throw new TypeError('command.type must be add-row or replace-row.');
   }
   const sellerIntent = recordAt(record.sellerIntent, 'command.sellerIntent');
   const catalogSnapshots = arrayAt(record.catalogSnapshots, 'command.catalogSnapshots')
@@ -364,11 +373,18 @@ export const parseProductGraphCommand = (value: unknown): ProductGraphCommand =>
   });
   return {
     commandId: identityAt(record.commandId, 'audit-mutation', 'command.commandId'),
-    type: 'add-row',
+    type: record.type,
     baseRevision: integerAt(record.baseRevision, 'command.baseRevision'),
     calculationPolicy: policyAt(record.calculationPolicy, 'command.calculationPolicy'),
     sellerIntent: {
-      row: productRowAt(sellerIntent.row, 'command.sellerIntent.row')
+      row: productRowAt(sellerIntent.row, 'command.sellerIntent.row'),
+      ...(sellerIntent.productPolicyInput === undefined
+        ? {}
+        : {
+            productPolicyInput: parseLongitudinalProductInput(
+              sellerIntent.productPolicyInput,
+            )
+          })
     },
     catalogSnapshots
   };

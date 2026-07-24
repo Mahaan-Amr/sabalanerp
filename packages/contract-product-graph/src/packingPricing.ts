@@ -232,6 +232,129 @@ const better = (left: ReturnType<typeof objective>, right?: ReturnType<typeof ob
   return left[4] < right[4];
 };
 
+const calculateUniformStripPlan = ({
+  request,
+  sources,
+  pieces,
+  kerf
+}: {
+  request: PackingRequest;
+  sources: SourcePiece[];
+  pieces: DemandPiece[];
+  kerf: Decimal;
+}): PackingPlan | null => {
+  if (sources.length === 0 || pieces.length === 0) return null;
+  const sourceLength = sources[0].free[0]?.length;
+  const sourceWidth = sources[0].free[0]?.width;
+  const pieceLength = pieces[0].length;
+  const pieceWidth = pieces[0].width;
+  if (!sourceLength || !sourceWidth ||
+      sources.some(source =>
+        !source.free[0]?.length.eq(sourceLength) ||
+        !source.free[0]?.width.eq(sourceWidth)
+      ) ||
+      pieces.some(piece => !piece.length.eq(pieceLength) || !piece.width.eq(pieceWidth)) ||
+      !pieceLength.eq(sourceLength)) {
+    return null;
+  }
+
+  const mutable = sources.map(source => ({
+    ...source,
+    nextX: new Decimal(0),
+    remainingWidth: sourceWidth,
+    placements: 0
+  }));
+  const placements: PackedPlacement[] = [];
+  const cuts: PhysicalCut[] = [];
+  for (const piece of pieces) {
+    const target = mutable.find(source => {
+      if (source.remainingWidth.lt(pieceWidth)) return false;
+      const rawRemainder = source.remainingWidth.minus(pieceWidth);
+      return rawRemainder.eq(0) || rawRemainder.gte(kerf);
+    });
+    if (!target) return null;
+    placements.push({
+      demandId: piece.id,
+      demandOrdinal: piece.ordinal,
+      sourceBatchId: target.batchId,
+      sourceOrdinal: target.ordinal,
+      xMeters: canonical(target.nextX),
+      yMeters: canonical(new Decimal(0)),
+      lengthMeters: canonical(pieceLength),
+      widthMeters: canonical(pieceWidth)
+    });
+    const rawRemainder = target.remainingWidth.minus(pieceWidth);
+    target.used = true;
+    target.placements += 1;
+    if (rawRemainder.gt(0)) {
+      const sequence = target.cutCount + 1;
+      cuts.push({
+        cutId: `${target.batchId}:${target.ordinal}:cut:${sequence}`,
+        sequence,
+        axis: 'longitudinal',
+        sourceBatchId: target.batchId,
+        sourceOrdinal: target.ordinal,
+        positionMeters: canonical(target.nextX.plus(pieceWidth)),
+        spanStartMeters: canonical(new Decimal(0)),
+        meters: canonical(sourceLength),
+        kerfMeters: canonical(kerf)
+      });
+      target.cutCount = sequence;
+      target.nextX = target.nextX.plus(pieceWidth).plus(kerf);
+      target.remainingWidth = rawRemainder.minus(kerf);
+    } else {
+      target.nextX = target.nextX.plus(pieceWidth);
+      target.remainingWidth = new Decimal(0);
+    }
+  }
+
+  const consumed = mutable.filter(source => source.used);
+  const remainders = consumed.flatMap(source =>
+    source.remainingWidth.gt(0)
+      ? [{
+          remainingStoneId: parseStableIdentity(
+            'remaining-stone',
+            `${source.batchId}:${source.ordinal}:remainder:1`
+          ),
+          sourceBatchId: source.batchId,
+          sourceOrdinal: source.ordinal,
+          xMeters: canonical(source.nextX),
+          yMeters: canonical(new Decimal(0)),
+          lengthMeters: canonical(sourceLength),
+          widthMeters: canonical(source.remainingWidth)
+        }]
+      : []
+  );
+  const longitudinalCutMeters = cuts.reduce(
+    (sum, cut) => sum.plus(cut.meters),
+    new Decimal(0)
+  );
+  const unusedSources = request.sources.map(source => ({
+    sourceBatchId: source.sourceBatchId,
+    quantity: source.quantity -
+      consumed.filter(item => item.batchId === source.sourceBatchId).length
+  })).filter(source => source.quantity > 0);
+  const planBase = {
+    policyVersion: request.policyVersion,
+    inputHash: hashCanonicalValue(request),
+    consumedSources: consumed.map(source => ({
+      sourceBatchId: source.batchId,
+      sourceOrdinal: source.ordinal
+    })),
+    unusedSources,
+    placements,
+    cuts,
+    longitudinalCutMeters: canonical(longitudinalCutMeters),
+    crossCutMeters: canonical(new Decimal(0)),
+    calibrationMeters: canonical(
+      request.calibrationEnabled ? longitudinalCutMeters : new Decimal(0)
+    ),
+    kerfWasteSquareMeters: canonical(longitudinalCutMeters.times(kerf)),
+    remainders
+  };
+  return { ...planBase, resultHash: hashCanonicalValue(planBase) };
+};
+
 export const calculatePackingPlan = (request: PackingRequest): PackingResult => {
   try {
     policyVersion(request.policyVersion, 'policyVersion');
@@ -281,6 +404,9 @@ export const calculatePackingPlan = (request: PackingRequest): PackingResult => 
       right.length.times(right.width).comparedTo(left.length.times(left.width)) ||
       left.id.localeCompare(right.id) || left.ordinal - right.ordinal
     );
+
+    const uniformStripPlan = calculateUniformStripPlan({ request, sources, pieces, kerf });
+    if (uniformStripPlan) return { ok: true, plan: uniformStripPlan };
 
     let bestState: SearchState | undefined;
     let bestObjective: ReturnType<typeof objective> | undefined;

@@ -11,6 +11,7 @@
     "test:hr-hiring-lifecycle": "npx tsx src/features/hr-hiring/hiringLifecycleViewModel.test.ts && npx tsx src/features/hr-hiring/hiringQueueViewModel.test.ts"
   },
   "dependencies": {
+    "@sabalanerp/contract-product-graph": "file:../packages/contract-product-graph",
     "@react-three/fiber": "^8.18.0",
     "@types/js-cookie": "^3.0.6",
     "@types/moment-jalaali": "^0.7.9",

@@ -90,6 +90,44 @@ const command = (baseRevision = 0, commandId = 'command-1') => ({
   }]
 });
 
+const canonicalLongitudinalCommand = () => {
+  const base = command(0, 'canonical-longitudinal');
+  return {
+    ...base,
+    sellerIntent: {
+      row: base.sellerIntent.row,
+      productPolicyInput: {
+        calculationPolicyVersion: policy.calculation,
+        packingPolicyVersion: policy.packing,
+        pricingPolicyVersion: policy.pricing,
+        roundingPolicyVersion: policy.rounding,
+        sourceBatchId: parseStableIdentity(
+          'source-batch',
+          'source-batch:canonical-longitudinal'
+        ),
+        motherWidthMeters: parseCanonicalDecimal('0.4'),
+        lengthMeters: parseCanonicalDecimal('1.5'),
+        widthMeters: parseCanonicalDecimal('0.2'),
+        quantity: 2,
+        lastManualField: 'length' as const,
+        lastManualDimension: 'length' as const,
+        lengthDisplayUnit: 'm' as const,
+        widthDisplayUnit: 'cm' as const,
+        baseRateToman: parseCanonicalDecimal('1000'),
+        mandatoryEnabled: false,
+        mandatoryPercentage: parseCanonicalDecimal('25'),
+        rememberedMandatoryPercentage: parseCanonicalDecimal('25'),
+        sawKerfEnabled: false,
+        sawKerfMeters: parseCanonicalDecimal('0.003'),
+        calibrationEnabled: false,
+        calibrationSelection: 'automatic' as const,
+        longitudinalCutRateToman: parseCanonicalDecimal('100'),
+        calibrationCutRateToman: parseCanonicalDecimal('50')
+      }
+    }
+  };
+};
+
 const run = async () => {
 {
   const store = new InMemoryAtomicStore();
@@ -123,6 +161,29 @@ const run = async () => {
   });
   assert.equal(stale.ok, false);
   assert.deepEqual({ state: store.state, audits: store.audits, total: store.totalAmountToman }, before);
+}
+
+{
+  const store = new InMemoryAtomicStore();
+  const result = await persistProductGraphCommand(store, {
+    contractId: 'contract-longitudinal',
+    actorId: 'seller-1',
+    command: canonicalLongitudinalCommand()
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) throw new Error('Expected longitudinal policy command to persist.');
+  assert.equal(result.graph.rows[0].commercial.requestedAreaSquareMeters, '0.6');
+  assert.equal(result.graph.rows[0].commercial.baseAmountToman, '600');
+  assert.equal(result.graph.rows[0].commercial.totalAmountToman, '825');
+  assert.equal(
+    result.graph.rows[0].commercial.calculationSnapshot?.sourcePiecesConsumed,
+    '1'
+  );
+  if (!store.state) throw new Error('Expected canonical graph state to reload.');
+  assert.deepEqual(
+    parseCanonicalProductGraph(serializeCanonicalProductGraph(store.state.graph)),
+    result.graph
+  );
 }
 
 for (const failureInjection of ['after-state-write', 'after-audit-write'] as const) {

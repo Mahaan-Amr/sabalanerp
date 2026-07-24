@@ -106,6 +106,42 @@ export function CompactUnitSwitch({
   );
 }
 
+export function CompactSwitch({
+  checked,
+  onChange,
+  label,
+  disabled = false
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cx(
+        'relative h-5 w-9 shrink-0 rounded-full transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500',
+        checked ? 'bg-teal-600' : 'bg-slate-300 dark:bg-slate-700',
+        disabled && 'cursor-not-allowed opacity-40'
+      )}
+    >
+      <span
+        className={cx(
+          'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform',
+          checked ? 'translate-x-0.5' : 'translate-x-[18px]'
+        )}
+      />
+    </button>
+  );
+}
+
 export const AutoGrowingDescription = React.forwardRef<
   HTMLTextAreaElement,
   Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, 'rows' | 'placeholder'>

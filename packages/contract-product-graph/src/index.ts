@@ -28,6 +28,24 @@ export type {
 } from './packingPricing';
 
 export {
+  calculateLongitudinalProduct,
+  createNewLongitudinalProductInput,
+  parseLongitudinalProductInput,
+  transitionLongitudinalQuantity
+} from './longitudinalPolicy';
+export type {
+  LongitudinalConflict,
+  LongitudinalConflictCode,
+  LongitudinalDisplayUnit,
+  LongitudinalManualField,
+  LongitudinalProductCalculation,
+  LongitudinalProductInput,
+  LongitudinalProductResult,
+  NewLongitudinalProductInput,
+  LongitudinalSummaryRow
+} from './longitudinalPolicy';
+
+export {
   readLegacyProductGraph,
   type LegacyProductGraphConflict,
   type LegacyProductGraphInput,
@@ -70,6 +88,7 @@ export {
   type ProductGraphCommandResult,
   type ProductGraphConflict,
   type ProductGraphConflictCode,
+  type ReplaceRowCommand,
   type ProductRowId,
   type RemainingStoneId,
   type SourceBatchId,

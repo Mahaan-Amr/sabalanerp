@@ -182,6 +182,121 @@ const addRowCommand = (
 }
 
 {
+  const sellerRow = row({
+    commercial: {
+      baseAmountToman: parseCanonicalDecimal('1'),
+      totalAmountToman: parseCanonicalDecimal('1')
+    }
+  });
+  const command = addRowCommand(sellerRow);
+  const productPolicyInput = {
+    calculationPolicyVersion: 'calculation-v1',
+    packingPolicyVersion: 'packing-v1',
+    pricingPolicyVersion: 'pricing-v1',
+    roundingPolicyVersion: 'rounding-v1',
+    sourceBatchId: parseStableIdentity(
+      'source-batch',
+      'source-batch:command-longitudinal'
+    ),
+    motherWidthMeters: parseCanonicalDecimal('0.4'),
+    lengthMeters: parseCanonicalDecimal('1.5'),
+    widthMeters: parseCanonicalDecimal('0.12'),
+    quantity: 20,
+    lastManualField: 'length' as const,
+    lastManualDimension: 'length' as const,
+    lengthDisplayUnit: 'm' as const,
+    widthDisplayUnit: 'cm' as const,
+    baseRateToman: parseCanonicalDecimal('1000000'),
+    mandatoryEnabled: true,
+    mandatoryPercentage: parseCanonicalDecimal('25'),
+    rememberedMandatoryPercentage: parseCanonicalDecimal('25'),
+    sawKerfEnabled: false,
+    sawKerfMeters: parseCanonicalDecimal('0.003'),
+    calibrationEnabled: false,
+    calibrationSelection: 'automatic' as const,
+    longitudinalCutRateToman: parseCanonicalDecimal('10000'),
+    calibrationCutRateToman: parseCanonicalDecimal('5000')
+  };
+  const result = executeProductGraphCommand({
+    graph: emptyGraph(),
+    command: {
+      ...command,
+      sellerIntent: {
+        row: sellerRow,
+        productPolicyInput
+      }
+    }
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) throw new Error('Expected canonical longitudinal command to succeed.');
+  const commercial = result.graph.rows[0].commercial;
+  assert.equal(commercial.requestedLengthMeters, '1.5');
+  assert.equal(commercial.requestedWidthMeters, '0.12');
+  assert.equal(commercial.requestedQuantity, '20');
+  assert.equal(commercial.requestedAreaSquareMeters, '3.6');
+  assert.equal(commercial.baseAmountToman, '3600000');
+  assert.equal(commercial.totalAmountToman, '4800000');
+  assert.equal(commercial.calculationSnapshot?.sourcePiecesConsumed, '7');
+  assert.equal(commercial.calculationSnapshot?.calibrationEnabled, false);
+  assert.deepEqual(
+    parseCanonicalProductGraph(serializeCanonicalProductGraph(result.graph)),
+    result.graph
+  );
+
+  const edited = executeProductGraphCommand({
+    graph: result.graph,
+    command: {
+      ...command,
+      commandId: parseStableIdentity('audit-mutation', 'command-edit-longitudinal'),
+      type: 'replace-row',
+      baseRevision: 8,
+      sellerIntent: {
+        ...command.sellerIntent,
+        productPolicyInput: {
+          ...productPolicyInput,
+          lengthMeters: parseCanonicalDecimal('2')
+        }
+      }
+    }
+  });
+  if (!edited.ok) {
+    throw new Error(`Expected longitudinal edit to succeed: ${JSON.stringify(edited.conflicts)}`);
+  }
+  assert.equal(edited.graph.rows.length, 1);
+  assert.equal(edited.graph.rows[0].commercial.requestedLengthMeters, '2');
+  assert.equal(edited.graph.rows[0].commercial.requestedAreaSquareMeters, '4.8');
+  assert.equal(edited.graph.rows[0].commercial.totalAmountToman, '6400000');
+
+  const duplicated = executeProductGraphCommand({
+    graph: edited.graph,
+    command: {
+      ...command,
+      commandId: parseStableIdentity('audit-mutation', 'command-duplicate-longitudinal'),
+      baseRevision: 9,
+      sellerIntent: {
+        ...command.sellerIntent,
+        productPolicyInput: {
+          ...productPolicyInput,
+          sourceBatchId: parseStableIdentity(
+            'source-batch',
+            'source-batch:duplicated-longitudinal'
+          )
+        },
+        row: {
+          ...command.sellerIntent.row,
+          productRowId: parseStableIdentity('product-row', 'duplicated-longitudinal-row')
+        }
+      }
+    }
+  });
+  assert.equal(duplicated.ok, true);
+  if (!duplicated.ok) throw new Error('Expected explicit longitudinal duplicate to succeed.');
+  assert.equal(duplicated.graph.rows.length, 2);
+  assert.equal(duplicated.graph.rows[0].productRowId, 'product-row-018f6d35');
+  assert.equal(duplicated.graph.rows[1].productRowId, 'duplicated-longitudinal-row');
+}
+
+{
   const existing = row();
   const graph: CanonicalProductGraph = {
     ...emptyGraph(),

@@ -20,6 +20,7 @@ import type {
 } from './productGraph';
 import { parseStableIdentity, type StableIdentityKind } from './stableIdentity';
 import { parseLongitudinalProductInput } from './longitudinalPolicy';
+import { parseProductOperationsInput } from './operationsPolicy';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -63,6 +64,22 @@ const integerAt = (value: unknown, path: string): number => {
     throw new TypeError(`${path} must be a non-negative safe integer.`);
   }
   return Number(value);
+};
+
+const booleanAt = (value: unknown, path: string): boolean => {
+  if (typeof value !== 'boolean') throw new TypeError(`${path} must be boolean.`);
+  return value;
+};
+
+const enumAt = <Value extends string>(
+  value: unknown,
+  allowed: readonly Value[],
+  path: string
+): Value => {
+  if (!allowed.includes(value as Value)) {
+    throw new TypeError(`${path} has an unsupported value.`);
+  }
+  return value as Value;
 };
 
 const decimalAt = (value: unknown, path: string): CanonicalDecimal => {
@@ -311,12 +328,47 @@ const operationGroupAt = (value: unknown, path: string): CanonicalOperationGroup
       'operation-group',
       `${path}.operationGroupId`
     ),
-    productRowId: identityAt(record.productRowId, 'product-row', `${path}.productRowId`)
+    productRowId: identityAt(record.productRowId, 'product-row', `${path}.productRowId`),
+    scope: decimalAt(record.scope, `${path}.scope`),
+    basis: enumAt(record.basis, ['piece-count', 'linear-meters'], `${path}.basis`),
+    automaticNoOperations: booleanAt(
+      record.automaticNoOperations,
+      `${path}.automaticNoOperations`
+    )
+  };
+};
+
+const quantityOverrideAt = (value: unknown, path: string) => {
+  const record = recordAt(value, path);
+  return {
+    value: decimalAt(record.value, `${path}.value`),
+    automaticQuantitySnapshot: decimalAt(
+      record.automaticQuantitySnapshot,
+      `${path}.automaticQuantitySnapshot`
+    ),
+    ...(record.resolution === undefined
+      ? {}
+      : {
+          resolution: enumAt(
+            record.resolution,
+            ['keep', 'use-calculation'],
+            `${path}.resolution`
+          )
+        })
   };
 };
 
 const toolSelectionAt = (value: unknown, path: string): CanonicalToolSelection => {
   const record = recordAt(value, path);
+  const edges = record.edges === undefined
+    ? undefined
+    : arrayAt(record.edges, `${path}.edges`).map((edge, index) =>
+        enumAt(
+          edge,
+          ['front', 'back', 'left', 'right'] as const,
+          `${path}.edges.${index}`
+        )
+      );
   return {
     toolSelectionId: identityAt(
       record.toolSelectionId,
@@ -327,6 +379,42 @@ const toolSelectionAt = (value: unknown, path: string): CanonicalToolSelection =
       record.operationGroupId,
       'operation-group',
       `${path}.operationGroupId`
+    ),
+    catalogItemId: nonEmptyStringAt(record.catalogItemId, `${path}.catalogItemId`),
+    catalogSnapshotVersion: nonEmptyStringAt(
+      record.catalogSnapshotVersion,
+      `${path}.catalogSnapshotVersion`
+    ),
+    name: nonEmptyStringAt(record.name, `${path}.name`),
+    unit: enumAt(record.unit, ['meter', 'squareMeter'], `${path}.unit`),
+    rateToman: decimalAt(record.rateToman, `${path}.rateToman`),
+    ...(edges === undefined ? {} : { edges }),
+    ...(record.quantityOverride === undefined
+      ? {}
+      : {
+          quantityOverride: quantityOverrideAt(
+            record.quantityOverride,
+            `${path}.quantityOverride`
+          )
+        }),
+    ...(record.outsideCurrentCatalog === undefined
+      ? {}
+      : {
+          outsideCurrentCatalog: booleanAt(
+            record.outsideCurrentCatalog,
+            `${path}.outsideCurrentCatalog`
+          )
+        }),
+    automaticQuantity: decimalAt(
+      record.automaticQuantity,
+      `${path}.automaticQuantity`
+    ),
+    finalQuantity: decimalAt(record.finalQuantity, `${path}.finalQuantity`),
+    amountToman: decimalAt(record.amountToman, `${path}.amountToman`),
+    overrideStatus: enumAt(
+      record.overrideStatus,
+      ['automatic', 'current', 'kept', 'used-calculation'],
+      `${path}.overrideStatus`
     )
   };
 };
@@ -346,6 +434,47 @@ const finishingSelectionAt = (
       record.operationGroupId,
       'operation-group',
       `${path}.operationGroupId`
+    ),
+    catalogItemId: nonEmptyStringAt(record.catalogItemId, `${path}.catalogItemId`),
+    catalogSnapshotVersion: nonEmptyStringAt(
+      record.catalogSnapshotVersion,
+      `${path}.catalogSnapshotVersion`
+    ),
+    name: nonEmptyStringAt(record.name, `${path}.name`),
+    unit: enumAt(record.unit, ['meter', 'squareMeter'], `${path}.unit`),
+    rateToman: decimalAt(record.rateToman, `${path}.rateToman`),
+    incompatibleCatalogItemIds: arrayAt(
+      record.incompatibleCatalogItemIds,
+      `${path}.incompatibleCatalogItemIds`
+    ).map((item, index) =>
+      nonEmptyStringAt(item, `${path}.incompatibleCatalogItemIds.${index}`)
+    ),
+    ...(record.quantityOverride === undefined
+      ? {}
+      : {
+          quantityOverride: quantityOverrideAt(
+            record.quantityOverride,
+            `${path}.quantityOverride`
+          )
+        }),
+    ...(record.outsideCurrentCatalog === undefined
+      ? {}
+      : {
+          outsideCurrentCatalog: booleanAt(
+            record.outsideCurrentCatalog,
+            `${path}.outsideCurrentCatalog`
+          )
+        }),
+    automaticQuantity: decimalAt(
+      record.automaticQuantity,
+      `${path}.automaticQuantity`
+    ),
+    finalQuantity: decimalAt(record.finalQuantity, `${path}.finalQuantity`),
+    amountToman: decimalAt(record.amountToman, `${path}.amountToman`),
+    overrideStatus: enumAt(
+      record.overrideStatus,
+      ['automatic', 'current', 'kept', 'used-calculation'],
+      `${path}.overrideStatus`
     )
   };
 };
@@ -383,6 +512,13 @@ export const parseProductGraphCommand = (value: unknown): ProductGraphCommand =>
         : {
             productPolicyInput: parseLongitudinalProductInput(
               sellerIntent.productPolicyInput,
+            )
+          }),
+      ...(sellerIntent.operationPolicyInput === undefined
+        ? {}
+        : {
+            operationPolicyInput: parseProductOperationsInput(
+              sellerIntent.operationPolicyInput
             )
           })
     },

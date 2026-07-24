@@ -92,6 +92,11 @@ const command = (baseRevision = 0, commandId = 'command-1') => ({
 
 const canonicalLongitudinalCommand = () => {
   const base = command(0, 'canonical-longitudinal');
+  const productRowId = base.sellerIntent.row.productRowId;
+  const operationGroupId = parseStableIdentity(
+    'operation-group',
+    'operation-group:canonical-longitudinal'
+  );
   return {
     ...base,
     sellerIntent: {
@@ -123,6 +128,45 @@ const canonicalLongitudinalCommand = () => {
         calibrationSelection: 'automatic' as const,
         longitudinalCutRateToman: parseCanonicalDecimal('100'),
         calibrationCutRateToman: parseCanonicalDecimal('50')
+      },
+      operationPolicyInput: {
+        policyVersion: policy.calculation,
+        pricingPolicyVersion: policy.pricing,
+        roundingPolicyVersion: policy.rounding,
+        productRowId,
+        lengthMeters: parseCanonicalDecimal('1.5'),
+        widthMeters: parseCanonicalDecimal('0.2'),
+        quantity: 2,
+        groups: [{
+          operationGroupId,
+          scope: parseCanonicalDecimal('2')
+        }],
+        tools: [{
+          toolSelectionId: parseStableIdentity(
+            'tool-selection',
+            'tool-selection:canonical-longitudinal'
+          ),
+          operationGroupId,
+          catalogItemId: 'tool-catalog',
+          catalogSnapshotVersion: 'tool-inventory-1',
+          name: 'Edge tool',
+          unit: 'meter' as const,
+          rateToman: parseCanonicalDecimal('100'),
+          edges: ['front'] as const
+        }],
+        finishings: [{
+          finishingSelectionId: parseStableIdentity(
+            'finishing-selection',
+            'finishing-selection:canonical-longitudinal'
+          ),
+          operationGroupId,
+          catalogItemId: 'finishing-catalog',
+          catalogSnapshotVersion: 'finishing-inventory-1',
+          name: 'Surface finishing',
+          unit: 'squareMeter' as const,
+          rateToman: parseCanonicalDecimal('50'),
+          incompatibleCatalogItemIds: []
+        }]
       }
     }
   };
@@ -174,11 +218,15 @@ const run = async () => {
   if (!result.ok) throw new Error('Expected longitudinal policy command to persist.');
   assert.equal(result.graph.rows[0].commercial.requestedAreaSquareMeters, '0.6');
   assert.equal(result.graph.rows[0].commercial.baseAmountToman, '600');
-  assert.equal(result.graph.rows[0].commercial.totalAmountToman, '825');
+  assert.equal(result.graph.rows[0].commercial.totalAmountToman, '1155');
   assert.equal(
     result.graph.rows[0].commercial.calculationSnapshot?.sourcePiecesConsumed,
     '1'
   );
+  assert.equal(result.graph.toolSelections[0]?.amountToman, '300');
+  assert.equal(result.graph.finishingSelections[0]?.amountToman, '30');
+  assert.equal(result.totalAmountToman, '1155');
+  assert.equal(store.totalAmountToman, '1155');
   if (!store.state) throw new Error('Expected canonical graph state to reload.');
   assert.deepEqual(
     parseCanonicalProductGraph(serializeCanonicalProductGraph(store.state.graph)),

@@ -18,6 +18,14 @@ import {
   parseLongitudinalProductInput,
   type LongitudinalProductInput
 } from './longitudinalPolicy';
+import {
+  calculateProductOperations,
+  type CalculatedFinishingSelection,
+  type CalculatedOperationGroup,
+  type CalculatedToolSelection,
+  type ProductOperationsInput,
+  type ProductOperationsResult
+} from './operationsPolicy';
 
 export const CONTRACT_PRODUCT_GRAPH_SCHEMA_VERSION = 1 as const;
 
@@ -105,20 +113,13 @@ export interface CanonicalAllocation {
   readonly remainingStoneId?: RemainingStoneId;
 }
 
-export interface CanonicalOperationGroup {
-  readonly operationGroupId: OperationGroupId;
+export interface CanonicalOperationGroup extends CalculatedOperationGroup {
   readonly productRowId: ProductRowId;
 }
 
-export interface CanonicalToolSelection {
-  readonly toolSelectionId: ToolSelectionId;
-  readonly operationGroupId: OperationGroupId;
-}
+export interface CanonicalToolSelection extends CalculatedToolSelection {}
 
-export interface CanonicalFinishingSelection {
-  readonly finishingSelectionId: FinishingSelectionId;
-  readonly operationGroupId: OperationGroupId;
-}
+export interface CanonicalFinishingSelection extends CalculatedFinishingSelection {}
 
 export interface CanonicalProductGraph {
   readonly schemaVersion: typeof CONTRACT_PRODUCT_GRAPH_SCHEMA_VERSION;
@@ -138,6 +139,7 @@ export interface CanonicalProductGraph {
 export interface AddRowSellerIntent {
   readonly row: CanonicalProductRow;
   readonly productPolicyInput?: LongitudinalProductInput;
+  readonly operationPolicyInput?: ProductOperationsInput;
 }
 
 export interface AddRowCommand {
@@ -276,8 +278,20 @@ const cloneGraph = (graph: CanonicalProductGraph): CanonicalProductGraph => ({
   remainingStones: graph.remainingStones.map(item => ({ ...item })),
   allocations: graph.allocations.map(item => ({ ...item })),
   operationGroups: graph.operationGroups.map(item => ({ ...item })),
-  toolSelections: graph.toolSelections.map(item => ({ ...item })),
-  finishingSelections: graph.finishingSelections.map(item => ({ ...item }))
+  toolSelections: graph.toolSelections.map(item => ({
+    ...item,
+    ...(item.edges ? { edges: [...item.edges] } : {}),
+    ...(item.quantityOverride
+      ? { quantityOverride: { ...item.quantityOverride } }
+      : {})
+  })),
+  finishingSelections: graph.finishingSelections.map(item => ({
+    ...item,
+    incompatibleCatalogItemIds: [...item.incompatibleCatalogItemIds],
+    ...(item.quantityOverride
+      ? { quantityOverride: { ...item.quantityOverride } }
+      : {})
+  }))
 });
 
 const canonicalGraphValue = (graph: CanonicalProductGraph) => graph;
@@ -358,6 +372,7 @@ export const executeProductGraphCommand = (
 
   const requestedRow = command.sellerIntent.row;
   let nextRow = requestedRow;
+  let operationResult: ProductOperationsResult | undefined;
   if (
     command.sellerIntent.productPolicyInput &&
     requestedRow.productType !== 'longitudinal'
@@ -446,6 +461,96 @@ export const executeProductGraphCommand = (
       }
     };
   }
+  if (!command.sellerIntent.productPolicyInput) {
+    nextRow = {
+      ...nextRow,
+      commercial: calculateAuthoritativeCommercialFacts(
+        nextRow.commercial,
+        graph.calculationPolicy
+      )
+    };
+  }
+  if (command.sellerIntent.operationPolicyInput) {
+    const operationInput = command.sellerIntent.operationPolicyInput;
+    const expectedQuantity = nextRow.commercial.requestedQuantity === undefined
+      ? undefined
+      : Number(nextRow.commercial.requestedQuantity);
+    if (
+      operationInput.productRowId !== nextRow.productRowId ||
+      operationInput.lengthMeters !== nextRow.commercial.requestedLengthMeters ||
+      operationInput.widthMeters !== nextRow.commercial.requestedWidthMeters ||
+      operationInput.quantity !== expectedQuantity
+    ) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'product-policy-conflict',
+          path: ['sellerIntent', 'operationPolicyInput', 'geometry'],
+          productRowId: nextRow.productRowId,
+          message: 'Operation groups must use the authoritative product geometry.'
+        }]
+      };
+    }
+    if (
+      operationInput.policyVersion !== graph.calculationPolicy.calculation ||
+      operationInput.pricingPolicyVersion !== graph.calculationPolicy.pricing ||
+      operationInput.roundingPolicyVersion !== graph.calculationPolicy.rounding
+    ) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'policy-version-conflict',
+          path: ['sellerIntent', 'operationPolicyInput'],
+          productRowId: nextRow.productRowId,
+          message: 'Operation policy input does not match the graph policy.'
+        }]
+      };
+    }
+    const operations = calculateProductOperations(operationInput);
+    if (!operations.ok) {
+      return {
+        ok: false,
+        conflicts: operations.conflicts.map(conflict => ({
+          code: 'product-policy-conflict' as const,
+          path: ['sellerIntent', 'operationPolicyInput', ...conflict.path],
+          productRowId: nextRow.productRowId,
+          entityId: conflict.entityId,
+          message: conflict.message
+        }))
+      };
+    }
+    operationResult = operations.result;
+    const existingAmount = nextRow.commercial.totalAmountToman ??
+      parseCanonicalDecimal('0');
+    const combined = calculatePricing({
+      policyVersion: graph.calculationPolicy.pricing,
+      roundingPolicyVersion: graph.calculationPolicy.rounding,
+      lines: [
+        {
+          lineId: 'product-before-operations',
+          quantity: existingAmount,
+          rateToman: parseCanonicalDecimal('1')
+        },
+        {
+          lineId: 'operations',
+          quantity: operations.result.totalAmountToman,
+          rateToman: parseCanonicalDecimal('1')
+        }
+      ]
+    });
+    const existingSnapshot = nextRow.commercial.calculationSnapshot ?? {};
+    nextRow = {
+      ...nextRow,
+      commercial: {
+        ...nextRow.commercial,
+        totalAmountToman: combined.totalAmountToman,
+        calculationSnapshot: {
+          ...cloneCanonicalJson(existingSnapshot),
+          operations: normalizeLegacyJson(operations.result)
+        }
+      }
+    };
+  }
   const existingRowIndex = graph.rows.findIndex(
     existingRow => existingRow.productRowId === nextRow.productRowId
   );
@@ -489,6 +594,7 @@ export const executeProductGraphCommand = (
       };
     }
     if (
+      existingRow.productType === 'longitudinal' &&
       existingRow.commercial.calculationSnapshot &&
       !command.sellerIntent.productPolicyInput
     ) {
@@ -499,6 +605,23 @@ export const executeProductGraphCommand = (
           path: ['sellerIntent', 'productPolicyInput'],
           productRowId: nextRow.productRowId,
           message: 'Editing a canonical longitudinal row requires its complete policy input.'
+        }]
+      };
+    }
+    const existingOperationGroups = graph.operationGroups.filter(
+      group => group.productRowId === nextRow.productRowId
+    );
+    if (
+      existingOperationGroups.length > 0 &&
+      !command.sellerIntent.operationPolicyInput
+    ) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'product-policy-conflict',
+          path: ['sellerIntent', 'operationPolicyInput'],
+          productRowId: nextRow.productRowId,
+          message: 'Editing a row with operations requires its complete operation input.'
         }]
       };
     }
@@ -545,6 +668,27 @@ export const executeProductGraphCommand = (
   }
 
   const nextGraphBase = cloneGraph(graph);
+  const replacedOperationGroupIds = new Set(
+    command.type === 'replace-row'
+      ? nextGraphBase.operationGroups
+          .filter(group => group.productRowId === nextRow.productRowId)
+          .map(group => group.operationGroupId)
+      : []
+  );
+  const retainedOperationGroups = nextGraphBase.operationGroups.filter(
+    group => !replacedOperationGroupIds.has(group.operationGroupId)
+  );
+  const retainedToolSelections = nextGraphBase.toolSelections.filter(
+    selection => !replacedOperationGroupIds.has(selection.operationGroupId)
+  );
+  const retainedFinishingSelections = nextGraphBase.finishingSelections.filter(
+    selection => !replacedOperationGroupIds.has(selection.operationGroupId)
+  );
+  const calculatedOperationGroups: CanonicalOperationGroup[] =
+    operationResult?.groups.map(group => ({
+      ...group,
+      productRowId: nextRow.productRowId
+    })) ?? [];
   const alreadyHasCatalogSnapshot = nextGraphBase.catalogSnapshots.some(snapshot =>
     snapshot.catalogProductId === matchingCatalogSnapshot.catalogProductId &&
     snapshot.snapshotVersion === matchingCatalogSnapshot.snapshotVersion
@@ -561,27 +705,27 @@ export const executeProductGraphCommand = (
           ...nextGraphBase.rows,
           {
             ...nextRow,
-            commercial: command.sellerIntent.productPolicyInput &&
-              nextRow.productType === 'longitudinal'
-              ? cloneCommercialFacts(nextRow.commercial)
-              : calculateAuthoritativeCommercialFacts(
-                  nextRow.commercial,
-                  graph.calculationPolicy
-                )
+            commercial: cloneCommercialFacts(nextRow.commercial)
           }
         ]
       : nextGraphBase.rows.map((existingRow, index) => index === existingRowIndex
         ? {
         ...nextRow,
-        commercial: command.sellerIntent.productPolicyInput &&
-          nextRow.productType === 'longitudinal'
-          ? cloneCommercialFacts(nextRow.commercial)
-          : calculateAuthoritativeCommercialFacts(
-              nextRow.commercial,
-              graph.calculationPolicy
-            )
+        commercial: cloneCommercialFacts(nextRow.commercial)
           }
-        : existingRow)
+        : existingRow),
+    operationGroups: [
+      ...retainedOperationGroups,
+      ...calculatedOperationGroups
+    ],
+    toolSelections: [
+      ...retainedToolSelections,
+      ...(operationResult?.tools ?? [])
+    ],
+    finishingSelections: [
+      ...retainedFinishingSelections,
+      ...(operationResult?.finishings ?? [])
+    ]
   };
 
   const integrityConflicts = findGraphIntegrityConflicts(nextGraph);

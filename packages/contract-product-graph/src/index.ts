@@ -33,6 +33,33 @@ export {
   parseLongitudinalProductInput,
   transitionLongitudinalQuantity
 } from './longitudinalPolicy';
+
+export {
+  calculateProductOperations,
+  convertOperationGroupBasis,
+  parseProductOperationsInput,
+  splitOperationGroup
+} from './operationsPolicy';
+export type {
+  CalculatedFinishingSelection,
+  CalculatedOperationGroup,
+  CalculatedToolSelection,
+  FinishingSelectionDraft,
+  OperationEdge,
+  OperationGroupBasis,
+  OperationGroupBasisConversion,
+  OperationGroupSplitResult,
+  OperationGroupDraft,
+  OperationQuantityOverride,
+  OperationUnit,
+  ProductOperationsCalculation,
+  ProductOperationsConflict,
+  ProductOperationsConflictCode,
+  ProductOperationsInput,
+  ProductOperationsResult,
+  ToolSelectionDraft,
+  WorkshopOperationGroup
+} from './operationsPolicy';
 export type {
   LongitudinalConflict,
   LongitudinalConflictCode,

@@ -321,6 +321,131 @@ const addRowCommand = (
 }
 
 {
+  const operationsRow = row({
+    productRowId: parseStableIdentity('product-row', 'row-with-operations'),
+    commercial: {}
+  });
+  const base = addRowCommand(operationsRow);
+  const longitudinalInput = {
+    calculationPolicyVersion: 'calculation-v1',
+    packingPolicyVersion: 'packing-v1',
+    pricingPolicyVersion: 'pricing-v1',
+    roundingPolicyVersion: 'rounding-v1',
+    sourceBatchId: parseStableIdentity('source-batch', 'source-with-operations'),
+    motherWidthMeters: parseCanonicalDecimal('0.4'),
+    lengthMeters: parseCanonicalDecimal('1.5'),
+    widthMeters: parseCanonicalDecimal('0.4'),
+    quantity: 2,
+    lastManualField: 'length' as const,
+    lastManualDimension: 'length' as const,
+    lengthDisplayUnit: 'm' as const,
+    widthDisplayUnit: 'cm' as const,
+    baseRateToman: parseCanonicalDecimal('1000'),
+    mandatoryEnabled: false,
+    mandatoryPercentage: parseCanonicalDecimal('25'),
+    rememberedMandatoryPercentage: parseCanonicalDecimal('25'),
+    sawKerfEnabled: false,
+    sawKerfMeters: parseCanonicalDecimal('0.003'),
+    calibrationEnabled: false,
+    calibrationSelection: 'automatic' as const,
+    longitudinalCutRateToman: parseCanonicalDecimal('100'),
+    calibrationCutRateToman: parseCanonicalDecimal('50')
+  };
+  const operationGroupId = parseStableIdentity('operation-group', 'operation-group-main');
+  const operationInput = {
+    policyVersion: 'calculation-v1',
+    pricingPolicyVersion: 'pricing-v1',
+    roundingPolicyVersion: 'rounding-v1',
+    productRowId: operationsRow.productRowId,
+    lengthMeters: parseCanonicalDecimal('1.5'),
+    widthMeters: parseCanonicalDecimal('0.4'),
+    quantity: 2,
+    groups: [{
+      operationGroupId,
+      scope: parseCanonicalDecimal('2')
+    }],
+    tools: [{
+      toolSelectionId: parseStableIdentity('tool-selection', 'tool-selection-main'),
+      operationGroupId,
+      catalogItemId: 'tool-catalog',
+      catalogSnapshotVersion: 'inventory-tool-1',
+      name: 'نیم لول',
+      unit: 'meter' as const,
+      rateToman: parseCanonicalDecimal('100'),
+      edges: ['front'] as const
+    }],
+    finishings: [{
+      finishingSelectionId: parseStableIdentity(
+        'finishing-selection',
+        'finishing-selection-main'
+      ),
+      operationGroupId,
+      catalogItemId: 'finishing-catalog',
+      catalogSnapshotVersion: 'inventory-finishing-1',
+      name: 'ساب سطح',
+      unit: 'squareMeter' as const,
+      rateToman: parseCanonicalDecimal('50'),
+      incompatibleCatalogItemIds: []
+    }]
+  };
+  const added = executeProductGraphCommand({
+    graph: emptyGraph(),
+    command: {
+      ...base,
+      sellerIntent: {
+        row: operationsRow,
+        productPolicyInput: longitudinalInput,
+        operationPolicyInput: operationInput
+      }
+    }
+  });
+  assert.equal(added.ok, true);
+  if (!added.ok) throw new Error('Expected operations command to succeed.');
+  assert.equal(added.graph.rows[0].commercial.baseAmountToman, '1200');
+  assert.equal(added.graph.rows[0].commercial.totalAmountToman, '1560');
+  assert.equal(added.graph.operationGroups.length, 1);
+  assert.equal(added.graph.toolSelections[0]?.finalQuantity, '3');
+  assert.equal(added.graph.toolSelections[0]?.amountToman, '300');
+  assert.equal(added.graph.finishingSelections[0]?.finalQuantity, '1.2');
+  assert.equal(added.graph.finishingSelections[0]?.amountToman, '60');
+  assert.deepEqual(
+    parseCanonicalProductGraph(serializeCanonicalProductGraph(added.graph)),
+    added.graph
+  );
+
+  const removedOperations = executeProductGraphCommand({
+    graph: added.graph,
+    command: {
+      ...base,
+      commandId: parseStableIdentity('audit-mutation', 'remove-row-operations'),
+      type: 'replace-row',
+      baseRevision: 8,
+      sellerIntent: {
+        row: operationsRow,
+        productPolicyInput: longitudinalInput,
+        operationPolicyInput: {
+          ...operationInput,
+          groups: [],
+          tools: [],
+          finishings: []
+        }
+      }
+    }
+  });
+  assert.equal(removedOperations.ok, true);
+  if (!removedOperations.ok) {
+    throw new Error('Expected atomic operation replacement to succeed.');
+  }
+  assert.equal(removedOperations.graph.rows[0].commercial.totalAmountToman, '1200');
+  assert.equal(removedOperations.graph.toolSelections.length, 0);
+  assert.equal(removedOperations.graph.finishingSelections.length, 0);
+  assert.equal(
+    removedOperations.graph.operationGroups[0]?.automaticNoOperations,
+    true
+  );
+}
+
+{
   const graph = emptyGraph();
   const result = executeProductGraphCommand({
     graph,

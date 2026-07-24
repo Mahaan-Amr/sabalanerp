@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import { parseCanonicalDecimal, type CanonicalDecimal } from './canonicalDecimal';
 import { findGraphIntegrityConflicts } from './graphIntegrity';
 import type { CanonicalJsonObject, CanonicalJsonValue } from './canonicalJson';
@@ -21,6 +22,12 @@ import type {
 import { parseStableIdentity, type StableIdentityKind } from './stableIdentity';
 import { parseLongitudinalProductInput } from './longitudinalPolicy';
 import { parseProductOperationsInput } from './operationsPolicy';
+import {
+  parseRemainderChildPolicyInput,
+  type PaidRemainderStock,
+  type RemainderChildIntent
+} from './remainderPolicy';
+import type { PackingPlan } from './packingPricing';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -225,6 +232,9 @@ const productRowAt = (value: unknown, path: string): CanonicalProductRow => {
     ),
     productType: productType as CanonicalProductType,
     contractualTitle: stringAt(record.contractualTitle, `${path}.contractualTitle`),
+    ...(record.description === undefined
+      ? {}
+      : { description: stringAt(record.description, `${path}.description`) }),
     commercial: commercialAt(record.commercial, `${path}.commercial`),
     ...(optionalIdentityAt(record, 'parentProductRowId', 'product-row', path)
       ? {
@@ -268,6 +278,48 @@ const layerAt = (value: unknown, path: string): CanonicalLayerConfiguration => {
   };
 };
 
+const paidRemainderAt = (value: unknown, path: string): PaidRemainderStock => {
+  const record = recordAt(value, path);
+  const lengthMeters = decimalAt(record.lengthMeters, `${path}.lengthMeters`);
+  const widthMeters = decimalAt(record.widthMeters, `${path}.widthMeters`);
+  const quantity = integerAt(record.quantity, `${path}.quantity`);
+  if (
+    new Decimal(lengthMeters).lte(0) ||
+    new Decimal(widthMeters).lte(0) ||
+    quantity <= 0
+  ) {
+    throw new TypeError(`${path} dimensions and quantity must be positive.`);
+  }
+  return {
+    remainingStoneId: identityAt(
+      record.remainingStoneId,
+      'remaining-stone',
+      `${path}.remainingStoneId`
+    ),
+    ownerProductRowId: identityAt(
+      record.ownerProductRowId,
+      'product-row',
+      `${path}.ownerProductRowId`
+    ),
+    catalogProductId: nonEmptyStringAt(
+      record.catalogProductId,
+      `${path}.catalogProductId`
+    ),
+    sourceBatchId: identityAt(
+      record.sourceBatchId,
+      'source-batch',
+      `${path}.sourceBatchId`
+    ),
+    lengthMeters,
+    widthMeters,
+    quantity,
+    creationOrder: integerAt(record.creationOrder, `${path}.creationOrder`),
+    materialPaid: record.materialPaid === true
+      ? true
+      : (() => { throw new TypeError(`${path}.materialPaid must be true.`); })()
+  };
+};
+
 const sourceBatchAt = (value: unknown, path: string): CanonicalSourceBatch => {
   const record = recordAt(value, path);
   return {
@@ -281,42 +333,250 @@ const sourceBatchAt = (value: unknown, path: string): CanonicalSourceBatch => {
             path
           )
         }
-      : {})
+      : {}),
+    ...(record.initialRemainders === undefined
+      ? {}
+      : {
+          initialRemainders: arrayAt(
+            record.initialRemainders,
+            `${path}.initialRemainders`
+          ).map((item, index) =>
+            paidRemainderAt(item, `${path}.initialRemainders.${index}`)
+          )
+        })
   };
 };
 
 const remainingStoneAt = (value: unknown, path: string): CanonicalRemainingStone => {
+  return paidRemainderAt(value, path);
+};
+
+const packingPlanAt = (value: unknown, path: string): PackingPlan => {
   const record = recordAt(value, path);
+  const consumedSources = arrayAt(record.consumedSources, `${path}.consumedSources`)
+    .map((item, index) => {
+      const source = recordAt(item, `${path}.consumedSources.${index}`);
+      return {
+        sourceBatchId: identityAt(
+          source.sourceBatchId,
+          'source-batch',
+          `${path}.consumedSources.${index}.sourceBatchId`
+        ),
+        sourceOrdinal: integerAt(
+          source.sourceOrdinal,
+          `${path}.consumedSources.${index}.sourceOrdinal`
+        )
+      };
+    });
+  const unusedSources = arrayAt(record.unusedSources, `${path}.unusedSources`)
+    .map((item, index) => {
+      const source = recordAt(item, `${path}.unusedSources.${index}`);
+      return {
+        sourceBatchId: identityAt(
+          source.sourceBatchId,
+          'source-batch',
+          `${path}.unusedSources.${index}.sourceBatchId`
+        ),
+        quantity: integerAt(source.quantity, `${path}.unusedSources.${index}.quantity`)
+      };
+    });
+  const placements = arrayAt(record.placements, `${path}.placements`)
+    .map((item, index) => {
+      const placement = recordAt(item, `${path}.placements.${index}`);
+      return {
+        demandId: nonEmptyStringAt(placement.demandId, `${path}.placements.${index}.demandId`),
+        demandOrdinal: integerAt(
+          placement.demandOrdinal,
+          `${path}.placements.${index}.demandOrdinal`
+        ),
+        sourceBatchId: identityAt(
+          placement.sourceBatchId,
+          'source-batch',
+          `${path}.placements.${index}.sourceBatchId`
+        ),
+        sourceOrdinal: integerAt(
+          placement.sourceOrdinal,
+          `${path}.placements.${index}.sourceOrdinal`
+        ),
+        xMeters: decimalAt(placement.xMeters, `${path}.placements.${index}.xMeters`),
+        yMeters: decimalAt(placement.yMeters, `${path}.placements.${index}.yMeters`),
+        lengthMeters: decimalAt(
+          placement.lengthMeters,
+          `${path}.placements.${index}.lengthMeters`
+        ),
+        widthMeters: decimalAt(
+          placement.widthMeters,
+          `${path}.placements.${index}.widthMeters`
+        )
+      };
+    });
+  const cuts = arrayAt(record.cuts, `${path}.cuts`).map((item, index) => {
+    const cut = recordAt(item, `${path}.cuts.${index}`);
+    return {
+      cutId: nonEmptyStringAt(cut.cutId, `${path}.cuts.${index}.cutId`),
+      sequence: integerAt(cut.sequence, `${path}.cuts.${index}.sequence`),
+      axis: enumAt(
+        cut.axis,
+        ['longitudinal', 'cross'] as const,
+        `${path}.cuts.${index}.axis`
+      ),
+      sourceBatchId: identityAt(
+        cut.sourceBatchId,
+        'source-batch',
+        `${path}.cuts.${index}.sourceBatchId`
+      ),
+      sourceOrdinal: integerAt(
+        cut.sourceOrdinal,
+        `${path}.cuts.${index}.sourceOrdinal`
+      ),
+      positionMeters: decimalAt(
+        cut.positionMeters,
+        `${path}.cuts.${index}.positionMeters`
+      ),
+      spanStartMeters: decimalAt(
+        cut.spanStartMeters,
+        `${path}.cuts.${index}.spanStartMeters`
+      ),
+      meters: decimalAt(cut.meters, `${path}.cuts.${index}.meters`),
+      kerfMeters: decimalAt(cut.kerfMeters, `${path}.cuts.${index}.kerfMeters`)
+    };
+  });
+  const remainders = arrayAt(record.remainders, `${path}.remainders`)
+    .map((item, index) => {
+      const remainder = recordAt(item, `${path}.remainders.${index}`);
+      return {
+        remainingStoneId: identityAt(
+          remainder.remainingStoneId,
+          'remaining-stone',
+          `${path}.remainders.${index}.remainingStoneId`
+        ),
+        sourceBatchId: identityAt(
+          remainder.sourceBatchId,
+          'source-batch',
+          `${path}.remainders.${index}.sourceBatchId`
+        ),
+        sourceOrdinal: integerAt(
+          remainder.sourceOrdinal,
+          `${path}.remainders.${index}.sourceOrdinal`
+        ),
+        xMeters: decimalAt(remainder.xMeters, `${path}.remainders.${index}.xMeters`),
+        yMeters: decimalAt(remainder.yMeters, `${path}.remainders.${index}.yMeters`),
+        lengthMeters: decimalAt(
+          remainder.lengthMeters,
+          `${path}.remainders.${index}.lengthMeters`
+        ),
+        widthMeters: decimalAt(
+          remainder.widthMeters,
+          `${path}.remainders.${index}.widthMeters`
+        )
+      };
+    });
   return {
-    remainingStoneId: identityAt(
-      record.remainingStoneId,
-      'remaining-stone',
-      `${path}.remainingStoneId`
+    policyVersion: nonEmptyStringAt(record.policyVersion, `${path}.policyVersion`),
+    inputHash: nonEmptyStringAt(record.inputHash, `${path}.inputHash`),
+    resultHash: nonEmptyStringAt(record.resultHash, `${path}.resultHash`),
+    consumedSources,
+    unusedSources,
+    placements,
+    cuts,
+    longitudinalCutMeters: decimalAt(
+      record.longitudinalCutMeters,
+      `${path}.longitudinalCutMeters`
     ),
-    sourceBatchId: identityAt(record.sourceBatchId, 'source-batch', `${path}.sourceBatchId`)
+    crossCutMeters: decimalAt(record.crossCutMeters, `${path}.crossCutMeters`),
+    calibrationMeters: decimalAt(
+      record.calibrationMeters,
+      `${path}.calibrationMeters`
+    ),
+    kerfWasteSquareMeters: decimalAt(
+      record.kerfWasteSquareMeters,
+      `${path}.kerfWasteSquareMeters`
+    ),
+    remainders
+  };
+};
+
+const remainderIntentAt = (value: unknown, path: string): RemainderChildIntent => {
+  const record = recordAt(value, path);
+  const policy = parseRemainderChildPolicyInput(record);
+  return {
+    ...policy,
+    allocationOrder: integerAt(record.allocationOrder, `${path}.allocationOrder`),
+    childProductRowId: identityAt(
+      record.childProductRowId,
+      'product-row',
+      `${path}.childProductRowId`
+    ),
+    catalogProductId: nonEmptyStringAt(
+      record.catalogProductId,
+      `${path}.catalogProductId`
+    )
   };
 };
 
 const allocationAt = (value: unknown, path: string): CanonicalAllocation => {
   const record = recordAt(value, path);
+  const cuttingPricingLines = arrayAt(
+    record.cuttingPricingLines,
+    `${path}.cuttingPricingLines`
+  ).map((item, index) => {
+    const linePath = `${path}.cuttingPricingLines.${index}`;
+    const line = recordAt(item, linePath);
+    return {
+      lineId: nonEmptyStringAt(line.lineId, `${linePath}.lineId`),
+      quantity: decimalAt(line.quantity, `${linePath}.quantity`),
+      rateToman: decimalAt(line.rateToman, `${linePath}.rateToman`),
+      amountToman: decimalAt(line.amountToman, `${linePath}.amountToman`)
+    };
+  });
   return {
     allocationId: identityAt(record.allocationId, 'allocation', `${path}.allocationId`),
-    sourceBatchId: identityAt(record.sourceBatchId, 'source-batch', `${path}.sourceBatchId`),
+    allocationOrder: integerAt(record.allocationOrder, `${path}.allocationOrder`),
+    sourceProductRowId: identityAt(
+      record.sourceProductRowId,
+      'product-row',
+      `${path}.sourceProductRowId`
+    ),
     targetProductRowId: identityAt(
       record.targetProductRowId,
       'product-row',
       `${path}.targetProductRowId`
     ),
-    ...(optionalIdentityAt(record, 'remainingStoneId', 'remaining-stone', path)
-      ? {
-          remainingStoneId: optionalIdentityAt(
-            record,
-            'remainingStoneId',
-            'remaining-stone',
-            path
-          )
-        }
-      : {})
+    sourceRemainingStoneId: identityAt(
+      record.sourceRemainingStoneId,
+      'remaining-stone',
+      `${path}.sourceRemainingStoneId`
+    ),
+    consumedSourcePieces: integerAt(
+      record.consumedSourcePieces,
+      `${path}.consumedSourcePieces`
+    ),
+    generatedRemainingStoneIds: arrayAt(
+      record.generatedRemainingStoneIds,
+      `${path}.generatedRemainingStoneIds`
+    ).map((item, index) =>
+      identityAt(
+        item,
+        'remaining-stone',
+        `${path}.generatedRemainingStoneIds.${index}`
+      )
+    ),
+    packingPlan: packingPlanAt(record.packingPlan, `${path}.packingPlan`),
+    materialAmountToman: decimalAt(
+      record.materialAmountToman,
+      `${path}.materialAmountToman`
+    ),
+    materialPricingReason: enumAt(
+      record.materialPricingReason,
+      ['paid-in-source-product'] as const,
+      `${path}.materialPricingReason`
+    ),
+    cuttingPricingLines,
+    cuttingAmountToman: decimalAt(
+      record.cuttingAmountToman,
+      `${path}.cuttingAmountToman`
+    ),
+    intentSnapshot: remainderIntentAt(record.intentSnapshot, `${path}.intentSnapshot`)
   };
 };
 
@@ -484,8 +744,12 @@ export const serializeCanonicalProductGraph = (graph: CanonicalProductGraph): st
 
 export const parseProductGraphCommand = (value: unknown): ProductGraphCommand => {
   const record = recordAt(value, 'command');
-  if (record.type !== 'add-row' && record.type !== 'replace-row') {
-    throw new TypeError('command.type must be add-row or replace-row.');
+  if (
+    record.type !== 'add-row' &&
+    record.type !== 'replace-row' &&
+    record.type !== 'delete-row'
+  ) {
+    throw new TypeError('command.type must be add-row, replace-row, or delete-row.');
   }
   const sellerIntent = recordAt(record.sellerIntent, 'command.sellerIntent');
   const catalogSnapshots = arrayAt(record.catalogSnapshots, 'command.catalogSnapshots')
@@ -500,11 +764,28 @@ export const parseProductGraphCommand = (value: unknown): ProductGraphCommand =>
     }
     snapshotIdentities.add(identity);
   });
-  return {
+  const common = {
     commandId: identityAt(record.commandId, 'audit-mutation', 'command.commandId'),
-    type: record.type,
     baseRevision: integerAt(record.baseRevision, 'command.baseRevision'),
     calculationPolicy: policyAt(record.calculationPolicy, 'command.calculationPolicy'),
+    catalogSnapshots
+  };
+  if (record.type === 'delete-row') {
+    return {
+      ...common,
+      type: 'delete-row',
+      sellerIntent: {
+        productRowId: identityAt(
+          sellerIntent.productRowId,
+          'product-row',
+          'command.sellerIntent.productRowId'
+        )
+      }
+    };
+  }
+  return {
+    ...common,
+    type: record.type,
     sellerIntent: {
       row: productRowAt(sellerIntent.row, 'command.sellerIntent.row'),
       ...(sellerIntent.productPolicyInput === undefined
@@ -520,9 +801,15 @@ export const parseProductGraphCommand = (value: unknown): ProductGraphCommand =>
             operationPolicyInput: parseProductOperationsInput(
               sellerIntent.operationPolicyInput
             )
+          }),
+      ...(sellerIntent.remainderChildPolicyInput === undefined
+        ? {}
+        : {
+            remainderChildPolicyInput: parseRemainderChildPolicyInput(
+              sellerIntent.remainderChildPolicyInput
+            )
           })
     },
-    catalogSnapshots
   };
 };
 

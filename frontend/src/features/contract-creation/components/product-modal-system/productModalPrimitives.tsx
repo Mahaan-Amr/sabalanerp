@@ -260,8 +260,8 @@ export function InlineCollectionSection({
   children
 }: {
   title: string;
-  actionLabel: string;
-  onAction: () => void;
+  actionLabel?: string;
+  onAction?: () => void;
   emptyText: string;
   children?: React.ReactNode;
 }) {
@@ -269,9 +269,11 @@ export function InlineCollectionSection({
     <section className="border-t border-slate-200 py-3 dark:border-slate-800">
       <div className="flex min-h-8 items-center justify-between gap-3">
         <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">{title}</h3>
-        <button type="button" onClick={onAction} className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300">
-          {actionLabel}
-        </button>
+        {actionLabel && onAction && (
+          <button type="button" onClick={onAction} className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300">
+            {actionLabel}
+          </button>
+        )}
       </div>
       <div className="mt-2 text-sm text-slate-600 dark:text-slate-300">
         {children ?? <div className="min-h-9 border-y border-slate-100 py-2 dark:border-slate-800">{emptyText}</div>}

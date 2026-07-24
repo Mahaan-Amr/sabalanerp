@@ -12,7 +12,7 @@ import {
   parseCanonicalProductGraph,
   parseProductGraphCommand
 } from './productGraphSerialization';
-import { calculatePricing } from './packingPricing';
+import { calculatePricing, type PackingPlan } from './packingPricing';
 import {
   calculateLongitudinalProduct,
   parseLongitudinalProductInput,
@@ -26,6 +26,16 @@ import {
   type ProductOperationsInput,
   type ProductOperationsResult
 } from './operationsPolicy';
+import {
+  canDeleteRemainderSource,
+  materializePaidRemainderStocks,
+  replayRemainderAllocations,
+  type CanonicalRemainderAllocation,
+  type PaidRemainderStock,
+  type RemainderChildIntent,
+  type RemainderChildPolicyInput,
+  type RemainderReplayResult
+} from './remainderPolicy';
 
 export const CONTRACT_PRODUCT_GRAPH_SCHEMA_VERSION = 1 as const;
 
@@ -85,6 +95,7 @@ export interface CanonicalProductRow {
   readonly catalogSnapshotVersion: string;
   readonly productType: CanonicalProductType;
   readonly contractualTitle: string;
+  readonly description?: string;
   readonly commercial: CanonicalCommercialFacts;
   readonly parentProductRowId?: ProductRowId;
   readonly sourceProductRowId?: ProductRowId;
@@ -99,18 +110,13 @@ export interface CanonicalLayerConfiguration {
 export interface CanonicalSourceBatch {
   readonly sourceBatchId: SourceBatchId;
   readonly ownerProductRowId?: ProductRowId;
+  readonly initialRemainders?: readonly PaidRemainderStock[];
 }
 
-export interface CanonicalRemainingStone {
-  readonly remainingStoneId: RemainingStoneId;
-  readonly sourceBatchId: SourceBatchId;
-}
+export interface CanonicalRemainingStone extends PaidRemainderStock {}
 
-export interface CanonicalAllocation {
-  readonly allocationId: AllocationId;
-  readonly sourceBatchId: SourceBatchId;
-  readonly targetProductRowId: ProductRowId;
-  readonly remainingStoneId?: RemainingStoneId;
+export interface CanonicalAllocation extends CanonicalRemainderAllocation {
+  readonly intentSnapshot: RemainderChildIntent;
 }
 
 export interface CanonicalOperationGroup extends CalculatedOperationGroup {
@@ -140,6 +146,7 @@ export interface AddRowSellerIntent {
   readonly row: CanonicalProductRow;
   readonly productPolicyInput?: LongitudinalProductInput;
   readonly operationPolicyInput?: ProductOperationsInput;
+  readonly remainderChildPolicyInput?: RemainderChildPolicyInput;
 }
 
 export interface AddRowCommand {
@@ -160,7 +167,18 @@ export interface ReplaceRowCommand {
   readonly catalogSnapshots: readonly CatalogSnapshot[];
 }
 
-export type ProductGraphCommand = AddRowCommand | ReplaceRowCommand;
+export interface DeleteRowCommand {
+  readonly commandId: AuditMutationId;
+  readonly type: 'delete-row';
+  readonly baseRevision: number;
+  readonly calculationPolicy: CalculationPolicySnapshot;
+  readonly sellerIntent: {
+    readonly productRowId: ProductRowId;
+  };
+  readonly catalogSnapshots: readonly CatalogSnapshot[];
+}
+
+export type ProductGraphCommand = AddRowCommand | ReplaceRowCommand | DeleteRowCommand;
 
 export interface ProductGraphCommandRequest {
   readonly graph: CanonicalProductGraph;
@@ -179,7 +197,9 @@ export type ProductGraphConflictCode =
   | 'product-row-missing'
   | 'product-policy-conflict'
   | 'policy-version-conflict'
-  | 'revision-conflict';
+  | 'revision-conflict'
+  | 'remainder-allocation-conflict'
+  | 'source-has-dependent-products';
 
 export interface ProductGraphConflict {
   readonly code: ProductGraphConflictCode;
@@ -265,6 +285,15 @@ const cloneCatalogSnapshot = (snapshot: CatalogSnapshot): CatalogSnapshot => ({
   }
 });
 
+const clonePackingPlan = (plan: PackingPlan): PackingPlan => ({
+  ...plan,
+  consumedSources: plan.consumedSources.map(source => ({ ...source })),
+  unusedSources: plan.unusedSources.map(source => ({ ...source })),
+  placements: plan.placements.map(placement => ({ ...placement })),
+  cuts: plan.cuts.map(cut => ({ ...cut })),
+  remainders: plan.remainders.map(remainder => ({ ...remainder }))
+});
+
 const cloneGraph = (graph: CanonicalProductGraph): CanonicalProductGraph => ({
   ...graph,
   calculationPolicy: { ...graph.calculationPolicy },
@@ -274,9 +303,20 @@ const cloneGraph = (graph: CanonicalProductGraph): CanonicalProductGraph => ({
     commercial: cloneCommercialFacts(row.commercial)
   })),
   layerConfigurations: graph.layerConfigurations.map(item => ({ ...item })),
-  sourceBatches: graph.sourceBatches.map(item => ({ ...item })),
+  sourceBatches: graph.sourceBatches.map(item => ({
+    ...item,
+    ...(item.initialRemainders
+      ? { initialRemainders: item.initialRemainders.map(stock => ({ ...stock })) }
+      : {})
+  })),
   remainingStones: graph.remainingStones.map(item => ({ ...item })),
-  allocations: graph.allocations.map(item => ({ ...item })),
+  allocations: graph.allocations.map(item => ({
+    ...item,
+    generatedRemainingStoneIds: [...item.generatedRemainingStoneIds],
+    packingPlan: clonePackingPlan(item.packingPlan),
+    cuttingPricingLines: item.cuttingPricingLines.map(line => ({ ...line })),
+    intentSnapshot: { ...item.intentSnapshot }
+  })),
   operationGroups: graph.operationGroups.map(item => ({ ...item })),
   toolSelections: graph.toolSelections.map(item => ({
     ...item,
@@ -322,6 +362,161 @@ const findPolicyConflict = (
   }
   return null;
 };
+
+const canonicalRemainderReplay = ({
+  policyVersion,
+  pricingPolicyVersion,
+  roundingPolicyVersion,
+  sourceBatches,
+  intents
+}: {
+  readonly policyVersion: string;
+  readonly pricingPolicyVersion: string;
+  readonly roundingPolicyVersion: string;
+  readonly sourceBatches: readonly CanonicalSourceBatch[];
+  readonly intents: readonly RemainderChildIntent[];
+}): { readonly ok: true; readonly result: RemainderReplayResult;
+  readonly allocations: readonly CanonicalAllocation[] } |
+  { readonly ok: false; readonly conflicts: readonly ProductGraphConflict[] } => {
+  const replay = replayRemainderAllocations({
+    policyVersion,
+    pricingPolicyVersion,
+    roundingPolicyVersion,
+    baseInventory: sourceBatches.flatMap(batch => batch.initialRemainders ?? []),
+    childIntents: intents
+  });
+  if (!replay.ok) {
+    return {
+      ok: false,
+      conflicts: replay.conflicts.map(conflict => ({
+        code: 'remainder-allocation-conflict' as const,
+        path: ['remainderAllocations', ...conflict.path],
+        message: conflict.message,
+        entityId: conflict.sourceRemainingStoneId,
+        productRowId: conflict.childProductRowId
+      }))
+    };
+  }
+  const intentByAllocation = new Map(
+    intents.map(intent => [intent.allocationId, intent])
+  );
+  return {
+    ok: true,
+    result: replay.result,
+    allocations: replay.result.allocations.map(allocation => {
+      const intent = intentByAllocation.get(allocation.allocationId);
+      if (!intent) {
+        throw new TypeError(
+          `Remainder allocation ${allocation.allocationId} has no canonical intent.`
+        );
+      }
+      return {
+        ...allocation,
+        intentSnapshot: { ...intent }
+      };
+    })
+  };
+};
+
+const reconcileRemainderChildCommercialFacts = ({
+  rows,
+  allocations,
+  operationGroups,
+  toolSelections,
+  finishingSelections,
+  policy
+}: {
+  readonly rows: readonly CanonicalProductRow[];
+  readonly allocations: readonly CanonicalAllocation[];
+  readonly operationGroups: readonly CanonicalOperationGroup[];
+  readonly toolSelections: readonly CanonicalToolSelection[];
+  readonly finishingSelections: readonly CanonicalFinishingSelection[];
+  readonly policy: CalculationPolicySnapshot;
+}): CanonicalProductRow[] => {
+  const allocationByTarget = new Map(
+    allocations.map(allocation => [allocation.targetProductRowId, allocation])
+  );
+  return rows.map(row => {
+    const allocation = allocationByTarget.get(row.productRowId);
+    if (!allocation) return row;
+    const groupIds = new Set(
+      operationGroups
+        .filter(group => group.productRowId === row.productRowId)
+        .map(group => group.operationGroupId)
+    );
+    const operationAmounts = [
+      ...toolSelections
+        .filter(selection => groupIds.has(selection.operationGroupId))
+        .map(selection => ({
+          lineId: `tool:${selection.toolSelectionId}`,
+          quantity: selection.amountToman,
+          rateToman: parseCanonicalDecimal('1')
+        })),
+      ...finishingSelections
+        .filter(selection => groupIds.has(selection.operationGroupId))
+        .map(selection => ({
+          lineId: `finishing:${selection.finishingSelectionId}`,
+          quantity: selection.amountToman,
+          rateToman: parseCanonicalDecimal('1')
+        }))
+    ];
+    const total = calculatePricing({
+      policyVersion: policy.pricing,
+      roundingPolicyVersion: policy.rounding,
+      lines: [
+        {
+          lineId: `remainder-cutting:${allocation.allocationId}`,
+          quantity: allocation.cuttingAmountToman,
+          rateToman: parseCanonicalDecimal('1')
+        },
+        ...operationAmounts
+      ]
+    });
+    return {
+      ...row,
+      commercial: {
+        ...row.commercial,
+        baseRateToman: parseCanonicalDecimal('0'),
+        baseAmountToman: parseCanonicalDecimal('0'),
+        totalAmountToman: total.totalAmountToman,
+        calculationSnapshot: {
+          ...cloneCanonicalJson(row.commercial.calculationSnapshot ?? {}),
+          materialPricing: {
+            amountToman: '0',
+            reason: 'paid-in-source-product'
+          },
+          remainderCutting: {
+            allocationId: allocation.allocationId,
+            longitudinalMeters: allocation.packingPlan.longitudinalCutMeters,
+            crossMeters: allocation.packingPlan.crossCutMeters,
+            calibrationMeters: allocation.packingPlan.calibrationMeters,
+            amountToman: allocation.cuttingAmountToman
+          }
+        }
+      }
+    };
+  });
+};
+
+const appliedResult = ({
+  inputGraph,
+  command,
+  nextGraph
+}: {
+  readonly inputGraph: CanonicalProductGraph;
+  readonly command: ProductGraphCommand;
+  readonly nextGraph: CanonicalProductGraph;
+}): ProductGraphCommandResult => ({
+  ok: true,
+  graph: nextGraph,
+  appliedCommand: {
+    commandId: command.commandId,
+    inputRevision: inputGraph.revision,
+    outputRevision: nextGraph.revision,
+    inputHash: hashCanonicalValue(canonicalCommandValue(inputGraph, command)),
+    resultHash: hashCanonicalValue(canonicalGraphValue(nextGraph))
+  }
+});
 
 export const executeProductGraphCommand = (
   request: ProductGraphCommandRequest
@@ -370,9 +565,95 @@ export const executeProductGraphCommand = (
     return { ok: false, conflicts: [policyConflict] };
   }
 
+  if (command.type === 'delete-row') {
+    const deletedRow = graph.rows.find(
+      row => row.productRowId === command.sellerIntent.productRowId
+    );
+    if (!deletedRow) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'product-row-missing',
+          path: ['rows', command.sellerIntent.productRowId],
+          productRowId: command.sellerIntent.productRowId,
+          message: 'Contract product row does not exist for deletion.'
+        }]
+      };
+    }
+    const intents = graph.allocations.map(allocation => allocation.intentSnapshot);
+    const dependents = intents.filter(
+      intent => intent.sourceProductRowId === deletedRow.productRowId
+    );
+    if (!canDeleteRemainderSource(deletedRow.productRowId, intents)) {
+      return {
+        ok: false,
+        conflicts: dependents.map(intent => ({
+          code: 'source-has-dependent-products' as const,
+          path: ['rows', deletedRow.productRowId, 'dependents'],
+          productRowId: deletedRow.productRowId,
+          entityId: intent.childProductRowId,
+          message: 'The source product has dependent remainder products and cannot be deleted.'
+        }))
+      };
+    }
+    const removedGroupIds = new Set(
+      graph.operationGroups
+        .filter(group => group.productRowId === deletedRow.productRowId)
+        .map(group => group.operationGroupId)
+    );
+    const retainedIntents = intents.filter(
+      intent => intent.childProductRowId !== deletedRow.productRowId
+    );
+    const retainedSourceBatches = graph.sourceBatches.filter(
+      batch => batch.ownerProductRowId !== deletedRow.productRowId
+    );
+    const replay = canonicalRemainderReplay({
+      policyVersion: graph.calculationPolicy.packing,
+      pricingPolicyVersion: graph.calculationPolicy.pricing,
+      roundingPolicyVersion: graph.calculationPolicy.rounding,
+      sourceBatches: retainedSourceBatches,
+      intents: retainedIntents
+    });
+    if (!replay.ok) return replay;
+    const nextRows = graph.rows.filter(
+      row => row.productRowId !== deletedRow.productRowId
+    );
+    const nextOperationGroups = graph.operationGroups.filter(
+      group => !removedGroupIds.has(group.operationGroupId)
+    );
+    const nextToolSelections = graph.toolSelections.filter(
+      selection => !removedGroupIds.has(selection.operationGroupId)
+    );
+    const nextFinishingSelections = graph.finishingSelections.filter(
+      selection => !removedGroupIds.has(selection.operationGroupId)
+    );
+    const nextGraph: CanonicalProductGraph = {
+      ...cloneGraph(graph),
+      revision: graph.revision + 1,
+      rows: reconcileRemainderChildCommercialFacts({
+        rows: nextRows,
+        allocations: replay.allocations,
+        operationGroups: nextOperationGroups,
+        toolSelections: nextToolSelections,
+        finishingSelections: nextFinishingSelections,
+        policy: graph.calculationPolicy
+      }),
+      sourceBatches: retainedSourceBatches,
+      remainingStones: replay.result.inventory,
+      allocations: replay.allocations,
+      operationGroups: nextOperationGroups,
+      toolSelections: nextToolSelections,
+      finishingSelections: nextFinishingSelections
+    };
+    const conflicts = findGraphIntegrityConflicts(nextGraph);
+    if (conflicts.length > 0) return { ok: false, conflicts };
+    return appliedResult({ inputGraph: graph, command, nextGraph });
+  }
+
   const requestedRow = command.sellerIntent.row;
   let nextRow = requestedRow;
   let operationResult: ProductOperationsResult | undefined;
+  let calculatedSourceBatch: CanonicalSourceBatch | undefined;
   if (
     command.sellerIntent.productPolicyInput &&
     requestedRow.productType !== 'longitudinal'
@@ -441,6 +722,26 @@ export const executeProductGraphCommand = (
     const calculationSnapshot = normalizeLegacyJson(
       calculation.result
     ) as CanonicalJsonObject;
+    if (!command.sellerIntent.remainderChildPolicyInput) {
+      calculatedSourceBatch = {
+        sourceBatchId: policyInput.sourceBatchId,
+        ownerProductRowId: requestedRow.productRowId,
+        initialRemainders: materializePaidRemainderStocks({
+          ownerProductRowId: requestedRow.productRowId,
+          catalogProductId: requestedRow.catalogProductId,
+          sourceBatchId: policyInput.sourceBatchId,
+          remainders: calculation.result.remainders,
+          startingCreationOrder: (() => {
+            const existing = graph.sourceBatches
+              .find(batch => batch.ownerProductRowId === requestedRow.productRowId)
+              ?.initialRemainders ?? [];
+            return existing.length > 0
+              ? Math.min(...existing.map(stock => stock.creationOrder))
+              : graph.rows.length * 1000;
+          })()
+        })
+      };
+    }
     nextRow = {
       ...requestedRow,
       commercial: {
@@ -458,6 +759,75 @@ export const executeProductGraphCommand = (
         baseAmountToman: calculation.result.baseAmountToman,
         totalAmountToman: calculation.result.totalAmountToman,
         calculationSnapshot
+      }
+    };
+  }
+  if (command.sellerIntent.remainderChildPolicyInput) {
+    const childInput = command.sellerIntent.remainderChildPolicyInput;
+    const authoritativeQuantity = nextRow.commercial.requestedQuantity === undefined
+      ? undefined
+      : Number(nextRow.commercial.requestedQuantity);
+    if (
+      nextRow.sourceProductRowId !== childInput.sourceProductRowId ||
+      nextRow.commercial.requestedLengthMeters !== childInput.lengthMeters ||
+      nextRow.commercial.requestedWidthMeters !== childInput.widthMeters ||
+      authoritativeQuantity !== childInput.quantity
+    ) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'remainder-allocation-conflict',
+          path: ['sellerIntent', 'remainderChildPolicyInput', 'geometry'],
+          productRowId: nextRow.productRowId,
+          message: 'Remainder allocation must use the authoritative child geometry and source.'
+        }]
+      };
+    }
+    const sourceRow = graph.rows.find(
+      row => row.productRowId === childInput.sourceProductRowId
+    );
+    if (!sourceRow) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'orphan-product-reference',
+          path: ['sellerIntent', 'row', 'sourceProductRowId'],
+          productRowId: nextRow.productRowId,
+          message: 'Remainder child references a missing source product row.',
+          received: childInput.sourceProductRowId
+        }]
+      };
+    }
+    if (
+      sourceRow.catalogProductId !== nextRow.catalogProductId ||
+      nextRow.commercial.baseRateToman !== parseCanonicalDecimal('0') ||
+      command.sellerIntent.productPolicyInput?.baseMaterialPricing !==
+        'paid-source-zero'
+    ) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'remainder-allocation-conflict',
+          path: ['sellerIntent', 'remainderChildPolicyInput', 'pricing'],
+          productRowId: nextRow.productRowId,
+          message: 'A remainder child must use the source catalog stone with zero material rate.'
+        }]
+      };
+    }
+    const snapshot = nextRow.commercial.calculationSnapshot ?? {};
+    nextRow = {
+      ...nextRow,
+      commercial: {
+        ...nextRow.commercial,
+        baseRateToman: parseCanonicalDecimal('0'),
+        baseAmountToman: parseCanonicalDecimal('0'),
+        calculationSnapshot: {
+          ...cloneCanonicalJson(snapshot),
+          materialPricing: {
+            amountToman: '0',
+            reason: 'paid-in-source-product'
+          }
+        }
       }
     };
   }
@@ -625,6 +995,36 @@ export const executeProductGraphCommand = (
         }]
       };
     }
+    const existingAllocation = graph.allocations.find(
+      allocation => allocation.targetProductRowId === nextRow.productRowId
+    );
+    if (existingAllocation && !command.sellerIntent.remainderChildPolicyInput) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'remainder-allocation-conflict',
+          path: ['sellerIntent', 'remainderChildPolicyInput'],
+          productRowId: nextRow.productRowId,
+          message: 'Editing a remainder child requires its complete explicit source input.'
+        }]
+      };
+    }
+    if (
+      existingAllocation &&
+      command.sellerIntent.remainderChildPolicyInput &&
+      existingAllocation.allocationId !==
+        command.sellerIntent.remainderChildPolicyInput.allocationId
+    ) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'remainder-allocation-conflict',
+          path: ['sellerIntent', 'remainderChildPolicyInput', 'allocationId'],
+          productRowId: nextRow.productRowId,
+          message: 'Editing a remainder child cannot replace its stable allocation identity.'
+        }]
+      };
+    }
   }
 
   const matchingCatalogSnapshots = command.catalogSnapshots.filter(snapshot =>
@@ -689,10 +1089,81 @@ export const executeProductGraphCommand = (
       ...group,
       productRowId: nextRow.productRowId
     })) ?? [];
+  const retainedSourceBatches = calculatedSourceBatch
+    ? nextGraphBase.sourceBatches.filter(
+        batch => batch.ownerProductRowId !== nextRow.productRowId
+      )
+    : nextGraphBase.sourceBatches;
+  const nextSourceBatches = [
+    ...retainedSourceBatches,
+    ...(calculatedSourceBatch ? [calculatedSourceBatch] : [])
+  ];
+  const existingAllocation = nextGraphBase.allocations.find(
+    allocation => allocation.targetProductRowId === nextRow.productRowId
+  );
+  const retainedRemainderIntents = nextGraphBase.allocations
+    .filter(allocation =>
+      command.type !== 'replace-row' ||
+      allocation.targetProductRowId !== nextRow.productRowId
+    )
+    .map(allocation => allocation.intentSnapshot);
+  const childPolicyInput = command.sellerIntent.remainderChildPolicyInput;
+  const nextAllocationOrder = existingAllocation?.allocationOrder ??
+    (nextGraphBase.allocations.reduce(
+      (maximum, allocation) => Math.max(maximum, allocation.allocationOrder),
+      -1
+    ) + 1);
+  const nextRemainderIntent: RemainderChildIntent | undefined =
+    childPolicyInput
+      ? {
+          ...childPolicyInput,
+          allocationOrder: nextAllocationOrder,
+          childProductRowId: nextRow.productRowId,
+          catalogProductId: nextRow.catalogProductId
+        }
+      : undefined;
+  const nextRemainderIntents = [
+    ...retainedRemainderIntents,
+    ...(nextRemainderIntent ? [nextRemainderIntent] : [])
+  ];
+  const remainderReplay = canonicalRemainderReplay({
+    policyVersion: graph.calculationPolicy.packing,
+    pricingPolicyVersion: graph.calculationPolicy.pricing,
+    roundingPolicyVersion: graph.calculationPolicy.rounding,
+    sourceBatches: nextSourceBatches,
+    intents: nextRemainderIntents
+  });
+  if (!remainderReplay.ok) return remainderReplay;
   const alreadyHasCatalogSnapshot = nextGraphBase.catalogSnapshots.some(snapshot =>
     snapshot.catalogProductId === matchingCatalogSnapshot.catalogProductId &&
     snapshot.snapshotVersion === matchingCatalogSnapshot.snapshotVersion
   );
+  const nextOperationGroups = [
+    ...retainedOperationGroups,
+    ...calculatedOperationGroups
+  ];
+  const nextToolSelections = [
+    ...retainedToolSelections,
+    ...(operationResult?.tools ?? [])
+  ];
+  const nextFinishingSelections = [
+    ...retainedFinishingSelections,
+    ...(operationResult?.finishings ?? [])
+  ];
+  const replacedRows = command.type === 'add-row'
+    ? [
+        ...nextGraphBase.rows,
+        {
+          ...nextRow,
+          commercial: cloneCommercialFacts(nextRow.commercial)
+        }
+      ]
+    : nextGraphBase.rows.map((existingRow, index) => index === existingRowIndex
+      ? {
+          ...nextRow,
+          commercial: cloneCommercialFacts(nextRow.commercial)
+        }
+      : existingRow);
   const nextGraph: CanonicalProductGraph = {
     ...nextGraphBase,
     revision: graph.revision + 1,
@@ -700,32 +1171,20 @@ export const executeProductGraphCommand = (
       ...nextGraphBase.catalogSnapshots,
       ...(alreadyHasCatalogSnapshot ? [] : [cloneCatalogSnapshot(matchingCatalogSnapshot)])
     ],
-    rows: command.type === 'add-row'
-      ? [
-          ...nextGraphBase.rows,
-          {
-            ...nextRow,
-            commercial: cloneCommercialFacts(nextRow.commercial)
-          }
-        ]
-      : nextGraphBase.rows.map((existingRow, index) => index === existingRowIndex
-        ? {
-        ...nextRow,
-        commercial: cloneCommercialFacts(nextRow.commercial)
-          }
-        : existingRow),
-    operationGroups: [
-      ...retainedOperationGroups,
-      ...calculatedOperationGroups
-    ],
-    toolSelections: [
-      ...retainedToolSelections,
-      ...(operationResult?.tools ?? [])
-    ],
-    finishingSelections: [
-      ...retainedFinishingSelections,
-      ...(operationResult?.finishings ?? [])
-    ]
+    rows: reconcileRemainderChildCommercialFacts({
+      rows: replacedRows,
+      allocations: remainderReplay.allocations,
+      operationGroups: nextOperationGroups,
+      toolSelections: nextToolSelections,
+      finishingSelections: nextFinishingSelections,
+      policy: graph.calculationPolicy
+    }),
+    sourceBatches: nextSourceBatches,
+    remainingStones: remainderReplay.result.inventory,
+    allocations: remainderReplay.allocations,
+    operationGroups: nextOperationGroups,
+    toolSelections: nextToolSelections,
+    finishingSelections: nextFinishingSelections
   };
 
   const integrityConflicts = findGraphIntegrityConflicts(nextGraph);

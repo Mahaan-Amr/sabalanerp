@@ -192,6 +192,23 @@ if (!missingPrice.ok) {
   assert.equal(missingPrice.conflicts[0]?.code, 'base-rate-required');
 }
 
+const paidSourceMaterial = calculateLongitudinalProduct(baseInput({
+  baseMaterialPricing: 'paid-source-zero',
+  baseRateToman: c('0')
+}));
+assert.equal(paidSourceMaterial.ok, true);
+if (paidSourceMaterial.ok) {
+  assert.equal(paidSourceMaterial.result.baseMaterialPricing, 'paid-source-zero');
+  assert.equal(paidSourceMaterial.result.baseAmountToman, '0');
+}
+
+const paidSourceCannotBeMandatory = calculateLongitudinalProduct(baseInput({
+  baseMaterialPricing: 'paid-source-zero',
+  baseRateToman: c('0'),
+  mandatoryEnabled: true
+}));
+assert.equal(paidSourceCannotBeMandatory.ok, false);
+
 const missingCutRate = calculateLongitudinalProduct(baseInput({
   widthMeters: c('0.2'),
   quantity: 1,

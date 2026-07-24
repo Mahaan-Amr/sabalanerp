@@ -569,6 +569,253 @@ const addRowCommand = (
 }
 
 {
+  const sourceRowId = parseStableIdentity('product-row', 'remainder-source-row');
+  const childRowId = parseStableIdentity('product-row', 'remainder-child-row');
+  const sourceBatchId = parseStableIdentity('source-batch', 'remainder-source-batch');
+  const childPackingBatchId = parseStableIdentity(
+    'source-batch',
+    'remainder-child-preview-batch'
+  );
+  const allocationId = parseStableIdentity('allocation', 'remainder-allocation');
+  const longitudinalInput = ({
+    batchId,
+    width,
+    quantity,
+    baseRate
+  }: {
+    batchId: ReturnType<typeof parseStableIdentity<'source-batch'>>;
+    width: string;
+    quantity: number;
+    baseRate: string;
+  }) => ({
+    calculationPolicyVersion: 'calculation-v1',
+    packingPolicyVersion: 'packing-v1',
+    pricingPolicyVersion: 'pricing-v1',
+    roundingPolicyVersion: 'rounding-v1',
+    sourceBatchId: batchId,
+    motherWidthMeters: parseCanonicalDecimal(
+      batchId === childPackingBatchId ? '0.16' : '0.4'
+    ),
+    lengthMeters: parseCanonicalDecimal('1.5'),
+    widthMeters: parseCanonicalDecimal(width),
+    quantity,
+    lastManualField: 'length' as const,
+    lastManualDimension: 'length' as const,
+    lengthDisplayUnit: 'm' as const,
+    widthDisplayUnit: 'cm' as const,
+    baseMaterialPricing: baseRate === '0'
+      ? 'paid-source-zero' as const
+      : 'manual-positive' as const,
+    baseRateToman: parseCanonicalDecimal(baseRate),
+    mandatoryEnabled: false,
+    mandatoryPercentage: parseCanonicalDecimal('25'),
+    rememberedMandatoryPercentage: parseCanonicalDecimal('25'),
+    sawKerfEnabled: false,
+    sawKerfMeters: parseCanonicalDecimal('0.003'),
+    calibrationEnabled: false,
+    calibrationSelection: 'automatic' as const,
+    longitudinalCutRateToman: parseCanonicalDecimal('0'),
+    calibrationCutRateToman: parseCanonicalDecimal('0')
+  });
+  const sourceRow = row({
+    productRowId: sourceRowId,
+    commercial: {}
+  });
+  const sourceCommand = addRowCommand(sourceRow, {
+    commandId: parseStableIdentity('audit-mutation', 'add-remainder-source'),
+    sellerIntent: {
+      row: sourceRow,
+      productPolicyInput: longitudinalInput({
+        batchId: sourceBatchId,
+        width: '0.12',
+        quantity: 2,
+        baseRate: '1000'
+      })
+    }
+  });
+  const sourceAdded = executeProductGraphCommand({
+    graph: emptyGraph(),
+    command: sourceCommand
+  });
+  assert.equal(sourceAdded.ok, true);
+  if (!sourceAdded.ok) throw new Error('Expected remainder source to be added.');
+  const selectedRemainderId = parseStableIdentity(
+    'remaining-stone',
+    `${sourceRowId}:base-remainder:1`
+  );
+  assert.equal(sourceAdded.graph.remainingStones[0]?.remainingStoneId, selectedRemainderId);
+  assert.equal(sourceAdded.graph.remainingStones[0]?.widthMeters, '0.16');
+  assert.equal(sourceAdded.graph.remainingStones[0]?.materialPaid, true);
+
+  const childRow = row({
+    productRowId: childRowId,
+    sourceProductRowId: sourceRowId,
+    contractualTitle: 'Independent remainder child',
+    description: 'Independent child description',
+    commercial: {}
+  });
+  const childInput = longitudinalInput({
+    batchId: childPackingBatchId,
+    width: '0.12',
+    quantity: 1,
+    baseRate: '0'
+  });
+  const childAdded = executeProductGraphCommand({
+    graph: sourceAdded.graph,
+    command: {
+      ...sourceCommand,
+      commandId: parseStableIdentity('audit-mutation', 'add-remainder-child'),
+      baseRevision: 8,
+      sellerIntent: {
+        row: childRow,
+        productPolicyInput: childInput,
+        remainderChildPolicyInput: {
+          allocationId,
+          sourceProductRowId: sourceRowId,
+          selectedRemainingStoneId: selectedRemainderId,
+          lengthMeters: parseCanonicalDecimal('1.5'),
+          widthMeters: parseCanonicalDecimal('0.12'),
+          quantity: 1,
+          kerfMeters: parseCanonicalDecimal('0'),
+          calibrationEnabled: false,
+          longitudinalCutRateToman: parseCanonicalDecimal('100'),
+          crossCutRateToman: parseCanonicalDecimal('0'),
+          calibrationCutRateToman: parseCanonicalDecimal('0')
+        }
+      }
+    }
+  });
+  assert.equal(childAdded.ok, true, JSON.stringify(childAdded));
+  if (!childAdded.ok) throw new Error('Expected remainder child to be added.');
+  assert.equal(childAdded.graph.rows[1]?.commercial.baseRateToman, '0');
+  assert.equal(childAdded.graph.rows[1]?.commercial.baseAmountToman, '0');
+  assert.equal(childAdded.graph.rows[1]?.description, 'Independent child description');
+  assert.equal(childAdded.graph.allocations[0]?.sourceRemainingStoneId, selectedRemainderId);
+  assert.equal(childAdded.graph.allocations[0]?.materialAmountToman, '0');
+  assert.equal(childAdded.graph.allocations[0]?.cuttingAmountToman, '150');
+  assert.equal(childAdded.graph.rows[1]?.commercial.totalAmountToman, '150');
+  assert.equal(childAdded.graph.remainingStones[0]?.ownerProductRowId, childRowId);
+  assert.equal(childAdded.graph.remainingStones[0]?.widthMeters, '0.04');
+  assert.deepEqual(
+    parseCanonicalProductGraph(serializeCanonicalProductGraph(childAdded.graph)),
+    childAdded.graph
+  );
+
+  const compatibleSourceEdit = executeProductGraphCommand({
+    graph: childAdded.graph,
+    command: {
+      ...sourceCommand,
+      commandId: parseStableIdentity('audit-mutation', 'edit-compatible-source'),
+      type: 'replace-row',
+      baseRevision: 9,
+      sellerIntent: {
+        row: sourceRow,
+        productPolicyInput: longitudinalInput({
+          batchId: sourceBatchId,
+          width: '0.14',
+          quantity: 2,
+          baseRate: '1000'
+        })
+      }
+    }
+  });
+  assert.equal(compatibleSourceEdit.ok, true, JSON.stringify(compatibleSourceEdit));
+  if (!compatibleSourceEdit.ok) {
+    throw new Error('Expected compatible source edit to replay child pricing.');
+  }
+  assert.equal(
+    compatibleSourceEdit.graph.allocations[0]?.cuttingAmountToman,
+    '0'
+  );
+  assert.equal(
+    compatibleSourceEdit.graph.rows[1]?.commercial.totalAmountToman,
+    '0'
+  );
+
+  const incompatibleSourceEdit = executeProductGraphCommand({
+    graph: childAdded.graph,
+    command: {
+      ...sourceCommand,
+      commandId: parseStableIdentity('audit-mutation', 'edit-remainder-source'),
+      type: 'replace-row',
+      baseRevision: 9,
+      sellerIntent: {
+        row: sourceRow,
+        productPolicyInput: longitudinalInput({
+          batchId: sourceBatchId,
+          width: '0.2',
+          quantity: 2,
+          baseRate: '1000'
+        })
+      }
+    }
+  });
+  assert.equal(incompatibleSourceEdit.ok, false);
+  if (!incompatibleSourceEdit.ok) {
+    assert.equal(
+      incompatibleSourceEdit.conflicts[0]?.code,
+      'remainder-allocation-conflict'
+    );
+    assert.equal(incompatibleSourceEdit.conflicts[0]?.productRowId, childRowId);
+  }
+  assert.equal(childAdded.graph.revision, 9);
+
+  const blockedSourceDelete = executeProductGraphCommand({
+    graph: childAdded.graph,
+    command: {
+      commandId: parseStableIdentity('audit-mutation', 'delete-blocked-source'),
+      type: 'delete-row',
+      baseRevision: 9,
+      calculationPolicy: calculationPolicy(),
+      sellerIntent: { productRowId: sourceRowId },
+      catalogSnapshots: []
+    }
+  });
+  assert.equal(blockedSourceDelete.ok, false);
+  if (!blockedSourceDelete.ok) {
+    assert.equal(
+      blockedSourceDelete.conflicts[0]?.code,
+      'source-has-dependent-products'
+    );
+    assert.equal(blockedSourceDelete.conflicts[0]?.entityId, childRowId);
+  }
+
+  const childDeleted = executeProductGraphCommand({
+    graph: childAdded.graph,
+    command: {
+      commandId: parseStableIdentity('audit-mutation', 'delete-remainder-child'),
+      type: 'delete-row',
+      baseRevision: 9,
+      calculationPolicy: calculationPolicy(),
+      sellerIntent: { productRowId: childRowId },
+      catalogSnapshots: []
+    }
+  });
+  assert.equal(childDeleted.ok, true);
+  if (!childDeleted.ok) throw new Error('Expected explicit child deletion.');
+  assert.equal(childDeleted.graph.allocations.length, 0);
+  assert.equal(childDeleted.graph.remainingStones[0]?.remainingStoneId, selectedRemainderId);
+  assert.equal(childDeleted.graph.remainingStones[0]?.widthMeters, '0.16');
+
+  const sourceDeleted = executeProductGraphCommand({
+    graph: childDeleted.graph,
+    command: {
+      commandId: parseStableIdentity('audit-mutation', 'delete-remainder-source'),
+      type: 'delete-row',
+      baseRevision: 10,
+      calculationPolicy: calculationPolicy(),
+      sellerIntent: { productRowId: sourceRowId },
+      catalogSnapshots: []
+    }
+  });
+  assert.equal(sourceDeleted.ok, true);
+  if (!sourceDeleted.ok) throw new Error('Expected source deletion after child deletion.');
+  assert.equal(sourceDeleted.graph.rows.length, 0);
+  assert.equal(sourceDeleted.graph.sourceBatches.length, 0);
+  assert.equal(sourceDeleted.graph.remainingStones.length, 0);
+}
+
+{
   assert.throws(
     () => parseStableIdentity('product-row', '  '),
     /Stable product-row identity is required/

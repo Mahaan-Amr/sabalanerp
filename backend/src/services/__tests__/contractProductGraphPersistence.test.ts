@@ -172,6 +172,76 @@ const canonicalLongitudinalCommand = () => {
   };
 };
 
+const remainderCommands = () => {
+  const sourceBase = canonicalLongitudinalCommand();
+  const sourceRowId = parseStableIdentity('product-row', 'persisted-remainder-source');
+  const sourceBatchId = parseStableIdentity('source-batch', 'persisted-remainder-batch');
+  const source = {
+    ...sourceBase,
+    commandId: parseStableIdentity('audit-mutation', 'persist-remainder-source'),
+    sellerIntent: {
+      row: {
+        ...sourceBase.sellerIntent.row,
+        productRowId: sourceRowId,
+        commercial: {}
+      },
+      productPolicyInput: {
+        ...sourceBase.sellerIntent.productPolicyInput,
+        sourceBatchId,
+        widthMeters: parseCanonicalDecimal('0.12'),
+        quantity: 2
+      }
+    }
+  };
+  const childRowId = parseStableIdentity('product-row', 'persisted-remainder-child');
+  const selectedRemainingStoneId = parseStableIdentity(
+    'remaining-stone',
+    `${sourceRowId}:base-remainder:1`
+  );
+  const child = {
+    ...source,
+    commandId: parseStableIdentity('audit-mutation', 'persist-remainder-child'),
+    baseRevision: 1,
+    sellerIntent: {
+      row: {
+        ...source.sellerIntent.row,
+        productRowId: childRowId,
+        contractualTitle: 'Child from paid remainder',
+        sourceProductRowId: sourceRowId,
+        commercial: {}
+      },
+      productPolicyInput: {
+        ...source.sellerIntent.productPolicyInput,
+        sourceBatchId: parseStableIdentity(
+          'source-batch',
+          'persisted-remainder-child-preview'
+        ),
+        motherWidthMeters: parseCanonicalDecimal('0.16'),
+        widthMeters: parseCanonicalDecimal('0.12'),
+        quantity: 1,
+        baseMaterialPricing: 'paid-source-zero' as const,
+        baseRateToman: parseCanonicalDecimal('0'),
+        longitudinalCutRateToman: parseCanonicalDecimal('0'),
+        calibrationCutRateToman: parseCanonicalDecimal('0')
+      },
+      remainderChildPolicyInput: {
+        allocationId: parseStableIdentity('allocation', 'persisted-remainder-allocation'),
+        sourceProductRowId: sourceRowId,
+        selectedRemainingStoneId,
+        lengthMeters: parseCanonicalDecimal('1.5'),
+        widthMeters: parseCanonicalDecimal('0.12'),
+        quantity: 1,
+        kerfMeters: parseCanonicalDecimal('0'),
+        calibrationEnabled: false,
+        longitudinalCutRateToman: parseCanonicalDecimal('0'),
+        crossCutRateToman: parseCanonicalDecimal('0'),
+        calibrationCutRateToman: parseCanonicalDecimal('0')
+      }
+    }
+  };
+  return { source, child, sourceRowId, childRowId, selectedRemainingStoneId };
+};
+
 const run = async () => {
 {
   const store = new InMemoryAtomicStore();
@@ -231,6 +301,41 @@ const run = async () => {
   assert.deepEqual(
     parseCanonicalProductGraph(serializeCanonicalProductGraph(store.state.graph)),
     result.graph
+  );
+}
+
+{
+  const store = new InMemoryAtomicStore();
+  const commands = remainderCommands();
+  const source = await persistProductGraphCommand(store, {
+    contractId: 'contract-remainder',
+    actorId: 'seller-1',
+    command: commands.source
+  });
+  assert.equal(source.ok, true);
+  if (!source.ok) throw new Error('Expected paid remainder source to persist.');
+  assert.equal(source.graph.remainingStones[0]?.widthMeters, '0.16');
+
+  const child = await persistProductGraphCommand(store, {
+    contractId: 'contract-remainder',
+    actorId: 'seller-1',
+    command: commands.child
+  });
+  assert.equal(child.ok, true);
+  if (!child.ok) throw new Error('Expected paid remainder child to persist.');
+  assert.equal(child.graph.rows[1]?.sourceProductRowId, commands.sourceRowId);
+  assert.equal(child.graph.rows[1]?.commercial.baseAmountToman, '0');
+  assert.equal(
+    child.graph.allocations[0]?.sourceRemainingStoneId,
+    commands.selectedRemainingStoneId
+  );
+  assert.equal(child.graph.allocations[0]?.targetProductRowId, commands.childRowId);
+  assert.equal(child.graph.remainingStones[0]?.ownerProductRowId, commands.childRowId);
+  assert.equal(store.audits.length, 2);
+  if (!store.state) throw new Error('Expected paid remainder graph to reload.');
+  assert.deepEqual(
+    parseCanonicalProductGraph(serializeCanonicalProductGraph(store.state.graph)),
+    child.graph
   );
 }
 

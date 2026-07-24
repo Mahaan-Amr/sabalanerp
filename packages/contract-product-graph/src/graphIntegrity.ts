@@ -38,7 +38,13 @@ export const findGraphIntegrityConflicts = (
   const productRowIds = new Set(graph.rows.map(row => row.productRowId));
   const sourceBatchIds = new Set(graph.sourceBatches.map(batch => batch.sourceBatchId));
   const remainingStoneIds = new Set(
-    graph.remainingStones.map(stone => stone.remainingStoneId)
+    [
+      ...graph.remainingStones.map(stone => stone.remainingStoneId),
+      ...graph.sourceBatches.flatMap(
+        batch => (batch.initialRemainders ?? []).map(stone => stone.remainingStoneId)
+      ),
+      ...graph.allocations.flatMap(allocation => allocation.generatedRemainingStoneIds)
+    ]
   );
   const operationGroupIds = new Set(
     graph.operationGroups.map(group => group.operationGroupId)
@@ -60,6 +66,12 @@ export const findGraphIntegrityConflicts = (
     ...collectDuplicateIdentityConflicts(
       'remainingStones',
       graph.remainingStones.map(stone => stone.remainingStoneId)
+    ),
+    ...collectDuplicateIdentityConflicts(
+      'sourceBatches.initialRemainders',
+      graph.sourceBatches.flatMap(
+        batch => (batch.initialRemainders ?? []).map(stone => stone.remainingStoneId)
+      )
     ),
     ...collectDuplicateIdentityConflicts(
       'allocations',
@@ -169,6 +181,19 @@ export const findGraphIntegrityConflicts = (
         received: batch.ownerProductRowId
       });
     }
+    (batch.initialRemainders ?? []).forEach(stone => {
+      if (
+        stone.sourceBatchId !== batch.sourceBatchId ||
+        stone.ownerProductRowId !== batch.ownerProductRowId
+      ) {
+        conflicts.push({
+          code: 'orphan-graph-reference',
+          path: ['sourceBatches', batch.sourceBatchId, 'initialRemainders'],
+          entityId: stone.remainingStoneId,
+          message: 'Initial remainder identity does not belong to its source batch owner.'
+        });
+      }
+    });
   });
 
   graph.remainingStones.forEach(stone => {
@@ -181,16 +206,25 @@ export const findGraphIntegrityConflicts = (
         received: stone.sourceBatchId
       });
     }
+    if (!productRowIds.has(stone.ownerProductRowId)) {
+      conflicts.push({
+        code: 'orphan-graph-reference',
+        path: ['remainingStones', stone.remainingStoneId, 'ownerProductRowId'],
+        entityId: stone.remainingStoneId,
+        message: 'Remaining stone references a missing owner product row.',
+        received: stone.ownerProductRowId
+      });
+    }
   });
 
   graph.allocations.forEach(allocation => {
-    if (!sourceBatchIds.has(allocation.sourceBatchId)) {
+    if (!productRowIds.has(allocation.sourceProductRowId)) {
       conflicts.push({
         code: 'orphan-graph-reference',
-        path: ['allocations', allocation.allocationId, 'sourceBatchId'],
+        path: ['allocations', allocation.allocationId, 'sourceProductRowId'],
         entityId: allocation.allocationId,
-        message: 'Allocation references a missing source batch.',
-        received: allocation.sourceBatchId
+        message: 'Allocation references a missing source product row.',
+        received: allocation.sourceProductRowId
       });
     }
     if (!productRowIds.has(allocation.targetProductRowId)) {
@@ -203,15 +237,14 @@ export const findGraphIntegrityConflicts = (
       });
     }
     if (
-      allocation.remainingStoneId &&
-      !remainingStoneIds.has(allocation.remainingStoneId)
+      !remainingStoneIds.has(allocation.sourceRemainingStoneId)
     ) {
       conflicts.push({
         code: 'orphan-graph-reference',
-        path: ['allocations', allocation.allocationId, 'remainingStoneId'],
+        path: ['allocations', allocation.allocationId, 'sourceRemainingStoneId'],
         entityId: allocation.allocationId,
         message: 'Allocation references a missing remaining stone.',
-        received: allocation.remainingStoneId
+        received: allocation.sourceRemainingStoneId
       });
     }
   });

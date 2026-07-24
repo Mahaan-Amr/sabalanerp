@@ -40,6 +40,25 @@ export {
   parseProductOperationsInput,
   splitOperationGroup
 } from './operationsPolicy';
+export {
+  calculatePaidRemainderFacts,
+  canDeleteRemainderSource,
+  findRemainderDependents,
+  materializePaidRemainderStocks,
+  parseRemainderChildPolicyInput,
+  replayRemainderAllocations
+} from './remainderPolicy';
+export type {
+  CanonicalRemainderAllocation,
+  PaidRemainderStock,
+  RemainderChildPolicyInput,
+  RemainderChildIntent,
+  RemainderReplay,
+  RemainderReplayConflict,
+  RemainderReplayConflictCode,
+  RemainderReplayInput,
+  RemainderReplayResult
+} from './remainderPolicy';
 export type {
   CalculatedFinishingSelection,
   CalculatedOperationGroup,

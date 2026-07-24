@@ -28,6 +28,7 @@ export interface LongitudinalProductInput {
   readonly lastManualDimension: 'length' | 'width';
   readonly lengthDisplayUnit: LongitudinalDisplayUnit;
   readonly widthDisplayUnit: LongitudinalDisplayUnit;
+  readonly baseMaterialPricing?: 'manual-positive' | 'paid-source-zero';
   readonly baseRateToman?: CanonicalDecimal;
   readonly mandatoryEnabled: boolean;
   readonly mandatoryPercentage: CanonicalDecimal;
@@ -89,6 +90,7 @@ export interface LongitudinalProductResult {
   readonly quantity?: number;
   readonly lengthDisplayUnit: LongitudinalDisplayUnit;
   readonly widthDisplayUnit: LongitudinalDisplayUnit;
+  readonly baseMaterialPricing: 'manual-positive' | 'paid-source-zero';
   readonly mandatoryEnabled: boolean;
   readonly mandatoryPercentage: CanonicalDecimal;
   readonly rememberedMandatoryPercentage: CanonicalDecimal;
@@ -267,6 +269,12 @@ export const parseLongitudinalProductInput = (
     ),
     lengthDisplayUnit: enumeration('lengthDisplayUnit', ['cm', 'm'] as const),
     widthDisplayUnit: enumeration('widthDisplayUnit', ['cm', 'm'] as const),
+    baseMaterialPricing: record.baseMaterialPricing === undefined
+      ? 'manual-positive'
+      : enumeration(
+          'baseMaterialPricing',
+          ['manual-positive', 'paid-source-zero'] as const
+        ),
     ...(decimal('baseRateToman', true) === undefined
       ? {}
       : { baseRateToman: decimal('baseRateToman') }),
@@ -344,11 +352,18 @@ export const calculateLongitudinalProduct = (
       message: 'Quantity must be a positive integer or blank.'
     });
   }
-  if (!baseRate || baseRate.lte(0)) {
+  const paidSourceMaterial = input.baseMaterialPricing === 'paid-source-zero';
+  if (
+    (!paidSourceMaterial && (!baseRate || baseRate.lte(0))) ||
+    (paidSourceMaterial && (!baseRate || !baseRate.eq(0))) ||
+    (paidSourceMaterial && input.mandatoryEnabled)
+  ) {
     conflicts.push({
       code: 'base-rate-required',
       field: 'baseRateToman',
-      message: 'Enter the price.'
+      message: paidSourceMaterial
+        ? 'Paid source material must have zero base rate and no mandatory increase.'
+        : 'Enter the price.'
     });
   }
   if (!mandatoryPercentage || mandatoryPercentage.lte(0)) {
@@ -538,6 +553,7 @@ export const calculateLongitudinalProduct = (
     ...(input.quantity === undefined ? {} : { quantity: input.quantity }),
     lengthDisplayUnit: input.lengthDisplayUnit,
     widthDisplayUnit: input.widthDisplayUnit,
+    baseMaterialPricing: input.baseMaterialPricing ?? 'manual-positive',
     mandatoryEnabled: input.mandatoryEnabled,
     mandatoryPercentage: input.mandatoryPercentage,
     rememberedMandatoryPercentage: input.rememberedMandatoryPercentage,

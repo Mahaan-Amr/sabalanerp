@@ -16,6 +16,7 @@ import type {
   CanonicalRemainingStone,
   CanonicalSourceBatch,
   CanonicalToolSelection,
+  AddRowSellerIntent,
   CatalogSnapshot,
   CatalogTechnicalFacts
 } from './productGraph';
@@ -28,6 +29,12 @@ import {
   type RemainderChildIntent
 } from './remainderPolicy';
 import type { PackingPlan } from './packingPricing';
+import {
+  parseStairPartPolicyInput,
+  type CanonicalStairPartFacts,
+  type CanonicalStairSystem,
+  type StaircaseQuantityIntent
+} from './stairPolicy';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -217,6 +224,31 @@ const catalogSnapshotAt = (value: unknown, path: string): CatalogSnapshot => {
   };
 };
 
+const stairPartFactsAt = (
+  value: unknown,
+  path: string
+): CanonicalStairPartFacts => {
+  const record = recordAt(value, path);
+  return {
+    stairSystemId: identityAt(
+      record.stairSystemId,
+      'stair-system',
+      `${path}.stairSystemId`
+    ),
+    part: enumAt(record.part, ['tread', 'riser', 'landing'], `${path}.part`),
+    lengthDisplayUnit: enumAt(
+      record.lengthDisplayUnit,
+      ['cm', 'm'],
+      `${path}.lengthDisplayUnit`
+    ),
+    crossDimensionDisplayUnit: enumAt(
+      record.crossDimensionDisplayUnit,
+      ['cm', 'm'],
+      `${path}.crossDimensionDisplayUnit`
+    )
+  };
+};
+
 const productRowAt = (value: unknown, path: string): CanonicalProductRow => {
   const record = recordAt(value, path);
   const productType = stringAt(record.productType, `${path}.productType`);
@@ -235,6 +267,9 @@ const productRowAt = (value: unknown, path: string): CanonicalProductRow => {
     ...(record.description === undefined
       ? {}
       : { description: stringAt(record.description, `${path}.description`) }),
+    ...(record.stairPart === undefined
+      ? {}
+      : { stairPart: stairPartFactsAt(record.stairPart, `${path}.stairPart`) }),
     commercial: commercialAt(record.commercial, `${path}.commercial`),
     ...(optionalIdentityAt(record, 'parentProductRowId', 'product-row', path)
       ? {
@@ -257,6 +292,84 @@ const productRowAt = (value: unknown, path: string): CanonicalProductRow => {
         }
       : {})
   };
+};
+
+const stairSystemAt = (value: unknown, path: string): CanonicalStairSystem => {
+  const record = recordAt(value, path);
+  const stairSystemId = identityAt(
+    record.stairSystemId,
+    'stair-system',
+    `${path}.stairSystemId`
+  );
+  const catalogProductId = nonEmptyStringAt(
+    record.catalogProductId,
+    `${path}.catalogProductId`
+  );
+  const catalogSnapshotVersion = nonEmptyStringAt(
+    record.catalogSnapshotVersion,
+    `${path}.catalogSnapshotVersion`
+  );
+  const quantityMode = enumAt(
+    record.quantityMode,
+    ['steps', 'staircases'],
+    `${path}.quantityMode`
+  );
+  const totalSteps = integerAt(record.totalSteps, `${path}.totalSteps`);
+  if (totalSteps <= 0) throw new TypeError(`${path}.totalSteps must be positive.`);
+  if (quantityMode === 'steps') {
+    return {
+      stairSystemId,
+      catalogProductId,
+      catalogSnapshotVersion,
+      quantityMode,
+      totalSteps
+    };
+  }
+  const numberOfStaircases = integerAt(
+    record.numberOfStaircases,
+    `${path}.numberOfStaircases`
+  );
+  const stepsPerStaircase = integerAt(
+    record.stepsPerStaircase,
+    `${path}.stepsPerStaircase`
+  );
+  if (
+    numberOfStaircases <= 0 ||
+    stepsPerStaircase <= 0 ||
+    numberOfStaircases * stepsPerStaircase !== totalSteps
+  ) {
+    throw new TypeError(`${path} staircase quantity is inconsistent.`);
+  }
+  return {
+    stairSystemId,
+    catalogProductId,
+    catalogSnapshotVersion,
+    quantityMode,
+    totalSteps,
+    numberOfStaircases,
+    stepsPerStaircase
+  };
+};
+
+const staircaseQuantityAt = (
+  value: unknown,
+  path: string
+): StaircaseQuantityIntent => {
+  const record = recordAt(value, path);
+  const mode = enumAt(record.mode, ['steps', 'staircases'], `${path}.mode`);
+  return mode === 'steps'
+    ? { mode, totalSteps: integerAt(record.totalSteps, `${path}.totalSteps`) }
+    : {
+        mode,
+        numberOfStaircases: integerAt(
+          record.numberOfStaircases,
+          `${path}.numberOfStaircases`
+        ),
+        stepsPerStaircase: integerAt(
+          record.stepsPerStaircase,
+          `${path}.stepsPerStaircase`
+        )
+      };
 };
 
 const layerAt = (value: unknown, path: string): CanonicalLayerConfiguration => {
@@ -742,14 +855,55 @@ const finishingSelectionAt = (
 export const serializeCanonicalProductGraph = (graph: CanonicalProductGraph): string =>
   JSON.stringify(graph);
 
+const addRowSellerIntentAt = (
+  value: unknown,
+  path: string
+): AddRowSellerIntent => {
+  const sellerIntent = recordAt(value, path);
+  return {
+    row: productRowAt(sellerIntent.row, `${path}.row`),
+    ...(sellerIntent.productPolicyInput === undefined
+      ? {}
+      : {
+          productPolicyInput: parseLongitudinalProductInput(
+            sellerIntent.productPolicyInput
+          )
+        }),
+    ...(sellerIntent.operationPolicyInput === undefined
+      ? {}
+      : {
+          operationPolicyInput: parseProductOperationsInput(
+            sellerIntent.operationPolicyInput
+          )
+        }),
+    ...(sellerIntent.remainderChildPolicyInput === undefined
+      ? {}
+      : {
+          remainderChildPolicyInput: parseRemainderChildPolicyInput(
+            sellerIntent.remainderChildPolicyInput
+          )
+        }),
+    ...(sellerIntent.stairPartPolicyInput === undefined
+      ? {}
+      : {
+          stairPartPolicyInput: parseStairPartPolicyInput(
+            sellerIntent.stairPartPolicyInput
+          )
+        })
+  };
+};
+
 export const parseProductGraphCommand = (value: unknown): ProductGraphCommand => {
   const record = recordAt(value, 'command');
   if (
     record.type !== 'add-row' &&
     record.type !== 'replace-row' &&
-    record.type !== 'delete-row'
+    record.type !== 'delete-row' &&
+    record.type !== 'add-stair-system'
   ) {
-    throw new TypeError('command.type must be add-row, replace-row, or delete-row.');
+    throw new TypeError(
+      'command.type must be add-row, replace-row, delete-row, or add-stair-system.'
+    );
   }
   const sellerIntent = recordAt(record.sellerIntent, 'command.sellerIntent');
   const catalogSnapshots = arrayAt(record.catalogSnapshots, 'command.catalogSnapshots')
@@ -783,33 +937,39 @@ export const parseProductGraphCommand = (value: unknown): ProductGraphCommand =>
       }
     };
   }
+  if (record.type === 'add-stair-system') {
+    return {
+      ...common,
+      type: 'add-stair-system',
+      sellerIntent: {
+        stairSystemId: identityAt(
+          sellerIntent.stairSystemId,
+          'stair-system',
+          'command.sellerIntent.stairSystemId'
+        ),
+        quantity: staircaseQuantityAt(
+          sellerIntent.quantity,
+          'command.sellerIntent.quantity'
+        ),
+        parts: arrayAt(
+          sellerIntent.parts,
+          'command.sellerIntent.parts'
+        ).map((part, index) =>
+          addRowSellerIntentAt(
+            part,
+            `command.sellerIntent.parts.${index}`
+          )
+        )
+      }
+    };
+  }
   return {
     ...common,
     type: record.type,
-    sellerIntent: {
-      row: productRowAt(sellerIntent.row, 'command.sellerIntent.row'),
-      ...(sellerIntent.productPolicyInput === undefined
-        ? {}
-        : {
-            productPolicyInput: parseLongitudinalProductInput(
-              sellerIntent.productPolicyInput,
-            )
-          }),
-      ...(sellerIntent.operationPolicyInput === undefined
-        ? {}
-        : {
-            operationPolicyInput: parseProductOperationsInput(
-              sellerIntent.operationPolicyInput
-            )
-          }),
-      ...(sellerIntent.remainderChildPolicyInput === undefined
-        ? {}
-        : {
-            remainderChildPolicyInput: parseRemainderChildPolicyInput(
-              sellerIntent.remainderChildPolicyInput
-            )
-          })
-    },
+    sellerIntent: addRowSellerIntentAt(
+      sellerIntent,
+      'command.sellerIntent'
+    )
   };
 };
 
@@ -829,6 +989,10 @@ export const parseCanonicalProductGraph = (input: string | unknown): CanonicalPr
       .map((item, index) => catalogSnapshotAt(item, `graph.catalogSnapshots.${index}`)),
     rows: arrayAt(record.rows, 'graph.rows')
       .map((item, index) => productRowAt(item, `graph.rows.${index}`)),
+    stairSystems: (record.stairSystems === undefined
+      ? []
+      : arrayAt(record.stairSystems, 'graph.stairSystems')
+    ).map((item, index) => stairSystemAt(item, `graph.stairSystems.${index}`)),
     layerConfigurations: arrayAt(record.layerConfigurations, 'graph.layerConfigurations')
       .map((item, index) => layerAt(item, `graph.layerConfigurations.${index}`)),
     sourceBatches: arrayAt(record.sourceBatches, 'graph.sourceBatches')

@@ -268,6 +268,7 @@ export const readLegacyProductGraph = ({
     calculationPolicy: { ...calculationPolicy },
     catalogSnapshots,
     rows,
+    stairSystems: [],
     layerConfigurations: [],
     sourceBatches: [],
     remainingStones: [],

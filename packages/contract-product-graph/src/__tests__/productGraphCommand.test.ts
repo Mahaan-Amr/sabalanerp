@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {
   executeProductGraphCommand,
+  createNewStairPartPolicyInput,
+  migrateLegacyNosing,
   parseCanonicalProductGraph,
   parseCanonicalDecimal,
   parseStableIdentity,
@@ -24,6 +26,7 @@ const emptyGraph = (): CanonicalProductGraph => ({
   calculationPolicy: calculationPolicy(),
   catalogSnapshots: [],
   rows: [],
+  stairSystems: [],
   layerConfigurations: [],
   sourceBatches: [],
   remainingStones: [],
@@ -823,6 +826,275 @@ const addRowCommand = (
   assert.throws(
     () => parseCanonicalDecimal(0.1 as never),
     /Canonical decimal input must be a string/
+  );
+}
+
+{
+  const stairSystemId = parseStableIdentity('stair-system', 'stair-system-1');
+  const treadRowId = parseStableIdentity('product-row', 'stair-tread-row');
+  const riserRowId = parseStableIdentity('product-row', 'stair-riser-row');
+  const versions = calculationPolicy();
+  const stairCatalogSnapshot = {
+    catalogProductId: 'catalog-stone-40',
+    snapshotVersion: 'inventory-42',
+    facts: {
+      motherLengthMeters: parseCanonicalDecimal('3'),
+      motherWidthMeters: parseCanonicalDecimal('0.4'),
+      thicknessMeters: parseCanonicalDecimal('0.02')
+    }
+  };
+  const stairInput = (
+    part: 'tread' | 'riser',
+    sourceBatchSuffix: string,
+    overrides: Record<string, unknown> = {}
+  ) => ({
+    ...createNewStairPartPolicyInput(
+      part,
+      {
+        stairSystemId,
+        sourceBatchId: parseStableIdentity(
+          'source-batch',
+          `stair-source-${sourceBatchSuffix}`
+        )
+      },
+      versions
+    ),
+    motherLengthMeters: parseCanonicalDecimal('3'),
+    motherWidthMeters: parseCanonicalDecimal('0.4'),
+    lengthMeters: parseCanonicalDecimal('1.2'),
+    baseRateToman: parseCanonicalDecimal('1000'),
+    longitudinalCutRateToman: parseCanonicalDecimal('0'),
+    crossCutRateToman: parseCanonicalDecimal('0'),
+    calibrationCutRateToman: parseCanonicalDecimal('0'),
+    ...overrides
+  });
+  const stairCommand = {
+    commandId: parseStableIdentity('audit-mutation', 'add-stair-system'),
+    type: 'add-stair-system' as const,
+    baseRevision: 7,
+    calculationPolicy: versions,
+    sellerIntent: {
+      stairSystemId,
+      quantity: {
+        mode: 'staircases' as const,
+        numberOfStaircases: 2,
+        stepsPerStaircase: 2
+      },
+      parts: [
+        {
+          row: row({
+            productRowId: treadRowId,
+            productType: 'stair',
+            contractualTitle: 'Independent tread',
+            commercial: {}
+          }),
+          stairPartPolicyInput: stairInput('tread', 'tread', {
+            longitudinalCutRateToman: parseCanonicalDecimal('100'),
+            crossCutRateToman: parseCanonicalDecimal('50')
+          }),
+          operationPolicyInput: {
+            policyVersion: versions.calculation,
+            pricingPolicyVersion: versions.pricing,
+            roundingPolicyVersion: versions.rounding,
+            productRowId: treadRowId,
+            lengthMeters: parseCanonicalDecimal('1.2'),
+            widthMeters: parseCanonicalDecimal('0.3'),
+            quantity: 4,
+            groups: [{
+              operationGroupId: parseStableIdentity(
+                'operation-group',
+                'stair-tread-group'
+              ),
+              scope: parseCanonicalDecimal('4')
+            }],
+            tools: [{
+              toolSelectionId: parseStableIdentity(
+                'tool-selection',
+                'stair-tread-tool'
+              ),
+              operationGroupId: parseStableIdentity(
+                'operation-group',
+                'stair-tread-group'
+              ),
+              catalogItemId: 'tool-front-edge',
+              catalogSnapshotVersion: 'tool-v1',
+              name: 'Front edge',
+              unit: 'meter' as const,
+              rateToman: parseCanonicalDecimal('100'),
+              edges: ['front'] as const
+            }],
+            finishings: []
+          }
+        },
+        {
+          row: row({
+            productRowId: riserRowId,
+            productType: 'stair',
+            contractualTitle: 'Independent riser',
+            commercial: {}
+          }),
+          stairPartPolicyInput: stairInput('riser', 'riser')
+        }
+      ]
+    },
+    catalogSnapshots: [stairCatalogSnapshot]
+  };
+  const before = emptyGraph();
+  const added = executeProductGraphCommand({
+    graph: before,
+    command: stairCommand
+  });
+  assert.equal(added.ok, true, JSON.stringify(added));
+  if (!added.ok) throw new Error('Expected atomic stair-system creation.');
+  assert.equal(added.graph.revision, 8);
+  assert.deepEqual(added.graph.stairSystems, [{
+    stairSystemId,
+    catalogProductId: 'catalog-stone-40',
+    catalogSnapshotVersion: 'inventory-42',
+    quantityMode: 'staircases',
+    totalSteps: 4,
+    numberOfStaircases: 2,
+    stepsPerStaircase: 2
+  }]);
+  assert.equal(added.graph.rows[0]?.stairPart?.part, 'tread');
+  assert.equal(added.graph.rows[0]?.commercial.requestedWidthMeters, '0.3');
+  assert.equal(added.graph.rows[0]?.commercial.requestedQuantity, '4');
+  assert.equal(added.graph.rows[0]?.commercial.totalAmountToman, '2480');
+  assert.equal(added.graph.rows[1]?.stairPart?.part, 'riser');
+  assert.equal(added.graph.rows[1]?.commercial.requestedWidthMeters, '0.17');
+  assert.equal(added.graph.rows[1]?.commercial.requestedQuantity, '4');
+  assert.equal(added.graph.rows[1]?.commercial.totalAmountToman, '816');
+  assert.equal(added.graph.sourceBatches.length, 2);
+  assert.equal(added.graph.toolSelections[0]?.amountToman, '480');
+  assert.deepEqual(
+    parseCanonicalProductGraph(serializeCanonicalProductGraph(added.graph)),
+    added.graph
+  );
+
+  const riserBeforeEdit = structuredClone(added.graph.rows[1]);
+  const edited = executeProductGraphCommand({
+    graph: added.graph,
+    command: {
+      commandId: parseStableIdentity('audit-mutation', 'edit-only-tread'),
+      type: 'replace-row',
+      baseRevision: 8,
+      calculationPolicy: versions,
+      sellerIntent: {
+        row: added.graph.rows[0],
+        stairPartPolicyInput: stairInput('tread', 'tread', {
+          quantity: 2,
+          baseRateToman: parseCanonicalDecimal('3000')
+        }),
+        operationPolicyInput: {
+          ...stairCommand.sellerIntent.parts[0].operationPolicyInput!,
+          quantity: 2,
+          groups: [{
+            operationGroupId: parseStableIdentity(
+              'operation-group',
+              'stair-tread-group'
+            ),
+            scope: parseCanonicalDecimal('2')
+          }]
+        }
+      },
+      catalogSnapshots: [stairCatalogSnapshot]
+    }
+  });
+  assert.equal(edited.ok, true, JSON.stringify(edited));
+  if (!edited.ok) throw new Error('Expected exact stair-row edit.');
+  assert.equal(edited.graph.rows[0]?.commercial.requestedQuantity, '2');
+  assert.equal(edited.graph.rows[0]?.commercial.totalAmountToman, '2400');
+  assert.deepEqual(edited.graph.rows[1], riserBeforeEdit);
+  assert.deepEqual(edited.graph.stairSystems, added.graph.stairSystems);
+
+  const invalidGraph = emptyGraph();
+  const invalidBefore = structuredClone(invalidGraph);
+  const invalidAtomic = executeProductGraphCommand({
+    graph: invalidGraph,
+    command: {
+      ...stairCommand,
+      commandId: parseStableIdentity('audit-mutation', 'invalid-stair-system'),
+      sellerIntent: {
+        ...stairCommand.sellerIntent,
+        parts: [
+          stairCommand.sellerIntent.parts[0],
+          {
+            ...stairCommand.sellerIntent.parts[1],
+            stairPartPolicyInput: stairInput('riser', 'riser', {
+              motherLengthMeters: undefined
+            })
+          }
+        ]
+      }
+    }
+  });
+  assert.equal(invalidAtomic.ok, false);
+  assert.deepEqual(invalidGraph, invalidBefore);
+
+  const contradictoryCatalogGraph = emptyGraph();
+  const contradictoryCatalogBefore = structuredClone(contradictoryCatalogGraph);
+  const contradictoryCatalog = executeProductGraphCommand({
+    graph: contradictoryCatalogGraph,
+    command: {
+      ...stairCommand,
+      commandId: parseStableIdentity(
+        'audit-mutation',
+        'contradictory-stair-catalog'
+      ),
+      sellerIntent: {
+        ...stairCommand.sellerIntent,
+        parts: [
+          stairCommand.sellerIntent.parts[0],
+          {
+            ...stairCommand.sellerIntent.parts[1],
+            row: {
+              ...stairCommand.sellerIntent.parts[1].row,
+              catalogProductId: 'different-catalog-stone'
+            }
+          }
+        ]
+      }
+    }
+  });
+  assert.equal(contradictoryCatalog.ok, false);
+  assert.equal(
+    contradictoryCatalog.ok
+      ? undefined
+      : contradictoryCatalog.conflicts[0]?.code,
+    'catalog-snapshot-conflict'
+  );
+  assert.deepEqual(contradictoryCatalogGraph, contradictoryCatalogBefore);
+
+  assert.deepEqual(
+    migrateLegacyNosing(
+      {
+        legacyValue: 'rounded',
+        title: 'Historical rounded edge',
+        rateToman: parseCanonicalDecimal('15000')
+      },
+      [{
+        legacyValue: 'rounded',
+        toolCatalogItemId: 'tool-rounded-edge',
+        toolSnapshotVersion: 'tool-v3'
+      }]
+    ),
+    {
+      kind: 'catalog-tool',
+      toolCatalogItemId: 'tool-rounded-edge',
+      toolSnapshotVersion: 'tool-v3',
+      edge: 'front'
+    }
+  );
+  assert.equal(
+    migrateLegacyNosing(
+      {
+        legacyValue: 'unknown-historical',
+        title: 'Historical edge',
+        rateToman: parseCanonicalDecimal('15000')
+      },
+      []
+    ).kind,
+    'historical-tool-snapshot'
   );
 }
 

@@ -68,6 +68,7 @@ const emptyGraphFor = (command: ProductGraphCommand): CanonicalProductGraph => (
   calculationPolicy: { ...command.calculationPolicy },
   catalogSnapshots: [],
   rows: [],
+  stairSystems: [],
   layerConfigurations: [],
   sourceBatches: [],
   remainingStones: [],

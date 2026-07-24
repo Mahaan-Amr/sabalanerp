@@ -36,6 +36,14 @@ import {
   type RemainderChildPolicyInput,
   type RemainderReplayResult
 } from './remainderPolicy';
+import {
+  calculateStairPart,
+  resolveStaircaseQuantity,
+  type CanonicalStairPartFacts,
+  type CanonicalStairSystem,
+  type StairPartPolicyInput,
+  type StaircaseQuantityIntent
+} from './stairPolicy';
 
 export const CONTRACT_PRODUCT_GRAPH_SCHEMA_VERSION = 1 as const;
 
@@ -48,6 +56,7 @@ export type OperationGroupId = StableIdentity<'operation-group'>;
 export type ToolSelectionId = StableIdentity<'tool-selection'>;
 export type FinishingSelectionId = StableIdentity<'finishing-selection'>;
 export type AuditMutationId = StableIdentity<'audit-mutation'>;
+export type StairSystemId = StableIdentity<'stair-system'>;
 
 export type CanonicalProductType =
   | 'longitudinal'
@@ -96,6 +105,7 @@ export interface CanonicalProductRow {
   readonly productType: CanonicalProductType;
   readonly contractualTitle: string;
   readonly description?: string;
+  readonly stairPart?: CanonicalStairPartFacts;
   readonly commercial: CanonicalCommercialFacts;
   readonly parentProductRowId?: ProductRowId;
   readonly sourceProductRowId?: ProductRowId;
@@ -133,6 +143,7 @@ export interface CanonicalProductGraph {
   readonly calculationPolicy: CalculationPolicySnapshot;
   readonly catalogSnapshots: readonly CatalogSnapshot[];
   readonly rows: readonly CanonicalProductRow[];
+  readonly stairSystems: readonly CanonicalStairSystem[];
   readonly layerConfigurations: readonly CanonicalLayerConfiguration[];
   readonly sourceBatches: readonly CanonicalSourceBatch[];
   readonly remainingStones: readonly CanonicalRemainingStone[];
@@ -147,6 +158,7 @@ export interface AddRowSellerIntent {
   readonly productPolicyInput?: LongitudinalProductInput;
   readonly operationPolicyInput?: ProductOperationsInput;
   readonly remainderChildPolicyInput?: RemainderChildPolicyInput;
+  readonly stairPartPolicyInput?: StairPartPolicyInput;
 }
 
 export interface AddRowCommand {
@@ -178,7 +190,24 @@ export interface DeleteRowCommand {
   readonly catalogSnapshots: readonly CatalogSnapshot[];
 }
 
-export type ProductGraphCommand = AddRowCommand | ReplaceRowCommand | DeleteRowCommand;
+export interface AddStairSystemCommand {
+  readonly commandId: AuditMutationId;
+  readonly type: 'add-stair-system';
+  readonly baseRevision: number;
+  readonly calculationPolicy: CalculationPolicySnapshot;
+  readonly sellerIntent: {
+    readonly stairSystemId: StairSystemId;
+    readonly quantity: StaircaseQuantityIntent;
+    readonly parts: readonly AddRowSellerIntent[];
+  };
+  readonly catalogSnapshots: readonly CatalogSnapshot[];
+}
+
+export type ProductGraphCommand =
+  | AddRowCommand
+  | ReplaceRowCommand
+  | DeleteRowCommand
+  | AddStairSystemCommand;
 
 export interface ProductGraphCommandRequest {
   readonly graph: CanonicalProductGraph;
@@ -302,6 +331,7 @@ const cloneGraph = (graph: CanonicalProductGraph): CanonicalProductGraph => ({
     ...row,
     commercial: cloneCommercialFacts(row.commercial)
   })),
+  stairSystems: graph.stairSystems.map(system => ({ ...system })),
   layerConfigurations: graph.layerConfigurations.map(item => ({ ...item })),
   sourceBatches: graph.sourceBatches.map(item => ({
     ...item,
@@ -618,6 +648,11 @@ export const executeProductGraphCommand = (
     const nextRows = graph.rows.filter(
       row => row.productRowId !== deletedRow.productRowId
     );
+    const nextStairSystems = graph.stairSystems.filter(system =>
+      nextRows.some(
+        row => row.stairPart?.stairSystemId === system.stairSystemId
+      )
+    );
     const nextOperationGroups = graph.operationGroups.filter(
       group => !removedGroupIds.has(group.operationGroupId)
     );
@@ -638,6 +673,7 @@ export const executeProductGraphCommand = (
         finishingSelections: nextFinishingSelections,
         policy: graph.calculationPolicy
       }),
+      stairSystems: nextStairSystems,
       sourceBatches: retainedSourceBatches,
       remainingStones: replay.result.inventory,
       allocations: replay.allocations,
@@ -650,10 +686,199 @@ export const executeProductGraphCommand = (
     return appliedResult({ inputGraph: graph, command, nextGraph });
   }
 
+  if (command.type === 'add-stair-system') {
+    if (graph.stairSystems.some(
+      system => system.stairSystemId === command.sellerIntent.stairSystemId
+    )) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'duplicate-stable-identity',
+          path: ['stairSystems', command.sellerIntent.stairSystemId],
+          entityId: command.sellerIntent.stairSystemId,
+          message: 'Stair system identity already exists.'
+        }]
+      };
+    }
+    if (command.sellerIntent.parts.length === 0) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'product-policy-conflict',
+          path: ['sellerIntent', 'parts'],
+          message: 'A stair system must contain at least one selected part.'
+        }]
+      };
+    }
+    const firstPart = command.sellerIntent.parts[0];
+    const sharedCatalogSnapshots = command.catalogSnapshots.filter(snapshot =>
+      snapshot.catalogProductId === firstPart.row.catalogProductId &&
+      snapshot.snapshotVersion === firstPart.row.catalogSnapshotVersion
+    );
+    if (sharedCatalogSnapshots.length !== 1) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'catalog-snapshot-conflict',
+          path: [
+            'catalogSnapshots',
+            firstPart.row.catalogProductId,
+            firstPart.row.catalogSnapshotVersion
+          ],
+          productRowId: firstPart.row.productRowId,
+          message: 'A stair system requires exactly one shared catalog stone snapshot.'
+        }]
+      };
+    }
+    const contradictoryCatalogPart = command.sellerIntent.parts.find(part =>
+      part.row.catalogProductId !== firstPart.row.catalogProductId ||
+      part.row.catalogSnapshotVersion !== firstPart.row.catalogSnapshotVersion
+    );
+    if (contradictoryCatalogPart) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'catalog-snapshot-conflict',
+          path: ['sellerIntent', 'parts', 'catalogIdentity'],
+          productRowId: contradictoryCatalogPart.row.productRowId,
+          message: 'Every part in one stair system must use the same catalog stone snapshot.'
+        }]
+      };
+    }
+    let resolvedQuantity: CanonicalStairSystem;
+    try {
+      resolvedQuantity = {
+        ...resolveStaircaseQuantity(command.sellerIntent.quantity),
+        stairSystemId: command.sellerIntent.stairSystemId,
+        catalogProductId: firstPart.row.catalogProductId,
+        catalogSnapshotVersion: firstPart.row.catalogSnapshotVersion
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'product-policy-conflict',
+          path: ['sellerIntent', 'quantity'],
+          message: error instanceof Error ? error.message : 'Stair quantity is invalid.'
+        }]
+      };
+    }
+    let stagedGraph: CanonicalProductGraph = {
+      ...cloneGraph(graph),
+      stairSystems: [...graph.stairSystems, resolvedQuantity],
+      catalogSnapshots: graph.catalogSnapshots.some(snapshot =>
+        snapshot.catalogProductId === firstPart.row.catalogProductId &&
+        snapshot.snapshotVersion === firstPart.row.catalogSnapshotVersion
+      )
+        ? graph.catalogSnapshots.map(cloneCatalogSnapshot)
+        : [
+            ...graph.catalogSnapshots.map(cloneCatalogSnapshot),
+            cloneCatalogSnapshot(sharedCatalogSnapshots[0])
+          ]
+    };
+    for (const [index, part] of command.sellerIntent.parts.entries()) {
+      if (!part.stairPartPolicyInput) {
+        return {
+          ok: false,
+          conflicts: [{
+            code: 'product-policy-conflict',
+            path: ['sellerIntent', 'parts', String(index), 'stairPartPolicyInput'],
+            productRowId: part.row.productRowId,
+            message: 'Every stair-system part requires complete stair policy input.'
+          }]
+        };
+      }
+      if (
+        part.stairPartPolicyInput.stairSystemId !==
+        command.sellerIntent.stairSystemId
+      ) {
+        return {
+          ok: false,
+          conflicts: [{
+            code: 'orphan-graph-reference',
+            path: ['sellerIntent', 'parts', String(index), 'stairSystemId'],
+            productRowId: part.row.productRowId,
+            received: part.stairPartPolicyInput.stairSystemId,
+            expected: command.sellerIntent.stairSystemId,
+            message: 'Every created stair part must belong to the new stair system.'
+          }]
+        };
+      }
+      const initializedQuantity =
+        part.stairPartPolicyInput.quantity === undefined &&
+        (part.stairPartPolicyInput.part === 'tread' ||
+          part.stairPartPolicyInput.part === 'riser')
+          ? resolvedQuantity.totalSteps
+          : part.stairPartPolicyInput.quantity;
+      const result = executeProductGraphCommand({
+        graph: stagedGraph,
+        command: {
+          commandId: command.commandId,
+          type: 'add-row',
+          baseRevision: stagedGraph.revision,
+          calculationPolicy: command.calculationPolicy,
+          sellerIntent: {
+            ...part,
+            stairPartPolicyInput: {
+              ...part.stairPartPolicyInput,
+              ...(initializedQuantity === undefined
+                ? {}
+                : { quantity: initializedQuantity })
+            }
+          },
+          catalogSnapshots: command.catalogSnapshots
+        }
+      });
+      if (!result.ok) {
+        return {
+          ok: false,
+          conflicts: result.conflicts.map(conflict => ({
+            ...conflict,
+            path: ['sellerIntent', 'parts', String(index), ...conflict.path]
+          }))
+        };
+      }
+      stagedGraph = result.graph;
+    }
+    const nextGraph = {
+      ...stagedGraph,
+      revision: graph.revision + 1
+    };
+    return appliedResult({ inputGraph: graph, command, nextGraph });
+  }
+
   const requestedRow = command.sellerIntent.row;
   let nextRow = requestedRow;
   let operationResult: ProductOperationsResult | undefined;
   let calculatedSourceBatch: CanonicalSourceBatch | undefined;
+  if (
+    requestedRow.productType === 'stair' &&
+    !command.sellerIntent.stairPartPolicyInput
+  ) {
+    return {
+      ok: false,
+      conflicts: [{
+        code: 'product-policy-conflict',
+        path: ['sellerIntent', 'stairPartPolicyInput'],
+        productRowId: requestedRow.productRowId,
+        message: 'Canonical stair writes require complete stair-part policy input.'
+      }]
+    };
+  }
+  if (
+    command.sellerIntent.stairPartPolicyInput &&
+    requestedRow.productType !== 'stair'
+  ) {
+    return {
+      ok: false,
+      conflicts: [{
+        code: 'product-policy-conflict',
+        path: ['sellerIntent', 'stairPartPolicyInput'],
+        productRowId: requestedRow.productRowId,
+        message: 'Stair policy input can only be applied to a stair row.'
+      }]
+    };
+  }
   if (
     command.sellerIntent.productPolicyInput &&
     requestedRow.productType !== 'longitudinal'
@@ -762,6 +987,109 @@ export const executeProductGraphCommand = (
       }
     };
   }
+  if (requestedRow.productType === 'stair' && command.sellerIntent.stairPartPolicyInput) {
+    const stairInput = command.sellerIntent.stairPartPolicyInput;
+    const expectedVersions = {
+      calculationPolicyVersion: graph.calculationPolicy.calculation,
+      packingPolicyVersion: graph.calculationPolicy.packing,
+      pricingPolicyVersion: graph.calculationPolicy.pricing,
+      roundingPolicyVersion: graph.calculationPolicy.rounding
+    };
+    const mismatchedVersion = Object.entries(expectedVersions).find(
+      ([key, expected]) => stairInput[key as keyof typeof expectedVersions] !== expected
+    );
+    if (mismatchedVersion) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'policy-version-conflict',
+          path: ['sellerIntent', 'stairPartPolicyInput', mismatchedVersion[0]],
+          productRowId: requestedRow.productRowId,
+          expected: mismatchedVersion[1],
+          received: stairInput[
+            mismatchedVersion[0] as keyof typeof expectedVersions
+          ],
+          message: 'Stair part policy version does not match the graph policy.'
+        }]
+      };
+    }
+    const stairSystem = graph.stairSystems.find(
+      system => system.stairSystemId === stairInput.stairSystemId
+    );
+    if (!stairSystem) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'orphan-graph-reference',
+          path: ['sellerIntent', 'stairPartPolicyInput', 'stairSystemId'],
+          productRowId: requestedRow.productRowId,
+          received: stairInput.stairSystemId,
+          message: 'Stair part references a missing stair system.'
+        }]
+      };
+    }
+    if (
+      stairSystem.catalogProductId !== requestedRow.catalogProductId ||
+      stairSystem.catalogSnapshotVersion !== requestedRow.catalogSnapshotVersion
+    ) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'catalog-snapshot-conflict',
+          path: ['sellerIntent', 'stairPartPolicyInput', 'catalogIdentity'],
+          productRowId: requestedRow.productRowId,
+          message: 'Every part in one stair system must use its shared catalog stone snapshot.'
+        }]
+      };
+    }
+    const calculation = calculateStairPart(stairInput);
+    if (!calculation.ok) {
+      return {
+        ok: false,
+        conflicts: calculation.conflicts.map(conflict => ({
+          code: 'product-policy-conflict' as const,
+          path: ['sellerIntent', 'stairPartPolicyInput', conflict.field],
+          productRowId: requestedRow.productRowId,
+          message: conflict.message
+        }))
+      };
+    }
+    const calculationSnapshot = normalizeLegacyJson(
+      calculation.result
+    ) as CanonicalJsonObject;
+    calculatedSourceBatch = {
+      sourceBatchId: stairInput.sourceBatchId,
+      ownerProductRowId: requestedRow.productRowId,
+      initialRemainders: materializePaidRemainderStocks({
+        ownerProductRowId: requestedRow.productRowId,
+        catalogProductId: requestedRow.catalogProductId,
+        sourceBatchId: stairInput.sourceBatchId,
+        remainders: calculation.result.packingPlan.remainders,
+        startingCreationOrder: (() => {
+          const existing = graph.sourceBatches
+            .find(batch => batch.ownerProductRowId === requestedRow.productRowId)
+            ?.initialRemainders ?? [];
+          return existing.length > 0
+            ? Math.min(...existing.map(stock => stock.creationOrder))
+            : graph.rows.length * 1000;
+        })()
+      })
+    };
+    nextRow = {
+      ...requestedRow,
+      stairPart: calculation.result.stairPart,
+      commercial: {
+        requestedLengthMeters: calculation.result.lengthMeters,
+        requestedWidthMeters: calculation.result.crossDimensionMeters,
+        requestedAreaSquareMeters: calculation.result.requestedAreaSquareMeters,
+        requestedQuantity: parseCanonicalDecimal(String(calculation.result.quantity)),
+        baseRateToman: stairInput.baseRateToman,
+        baseAmountToman: calculation.result.baseAmountToman,
+        totalAmountToman: calculation.result.totalAmountToman,
+        calculationSnapshot
+      }
+    };
+  }
   if (command.sellerIntent.remainderChildPolicyInput) {
     const childInput = command.sellerIntent.remainderChildPolicyInput;
     const authoritativeQuantity = nextRow.commercial.requestedQuantity === undefined
@@ -831,7 +1159,10 @@ export const executeProductGraphCommand = (
       }
     };
   }
-  if (!command.sellerIntent.productPolicyInput) {
+  if (
+    !command.sellerIntent.productPolicyInput &&
+    !command.sellerIntent.stairPartPolicyInput
+  ) {
     nextRow = {
       ...nextRow,
       commercial: calculateAuthoritativeCommercialFacts(
@@ -964,6 +1295,39 @@ export const executeProductGraphCommand = (
       };
     }
     if (
+      existingRow.productType === 'stair' &&
+      existingRow.stairPart &&
+      !command.sellerIntent.stairPartPolicyInput
+    ) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'product-policy-conflict',
+          path: ['sellerIntent', 'stairPartPolicyInput'],
+          productRowId: nextRow.productRowId,
+          message: 'Editing a canonical stair row requires its complete policy input.'
+        }]
+      };
+    }
+    if (
+      existingRow.stairPart &&
+      nextRow.stairPart &&
+      (
+        existingRow.stairPart.stairSystemId !== nextRow.stairPart.stairSystemId ||
+        existingRow.stairPart.part !== nextRow.stairPart.part
+      )
+    ) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'product-policy-conflict',
+          path: ['sellerIntent', 'stairPartPolicyInput', 'identity'],
+          productRowId: nextRow.productRowId,
+          message: 'Editing a stair row cannot move it to another system or part type.'
+        }]
+      };
+    }
+    if (
       existingRow.productType === 'longitudinal' &&
       existingRow.commercial.calculationSnapshot &&
       !command.sellerIntent.productPolicyInput
@@ -1042,6 +1406,27 @@ export const executeProductGraphCommand = (
         message: 'Contract product row does not have its referenced catalog snapshot.'
       }]
     };
+  }
+  if (command.sellerIntent.stairPartPolicyInput) {
+    const stairInput = command.sellerIntent.stairPartPolicyInput;
+    if (
+      matchingCatalogSnapshot.facts.motherLengthMeters === undefined ||
+      matchingCatalogSnapshot.facts.motherWidthMeters === undefined ||
+      stairInput.motherLengthMeters !==
+        matchingCatalogSnapshot.facts.motherLengthMeters ||
+      stairInput.motherWidthMeters !==
+        matchingCatalogSnapshot.facts.motherWidthMeters
+    ) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'catalog-snapshot-conflict',
+          path: ['catalogSnapshots', nextRow.catalogProductId, 'motherDimensions'],
+          productRowId: nextRow.productRowId,
+          message: 'Stair mother dimensions must exactly match the inventory snapshot.'
+        }]
+      };
+    }
   }
 
   const existingCatalogSnapshot = graph.catalogSnapshots.find(snapshot =>

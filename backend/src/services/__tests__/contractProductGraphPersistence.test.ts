@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  createNewStairPartPolicyInput,
   parseCanonicalDecimal,
   parseCanonicalProductGraph,
   parseStableIdentity,
@@ -242,7 +243,115 @@ const remainderCommands = () => {
   return { source, child, sourceRowId, childRowId, selectedRemainingStoneId };
 };
 
+const canonicalStairCommand = () => {
+  const stairSystemId = parseStableIdentity('stair-system', 'persisted-stair-system');
+  const versions = policy;
+  const part = (kind: 'tread' | 'riser', suffix: string) => ({
+    row: {
+      productRowId: parseStableIdentity('product-row', `persisted-stair-${suffix}`),
+      catalogProductId: 'catalog-stair-stone',
+      catalogSnapshotVersion: 'stair-inventory-1',
+      productType: 'stair' as const,
+      contractualTitle: kind === 'tread' ? 'Tread' : 'Riser',
+      commercial: {}
+    },
+    stairPartPolicyInput: {
+      ...createNewStairPartPolicyInput(
+        kind,
+        {
+          stairSystemId,
+          sourceBatchId: parseStableIdentity(
+            'source-batch',
+            `persisted-stair-source-${suffix}`
+          )
+        },
+        versions
+      ),
+      motherLengthMeters: parseCanonicalDecimal('3'),
+      motherWidthMeters: parseCanonicalDecimal('0.4'),
+      lengthMeters: parseCanonicalDecimal('1.2'),
+      baseRateToman: parseCanonicalDecimal('1000'),
+      longitudinalCutRateToman: parseCanonicalDecimal('0'),
+      crossCutRateToman: parseCanonicalDecimal('0'),
+      calibrationCutRateToman: parseCanonicalDecimal('0')
+    }
+  });
+  return {
+    commandId: parseStableIdentity('audit-mutation', 'persist-stair-system'),
+    type: 'add-stair-system' as const,
+    baseRevision: 0,
+    calculationPolicy: policy,
+    sellerIntent: {
+      stairSystemId,
+      quantity: {
+        mode: 'staircases' as const,
+        numberOfStaircases: 2,
+        stepsPerStaircase: 2
+      },
+      parts: [part('tread', 'tread'), part('riser', 'riser')]
+    },
+    catalogSnapshots: [{
+      catalogProductId: 'catalog-stair-stone',
+      snapshotVersion: 'stair-inventory-1',
+      facts: {
+        motherLengthMeters: parseCanonicalDecimal('3'),
+        motherWidthMeters: parseCanonicalDecimal('0.4'),
+        thicknessMeters: parseCanonicalDecimal('0.02')
+      }
+    }]
+  };
+};
+
 const run = async () => {
+{
+  const store = new InMemoryAtomicStore();
+  const result = await persistProductGraphCommand(store, {
+    contractId: 'contract-stair',
+    actorId: 'seller-1',
+    command: canonicalStairCommand()
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  if (!result.ok) throw new Error('Expected stair system to persist atomically.');
+  assert.equal(result.graph.revision, 1);
+  assert.equal(result.graph.rows.length, 2);
+  assert.equal(result.graph.stairSystems[0]?.totalSteps, 4);
+  assert.equal(result.graph.rows[0]?.commercial.totalAmountToman, '1440');
+  assert.equal(result.graph.rows[1]?.commercial.totalAmountToman, '816');
+  assert.equal(result.totalAmountToman, '2256');
+  assert.equal(store.audits.length, 1);
+  if (!store.state) throw new Error('Expected stair graph to reload.');
+  assert.deepEqual(
+    parseCanonicalProductGraph(serializeCanonicalProductGraph(store.state.graph)),
+    result.graph
+  );
+
+  const invalid = canonicalStairCommand();
+  const invalidStore = new InMemoryAtomicStore();
+  const invalidResult = await persistProductGraphCommand(invalidStore, {
+    contractId: 'contract-invalid-stair',
+    actorId: 'seller-1',
+    command: {
+      ...invalid,
+      sellerIntent: {
+        ...invalid.sellerIntent,
+        parts: [
+          invalid.sellerIntent.parts[0],
+          {
+            ...invalid.sellerIntent.parts[1],
+            stairPartPolicyInput: {
+              ...invalid.sellerIntent.parts[1].stairPartPolicyInput,
+              motherLengthMeters: undefined
+            }
+          }
+        ]
+      }
+    }
+  });
+  assert.equal(invalidResult.ok, false);
+  assert.equal(invalidStore.state, null);
+  assert.equal(invalidStore.audits.length, 0);
+}
+
 {
   const store = new InMemoryAtomicStore();
   const result = await persistProductGraphCommand(store, {

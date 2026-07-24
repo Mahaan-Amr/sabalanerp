@@ -48,6 +48,32 @@ export {
   parseRemainderChildPolicyInput,
   replayRemainderAllocations
 } from './remainderPolicy';
+export {
+  calculateStairPart,
+  createNewStairPartPolicyInput,
+  copyStairPartOperations,
+  copyStairPartPolicyFromTread,
+  migrateLegacyNosing,
+  parseStairPartPolicyInput,
+  resolveStaircaseQuantity
+} from './stairPolicy';
+export type {
+  CanonicalStairPartFacts,
+  CanonicalStairSystem,
+  LegacyNosingSnapshot,
+  MigratedLegacyNosing,
+  NosingMigrationMapping,
+  ResolvedStaircaseQuantity,
+  StaircaseQuantityIntent,
+  StairDisplayUnit,
+  StairPartCalculation,
+  StairPartConflict,
+  StairPartConflictCode,
+  StairPartKind,
+  StairPartPolicyInput,
+  StairPartPolicyResult,
+  StairQuantityMode
+} from './stairPolicy';
 export type {
   CanonicalRemainderAllocation,
   PaidRemainderStock,

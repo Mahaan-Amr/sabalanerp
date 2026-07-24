@@ -7,6 +7,7 @@ export type StableIdentityKind =
   | 'product-row'
   | 'remaining-stone'
   | 'source-batch'
+  | 'stair-system'
   | 'tool-selection';
 
 declare const stableIdentityBrand: unique symbol;

@@ -10,6 +10,24 @@ export {
 } from './stableIdentity';
 
 export {
+  calculatePackingPlan,
+  calculatePricing
+} from './packingPricing';
+export type {
+  PackedPlacement,
+  PackedRemainder,
+  PackingDemand,
+  PackingPlan,
+  PackingRequest,
+  PackingResult,
+  PackingSourceBatch,
+  PhysicalCut,
+  PricedLine,
+  PricingResult,
+  PricingRequest
+} from './packingPricing';
+
+export {
   readLegacyProductGraph,
   type LegacyProductGraphConflict,
   type LegacyProductGraphInput,

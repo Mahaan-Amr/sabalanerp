@@ -83,6 +83,8 @@ const addRowCommand = (
   assert.equal(result.graph.rows[0].catalogSnapshotVersion, 'inventory-42');
   assert.equal(result.graph.rows[0].commercial.requestedAreaSquareMeters, '12.5');
   assert.equal(result.graph.rows[0].commercial.baseRateToman, '1250000');
+  assert.equal(result.graph.rows[0].commercial.baseAmountToman, '15625000');
+  assert.equal(result.graph.rows[0].commercial.totalAmountToman, '15625000');
   assert.deepEqual(result.graph.catalogSnapshots, [{
     catalogProductId: 'catalog-stone-40',
     snapshotVersion: 'inventory-42',
@@ -158,6 +160,25 @@ const addRowCommand = (
   if (!repeatedResult.ok) throw new Error('Expected repeated deterministic command to succeed.');
   assert.equal(repeatedResult.appliedCommand.inputHash, result.appliedCommand.inputHash);
   assert.equal(repeatedResult.appliedCommand.resultHash, result.appliedCommand.resultHash);
+}
+
+{
+  const maliciousRow = row({
+    commercial: {
+      requestedAreaSquareMeters: parseCanonicalDecimal('2'),
+      baseRateToman: parseCanonicalDecimal('100'),
+      baseAmountToman: parseCanonicalDecimal('1'),
+      totalAmountToman: parseCanonicalDecimal('1')
+    }
+  });
+  const result = executeProductGraphCommand({
+    graph: emptyGraph(),
+    command: addRowCommand(maliciousRow)
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) throw new Error('Expected authoritative price calculation to succeed.');
+  assert.equal(result.graph.rows[0].commercial.baseAmountToman, '200');
+  assert.equal(result.graph.rows[0].commercial.totalAmountToman, '200');
 }
 
 {

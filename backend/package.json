@@ -7,6 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "test:contract-print": "tsx src/utils/__tests__/printTemplateLongitudinalOptimizer.test.ts && tsx src/utils/__tests__/printTemplateProjectName.test.ts && tsx src/utils/__tests__/printTemplateStairLayer.test.ts",
+    "test:product-graph-persistence": "tsx src/services/__tests__/contractProductGraphPersistence.test.ts",
     "test:hr-personnel-boundary": "tsx src/services/__tests__/hrPersonnelBoundary.test.ts",
     "test:hr-candidate-access": "tsx src/services/__tests__/hrCandidateAccess.test.ts",
     "test:hr-candidate-assessment": "tsx src/services/__tests__/hrCandidateAssessment.test.ts",
@@ -29,6 +30,7 @@
     "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"
   },
   "dependencies": {
+    "@sabalanerp/contract-product-graph": "file:../packages/contract-product-graph",
     "@prisma/client": "^5.16.1",
     "axios": "^1.13.5",
     "bcryptjs": "^2.4.3",

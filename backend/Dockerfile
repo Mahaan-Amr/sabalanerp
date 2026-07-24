@@ -18,18 +18,26 @@ RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By:
   ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-COPY package*.json ./
+COPY backend/package*.json ./
+COPY packages/contract-product-graph/package*.json /packages/contract-product-graph/
+COPY packages/contract-product-graph/tsconfig*.json /packages/contract-product-graph/
+COPY packages/contract-product-graph/src /packages/contract-product-graph/src
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 RUN --mount=type=cache,target=/root/.npm \
   npm config set fetch-retries 5 \
   && npm config set fetch-retry-factor 2 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000 \
+  && cd /packages/contract-product-graph \
+  && npm ci --prefer-offline --no-audit --fund=false \
+  && npm run build \
+  && npm prune --omit=dev \
+  && cd /app \
   && npm ci --prefer-offline --no-audit --fund=false
 
-COPY prisma ./prisma
-COPY tsconfig.json ./
-COPY src ./src
+COPY backend/prisma ./prisma
+COPY backend/tsconfig.json ./
+COPY backend/src ./src
 
 RUN npx prisma generate
 RUN npm run build
@@ -69,11 +77,12 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /packages/contract-product-graph /packages/contract-product-graph
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/dist ./dist
-COPY public ./public
-COPY scripts ./scripts
-COPY excel ./excel
+COPY backend/public ./public
+COPY backend/scripts ./scripts
+COPY backend/excel ./excel
 
 RUN printf 'TCPSocket 3310\nTCPAddr clamav\n' > /etc/clamav/clamd-remote.conf \
   && chmod +x /app/scripts/hr-clamdscan.sh \

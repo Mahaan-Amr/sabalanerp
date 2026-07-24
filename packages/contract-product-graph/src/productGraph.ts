@@ -11,6 +11,7 @@ import {
   parseCanonicalProductGraph,
   parseProductGraphCommand
 } from './productGraphSerialization';
+import { calculatePricing } from './packingPricing';
 
 export const CONTRACT_PRODUCT_GRAPH_SCHEMA_VERSION = 1 as const;
 
@@ -195,6 +196,38 @@ const cloneCommercialFacts = (facts: CanonicalCommercialFacts): CanonicalCommerc
     : {})
 });
 
+const calculateAuthoritativeCommercialFacts = (
+  facts: CanonicalCommercialFacts,
+  policy: CalculationPolicySnapshot
+): CanonicalCommercialFacts => {
+  const {
+    baseAmountToman: _clientBaseAmount,
+    totalAmountToman: _clientTotalAmount,
+    ...sellerFacts
+  } = facts;
+  const pricingQuantity =
+    facts.requestedAreaSquareMeters ??
+    facts.requestedQuantity ??
+    facts.requestedLengthMeters;
+  if (pricingQuantity === undefined || facts.baseRateToman === undefined) {
+    return cloneCommercialFacts(sellerFacts);
+  }
+  const pricing = calculatePricing({
+    policyVersion: policy.pricing,
+    roundingPolicyVersion: policy.rounding,
+    lines: [{
+      lineId: 'base-material',
+      quantity: pricingQuantity,
+      rateToman: facts.baseRateToman
+    }]
+  });
+  return {
+    ...cloneCommercialFacts(sellerFacts),
+    baseAmountToman: pricing.totalAmountToman,
+    totalAmountToman: pricing.totalAmountToman
+  };
+};
+
 const cloneCatalogSnapshot = (snapshot: CatalogSnapshot): CatalogSnapshot => ({
   ...snapshot,
   facts: {
@@ -370,7 +403,10 @@ export const executeProductGraphCommand = (
       ...nextGraphBase.rows,
       {
         ...nextRow,
-        commercial: cloneCommercialFacts(nextRow.commercial)
+        commercial: calculateAuthoritativeCommercialFacts(
+          nextRow.commercial,
+          graph.calculationPolicy
+        )
       }
     ]
   };

@@ -940,6 +940,8 @@ model SalesContract {
   template                          ContractTemplate?                  @relation("SalesContractTemplate", fields: [templateId], references: [id])
   sellerAudits                      SalesContractSellerAudit[]
   reportingEvents                   SalesReportingEvent[]
+  productGraphState                 SalesContractProductGraphState?
+  productGraphAudits                SalesContractProductGraphAudit[]
 
   @@index([createdBy, creatorSequenceNumber])
   @@index([responsibleSellerId])
@@ -947,6 +949,40 @@ model SalesContract {
   @@index([realizedAt])
   @@index([lostAt])
   @@map("sales_contracts")
+}
+
+model SalesContractProductGraphState {
+  contractId       String        @id
+  schemaVersion    Int
+  revision         Int
+  graph            Json
+  policySnapshot   Json
+  inputHash        String
+  resultHash       String
+  totalAmountToman Decimal       @db.Decimal(20, 0)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  contract         SalesContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@map("sales_contract_product_graph_states")
+}
+
+model SalesContractProductGraphAudit {
+  commandId      String        @id
+  contractId     String
+  actorId        String
+  baseRevision   Int
+  resultRevision Int
+  command        Json
+  resultGraph    Json
+  inputHash      String
+  resultHash     String
+  createdAt      DateTime      @default(now())
+  contract       SalesContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@unique([contractId, resultRevision])
+  @@index([contractId, createdAt])
+  @@map("sales_contract_product_graph_audits")
 }
 
 model SalesContractSellerAudit {

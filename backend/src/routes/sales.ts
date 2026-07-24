@@ -24,6 +24,10 @@ import {
 } from '../utils/salesContractPdf';
 import type { ContractPrintVariant } from '../utils/printTemplate';
 import { assignLegacyRealizedCredit, reassignContractSeller, snapshotRealizedSale } from '../services/salesAttributionService';
+import {
+  loadSalesContractProductGraph,
+  persistSalesContractProductGraphCommand
+} from '../services/contractProductGraphPersistence';
 import salesReportsRouter from './salesReports';
 
 const router = express.Router();
@@ -746,6 +750,69 @@ router.post('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
     return;
   }
 });
+
+router.post(
+  '/contracts/:id/product-graph/commands',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.SALES_CONTRACTS_EDIT, FEATURE_PERMISSIONS.EDIT),
+  async (req: any, res: Response) => {
+    try {
+      const contract = await prisma.salesContract.findUnique({
+        where: { id: req.params.id },
+        select: { id: true, departmentId: true }
+      });
+      if (!contract) {
+        return res.status(404).json({ success: false, error: 'Contract not found' });
+      }
+      if (!validateContractAccess(contract, req.user)) {
+        return res.status(403).json({ success: false, error: 'Access denied' });
+      }
+      const result = await persistSalesContractProductGraphCommand({
+        contractId: contract.id,
+        actorId: req.user.id,
+        command: req.body
+      });
+      if (!result.ok) {
+        const stale = result.conflicts.some(conflict => conflict.code === 'revision-conflict');
+        return res.status(stale ? 409 : 422).json({ success: false, conflicts: result.conflicts });
+      }
+      return res.json({ success: true, data: result });
+    } catch (error) {
+      console.error('Persist contract product graph command error:', error);
+      return res.status(400).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Invalid product graph command'
+      });
+    }
+  }
+);
+
+router.get(
+  '/contracts/:id/product-graph',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW),
+  requireFeatureAccess(FEATURES.SALES_CONTRACTS_VIEW, FEATURE_PERMISSIONS.VIEW),
+  async (req: any, res: Response) => {
+    try {
+      const contract = await prisma.salesContract.findUnique({
+        where: { id: req.params.id },
+        select: { id: true, departmentId: true }
+      });
+      if (!contract) {
+        return res.status(404).json({ success: false, error: 'Contract not found' });
+      }
+      if (!validateContractAccess(contract, req.user)) {
+        return res.status(403).json({ success: false, error: 'Access denied' });
+      }
+      const state = await loadSalesContractProductGraph(contract.id);
+      return res.json({ success: true, data: state });
+    } catch (error) {
+      console.error('Load contract product graph error:', error);
+      return res.status(500).json({ success: false, error: 'Server error' });
+    }
+  }
+);
 
 // @desc    Update sales contract
 // @route   PUT /api/sales/contracts/:id

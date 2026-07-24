@@ -160,6 +160,26 @@ export const findGraphIntegrityConflicts = (
         message: 'Stair-part facts can only belong to a stair row.'
       });
     }
+    if (row.slab && row.productType !== 'slab') {
+      conflicts.push({
+        code: 'orphan-graph-reference',
+        path: ['rows', row.productRowId, 'slab'],
+        productRowId: row.productRowId,
+        message: 'Canonical slab facts can only belong to a slab row.'
+      });
+    }
+    if (
+      row.slab &&
+      new Set(row.slab.sourceRows.map(source => source.sourceRowId)).size !==
+        row.slab.sourceRows.length
+    ) {
+      conflicts.push({
+        code: 'duplicate-stable-identity',
+        path: ['rows', row.productRowId, 'slab', 'sourceRows'],
+        productRowId: row.productRowId,
+        message: 'Slab manual source row identity is duplicated.'
+      });
+    }
     if (row.parentProductRowId && !productRowIds.has(row.parentProductRowId)) {
       conflicts.push({
         code: 'orphan-product-reference',

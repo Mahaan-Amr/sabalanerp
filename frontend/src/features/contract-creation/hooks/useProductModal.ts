@@ -33,7 +33,6 @@ export const useProductModal = (options: UseProductModalOptions = {}) => {
 
   // Modal visibility
   const [showProductModal, setShowProductModal] = useState(false);
-  const [showCADDesigner, setShowCADDesigner] = useState(false);
 
   // Product selection
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -104,7 +103,6 @@ export const useProductModal = (options: UseProductModalOptions = {}) => {
     setHasQuantityBeenInteracted(false);
     setTouchedFields(new Set());
     setStairSystemConfig(null);
-    setShowCADDesigner(false);
     setTreadProductSearchTerm('');
     setRiserProductSearchTerm('');
     setLandingProductSearchTerm('');
@@ -257,8 +255,6 @@ export const useProductModal = (options: UseProductModalOptions = {}) => {
     // Modal visibility
     showProductModal,
     setShowProductModal,
-    showCADDesigner,
-    setShowCADDesigner,
     
     // Product selection
     selectedProduct,

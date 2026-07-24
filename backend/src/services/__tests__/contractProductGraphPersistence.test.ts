@@ -173,6 +173,67 @@ const canonicalLongitudinalCommand = () => {
   };
 };
 
+const canonicalSlabCommand = () => {
+  const base = command(0, 'canonical-slab');
+  const productRowId = parseStableIdentity('product-row', 'persisted-slab-row');
+  return {
+    ...base,
+    sellerIntent: {
+      row: {
+        ...base.sellerIntent.row,
+        productRowId,
+        catalogProductId: 'catalog-slab',
+        catalogSnapshotVersion: 'slab-inventory-1',
+        productType: 'slab' as const,
+        contractualTitle: 'Manual source slab',
+        commercial: {}
+      },
+      slabPolicyInput: {
+        calculationPolicyVersion: policy.calculation,
+        packingPolicyVersion: policy.packing,
+        pricingPolicyVersion: policy.pricing,
+        roundingPolicyVersion: policy.rounding,
+        sourceBatchId: parseStableIdentity(
+          'source-batch',
+          'persisted-slab-source-batch'
+        ),
+        lengthMeters: parseCanonicalDecimal('1'),
+        widthMeters: parseCanonicalDecimal('1'),
+        quantity: 4,
+        lastManualField: 'width' as const,
+        lastManualDimension: 'width' as const,
+        lengthDisplayUnit: 'm' as const,
+        widthDisplayUnit: 'm' as const,
+        sourceRows: [{
+          sourceRowId: parseStableIdentity(
+            'slab-source-row',
+            'persisted-slab-source-row'
+          ),
+          lengthMeters: parseCanonicalDecimal('2'),
+          widthMeters: parseCanonicalDecimal('2'),
+          lengthDisplayUnit: 'm' as const,
+          widthDisplayUnit: 'm' as const,
+          quantity: 2
+        }],
+        baseMaterialRateToman: parseCanonicalDecimal('100'),
+        kerfMeters: parseCanonicalDecimal('0'),
+        cuttingPricingMethod: 'lineBased' as const,
+        longitudinalCutRateToman: parseCanonicalDecimal('10'),
+        crossCutRateToman: parseCanonicalDecimal('10'),
+        verticalCutSides: [] as const
+      }
+    },
+    catalogSnapshots: [{
+      catalogProductId: 'catalog-slab',
+      snapshotVersion: 'slab-inventory-1',
+      facts: {
+        motherLengthMeters: parseCanonicalDecimal('3'),
+        motherWidthMeters: parseCanonicalDecimal('2')
+      }
+    }]
+  };
+};
+
 const remainderCommands = () => {
   const sourceBase = canonicalLongitudinalCommand();
   const sourceRowId = parseStableIdentity('product-row', 'persisted-remainder-source');
@@ -491,6 +552,37 @@ const run = async () => {
   assert.equal(result.totalAmountToman, '1155');
   assert.equal(store.totalAmountToman, '1155');
   if (!store.state) throw new Error('Expected canonical graph state to reload.');
+  assert.deepEqual(
+    parseCanonicalProductGraph(serializeCanonicalProductGraph(store.state.graph)),
+    result.graph
+  );
+}
+
+{
+  const store = new InMemoryAtomicStore();
+  const result = await persistProductGraphCommand(store, {
+    contractId: 'contract-slab',
+    actorId: 'seller-1',
+    command: canonicalSlabCommand()
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) throw new Error('Expected canonical slab command to persist.');
+  const row = result.graph.rows[0];
+  assert.equal(row?.commercial.requestedAreaSquareMeters, '4');
+  assert.equal(row?.commercial.baseAmountToman, '400');
+  assert.equal(row?.slab?.sourceRows[0]?.quantity, 2);
+  assert.equal(
+    (
+      row?.commercial.calculationSnapshot as {
+        packingPlan?: { consumedSources?: readonly unknown[] };
+      }
+    )?.packingPlan?.consumedSources?.length,
+    1
+  );
+  assert.equal('cadDesign' in (row ?? {}), false);
+  assert.equal(store.audits.length, 1);
+  assert.equal(store.totalAmountToman, result.totalAmountToman);
+  if (!store.state) throw new Error('Expected canonical slab graph to reload.');
   assert.deepEqual(
     parseCanonicalProductGraph(serializeCanonicalProductGraph(store.state.graph)),
     result.graph

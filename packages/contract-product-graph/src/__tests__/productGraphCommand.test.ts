@@ -1274,6 +1274,125 @@ const addRowCommand = (
 }
 
 {
+  const slabRowId = parseStableIdentity('product-row', 'canonical-slab-row');
+  const slabSourceBatchId = parseStableIdentity(
+    'source-batch',
+    'canonical-slab-batch'
+  );
+  const slabInput = {
+    calculationPolicyVersion: calculationPolicy().calculation,
+    packingPolicyVersion: calculationPolicy().packing,
+    pricingPolicyVersion: calculationPolicy().pricing,
+    roundingPolicyVersion: calculationPolicy().rounding,
+    sourceBatchId: slabSourceBatchId,
+    lengthMeters: parseCanonicalDecimal('1'),
+    widthMeters: parseCanonicalDecimal('1'),
+    quantity: 4,
+    lastManualField: 'width' as const,
+    lastManualDimension: 'width' as const,
+    lengthDisplayUnit: 'm' as const,
+    widthDisplayUnit: 'm' as const,
+    sourceRows: [{
+      sourceRowId: parseStableIdentity(
+        'slab-source-row',
+        'canonical-slab-source-1'
+      ),
+      lengthMeters: parseCanonicalDecimal('2'),
+      widthMeters: parseCanonicalDecimal('2'),
+      lengthDisplayUnit: 'm' as const,
+      widthDisplayUnit: 'm' as const,
+      quantity: 2
+    }],
+    baseMaterialRateToman: parseCanonicalDecimal('100'),
+    kerfMeters: parseCanonicalDecimal('0'),
+    cuttingPricingMethod: 'lineBased' as const,
+    longitudinalCutRateToman: parseCanonicalDecimal('10'),
+    crossCutRateToman: parseCanonicalDecimal('10'),
+    verticalCutSides: [] as const
+  };
+  const slabCatalog = {
+    catalogProductId: 'catalog-slab-1',
+    snapshotVersion: 'slab-catalog-v1',
+    facts: {
+      motherLengthMeters: parseCanonicalDecimal('3'),
+      motherWidthMeters: parseCanonicalDecimal('2')
+    }
+  };
+  const added = executeProductGraphCommand({
+    graph: emptyGraph(),
+    command: {
+      commandId: parseStableIdentity('audit-mutation', 'add-canonical-slab'),
+      type: 'add-row',
+      baseRevision: 7,
+      calculationPolicy: calculationPolicy(),
+      sellerIntent: {
+        row: row({
+          productRowId: slabRowId,
+          catalogProductId: 'catalog-slab-1',
+          catalogSnapshotVersion: 'slab-catalog-v1',
+          productType: 'slab',
+          contractualTitle: 'Manual source slab',
+          commercial: {}
+        }),
+        slabPolicyInput: slabInput
+      },
+      catalogSnapshots: [slabCatalog]
+    }
+  });
+  assert.equal(added.ok, true, JSON.stringify(added));
+  if (!added.ok) throw new Error('Expected canonical slab creation.');
+  assert.equal(added.graph.rows[0]?.slab?.sourceRows.length, 1);
+  assert.equal(
+    added.graph.rows[0]?.commercial.requestedAreaSquareMeters,
+    '4'
+  );
+  assert.equal(added.graph.rows[0]?.commercial.baseAmountToman, '400');
+  assert.equal(added.graph.sourceBatches[0]?.initialRemainders?.length, 0);
+  const lineSnapshot = added.graph.rows[0]?.commercial.calculationSnapshot;
+
+  const repriced = executeProductGraphCommand({
+    graph: added.graph,
+    command: {
+      commandId: parseStableIdentity(
+        'audit-mutation',
+        'reprice-canonical-slab'
+      ),
+      type: 'replace-row',
+      baseRevision: 8,
+      calculationPolicy: calculationPolicy(),
+      sellerIntent: {
+        row: added.graph.rows[0],
+        slabPolicyInput: {
+          ...slabInput,
+          cuttingPricingMethod: 'squareMeter',
+          squareMeterCutRateToman: parseCanonicalDecimal('25')
+        }
+      },
+      catalogSnapshots: [slabCatalog]
+    }
+  });
+  assert.equal(repriced.ok, true, JSON.stringify(repriced));
+  if (!repriced.ok) throw new Error('Expected slab cutting repricing.');
+  assert.equal(repriced.graph.rows[0]?.slab?.cuttingPricingMethod, 'squareMeter');
+  assert.deepEqual(
+    (
+      repriced.graph.rows[0]?.commercial.calculationSnapshot as {
+        packingPlan?: unknown;
+      }
+    )?.packingPlan,
+    (lineSnapshot as { packingPlan?: unknown })?.packingPlan
+  );
+  assert.deepEqual(
+    repriced.graph.rows[0]?.slab?.sourceRows,
+    added.graph.rows[0]?.slab?.sourceRows
+  );
+  assert.deepEqual(
+    parseCanonicalProductGraph(serializeCanonicalProductGraph(repriced.graph)),
+    repriced.graph
+  );
+}
+
+{
   const legacyContract = {
     contractId: 'legacy-contract-42',
     revision: 3,

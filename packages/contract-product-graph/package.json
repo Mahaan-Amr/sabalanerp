@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test": "tsx src/__tests__/productGraphCommand.test.ts && tsx src/__tests__/packingPricing.test.ts && tsx src/__tests__/longitudinalPolicy.test.ts && tsx src/__tests__/operationsPolicy.test.ts && tsx src/__tests__/remainderPolicy.test.ts && tsx src/__tests__/stairLayerPolicy.test.ts",
+    "test": "tsx src/__tests__/productGraphCommand.test.ts && tsx src/__tests__/packingPricing.test.ts && tsx src/__tests__/longitudinalPolicy.test.ts && tsx src/__tests__/operationsPolicy.test.ts && tsx src/__tests__/remainderPolicy.test.ts && tsx src/__tests__/stairLayerPolicy.test.ts && tsx src/__tests__/slabPolicy.test.ts",
     "typecheck": "tsc --noEmit",
     "prepack": "npm run build"
   },

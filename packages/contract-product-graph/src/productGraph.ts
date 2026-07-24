@@ -49,6 +49,11 @@ import {
   type StairLayerConfigurationInput,
   type StairLayerConfigurationResult
 } from './stairLayerPolicy';
+import {
+  calculateSlab,
+  type CanonicalSlabFacts,
+  type SlabPolicyInput
+} from './slabPolicy';
 
 export const CONTRACT_PRODUCT_GRAPH_SCHEMA_VERSION = 1 as const;
 
@@ -111,6 +116,7 @@ export interface CanonicalProductRow {
   readonly contractualTitle: string;
   readonly description?: string;
   readonly stairPart?: CanonicalStairPartFacts;
+  readonly slab?: CanonicalSlabFacts;
   readonly commercial: CanonicalCommercialFacts;
   readonly parentProductRowId?: ProductRowId;
   readonly sourceProductRowId?: ProductRowId;
@@ -168,6 +174,7 @@ export interface AddRowSellerIntent {
   readonly remainderChildPolicyInput?: RemainderChildPolicyInput;
   readonly stairPartPolicyInput?: StairPartPolicyInput;
   readonly layerConfigurationInputs?: readonly StairLayerConfigurationInput[];
+  readonly slabPolicyInput?: SlabPolicyInput;
 }
 
 export interface AddRowCommand {
@@ -351,6 +358,14 @@ const cloneGraph = (graph: CanonicalProductGraph): CanonicalProductGraph => ({
   catalogSnapshots: graph.catalogSnapshots.map(cloneCatalogSnapshot),
   rows: graph.rows.map(row => ({
     ...row,
+    ...(row.slab
+      ? {
+          slab: {
+            ...row.slab,
+            sourceRows: row.slab.sourceRows.map(source => ({ ...source }))
+          }
+        }
+      : {}),
     commercial: cloneCommercialFacts(row.commercial)
   })),
   stairSystems: graph.stairSystems.map(system => ({ ...system })),
@@ -1111,6 +1126,20 @@ export const executeProductGraphCommand = (
     };
   }
   if (
+    requestedRow.productType === 'slab' &&
+    !command.sellerIntent.slabPolicyInput
+  ) {
+    return {
+      ok: false,
+      conflicts: [{
+        code: 'product-policy-conflict',
+        path: ['sellerIntent', 'slabPolicyInput'],
+        productRowId: requestedRow.productRowId,
+        message: 'Canonical slab writes require complete slab policy input.'
+      }]
+    };
+  }
+  if (
     command.sellerIntent.stairPartPolicyInput &&
     requestedRow.productType !== 'stair'
   ) {
@@ -1135,6 +1164,20 @@ export const executeProductGraphCommand = (
         path: ['sellerIntent', 'productPolicyInput'],
         productRowId: requestedRow.productRowId,
         message: 'Longitudinal policy input can only be applied to a longitudinal row.'
+      }]
+    };
+  }
+  if (
+    command.sellerIntent.slabPolicyInput &&
+    requestedRow.productType !== 'slab'
+  ) {
+    return {
+      ok: false,
+      conflicts: [{
+        code: 'product-policy-conflict',
+        path: ['sellerIntent', 'slabPolicyInput'],
+        productRowId: requestedRow.productRowId,
+        message: 'Slab policy input can only be applied to a slab row.'
       }]
     };
   }
@@ -1229,6 +1272,87 @@ export const executeProductGraphCommand = (
         baseAmountToman: calculation.result.baseAmountToman,
         totalAmountToman: calculation.result.totalAmountToman,
         calculationSnapshot
+      }
+    };
+  }
+  if (requestedRow.productType === 'slab' && command.sellerIntent.slabPolicyInput) {
+    const slabInput = command.sellerIntent.slabPolicyInput;
+    const expectedVersions = {
+      calculationPolicyVersion: graph.calculationPolicy.calculation,
+      packingPolicyVersion: graph.calculationPolicy.packing,
+      pricingPolicyVersion: graph.calculationPolicy.pricing,
+      roundingPolicyVersion: graph.calculationPolicy.rounding
+    };
+    const mismatchedVersion = Object.entries(expectedVersions).find(
+      ([key, expected]) => slabInput[key as keyof typeof expectedVersions] !== expected
+    );
+    if (mismatchedVersion) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'policy-version-conflict',
+          path: ['sellerIntent', 'slabPolicyInput', mismatchedVersion[0]],
+          productRowId: requestedRow.productRowId,
+          expected: mismatchedVersion[1],
+          received: String(
+            slabInput[mismatchedVersion[0] as keyof typeof expectedVersions]
+          ),
+          message: 'Slab policy version does not match the graph policy.'
+        }]
+      };
+    }
+    const calculation = calculateSlab(slabInput);
+    if (!calculation.ok) {
+      return {
+        ok: false,
+        conflicts: calculation.conflicts.map(conflict => ({
+          code: 'product-policy-conflict' as const,
+          path: ['sellerIntent', 'slabPolicyInput', conflict.field],
+          productRowId: requestedRow.productRowId,
+          entityId: conflict.entityId,
+          message: conflict.message
+        }))
+      };
+    }
+    calculatedSourceBatch = {
+      sourceBatchId: slabInput.sourceBatchId,
+      ownerProductRowId: requestedRow.productRowId,
+      initialRemainders: materializePaidRemainderStocks({
+        ownerProductRowId: requestedRow.productRowId,
+        catalogProductId: requestedRow.catalogProductId,
+        sourceBatchId: slabInput.sourceBatchId,
+        remainders: calculation.result.packingPlan.remainders,
+        startingCreationOrder: (() => {
+          const existingRemainders = graph.sourceBatches.find(
+            batch => batch.ownerProductRowId === requestedRow.productRowId
+          )?.initialRemainders ?? [];
+          return existingRemainders.length > 0
+            ? Math.min(...existingRemainders.map(remainder => remainder.creationOrder))
+            : graph.rows.length * 1000;
+        })()
+      })
+    };
+    nextRow = {
+      ...requestedRow,
+      slab: {
+        lengthDisplayUnit: calculation.result.lengthDisplayUnit,
+        widthDisplayUnit: calculation.result.widthDisplayUnit,
+        cuttingPricingMethod: calculation.result.cuttingPricingMethod,
+        sourceRows: calculation.result.sourceRows.map(source => ({ ...source }))
+      },
+      commercial: {
+        requestedLengthMeters: calculation.result.lengthMeters,
+        requestedWidthMeters: calculation.result.widthMeters,
+        requestedAreaSquareMeters: calculation.result.finishedAreaSquareMeters,
+        requestedQuantity: parseCanonicalDecimal(
+          String(calculation.result.quantity)
+        ),
+        baseRateToman: slabInput.baseMaterialRateToman,
+        baseAmountToman: calculation.result.materialAmountToman,
+        totalAmountToman: calculation.result.totalAmountToman,
+        calculationSnapshot: normalizeLegacyJson(
+          calculation.result
+        ) as CanonicalJsonObject
       }
     };
   }
@@ -1406,7 +1530,8 @@ export const executeProductGraphCommand = (
   }
   if (
     !command.sellerIntent.productPolicyInput &&
-    !command.sellerIntent.stairPartPolicyInput
+    !command.sellerIntent.stairPartPolicyInput &&
+    !command.sellerIntent.slabPolicyInput
   ) {
     nextRow = {
       ...nextRow,
@@ -1584,6 +1709,21 @@ export const executeProductGraphCommand = (
           path: ['sellerIntent', 'productPolicyInput'],
           productRowId: nextRow.productRowId,
           message: 'Editing a canonical longitudinal row requires its complete policy input.'
+        }]
+      };
+    }
+    if (
+      existingRow.productType === 'slab' &&
+      existingRow.slab &&
+      !command.sellerIntent.slabPolicyInput
+    ) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'product-policy-conflict',
+          path: ['sellerIntent', 'slabPolicyInput'],
+          productRowId: nextRow.productRowId,
+          message: 'Editing a canonical slab row requires its complete policy input.'
         }]
       };
     }

@@ -8,6 +8,7 @@ export type StableIdentityKind =
   | 'product-row'
   | 'remaining-stone'
   | 'source-batch'
+  | 'slab-source-row'
   | 'stair-system'
   | 'tool-selection';
 

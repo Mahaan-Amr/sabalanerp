@@ -80,6 +80,23 @@ export {
   parseStairLayerConfigurationInput,
   replayStairLayerConfigurations
 } from './stairLayerPolicy';
+export {
+  calculateSlab,
+  parseSlabPolicyInput
+} from './slabPolicy';
+export type {
+  CanonicalSlabFacts,
+  SlabCalculation,
+  SlabConflict,
+  SlabConflictCode,
+  SlabCuttingPricingMethod,
+  SlabDisplayUnit,
+  SlabEdge,
+  SlabManualField,
+  SlabPolicyInput,
+  SlabPolicyResult,
+  SlabSourceRowInput
+} from './slabPolicy';
 export type {
   StairLayerCalculation,
   StairLayerCatalogUnit,

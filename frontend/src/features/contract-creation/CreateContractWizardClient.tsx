@@ -34,7 +34,6 @@ import { downloadBlobResponse } from '@/lib/downloadFile';
 import { formatDisplayNumber, formatPrice, formatPriceWithRial, formatDimensions, formatSquareMeters, formatQuantity, normalizeDigits, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import StoneCanvas from '@/components/StoneCanvas';
-import { StoneCADDesigner } from '@/components/stone-cad/StoneCADDesigner';
 
 // Import new step components
 import { Step1ContractDate } from '@/features/contract-creation/components/steps/Step1ContractDate';
@@ -1939,8 +1938,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const setRiserExpanded = productModal.setRiserExpanded;
   const landingExpanded = productModal.landingExpanded;
   const setLandingExpanded = productModal.setLandingExpanded;
-  const showCADDesigner = productModal.showCADDesigner;
-  const setShowCADDesigner = productModal.setShowCADDesigner;
   const showProductModal = productModal.showProductModal;
   const setShowProductModal = productModal.setShowProductModal;
   const hasQuantityBeenInteracted = productModal.hasQuantityBeenInteracted;
@@ -3317,8 +3314,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       totalSubServiceCost: product.totalSubServiceCost || 0,
       usedLengthForSubServices: product.usedLengthForSubServices || 0,
       usedSquareMetersForSubServices: product.usedSquareMetersForSubServices || 0,
-      // Preserve CAD Design if available
-      cadDesign: product.cadDesign || null
     });
     
     // Set product type for wizard
@@ -4808,8 +4803,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         slabLineCuttingStrategy: linePlan.axisUsingStandard,
         slabLineCuttingLongitudinalMeters: linePlan.longitudinalMeters,
         slabLineCuttingCrossMeters: linePlan.crossMeters,
-        // CAD Design (if available)
-        cadDesign: productConfig.cadDesign || null,
         meta: {
           sawKerf: sawKerfEnabled
             ? {
@@ -11316,84 +11309,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               })()}
                             </div>
                           </div>
-
-                          {/* CAD Designer Section */}
-                          <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-indigo-200 dark:border-indigo-800 shadow-lg overflow-hidden mt-6">
-                            <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 dark:from-indigo-600 dark:to-indigo-700 px-6 py-4">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                                    <FaRuler className="text-white text-lg" />
-                                  </div>
-                                  <div>
-                                    <h4 className="text-lg font-bold text-white">ابزار طراحی CAD</h4>
-                                    <p className="text-xs text-indigo-100">طراحی و برنامه‌ریزی برش‌ها به صورت بصری</p>
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => setShowCADDesigner(!showCADDesigner)}
-                                  className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors text-sm font-medium"
-                                >
-                                  {showCADDesigner ? 'مخفی کردن' : 'نمایش'}
-                                </button>
-                              </div>
-                            </div>
-                            
-                            {showCADDesigner && (
-                              <div className="p-6">
-                                <p className="text-sm text-gray-700 dark:text-gray-300 mb-4 leading-relaxed">
-                                  از این ابزار برای طراحی و برنامه‌ریزی برش‌ها روی سنگ‌های استاندارد استفاده کنید. می‌توانید ابعاد مورد نظر را رسم کنید و هزینه‌ها به صورت خودکار محاسبه می‌شوند.
-                                </p>
-                                
-                                {standardDimensions && standardDimensions.length > 0 ? (
-                                  <StoneCADDesigner
-                                    originalLength={productConfig.length || 0}
-                                    originalWidth={productConfig.width || 0}
-                                    lengthUnit={lengthUnit}
-                                    widthUnit={widthUnit}
-                                    standardDimensions={standardDimensions}
-                                    productType="slab"
-                                    mode="design"
-                                    enableCostCalculation={true}
-                                    enableAutoSync={true}
-                                    onDimensionsCalculated={(dims) => {
-                                      // Sync CAD dimensions with product config
-                                      if (dims.length && dims.width) {
-                                        setProductConfig(prev => ({
-                                          ...prev,
-                                          length: dims.length,
-                                          width: dims.width,
-                                          squareMeters: dims.squareMeters
-                                        }));
-                                      }
-                                    }}
-                                    onCostCalculated={(cost) => {
-                                      // Update cutting cost in product config
-                                      setProductConfig(prev => ({
-                                        ...prev,
-                                        cuttingCost: cost
-                                      }));
-                                    }}
-                                    onDesignChange={(design) => {
-                                      // Store CAD design for later use
-                                      setProductConfig(prev => ({
-                                        ...prev,
-                                        cadDesign: design
-                                      }));
-                                    }}
-                                    initialDesign={productConfig.cadDesign || null}
-                                  />
-                                ) : (
-                                  <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-                                    <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                                      لطفاً ابتدا ابعاد استاندارد را اضافه کنید تا بتوانید از ابزار طراحی استفاده کنید.
-                                    </p>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
                         </div>
                       );
                     })()}
@@ -12079,8 +11994,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           setRiserExpanded={productModal.setRiserExpanded}
           landingExpanded={productModal.landingExpanded}
           setLandingExpanded={productModal.setLandingExpanded}
-          showCADDesigner={productModal.showCADDesigner}
-          setShowCADDesigner={productModal.setShowCADDesigner}
           errors={errors}
           setErrors={setErrors}
           hasQuantityBeenInteracted={productModal.hasQuantityBeenInteracted}

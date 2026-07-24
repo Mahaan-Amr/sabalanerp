@@ -14,7 +14,6 @@ import type {
   StoneFinishing
 } from '../../types/contract.types';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
-import { StoneCADDesigner } from '@/components/stone-cad/StoneCADDesigner';
 import { formatDisplayNumber, formatPrice, formatSquareMeters } from '@/lib/numberFormat';
 import { isUsableRemainingStone, normalizeRemainingStoneCollection } from '../../utils/remainingStoneGuards';
 import { PRODUCT_TYPES } from '../../constants/contract.constants';
@@ -77,9 +76,6 @@ interface ProductConfigurationModalProps {
   setRiserExpanded: React.Dispatch<React.SetStateAction<boolean>>;
   landingExpanded: boolean;
   setLandingExpanded: React.Dispatch<React.SetStateAction<boolean>>;
-  // CAD designer
-  showCADDesigner: boolean;
-  setShowCADDesigner: React.Dispatch<React.SetStateAction<boolean>>;
   // Errors
   errors: Record<string, string>;
   setErrors: React.Dispatch<React.SetStateAction<Record<string, string>>>;
@@ -172,8 +168,6 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
   setRiserExpanded,
   landingExpanded,
   setLandingExpanded,
-  showCADDesigner,
-  setShowCADDesigner,
   errors,
   setErrors,
   hasQuantityBeenInteracted,
@@ -2998,83 +2992,6 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
                             </div>
                           </div>
 
-                          {/* CAD Designer Section */}
-                          <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-indigo-200 dark:border-indigo-800 shadow-lg overflow-hidden mt-6">
-                            <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 dark:from-indigo-600 dark:to-indigo-700 px-6 py-4">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                                    <FaRuler className="text-white text-lg" />
-                                  </div>
-                                  <div>
-                                    <h4 className="text-lg font-bold text-white">ابزار طراحی CAD</h4>
-                                    <p className="text-xs text-indigo-100">طراحی و برنامه‌ریزی برش‌ها به صورت بصری</p>
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => setShowCADDesigner(!showCADDesigner)}
-                                  className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors text-sm font-medium"
-                                >
-                                  {showCADDesigner ? 'مخفی کردن' : 'نمایش'}
-                                </button>
-                              </div>
-                            </div>
-                            
-                            {showCADDesigner && (
-                              <div className="p-6">
-                                <p className="text-sm text-gray-700 dark:text-gray-300 mb-4 leading-relaxed">
-                                  از این ابزار برای طراحی و برنامه‌ریزی برش‌ها روی سنگ‌های استاندارد استفاده کنید. می‌توانید ابعاد مورد نظر را رسم کنید و هزینه‌ها به صورت خودکار محاسبه می‌شوند.
-                                </p>
-                                
-                                {standardDimensions && standardDimensions.length > 0 ? (
-                                  <StoneCADDesigner
-                                    originalLength={productConfig.length || 0}
-                                    originalWidth={productConfig.width || 0}
-                                    lengthUnit={lengthUnit}
-                                    widthUnit={widthUnit}
-                                    standardDimensions={standardDimensions}
-                                    productType="slab"
-                                    mode="design"
-                                    enableCostCalculation={true}
-                                    enableAutoSync={true}
-                                    onDimensionsCalculated={(dims) => {
-                                      // Sync CAD dimensions with product config
-                                      if (dims.length && dims.width) {
-                                        setProductConfig((prev: any) => ({
-                                          ...prev,
-                                          length: dims.length,
-                                          width: dims.width,
-                                          squareMeters: dims.squareMeters
-                                        }));
-                                      }
-                                    }}
-                                    onCostCalculated={(cost) => {
-                                      // Update cutting cost in product config
-                                      setProductConfig((prev: any) => ({
-                                        ...prev,
-                                        cuttingCost: cost
-                                      }));
-                                    }}
-                                    onDesignChange={(design) => {
-                                      // Store CAD design for later use
-                                      setProductConfig((prev: any) => ({
-                                        ...prev,
-                                        cadDesign: design
-                                      }));
-                                    }}
-                                    initialDesign={productConfig.cadDesign || null}
-                                  />
-                                ) : (
-                                  <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-                                    <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                                      لطفاً ابتدا ابعاد استاندارد را اضافه کنید تا بتوانید از ابزار طراحی استفاده کنید.
-                                    </p>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
                         </div>
                       );
                     })()}

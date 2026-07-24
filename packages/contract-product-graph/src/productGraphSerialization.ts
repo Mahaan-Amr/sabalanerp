@@ -39,6 +39,10 @@ import {
   parseStairLayerConfigurationInput,
   type StairLayerConfigurationResult
 } from './stairLayerPolicy';
+import {
+  parseSlabPolicyInput,
+  type CanonicalSlabFacts
+} from './slabPolicy';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -274,6 +278,73 @@ const productRowAt = (value: unknown, path: string): CanonicalProductRow => {
     ...(record.stairPart === undefined
       ? {}
       : { stairPart: stairPartFactsAt(record.stairPart, `${path}.stairPart`) }),
+    ...(record.slab === undefined
+      ? {}
+      : {
+          slab: (() => {
+            const slab = recordAt(record.slab, `${path}.slab`);
+            const facts: CanonicalSlabFacts = {
+              lengthDisplayUnit: enumAt(
+                slab.lengthDisplayUnit,
+                ['cm', 'm'],
+                `${path}.slab.lengthDisplayUnit`
+              ),
+              widthDisplayUnit: enumAt(
+                slab.widthDisplayUnit,
+                ['cm', 'm'],
+                `${path}.slab.widthDisplayUnit`
+              ),
+              cuttingPricingMethod: enumAt(
+                slab.cuttingPricingMethod,
+                ['lineBased', 'squareMeter'],
+                `${path}.slab.cuttingPricingMethod`
+              ),
+              sourceRows: arrayAt(
+                slab.sourceRows,
+                `${path}.slab.sourceRows`
+              ).map((item, index) => {
+                const source = recordAt(
+                  item,
+                  `${path}.slab.sourceRows.${index}`
+                );
+                const quantity = integerAt(
+                  source.quantity,
+                  `${path}.slab.sourceRows.${index}.quantity`
+                );
+                if (quantity <= 0) {
+                  throw new TypeError('Slab source quantity must be positive.');
+                }
+                return {
+                  sourceRowId: identityAt(
+                    source.sourceRowId,
+                    'slab-source-row',
+                    `${path}.slab.sourceRows.${index}.sourceRowId`
+                  ),
+                  lengthMeters: decimalAt(
+                    source.lengthMeters,
+                    `${path}.slab.sourceRows.${index}.lengthMeters`
+                  ),
+                  widthMeters: decimalAt(
+                    source.widthMeters,
+                    `${path}.slab.sourceRows.${index}.widthMeters`
+                  ),
+                  lengthDisplayUnit: enumAt(
+                    source.lengthDisplayUnit,
+                    ['cm', 'm'],
+                    `${path}.slab.sourceRows.${index}.lengthDisplayUnit`
+                  ),
+                  widthDisplayUnit: enumAt(
+                    source.widthDisplayUnit,
+                    ['cm', 'm'],
+                    `${path}.slab.sourceRows.${index}.widthDisplayUnit`
+                  ),
+                  quantity
+                };
+              })
+            };
+            return facts;
+          })()
+        }),
     commercial: commercialAt(record.commercial, `${path}.commercial`),
     ...(optionalIdentityAt(record, 'parentProductRowId', 'product-row', path)
       ? {
@@ -936,6 +1007,13 @@ const addRowSellerIntentAt = (
             sellerIntent.layerConfigurationInputs,
             `${path}.layerConfigurationInputs`
           ).map(item => parseStairLayerConfigurationInput(item))
+        }),
+    ...(sellerIntent.slabPolicyInput === undefined
+      ? {}
+      : {
+          slabPolicyInput: parseSlabPolicyInput(
+            sellerIntent.slabPolicyInput
+          )
         })
   };
 };

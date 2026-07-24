@@ -534,8 +534,6 @@ export interface ContractProduct {
   finishingSquareMeters?: number | null;
   /** Canonical collection; legacy singular finishing fields remain readable. */
   finishings?: AppliedProductFinishing[];
-  // CAD Design (for visual design storage)
-  cadDesign?: any; // Stores the CAD design data for future reference
 }
 
 export interface DeliveryProductItem {

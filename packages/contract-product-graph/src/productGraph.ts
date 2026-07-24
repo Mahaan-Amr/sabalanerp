@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import { hashCanonicalValue } from './canonicalHash';
 import { findGraphIntegrityConflicts } from './graphIntegrity';
 import {
@@ -33,8 +34,7 @@ import {
   type CanonicalRemainderAllocation,
   type PaidRemainderStock,
   type RemainderChildIntent,
-  type RemainderChildPolicyInput,
-  type RemainderReplayResult
+  type RemainderChildPolicyInput
 } from './remainderPolicy';
 import {
   calculateStairPart,
@@ -44,6 +44,11 @@ import {
   type StairPartPolicyInput,
   type StaircaseQuantityIntent
 } from './stairPolicy';
+import {
+  calculateStairLayerConfiguration,
+  type StairLayerConfigurationInput,
+  type StairLayerConfigurationResult
+} from './stairLayerPolicy';
 
 export const CONTRACT_PRODUCT_GRAPH_SCHEMA_VERSION = 1 as const;
 
@@ -114,7 +119,10 @@ export interface CanonicalProductRow {
 export interface CanonicalLayerConfiguration {
   readonly layerConfigurationId: LayerConfigurationId;
   readonly parentProductRowId: ProductRowId;
-  readonly sourceBatchId?: SourceBatchId;
+  readonly sourceBatchId: SourceBatchId;
+  readonly creationOrder: number;
+  readonly input: StairLayerConfigurationInput;
+  readonly result: StairLayerConfigurationResult;
 }
 
 export interface CanonicalSourceBatch {
@@ -159,6 +167,7 @@ export interface AddRowSellerIntent {
   readonly operationPolicyInput?: ProductOperationsInput;
   readonly remainderChildPolicyInput?: RemainderChildPolicyInput;
   readonly stairPartPolicyInput?: StairPartPolicyInput;
+  readonly layerConfigurationInputs?: readonly StairLayerConfigurationInput[];
 }
 
 export interface AddRowCommand {
@@ -190,6 +199,17 @@ export interface DeleteRowCommand {
   readonly catalogSnapshots: readonly CatalogSnapshot[];
 }
 
+export interface DeleteLayerConfigurationCommand {
+  readonly commandId: AuditMutationId;
+  readonly type: 'delete-layer-configuration';
+  readonly baseRevision: number;
+  readonly calculationPolicy: CalculationPolicySnapshot;
+  readonly sellerIntent: {
+    readonly layerConfigurationId: LayerConfigurationId;
+  };
+  readonly catalogSnapshots: readonly CatalogSnapshot[];
+}
+
 export interface AddStairSystemCommand {
   readonly commandId: AuditMutationId;
   readonly type: 'add-stair-system';
@@ -207,6 +227,7 @@ export type ProductGraphCommand =
   | AddRowCommand
   | ReplaceRowCommand
   | DeleteRowCommand
+  | DeleteLayerConfigurationCommand
   | AddStairSystemCommand;
 
 export interface ProductGraphCommandRequest {
@@ -221,6 +242,7 @@ export type ProductGraphConflictCode =
   | 'duplicate-product-row-id'
   | 'invalid-canonical-command'
   | 'invalid-canonical-graph'
+  | 'layer-configuration-missing'
   | 'orphan-graph-reference'
   | 'orphan-product-reference'
   | 'product-row-missing'
@@ -332,7 +354,7 @@ const cloneGraph = (graph: CanonicalProductGraph): CanonicalProductGraph => ({
     commercial: cloneCommercialFacts(row.commercial)
   })),
   stairSystems: graph.stairSystems.map(system => ({ ...system })),
-  layerConfigurations: graph.layerConfigurations.map(item => ({ ...item })),
+  layerConfigurations: graph.layerConfigurations.map(item => structuredClone(item)),
   sourceBatches: graph.sourceBatches.map(item => ({
     ...item,
     ...(item.initialRemainders
@@ -393,58 +415,190 @@ const findPolicyConflict = (
   return null;
 };
 
-const canonicalRemainderReplay = ({
-  policyVersion,
-  pricingPolicyVersion,
-  roundingPolicyVersion,
+const replayCanonicalResourceConsumers = ({
+  rows,
+  previousConfigurations,
+  layerInputs,
+  remainderIntents,
   sourceBatches,
-  intents
+  policy,
+  baseCommercialRowIds = new Set<ProductRowId>()
 }: {
-  readonly policyVersion: string;
-  readonly pricingPolicyVersion: string;
-  readonly roundingPolicyVersion: string;
+  readonly rows: readonly CanonicalProductRow[];
+  readonly previousConfigurations: readonly CanonicalLayerConfiguration[];
+  readonly layerInputs: readonly StairLayerConfigurationInput[];
+  readonly remainderIntents: readonly RemainderChildIntent[];
   readonly sourceBatches: readonly CanonicalSourceBatch[];
-  readonly intents: readonly RemainderChildIntent[];
-}): { readonly ok: true; readonly result: RemainderReplayResult;
-  readonly allocations: readonly CanonicalAllocation[] } |
-  { readonly ok: false; readonly conflicts: readonly ProductGraphConflict[] } => {
-  const replay = replayRemainderAllocations({
-    policyVersion,
-    pricingPolicyVersion,
-    roundingPolicyVersion,
-    baseInventory: sourceBatches.flatMap(batch => batch.initialRemainders ?? []),
-    childIntents: intents
+  readonly policy: CalculationPolicySnapshot;
+  readonly baseCommercialRowIds?: ReadonlySet<ProductRowId>;
+}):
+  | {
+      readonly ok: true;
+      readonly configurations: readonly CanonicalLayerConfiguration[];
+      readonly allocations: readonly CanonicalAllocation[];
+      readonly inventory: readonly PaidRemainderStock[];
+      readonly rows: readonly CanonicalProductRow[];
+    }
+  | { readonly ok: false; readonly conflicts: readonly ProductGraphConflict[] } => {
+  const parents = new Map<ProductRowId, {
+    lengthMeters: CanonicalDecimal;
+    crossDimensionMeters: CanonicalDecimal;
+    quantity: number;
+  }>();
+  rows.forEach(row => {
+    if (
+      row.productType !== 'stair' ||
+      !row.stairPart ||
+      row.commercial.requestedLengthMeters === undefined ||
+      row.commercial.requestedWidthMeters === undefined ||
+      row.commercial.requestedQuantity === undefined
+    ) return;
+    const quantity = Number(row.commercial.requestedQuantity);
+    if (Number.isSafeInteger(quantity) && quantity > 0) {
+      parents.set(row.productRowId, {
+        lengthMeters: row.commercial.requestedLengthMeters,
+        crossDimensionMeters: row.commercial.requestedWidthMeters,
+        quantity
+      });
+    }
   });
-  if (!replay.ok) {
-    return {
-      ok: false,
-      conflicts: replay.conflicts.map(conflict => ({
-        code: 'remainder-allocation-conflict' as const,
-        path: ['remainderAllocations', ...conflict.path],
-        message: conflict.message,
-        entityId: conflict.sourceRemainingStoneId,
-        productRowId: conflict.childProductRowId
-      }))
-    };
-  }
-  const intentByAllocation = new Map(
-    intents.map(intent => [intent.allocationId, intent])
+  let inventory = sourceBatches.flatMap(
+    batch => batch.initialRemainders?.map(stock => ({ ...stock })) ?? []
   );
+  const configurations: CanonicalLayerConfiguration[] = [];
+  const allocations: CanonicalAllocation[] = [];
+  const events = [
+    ...layerInputs.map(input => ({
+      kind: 'layer' as const,
+      order: input.creationOrder,
+      identity: input.layerConfigurationId,
+      input
+    })),
+    ...remainderIntents.map(intent => ({
+      kind: 'remainder' as const,
+      order: intent.allocationOrder,
+      identity: intent.allocationId,
+      intent
+    }))
+  ].sort((left, right) =>
+    left.order - right.order ||
+    left.kind.localeCompare(right.kind) ||
+    left.identity.localeCompare(right.identity)
+  );
+  for (const event of events) {
+    if (event.kind === 'layer') {
+      const parent = parents.get(event.input.parentProductRowId);
+      if (!parent) {
+        return {
+          ok: false,
+          conflicts: [{
+            code: 'orphan-graph-reference',
+            path: ['layerConfigurations', event.input.layerConfigurationId, 'parent'],
+            entityId: event.input.layerConfigurationId,
+            message: 'Layer configuration references a missing canonical stair parent.'
+          }]
+        };
+      }
+      const calculation = calculateStairLayerConfiguration({
+        input: event.input,
+        parent,
+        availableInventory: inventory
+      });
+      if (!calculation.ok) {
+        return {
+          ok: false,
+          conflicts: calculation.conflicts.map(conflict => ({
+            code: 'product-policy-conflict' as const,
+            path: [
+              'layerConfigurations',
+              event.input.layerConfigurationId,
+              conflict.field
+            ],
+            entityId: conflict.entityId ?? event.input.layerConfigurationId,
+            message: conflict.message
+          }))
+        };
+      }
+      configurations.push({
+        layerConfigurationId: event.input.layerConfigurationId,
+        parentProductRowId: event.input.parentProductRowId,
+        sourceBatchId: event.input.sourceBatchId,
+        creationOrder: event.input.creationOrder,
+        input: structuredClone(event.input),
+        result: structuredClone(calculation.result)
+      });
+      inventory = calculation.inventory.map(stock => ({ ...stock }));
+      continue;
+    }
+    const replay = replayRemainderAllocations({
+      policyVersion: policy.packing,
+      pricingPolicyVersion: policy.pricing,
+      roundingPolicyVersion: policy.rounding,
+      baseInventory: inventory,
+      childIntents: [event.intent]
+    });
+    if (!replay.ok) {
+      return {
+        ok: false,
+        conflicts: replay.conflicts.map(conflict => ({
+          code: 'remainder-allocation-conflict' as const,
+          path: ['remainderAllocations', ...conflict.path],
+          entityId: conflict.sourceRemainingStoneId,
+          productRowId: conflict.childProductRowId,
+          message: conflict.message
+        }))
+      };
+    }
+    const allocation = replay.result.allocations[0];
+    if (!allocation) {
+      throw new TypeError(`Allocation ${event.intent.allocationId} was not replayed.`);
+    }
+    allocations.push({
+      ...allocation,
+      intentSnapshot: { ...event.intent }
+    });
+    inventory = replay.result.inventory.map(stock => ({ ...stock }));
+  }
+  const previousByParent = new Map<ProductRowId, Decimal>();
+  previousConfigurations.forEach(configuration => {
+    previousByParent.set(
+      configuration.parentProductRowId,
+      (previousByParent.get(configuration.parentProductRowId) ?? new Decimal(0))
+        .plus(configuration.result.totalAmountToman)
+    );
+  });
+  const nextByParent = new Map<ProductRowId, Decimal>();
+  configurations.forEach(configuration => {
+    nextByParent.set(
+      configuration.parentProductRowId,
+      (nextByParent.get(configuration.parentProductRowId) ?? new Decimal(0))
+        .plus(configuration.result.totalAmountToman)
+    );
+  });
+  const layerPricedRows = rows.map(row => {
+    const previous = baseCommercialRowIds.has(row.productRowId)
+      ? new Decimal(0)
+      : previousByParent.get(row.productRowId) ?? new Decimal(0);
+    const next = nextByParent.get(row.productRowId) ?? new Decimal(0);
+    if (previous.eq(0) && next.eq(0)) return row;
+    return {
+      ...row,
+      commercial: {
+        ...row.commercial,
+        totalAmountToman: parseCanonicalDecimal(
+          new Decimal(
+            row.commercial.totalAmountToman ?? parseCanonicalDecimal('0')
+          ).minus(previous).plus(next).toFixed()
+        )
+      }
+    };
+  });
   return {
     ok: true,
-    result: replay.result,
-    allocations: replay.result.allocations.map(allocation => {
-      const intent = intentByAllocation.get(allocation.allocationId);
-      if (!intent) {
-        throw new TypeError(
-          `Remainder allocation ${allocation.allocationId} has no canonical intent.`
-        );
-      }
-      return {
-        ...allocation,
-        intentSnapshot: { ...intent }
-      };
-    })
+    configurations,
+    allocations,
+    inventory,
+    rows: layerPricedRows
   };
 };
 
@@ -637,14 +791,6 @@ export const executeProductGraphCommand = (
     const retainedSourceBatches = graph.sourceBatches.filter(
       batch => batch.ownerProductRowId !== deletedRow.productRowId
     );
-    const replay = canonicalRemainderReplay({
-      policyVersion: graph.calculationPolicy.packing,
-      pricingPolicyVersion: graph.calculationPolicy.pricing,
-      roundingPolicyVersion: graph.calculationPolicy.rounding,
-      sourceBatches: retainedSourceBatches,
-      intents: retainedIntents
-    });
-    if (!replay.ok) return replay;
     const nextRows = graph.rows.filter(
       row => row.productRowId !== deletedRow.productRowId
     );
@@ -662,24 +808,123 @@ export const executeProductGraphCommand = (
     const nextFinishingSelections = graph.finishingSelections.filter(
       selection => !removedGroupIds.has(selection.operationGroupId)
     );
+    const retainedLayerInputs = graph.layerConfigurations
+      .filter(configuration =>
+        configuration.parentProductRowId !== deletedRow.productRowId
+      )
+      .map(configuration => configuration.input);
+    const resourceReplay = replayCanonicalResourceConsumers({
+      rows: nextRows,
+      previousConfigurations: graph.layerConfigurations,
+      layerInputs: retainedLayerInputs,
+      remainderIntents: retainedIntents,
+      sourceBatches: retainedSourceBatches,
+      policy: graph.calculationPolicy
+    });
+    if (!resourceReplay.ok) return resourceReplay;
+    const previousLayerBatchIds = new Set(
+      graph.layerConfigurations.map(
+        configuration => configuration.sourceBatchId
+      )
+    );
+    const finalSourceBatches = [
+      ...retainedSourceBatches.filter(
+        batch => !previousLayerBatchIds.has(batch.sourceBatchId)
+      ),
+      ...resourceReplay.configurations.map(configuration => ({
+        sourceBatchId: configuration.sourceBatchId,
+        ownerProductRowId: configuration.parentProductRowId
+      }))
+    ];
     const nextGraph: CanonicalProductGraph = {
       ...cloneGraph(graph),
       revision: graph.revision + 1,
       rows: reconcileRemainderChildCommercialFacts({
-        rows: nextRows,
-        allocations: replay.allocations,
+        rows: resourceReplay.rows,
+        allocations: resourceReplay.allocations,
         operationGroups: nextOperationGroups,
         toolSelections: nextToolSelections,
         finishingSelections: nextFinishingSelections,
         policy: graph.calculationPolicy
       }),
       stairSystems: nextStairSystems,
-      sourceBatches: retainedSourceBatches,
-      remainingStones: replay.result.inventory,
-      allocations: replay.allocations,
+      layerConfigurations: resourceReplay.configurations,
+      sourceBatches: finalSourceBatches,
+      remainingStones: resourceReplay.inventory,
+      allocations: resourceReplay.allocations,
       operationGroups: nextOperationGroups,
       toolSelections: nextToolSelections,
       finishingSelections: nextFinishingSelections
+    };
+    const conflicts = findGraphIntegrityConflicts(nextGraph);
+    if (conflicts.length > 0) return { ok: false, conflicts };
+    return appliedResult({ inputGraph: graph, command, nextGraph });
+  }
+
+  if (command.type === 'delete-layer-configuration') {
+    const deleted = graph.layerConfigurations.find(
+      configuration =>
+        configuration.layerConfigurationId ===
+        command.sellerIntent.layerConfigurationId
+    );
+    if (!deleted) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'layer-configuration-missing',
+          path: [
+            'layerConfigurations',
+            command.sellerIntent.layerConfigurationId
+          ],
+          entityId: command.sellerIntent.layerConfigurationId,
+          message: 'Structural layer configuration does not exist for deletion.'
+        }]
+      };
+    }
+    const retainedInputs = graph.layerConfigurations
+      .filter(configuration =>
+        configuration.layerConfigurationId !== deleted.layerConfigurationId
+      )
+      .map(configuration => configuration.input);
+    const resourceReplay = replayCanonicalResourceConsumers({
+      rows: graph.rows,
+      previousConfigurations: graph.layerConfigurations,
+      layerInputs: retainedInputs,
+      remainderIntents: graph.allocations.map(
+        allocation => allocation.intentSnapshot
+      ),
+      sourceBatches: graph.sourceBatches,
+      policy: graph.calculationPolicy
+    });
+    if (!resourceReplay.ok) return resourceReplay;
+    const previousLayerBatchIds = new Set(
+      graph.layerConfigurations.map(
+        configuration => configuration.sourceBatchId
+      )
+    );
+    const nextGraph: CanonicalProductGraph = {
+      ...cloneGraph(graph),
+      revision: graph.revision + 1,
+      rows: reconcileRemainderChildCommercialFacts({
+        rows: resourceReplay.rows,
+        allocations: resourceReplay.allocations,
+        operationGroups: graph.operationGroups,
+        toolSelections: graph.toolSelections,
+        finishingSelections: graph.finishingSelections,
+        policy: graph.calculationPolicy
+      }),
+      layerConfigurations: resourceReplay.configurations,
+      sourceBatches: [
+        ...graph.sourceBatches.filter(
+          batch => !previousLayerBatchIds.has(batch.sourceBatchId)
+        ),
+        ...resourceReplay.configurations.map(configuration => ({
+          sourceBatchId: configuration.sourceBatchId,
+          ownerProductRowId: configuration.parentProductRowId
+        }))
+      ],
+      remainingStones: resourceReplay.inventory,
+      allocations: resourceReplay.allocations
     };
     const conflicts = findGraphIntegrityConflicts(nextGraph);
     if (conflicts.length > 0) return { ok: false, conflicts };
@@ -1494,9 +1739,16 @@ export const executeProductGraphCommand = (
     .map(allocation => allocation.intentSnapshot);
   const childPolicyInput = command.sellerIntent.remainderChildPolicyInput;
   const nextAllocationOrder = existingAllocation?.allocationOrder ??
-    (nextGraphBase.allocations.reduce(
-      (maximum, allocation) => Math.max(maximum, allocation.allocationOrder),
-      -1
+    (Math.max(
+      nextGraphBase.allocations.reduce(
+        (maximum, allocation) => Math.max(maximum, allocation.allocationOrder),
+        -1
+      ),
+      nextGraphBase.layerConfigurations.reduce(
+        (maximum, configuration) =>
+          Math.max(maximum, configuration.creationOrder),
+        -1
+      )
     ) + 1);
   const nextRemainderIntent: RemainderChildIntent | undefined =
     childPolicyInput
@@ -1511,14 +1763,6 @@ export const executeProductGraphCommand = (
     ...retainedRemainderIntents,
     ...(nextRemainderIntent ? [nextRemainderIntent] : [])
   ];
-  const remainderReplay = canonicalRemainderReplay({
-    policyVersion: graph.calculationPolicy.packing,
-    pricingPolicyVersion: graph.calculationPolicy.pricing,
-    roundingPolicyVersion: graph.calculationPolicy.rounding,
-    sourceBatches: nextSourceBatches,
-    intents: nextRemainderIntents
-  });
-  if (!remainderReplay.ok) return remainderReplay;
   const alreadyHasCatalogSnapshot = nextGraphBase.catalogSnapshots.some(snapshot =>
     snapshot.catalogProductId === matchingCatalogSnapshot.catalogProductId &&
     snapshot.snapshotVersion === matchingCatalogSnapshot.snapshotVersion
@@ -1549,24 +1793,176 @@ export const executeProductGraphCommand = (
           commercial: cloneCommercialFacts(nextRow.commercial)
         }
       : existingRow);
+  const providedLayerInputs = command.sellerIntent.layerConfigurationInputs;
+  if (
+    providedLayerInputs?.some(
+      input => input.parentProductRowId !== nextRow.productRowId
+    )
+  ) {
+    return {
+      ok: false,
+      conflicts: [{
+        code: 'orphan-graph-reference',
+        path: ['sellerIntent', 'layerConfigurationInputs', 'parentProductRowId'],
+        productRowId: nextRow.productRowId,
+        message: 'Every submitted layer configuration must belong to the edited stair row.'
+      }]
+    };
+  }
+  if (
+    providedLayerInputs !== undefined &&
+    (nextRow.productType !== 'stair' || !nextRow.stairPart)
+  ) {
+    return {
+      ok: false,
+      conflicts: [{
+        code: 'product-policy-conflict',
+        path: ['sellerIntent', 'layerConfigurationInputs'],
+        productRowId: nextRow.productRowId,
+        message: 'Structural stair layers may belong only to a canonical stair part.'
+      }]
+    };
+  }
+  const retainedLayerInputs = nextGraphBase.layerConfigurations
+    .filter(configuration =>
+      providedLayerInputs === undefined ||
+      configuration.parentProductRowId !== nextRow.productRowId
+    )
+    .map(configuration => configuration.input);
+  const nextLayerInputs = [
+    ...retainedLayerInputs,
+    ...(providedLayerInputs ?? [])
+  ];
+  const newLayerMaterialSnapshots: CatalogSnapshot[] = [];
+  for (const layerInput of nextLayerInputs) {
+    const layerSource = layerInput.source;
+    if (layerSource.kind !== 'new-material') continue;
+    const snapshots = command.catalogSnapshots.filter(snapshot =>
+      snapshot.catalogProductId === layerSource.catalogProductId &&
+      snapshot.snapshotVersion === layerSource.catalogSnapshotVersion
+    );
+    const existing = nextGraphBase.catalogSnapshots.find(snapshot =>
+      snapshot.catalogProductId === layerSource.catalogProductId &&
+      snapshot.snapshotVersion === layerSource.catalogSnapshotVersion
+    );
+    const snapshot = snapshots[0] ?? existing;
+    if (!snapshot) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'catalog-snapshot-missing',
+          path: [
+            'sellerIntent',
+            'layerConfigurationInputs',
+            layerInput.layerConfigurationId,
+            'source'
+          ],
+          entityId: layerInput.layerConfigurationId,
+          productRowId: nextRow.productRowId,
+          message: 'New layer material requires its explicit inventory snapshot.'
+        }]
+      };
+    }
+    const truths = [existing, ...snapshots]
+      .filter((item): item is CatalogSnapshot => item !== undefined)
+      .map(stableCanonicalJson);
+    if (new Set(truths).size > 1) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'catalog-snapshot-conflict',
+          path: [
+            'sellerIntent',
+            'layerConfigurationInputs',
+            layerInput.layerConfigurationId,
+            'source'
+          ],
+          entityId: layerInput.layerConfigurationId,
+          productRowId: nextRow.productRowId,
+          message: 'New layer material has contradictory inventory facts.'
+        }]
+      };
+    }
+    if (
+      snapshot.facts.motherLengthMeters === undefined ||
+      snapshot.facts.motherWidthMeters === undefined ||
+      layerSource.sourceRows.some(source =>
+        source.lengthMeters !== snapshot.facts.motherLengthMeters ||
+        source.widthMeters !== snapshot.facts.motherWidthMeters
+      )
+    ) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'catalog-snapshot-conflict',
+          path: [
+            'sellerIntent',
+            'layerConfigurationInputs',
+            layerInput.layerConfigurationId,
+            'source',
+            'motherDimensions'
+          ],
+          entityId: layerInput.layerConfigurationId,
+          productRowId: nextRow.productRowId,
+          message: 'New layer source dimensions must match its inventory snapshot.'
+        }]
+      };
+    }
+    if (!existing) newLayerMaterialSnapshots.push(snapshot);
+  }
+  const resourceReplay = replayCanonicalResourceConsumers({
+    rows: replacedRows,
+    previousConfigurations: nextGraphBase.layerConfigurations,
+    layerInputs: nextLayerInputs,
+    remainderIntents: nextRemainderIntents,
+    sourceBatches: nextSourceBatches,
+    policy: graph.calculationPolicy,
+    baseCommercialRowIds: new Set([nextRow.productRowId])
+  });
+  if (!resourceReplay.ok) return resourceReplay;
+  const previousLayerBatchIds = new Set(
+    nextGraphBase.layerConfigurations.map(
+      configuration => configuration.sourceBatchId
+    )
+  );
+  const finalSourceBatches = [
+    ...nextSourceBatches.filter(
+      batch => !previousLayerBatchIds.has(batch.sourceBatchId)
+    ),
+    ...resourceReplay.configurations.map(configuration => ({
+      sourceBatchId: configuration.sourceBatchId,
+      ownerProductRowId: configuration.parentProductRowId
+    }))
+  ];
   const nextGraph: CanonicalProductGraph = {
     ...nextGraphBase,
     revision: graph.revision + 1,
     catalogSnapshots: [
       ...nextGraphBase.catalogSnapshots,
-      ...(alreadyHasCatalogSnapshot ? [] : [cloneCatalogSnapshot(matchingCatalogSnapshot)])
+      ...(alreadyHasCatalogSnapshot ? [] : [cloneCatalogSnapshot(matchingCatalogSnapshot)]),
+      ...newLayerMaterialSnapshots
+        .filter((snapshot, index, items) => (
+          alreadyHasCatalogSnapshot ||
+          snapshot.catalogProductId !== matchingCatalogSnapshot.catalogProductId ||
+          snapshot.snapshotVersion !== matchingCatalogSnapshot.snapshotVersion
+        ) && items.findIndex(item =>
+          item.catalogProductId === snapshot.catalogProductId &&
+          item.snapshotVersion === snapshot.snapshotVersion
+        ) === index)
+        .map(cloneCatalogSnapshot)
     ],
     rows: reconcileRemainderChildCommercialFacts({
-      rows: replacedRows,
-      allocations: remainderReplay.allocations,
+      rows: resourceReplay.rows,
+      allocations: resourceReplay.allocations,
       operationGroups: nextOperationGroups,
       toolSelections: nextToolSelections,
       finishingSelections: nextFinishingSelections,
       policy: graph.calculationPolicy
     }),
-    sourceBatches: nextSourceBatches,
-    remainingStones: remainderReplay.result.inventory,
-    allocations: remainderReplay.allocations,
+    layerConfigurations: resourceReplay.configurations,
+    sourceBatches: finalSourceBatches,
+    remainingStones: resourceReplay.inventory,
+    allocations: resourceReplay.allocations,
     operationGroups: nextOperationGroups,
     toolSelections: nextToolSelections,
     finishingSelections: nextFinishingSelections

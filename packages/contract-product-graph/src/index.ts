@@ -74,6 +74,27 @@ export type {
   StairPartPolicyResult,
   StairQuantityMode
 } from './stairPolicy';
+export {
+  calculateStairLayerConfiguration,
+  duplicateStairLayerConfigurationDraft,
+  parseStairLayerConfigurationInput,
+  replayStairLayerConfigurations
+} from './stairLayerPolicy';
+export type {
+  StairLayerCalculation,
+  StairLayerCatalogUnit,
+  StairLayerConfigurationInput,
+  StairLayerConfigurationResult,
+  StairLayerConflict,
+  StairLayerConflictCode,
+  StairLayerNewSourceRow,
+  StairLayerParentGeometry,
+  StairLayerPhysicalStripDemand,
+  StairLayerReplayResult,
+  StairLayerSide,
+  StairLayerSideOperationsInput,
+  StairLayerSourceSelection
+} from './stairLayerPolicy';
 export type {
   CanonicalRemainderAllocation,
   PaidRemainderStock,
@@ -153,6 +174,7 @@ export {
   type CatalogSnapshot,
   type CatalogTechnicalFacts,
   type FinishingSelectionId,
+  type DeleteLayerConfigurationCommand,
   type LayerConfigurationId,
   type OperationGroupId,
   type ProductGraphCommand,

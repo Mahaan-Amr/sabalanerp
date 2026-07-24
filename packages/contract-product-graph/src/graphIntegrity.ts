@@ -219,7 +219,19 @@ export const findGraphIntegrityConflicts = (
         received: layer.parentProductRowId
       });
     }
-    if (layer.sourceBatchId && !sourceBatchIds.has(layer.sourceBatchId)) {
+    const parent = graph.rows.find(
+      row => row.productRowId === layer.parentProductRowId
+    );
+    if (parent && (parent.productType !== 'stair' || !parent.stairPart)) {
+      conflicts.push({
+        code: 'orphan-graph-reference',
+        path: ['layerConfigurations', layer.layerConfigurationId, 'parentProductRowId'],
+        entityId: layer.layerConfigurationId,
+        message: 'Structural layer parent must be a canonical stair part.',
+        received: layer.parentProductRowId
+      });
+    }
+    if (!sourceBatchIds.has(layer.sourceBatchId)) {
       conflicts.push({
         code: 'orphan-graph-reference',
         path: ['layerConfigurations', layer.layerConfigurationId, 'sourceBatchId'],
@@ -228,6 +240,64 @@ export const findGraphIntegrityConflicts = (
         received: layer.sourceBatchId
       });
     }
+    const layerSourceBatch = graph.sourceBatches.find(
+      batch => batch.sourceBatchId === layer.sourceBatchId
+    );
+    if (
+      layerSourceBatch &&
+      layerSourceBatch.ownerProductRowId !== layer.parentProductRowId
+    ) {
+      conflicts.push({
+        code: 'orphan-graph-reference',
+        path: ['layerConfigurations', layer.layerConfigurationId, 'sourceBatchId'],
+        entityId: layer.layerConfigurationId,
+        message: 'Layer source batch does not belong to its stair parent.'
+      });
+    }
+    if (
+      layer.input.layerConfigurationId !== layer.layerConfigurationId ||
+      layer.input.parentProductRowId !== layer.parentProductRowId ||
+      layer.input.sourceBatchId !== layer.sourceBatchId ||
+      layer.input.creationOrder !== layer.creationOrder
+    ) {
+      conflicts.push({
+        code: 'orphan-graph-reference',
+        path: ['layerConfigurations', layer.layerConfigurationId, 'input'],
+        entityId: layer.layerConfigurationId,
+        message: 'Layer input snapshot does not match its canonical identity.'
+      });
+    }
+    const layerSource = layer.input.source;
+    if (layerSource.kind === 'new-material') {
+      const hasSnapshot = graph.catalogSnapshots.some(snapshot =>
+        snapshot.catalogProductId === layerSource.catalogProductId &&
+        snapshot.snapshotVersion === layerSource.catalogSnapshotVersion
+      );
+      if (!hasSnapshot) {
+        conflicts.push({
+          code: 'catalog-snapshot-missing',
+          path: ['layerConfigurations', layer.layerConfigurationId, 'source'],
+          entityId: layer.layerConfigurationId,
+          message: 'New layer material does not have its catalog snapshot.'
+        });
+      }
+    }
+    layer.result.generatedRemainders.forEach(remainder => {
+      const storedRemainder = graph.remainingStones.find(
+        stone => stone.remainingStoneId === remainder.remainingStoneId
+      );
+      if (
+        storedRemainder &&
+        stableCanonicalJson(storedRemainder) !== stableCanonicalJson(remainder)
+      ) {
+        conflicts.push({
+          code: 'orphan-graph-reference',
+          path: ['layerConfigurations', layer.layerConfigurationId, 'generatedRemainders'],
+          entityId: remainder.remainingStoneId,
+          message: 'Unconsumed layer result remainder differs from canonical inventory.'
+        });
+      }
+    });
   });
 
   graph.sourceBatches.forEach(batch => {

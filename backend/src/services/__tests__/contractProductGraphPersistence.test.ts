@@ -246,36 +246,93 @@ const remainderCommands = () => {
 const canonicalStairCommand = () => {
   const stairSystemId = parseStableIdentity('stair-system', 'persisted-stair-system');
   const versions = policy;
-  const part = (kind: 'tread' | 'riser', suffix: string) => ({
-    row: {
-      productRowId: parseStableIdentity('product-row', `persisted-stair-${suffix}`),
-      catalogProductId: 'catalog-stair-stone',
-      catalogSnapshotVersion: 'stair-inventory-1',
-      productType: 'stair' as const,
-      contractualTitle: kind === 'tread' ? 'Tread' : 'Riser',
-      commercial: {}
-    },
-    stairPartPolicyInput: {
-      ...createNewStairPartPolicyInput(
-        kind,
-        {
-          stairSystemId,
-          sourceBatchId: parseStableIdentity(
-            'source-batch',
-            `persisted-stair-source-${suffix}`
-          )
-        },
-        versions
-      ),
-      motherLengthMeters: parseCanonicalDecimal('3'),
-      motherWidthMeters: parseCanonicalDecimal('0.4'),
-      lengthMeters: parseCanonicalDecimal('1.2'),
-      baseRateToman: parseCanonicalDecimal('1000'),
-      longitudinalCutRateToman: parseCanonicalDecimal('0'),
-      crossCutRateToman: parseCanonicalDecimal('0'),
-      calibrationCutRateToman: parseCanonicalDecimal('0')
-    }
-  });
+  const part = (kind: 'tread' | 'riser', suffix: string) => {
+    const productRowId = parseStableIdentity(
+      'product-row',
+      `persisted-stair-${suffix}`
+    );
+    const draft = {
+      row: {
+        productRowId,
+        catalogProductId: 'catalog-stair-stone',
+        catalogSnapshotVersion: 'stair-inventory-1',
+        productType: 'stair' as const,
+        contractualTitle: kind === 'tread' ? 'Tread' : 'Riser',
+        commercial: {}
+      },
+      stairPartPolicyInput: {
+        ...createNewStairPartPolicyInput(
+          kind,
+          {
+            stairSystemId,
+            sourceBatchId: parseStableIdentity(
+              'source-batch',
+              `persisted-stair-source-${suffix}`
+            )
+          },
+          versions
+        ),
+        motherLengthMeters: parseCanonicalDecimal('3'),
+        motherWidthMeters: parseCanonicalDecimal('0.4'),
+        lengthMeters: parseCanonicalDecimal('1.2'),
+        baseRateToman: parseCanonicalDecimal('1000'),
+        longitudinalCutRateToman: parseCanonicalDecimal('0'),
+        crossCutRateToman: parseCanonicalDecimal('0'),
+        calibrationCutRateToman: parseCanonicalDecimal('0')
+      }
+    };
+    return kind === 'tread'
+      ? {
+          ...draft,
+          layerConfigurationInputs: [{
+            calculationPolicyVersion: versions.calculation,
+            packingPolicyVersion: versions.packing,
+            pricingPolicyVersion: versions.pricing,
+            roundingPolicyVersion: versions.rounding,
+            layerConfigurationId: parseStableIdentity(
+              'layer-configuration',
+              'persisted-tread-layer'
+            ),
+            parentProductRowId: productRowId,
+            sourceBatchId: parseStableIdentity(
+              'source-batch',
+              'persisted-tread-layer-source'
+            ),
+            creationOrder: 1,
+            layerCatalogItemId: 'layer-type-1',
+            layerCatalogSnapshotVersion: 'layer-type-v1',
+            layerTitle: 'Tread layer',
+            layerUnit: 'set' as const,
+            layerRateToman: parseCanonicalDecimal('100'),
+            layersPerParentPiece: 1,
+            widthMeters: parseCanonicalDecimal('0.04'),
+            widthDisplayUnit: 'cm' as const,
+            targetSides: ['front'] as const,
+            source: {
+              kind: 'new-material' as const,
+              catalogProductId: 'catalog-stair-stone',
+              catalogSnapshotVersion: 'stair-inventory-1',
+              materialRateToman: parseCanonicalDecimal('1000'),
+              sourceRows: [{
+                sourceRowId: parseStableIdentity(
+                  'layer-source-row',
+                  'persisted-tread-layer-new-source'
+                ),
+                lengthMeters: parseCanonicalDecimal('3'),
+                widthMeters: parseCanonicalDecimal('0.4'),
+                quantity: 1
+              }]
+            },
+            kerfMeters: parseCanonicalDecimal('0'),
+            calibrationEnabled: false,
+            longitudinalCutRateToman: parseCanonicalDecimal('0'),
+            crossCutRateToman: parseCanonicalDecimal('0'),
+            calibrationCutRateToman: parseCanonicalDecimal('0'),
+            sideOperations: []
+          }]
+        }
+      : draft;
+  };
   return {
     commandId: parseStableIdentity('audit-mutation', 'persist-stair-system'),
     type: 'add-stair-system' as const,
@@ -315,15 +372,42 @@ const run = async () => {
   assert.equal(result.graph.revision, 1);
   assert.equal(result.graph.rows.length, 2);
   assert.equal(result.graph.stairSystems[0]?.totalSteps, 4);
-  assert.equal(result.graph.rows[0]?.commercial.totalAmountToman, '1440');
+  assert.equal(result.graph.rows[0]?.commercial.totalAmountToman, '3040');
   assert.equal(result.graph.rows[1]?.commercial.totalAmountToman, '816');
-  assert.equal(result.totalAmountToman, '2256');
+  assert.equal(result.graph.layerConfigurations.length, 1);
+  assert.equal(result.totalAmountToman, '3856');
   assert.equal(store.audits.length, 1);
   if (!store.state) throw new Error('Expected stair graph to reload.');
   assert.deepEqual(
     parseCanonicalProductGraph(serializeCanonicalProductGraph(store.state.graph)),
     result.graph
   );
+  const deletedLayer = await persistProductGraphCommand(store, {
+    contractId: 'contract-stair',
+    actorId: 'seller-1',
+    command: {
+      commandId: parseStableIdentity(
+        'audit-mutation',
+        'persist-delete-stair-layer'
+      ),
+      type: 'delete-layer-configuration',
+      baseRevision: 1,
+      calculationPolicy: policy,
+      sellerIntent: {
+        layerConfigurationId: parseStableIdentity(
+          'layer-configuration',
+          'persisted-tread-layer'
+        )
+      },
+      catalogSnapshots: []
+    }
+  });
+  assert.equal(deletedLayer.ok, true, JSON.stringify(deletedLayer));
+  if (!deletedLayer.ok) throw new Error('Expected structural layer deletion.');
+  assert.equal(deletedLayer.graph.revision, 2);
+  assert.equal(deletedLayer.graph.layerConfigurations.length, 0);
+  assert.equal(deletedLayer.totalAmountToman, '2256');
+  assert.equal(store.audits.length, 2);
 
   const invalid = canonicalStairCommand();
   const invalidStore = new InMemoryAtomicStore();

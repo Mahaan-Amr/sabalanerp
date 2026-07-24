@@ -924,7 +924,90 @@ const addRowCommand = (
               edges: ['front'] as const
             }],
             finishings: []
-          }
+          },
+          layerConfigurationInputs: [{
+            calculationPolicyVersion: versions.calculation,
+            packingPolicyVersion: versions.packing,
+            pricingPolicyVersion: versions.pricing,
+            roundingPolicyVersion: versions.rounding,
+            layerConfigurationId: parseStableIdentity(
+              'layer-configuration',
+              'tread-layer-config'
+            ),
+            parentProductRowId: treadRowId,
+            sourceBatchId: parseStableIdentity(
+              'source-batch',
+              'tread-layer-source'
+            ),
+            creationOrder: 1,
+            layerCatalogItemId: 'layer-type-1',
+            layerCatalogSnapshotVersion: 'layer-type-v1',
+            layerTitle: 'Tread layer',
+            layerUnit: 'set' as const,
+            layerRateToman: parseCanonicalDecimal('100'),
+            layersPerParentPiece: 1,
+            widthMeters: parseCanonicalDecimal('0.04'),
+            widthDisplayUnit: 'cm' as const,
+            targetSides: ['front'] as const,
+            source: {
+              kind: 'new-material' as const,
+              catalogProductId: 'catalog-stone-40',
+              catalogSnapshotVersion: 'inventory-42',
+              materialRateToman: parseCanonicalDecimal('1000'),
+              sourceRows: [{
+                sourceRowId: parseStableIdentity(
+                  'layer-source-row',
+                  'tread-layer-new-source'
+                ),
+                lengthMeters: parseCanonicalDecimal('3'),
+                widthMeters: parseCanonicalDecimal('0.4'),
+                quantity: 1
+              }]
+            },
+            kerfMeters: parseCanonicalDecimal('0'),
+            calibrationEnabled: false,
+            longitudinalCutRateToman: parseCanonicalDecimal('0'),
+            crossCutRateToman: parseCanonicalDecimal('0'),
+            calibrationCutRateToman: parseCanonicalDecimal('0'),
+            sideOperations: []
+          }, {
+            calculationPolicyVersion: versions.calculation,
+            packingPolicyVersion: versions.packing,
+            pricingPolicyVersion: versions.pricing,
+            roundingPolicyVersion: versions.rounding,
+            layerConfigurationId: parseStableIdentity(
+              'layer-configuration',
+              'tread-layer-config-2'
+            ),
+            parentProductRowId: treadRowId,
+            sourceBatchId: parseStableIdentity(
+              'source-batch',
+              'tread-layer-source-2'
+            ),
+            creationOrder: 2,
+            layerCatalogItemId: 'layer-type-2',
+            layerCatalogSnapshotVersion: 'layer-type-v1',
+            layerTitle: 'Second tread layer',
+            layerUnit: 'set' as const,
+            layerRateToman: parseCanonicalDecimal('50'),
+            layersPerParentPiece: 1,
+            widthMeters: parseCanonicalDecimal('0.02'),
+            widthDisplayUnit: 'cm' as const,
+            targetSides: ['front'] as const,
+            source: {
+              kind: 'paid-remainder' as const,
+              selectedRemainingStoneIds: [parseStableIdentity(
+                'remaining-stone',
+                'tread-layer-config:remainder:1'
+              )]
+            },
+            kerfMeters: parseCanonicalDecimal('0'),
+            calibrationEnabled: false,
+            longitudinalCutRateToman: parseCanonicalDecimal('0'),
+            crossCutRateToman: parseCanonicalDecimal('0'),
+            calibrationCutRateToman: parseCanonicalDecimal('0'),
+            sideOperations: []
+          }]
         },
         {
           row: row({
@@ -959,12 +1042,25 @@ const addRowCommand = (
   assert.equal(added.graph.rows[0]?.stairPart?.part, 'tread');
   assert.equal(added.graph.rows[0]?.commercial.requestedWidthMeters, '0.3');
   assert.equal(added.graph.rows[0]?.commercial.requestedQuantity, '4');
-  assert.equal(added.graph.rows[0]?.commercial.totalAmountToman, '2480');
+  assert.equal(added.graph.rows[0]?.commercial.totalAmountToman, '4280');
   assert.equal(added.graph.rows[1]?.stairPart?.part, 'riser');
   assert.equal(added.graph.rows[1]?.commercial.requestedWidthMeters, '0.17');
   assert.equal(added.graph.rows[1]?.commercial.requestedQuantity, '4');
   assert.equal(added.graph.rows[1]?.commercial.totalAmountToman, '816');
-  assert.equal(added.graph.sourceBatches.length, 2);
+  assert.equal(added.graph.sourceBatches.length, 4);
+  assert.equal(added.graph.layerConfigurations.length, 2);
+  assert.equal(
+    added.graph.layerConfigurations[0]?.result.commercialLayerSets,
+    4
+  );
+  assert.equal(
+    added.graph.layerConfigurations[0]?.result.physicalStripCount,
+    4
+  );
+  assert.equal(
+    added.graph.layerConfigurations[1]?.result.materialAmountToman,
+    '0'
+  );
   assert.equal(added.graph.toolSelections[0]?.amountToman, '480');
   assert.deepEqual(
     parseCanonicalProductGraph(serializeCanonicalProductGraph(added.graph)),
@@ -1003,9 +1099,88 @@ const addRowCommand = (
   assert.equal(edited.ok, true, JSON.stringify(edited));
   if (!edited.ok) throw new Error('Expected exact stair-row edit.');
   assert.equal(edited.graph.rows[0]?.commercial.requestedQuantity, '2');
-  assert.equal(edited.graph.rows[0]?.commercial.totalAmountToman, '2400');
+  assert.equal(edited.graph.rows[0]?.commercial.totalAmountToman, '3900');
+  assert.equal(
+    edited.graph.layerConfigurations[0]?.result.commercialLayerSets,
+    2
+  );
   assert.deepEqual(edited.graph.rows[1], riserBeforeEdit);
   assert.deepEqual(edited.graph.stairSystems, added.graph.stairSystems);
+
+  const blockedLayerSourceDeletion = executeProductGraphCommand({
+    graph: edited.graph,
+    command: {
+      commandId: parseStableIdentity(
+        'audit-mutation',
+        'delete-layer-with-dependent-layer'
+      ),
+      type: 'delete-layer-configuration',
+      baseRevision: 9,
+      calculationPolicy: versions,
+      sellerIntent: {
+        layerConfigurationId: parseStableIdentity(
+          'layer-configuration',
+          'tread-layer-config'
+        )
+      },
+      catalogSnapshots: []
+    }
+  });
+  assert.equal(blockedLayerSourceDeletion.ok, false);
+  assert.equal(edited.graph.revision, 9);
+  assert.equal(edited.graph.layerConfigurations.length, 2);
+
+  const deletedLayer = executeProductGraphCommand({
+    graph: edited.graph,
+    command: {
+      commandId: parseStableIdentity('audit-mutation', 'delete-tread-layer'),
+      type: 'delete-layer-configuration',
+      baseRevision: 9,
+      calculationPolicy: versions,
+      sellerIntent: {
+        layerConfigurationId: parseStableIdentity(
+          'layer-configuration',
+          'tread-layer-config-2'
+        )
+      },
+      catalogSnapshots: []
+    }
+  });
+  assert.equal(deletedLayer.ok, true, JSON.stringify(deletedLayer));
+  if (!deletedLayer.ok) throw new Error('Expected atomic layer deletion.');
+  assert.equal(deletedLayer.graph.layerConfigurations.length, 1);
+  assert.equal(deletedLayer.graph.rows[0]?.commercial.totalAmountToman, '3800');
+  assert.equal(
+    deletedLayer.graph.remainingStones.some(stone =>
+      stone.remainingStoneId.includes(
+        ':layer-remainder:tread-layer-config-2:'
+      )
+    ),
+    false
+  );
+
+  const deletedParent = executeProductGraphCommand({
+    graph: edited.graph,
+    command: {
+      commandId: parseStableIdentity(
+        'audit-mutation',
+        'delete-tread-with-layer'
+      ),
+      type: 'delete-row',
+      baseRevision: 9,
+      calculationPolicy: versions,
+      sellerIntent: { productRowId: treadRowId },
+      catalogSnapshots: []
+    }
+  });
+  assert.equal(deletedParent.ok, true, JSON.stringify(deletedParent));
+  if (!deletedParent.ok) throw new Error('Expected explicit structural deletion.');
+  assert.deepEqual(
+    deletedParent.graph.rows.map(item => item.productRowId),
+    [riserRowId]
+  );
+  assert.equal(deletedParent.graph.layerConfigurations.length, 0);
+  assert.equal(deletedParent.graph.stairSystems.length, 1);
 
   const invalidGraph = emptyGraph();
   const invalidBefore = structuredClone(invalidGraph);

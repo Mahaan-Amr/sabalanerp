@@ -35,6 +35,10 @@ import {
   type CanonicalStairSystem,
   type StaircaseQuantityIntent
 } from './stairPolicy';
+import {
+  parseStairLayerConfigurationInput,
+  type StairLayerConfigurationResult
+} from './stairLayerPolicy';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -374,20 +378,55 @@ const staircaseQuantityAt = (
 
 const layerAt = (value: unknown, path: string): CanonicalLayerConfiguration => {
   const record = recordAt(value, path);
+  const layerConfigurationId = identityAt(
+    record.layerConfigurationId,
+    'layer-configuration',
+    `${path}.layerConfigurationId`
+  );
+  const parentProductRowId = identityAt(
+    record.parentProductRowId,
+    'product-row',
+    `${path}.parentProductRowId`
+  );
+  const sourceBatchId = identityAt(
+    record.sourceBatchId,
+    'source-batch',
+    `${path}.sourceBatchId`
+  );
+  const creationOrder = integerAt(record.creationOrder, `${path}.creationOrder`);
+  const input = parseStairLayerConfigurationInput(record.input);
+  if (
+    input.layerConfigurationId !== layerConfigurationId ||
+    input.parentProductRowId !== parentProductRowId ||
+    input.sourceBatchId !== sourceBatchId ||
+    input.creationOrder !== creationOrder
+  ) {
+    throw new TypeError(`${path} layer identity differs from its input snapshot.`);
+  }
+  const resultRecord = recordAt(record.result, `${path}.result`);
+  integerAt(
+    resultRecord.commercialLayerSets,
+    `${path}.result.commercialLayerSets`
+  );
+  integerAt(
+    resultRecord.physicalStripCount,
+    `${path}.result.physicalStripCount`
+  );
+  decimalAt(resultRecord.layerAmountToman, `${path}.result.layerAmountToman`);
+  decimalAt(resultRecord.materialAmountToman, `${path}.result.materialAmountToman`);
+  decimalAt(resultRecord.cuttingAmountToman, `${path}.result.cuttingAmountToman`);
+  decimalAt(resultRecord.operationsAmountToman, `${path}.result.operationsAmountToman`);
+  decimalAt(resultRecord.totalAmountToman, `${path}.result.totalAmountToman`);
+  const result = structuredClone(
+    resultRecord
+  ) as unknown as StairLayerConfigurationResult;
   return {
-    layerConfigurationId: identityAt(
-      record.layerConfigurationId,
-      'layer-configuration',
-      `${path}.layerConfigurationId`
-    ),
-    parentProductRowId: identityAt(
-      record.parentProductRowId,
-      'product-row',
-      `${path}.parentProductRowId`
-    ),
-    ...(optionalIdentityAt(record, 'sourceBatchId', 'source-batch', path)
-      ? { sourceBatchId: optionalIdentityAt(record, 'sourceBatchId', 'source-batch', path) }
-      : {})
+    layerConfigurationId,
+    parentProductRowId,
+    sourceBatchId,
+    creationOrder,
+    input,
+    result
   };
 };
 
@@ -889,6 +928,14 @@ const addRowSellerIntentAt = (
           stairPartPolicyInput: parseStairPartPolicyInput(
             sellerIntent.stairPartPolicyInput
           )
+        }),
+    ...(sellerIntent.layerConfigurationInputs === undefined
+      ? {}
+      : {
+          layerConfigurationInputs: arrayAt(
+            sellerIntent.layerConfigurationInputs,
+            `${path}.layerConfigurationInputs`
+          ).map(item => parseStairLayerConfigurationInput(item))
         })
   };
 };
@@ -899,10 +946,11 @@ export const parseProductGraphCommand = (value: unknown): ProductGraphCommand =>
     record.type !== 'add-row' &&
     record.type !== 'replace-row' &&
     record.type !== 'delete-row' &&
+    record.type !== 'delete-layer-configuration' &&
     record.type !== 'add-stair-system'
   ) {
     throw new TypeError(
-      'command.type must be add-row, replace-row, delete-row, or add-stair-system.'
+      'command.type must be add-row, replace-row, delete-row, delete-layer-configuration, or add-stair-system.'
     );
   }
   const sellerIntent = recordAt(record.sellerIntent, 'command.sellerIntent');
@@ -933,6 +981,19 @@ export const parseProductGraphCommand = (value: unknown): ProductGraphCommand =>
           sellerIntent.productRowId,
           'product-row',
           'command.sellerIntent.productRowId'
+        )
+      }
+    };
+  }
+  if (record.type === 'delete-layer-configuration') {
+    return {
+      ...common,
+      type: 'delete-layer-configuration',
+      sellerIntent: {
+        layerConfigurationId: identityAt(
+          sellerIntent.layerConfigurationId,
+          'layer-configuration',
+          'command.sellerIntent.layerConfigurationId'
         )
       }
     };

@@ -104,7 +104,7 @@ import {
 import { PRODUCT_TYPES, WIZARD_STEPS } from '@/features/contract-creation/constants/contract.constants';
 
 // Import utilities
-import { generateCompactProductName, generateFullProductName, generateSlabContractProductName, inferCatalogContractType, productSupportsContractType } from '@/features/contract-creation/utils/productUtils';
+import { generateCompactProductName, generateFullProductName, generateSlabContractProductName, inferCatalogContractType, productSupportsContractRoute, productSupportsContractType } from '@/features/contract-creation/utils/productUtils';
 import {
   hasLayerEdgeSelection,
   deriveLayerEdgesFromTools,
@@ -366,6 +366,47 @@ const createLayerSideOperationInput = (
     groups: current?.groups ?? [],
     tools: current?.tools ?? [],
     finishings: current?.finishings ?? []
+  };
+};
+
+const cloneLayerOperationsForSide = (
+  template: ProductOperationsInput,
+  target: ProductOperationsInput,
+  side: 'front' | 'back' | 'left' | 'right'
+): ProductOperationsInput => {
+  const scopedIdentity = (value: string) =>
+    `${value.replace(/:layer-side:(front|back|left|right)$/, '')}:layer-side:${side}`;
+  const groupIds = new Map(
+    template.groups.map(group => [
+      String(group.operationGroupId),
+      parseStableIdentity(
+        'operation-group',
+        scopedIdentity(String(group.operationGroupId))
+      )
+    ])
+  );
+  return {
+    ...target,
+    groups: template.groups.map(group => ({
+      ...group,
+      operationGroupId: groupIds.get(String(group.operationGroupId))!
+    })),
+    tools: template.tools.map(tool => ({
+      ...tool,
+      toolSelectionId: parseStableIdentity(
+        'tool-selection',
+        scopedIdentity(String(tool.toolSelectionId))
+      ),
+      operationGroupId: groupIds.get(String(tool.operationGroupId))!
+    })),
+    finishings: template.finishings.map(finishing => ({
+      ...finishing,
+      finishingSelectionId: parseStableIdentity(
+        'finishing-selection',
+        scopedIdentity(String(finishing.finishingSelectionId))
+      ),
+      operationGroupId: groupIds.get(String(finishing.operationGroupId))!
+    }))
   };
 };
 
@@ -1693,7 +1734,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   const stairConflictMessage = (code: string, motherLength?: number | null) => {
     if (code === 'stair-mother-dimensions-required') {
-      return 'طول مادر در موجودی ثبت نشده است';
+      return 'عرض مادر در موجودی ثبت نشده است';
     }
     if (code === 'stair-maximum-mother-length-exceeded') {
       return `حداکثر طول این سنگ ${formatDisplayNumber(motherLength || 0)} متر است`;
@@ -1871,17 +1912,29 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     stairSystemV2.setIsSearchingStones(true);
     const timeout = setTimeout(async () => {
       try {
-        const res = await salesAPI.getProducts({ search: term, limit: 10, contractType: 'stair' });
+        const [stairResponse, longitudinalResponse] = await Promise.all([
+          salesAPI.getProducts({ search: term, limit: 10, contractType: 'stair' }),
+          salesAPI.getProducts({
+            search: term,
+            limit: 10,
+            contractType: 'longitudinal'
+          })
+        ]);
         if (!active) return;
-        const rawItems: Product[] = (res?.data?.items || res?.data?.data || []) as Product[];
+        const rawItems: Product[] = [
+          ...(stairResponse?.data?.items || stairResponse?.data?.data || []),
+          ...(longitudinalResponse?.data?.items ||
+            longitudinalResponse?.data?.data ||
+            [])
+        ] as Product[];
 
         const localFallbackProducts = products.filter(product =>
-          productSupportsContractType(product, 'stair') &&
+          productSupportsContractRoute(product, 'stair') &&
           productMatchesSearch(product, term, generateFullProductName(product))
         );
         const uniqueProducts = uniqueProductsByIdentity([...rawItems, ...localFallbackProducts]);
         const stairEligibleProducts = uniqueProducts.filter(product =>
-          productSupportsContractType(product, 'stair')
+          productSupportsContractRoute(product, 'stair')
         );
         stairSystemV2.setStoneSearchResults(stairEligibleProducts);
       } catch (e) {
@@ -1904,15 +1957,27 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     stairSystemV2.setIsSearchingLayerStones(true);
     const timeout = setTimeout(async () => {
       try {
-        const res = await salesAPI.getProducts({ search: term, limit: 10, contractType: 'stair' });
+        const [stairResponse, longitudinalResponse] = await Promise.all([
+          salesAPI.getProducts({ search: term, limit: 10, contractType: 'stair' }),
+          salesAPI.getProducts({
+            search: term,
+            limit: 10,
+            contractType: 'longitudinal'
+          })
+        ]);
         if (!active) return;
-        const rawItems: Product[] = (res?.data?.items || res?.data?.data || []) as Product[];
+        const rawItems: Product[] = [
+          ...(stairResponse?.data?.items || stairResponse?.data?.data || []),
+          ...(longitudinalResponse?.data?.items ||
+            longitudinalResponse?.data?.data ||
+            [])
+        ] as Product[];
         const localFallbackProducts = products.filter(product =>
-          productSupportsContractType(product, 'stair') &&
+          productSupportsContractRoute(product, 'stair') &&
           productMatchesSearch(product, term, generateFullProductName(product))
         );
         const stairEligible = uniqueProductsByIdentity([...rawItems, ...localFallbackProducts])
-          .filter(product => productSupportsContractType(product, 'stair'));
+          .filter(product => productSupportsContractRoute(product, 'stair'));
         stairSystemV2.setLayerStoneSearchResults(stairEligible);
       } catch (e) {
         console.error('Layer stone search failed', e);
@@ -2791,7 +2856,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       contractualTitle: product ? productLabel : '',
       pricePerSquareMeter: null,
       thicknessCm: product ? (product.thicknessValue ?? null) : null,
-      standardLengthValue: product?.motherLengthValue ?? null,
+      standardLengthValue: null,
       standardLengthUnit: 'm',
       operationPolicyInput: product
         ? createStairOperationInput(partType, prev, product.id)
@@ -3083,7 +3148,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   // Handle product selection and open configuration modal
   const handleProductSelection = (product: Product) => {
     const rememberedType = wizardData.selectedProductTypeForAddition;
-    const selectedProductType = rememberedType && productSupportsContractType(product, rememberedType)
+    const selectedProductType = rememberedType && productSupportsContractRoute(product, rememberedType)
       ? rememberedType
       : inferCatalogContractType(product);
 
@@ -3325,10 +3390,21 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             numberOfLayersPerStair: isLayer && layerInfo ? layerInfo.numberOfLayersPerStair : null,
             layerWidthCm: isLayer ? p.width : null,
             standardLengthValue:
-              Number((p.meta as any)?.stair?.motherLengthMeters) ||
-              Number(p.product?.motherLengthValue) ||
-              null,
-            standardLengthUnit: 'm',
+              (p.meta as any)?.stair?.motherLengthMode === 'explicit'
+                ? Number(
+                    p.standardLengthValue ||
+                    (p.meta as any)?.stair?.motherLengthMeters ||
+                    0
+                  ) || null
+                : null,
+            standardLengthUnit:
+              (p.meta as any)?.stair?.motherLengthMode === 'explicit'
+                ? (
+                    p.standardLengthUnit ||
+                    (p.meta as any)?.stair?.motherLengthDisplayUnit ||
+                    'm'
+                  )
+                : 'm',
             finishingEnabled: legacyOperationPolicyInput
               ? false
               : !!(p.finishingId || p.finishingCost || metaFinishing.id || metaFinishing.cost),
@@ -3391,6 +3467,19 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       .map((entry: any) => [entry.side, entry.input])
                   )
                 : {},
+              layerOperationEditingScope:
+                (layerProduct.meta as any)?.layerOperationEditingScope ||
+                'all',
+              layerDetachedOperationSides:
+                (layerProduct.meta as any)?.layerDetachedOperationSides ||
+                (
+                  Array.isArray((layerProduct.meta as any)?.layerSideOperations)
+                    ? (layerProduct.meta as any).layerSideOperations
+                        .map((entry: any) => entry?.side)
+                        .filter(Boolean)
+                    : []
+                ),
+              layerRemovedSideConflicts: [],
               layerUseDifferentStone: layerProduct.layerUseDifferentStone || !!layerAltStoneMeta,
               layerStoneProductId: layerProduct.layerUseDifferentStone
                 ? (layerProduct.layerStoneProductId || layerAltStoneMeta?.id || layerProduct.productId)
@@ -5724,8 +5813,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         {/* Product Configuration Modal */}
         {showProductModal && productConfig.productType === 'stair' && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4">
-            <div className="stair-v2-modal bg-white dark:bg-gray-800 rounded-xl max-w-4xl w-full max-h-[90vh] flex flex-col z-[10000]">
-              <div className="stair-v2-header flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
+            <div className="stair-v2-modal bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100 rounded-xl max-w-4xl w-full max-h-[90vh] flex flex-col z-[10000]">
+              <div className="stair-v2-header flex flex-shrink-0 items-center justify-between border-b border-gray-200 bg-white/95 p-4 backdrop-blur-md dark:border-gray-700 dark:bg-slate-900/95">
                 <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
                   تنظیمات محصول
                 </h3>
@@ -5739,7 +5828,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               </div>
 
               {/* Type Switcher (stair V2 modal) */}
-              <div className="stair-v2-type-selector flex-shrink-0 border-b border-gray-200 px-4 py-2 dark:border-gray-700">
+              <div className="stair-v2-type-selector flex-shrink-0 border-b border-gray-200 bg-white/95 px-4 py-2 backdrop-blur-md dark:border-gray-700 dark:bg-slate-900/95">
                 {isEditMode ? (
                   <div className="flex min-h-8 items-center justify-between text-xs">
                     <span className="font-semibold text-slate-600 dark:text-slate-300">نوع محصول</span>
@@ -5761,7 +5850,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 )}
               </div>
 
-              <div className="stair-v2-body flex-1 overflow-y-auto">
+              <div className="stair-v2-body flex-1 overflow-y-auto bg-white dark:bg-slate-900">
                 <div className="p-6 space-y-6">
                   {!isEditMode && (
                     <StairQuantityModeSection
@@ -5783,7 +5872,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   </div>
                 {(() => {
                   const [draft, setDraft] = getActiveDraft();
-                   const totals = computeTotalsV2(stairSystemV2.stairActivePart, draft);
+                  const totals = computeTotalsV2(stairSystemV2.stairActivePart, draft);
+                  const canonicalStairPreview = totals.canonicalCalculation.ok
+                    ? totals.canonicalCalculation.result
+                    : null;
                    const stairOperationPreview = draft.operationPolicyInput &&
                      draft.stoneProduct &&
                      getActualLengthMeters(draft) > 0 &&
@@ -5859,6 +5951,46 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   const mandatoryEnabled = draft.useMandatory ?? defaultMandatoryEnabled;
                   const supportsMandatory = stairSystemV2.stairActivePart === 'tread' || stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
                   const mandatoryPercentageValue = draft.mandatoryPercentage ?? 20;
+                  const setLayerSideEnabled = (
+                    side: 'front' | 'back' | 'left' | 'right',
+                    enabled: boolean
+                  ) => {
+                    const currentOperations =
+                      draft.layerSideOperations?.[side];
+                    const hasOperations = Boolean(
+                      currentOperations &&
+                      (
+                        currentOperations.tools.length > 0 ||
+                        currentOperations.finishings.length > 0
+                      )
+                    );
+                    const isDedicated =
+                      draft.layerDetachedOperationSides?.includes(side);
+                    const nextConflicts = new Set(
+                      draft.layerRemovedSideConflicts || []
+                    );
+                    const nextOperations = {
+                      ...(draft.layerSideOperations || {})
+                    };
+                    if (!enabled && hasOperations && isDedicated) {
+                      nextConflicts.add(side);
+                    } else if (!enabled) {
+                      delete nextOperations[side];
+                      nextConflicts.delete(side);
+                    } else {
+                      nextConflicts.delete(side);
+                    }
+                    setDraft({
+                      ...draft,
+                      layerEdges: {
+                        ...(draft.layerEdges || {}),
+                        perimeter: false,
+                        [side]: enabled
+                      },
+                      layerSideOperations: nextOperations,
+                      layerRemovedSideConflicts: Array.from(nextConflicts)
+                    });
+                  };
                   return (
                     <div className="space-y-6">
                       {!totals.canonicalCalculation.ok && (
@@ -5881,11 +6013,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         {draft.stoneProduct && (
                           <div className="mb-3 border-y border-slate-100 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-300">
                             {draft.stoneProduct.namePersian}
-                            {Number(draft.stoneProduct.motherLengthValue) > 0
-                              ? ` · مادر ${formatDisplayNumber(Number(draft.stoneProduct.motherLengthValue))}m × ${formatDisplayNumber(draft.stoneProduct.widthValue || 0)}cm`
-                              : draft.stoneProduct.widthValue
-                                ? ` · عرض مادر ${formatDisplayNumber(draft.stoneProduct.widthValue)}cm`
-                                : ''}
+                            {draft.stoneProduct.widthValue
+                              ? ` · عرض مادر ${formatDisplayNumber(draft.stoneProduct.widthValue)}cm`
+                              : ''}
                             {draft.stoneProduct.thicknessValue
                               ? ` · ضخامت ${formatDisplayNumber(draft.stoneProduct.thicknessValue)}cm`
                               : ''}
@@ -5966,55 +6096,101 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               const normalizedValue = value && value > 0 ? value : null;
                               const updatedDraft: StairPartDraftV2 = { ...draft, lengthValue: normalizedValue };
                               const error = validateDraftNumericFields(stairSystemV2.stairActivePart, updatedDraft, 'length', value);
-                              if (error) {
-                                stairSystemV2.setStairDraftErrors(prev => ({
-                                  ...prev,
-                                  [stairSystemV2.stairActivePart]: { ...prev[stairSystemV2.stairActivePart], length: error }
-                                }));
-                              } else {
-                                clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'length');
-                              }
+                              const motherLengthError = validateDraftNumericFields(
+                                stairSystemV2.stairActivePart,
+                                updatedDraft,
+                                'motherLength',
+                                updatedDraft.standardLengthValue ?? null
+                              );
+                              stairSystemV2.setStairDraftErrors(prev => ({
+                                ...prev,
+                                [stairSystemV2.stairActivePart]: {
+                                  ...prev[stairSystemV2.stairActivePart],
+                                  length: error || undefined,
+                                  motherLength: motherLengthError || undefined
+                                }
+                              }));
                               setDraft(updatedDraft);
                             }}
                                 min={0}
                                 step={0.01}
                                 className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
                               />
-                            {false && stairSystemV2.stairActivePart !== 'riser' && (
                             <div className="mt-3">
-                              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
-                                طول استاندارد (برای قیمت‌گذاری)
-                              </label>
-                              <div className="flex gap-2">
-                                <FormattedNumberInput
-                                  value={draft.standardLengthValue ?? null}
-                                  onChange={(value) => {
-                                    const normalized = value && value > 0 ? value : null;
-                                    const updatedDraft: StairPartDraftV2 = { ...draft, standardLengthValue: normalized };
-                                    if (normalized && normalized > 0) {
-                                      clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'length');
-                                    }
+                              <label className="mb-2 flex items-center justify-between text-sm font-medium text-gray-700 dark:text-gray-300">
+                                <span>طول مادر</span>
+                                <CompactUnitSwitch
+                                  label="واحد طول مادر"
+                                  value={
+                                    draft.standardLengthValue === null ||
+                                    draft.standardLengthValue === undefined
+                                      ? ''
+                                      : String(draft.standardLengthValue)
+                                  }
+                                  unit={
+                                    draft.standardLengthUnit ||
+                                    draft.lengthUnit ||
+                                    'm'
+                                  }
+                                  onChange={next => {
+                                    const updatedDraft: StairPartDraftV2 = {
+                                      ...draft,
+                                      standardLengthValue: next.value
+                                        ? Number(next.value)
+                                        : null,
+                                      standardLengthUnit: next.unit
+                                    };
+                                    const error = validateDraftNumericFields(
+                                      stairSystemV2.stairActivePart,
+                                      updatedDraft,
+                                      'motherLength',
+                                      updatedDraft.standardLengthValue ?? null
+                                    );
+                                    stairSystemV2.setStairDraftErrors(previous => ({
+                                      ...previous,
+                                      [stairSystemV2.stairActivePart]: {
+                                        ...previous[stairSystemV2.stairActivePart],
+                                        motherLength: error || undefined
+                                      }
+                                    }));
                                     setDraft(updatedDraft);
                                   }}
-                                  min={0}
-                                  step={0.01}
-                                  className="flex-1 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
                                 />
-                                <select
-                                  className="rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all font-medium"
-                                  value={draft.standardLengthUnit || draft.lengthUnit || 'm'}
-                                  onChange={(e) => setDraft({ ...draft, standardLengthUnit: (e.target.value as UnitType) })}
-                                  aria-label="واحد طول استاندارد"
-                                >
-                                  <option value="m">m</option>
-                                  <option value="cm">cm</option>
-                                </select>
-                              </div>
-                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                اگر طول واقعی وارد نشود، از همین طول استاندارد برای محاسبه قیمت استفاده می‌شود.
-                              </p>
+                              </label>
+                              <FormattedNumberInput
+                                value={draft.standardLengthValue ?? null}
+                                onChange={value => {
+                                  const normalized =
+                                    value && value > 0 ? value : null;
+                                  const updatedDraft: StairPartDraftV2 = {
+                                    ...draft,
+                                    standardLengthValue: normalized
+                                  };
+                                  const error = validateDraftNumericFields(
+                                    stairSystemV2.stairActivePart,
+                                    updatedDraft,
+                                    'motherLength',
+                                    normalized
+                                  );
+                                  stairSystemV2.setStairDraftErrors(previous => ({
+                                    ...previous,
+                                    [stairSystemV2.stairActivePart]: {
+                                      ...previous[stairSystemV2.stairActivePart],
+                                      motherLength: error || undefined
+                                    }
+                                  }));
+                                  setDraft(updatedDraft);
+                                }}
+                                min={0}
+                                step={0.01}
+                                className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-2.5 text-gray-800 transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-700/50 dark:text-white"
+                              />
+                              {draftErrors.motherLength && (
+                                <p className="mt-1 text-xs text-red-500">
+                                  {draftErrors.motherLength}
+                                </p>
+                              )}
                             </div>
-                            )}
                           {draftErrors.length && (
                             <p className="mt-1 text-xs text-red-500">{draftErrors.length}</p>
                           )}
@@ -6143,9 +6319,49 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             </div>
                           )}
 
-                          <div className="flex min-h-10 items-center justify-between border-y border-slate-100 text-sm dark:border-slate-700">
-                            <span className="text-slate-500">متر مربع</span>
-                            <strong>{formatDisplayNumber(totals.sqm)}m²</strong>
+                          <div className="md:col-span-2 divide-y divide-slate-100 border-y border-slate-100 text-sm dark:divide-slate-700 dark:border-slate-700">
+                            <div className="flex min-h-10 items-center justify-between">
+                              <span className="text-slate-500 dark:text-slate-400">
+                                محصول نهایی
+                              </span>
+                              <strong>
+                                {formatDisplayNumber(
+                                  canonicalStairPreview
+                                    ? Number(canonicalStairPreview.requestedAreaSquareMeters)
+                                    : totals.sqm
+                                )}m²
+                              </strong>
+                            </div>
+                            <div className="flex min-h-10 items-center justify-between">
+                              <span className="text-slate-500 dark:text-slate-400">
+                                سنگ مادر مصرفی
+                              </span>
+                              <strong>
+                                {canonicalStairPreview
+                                  ? `${formatDisplayNumber(Number(canonicalStairPreview.consumedMotherAreaSquareMeters))}m²`
+                                  : '—'}
+                              </strong>
+                            </div>
+                            <div className="flex min-h-10 items-center justify-between">
+                              <span className="text-slate-500 dark:text-slate-400">
+                                باقی‌مانده پرداخت‌شده
+                              </span>
+                              <strong>
+                                {canonicalStairPreview
+                                  ? `${formatDisplayNumber(Number(canonicalStairPreview.paidRemainderAreaSquareMeters))}m²`
+                                  : '—'}
+                              </strong>
+                            </div>
+                            <div className="flex min-h-10 items-center justify-between">
+                              <span className="text-slate-500 dark:text-slate-400">
+                                مبلغ ماده
+                              </span>
+                              <strong>
+                                {canonicalStairPreview
+                                  ? formatPrice(Number(canonicalStairPreview.baseAmountToman))
+                                  : '—'}
+                              </strong>
+                            </div>
                           </div>
 
                           <div>
@@ -6566,6 +6782,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 }
                                 if (!draft.layerSourceKind) {
                                   layerErrors.layerSource = 'منبع سنگ لایه را انتخاب کنید';
+                                } else if (draft.layerRemovedSideConflicts?.length) {
+                                  layerErrors.layerSource = 'عملیات سمت حذف‌شده را تعیین تکلیف کنید';
                                 } else if (
                                   draft.layerSourceKind === 'contractRemainder' &&
                                   !(draft.layerSelectedRemainingStoneIds?.length)
@@ -7220,17 +7438,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     <input
                                       type="checkbox"
                                       checked={!!(draft.layerEdges?.front)}
-                                      onChange={(e) => {
-                                        const currentEdges = draft.layerEdges || {};
-                                        setDraft({
-                                          ...draft,
-                                          layerEdges: {
-                                            ...currentEdges,
-                                            front: e.target.checked,
-                                            perimeter: e.target.checked ? false : currentEdges.perimeter
-                                          }
-                                        });
-                                      }}
+                                      onChange={(e) =>
+                                        setLayerSideEnabled('front', e.target.checked)
+                                      }
                                       className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                                       disabled={!!(draft.layerEdges?.perimeter)}
                                     />
@@ -7240,17 +7450,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       <input
                                         type="checkbox"
                                         checked={!!(draft.layerEdges?.back)}
-                                        onChange={(e) => {
-                                          const currentEdges = draft.layerEdges || {};
-                                          setDraft({
-                                            ...draft,
-                                            layerEdges: {
-                                              ...currentEdges,
-                                              back: e.target.checked,
-                                              perimeter: e.target.checked ? false : currentEdges.perimeter
-                                            }
-                                          });
-                                        }}
+                                        onChange={(e) =>
+                                          setLayerSideEnabled('back', e.target.checked)
+                                        }
                                         className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                                         disabled={!!(draft.layerEdges?.perimeter)}
                                       />
@@ -7260,17 +7462,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     <input
                                       type="checkbox"
                                       checked={!!(draft.layerEdges?.left)}
-                                      onChange={(e) => {
-                                        const currentEdges = draft.layerEdges || {};
-                                        setDraft({
-                                          ...draft,
-                                          layerEdges: {
-                                            ...currentEdges,
-                                            left: e.target.checked,
-                                            perimeter: e.target.checked ? false : currentEdges.perimeter
-                                          }
-                                        });
-                                      }}
+                                      onChange={(e) =>
+                                        setLayerSideEnabled('left', e.target.checked)
+                                      }
                                       className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                                       disabled={!!(draft.layerEdges?.perimeter)}
                                     />
@@ -7280,17 +7474,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     <input
                                       type="checkbox"
                                       checked={!!(draft.layerEdges?.right)}
-                                      onChange={(e) => {
-                                        const currentEdges = draft.layerEdges || {};
-                                        setDraft({
-                                          ...draft,
-                                          layerEdges: {
-                                            ...currentEdges,
-                                            right: e.target.checked,
-                                            perimeter: e.target.checked ? false : currentEdges.perimeter
-                                          }
-                                        });
-                                      }}
+                                      onChange={(e) =>
+                                        setLayerSideEnabled('right', e.target.checked)
+                                      }
                                       className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                                       disabled={!!(draft.layerEdges?.perimeter)}
                                     />
@@ -7302,6 +7488,64 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     لطفاً حداقل یک لبه را انتخاب کنید
                                   </p>
                                 )}
+                                {(draft.layerRemovedSideConflicts || []).map(side => {
+                                  const sideLabel = {
+                                    front: 'جلو',
+                                    back: 'عقب',
+                                    left: 'چپ',
+                                    right: 'راست'
+                                  }[side];
+                                  const sideOperations =
+                                    draft.layerSideOperations?.[side];
+                                  return (
+                                    <div
+                                      key={`removed-layer-side:${side}`}
+                                      className="mt-2 border-y border-red-200 py-2 text-xs dark:border-red-900"
+                                    >
+                                      <div className="font-semibold text-red-600 dark:text-red-300">
+                                        سمت {sideLabel} دارای عملیات اختصاصی است
+                                      </div>
+                                      <div className="mt-1 text-slate-500 dark:text-slate-400">
+                                        {(sideOperations?.tools.length || 0)} ابزار · {(sideOperations?.finishings.length || 0)} پرداخت
+                                      </div>
+                                      <div className="mt-2 flex gap-3">
+                                        <button
+                                          type="button"
+                                          className="font-semibold text-teal-700 dark:text-teal-300"
+                                          onClick={() =>
+                                            setLayerSideEnabled(side, true)
+                                          }
+                                        >
+                                          بازگرداندن سمت
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="font-semibold text-red-600"
+                                          onClick={() => {
+                                            const nextOperations = {
+                                              ...(draft.layerSideOperations || {})
+                                            };
+                                            delete nextOperations[side];
+                                            setDraft({
+                                              ...draft,
+                                              layerSideOperations: nextOperations,
+                                              layerDetachedOperationSides: (
+                                                draft.layerDetachedOperationSides ||
+                                                []
+                                              ).filter(item => item !== side),
+                                              layerRemovedSideConflicts: (
+                                                draft.layerRemovedSideConflicts ||
+                                                []
+                                              ).filter(item => item !== side)
+                                            });
+                                          }}
+                                        >
+                                          حذف سمت و عملیات آن
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
 
                               {draft.layerWidthCm &&
@@ -7315,35 +7559,126 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     draft.layerEdges?.perimeter ||
                                     Boolean(draft.layerEdges?.[side])
                                   );
-                                  return selectedSides.map(side => (
-                                    <div
-                                      key={side}
-                                      className="md:col-span-2 border-t border-slate-200 pt-3 dark:border-slate-700"
-                                    >
-                                      <div className="mb-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                                        عملیات لایه · {{
-                                          front: 'جلو',
-                                          back: 'عقب',
-                                          left: 'چپ',
-                                          right: 'راست'
-                                        }[side]}
+                                  if (selectedSides.length === 0) return null;
+                                  const sideLabels = {
+                                    front: 'جلو',
+                                    back: 'عقب',
+                                    left: 'چپ',
+                                    right: 'راست'
+                                  } as const;
+                                  const requestedScope =
+                                    draft.layerOperationEditingScope || 'all';
+                                  const editingScope =
+                                    requestedScope === 'all' ||
+                                    selectedSides.includes(requestedScope)
+                                      ? requestedScope
+                                      : 'all';
+                                  const referenceSide =
+                                    editingScope === 'all'
+                                      ? selectedSides[0]
+                                      : editingScope;
+                                  const referenceInput =
+                                    createLayerSideOperationInput(
+                                      stairSystemV2.stairActivePart,
+                                      draft,
+                                      referenceSide,
+                                      draft.stoneProduct!.id
+                                    );
+                                  const sideBreakdown = selectedSides.map(side => {
+                                    const input = createLayerSideOperationInput(
+                                      stairSystemV2.stairActivePart,
+                                      draft,
+                                      side,
+                                      draft.stoneProduct!.id
+                                    );
+                                    const calculation =
+                                      calculateProductOperations(input);
+                                    return {
+                                      side,
+                                      input,
+                                      calculation
+                                    };
+                                  });
+                                  return (
+                                    <div className="md:col-span-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+                                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                        <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                          عملیات لایه
+                                        </span>
+                                        <CompactSegmentedControl
+                                          label="اعمال روی"
+                                          value={editingScope}
+                                          options={[
+                                            { value: 'all', label: 'همه نوارها' },
+                                            ...selectedSides.map(side => ({
+                                              value: side,
+                                              label: sideLabels[side]
+                                            }))
+                                          ]}
+                                          onChange={scope => setDraft({
+                                            ...draft,
+                                            layerOperationEditingScope:
+                                              scope as
+                                                | 'all'
+                                                | 'front'
+                                                | 'back'
+                                                | 'left'
+                                                | 'right'
+                                          })}
+                                        />
                                       </div>
                                       <OperationCollectionsSection
-                                        input={createLayerSideOperationInput(
-                                          stairSystemV2.stairActivePart,
-                                          draft,
-                                          side,
-                                          draft.stoneProduct!.id
-                                        )}
-                                        onChange={operationInput => setDraft({
-                                          ...draft,
-                                          layerSideOperations: {
-                                            ...(draft.layerSideOperations || {}),
-                                            [side]: operationInput
+                                        input={referenceInput}
+                                        onChange={operationInput => {
+                                          if (editingScope === 'all') {
+                                            const nextSideOperations = {
+                                              ...(draft.layerSideOperations || {})
+                                            };
+                                            selectedSides.forEach(side => {
+                                              nextSideOperations[side] =
+                                                cloneLayerOperationsForSide(
+                                                  operationInput,
+                                                  createLayerSideOperationInput(
+                                                    stairSystemV2.stairActivePart,
+                                                    draft,
+                                                    side,
+                                                    draft.stoneProduct!.id
+                                                  ),
+                                                  side
+                                                );
+                                            });
+                                            setDraft({
+                                              ...draft,
+                                              layerSideOperations:
+                                                nextSideOperations,
+                                              layerDetachedOperationSides: (
+                                                draft.layerDetachedOperationSides ||
+                                                []
+                                              ).filter(side =>
+                                                !selectedSides.includes(side)
+                                              )
+                                            });
+                                            return;
                                           }
-                                        })}
-                                        toolCacheKey={`stair-layer-tools:${side}`}
-                                        finishingCacheKey={`stair-layer-finishings:${side}`}
+                                          setDraft({
+                                            ...draft,
+                                            layerSideOperations: {
+                                              ...(draft.layerSideOperations || {}),
+                                              [editingScope]: operationInput
+                                            },
+                                            layerDetachedOperationSides: Array.from(
+                                              new Set([
+                                                ...(
+                                                  draft.layerDetachedOperationSides ||
+                                                  []
+                                                ),
+                                                editingScope
+                                              ])
+                                            )
+                                          });
+                                        }}
+                                        toolCacheKey="stair-layer-tools"
+                                        finishingCacheKey="stair-layer-finishings"
                                         loadTools={async () => subServices.map(tool => ({
                                           catalogItemId: tool.id,
                                           catalogSnapshotVersion: String(
@@ -7386,8 +7721,25 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           })()
                                         }))}
                                       />
+                                      <div className="mt-2 divide-y divide-slate-100 border-y border-slate-100 text-xs dark:divide-slate-800 dark:border-slate-800">
+                                        {sideBreakdown.map(entry => (
+                                          <div
+                                            key={entry.side}
+                                            className="flex min-h-8 items-center justify-between gap-3"
+                                          >
+                                            <span className="text-slate-500 dark:text-slate-400">
+                                              {sideLabels[entry.side]} — {entry.input.quantity || 0} × {formatDisplayNumber(Number(entry.input.lengthMeters))}m
+                                            </span>
+                                            <strong>
+                                              {entry.calculation.ok
+                                                ? formatPrice(Number(entry.calculation.result.totalAmountToman))
+                                                : '—'}
+                                            </strong>
+                                          </div>
+                                        ))}
+                                      </div>
                                     </div>
-                                  ));
+                                  );
                                 })()}
                               <label className="md:col-span-2 border-t border-slate-200 pt-3 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">
                                 توضیحات لایه
@@ -8098,7 +8450,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 </div>
                 </div>
               </div>
-              <div className="stair-v2-footer p-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-2 flex-shrink-0">
+              <div className="stair-v2-footer flex flex-shrink-0 items-center justify-end gap-2 border-t border-gray-200 bg-white/95 p-4 backdrop-blur-md dark:border-gray-700 dark:bg-slate-900/95">
                 <button type="button" className="px-3 py-2 rounded-md bg-gray-200 dark:bg-gray-700" onClick={() => setShowProductModal(false)}>انصراف</button>
                 <button type="button" className="min-h-11 rounded-lg border border-teal-400/60 bg-teal-500/10 px-4 py-2 text-sm font-semibold text-teal-700 transition hover:bg-teal-500/20 dark:text-teal-200" onClick={() => {
                   const [draft] = getActiveDraft();
@@ -8529,8 +8881,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       (applied) => applied.meter
                     ),
                     cuttingBreakdown: cuttingBreakdown.length ? cuttingBreakdown : undefined,
-                    standardLengthValue: null,
-                    standardLengthUnit: draft.lengthUnit || 'm',
+                    standardLengthValue:
+                      draft.standardLengthValue &&
+                      draft.standardLengthValue > 0
+                        ? draft.standardLengthValue
+                        : null,
+                    standardLengthUnit:
+                      draft.standardLengthUnit || draft.lengthUnit || 'm',
                     actualLengthMeters: actualLengthM || null,
                     finishingId: draft.finishingEnabled ? draft.finishingId || null : null,
                     finishingCode: draft.finishingEnabled ? (selectedFinishing?.code || null) : null,
@@ -8547,7 +8904,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       tools: metaTools,
                       stair: {
                         motherLengthMeters: canonicalStairResult.motherLengthMeters,
+                        motherLengthMode: canonicalStairResult.motherLengthMode,
+                        motherLengthDisplayUnit:
+                          canonicalStairResult.motherLengthDisplayUnit,
                         motherWidthMeters: canonicalStairResult.motherWidthMeters,
+                        consumedMotherAreaSquareMeters:
+                          canonicalStairResult.consumedMotherAreaSquareMeters,
+                        paidRemainderAreaSquareMeters:
+                          canonicalStairResult.paidRemainderAreaSquareMeters,
                         calculationPolicyVersion: canonicalStairResult.calculationPolicyVersion,
                         packingPolicyVersion: canonicalStairResult.packingPlan.policyVersion,
                         inputHash: canonicalStairResult.inputHash,
@@ -9352,6 +9716,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   ? entry.calculation.result
                                   : null
                               })),
+                            layerOperationEditingScope:
+                              draft.layerOperationEditingScope || 'all',
+                            layerDetachedOperationSides:
+                              draft.layerDetachedOperationSides || [],
                             layerSourcePlan: {
                               canonicalInput:
                                 canonicalLayerRequest.input,
@@ -9649,13 +10017,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 .stair-v2-type-selector,
                 .stair-v2-footer {
                   padding-inline: 1rem !important;
-                  background-color: rgb(255 255 255 / 0.96) !important;
                   backdrop-filter: blur(12px);
-                }
-                .dark .stair-v2-header,
-                .dark .stair-v2-type-selector,
-                .dark .stair-v2-footer {
-                  background-color: rgb(15 23 42 / 0.96) !important;
                 }
                 .stair-v2-header {
                   min-height: 4rem;

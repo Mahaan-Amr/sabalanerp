@@ -140,3 +140,62 @@ console.log('catalogProductRanking tests passed');
     'slab'
   );
 }
+
+{
+  const longitudinalOnly = product({
+    id: 'catalog-longitudinal-for-stair',
+    code: 'L-40',
+    namePersian: 'طولی گرانیت نطنز',
+    cuttingDimensionNamePersian: 'طولی',
+    availableInLongitudinalContracts: true,
+    availableInStairContracts: false
+  });
+  const explicitStair = product({
+    id: 'catalog-explicit-stair',
+    code: 'S-40',
+    namePersian: 'سنگ پله گرانیت',
+    cuttingDimensionNamePersian: 'پله',
+    availableInLongitudinalContracts: false,
+    availableInStairContracts: true
+  });
+  const duplicateLongitudinalIdentity = {
+    ...longitudinalOnly,
+    namePersian: 'عنوان تکراری همان محصول'
+  };
+  const slabOnly = product({
+    id: 'catalog-slab-only',
+    code: 'SLAB-1',
+    namePersian: 'اسلب مستقل',
+    cuttingDimensionNamePersian: 'اسلب',
+    availableInLongitudinalContracts: false,
+    availableInStairContracts: false,
+    availableInSlabContracts: true
+  });
+
+  const stairRoute = rankContractCatalogProducts({
+    products: [
+      longitudinalOnly,
+      explicitStair,
+      duplicateLongitudinalIdentity,
+      slabOnly
+    ],
+    query: '',
+    activeType: 'stair'
+  });
+  assert.deepEqual(
+    stairRoute.map(item => item.product.id),
+    ['catalog-longitudinal-for-stair', 'catalog-explicit-stair'],
+    'stair route must contain explicit stair products plus every longitudinal identity exactly once'
+  );
+
+  const longitudinalRoute = rankContractCatalogProducts({
+    products: [longitudinalOnly, explicitStair],
+    query: '',
+    activeType: 'longitudinal'
+  });
+  assert.deepEqual(
+    longitudinalRoute.map(item => item.product.id),
+    ['catalog-longitudinal-for-stair'],
+    'the same catalog product must remain available through its longitudinal route'
+  );
+}

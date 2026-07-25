@@ -45,6 +45,13 @@ export type StairLayerSourceSelection =
 
 export interface StairLayerSideOperationsInput {
   readonly side: StairLayerSide;
+  /**
+   * One seller-facing operation selection may fan out into multiple physical
+   * side scopes. The shared identity keeps that intent auditable without
+   * merging the side-specific geometry.
+   */
+  readonly operationCollectionId?: StableIdentity<'layer-operation-collection'>;
+  readonly scopeIntent?: 'all-strips' | 'side' | 'side-subset';
   readonly operations: ProductOperationsInput;
 }
 
@@ -104,6 +111,8 @@ export interface StairLayerConfigurationResult {
   readonly cuttingPricingLines: readonly PricedLine[];
   readonly sideOperationResults: readonly {
     readonly side: StairLayerSide;
+    readonly operationCollectionId: StableIdentity<'layer-operation-collection'>;
+    readonly scopeIntent: 'all-strips' | 'side' | 'side-subset';
     readonly result: ProductOperationsResult;
   }[];
   readonly generatedRemainders: readonly PaidRemainderStock[];
@@ -334,8 +343,29 @@ export const parseStairLayerConfigurationInput = (
     sideOperations: array(record.sideOperations, 'sideOperations')
       .map((item, index) => {
         const entry = object(item, `sideOperations.${index}`);
+        const parsedSide = side(entry.side, `sideOperations.${index}.side`);
+        const scopeIntent = entry.scopeIntent === undefined
+          ? 'side'
+          : entry.scopeIntent;
+        if (!['all-strips', 'side', 'side-subset'].includes(String(scopeIntent))) {
+          throw new TypeError(
+            `sideOperations.${index}.scopeIntent is unsupported.`
+          );
+        }
         return {
-          side: side(entry.side, `sideOperations.${index}.side`),
+          side: parsedSide,
+          ...(entry.operationCollectionId === undefined
+            ? {}
+            : {
+                operationCollectionId: parseStableIdentity(
+                  'layer-operation-collection',
+                  text(
+                    entry.operationCollectionId,
+                    `sideOperations.${index}.operationCollectionId`
+                  )
+                )
+              }),
+          scopeIntent: scopeIntent as 'all-strips' | 'side' | 'side-subset',
           operations: parseProductOperationsInput(entry.operations)
         };
       }),
@@ -594,6 +624,8 @@ export const calculateStairLayerConfiguration = ({
 
     const sideOperationResults: Array<{
       side: StairLayerSide;
+      operationCollectionId: StableIdentity<'layer-operation-collection'>;
+      scopeIntent: 'all-strips' | 'side' | 'side-subset';
       result: ProductOperationsResult;
     }> = [];
     const operationSides = new Set<StairLayerSide>();
@@ -650,7 +682,17 @@ export const calculateStairLayerConfiguration = ({
           }))
         };
       }
-      sideOperationResults.push({ side: sideOperation.side, result: operations.result });
+      sideOperationResults.push({
+        side: sideOperation.side,
+        operationCollectionId:
+          sideOperation.operationCollectionId ||
+          parseStableIdentity(
+            'layer-operation-collection',
+            `${input.layerConfigurationId}:operation:${sideOperation.side}`
+          ),
+        scopeIntent: sideOperation.scopeIntent || 'side',
+        result: operations.result
+      });
     }
 
     const layerQuantity = pricingQuantity(

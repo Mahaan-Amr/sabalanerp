@@ -126,6 +126,74 @@ const input = (
 }
 
 {
+  const sharedCollectionId = parseStableIdentity(
+    'layer-operation-collection',
+    'layer-shared-operation-1'
+  );
+  const base = input();
+  const front = base.sideOperations[0]!;
+  const calculated = calculateStairLayerConfiguration({
+    input: input({
+      sideOperations: [
+        {
+          ...front,
+          operationCollectionId: sharedCollectionId,
+          scopeIntent: 'all-strips'
+        },
+        {
+          side: 'left',
+          operationCollectionId: sharedCollectionId,
+          scopeIntent: 'all-strips',
+          operations: {
+            ...front.operations,
+            lengthMeters: decimal('0.3'),
+            groups: [{
+              operationGroupId: parseStableIdentity(
+                'operation-group',
+                'layer-left-group-1'
+              ),
+              scope: decimal('4')
+            }],
+            tools: [{
+              ...front.operations.tools[0]!,
+              toolSelectionId: parseStableIdentity(
+                'tool-selection',
+                'layer-left-tool-1'
+              ),
+              operationGroupId: parseStableIdentity(
+                'operation-group',
+                'layer-left-group-1'
+              )
+            }]
+          }
+        }
+      ]
+    }),
+    parent: {
+      lengthMeters: decimal('1.2'),
+      crossDimensionMeters: decimal('0.3'),
+      quantity: 2
+    },
+    availableInventory: []
+  });
+  assert.equal(calculated.ok, true, JSON.stringify(calculated));
+  if (!calculated.ok) throw new Error('Expected shared layer operations.');
+  assert.deepEqual(
+    calculated.result.sideOperationResults.map(result => [
+      result.side,
+      result.operationCollectionId,
+      result.scopeIntent,
+      result.result.totalAmountToman
+    ]),
+    [
+      ['front', sharedCollectionId, 'all-strips', '480'],
+      ['left', sharedCollectionId, 'all-strips', '120']
+    ]
+  );
+  assert.equal(calculated.result.operationsAmountToman, '600');
+}
+
+{
   const invalidRate = calculateStairLayerConfiguration({
     input: input({ layerRateToman: decimal('0') }),
     parent: {

@@ -252,6 +252,80 @@ const product = {
     result.graph.layerConfigurations[0]?.result.resultHash,
     'untrusted-client-result'
   );
+  assert.equal(
+    result.graph.layerConfigurations[0]?.result.sideOperationResults.length,
+    0
+  );
+
+  const {
+    motherLengthMeters: _historicalMotherLength,
+    ...stairWithoutStoredMotherLength
+  } = stairInput;
+  const derived = readLegacyProductGraph({
+    contractId: 'legacy-stair-without-mother-length',
+    revision: 2,
+    calculationPolicy: policy,
+    products: [{
+      productRowId: parseStableIdentity(
+        'product-row',
+        'legacy-stair-derived-row'
+      ),
+      productId: 'catalog-1',
+      productType: 'stair',
+      name: 'Historical stair tread',
+      totalPrice: 1,
+      stairPartPolicyInput: stairWithoutStoredMotherLength
+    }]
+  });
+  assert.equal(derived.ok, true, JSON.stringify(derived));
+  if (!derived.ok) throw new Error('expected derived historical stair');
+  assert.equal(
+    derived.graph.rows[0]?.stairPart?.motherLengthMode,
+    'derived-from-finished'
+  );
+  assert.equal(
+    derived.graph.rows[0]?.stairPart?.motherLengthDisplayUnit,
+    'm'
+  );
+
+  const ambiguousLayerOperations = readLegacyProductGraph({
+    contractId: 'legacy-layer-ambiguous-operations',
+    revision: 3,
+    calculationPolicy: policy,
+    products: [{
+      productRowId: parentRowId,
+      productId: 'catalog-1',
+      productType: 'stair',
+      name: 'Stair tread',
+      totalPrice: 1,
+      stairPartPolicyInput: stairInput
+    }, {
+      productRowId: parseStableIdentity(
+        'product-row',
+        'legacy-layer-ambiguous-row'
+      ),
+      productId: 'catalog-1',
+      productType: 'stair',
+      parentProductRowId: parentRowId,
+      name: 'Historical layer',
+      totalPrice: 1,
+      meta: { isLayer: true },
+      operationPolicyInput: {
+        tools: [{ legacyToolId: 'unknown-side-tool' }],
+        finishings: []
+      }
+    }]
+  });
+  assert.equal(ambiguousLayerOperations.ok, false);
+  if (ambiguousLayerOperations.ok) {
+    throw new Error('expected ambiguous layer operation conflict');
+  }
+  assert.equal(
+    ambiguousLayerOperations.conflicts.some(
+      conflict => conflict.code === 'legacy-layer-operation-ambiguous'
+    ),
+    true
+  );
 }
 
 console.log('legacy migration tests passed');

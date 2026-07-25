@@ -76,7 +76,7 @@ const addRowCommand = (
   const command = addRowCommand();
   const result = executeProductGraphCommand({ graph, command });
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, JSON.stringify(result));
   if (!result.ok) throw new Error('Expected add-row command to succeed.');
 
   assert.deepEqual(graph, before);
@@ -1042,11 +1042,11 @@ const addRowCommand = (
   assert.equal(added.graph.rows[0]?.stairPart?.part, 'tread');
   assert.equal(added.graph.rows[0]?.commercial.requestedWidthMeters, '0.3');
   assert.equal(added.graph.rows[0]?.commercial.requestedQuantity, '4');
-  assert.equal(added.graph.rows[0]?.commercial.totalAmountToman, '4280');
+  assert.equal(added.graph.rows[0]?.commercial.totalAmountToman, '5240');
   assert.equal(added.graph.rows[1]?.stairPart?.part, 'riser');
   assert.equal(added.graph.rows[1]?.commercial.requestedWidthMeters, '0.17');
   assert.equal(added.graph.rows[1]?.commercial.requestedQuantity, '4');
-  assert.equal(added.graph.rows[1]?.commercial.totalAmountToman, '816');
+  assert.equal(added.graph.rows[1]?.commercial.totalAmountToman, '1200');
   assert.equal(added.graph.sourceBatches.length, 4);
   assert.equal(added.graph.layerConfigurations.length, 2);
   assert.equal(
@@ -1099,7 +1099,7 @@ const addRowCommand = (
   assert.equal(edited.ok, true, JSON.stringify(edited));
   if (!edited.ok) throw new Error('Expected exact stair-row edit.');
   assert.equal(edited.graph.rows[0]?.commercial.requestedQuantity, '2');
-  assert.equal(edited.graph.rows[0]?.commercial.totalAmountToman, '3900');
+  assert.equal(edited.graph.rows[0]?.commercial.totalAmountToman, '5340');
   assert.equal(
     edited.graph.layerConfigurations[0]?.result.commercialLayerSets,
     2
@@ -1149,7 +1149,7 @@ const addRowCommand = (
   assert.equal(deletedLayer.ok, true, JSON.stringify(deletedLayer));
   if (!deletedLayer.ok) throw new Error('Expected atomic layer deletion.');
   assert.equal(deletedLayer.graph.layerConfigurations.length, 1);
-  assert.equal(deletedLayer.graph.rows[0]?.commercial.totalAmountToman, '3800');
+  assert.equal(deletedLayer.graph.rows[0]?.commercial.totalAmountToman, '5240');
   assert.equal(
     deletedLayer.graph.remainingStones.some(stone =>
       stone.remainingStoneId.includes(
@@ -1182,13 +1182,15 @@ const addRowCommand = (
   assert.equal(deletedParent.graph.layerConfigurations.length, 0);
   assert.equal(deletedParent.graph.stairSystems.length, 1);
 
-  const invalidGraph = emptyGraph();
-  const invalidBefore = structuredClone(invalidGraph);
-  const invalidAtomic = executeProductGraphCommand({
-    graph: invalidGraph,
+  const derivedMotherLengthGraph = emptyGraph();
+  const derivedMotherLengthAtomic = executeProductGraphCommand({
+    graph: derivedMotherLengthGraph,
     command: {
       ...stairCommand,
-      commandId: parseStableIdentity('audit-mutation', 'invalid-stair-system'),
+      commandId: parseStableIdentity(
+        'audit-mutation',
+        'derived-stair-mother-length'
+      ),
       sellerIntent: {
         ...stairCommand.sellerIntent,
         parts: [
@@ -1203,8 +1205,22 @@ const addRowCommand = (
       }
     }
   });
-  assert.equal(invalidAtomic.ok, false);
-  assert.deepEqual(invalidGraph, invalidBefore);
+  assert.equal(
+    derivedMotherLengthAtomic.ok,
+    true,
+    JSON.stringify(derivedMotherLengthAtomic)
+  );
+  if (!derivedMotherLengthAtomic.ok) {
+    throw new Error('Expected derived stair mother length to save atomically.');
+  }
+  assert.equal(
+    derivedMotherLengthAtomic.graph.rows[1]?.stairPart?.motherLengthMode,
+    'derived-from-finished'
+  );
+  assert.equal(
+    derivedMotherLengthAtomic.graph.rows[1]?.commercial.baseAmountToman,
+    '960'
+  );
 
   const contradictoryCatalogGraph = emptyGraph();
   const contradictoryCatalogBefore = structuredClone(contradictoryCatalogGraph);

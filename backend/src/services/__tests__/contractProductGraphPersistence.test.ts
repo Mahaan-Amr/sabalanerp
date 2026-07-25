@@ -433,10 +433,10 @@ const run = async () => {
   assert.equal(result.graph.revision, 1);
   assert.equal(result.graph.rows.length, 2);
   assert.equal(result.graph.stairSystems[0]?.totalSteps, 4);
-  assert.equal(result.graph.rows[0]?.commercial.totalAmountToman, '3040');
-  assert.equal(result.graph.rows[1]?.commercial.totalAmountToman, '816');
+  assert.equal(result.graph.rows[0]?.commercial.totalAmountToman, '4000');
+  assert.equal(result.graph.rows[1]?.commercial.totalAmountToman, '1200');
   assert.equal(result.graph.layerConfigurations.length, 1);
-  assert.equal(result.totalAmountToman, '3856');
+  assert.equal(result.totalAmountToman, '5200');
   assert.equal(store.audits.length, 1);
   if (!store.state) throw new Error('Expected stair graph to reload.');
   assert.deepEqual(
@@ -467,7 +467,7 @@ const run = async () => {
   if (!deletedLayer.ok) throw new Error('Expected structural layer deletion.');
   assert.equal(deletedLayer.graph.revision, 2);
   assert.equal(deletedLayer.graph.layerConfigurations.length, 0);
-  assert.equal(deletedLayer.totalAmountToman, '2256');
+  assert.equal(deletedLayer.totalAmountToman, '3600');
   assert.equal(store.audits.length, 2);
 
   const invalid = canonicalStairCommand();
@@ -492,9 +492,14 @@ const run = async () => {
       }
     }
   });
-  assert.equal(invalidResult.ok, false);
-  assert.equal(invalidStore.state, null);
-  assert.equal(invalidStore.audits.length, 0);
+  assert.equal(invalidResult.ok, true, JSON.stringify(invalidResult));
+  if (!invalidResult.ok) throw new Error('Expected derived stair mother length.');
+  assert.equal(
+    invalidResult.graph.rows[1]?.stairPart?.motherLengthMode,
+    'derived-from-finished'
+  );
+  assert.notEqual(invalidStore.state, null);
+  assert.equal(invalidStore.audits.length, 1);
 }
 
 {

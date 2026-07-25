@@ -836,6 +836,18 @@ export interface StairPartDraftV2 {
     'front' | 'back' | 'left' | 'right',
     ProductOperationsInput
   >>;
+  /**
+   * Seller-facing editor scope. `all` is represented canonically by one
+   * shared collection intent with independent child calculations per side.
+   */
+  layerOperationEditingScope?: 'all' | 'front' | 'back' | 'left' | 'right';
+  /** Sides explicitly detached from the shared all-strips operation row. */
+  layerDetachedOperationSides?: Array<'front' | 'back' | 'left' | 'right'>;
+  /**
+   * Removing a side with dedicated operations is reversible until the seller
+   * explicitly restores the side or deletes that side's operation snapshots.
+   */
+  layerRemovedSideConflicts?: Array<'front' | 'back' | 'left' | 'right'>;
   layerUseDifferentStone?: boolean;
   layerStoneProductId?: string | null;
   layerStoneProduct?: Product | null;
@@ -871,6 +883,7 @@ export interface StairPartDraftV2 {
 export interface StairDraftFieldErrors {
   thickness?: string;
   length?: string;
+  motherLength?: string;
   width?: string;
   pricePerSquareMeter?: string;
   quantity?: string;

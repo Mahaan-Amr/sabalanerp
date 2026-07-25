@@ -3,7 +3,7 @@
 
 import { useMemo } from 'react';
 import type { CrmCustomer, Product, ContractUsageType } from '../types/contract.types';
-import { productSupportsContractType } from '../utils/productUtils';
+import { productSupportsContractRoute } from '../utils/productUtils';
 import { normalizeDigits } from '@/lib/numberFormat';
 import {
   rankContractCatalogProducts,
@@ -98,7 +98,11 @@ export const useProductFiltering = (options: UseProductFilteringOptions): UsePro
 
   // Helper function to filter stair products
   const filterStairProducts = (searchTerm: string): Product[] => {
-    const stairEligibleProducts = products.filter(product => productSupportsContractType(product, 'stair'));
+    const stairEligibleProducts = Array.from(new Map(
+      products
+        .filter(product => productSupportsContractRoute(product, 'stair'))
+        .map(product => [product.id, product] as const)
+    ).values());
     if (!searchTerm.trim()) {
       return stairEligibleProducts.slice(-3);
     }

@@ -53,6 +53,7 @@ export interface LegacyProductGraphConflict {
   readonly code:
     | 'legacy-catalog-product-id-missing'
     | 'legacy-canonical-input-invalid'
+    | 'legacy-layer-operation-ambiguous'
     | 'legacy-product-reference-invalid'
     | 'legacy-product-reference-missing'
     | 'legacy-product-row-id-conflict'
@@ -503,7 +504,43 @@ export const readLegacyProductGraph = ({
         });
       }
     }
-    if (product.operationPolicyInput !== undefined) {
+    const legacyMeta = (
+      product.meta !== null &&
+      typeof product.meta === 'object' &&
+      !Array.isArray(product.meta)
+    )
+      ? product.meta as Readonly<Record<string, unknown>>
+      : undefined;
+    const isLegacyLayer = legacyMeta?.isLayer === true;
+    const legacyOperationRecord = (
+      product.operationPolicyInput !== null &&
+      typeof product.operationPolicyInput === 'object' &&
+      !Array.isArray(product.operationPolicyInput)
+    )
+      ? product.operationPolicyInput as Readonly<Record<string, unknown>>
+      : undefined;
+    const hasLegacyLayerOperations =
+      (
+        Array.isArray(legacyOperationRecord?.tools) &&
+        legacyOperationRecord.tools.length > 0
+      ) ||
+      (
+        Array.isArray(legacyOperationRecord?.finishings) &&
+        legacyOperationRecord.finishings.length > 0
+      );
+    if (
+      product.operationPolicyInput !== undefined &&
+      isLegacyLayer &&
+      canonicalLayerInput === undefined &&
+      hasLegacyLayerOperations
+    ) {
+      conflicts.push({
+        code: 'legacy-layer-operation-ambiguous',
+        path: ['products', String(index), 'operationPolicyInput'],
+        message:
+          'Historical layer operations have no certain side ownership or canonical parent relation.'
+      });
+    } else if (product.operationPolicyInput !== undefined) {
       try {
         const operationInput = parseProductOperationsInput(product.operationPolicyInput);
         const operationResult = calculateProductOperations(operationInput);

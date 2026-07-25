@@ -3,6 +3,7 @@ export type StableIdentityKind =
   | 'audit-mutation'
   | 'finishing-selection'
   | 'layer-configuration'
+  | 'layer-operation-collection'
   | 'layer-source-row'
   | 'operation-group'
   | 'product-row'

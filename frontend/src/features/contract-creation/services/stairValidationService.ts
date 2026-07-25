@@ -7,7 +7,11 @@ import type {
   StairDraftFieldErrors,
   LayerTypeOption
 } from '../types/contract.types';
-import { getPartDisplayLabel } from '../utils/stairUtils';
+import {
+  getActualLengthMeters,
+  getDraftStandardLengthMeters,
+  getPartDisplayLabel
+} from '../utils/stairUtils';
 import { formatDisplayNumber } from '../utils/formatUtils';
 
 /**
@@ -39,6 +43,18 @@ export const validateDraftNumericFields = (
         const unit = draft.lengthUnit || 'm';
         const maxValue = unit === 'm' ? 10 : 1000;
         return `طول نمی‌تواند بیشتر از ${maxValue} ${unit === 'm' ? 'متر' : 'سانتی‌متر'} باشد`;
+      }
+      return null;
+    }
+
+    case 'motherLength': {
+      if (value === null || value === undefined || value <= 0) {
+        return null;
+      }
+      const motherLength = getDraftStandardLengthMeters(draft);
+      const finishedLength = getActualLengthMeters(draft);
+      if (motherLength > 0 && finishedLength > motherLength + 0.000001) {
+        return 'طول مادر باید حداقل برابر طول نهایی باشد';
       }
       return null;
     }
@@ -156,6 +172,15 @@ export const validateDraftRequiredFields = (
   const lengthError = validateDraftNumericFields(part, draft, 'length', draft.lengthValue ?? null, layerTypes);
   if (lengthError) errors.length = lengthError;
 
+  const motherLengthError = validateDraftNumericFields(
+    part,
+    draft,
+    'motherLength',
+    draft.standardLengthValue ?? null,
+    layerTypes
+  );
+  if (motherLengthError) errors.motherLength = motherLengthError;
+
   const widthError = validateDraftNumericFields(part, draft, 'width', draft.widthCm ?? null, layerTypes);
   if (widthError) errors.width = widthError;
 
@@ -186,6 +211,10 @@ export const validateDraftRequiredFields = (
 
   if (hasLayerConfiguration && !draft.layerSourceKind) {
     errors.layerSource = 'منبع سنگ لایه را انتخاب کنید';
+  }
+
+  if (hasLayerConfiguration && draft.layerRemovedSideConflicts?.length) {
+    errors.layerSource = 'عملیات سمت حذف‌شده را تعیین تکلیف کنید';
   }
 
   if (

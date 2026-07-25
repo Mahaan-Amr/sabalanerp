@@ -58,6 +58,30 @@ export const inferCatalogContractType = (
 };
 
 /**
+ * Resolve eligibility for one contract-entry route without changing catalog
+ * identity. The stair route deliberately accepts every longitudinal catalog
+ * product in addition to products explicitly classified or enabled for stairs.
+ */
+export const productSupportsContractRoute = (
+  product: Product,
+  contractType?: ContractUsageType | null
+): boolean => {
+  if (!contractType) return true;
+  const normalizedType = contractType === 'volumetric'
+    ? 'prepared'
+    : contractType;
+  const catalogType = inferCatalogContractType(product);
+  if (normalizedType === 'stair') {
+    return (
+      catalogType === 'stair' ||
+      catalogType === 'longitudinal' ||
+      product.availableInStairContracts === true
+    );
+  }
+  return catalogType === normalizedType;
+};
+
+/**
  * Generate full product name (re-export from formatUtils for convenience)
  */
 export { generateFullProductName };

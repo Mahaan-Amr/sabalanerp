@@ -237,6 +237,11 @@ const stairPartFactsAt = (
   path: string
 ): CanonicalStairPartFacts => {
   const record = recordAt(value, path);
+  const lengthDisplayUnit = enumAt(
+    record.lengthDisplayUnit,
+    ['cm', 'm'],
+    `${path}.lengthDisplayUnit`
+  );
   return {
     stairSystemId: identityAt(
       record.stairSystemId,
@@ -244,11 +249,21 @@ const stairPartFactsAt = (
       `${path}.stairSystemId`
     ),
     part: enumAt(record.part, ['tread', 'riser', 'landing'], `${path}.part`),
-    lengthDisplayUnit: enumAt(
-      record.lengthDisplayUnit,
-      ['cm', 'm'],
-      `${path}.lengthDisplayUnit`
-    ),
+    motherLengthMode: record.motherLengthMode === undefined
+      ? 'derived-from-finished'
+      : enumAt(
+          record.motherLengthMode,
+          ['derived-from-finished', 'explicit'],
+          `${path}.motherLengthMode`
+        ),
+    motherLengthDisplayUnit: record.motherLengthDisplayUnit === undefined
+      ? lengthDisplayUnit
+      : enumAt(
+          record.motherLengthDisplayUnit,
+          ['cm', 'm'],
+          `${path}.motherLengthDisplayUnit`
+        ),
+    lengthDisplayUnit,
     crossDimensionDisplayUnit: enumAt(
       record.crossDimensionDisplayUnit,
       ['cm', 'm'],
@@ -488,9 +503,29 @@ const layerAt = (value: unknown, path: string): CanonicalLayerConfiguration => {
   decimalAt(resultRecord.cuttingAmountToman, `${path}.result.cuttingAmountToman`);
   decimalAt(resultRecord.operationsAmountToman, `${path}.result.operationsAmountToman`);
   decimalAt(resultRecord.totalAmountToman, `${path}.result.totalAmountToman`);
-  const result = structuredClone(
-    resultRecord
-  ) as unknown as StairLayerConfigurationResult;
+  const result = {
+    ...structuredClone(resultRecord),
+    sideOperationResults: Array.isArray(resultRecord.sideOperationResults)
+      ? resultRecord.sideOperationResults.map((entry, index) => {
+          const operation = recordAt(
+            entry,
+            `${path}.result.sideOperationResults.${index}`
+          );
+          const side = String(operation.side);
+          return {
+            ...structuredClone(operation),
+            operationCollectionId:
+              operation.operationCollectionId ||
+              identityAt(
+                `${layerConfigurationId}:operation:${side}`,
+                'layer-operation-collection',
+                `${path}.result.sideOperationResults.${index}.operationCollectionId`
+              ),
+            scopeIntent: operation.scopeIntent || 'side'
+          };
+        })
+      : []
+  } as unknown as StairLayerConfigurationResult;
   return {
     layerConfigurationId,
     parentProductRowId,

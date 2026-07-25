@@ -12,6 +12,16 @@ import {
   parseCanonicalDecimal,
   parseStableIdentity
 } from '@sabalanerp/contract-product-graph';
+import {
+  createFreshStairPartDraft
+} from '../../../utils/productConfigurationController';
+import {
+  createCanonicalStairDraftInput
+} from '../../../services/stairCalculationService';
+import {
+  validateDraftRequiredFields
+} from '../../../services/stairValidationService';
+import type { Product } from '../../../types/contract.types';
 
 const initial: StairQuantityState = {
   intent: { mode: 'steps', totalSteps: 1 },
@@ -137,6 +147,75 @@ assert.equal(copiedOperations.tools[0]?.rateToman, '100');
 assert.notEqual(
   copiedOperations.tools[0]?.toolSelectionId,
   'copy-source-tool'
+);
+
+const stairStone = {
+  id: 'catalog-longitudinal-stone',
+  code: 'L-40',
+  name: 'Longitudinal granite',
+  namePersian: 'طولی گرانیت',
+  widthValue: 40,
+  motherLengthValue: 3,
+  thicknessValue: 2,
+  currency: 'تومان',
+  isAvailable: true
+} as Product;
+const freshDraft = {
+  ...createFreshStairPartDraft('tread'),
+  stoneId: stairStone.id,
+  stoneProduct: stairStone,
+  lengthValue: 1.2,
+  lengthUnit: 'm' as const,
+  widthCm: 30,
+  widthUnit: 'cm' as const,
+  quantity: 4,
+  pricePerSquareMeter: 100000
+};
+assert.equal(
+  freshDraft.standardLengthValue,
+  undefined,
+  'new stair parts must not copy catalog mother length into the seller field'
+);
+const derivedInput = createCanonicalStairDraftInput(
+  'tread',
+  freshDraft,
+  () => 0
+);
+assert.equal(derivedInput.motherLengthMeters, undefined);
+assert.equal(derivedInput.motherLengthDisplayUnit, 'm');
+
+const explicitInput = createCanonicalStairDraftInput(
+  'tread',
+  {
+    ...freshDraft,
+    standardLengthValue: 150,
+    standardLengthUnit: 'cm'
+  },
+  () => 0
+);
+assert.equal(explicitInput.motherLengthMeters, '1.5');
+assert.equal(explicitInput.motherLengthDisplayUnit, 'cm');
+
+const invalidMotherLength = validateDraftRequiredFields('tread', {
+  ...freshDraft,
+  standardLengthValue: 100,
+  standardLengthUnit: 'cm'
+});
+assert.equal(
+  invalidMotherLength.motherLength,
+  'طول مادر باید حداقل برابر طول نهایی باشد'
+);
+
+const unresolvedRemovedLayerSide = validateDraftRequiredFields('tread', {
+  ...freshDraft,
+  numberOfLayersPerStair: 1,
+  layerTypeId: 'layer-type-1',
+  layerSourceKind: 'parentMaterial',
+  layerRemovedSideConflicts: ['left']
+});
+assert.equal(
+  unresolvedRemovedLayerSide.layerSource,
+  'عملیات سمت حذف‌شده را تعیین تکلیف کنید'
 );
 
 console.log('stair product state tests passed');

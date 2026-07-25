@@ -49,6 +49,7 @@ export interface StairPartPolicyInput {
   readonly part: StairPartKind;
   readonly sourceBatchId: StableIdentity<'source-batch'>;
   readonly motherLengthMeters?: CanonicalDecimal;
+  readonly motherLengthDisplayUnit?: StairDisplayUnit;
   readonly motherWidthMeters?: CanonicalDecimal;
   readonly lengthMeters?: CanonicalDecimal;
   readonly crossDimensionMeters?: CanonicalDecimal;
@@ -71,6 +72,8 @@ export interface StairPartPolicyInput {
 export interface CanonicalStairPartFacts {
   readonly stairSystemId: StableIdentity<'stair-system'>;
   readonly part: StairPartKind;
+  readonly motherLengthMode: 'derived-from-finished' | 'explicit';
+  readonly motherLengthDisplayUnit: StairDisplayUnit;
   readonly lengthDisplayUnit: StairDisplayUnit;
   readonly crossDimensionDisplayUnit: StairDisplayUnit;
 }
@@ -84,7 +87,11 @@ export interface StairPartPolicyResult {
   readonly crossDimensionMeters: CanonicalDecimal;
   readonly quantity: number;
   readonly requestedAreaSquareMeters: CanonicalDecimal;
+  readonly consumedMotherAreaSquareMeters: CanonicalDecimal;
+  readonly paidRemainderAreaSquareMeters: CanonicalDecimal;
   readonly motherLengthMeters: CanonicalDecimal;
+  readonly motherLengthMode: 'derived-from-finished' | 'explicit';
+  readonly motherLengthDisplayUnit: StairDisplayUnit;
   readonly motherWidthMeters: CanonicalDecimal;
   readonly mandatoryEnabled: boolean;
   readonly mandatoryPercentage: CanonicalDecimal;
@@ -188,6 +195,7 @@ export const createNewStairPartPolicyInput = (
       ? { crossDimensionMeters: canonical('0.17') }
       : {}),
   lengthDisplayUnit: 'm',
+  motherLengthDisplayUnit: 'm',
   crossDimensionDisplayUnit: 'cm',
   mandatoryEnabled: false,
   mandatoryPercentage: canonical('25'),
@@ -312,6 +320,12 @@ export const parseStairPartPolicyInput = (
   if (!['cm', 'm'].includes(String(record.crossDimensionDisplayUnit))) {
     throw new TypeError('crossDimensionDisplayUnit must be cm or m.');
   }
+  if (
+    record.motherLengthDisplayUnit !== undefined &&
+    !['cm', 'm'].includes(String(record.motherLengthDisplayUnit))
+  ) {
+    throw new TypeError('motherLengthDisplayUnit must be cm or m.');
+  }
   if (!['automatic', 'manual'].includes(String(record.calibrationSelection))) {
     throw new TypeError('calibrationSelection must be automatic or manual.');
   }
@@ -334,6 +348,12 @@ export const parseStairPartPolicyInput = (
     ...(optionalDecimal('motherLengthMeters') === undefined
       ? {}
       : { motherLengthMeters: optionalDecimal('motherLengthMeters') }),
+    ...(record.motherLengthDisplayUnit === undefined
+      ? {}
+      : {
+          motherLengthDisplayUnit:
+            record.motherLengthDisplayUnit as StairDisplayUnit
+        }),
     ...(optionalDecimal('motherWidthMeters') === undefined
       ? {}
       : { motherWidthMeters: optionalDecimal('motherWidthMeters') }),
@@ -384,16 +404,6 @@ export const calculateStairPart = (
     parseStableIdentity('stair-system', input.stairSystemId);
     parseStableIdentity('source-batch', input.sourceBatchId);
 
-    if (!input.motherLengthMeters || !input.motherWidthMeters) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'stair-mother-dimensions-required',
-          field: 'motherDimensions',
-          message: 'Mother length and width must be registered in inventory.'
-        }]
-      };
-    }
     if (!input.lengthMeters || !input.crossDimensionMeters) {
       return {
         ok: false,
@@ -404,10 +414,27 @@ export const calculateStairPart = (
         }]
       };
     }
-    const motherLength = decimal(input.motherLengthMeters);
-    const motherWidth = decimal(input.motherWidthMeters);
+    if (!input.motherWidthMeters) {
+      return {
+        ok: false,
+        conflicts: [{
+          code: 'stair-mother-dimensions-required',
+          field: 'motherWidthMeters',
+          message: 'Mother width must be registered in inventory.'
+        }]
+      };
+    }
     const length = decimal(input.lengthMeters);
     const crossDimension = decimal(input.crossDimensionMeters);
+    const motherLengthMode = input.motherLengthMeters === undefined
+      ? 'derived-from-finished' as const
+      : 'explicit' as const;
+    const motherLength = input.motherLengthMeters === undefined
+      ? length
+      : decimal(input.motherLengthMeters);
+    const motherLengthDisplayUnit =
+      input.motherLengthDisplayUnit ?? input.lengthDisplayUnit;
+    const motherWidth = decimal(input.motherWidthMeters);
     if (
       motherLength.lte(0) ||
       motherWidth.lte(0) ||
@@ -542,16 +569,24 @@ export const calculateStairPart = (
       };
     }
     const area = length.times(crossDimension).times(quantity);
+    const consumedMotherArea = motherLength
+      .times(motherWidth)
+      .times(packed.plan.consumedSources.length);
+    const paidRemainderArea = packed.plan.remainders.reduce(
+      (sum, remainder) =>
+        sum.plus(decimal(remainder.lengthMeters).times(remainder.widthMeters)),
+      new Decimal(0)
+    );
     const lines = [
       {
         lineId: 'base-material',
-        quantity: canonical(area),
+        quantity: canonical(consumedMotherArea),
         rateToman: input.baseRateToman
       },
       ...(input.mandatoryEnabled
         ? [{
             lineId: 'mandatory',
-            quantity: canonical(area.times(input.baseRateToman)),
+            quantity: canonical(consumedMotherArea.times(input.baseRateToman)),
             rateToman: canonical(decimal(input.mandatoryPercentage).div(100))
           }]
         : []),
@@ -582,6 +617,8 @@ export const calculateStairPart = (
       stairPart: {
         stairSystemId: input.stairSystemId,
         part: input.part,
+        motherLengthMode,
+        motherLengthDisplayUnit,
         lengthDisplayUnit: input.lengthDisplayUnit,
         crossDimensionDisplayUnit: input.crossDimensionDisplayUnit
       },
@@ -589,7 +626,11 @@ export const calculateStairPart = (
       crossDimensionMeters: canonical(crossDimension),
       quantity,
       requestedAreaSquareMeters: canonical(area),
+      consumedMotherAreaSquareMeters: canonical(consumedMotherArea),
+      paidRemainderAreaSquareMeters: canonical(paidRemainderArea),
       motherLengthMeters: canonical(motherLength),
+      motherLengthMode,
+      motherLengthDisplayUnit,
       motherWidthMeters: canonical(motherWidth),
       mandatoryEnabled: input.mandatoryEnabled,
       mandatoryPercentage: input.mandatoryPercentage,

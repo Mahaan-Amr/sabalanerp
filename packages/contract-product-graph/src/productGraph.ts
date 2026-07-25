@@ -1795,10 +1795,7 @@ export const executeProductGraphCommand = (
   if (command.sellerIntent.stairPartPolicyInput) {
     const stairInput = command.sellerIntent.stairPartPolicyInput;
     if (
-      matchingCatalogSnapshot.facts.motherLengthMeters === undefined ||
       matchingCatalogSnapshot.facts.motherWidthMeters === undefined ||
-      stairInput.motherLengthMeters !==
-        matchingCatalogSnapshot.facts.motherLengthMeters ||
       stairInput.motherWidthMeters !==
         matchingCatalogSnapshot.facts.motherWidthMeters
     ) {
@@ -1806,9 +1803,9 @@ export const executeProductGraphCommand = (
         ok: false,
         conflicts: [{
           code: 'catalog-snapshot-conflict',
-          path: ['catalogSnapshots', nextRow.catalogProductId, 'motherDimensions'],
+          path: ['catalogSnapshots', nextRow.catalogProductId, 'motherWidthMeters'],
           productRowId: nextRow.productRowId,
-          message: 'Stair mother dimensions must exactly match the inventory snapshot.'
+          message: 'Stair mother width must exactly match the inventory snapshot.'
         }]
       };
     }

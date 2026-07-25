@@ -71,6 +71,8 @@ const approx = (actual: number, expected: number, precision = 6) => {
       } as Product,
       lengthValue: 1.2,
       lengthUnit: 'm',
+      standardLengthValue: 3,
+      standardLengthUnit: 'm',
       widthCm: 20,
       widthUnit: 'cm',
       quantity: 4,
@@ -565,11 +567,11 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   assert.equal(totals.piecesPerStone, 2);
   assert.equal(totals.baseStoneQuantity, 5);
   approx(totals.toolsTotal, 1_600_000);
-  approx(totals.cuttingMetersLongitudinalProduction, 12);
+  approx(totals.cuttingMetersLongitudinalProduction, 6);
   approx(totals.cuttingMetersLongitudinalCalibration, 6);
-  approx(totals.cuttingMetersLongitudinal, 18);
-  approx(totals.cuttingCost, 900_000);
-  approx(totals.partTotal, 4_900_000);
+  approx(totals.cuttingMetersLongitudinal, 12);
+  approx(totals.cuttingCost, 600_000);
+  approx(totals.partTotal, 4_600_000);
   assert.equal(layerMetrics.layersFromRemainingStones, 2);
   assert.equal(layerMetrics.layersFromNewStones, 3);
   approx(layerMetrics.squareMetersFromRemaining || 0, 0.4);
@@ -646,19 +648,21 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
     pricePerSquareMeter: 4_500_000,
     useMandatory: false,
     calibrationCutEnabled: true,
+    calibrationSelection: 'manual',
     tools: []
   }, () => 20_000);
 
   assert.equal(totals.piecesPerStone, 3);
   assert.equal(totals.baseStoneQuantity, 3);
   assert.deepEqual(totals.remainingStoneGroups, [
+    { widthCm: 25, quantity: 1 },
     { widthCm: 5, quantity: 2 },
-    { widthCm: 25, quantity: 1 }
+    { widthCm: 35, quantity: 3 }
   ]);
   approx(totals.cuttingMetersLongitudinalProduction, 5.04);
-  approx(totals.cuttingMetersLongitudinalCalibration, 2.16);
-  approx(totals.cuttingMetersLongitudinal, 7.2);
-  approx(totals.cuttingCostLongitudinal, 144_000);
+  approx(totals.cuttingMetersLongitudinalCalibration, 5.04);
+  approx(totals.cuttingMetersLongitudinal, 10.08);
+  approx(totals.cuttingCostLongitudinal, 201_600);
   approx(totals.cuttingMetersCross, 1.05);
   approx(totals.cuttingCostCross, 21_000);
 }
@@ -678,11 +682,11 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
     tools: []
   }, (code) => code === 'LONG' ? 50_000 : 25_000);
 
-  approx(totals.cuttingMetersLongitudinalProduction, 12);
+  approx(totals.cuttingMetersLongitudinalProduction, 6);
   approx(totals.cuttingMetersLongitudinalCalibration, 6);
-  approx(totals.cuttingMetersLongitudinal, 18);
-  approx(totals.cuttingCostLongitudinal, 900_000);
-  approx(totals.billableCuttingCostLongitudinal, 900_000);
+  approx(totals.cuttingMetersLongitudinal, 12);
+  approx(totals.cuttingCostLongitudinal, 600_000);
+  approx(totals.billableCuttingCostLongitudinal, 600_000);
   assert.equal(totals.shouldChargeCuttingCost, true);
 }
 

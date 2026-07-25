@@ -1,6 +1,6 @@
 import { normalizeDigits } from '@/lib/numberFormat';
 import type { ContractUsageType, Product } from '../../types/contract.types';
-import { inferCatalogContractType } from '../../utils/productUtils';
+import { productSupportsContractRoute } from '../../utils/productUtils';
 
 export type CatalogMatchKind =
   | 'personalized'
@@ -113,13 +113,14 @@ export const rankContractCatalogProducts = ({
   activeType,
   sellerHistory = {}
 }: RankContractCatalogProductsInput): RankedContractCatalogProduct[] => {
-  const eligible = products
+  const uniqueProducts = Array.from(new Map(
+    products.map(product => [product.id, product] as const)
+  ).values());
+  const eligible = uniqueProducts
     .map((product, catalogIndex) => ({ product, catalogIndex }))
     .filter(({ product }) =>
       !activeType ||
-      (activeType === 'volumetric'
-        ? inferCatalogContractType(product) === 'prepared'
-        : inferCatalogContractType(product) === activeType)
+      productSupportsContractRoute(product, activeType)
     );
   const normalizedQuery = normalizeContractCatalogSearchText(query);
 

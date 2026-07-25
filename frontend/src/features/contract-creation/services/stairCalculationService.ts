@@ -185,8 +185,22 @@ export const createCanonicalLayerCalculationRequest = ({
     .filter(side => Boolean(draft.layerSideOperations?.[side]))
     .map(side => {
       const stored = draft.layerSideOperations?.[side]!;
+      const isDetached =
+        draft.layerDetachedOperationSides?.includes(side) || false;
+      const hasSubset = stored.groups.some(group =>
+        Number(group.scope) < stripQuantity
+      );
       return {
         side,
+        operationCollectionId: parseStableIdentity(
+          'layer-operation-collection',
+          isDetached
+            ? `${layerConfigurationId}:operation:${side}`
+            : `${layerConfigurationId}:operation:all`
+        ),
+        scopeIntent: isDetached
+          ? (hasSubset ? 'side-subset' as const : 'side' as const)
+          : 'all-strips' as const,
         operations: {
           ...stored,
           productRowId: stableParentRowId,
@@ -310,7 +324,7 @@ export const createCanonicalStairDraftInput = (
   getCuttingTypePricePerMeter: (code: string) => number | null
 ): StairPartPolicyInput => {
   const actualLengthMeters = getActualLengthMeters(draft);
-  const motherLengthMeters = Number(draft.stoneProduct?.motherLengthValue || 0);
+  const motherLengthMeters = getDraftStandardLengthMeters(draft);
   const motherWidthMeters = Number(draft.stoneProduct?.widthValue || 0) / 100;
   const crossDimensionMeters = Number(draft.widthCm || 0) / 100;
   const longitudinalRate = getCuttingTypePricePerMeter('LONG');
@@ -328,6 +342,8 @@ export const createCanonicalStairDraftInput = (
     ...(motherLengthMeters > 0
       ? { motherLengthMeters: toCanonicalDecimal(motherLengthMeters) }
       : {}),
+    motherLengthDisplayUnit:
+      draft.standardLengthUnit || draft.lengthUnit || 'm',
     ...(motherWidthMeters > 0
       ? { motherWidthMeters: toCanonicalDecimal(motherWidthMeters) }
       : {}),
@@ -1112,7 +1128,7 @@ export const computeTotalsV2 = (
   return {
     ...legacyResult,
     sqm: Number(canonicalResult.requestedAreaSquareMeters),
-    pricingSquareMeters: Number(canonicalResult.requestedAreaSquareMeters),
+    pricingSquareMeters: Number(canonicalResult.consumedMotherAreaSquareMeters),
     baseStoneQuantity: consumedSourceCount,
     piecesPerStone: consumedSourceCount > 0
       ? Math.ceil(canonicalResult.quantity / consumedSourceCount)

@@ -29,15 +29,21 @@ export const buildLegacyContractMigrationPlan = (contract: {
   readonly id: string;
   readonly totalAmount: Prisma.Decimal | number | string | null;
   readonly contractData: unknown;
-}, revision = 0) => planLegacyProductGraphMigration(
-  {
+}, revision = 0) => {
+  /*
+   * SalesContract.totalAmount is the preserved contract-envelope total. It can
+   * include standalone services and exclude a contract-level discount, while
+   * the canonical product graph owns product rows only. Reconcile the graph
+   * against the legacy product-row totals; passing the contract envelope here
+   * would compare two different financial scopes and falsely block migration.
+   */
+  return planLegacyProductGraphMigration({
     contractId: contract.id,
     revision,
     calculationPolicy: CURRENT_CONTRACT_PRODUCT_POLICY,
     products: legacyProducts(contract.contractData)
-  },
-  contract.totalAmount
-);
+  });
+};
 
 export const readContractProductGraphWithoutWriting = async (
   prisma: PrismaClient,

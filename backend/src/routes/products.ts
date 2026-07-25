@@ -640,6 +640,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
   body('widthCode').notEmpty().withMessage('Width code is required'),
   body('widthValue').isNumeric().withMessage('Width value must be a number'),
   body('widthName').notEmpty().withMessage('Width name is required'),
+  body('motherLengthValue').optional({ nullable: true }).isFloat({ gt: 0 }).withMessage('Mother length must be greater than zero'),
   body('thicknessCode').notEmpty().withMessage('Thickness code is required'),
   body('thicknessValue').isNumeric().withMessage('Thickness value must be a number'),
   body('thicknessName').notEmpty().withMessage('Thickness name is required'),
@@ -714,6 +715,9 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
         widthCode: canonicalProduct.data.widthCode,
         widthValue: parseFloat(canonicalProduct.data.widthValue),
         widthName: canonicalProduct.data.widthName,
+        motherLengthValue: canonicalProduct.data.motherLengthValue
+          ? parseFloat(canonicalProduct.data.motherLengthValue)
+          : null,
         thicknessCode: canonicalProduct.data.thicknessCode,
         thicknessValue: parseFloat(canonicalProduct.data.thicknessValue),
         thicknessName: canonicalProduct.data.thicknessName,
@@ -761,6 +765,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PER
 // @access  Private/Sales Workspace Edit
 router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_PRODUCTS_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('basePrice').optional().isNumeric().withMessage('Base price must be a number'),
+  body('motherLengthValue').optional({ nullable: true }).isFloat({ gt: 0 }).withMessage('Mother length must be greater than zero'),
   body('isAvailable').optional().isBoolean().withMessage('isAvailable must be a boolean'),
   body('isActive').optional().isBoolean().withMessage('isActive must be a boolean'),
   body('leadTime').optional().isInt({ min: 0 }).withMessage('Lead time must be a non-negative integer'),
@@ -802,6 +807,11 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_P
 
     const updateData = {
       basePrice: req.body.basePrice ? parseFloat(req.body.basePrice) : product.basePrice,
+      motherLengthValue: req.body.motherLengthValue === null
+        ? null
+        : req.body.motherLengthValue !== undefined
+          ? parseFloat(req.body.motherLengthValue)
+          : product.motherLengthValue,
       isAvailable: req.body.isAvailable !== undefined ? req.body.isAvailable : product.isAvailable,
       isActive: req.body.isActive !== undefined ? req.body.isActive : product.isActive,
       leadTime: req.body.leadTime !== undefined ? parseInt(req.body.leadTime) : product.leadTime,

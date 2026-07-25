@@ -5,12 +5,42 @@ import {
 import type {
   CalculationPolicySnapshot,
   CanonicalProductGraph,
+  CanonicalLayerConfiguration,
   CanonicalProductRow,
   CanonicalProductType,
-  CatalogSnapshot
+  CanonicalSourceBatch,
+  CatalogSnapshot,
+  StairSystemId
 } from './productGraph';
-import { parseStableIdentity } from './stableIdentity';
+import type {
+  CalculatedFinishingSelection,
+  CalculatedOperationGroup,
+  CalculatedToolSelection
+} from './operationsPolicy';
+import {
+  calculateProductOperations,
+  parseProductOperationsInput
+} from './operationsPolicy';
+import { parseStableIdentity, type StableIdentity } from './stableIdentity';
+import { parseCanonicalDecimal } from './canonicalDecimal';
 import { parseCanonicalProductGraph } from './productGraphSerialization';
+import {
+  calculateLongitudinalProduct,
+  parseLongitudinalProductInput
+} from './longitudinalPolicy';
+import { calculateSlab, parseSlabPolicyInput } from './slabPolicy';
+import { materializePaidRemainderStocks } from './remainderPolicy';
+import {
+  calculateStairPart,
+  parseStairPartPolicyInput,
+  type CanonicalStairSystem
+} from './stairPolicy';
+import {
+  parseStairLayerConfigurationInput,
+  replayStairLayerConfigurations,
+  type StairLayerConfigurationInput,
+  type StairLayerParentGeometry
+} from './stairLayerPolicy';
 
 export interface LegacyProductGraphInput {
   readonly contractId: string;
@@ -27,7 +57,6 @@ export interface LegacyProductGraphConflict {
     | 'legacy-product-reference-missing'
     | 'legacy-product-row-id-conflict'
     | 'legacy-product-row-id-duplicate'
-    | 'legacy-product-row-id-missing'
     | 'legacy-product-type-invalid';
   readonly path: readonly string[];
   readonly message: string;
@@ -73,7 +102,8 @@ const cloneLegacyValue = <T>(value: T): T => {
 
 const resolveLegacyProductRowId = (
   product: Readonly<Record<string, unknown>>,
-  index: number
+  index: number,
+  contractId: string
 ): { value?: string; conflict?: LegacyProductGraphConflict } => {
   const canonical = typeof product.productRowId === 'string' ? product.productRowId.trim() : '';
   const compatibility = typeof product.rowId === 'string' ? product.rowId.trim() : '';
@@ -89,13 +119,10 @@ const resolveLegacyProductRowId = (
   }
   const value = canonical || compatibility;
   if (!value) {
-    return {
-      conflict: {
-        code: 'legacy-product-row-id-missing',
-        path: ['products', String(index), 'productRowId'],
-        message: 'Legacy contract product has no stable product row identity.'
-      }
-    };
+    // The row itself and its order in the immutable legacy snapshot are known
+    // facts, so assigning an identity here does not guess a parent/source
+    // relationship. The same contract snapshot always receives the same ID.
+    return { value: `legacy-row:${contractId}:${index}` };
   }
   return { value };
 };
@@ -164,9 +191,21 @@ export const readLegacyProductGraph = ({
   const rows: CanonicalProductRow[] = [];
   const rowLegacyIndexes: number[] = [];
   const catalogSnapshots: CatalogSnapshot[] = [];
+  const operationGroups: Array<CalculatedOperationGroup & {
+    productRowId: StableIdentity<'product-row'>;
+  }> = [];
+  const toolSelections: CalculatedToolSelection[] = [];
+  const finishingSelections: CalculatedFinishingSelection[] = [];
+  const sourceBatches: CanonicalSourceBatch[] = [];
+  const stairSystemsById = new Map<StairSystemId, CanonicalStairSystem>();
+  const layerInputs: Array<{
+    readonly input: StairLayerConfigurationInput;
+    readonly legacyIndex: number;
+    readonly legacySnapshot: CanonicalJsonObject;
+  }> = [];
 
   legacyView.forEach((product, index) => {
-    const identity = resolveLegacyProductRowId(product, index);
+    const identity = resolveLegacyProductRowId(product, index, contractId);
     const productType = resolveLegacyProductType(product, index);
     const catalogIdentity = resolveLegacyCatalogProductId(product, index);
     const parentReference = resolveLegacyProductReference(product, 'parentProductRowId', index);
@@ -198,6 +237,9 @@ export const readLegacyProductGraph = ({
       productType: productType.value,
       contractualTitle: contractualTitle || '',
       commercial: {
+        ...(product.totalPrice !== undefined && product.totalPrice !== null
+          ? { totalAmountToman: parseCanonicalDecimal(String(product.totalPrice)) }
+          : {}),
         legacySnapshot
       },
       ...(parentReference.value
@@ -215,6 +257,278 @@ export const readLegacyProductGraph = ({
         legacySnapshot
       }
     });
+    if (product.longitudinalPolicyInput !== undefined) {
+      try {
+        const policyInput = parseLongitudinalProductInput(
+          product.longitudinalPolicyInput
+        );
+        const calculation = calculateLongitudinalProduct(policyInput);
+        if (!calculation.ok) {
+          conflicts.push({
+            code: 'legacy-canonical-input-invalid',
+            path: ['products', String(index), 'longitudinalPolicyInput'],
+            message: calculation.conflicts
+              .map(conflict => conflict.message)
+              .join(' | ')
+          });
+        } else {
+          rows[rows.length - 1] = {
+            ...rows[rows.length - 1],
+            commercial: {
+              requestedLengthMeters: calculation.result.lengthMeters,
+              requestedWidthMeters: calculation.result.widthMeters,
+              requestedAreaSquareMeters:
+                calculation.result.requestedAreaSquareMeters,
+              ...(calculation.result.quantity === undefined
+                ? {}
+                : {
+                    requestedQuantity: parseCanonicalDecimal(
+                      String(calculation.result.quantity)
+                    )
+                  }),
+              baseRateToman: policyInput.baseRateToman,
+              baseAmountToman: calculation.result.baseAmountToman,
+              totalAmountToman: calculation.result.totalAmountToman,
+              calculationSnapshot: normalizeLegacyJson(
+                calculation.result
+              ) as CanonicalJsonObject,
+              legacySnapshot
+            }
+          };
+          sourceBatches.push({
+            sourceBatchId: policyInput.sourceBatchId,
+            ownerProductRowId: productRowId,
+            initialRemainders: materializePaidRemainderStocks({
+              ownerProductRowId: productRowId,
+              catalogProductId,
+              sourceBatchId: policyInput.sourceBatchId,
+              remainders: calculation.result.packingPlan.remainders,
+              startingCreationOrder: index * 1000
+            })
+          });
+        }
+      } catch (error) {
+        conflicts.push({
+          code: 'legacy-canonical-input-invalid',
+          path: ['products', String(index), 'longitudinalPolicyInput'],
+          message: error instanceof Error
+            ? error.message
+            : 'Longitudinal product policy is invalid.'
+        });
+      }
+    }
+    if (product.slabPolicyInput !== undefined) {
+      try {
+        const policyInput = parseSlabPolicyInput(product.slabPolicyInput);
+        const calculation = calculateSlab(policyInput);
+        if (!calculation.ok) {
+          conflicts.push({
+            code: 'legacy-canonical-input-invalid',
+            path: ['products', String(index), 'slabPolicyInput'],
+            message: calculation.conflicts
+              .map(conflict => conflict.message)
+              .join(' | ')
+          });
+        } else {
+          rows[rows.length - 1] = {
+            ...rows[rows.length - 1],
+            slab: {
+              lengthDisplayUnit: calculation.result.lengthDisplayUnit,
+              widthDisplayUnit: calculation.result.widthDisplayUnit,
+              cuttingPricingMethod: calculation.result.cuttingPricingMethod,
+              sourceRows: calculation.result.sourceRows.map(row => ({ ...row }))
+            },
+            commercial: {
+              requestedLengthMeters: calculation.result.lengthMeters,
+              requestedWidthMeters: calculation.result.widthMeters,
+              requestedAreaSquareMeters:
+                calculation.result.finishedAreaSquareMeters,
+              requestedQuantity: parseCanonicalDecimal(
+                String(calculation.result.quantity)
+              ),
+              baseRateToman: policyInput.baseMaterialRateToman,
+              baseAmountToman: calculation.result.materialAmountToman,
+              totalAmountToman: calculation.result.totalAmountToman,
+              calculationSnapshot: normalizeLegacyJson(
+                calculation.result
+              ) as CanonicalJsonObject,
+              legacySnapshot
+            }
+          };
+          sourceBatches.push({
+            sourceBatchId: policyInput.sourceBatchId,
+            ownerProductRowId: productRowId,
+            initialRemainders: materializePaidRemainderStocks({
+              ownerProductRowId: productRowId,
+              catalogProductId,
+              sourceBatchId: policyInput.sourceBatchId,
+              remainders: calculation.result.packingPlan.remainders,
+              startingCreationOrder: index * 1000
+            })
+          });
+        }
+      } catch (error) {
+        conflicts.push({
+          code: 'legacy-canonical-input-invalid',
+          path: ['products', String(index), 'slabPolicyInput'],
+          message: error instanceof Error
+            ? error.message
+            : 'Slab product policy is invalid.'
+        });
+      }
+    }
+    if (product.stairPartPolicyInput !== undefined) {
+      try {
+        const policyInput = parseStairPartPolicyInput(
+          product.stairPartPolicyInput
+        );
+        const calculation = calculateStairPart(policyInput);
+        if (!calculation.ok) {
+          conflicts.push({
+            code: 'legacy-canonical-input-invalid',
+            path: ['products', String(index), 'stairPartPolicyInput'],
+            message: calculation.conflicts
+              .map(conflict => conflict.message)
+              .join(' | ')
+          });
+        } else {
+          const stairCatalogSnapshotVersion =
+            `legacy:${contractId}:${revision}:stair:${policyInput.stairSystemId}`;
+          rows[rows.length - 1] = {
+            ...rows[rows.length - 1],
+            catalogSnapshotVersion: stairCatalogSnapshotVersion,
+            stairPart: calculation.result.stairPart,
+            commercial: {
+              requestedLengthMeters: calculation.result.lengthMeters,
+              requestedWidthMeters: calculation.result.crossDimensionMeters,
+              requestedAreaSquareMeters:
+                calculation.result.requestedAreaSquareMeters,
+              requestedQuantity: parseCanonicalDecimal(
+                String(calculation.result.quantity)
+              ),
+              baseRateToman: policyInput.baseRateToman,
+              baseAmountToman: calculation.result.baseAmountToman,
+              totalAmountToman: calculation.result.totalAmountToman,
+              calculationSnapshot: normalizeLegacyJson(
+                calculation.result
+              ) as CanonicalJsonObject,
+              legacySnapshot
+            }
+          };
+          const currentCatalogSnapshotIndex = catalogSnapshots.length - 1;
+          const sharedStairSnapshotExists = catalogSnapshots.some(
+            (snapshot, snapshotIndex) =>
+              snapshotIndex !== currentCatalogSnapshotIndex &&
+              snapshot.catalogProductId === catalogProductId &&
+              snapshot.snapshotVersion === stairCatalogSnapshotVersion
+          );
+          if (sharedStairSnapshotExists) {
+            catalogSnapshots.splice(currentCatalogSnapshotIndex, 1);
+          } else {
+            catalogSnapshots[currentCatalogSnapshotIndex] = {
+              catalogProductId,
+              snapshotVersion: stairCatalogSnapshotVersion,
+              facts: {}
+            };
+          }
+          sourceBatches.push({
+            sourceBatchId: policyInput.sourceBatchId,
+            ownerProductRowId: productRowId,
+            initialRemainders: materializePaidRemainderStocks({
+              ownerProductRowId: productRowId,
+              catalogProductId,
+              sourceBatchId: policyInput.sourceBatchId,
+              remainders: calculation.result.packingPlan.remainders,
+              startingCreationOrder: index * 1000
+            })
+          });
+          const existingSystem = stairSystemsById.get(
+            policyInput.stairSystemId
+          );
+          stairSystemsById.set(policyInput.stairSystemId, {
+            stairSystemId: policyInput.stairSystemId,
+            catalogProductId,
+            catalogSnapshotVersion: stairCatalogSnapshotVersion,
+            quantityMode: existingSystem?.quantityMode ?? 'steps',
+            totalSteps: Math.max(
+              existingSystem?.totalSteps ?? 0,
+              calculation.result.quantity
+            )
+          });
+        }
+      } catch (error) {
+        conflicts.push({
+          code: 'legacy-canonical-input-invalid',
+          path: ['products', String(index), 'stairPartPolicyInput'],
+          message: error instanceof Error
+            ? error.message
+            : 'Stair part policy is invalid.'
+        });
+      }
+    }
+    const layerSourcePlan = (
+      product.meta !== null &&
+      typeof product.meta === 'object' &&
+      !Array.isArray(product.meta)
+    )
+      ? (product.meta as Readonly<Record<string, unknown>>).layerSourcePlan
+      : undefined;
+    const canonicalLayerInput = (
+      layerSourcePlan !== null &&
+      typeof layerSourcePlan === 'object' &&
+      !Array.isArray(layerSourcePlan)
+    )
+      ? (layerSourcePlan as Readonly<Record<string, unknown>>).canonicalInput
+      : undefined;
+    if (canonicalLayerInput !== undefined) {
+      try {
+        layerInputs.push({
+          input: parseStairLayerConfigurationInput(canonicalLayerInput),
+          legacyIndex: index,
+          legacySnapshot
+        });
+      } catch (error) {
+        conflicts.push({
+          code: 'legacy-canonical-input-invalid',
+          path: [
+            'products',
+            String(index),
+            'meta',
+            'layerSourcePlan',
+            'canonicalInput'
+          ],
+          message: error instanceof Error
+            ? error.message
+            : 'Stair layer policy is invalid.'
+        });
+      }
+    }
+    if (product.operationPolicyInput !== undefined) {
+      try {
+        const operationInput = parseProductOperationsInput(product.operationPolicyInput);
+        const operationResult = calculateProductOperations(operationInput);
+        if (!operationResult.ok) {
+          conflicts.push({
+            code: 'legacy-canonical-input-invalid',
+            path: ['products', String(index), 'operationPolicyInput'],
+            message: operationResult.conflicts.map(conflict => conflict.message).join(' | ')
+          });
+        } else {
+          operationGroups.push(...operationResult.result.groups.map(group => ({
+            ...group,
+            productRowId
+          })));
+          toolSelections.push(...operationResult.result.tools);
+          finishingSelections.push(...operationResult.result.finishings);
+        }
+      } catch (error) {
+        conflicts.push({
+          code: 'legacy-canonical-input-invalid',
+          path: ['products', String(index), 'operationPolicyInput'],
+          message: error instanceof Error ? error.message : 'Product operations are invalid.'
+        });
+      }
+    }
   });
 
   const rowIndexesById = new Map<string, number[]>();
@@ -262,20 +576,129 @@ export const readLegacyProductGraph = ({
     };
   }
 
+  const layerSourceBatchIds = new Set(
+    sourceBatches.map(batch => batch.sourceBatchId)
+  );
+  layerInputs.forEach(({ input }) => {
+    if (!layerSourceBatchIds.has(input.sourceBatchId)) {
+      sourceBatches.push({
+        sourceBatchId: input.sourceBatchId,
+        ownerProductRowId: input.parentProductRowId,
+        initialRemainders: []
+      });
+      layerSourceBatchIds.add(input.sourceBatchId);
+    }
+    const layerSource = input.source;
+    if (
+      layerSource.kind === 'new-material' &&
+      !catalogSnapshots.some(snapshot =>
+        snapshot.catalogProductId === layerSource.catalogProductId &&
+        snapshot.snapshotVersion === layerSource.catalogSnapshotVersion
+      )
+    ) {
+      const legacyLayer = layerInputs.find(
+        candidate =>
+          candidate.input.layerConfigurationId === input.layerConfigurationId
+      );
+      catalogSnapshots.push({
+        catalogProductId: layerSource.catalogProductId,
+        snapshotVersion: layerSource.catalogSnapshotVersion,
+        facts: legacyLayer
+          ? { legacySnapshot: legacyLayer.legacySnapshot }
+          : {}
+      });
+    }
+  });
+
+  const layerParents = new Map<
+    StableIdentity<'product-row'>,
+    StairLayerParentGeometry
+  >();
+  rows.forEach(row => {
+    const quantity = Number(row.commercial.requestedQuantity);
+    if (
+      row.productType === 'stair' &&
+      row.stairPart &&
+      row.commercial.requestedLengthMeters !== undefined &&
+      row.commercial.requestedWidthMeters !== undefined &&
+      Number.isSafeInteger(quantity) &&
+      quantity > 0
+    ) {
+      layerParents.set(row.productRowId, {
+        lengthMeters: row.commercial.requestedLengthMeters,
+        crossDimensionMeters: row.commercial.requestedWidthMeters,
+        quantity
+      });
+    }
+  });
+  const layerReplay = replayStairLayerConfigurations({
+    inputs: layerInputs.map(entry => entry.input),
+    parents: layerParents,
+    baseInventory: sourceBatches.flatMap(
+      batch => batch.initialRemainders?.map(stock => ({ ...stock })) ?? []
+    )
+  });
+  if (!layerReplay.ok) {
+    return {
+      ok: false,
+      source: 'legacy-read',
+      contractId,
+      revision,
+      migrationRequired: true,
+      legacyView,
+      conflicts: layerReplay.conflicts.map(conflict => ({
+        code: 'legacy-canonical-input-invalid',
+        path: ['layerConfigurations', conflict.entityId ?? conflict.field],
+        message: conflict.message
+      }))
+    };
+  }
+  const layerConfigurations: CanonicalLayerConfiguration[] =
+    layerReplay.result.configurations.map(({ input, result }) => ({
+      layerConfigurationId: input.layerConfigurationId,
+      parentProductRowId: input.parentProductRowId,
+      sourceBatchId: input.sourceBatchId,
+      creationOrder: input.creationOrder,
+      input,
+      result
+    }));
+  layerConfigurations.forEach(configuration => {
+    const layerLegacyEntry = layerInputs.find(
+      entry =>
+        entry.input.layerConfigurationId ===
+        configuration.layerConfigurationId
+    );
+    if (!layerLegacyEntry) return;
+    const rowIndex = rowLegacyIndexes.findIndex(
+      legacyIndex => legacyIndex === layerLegacyEntry.legacyIndex
+    );
+    if (rowIndex < 0) return;
+    rows[rowIndex] = {
+      ...rows[rowIndex],
+      commercial: {
+        ...rows[rowIndex].commercial,
+        totalAmountToman: configuration.result.totalAmountToman,
+        calculationSnapshot: normalizeLegacyJson(
+          configuration.result
+        ) as CanonicalJsonObject
+      }
+    };
+  });
+
   const graph = {
     schemaVersion: 1 as const,
     revision,
     calculationPolicy: { ...calculationPolicy },
     catalogSnapshots,
     rows,
-    stairSystems: [],
-    layerConfigurations: [],
-    sourceBatches: [],
-    remainingStones: [],
+    stairSystems: [...stairSystemsById.values()],
+    layerConfigurations,
+    sourceBatches,
+    remainingStones: layerReplay.result.inventory,
     allocations: [],
-    operationGroups: [],
-    toolSelections: [],
-    finishingSelections: []
+    operationGroups,
+    toolSelections,
+    finishingSelections
   };
   let canonicalGraph: CanonicalProductGraph;
   try {

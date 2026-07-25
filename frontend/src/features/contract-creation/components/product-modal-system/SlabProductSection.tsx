@@ -6,11 +6,13 @@ import {
   parseCanonicalDecimal,
   parseStableIdentity,
   type CanonicalDecimal,
+  type SlabCalculation,
   type SlabPolicyInput,
   type SlabSourceRowInput,
   type StableIdentity
 } from '@sabalanerp/contract-product-graph';
 import {
+  CompactSwitch,
   CompactSegmentedControl,
   CompactUnitSwitch
 } from './productModalPrimitives';
@@ -53,7 +55,10 @@ function SlabField({
   inputMode?: 'decimal' | 'numeric';
 }) {
   const [draft, setDraft] = React.useState(value);
-  React.useEffect(() => setDraft(value), [value]);
+  const editingRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!editingRef.current) setDraft(value);
+  }, [value]);
   return (
     <div>
       <div className="mb-1 flex min-h-6 items-center justify-between gap-2">
@@ -76,9 +81,16 @@ function SlabField({
         id={id}
         inputMode={inputMode}
         value={draft}
+        onFocus={() => {
+          editingRef.current = true;
+        }}
         onChange={event => {
           setDraft(event.target.value);
           onChange(event.target.value);
+        }}
+        onBlur={() => {
+          editingRef.current = false;
+          setDraft(value);
         }}
         aria-invalid={Boolean(error)}
         aria-describedby={error ? `${id}-error` : undefined}
@@ -125,7 +137,9 @@ function SlabSourceRow({
       <SlabField
         id={`slab-source-${row.sourceRowId}-length`}
         label="طول"
-        value={toDisplay(row.lengthMeters, row.lengthDisplayUnit)}
+        value={Number(row.lengthMeters) > 0
+          ? toDisplay(row.lengthMeters, row.lengthDisplayUnit)
+          : ''}
         unit={row.lengthDisplayUnit}
         onUnitChange={lengthDisplayUnit => onChange({ ...row, lengthDisplayUnit })}
         onChange={value => commitDimension('lengthMeters', value, row.lengthDisplayUnit)}
@@ -134,7 +148,9 @@ function SlabSourceRow({
       <SlabField
         id={`slab-source-${row.sourceRowId}-width`}
         label="عرض"
-        value={toDisplay(row.widthMeters, row.widthDisplayUnit)}
+        value={Number(row.widthMeters) > 0
+          ? toDisplay(row.widthMeters, row.widthDisplayUnit)
+          : ''}
         unit={row.widthDisplayUnit}
         onUnitChange={widthDisplayUnit => onChange({ ...row, widthDisplayUnit })}
         onChange={value => commitDimension('widthMeters', value, row.widthDisplayUnit)}
@@ -146,8 +162,18 @@ function SlabSourceRow({
         value={row.quantity > 0 ? String(row.quantity) : ''}
         inputMode="numeric"
         onChange={value => {
-          if (value.trim() !== '' && !/^\d+$/.test(value.trim())) return;
-          onChange({ ...row, quantity: value.trim() === '' ? 0 : Number(value) });
+          const trimmed = value.trim();
+          if (trimmed === '') {
+            onChange({ ...row, quantity: 0 });
+            return;
+          }
+          safeCommit(() => {
+            const normalized = parseCanonicalDecimal(trimmed);
+            if (!/^[1-9]\d*$/.test(normalized)) return;
+            const quantity = Number(normalized);
+            if (!Number.isSafeInteger(quantity)) return;
+            onChange({ ...row, quantity });
+          });
         }}
         error={error}
       />
@@ -166,18 +192,40 @@ function SlabSourceRow({
 export function SlabProductSection({
   input,
   onChange,
+  showValidation = false,
+  calculation: workerCalculation,
+  calculating = false,
   createSourceIdentity = () =>
     parseStableIdentity('slab-source-row', crypto.randomUUID())
 }: {
   input: SlabPolicyInput;
   onChange: (input: SlabPolicyInput) => void;
+  showValidation?: boolean;
+  calculation?: SlabCalculation | null;
+  calculating?: boolean;
   createSourceIdentity?: () => StableIdentity<'slab-source-row'>;
 }) {
-  const calculation = React.useMemo(() => calculateSlab(input), [input]);
-  const conflict = (field: string) => calculation.ok
+  const localCalculation = React.useMemo(
+    () => workerCalculation === undefined && !calculating
+      ? calculateSlab(input)
+      : null,
+    [calculating, input, workerCalculation]
+  );
+  const calculation = workerCalculation ?? localCalculation;
+  const rawConflict = (field: string) => calculation?.ok
     ? undefined
-    : calculation.conflicts.find(item => item.field === field)?.message;
-  const resolved = calculation.ok ? calculation.result : undefined;
+    : calculation?.conflicts.find(item => item.field === field)?.message;
+  const conflict = (field: string) => {
+    if (!showValidation) return undefined;
+    const message = rawConflict(field);
+    if (!message) return undefined;
+    if (field === 'geometry' || field === 'quantity') return 'ابعاد و تعداد را کامل کنید';
+    if (field === 'baseMaterialRateToman') return 'قیمت را وارد کنید';
+    if (field === 'squareMeterCutRateToman') return 'نرخ برش را وارد کنید';
+    if (field === 'sourceRows') return 'منابع واردشده برای تأمین سفارش کافی نیستند';
+    return message;
+  };
+  const resolved = calculation?.ok ? calculation.result : undefined;
   const commitDimension = (
     field: 'lengthMeters' | 'widthMeters',
     raw: string,
@@ -227,10 +275,17 @@ export function SlabProductSection({
           value={input.quantity ? String(input.quantity) : ''}
           inputMode="numeric"
           onChange={value => {
-            if (value.trim() !== '' && !/^\d+$/.test(value.trim())) return;
-            onChange({
-              ...input,
-              quantity: value.trim() === '' ? undefined : Number(value)
+            const trimmed = value.trim();
+            if (trimmed === '') {
+              onChange({ ...input, quantity: undefined });
+              return;
+            }
+            safeCommit(() => {
+              const normalized = parseCanonicalDecimal(trimmed);
+              if (!/^[1-9]\d*$/.test(normalized)) return;
+              const quantity = Number(normalized);
+              if (!Number.isSafeInteger(quantity)) return;
+              onChange({ ...input, quantity });
             });
           }}
           error={conflict('quantity')}
@@ -285,9 +340,9 @@ export function SlabProductSection({
               ...input,
               sourceRows: removeSlabSourceRow(input.sourceRows, row.sourceRowId)
             })}
-            error={sourceError}
           />
         ))}
+        {sourceError && <div className={errorClass}>{sourceError}</div>}
       </section>
 
       <section className="border-t border-slate-200 py-3 dark:border-slate-800">
@@ -318,9 +373,31 @@ export function SlabProductSection({
         )}
       </section>
 
+      <div className="flex min-h-10 items-center gap-2 border-t border-slate-200 py-2 text-xs font-semibold dark:border-slate-800">
+        <CompactSwitch
+          label="خوراک اره"
+          checked={Number(input.kerfMeters) > 0}
+          onChange={enabled => onChange({
+            ...input,
+            kerfMeters: parseCanonicalDecimal(enabled ? '0.003' : '0')
+          })}
+        />
+        خوراک اره
+      </div>
+
       <section aria-label="خلاصه محاسبه" className="border-t border-slate-200 dark:border-slate-800">
         <h3 className="py-2 text-sm font-bold">خلاصه محاسبه</h3>
-        {[
+        {calculating && (
+          <div role="status" aria-label="در حال محاسبه" className="space-y-1.5 py-1">
+            {Array.from({ length: 6 }, (_, index) => (
+              <div
+                key={index}
+                className="h-9 animate-pulse rounded bg-slate-100 motion-reduce:animate-none dark:bg-slate-800"
+              />
+            ))}
+          </div>
+        )}
+        {!calculating && [
           ['محصول نهایی', resolved
             ? `${resolved.quantity} × ${resolved.lengthMeters}m × ${resolved.widthMeters}m`
             : '—'],
@@ -344,9 +421,6 @@ export function SlabProductSection({
             <span className="font-semibold">{value}</span>
           </div>
         ))}
-        {!calculation.ok && conflict('sourceRows') && (
-          <div className={errorClass}>{conflict('sourceRows')}</div>
-        )}
       </section>
     </div>
   );

@@ -7,6 +7,7 @@ import {
   transitionLongitudinalQuantity,
   type CanonicalDecimal,
   type LongitudinalManualField,
+  type LongitudinalProductCalculation,
   type LongitudinalProductInput
 } from '@sabalanerp/contract-product-graph';
 import {
@@ -53,7 +54,10 @@ function CompactDecimalField({
   inputMode?: 'decimal' | 'numeric';
 }) {
   const [draft, setDraft] = React.useState(value);
-  React.useEffect(() => setDraft(value), [value]);
+  const editingRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!editingRef.current) setDraft(value);
+  }, [value]);
   return (
     <div>
       <div className="mb-1 flex min-h-6 items-center justify-between gap-2">
@@ -76,10 +80,17 @@ function CompactDecimalField({
         id={id}
         inputMode={inputMode}
         value={draft}
+        onFocus={() => {
+          editingRef.current = true;
+        }}
         onChange={event => {
           const next = event.target.value;
           setDraft(next);
           onValueChange(next);
+        }}
+        onBlur={() => {
+          editingRef.current = false;
+          setDraft(value);
         }}
         aria-invalid={Boolean(error)}
         aria-describedby={error ? `${id}-error` : undefined}
@@ -92,18 +103,38 @@ function CompactDecimalField({
 
 export function LongitudinalProductSection({
   input,
-  onChange
+  onChange,
+  showValidation = false,
+  calculation: workerCalculation,
+  calculating = false
 }: {
   input: LongitudinalProductInput;
   onChange: (input: LongitudinalProductInput) => void;
+  showValidation?: boolean;
+  calculation?: LongitudinalProductCalculation | null;
+  calculating?: boolean;
 }) {
-  const calculation = React.useMemo(
-    () => calculateLongitudinalProduct(input),
-    [input]
+  const localCalculation = React.useMemo(
+    () => workerCalculation === undefined && !calculating
+      ? calculateLongitudinalProduct(input)
+      : null,
+    [calculating, input, workerCalculation]
   );
-  const conflictFor = (field: string) => calculation.ok
+  const calculation = workerCalculation ?? localCalculation;
+  const rawConflictFor = (field: string) => calculation?.ok
     ? undefined
-    : calculation.conflicts.find(conflict => conflict.field === field)?.message;
+    : calculation?.conflicts.find(conflict => conflict.field === field)?.message;
+  const conflictFor = (field: string) => {
+    if (!showValidation) return undefined;
+    const message = rawConflictFor(field);
+    if (!message) return undefined;
+    if (field === 'dimensions') return 'طول یا مترمربع را وارد کنید';
+    if (field === 'baseRateToman') return 'قیمت را وارد کنید';
+    if (field === 'widthMeters') {
+      return `حداکثر عرض این سنگ ${Number(input.motherWidthMeters) * 100} سانتی‌متر است`;
+    }
+    return message;
+  };
   const commitDecimal = (
     field: 'lengthMeters' | 'widthMeters' | 'requestedAreaSquareMeters' | 'baseRateToman',
     rawValue: string,
@@ -130,13 +161,13 @@ export function LongitudinalProductSection({
     }
   };
   const effectiveWidth = input.widthMeters ?? input.motherWidthMeters;
-  const resolved = calculation.ok ? calculation.result : undefined;
+  const resolved = calculation?.ok ? calculation.result : undefined;
   const visibleLength = resolved?.lengthMeters ?? input.lengthMeters;
   const visibleWidth = resolved?.widthMeters ?? effectiveWidth;
   const visibleArea = resolved?.requestedAreaSquareMeters ??
     input.requestedAreaSquareMeters;
   const noPhysicalCut = effectiveWidth === input.motherWidthMeters;
-  const summaryRows = calculation.ok
+  const summaryRows = calculation?.ok
     ? calculation.result.summary
     : [
         { key: 'layout', label: 'چیدمان', value: '—' },
@@ -162,7 +193,6 @@ export function LongitudinalProductSection({
             'length',
             input.lengthDisplayUnit
           )}
-          error={conflictFor('dimensions')}
         />
         <CompactDecimalField
           id="longitudinal-width"
@@ -185,10 +215,20 @@ export function LongitudinalProductSection({
           inputMode="numeric"
           onValueChange={value => {
             const trimmed = value.trim();
-            if (trimmed !== '' && !/^\d+$/.test(trimmed)) return;
+            let nextQuantity: number | undefined;
+            if (trimmed !== '') {
+              try {
+                const normalized = parseCanonicalDecimal(trimmed);
+                if (!/^[1-9]\d*$/.test(normalized)) return;
+                nextQuantity = Number(normalized);
+                if (!Number.isSafeInteger(nextQuantity)) return;
+              } catch {
+                return;
+              }
+            }
             const transitioned = transitionLongitudinalQuantity({
               previousQuantity: input.quantity,
-              nextQuantity: trimmed === '' ? undefined : Number(trimmed),
+              nextQuantity,
               mandatoryEnabled: input.mandatoryEnabled,
               mandatoryPercentage: input.mandatoryPercentage,
               rememberedMandatoryPercentage: input.rememberedMandatoryPercentage
@@ -210,9 +250,11 @@ export function LongitudinalProductSection({
             value,
             'area'
           )}
-          error={conflictFor('dimensions')}
         />
       </div>
+      {conflictFor('dimensions') && (
+        <div className={errorClass}>{conflictFor('dimensions')}</div>
+      )}
 
       <CompactDecimalField
         id="longitudinal-base-rate"
@@ -264,7 +306,7 @@ export function LongitudinalProductSection({
         <label className="inline-flex items-center gap-2 text-xs font-semibold">
           <CompactSwitch
             label="برش کالیبر"
-            checked={calculation.ok
+            checked={calculation?.ok
               ? calculation.result.calibrationEnabled
               : input.calibrationEnabled}
             disabled={noPhysicalCut}
@@ -278,7 +320,7 @@ export function LongitudinalProductSection({
         </label>
       </div>
 
-      {!calculation.ok && conflictFor('summary') && (
+      {!calculation?.ok && showValidation && conflictFor('summary') && (
         <div tabIndex={-1} className="text-xs text-red-600 dark:text-red-300">
           {conflictFor('summary')}
         </div>
@@ -286,7 +328,17 @@ export function LongitudinalProductSection({
 
       <section aria-label="خلاصه محاسبه" className="border-t border-slate-200 dark:border-slate-800">
         <h3 className="py-2 text-sm font-bold">خلاصه محاسبه</h3>
-        {summaryRows.map(row => (
+        {calculating && (
+          <div role="status" aria-label="در حال محاسبه" className="space-y-1.5 py-1">
+            {Array.from({ length: 6 }, (_, index) => (
+              <div
+                key={index}
+                className="h-9 animate-pulse rounded bg-slate-100 motion-reduce:animate-none dark:bg-slate-800"
+              />
+            ))}
+          </div>
+        )}
+        {!calculating && summaryRows.map(row => (
           <div
             key={row.key}
             className="grid min-h-9 grid-cols-[7rem_1fr] items-center gap-3 border-t border-slate-100 py-1.5 text-xs dark:border-slate-800"

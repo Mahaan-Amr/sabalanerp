@@ -280,6 +280,7 @@ interface StoneProductWizardData {
   
   // Contract visibility
   contractVisibility: Record<ContractVisibilityOption, boolean>;
+  motherLengthValue: string;
 }
 
 export default function CreateStoneProductWizard() {
@@ -332,7 +333,8 @@ export default function CreateStoneProductWizard() {
     finishType: null,
     colorId: '',
   color: null,
-  contractVisibility: { ...EMPTY_CONTRACT_VISIBILITY }
+  contractVisibility: { ...EMPTY_CONTRACT_VISIBILITY },
+  motherLengthValue: ''
   });
 
   // Load master data
@@ -482,6 +484,13 @@ export default function CreateStoneProductWizard() {
         if (!Object.values(wizardData.contractVisibility || {}).some(Boolean)) {
           newErrors.contractVisibility = 'حداقل یک قرارداد باید انتخاب شود';
         }
+        if (
+          wizardData.motherLengthValue &&
+          (!Number.isFinite(Number(wizardData.motherLengthValue)) ||
+            Number(wizardData.motherLengthValue) <= 0)
+        ) {
+          newErrors.motherLengthValue = 'طول مادر باید بیشتر از صفر باشد';
+        }
         break;
     }
     
@@ -568,6 +577,9 @@ export default function CreateStoneProductWizard() {
         widthCode: wizardData.cutWidth?.code || '',
         widthValue: wizardData.cutWidth?.value || 0,
         widthName: wizardData.cutWidth?.value ? `ع${wizardData.cutWidth.value}` : '',
+        motherLengthValue: wizardData.motherLengthValue
+          ? Number(wizardData.motherLengthValue)
+          : null,
         thicknessCode: wizardData.thickness?.code || '',
         thicknessValue: wizardData.thickness?.value || 0,
         thicknessName: wizardData.thickness?.value ? `ض${wizardData.thickness.value}` : '',
@@ -762,6 +774,21 @@ export default function CreateStoneProductWizard() {
               onSearchChange={updateSearchTerm}
               onSelect={selectMasterDataItem}
             />
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                طول مادر (متر)
+              </label>
+              <input
+                value={wizardData.motherLengthValue}
+                onChange={(event) => updateWizardData('motherLengthValue', event.target.value)}
+                inputMode="decimal"
+                className="h-10 w-full rounded-lg border border-slate-300 bg-transparent px-3 text-sm outline-none focus:border-teal-500 dark:border-slate-700"
+              />
+              {errors.motherLengthValue && (
+                <p className="mt-1 text-sm text-red-500">{errors.motherLengthValue}</p>
+              )}
+            </div>
             
             {/* Final Code Preview */}
             <div className="bg-teal-50 dark:bg-teal-900/20 p-4 rounded-lg border border-teal-200 dark:border-teal-800">

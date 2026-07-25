@@ -33,6 +33,7 @@ const ProductDetailPage: React.FC = () => {
   const [editing, setEditing] = useState(false);
   const [formData, setFormData] = useState({
     basePrice: '',
+    motherLengthValue: '',
     isAvailable: true,
     leadTime: '',
     description: '',
@@ -55,6 +56,7 @@ const ProductDetailPage: React.FC = () => {
         setProduct(data.data);
         setFormData({
           basePrice: data.data.basePrice?.toString() || '',
+          motherLengthValue: data.data.motherLengthValue?.toString() || '',
           isAvailable: data.data.isAvailable,
           leadTime: data.data.leadTime?.toString() || '',
           description: data.data.description || '',
@@ -76,6 +78,9 @@ const ProductDetailPage: React.FC = () => {
     try {
       const response = await salesAPI.updateProduct(productId, {
         basePrice: formData.basePrice ? parseFloat(formData.basePrice) : null,
+        motherLengthValue: formData.motherLengthValue
+          ? parseFloat(formData.motherLengthValue)
+          : null,
         isAvailable: formData.isAvailable,
         leadTime: formData.leadTime ? parseInt(formData.leadTime) : null,
         description: formData.description || null,
@@ -221,6 +226,30 @@ const ProductDetailPage: React.FC = () => {
                   <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
                     {product.widthValue} × {product.thicknessValue} سانتی‌متر
                   </div>
+                </div>
+
+                {/* Mine */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                    طول مادر
+                  </label>
+                  {editing ? (
+                    <input
+                      value={formData.motherLengthValue}
+                      onChange={(event) => setFormData({
+                        ...formData,
+                        motherLengthValue: event.target.value
+                      })}
+                      inputMode="decimal"
+                      className="w-full rounded-lg border border-slate-200 bg-white/50 px-4 py-2 focus:border-teal-500 focus:outline-none dark:border-slate-600 dark:bg-slate-700/50"
+                    />
+                  ) : (
+                    <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                      {product.motherLengthValue
+                        ? `${product.motherLengthValue} متر`
+                        : 'در موجودی ثبت نشده است'}
+                    </div>
+                  )}
                 </div>
 
                 {/* Mine */}

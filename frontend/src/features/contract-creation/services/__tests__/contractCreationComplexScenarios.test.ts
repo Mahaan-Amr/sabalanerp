@@ -3,7 +3,12 @@ import { calculateSmartLongitudinalCutPlan, calculateSlabRemainingStones, hasLon
 import { allocateRemainingStonePartitions } from '../remainingStonePartitionService';
 import { recalculateRemainingChildAddOns } from '../remainingStoneChildAddOnService';
 import { calculateSlabCut, validateCutDimensions } from '../stoneCuttingService';
-import { calculateLayerMetrics, calculateStairStoneUsage, computeTotalsV2 } from '../stairCalculationService';
+import {
+  calculateCanonicalStairDraft,
+  calculateLayerMetrics,
+  calculateStairStoneUsage,
+  computeTotalsV2
+} from '../stairCalculationService';
 import { validatePayment, validateWizardStep } from '../validationService';
 import { calculateContractTotal, calculateFinalPrice } from '../pricingService';
 import { buildSlabCutDetails, calculateSlabMetrics, handleSmartCalculation } from '../../utils/productCalculations';
@@ -54,6 +59,47 @@ import type {
 const approx = (actual: number, expected: number, precision = 6) => {
   assert.equal(Number(actual.toFixed(precision)), Number(expected.toFixed(precision)));
 };
+
+{
+  const canonicalStair = calculateCanonicalStairDraft(
+    'tread',
+    {
+      stoneProduct: {
+        id: 'stone-40',
+        motherLengthValue: 3,
+        widthValue: 40
+      } as Product,
+      lengthValue: 1.2,
+      lengthUnit: 'm',
+      widthCm: 20,
+      widthUnit: 'cm',
+      quantity: 4,
+      pricePerSquareMeter: 100_000,
+      useMandatory: false,
+      mandatoryPercentage: 25,
+      sawKerfEnabled: false,
+      sawKerfCm: 0.3,
+      calibrationCutEnabled: false,
+      calibrationSelection: 'automatic'
+    },
+    () => 10_000
+  );
+  assert.equal(canonicalStair.ok, true);
+  if (canonicalStair.ok) {
+    assert.equal(canonicalStair.result.packingPlan.consumedSources.length, 1);
+    assert.equal(canonicalStair.result.packingPlan.placements.length, 4);
+    assert.equal(canonicalStair.result.requestedAreaSquareMeters, '0.96');
+    assert.equal(canonicalStair.result.calibrationEnabled, true);
+    assert.equal(
+      canonicalStair.result.packingPlan.remainders.some(
+        remainder =>
+          remainder.lengthMeters === '0.6' &&
+          remainder.widthMeters === '0.4'
+      ),
+      true
+    );
+  }
+}
 
 const product = (overrides: Partial<Product> = {}): Product => ({
   id: 'stone-arsanjan-40',

@@ -7,7 +7,7 @@ import type {
   StairDraftFieldErrors,
   LayerTypeOption
 } from '../types/contract.types';
-import { getPartDisplayLabel, getDraftStandardLengthMeters } from '../utils/stairUtils';
+import { getPartDisplayLabel } from '../utils/stairUtils';
 import { formatDisplayNumber } from '../utils/formatUtils';
 
 /**
@@ -32,12 +32,8 @@ export const validateDraftNumericFields = (
 
   switch (field) {
     case 'length': {
-      const hasStandardLength = getDraftStandardLengthMeters(draft) > 0;
       if (value === null || value === undefined || value <= 0) {
-        if (!hasStandardLength) {
-          return `طول برای ${partLabel} الزامی است`;
-        }
-        return null;
+        return `طول برای ${partLabel} الزامی است`;
       }
       if (value > 1000) { // Reasonable max: 10 meters or 1000 cm
         const unit = draft.lengthUnit || 'm';
@@ -181,11 +177,26 @@ export const validateDraftRequiredFields = (
     }
   }
 
-  if (draft.numberOfLayersPerStair && draft.numberOfLayersPerStair > 0 && layerTypes.length > 0 && !draft.layerTypeId) {
+  const hasLayerConfiguration =
+    Boolean(draft.numberOfLayersPerStair && draft.numberOfLayersPerStair > 0);
+
+  if (hasLayerConfiguration && layerTypes.length > 0 && !draft.layerTypeId) {
     errors.layerType = 'انتخاب نوع لایه الزامی است';
   }
 
-  if (draft.numberOfLayersPerStair && draft.numberOfLayersPerStair > 0 && draft.layerUseDifferentStone) {
+  if (hasLayerConfiguration && !draft.layerSourceKind) {
+    errors.layerSource = 'منبع سنگ لایه را انتخاب کنید';
+  }
+
+  if (
+    hasLayerConfiguration &&
+    draft.layerSourceKind === 'contractRemainder' &&
+    !(draft.layerSelectedRemainingStoneIds?.length)
+  ) {
+    errors.layerSource = 'باقی‌مانده موردنظر را انتخاب کنید';
+  }
+
+  if (hasLayerConfiguration && draft.layerSourceKind === 'newMaterial') {
     if (!draft.layerStoneProduct || !draft.layerStoneProductId) {
       errors.layerStone = 'انتخاب سنگ لایه الزامی است';
     }

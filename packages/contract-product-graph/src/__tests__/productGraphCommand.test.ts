@@ -1438,20 +1438,12 @@ const addRowCommand = (
   const result = readLegacyProductGraph(legacyContract);
 
   assert.deepEqual(legacyContract, before);
-  assert.deepEqual(result, {
-    ok: false,
-    source: 'legacy-read',
-    contractId: 'legacy-contract-with-missing-identity',
-    revision: 4,
-    migrationRequired: true,
-    legacyView: before.products,
-    conflicts: [{
-      code: 'legacy-product-row-id-missing',
-      path: ['products', '0', 'productRowId'],
-      message: 'Legacy contract product has no stable product row identity.'
-    }]
-  });
-  assert.equal('graph' in result, false);
+  assert.equal(result.ok, true);
+  if (!result.ok) throw new Error('Expected deterministic legacy row identity.');
+  assert.equal(
+    result.graph.rows[0]?.productRowId,
+    'legacy-row:legacy-contract-with-missing-identity:0'
+  );
 }
 
 {

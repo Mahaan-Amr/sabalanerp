@@ -1,103 +1,128 @@
-// Step 5: Product Selection Component
-// Mobile-first catalog-to-cart product selection for contract creation.
+'use client';
 
-import React, { useState } from 'react';
-import { FaSearch, FaPlus, FaCheck, FaEdit, FaTrash, FaTimes, FaChevronDown, FaWrench } from 'react-icons/fa';
-import { formatPrice, formatSquareMeters, formatQuantity, formatDisplayNumber, parseFormattedNumber } from '@/lib/numberFormat';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { resolveBackendAssetUrl } from '@/lib/api';
-import { generateFullProductName } from '../../utils/productUtils';
+import {
+  formatDisplayNumber,
+  formatPrice,
+  formatQuantity,
+  formatSquareMeters,
+  parseFormattedNumber
+} from '@/lib/numberFormat';
+import type {
+  ContractProduct,
+  ContractServiceRow,
+  ContractServiceRowSourceType,
+  Product
+} from '../../types/contract.types';
+import type { ContractProductCartController } from '../../hooks/useContractProductCartController';
+import { generateFullProductName, inferCatalogContractType } from '../../utils/productUtils';
 import {
   getServiceRowSourceLabel,
   getServiceRowUnitLabel,
   getServiceRowUnitPriceFromCatalog
 } from '../../utils/contractServiceRows';
+import { getAvailableRemainingStoneInventory } from '../../utils/remainingStoneGuards';
 import {
-  getAvailableRemainingStoneInventory
-} from '../../utils/remainingStoneGuards';
-import { getPreparedKindLabel, getPreparedQuantity, getPreparedUnit, getPreparedUnitLabel, isPreparedProductType } from '../../utils/preparedProductUtils';
+  getPreparedQuantity,
+  getPreparedUnit,
+  getPreparedUnitLabel,
+  isPreparedProductType
+} from '../../utils/preparedProductUtils';
 import { getPartDisplayLabel } from '../../utils/stairSystemHelpers';
 import { hasUnresolvedLegacyRemainingChildAddOns } from '../../services/remainingStoneChildAddOnService';
-import type { ContractProduct, ContractServiceRowSourceType } from '../../types/contract.types';
-import type { ContractProductCartController } from '../../hooks/useContractProductCartController';
-
-const PRODUCT_TYPES = [
-  {
-    id: 'longitudinal',
-    name: 'سنگ طولی',
-    nameEn: 'Longitudinal Stone',
-  },
-  {
-    id: 'stair',
-    name: 'سنگ پله',
-    nameEn: 'Stair Stone',
-  },
-  {
-    id: 'slab',
-    name: 'سنگ اسلب',
-    nameEn: 'Slab Stone',
-  },
-  {
-    id: 'prepared',
-    name: 'کیوبیک و قطعات آماده',
-    nameEn: 'Cubic and Ready Pieces',
-  },
-] as const;
+import {
+  moveCatalogHighlight,
+  resolveHighlightedCatalogProduct
+} from './catalogProductRanking';
+import { buildContractCartRows } from './contractCartRows';
 
 interface Step5ProductSelectionProps {
   controller: ContractProductCartController;
   errors: Record<string, string>;
 }
 
-const getProductTypeLabel = (type: ContractProduct['productType']) => (
-  PRODUCT_TYPES.find((item) => item.id === type)?.name ?? type
-);
-
-const getContractRowTypeLabel = (product: ContractProduct) => {
-  if (product.productType === 'stair' && product.stairPartType) {
-    return getPartDisplayLabel(product.stairPartType);
-  }
-  return getProductTypeLabel(product.productType);
-};
-
-const getProductTypeClasses = (type: ContractProduct['productType']) => {
-  if (type === 'longitudinal') return 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/20 dark:text-teal-200 dark:border-teal-800';
-  if (type === 'slab') return 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-200 dark:border-indigo-800';
-  if (type === 'prepared' || type === 'volumetric') return 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-200 dark:border-emerald-800';
-  return 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-200 dark:border-purple-800';
+const TYPE_LABELS: Record<string, string> = {
+  longitudinal: 'طولی',
+  stair: 'پله',
+  slab: 'اسلب',
+  prepared: 'آماده',
+  volumetric: 'آماده'
 };
 
 const SERVICE_SOURCE_OPTIONS: ContractServiceRowSourceType[] = ['tool', 'cutting', 'finishing'];
 
-const LegacyRemainingAddOnReview: React.FC<{
-  onAdopt: () => void;
-  onRemove: () => void;
-}> = ({ onAdopt, onRemove }) => (
-  <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
-    <p className="font-semibold">افزونه‌های قدیمی این باقی‌مانده نیازمند تصمیم شما هستند.</p>
-    <p className="mt-1 leading-5">این داده‌ها خودکار از والد کپی نمی‌شوند. آن‌ها را حذف کنید یا به افزونه‌های مستقل این فرزند تبدیل و بر اساس هندسه‌ی خودش دوباره محاسبه کنید.</p>
-    <div className="mt-2 flex flex-wrap gap-2">
-      <button type="button" onClick={onAdopt} className="rounded-md bg-amber-700 px-3 py-1.5 font-semibold text-white hover:bg-amber-800">
-        پذیرش و محاسبه مجدد
-      </button>
-      <button type="button" onClick={onRemove} className="rounded-md border border-amber-400 bg-white px-3 py-1.5 font-semibold text-amber-800 hover:bg-amber-100 dark:bg-slate-900 dark:text-amber-200">
-        حذف از این فرزند
-      </button>
-    </div>
-  </div>
-);
+const getContractRowTypeLabel = (product: ContractProduct): string => {
+  if (product.productType === 'stair' && product.stairPartType) {
+    return getPartDisplayLabel(product.stairPartType);
+  }
+  return TYPE_LABELS[product.productType] ?? product.productType;
+};
 
-interface RowImageStripProps {
-  images?: string[];
-  label: string;
+const inferCatalogTypeLabel = (
+  product: Product,
+  activeType: string | null
+): string => {
+  const type = activeType ?? inferCatalogContractType(product);
+  return TYPE_LABELS[type] ?? type;
+};
+
+const getProductFacts = (product: Product): string => [
+  product.code,
+  product.stoneTypeNamePersian,
+  product.widthValue > 0 ? `عرض ${formatDisplayNumber(product.widthValue)}cm` : null,
+  product.thicknessValue > 0 ? `ضخامت ${formatDisplayNumber(product.thicknessValue)}cm` : null
+].filter(Boolean).join(' · ');
+
+const getGeometryLabel = (product: ContractProduct): string => {
+  if (isPreparedProductType(product.productType)) {
+    return `${formatDisplayNumber(getPreparedQuantity(product))} ${getPreparedUnitLabel(getPreparedUnit(product))}`;
+  }
+  const length = `${formatDisplayNumber(product.length)}${product.lengthUnit}`;
+  const width = `${formatDisplayNumber(product.width)}${product.widthUnit}`;
+  const quantity = product.quantity > 0 ? `${formatDisplayNumber(product.quantity)} عدد` : 'بدون تعداد';
+  return `${length} × ${width} · ${quantity}`;
+};
+
+const getToolRows = (product: ContractProduct) =>
+  (product.appliedSubServices || []).map((tool, index) => ({
+    id: String((tool as any).selectionId || (tool as any).id || `${product.rowId}-tool-${index}`),
+    label: [
+      (tool as any).namePersian || (tool as any).name || 'ابزار',
+      (tool as any).quantity ? formatDisplayNumber((tool as any).quantity) : null,
+      (tool as any).calculationBase === 'squareMeters' ? 'm²' : 'm'
+    ].filter(Boolean).join(' · ')
+  }));
+
+const getFinishingRows = (product: ContractProduct) => {
+  if (product.finishings?.length) {
+    return product.finishings.map((finishing, index) => ({
+      id: String((finishing as any).selectionId || (finishing as any).id || `${product.rowId}-finishing-${index}`),
+      label: [
+        (finishing as any).namePersian || (finishing as any).name || 'پرداخت',
+        formatDisplayNumber((finishing as any).quantity ?? 0),
+        (finishing as any).calculationBase === 'length' ? 'm' : 'm²'
+      ].join(' · ')
+    }));
+  }
+  if (!product.finishingId) return [];
+  return [{
+    id: String(product.finishingId),
+    label: [
+      product.finishingName || 'پرداخت سنگ',
+      formatDisplayNumber(product.finishingQuantity ?? product.finishingSquareMeters ?? 0),
+      product.finishingCalculationBase === 'length' ? 'm' : 'm²'
+    ].join(' · ')
+  }];
+};
+
+const RowImages: React.FC<{
+  product: ContractProduct;
   onChange: (images: string[]) => void;
   onUpload: (file: File) => Promise<string>;
-}
-
-const RowImageStrip: React.FC<RowImageStripProps> = ({ images = [], label, onChange, onUpload }) => {
-  const visibleImages = images.slice(0, 3);
-  const overflow = Math.max(0, images.length - visibleImages.length);
-
-  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+}> = ({ product, onChange, onUpload }) => {
+  const images = product.images || [];
+  const upload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
@@ -106,1042 +131,480 @@ const RowImageStrip: React.FC<RowImageStripProps> = ({ images = [], label, onCha
   };
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2">
-      {visibleImages.map((image, imageIndex) => (
-        <div key={`${image}-${imageIndex}`} className="relative h-12 w-12 overflow-hidden rounded-md border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
-          <img src={resolveBackendAssetUrl(image)} alt={label} className="h-full w-full object-cover" />
+    <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 dark:border-slate-800">
+      {images.map((image, index) => (
+        <span key={`${image}-${index}`} className="inline-flex items-center gap-1">
+          <img
+            src={resolveBackendAssetUrl(image)}
+            alt={product.stoneName}
+            className="h-8 w-8 rounded border border-slate-200 object-cover dark:border-slate-700"
+          />
           <button
             type="button"
-            onClick={() => onChange(images.filter((_, index) => index !== imageIndex))}
-            className="absolute left-0.5 top-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-950/70 text-white"
-            aria-label="حذف تصویر"
-            title="حذف تصویر"
+            onClick={() => onChange(images.filter((_, imageIndex) => imageIndex !== index))}
+            className="text-xs text-slate-500 hover:text-red-600"
           >
-            <FaTimes className="h-3 w-3" />
+            حذف
           </button>
-        </div>
-      ))}
-      {overflow > 0 && (
-        <span className="inline-flex h-12 min-w-12 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-          +{overflow}
         </span>
-      )}
-      <label className="inline-flex h-12 w-12 cursor-pointer items-center justify-center rounded-md border border-dashed border-teal-300 bg-teal-50 text-teal-700 transition hover:bg-teal-100 dark:border-teal-700 dark:bg-teal-900/20 dark:text-teal-200">
-        <FaPlus className="h-4 w-4" />
-        <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={handleUpload} />
+      ))}
+      <label className="cursor-pointer text-xs font-medium text-teal-700 hover:text-teal-800 dark:text-teal-300">
+        افزودن تصویر
+        <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={upload} />
       </label>
     </div>
   );
 };
 
+const ContractRow: React.FC<{
+  product: ContractProduct;
+  depth?: number;
+  controller: ContractProductCartController;
+  pendingRowId: string | null;
+  deleteConfirmRowId: string | null;
+  onDeleteRequest: (rowId: string) => void;
+  onDeleteCancel: () => void;
+  onDeleteConfirm: (rowId: string) => void;
+}> = ({
+  product,
+  depth = 0,
+  controller,
+  pendingRowId,
+  deleteConfirmRowId,
+  onDeleteRequest,
+  onDeleteCancel,
+  onDeleteConfirm
+}) => {
+  const rowId = product.rowId;
+  if (!rowId) return null;
+  const tools = getToolRows(product);
+  const finishings = getFinishingRows(product);
+  const remaining = getAvailableRemainingStoneInventory(product);
+  const pending = pendingRowId === rowId;
+  const confirmingDelete = deleteConfirmRowId === rowId;
+
+  return (
+    <div
+      className={`border-b border-slate-200 py-3 last:border-b-0 dark:border-slate-700 ${depth ? 'mr-5 border-r pr-4' : ''}`}
+      data-contract-row-id={rowId}
+    >
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <strong className="text-sm text-slate-900 dark:text-white">{product.stoneName}</strong>
+            <span className="text-xs text-slate-500 dark:text-slate-400">{getContractRowTypeLabel(product)}</span>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
+            <span>{getGeometryLabel(product)}</span>
+            {!isPreparedProductType(product.productType) && (
+              <span>{formatSquareMeters(product.squareMeters)}</span>
+            )}
+            <strong className="text-slate-900 dark:text-white">
+              {formatPrice(product.totalPrice, product.currency)}
+            </strong>
+          </div>
+        </div>
+
+        {confirmingDelete ? (
+          <div className="flex items-center gap-2 text-xs">
+            <span>حذف این محصول؟</span>
+            <button type="button" onClick={onDeleteCancel} disabled={pending}>انصراف</button>
+            <button
+              type="button"
+              onClick={() => onDeleteConfirm(rowId)}
+              disabled={pending}
+              className="font-semibold text-red-600 disabled:opacity-50"
+            >
+              {pending ? 'در حال حذف…' : 'حذف'}
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
+            <button type="button" onClick={() => controller.cart.editItem(rowId)} disabled={pending}>ویرایش</button>
+            <button type="button" onClick={() => controller.cart.duplicateItem(rowId)} disabled={pending}>تکثیر</button>
+            <button type="button" onClick={() => onDeleteRequest(rowId)} disabled={pending} className="text-red-600">حذف</button>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-2 space-y-1 text-xs text-slate-600 dark:text-slate-300">
+        {Boolean(product.isMandatory) && (
+          <div>حکمی — {formatDisplayNumber(product.mandatoryPercentage)}٪</div>
+        )}
+        {(Number(product.cuttingCost || 0) > 0 || Number(product.physicalCuttingCost || 0) > 0) && (
+          <div>
+            برش — {formatPrice(product.cuttingCost, product.currency)}
+            {product.physicalCuttingCost !== undefined && product.physicalCuttingCost !== product.cuttingCost
+              ? ` · فیزیکی ${formatPrice(product.physicalCuttingCost, product.currency)}`
+              : ''}
+          </div>
+        )}
+        {tools.map(tool => <div key={tool.id}>ابزار — {tool.label}</div>)}
+        {finishings.map(finishing => <div key={finishing.id}>پرداخت — {finishing.label}</div>)}
+        {product.description && <div>توضیحات — {product.description}</div>}
+        {remaining.length > 0 && (
+          <div className="space-y-1">
+            <div>باقی‌مانده — {remaining.length} قطعه</div>
+            {controller.cart.useRemainingStone && remaining.map(piece => (
+              <div key={piece.id} className="flex flex-wrap items-center gap-2 pr-3">
+                <span>
+                  {formatDisplayNumber(piece.width)}cm × {formatDisplayNumber(piece.length)}m
+                  {' · '}{formatSquareMeters(piece.squareMeters)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => controller.cart.useRemainingStone?.(piece, product)}
+                  className="font-medium text-teal-700 dark:text-teal-300"
+                >
+                  استفاده
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {hasUnresolvedLegacyRemainingChildAddOns(product) && (
+        <div className="mt-2 border-t border-amber-200 pt-2 text-xs text-amber-800 dark:border-amber-800 dark:text-amber-200">
+          <p>عملیات قدیمی این باقی‌مانده نیاز به تعیین تکلیف دارد.</p>
+          <div className="mt-1 flex gap-3">
+            <button type="button" onClick={() => controller.cart.resolveLegacyRemainingAddOns(rowId, 'adopt')}>
+              پذیرش و محاسبه مجدد
+            </button>
+            <button type="button" onClick={() => controller.cart.resolveLegacyRemainingAddOns(rowId, 'remove')}>
+              حذف عملیات
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-2">
+        <RowImages
+          product={product}
+          onChange={images => controller.cart.updateItemImages(rowId, images)}
+          onUpload={controller.cart.uploadImage}
+        />
+      </div>
+    </div>
+  );
+};
+
+const ServiceRow: React.FC<{
+  row: ContractServiceRow;
+  controller: ContractProductCartController;
+  confirmingDelete: boolean;
+  onDeleteRequest: () => void;
+  onDeleteCancel: () => void;
+}> = ({ row, controller, confirmingDelete, onDeleteRequest, onDeleteCancel }) => (
+  <div className="border-b border-slate-200 py-3 last:border-b-0 dark:border-slate-700">
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <strong className="text-sm text-slate-900 dark:text-white">{row.title}</strong>
+        <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+          {getServiceRowSourceLabel(row.sourceType)} · {formatDisplayNumber(row.quantity)} {getServiceRowUnitLabel(row.unit)}
+          {' · '}{formatPrice(row.totalPrice, row.currency)}
+        </div>
+      </div>
+      {confirmingDelete ? (
+        <div className="flex gap-2 text-xs">
+          <span>حذف این خدمت؟</span>
+          <button type="button" onClick={onDeleteCancel}>انصراف</button>
+          <button type="button" onClick={() => controller.cart.removeServiceRow(row.id)} className="text-red-600">حذف</button>
+        </div>
+      ) : (
+        <div className="flex gap-3 text-xs font-medium">
+          <button type="button" onClick={() => controller.cart.duplicateServiceRow(row.id)}>تکثیر</button>
+          <button type="button" onClick={onDeleteRequest} className="text-red-600">حذف</button>
+        </div>
+      )}
+    </div>
+    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+      <label className="text-xs">
+        مقدار
+        <input
+          type="text"
+          inputMode="decimal"
+          value={formatDisplayNumber(row.quantity)}
+          onChange={event => controller.cart.updateServiceRow(row.id, { quantity: parseFormattedNumber(event.target.value) })}
+          className="mt-1 w-full rounded border border-slate-200 bg-transparent px-2 py-1.5 dark:border-slate-700"
+        />
+      </label>
+      <label className="text-xs">
+        نرخ
+        <input
+          type="text"
+          inputMode="decimal"
+          value={formatDisplayNumber(row.unitPrice)}
+          onChange={event => controller.cart.updateServiceRow(row.id, { unitPrice: parseFormattedNumber(event.target.value) })}
+          className="mt-1 w-full rounded border border-slate-200 bg-transparent px-2 py-1.5 dark:border-slate-700"
+        />
+      </label>
+      <label className="text-xs">
+        توضیحات
+        <input
+          type="text"
+          value={row.description || ''}
+          onChange={event => controller.cart.updateServiceRow(row.id, { description: event.target.value })}
+          className="mt-1 w-full rounded border border-slate-200 bg-transparent px-2 py-1.5 dark:border-slate-700"
+        />
+      </label>
+    </div>
+  </div>
+);
+
 export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   controller,
-  errors,
+  errors
 }) => {
   const { catalog, services, cart } = controller;
-  const hasSelectedProducts = cart.hasItems;
-  const hasSearch = catalog.hasSearch;
-  const productsSummary = cart.summary;
-  const selectedRowCount = cart.items.length + cart.serviceRows.length;
-  const [expandedDesktopRows, setExpandedDesktopRows] = useState<Set<string>>(new Set());
+  const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
+  const [deleteConfirmRowId, setDeleteConfirmRowId] = useState<string | null>(null);
+  const [pendingRowId, setPendingRowId] = useState<string | null>(null);
+  const [serviceDeleteId, setServiceDeleteId] = useState<string | null>(null);
+  const [showServiceCatalog, setShowServiceCatalog] = useState(false);
+  const highlightedRef = useRef<HTMLButtonElement | null>(null);
+  const projectedRows = useMemo(() => buildContractCartRows(cart.items), [cart.items]);
 
-  const toggleDesktopRow = (rowKey: string) => {
-    setExpandedDesktopRows((current) => {
-      const next = new Set(current);
-      if (next.has(rowKey)) {
-        next.delete(rowKey);
-      } else {
-        next.add(rowKey);
-      }
-      return next;
-    });
+  useEffect(() => {
+    setHighlightedIndex(null);
+  }, [catalog.query, catalog.activeType]);
+
+  useEffect(() => {
+    highlightedRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [highlightedIndex]);
+
+  const selectHighlighted = () => {
+    const product = resolveHighlightedCatalogProduct(catalog.products, highlightedIndex);
+    if (product) catalog.selectProduct(product);
+  };
+
+  const confirmDelete = (rowId: string) => {
+    setPendingRowId(rowId);
+    try {
+      cart.removeItem(rowId);
+      setDeleteConfirmRowId(null);
+    } finally {
+      setPendingRowId(null);
+    }
   };
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-teal-600 dark:text-teal-300">
-            کاتالوگ قرارداد
-          </p>
-          <h3 className="mt-1 text-xl font-semibold text-slate-900 dark:text-white">
-            انتخاب محصولات
-          </h3>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-            محصول را پیدا کنید، تنظیماتش را ثبت کنید و لیست قرارداد را همین‌جا مرور کنید.
-          </p>
-        </div>
-      </div>
+      <header>
+        <h3 className="text-xl font-semibold text-slate-900 dark:text-white">انتخاب محصولات</h3>
+      </header>
 
       {errors.products && (
-        <div className="whitespace-pre-line rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+        <div className="border-b border-red-300 pb-2 text-sm text-red-700 dark:border-red-800 dark:text-red-300">
           {errors.products}
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="rounded-lg border border-teal-200 bg-white p-4 shadow-sm dark:border-teal-800 dark:bg-slate-900/50">
-          <p className="text-xs text-slate-500 dark:text-slate-400">قیمت کل قرارداد</p>
-          <p className="mt-1 text-lg font-semibold text-teal-700 dark:text-teal-200">
-            {formatPrice(productsSummary.totalPrice, 'تومان')}
-          </p>
+      <section className="border-y border-slate-200 py-3 dark:border-slate-700" aria-label="کاتالوگ محصولات">
+        <div className="flex gap-1 overflow-x-auto pb-3" role="tablist" aria-label="نوع محصول">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!catalog.activeType}
+            onClick={() => catalog.selectType(null)}
+            className={`rounded-md px-3 py-1.5 text-xs ${!catalog.activeType ? 'bg-teal-600 text-white' : 'text-slate-600 dark:text-slate-300'}`}
+          >
+            همه
+          </button>
+          {catalog.typeOptions.map(type => (
+            <button
+              key={type.id}
+              type="button"
+              role="tab"
+              aria-selected={catalog.activeType === type.id}
+              onClick={() => catalog.selectType(type.id)}
+              className={`rounded-md px-3 py-1.5 text-xs ${catalog.activeType === type.id ? 'bg-teal-600 text-white' : 'text-slate-600 dark:text-slate-300'}`}
+            >
+              {TYPE_LABELS[type.id] ?? type.name}
+            </button>
+          ))}
         </div>
-        <div className="rounded-lg border border-blue-200 bg-white p-4 shadow-sm dark:border-blue-800 dark:bg-slate-900/50">
-          <p className="text-xs text-slate-500 dark:text-slate-400">متر مربع کل</p>
-          <p className="mt-1 text-lg font-semibold text-blue-700 dark:text-blue-200">
-            {formatSquareMeters(productsSummary.totalSquareMeters)}
-          </p>
-        </div>
-        <div className="rounded-lg border border-purple-200 bg-white p-4 shadow-sm dark:border-purple-800 dark:bg-slate-900/50">
-          <p className="text-xs text-slate-500 dark:text-slate-400">تعداد کل قطعات</p>
-          <p className="mt-1 text-lg font-semibold text-purple-700 dark:text-purple-200">
-            {formatQuantity(productsSummary.totalQuantity)}
-          </p>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 gap-5">
-        <section className="space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900/60 sm:p-4">
-            <div className="mb-4">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  نوع محصول
-                </p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {catalog.selectedTypeCount} مورد
-                </p>
-              </div>
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                <button
-                  type="button"
-                  onClick={() => catalog.selectType(null)}
-                  className={`inline-flex min-h-10 flex-shrink-0 items-center justify-center rounded-lg border px-3 py-2 text-sm font-semibold transition ${
-                    !catalog.activeType
-                      ? 'border-teal-400 bg-teal-500 text-white shadow-sm'
-                      : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-teal-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
-                  }`}
-                >
-                  همه
-                  <span className={`mr-2 rounded-full px-2 py-0.5 text-xs ${
-                    !catalog.activeType
-                      ? 'bg-white/20 text-white'
-                      : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
-                  }`}>
-                    {catalog.allProducts.length}
-                  </span>
-                </button>
-                {catalog.typeOptions.map((type) => {
-                  const isActive = catalog.activeType === type.id;
-                  return (
-                    <button
-                      key={type.id}
-                      type="button"
-                      onClick={() => catalog.selectType(type.id)}
-                      className={`inline-flex min-h-10 flex-shrink-0 items-center justify-center rounded-lg border px-3 py-2 text-sm font-semibold transition ${
-                        isActive
-                          ? 'border-teal-400 bg-teal-500 text-white shadow-sm'
-                          : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-teal-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
-                      }`}
-                    >
-                      {type.name}
-                      <span className={`mr-2 rounded-full px-2 py-0.5 text-xs ${
-                        isActive
-                          ? 'bg-white/20 text-white'
-                          : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
-                      }`}>
-                        {type.count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+        <label htmlFor="contract-product-search" className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-200">
+          جستجوی محصول
+        </label>
+        <input
+          id="contract-product-search"
+          type="search"
+          value={catalog.query}
+          onChange={event => catalog.setQuery(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              event.preventDefault();
+              setHighlightedIndex(current => moveCatalogHighlight(
+                current,
+                event.key === 'ArrowDown' ? 'next' : 'previous',
+                catalog.products.length
+              ));
+              return;
+            }
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              selectHighlighted();
+            }
+          }}
+          className="w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700"
+          aria-controls="contract-product-results"
+          aria-activedescendant={highlightedIndex === null ? undefined : `contract-product-result-${highlightedIndex}`}
+        />
 
-            <label className="sr-only" htmlFor="contract-product-search">
-              جستجوی محصول
-            </label>
-            <div className="relative">
-              <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                id="contract-product-search"
-                type="text"
-                placeholder="جستجو در کد، نام، نوع سنگ، معدن، پرداخت، رنگ، کیفیت و قیمت"
-                value={catalog.query}
-                onChange={(event) => catalog.setQuery(event.target.value)}
-                className="min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 py-3 pl-4 pr-10 text-sm text-slate-900 outline-none transition focus:border-teal-500 focus:bg-white focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder-slate-400 dark:focus:border-teal-400 dark:focus:bg-slate-900"
-              />
-            </div>
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
-              <span>{hasSearch ? `${catalog.products.length} نتیجه پیدا شد` : 'برای نمایش محصولات، جستجو را شروع کنید'}</span>
-              <span>{productsSummary.totalPrice > 0 ? 'لیست قرارداد آماده مرور است' : 'هنوز محصولی اضافه نشده است'}</span>
-            </div>
-          </div>
-
+        <div
+          id="contract-product-results"
+          role="listbox"
+          className="mt-2 max-h-80 overflow-y-auto border-t border-slate-200 dark:border-slate-700"
+        >
           {catalog.products.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center dark:border-slate-700 dark:bg-slate-900/50">
-              <p className="text-base font-medium text-slate-700 dark:text-slate-200">
-                {hasSearch ? 'هیچ محصولی با این جستجو یافت نشد' : 'برای شروع، نام یا کد محصول را جستجو کنید'}
-              </p>
-              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                اگر محصول در کاتالوگ نیست، آن را ایجاد کنید و به همین قرارداد برگردید.
-              </p>
+            <div className="py-4 text-sm text-slate-500">محصولی پیدا نشد</div>
+          ) : catalog.products.map((product, index) => {
+            const highlighted = highlightedIndex === index;
+            return (
               <button
+                key={product.id}
+                ref={highlighted ? highlightedRef : null}
+                id={`contract-product-result-${index}`}
                 type="button"
-                onClick={catalog.createProduct}
-                className="mt-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-purple-300 px-4 py-2 text-sm font-semibold text-purple-700 transition-colors hover:bg-purple-50 dark:border-purple-700 dark:text-purple-200 dark:hover:bg-purple-900/20"
+                role="option"
+                aria-selected={highlighted}
+                onMouseEnter={() => setHighlightedIndex(index)}
+                onClick={() => catalog.selectProduct(product)}
+                className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-slate-100 px-1 py-2.5 text-right last:border-b-0 dark:border-slate-800 ${highlighted ? 'bg-teal-50 dark:bg-teal-950/30' : ''}`}
               >
-                <FaPlus className="h-4 w-4" />
-                ایجاد محصول
+                <span className="min-w-0">
+                  <strong className="block truncate text-sm text-slate-900 dark:text-white">
+                    {product.namePersian || product.name}
+                  </strong>
+                  <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">
+                    {getProductFacts(product)} · {inferCatalogTypeLabel(product, catalog.activeType)}
+                  </span>
+                </span>
+                <span className="text-xs font-medium text-teal-700 dark:text-teal-300">انتخاب</span>
               </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-              {catalog.products.map((product) => (
-                <article
-                  key={product.id}
-                  className="group rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-teal-300 hover:shadow-md dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-teal-700"
-                >
-                  <button
-                    type="button"
-                    onClick={() => catalog.selectProduct(product)}
-                    className="block w-full text-right"
-                    aria-label={`انتخاب محصول ${product.namePersian || product.name}`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <h4 className="break-words text-base font-semibold leading-7 text-slate-900 dark:text-white">
-                          {product.namePersian || product.name}
-                        </h4>
-                        <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                          {generateFullProductName(product)}
-                        </p>
-                      </div>
-                      <span className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-700 transition group-hover:bg-teal-600 group-hover:text-white dark:bg-teal-900/30 dark:text-teal-200">
-                        <FaPlus className="h-4 w-4" />
-                      </span>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                      <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
-                        <p className="text-xs text-slate-500 dark:text-slate-400">ابعاد</p>
-                        <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">
-                          {formatDisplayNumber(product.widthValue)} × {formatDisplayNumber(product.thicknessValue)} cm
-                        </p>
-                      </div>
-                      <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
-                        <p className="text-xs text-slate-500 dark:text-slate-400">قیمت</p>
-                        <p className="mt-1 font-medium text-teal-700 dark:text-teal-200">
-                          {product.basePrice ? formatPrice(product.basePrice, product.currency) : 'تعیین نشده'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                      {product.stoneTypeNamePersian && (
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                          {product.stoneTypeNamePersian}
-                        </span>
-                      )}
-                      {product.mineNamePersian && (
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                          {product.mineNamePersian}
-                        </span>
-                      )}
-                      {product.finishNamePersian && (
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                          {product.finishNamePersian}
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                </article>
-              ))}
-            </div>
-          )}
-
-          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900/60 sm:p-4">
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  خدمات مستقل
-                </p>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  ابزار، برش و پرداخت سنگ از کاتالوگ‌های جدا انتخاب می‌شوند اما به یک شکل ردیف قرارداد اضافه می‌شوند.
-                </p>
-              </div>
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {SERVICE_SOURCE_OPTIONS.map((sourceType) => {
-                  const isActive = services.sourceType === sourceType;
-                  return (
-                    <button
-                      key={sourceType}
-                      type="button"
-                      onClick={() => services.setSourceType(sourceType)}
-                      className={`inline-flex min-h-10 flex-shrink-0 items-center justify-center rounded-lg border px-3 py-2 text-sm font-semibold transition ${
-                        isActive
-                          ? 'border-emerald-400 bg-emerald-500 text-white shadow-sm'
-                          : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
-                      }`}
-                    >
-                      {getServiceRowSourceLabel(sourceType)}
-                      <span className={`mr-2 rounded-full px-2 py-0.5 text-xs ${
-                        isActive
-                          ? 'bg-white/20 text-white'
-                          : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
-                      }`}>
-                        {services.counts[sourceType]}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <label className="sr-only" htmlFor="contract-service-search">
-              جستجوی خدمت
-            </label>
-            <div className="relative">
-              <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                id="contract-service-search"
-                type="text"
-                placeholder="جستجو در خدمات"
-                value={services.query}
-                onChange={(event) => services.setQuery(event.target.value)}
-                className="min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 py-3 pl-4 pr-10 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder-slate-400 dark:focus:border-emerald-400 dark:focus:bg-slate-900"
-              />
-            </div>
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
-              <span>{services.hasSearch ? `${services.rows.length} نتیجه پیدا شد` : 'برای نمایش خدمات، جستجو را شروع کنید'}</span>
-              <span>{cart.hasServiceRows ? 'ردیف‌های خدمات آماده مرور هستند' : 'هنوز خدمتی اضافه نشده است'}</span>
-            </div>
-
-            <div className="mt-3 grid grid-cols-1 gap-2 xl:grid-cols-2">
-              {services.rows.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400 xl:col-span-2">
-                  {services.hasSearch ? 'خدمتی برای این جستجو پیدا نشد' : 'برای شروع، نام خدمت را جستجو کنید'}
-                </div>
-              ) : services.rows.map((service) => {
-                const unitPrice = getServiceRowUnitPriceFromCatalog(services.sourceType, service);
-                return (
-                  <button
-                    key={`${services.sourceType}-${service.id}`}
-                    type="button"
-                    onClick={() => services.addRow(services.sourceType, service)}
-                    className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-right transition hover:border-emerald-300 hover:bg-white dark:border-slate-700 dark:bg-slate-800 dark:hover:border-emerald-700 dark:hover:bg-slate-900"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="break-words text-sm font-semibold text-slate-900 dark:text-white">
-                          {service.namePersian || service.name || getServiceRowSourceLabel(services.sourceType)}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          {formatPrice(unitPrice, 'تومان')} / {getServiceRowUnitLabel(services.sourceType === 'cutting' ? 'meter' : ('calculationBase' in service && service.calculationBase === 'squareMeters' ? 'squareMeter' : 'meter'))}
-                        </p>
-                      </div>
-                      <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200">
-                        <FaPlus className="h-3.5 w-3.5" />
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-
-        <aside className="space-y-3 lg:hidden">
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h4 className="text-base font-semibold text-slate-900 dark:text-white">
-                  لیست قرارداد
-                </h4>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  {hasSelectedProducts ? `${selectedRowCount} ردیف انتخاب شده` : 'محصولات و خدمات انتخاب شده اینجا نمایش داده می‌شوند'}
-                </p>
-              </div>
-              <span className="inline-flex h-10 min-w-10 items-center justify-center rounded-full bg-teal-600 px-3 text-sm font-bold text-white">
-                {selectedRowCount}
-              </span>
-            </div>
-          </div>
-
-          {!hasSelectedProducts ? (
-            <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center dark:border-slate-700 dark:bg-slate-900/50">
-              <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-                <FaCheck className="h-4 w-4" />
-              </div>
-              <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">
-                هنوز ردیفی در قرارداد نیست
-              </p>
-              <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                بعد از افزودن محصول یا خدمت، خلاصه قیمت و عملیات ویرایش اینجا قرار می‌گیرد.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {cart.items.map((product, index) => {
-                const catalogProduct = product.product;
-                const availableRemainingStones = getAvailableRemainingStoneInventory(product);
-                const isLayerProduct = Boolean((product.meta as any)?.isLayer);
-                const isRemainingStoneChild = Boolean((product.meta as any)?.remainingSource);
-                const needsLegacyAddOnReview = hasUnresolvedLegacyRemainingChildAddOns(product);
-                const shouldShowRemainingStones =
-                  !isLayerProduct &&
-                  (!isRemainingStoneChild || availableRemainingStones.length > 0) &&
-                  (availableRemainingStones.length > 0 || product.productType === 'longitudinal');
-                const hasGeometryCutWithoutRate =
-                  product.productType === 'longitudinal' &&
-                  !!product.isCut &&
-                  (!product.cuttingCostPerMeter || product.cuttingCostPerMeter <= 0);
-                const isPreparedRow = isPreparedProductType(product.productType);
-                const preparedQuantity = isPreparedRow ? getPreparedQuantity(product) : 0;
-                const preparedUnit = isPreparedRow ? getPreparedUnit(product) : 'count';
-
-                return (
-                  <article
-                    key={`${product.productId}-${index}`}
-                    className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${getProductTypeClasses(product.productType)}`}>
-                            {getContractRowTypeLabel(product)}
-                          </span>
-                          {product.meta?.remainingSource && (
-                            <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-700 dark:border-orange-800 dark:bg-orange-900/20 dark:text-orange-200">
-                              از باقی‌مانده
-                            </span>
-                          )}
-                        </div>
-                        <h5 className="mt-2 break-words text-base font-semibold leading-7 text-slate-900 dark:text-white">
-                          {product.stoneName || catalogProduct?.namePersian || `محصول ${index + 1}`}
-                        </h5>
-                        <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                          {product.stoneCode ? `کد: ${product.stoneCode}` : 'بدون کد'}
-                          {catalogProduct?.mineNamePersian ? ` | معدن: ${catalogProduct.mineNamePersian}` : ''}
-                        </p>
-                        {isPreparedRow && (
-                          <p className="mt-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                            {getPreparedKindLabel(product.preparedKind)} | {getPreparedUnitLabel(preparedUnit)}
-                          </p>
-                        )}
-                        <RowImageStrip
-                          images={product.images || []}
-                          label={product.stoneName || catalogProduct?.namePersian || 'تصویر محصول'}
-                          onChange={(images) => cart.updateItemImages(index, images)}
-                          onUpload={cart.uploadImage}
-                        />
-                      </div>
-
-                      <div className="flex flex-shrink-0 gap-1">
-                        {!isPreparedProductType(product.productType) && (
-                          <button
-                            type="button"
-                            onClick={() => cart.manageItemTools(index, product)}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-purple-600 transition hover:bg-purple-50 dark:text-purple-300 dark:hover:bg-purple-900/20"
-                            title="مدیریت ابزار"
-                            aria-label="مدیریت ابزار محصول"
-                          >
-                            <FaWrench className="h-4 w-4" />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => cart.duplicateItem(index)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
-                          title="تکثیر"
-                          aria-label="تکثیر محصول"
-                        >
-                          <FaPlus className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => cart.editItem(index)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-blue-600 transition hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
-                          title="ویرایش"
-                          aria-label="ویرایش محصول"
-                        >
-                          <FaEdit className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => cart.removeItem(index)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20"
-                          title="حذف"
-                          aria-label="حذف محصول"
-                        >
-                          <FaTrash className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {needsLegacyAddOnReview && (
-                      <LegacyRemainingAddOnReview
-                        onAdopt={() => cart.resolveLegacyRemainingAddOns(index, 'adopt')}
-                        onRemove={() => cart.resolveLegacyRemainingAddOns(index, 'remove')}
-                      />
-                    )}
-
-                    <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                      <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
-                        <p className="text-xs text-slate-500 dark:text-slate-400">تعداد</p>
-                        <p className="mt-1 font-semibold text-slate-800 dark:text-slate-100">
-                          {formatDisplayNumber(isPreparedRow ? preparedQuantity : product.quantity || 0)}
-                        </p>
-                      </div>
-                      <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
-                        <p className="text-xs text-slate-500 dark:text-slate-400">{isPreparedRow ? 'واحد' : 'متراژ'}</p>
-                        <p className="mt-1 font-semibold text-slate-800 dark:text-slate-100">
-                          {isPreparedRow ? getPreparedUnitLabel(preparedUnit) : formatSquareMeters(product.squareMeters || 0)}
-                        </p>
-                      </div>
-                      <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
-                        <p className="text-xs text-slate-500 dark:text-slate-400">قیمت واحد</p>
-                        <p className="mt-1 font-semibold text-slate-800 dark:text-slate-100">
-                          {formatPrice(product.unitPrice ?? product.pricePerSquareMeter ?? 0, 'تومان')}
-                        </p>
-                      </div>
-                      <div className="rounded-lg bg-teal-50 p-2 dark:bg-teal-900/20">
-                        <p className="text-xs text-teal-700 dark:text-teal-300">قیمت کل</p>
-                        <p className="mt-1 font-semibold text-teal-800 dark:text-teal-100">
-                          {formatPrice(product.totalPrice || 0, 'تومان')}
-                        </p>
-                      </div>
-                    </div>
-
-                    {shouldShowRemainingStones && (
-                      <div className="mt-4 rounded-lg border border-orange-200 bg-orange-50 p-3 dark:border-orange-800 dark:bg-orange-900/20">
-                        <p className="text-sm font-semibold text-orange-800 dark:text-orange-100">
-                          سنگ‌های باقیمانده
-                        </p>
-                        {availableRemainingStones.length === 0 ? (
-                          <p className="mt-1 text-xs leading-5 text-orange-700 dark:text-orange-200">
-                            {hasGeometryCutWithoutRate
-                              ? 'برش هندسی انجام شده اما نرخ برش در دسترس نیست؛ هزینه برش صفر ثبت شده است.'
-                              : 'پس از ثبت برش، باقی‌مانده‌های قابل استفاده اینجا نمایش داده می‌شوند.'}
-                          </p>
-                        ) : (
-                          <div className="mt-2 space-y-2">
-                            {availableRemainingStones.map((remainingStone) => (
-                              <div
-                                key={remainingStone.id}
-                                className="rounded-lg border border-orange-200 bg-white p-3 dark:border-orange-800 dark:bg-slate-900/50"
-                              >
-                                <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-                                  <div className="rounded-md bg-orange-50 px-2 py-1.5 dark:bg-orange-900/20">
-                                    <p className="text-orange-700 dark:text-orange-200">عرض</p>
-                                    <p className="mt-1 font-semibold text-slate-900 dark:text-white">
-                                      {formatDisplayNumber(remainingStone.width)} cm
-                                    </p>
-                                  </div>
-                                  <div className="rounded-md bg-orange-50 px-2 py-1.5 dark:bg-orange-900/20">
-                                    <p className="text-orange-700 dark:text-orange-200">طول</p>
-                                    <p className="mt-1 font-semibold text-slate-900 dark:text-white">
-                                      {formatDisplayNumber(remainingStone.length)} m
-                                    </p>
-                                  </div>
-                                  <div className="rounded-md bg-orange-50 px-2 py-1.5 dark:bg-orange-900/20">
-                                    <p className="text-orange-700 dark:text-orange-200">مساحت هر قطعه</p>
-                                    <p className="mt-1 font-semibold text-slate-900 dark:text-white">
-                                      {formatSquareMeters((remainingStone.width * remainingStone.length) / 100)}
-                                    </p>
-                                  </div>
-                                  <div className="rounded-md bg-orange-50 px-2 py-1.5 dark:bg-orange-900/20">
-                                    <p className="text-orange-700 dark:text-orange-200">موجودی</p>
-                                    <p className="mt-1 font-semibold text-slate-900 dark:text-white">
-                                      {formatDisplayNumber(remainingStone.quantity || 1)} قطعه
-                                    </p>
-                                  </div>
-                                </div>
-                                <p className="mt-2 text-xs font-semibold text-orange-800 dark:text-orange-100">
-                                  مساحت کل موجودی: {formatSquareMeters(remainingStone.squareMeters)}
-                                </p>
-                                {cart.useRemainingStone && (
-                                  <button
-                                    type="button"
-                                    onClick={() => cart.useRemainingStone?.(remainingStone, product)}
-                                    className="mt-2 inline-flex min-h-9 w-full items-center justify-center rounded-lg bg-orange-500 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-orange-600"
-                                  >
-                                    استفاده از این موجودی
-                                  </button>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </article>
-                );
-              })}
-              {cart.serviceRows.map((row) => (
-                <article
-                  key={row.id}
-                  className="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm dark:border-emerald-800 dark:bg-slate-900/60"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
-                        {getServiceRowSourceLabel(row.sourceType)}
-                      </span>
-                      <h5 className="mt-2 break-words text-base font-semibold leading-7 text-slate-900 dark:text-white">
-                        {row.title}
-                      </h5>
-                      {row.description && (
-                        <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                          {row.description}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="flex flex-shrink-0 gap-1">
-                      <button
-                        type="button"
-                        onClick={() => cart.duplicateServiceRow(row.id)}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
-                        title="تکثیر"
-                        aria-label="تکثیر خدمت"
-                      >
-                        <FaPlus className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => cart.removeServiceRow(row.id)}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20"
-                        title="حذف"
-                        aria-label="حذف خدمت"
-                      >
-                        <FaTrash className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                    <label className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
-                      <span className="text-xs text-slate-500 dark:text-slate-400">
-                        مقدار ({getServiceRowUnitLabel(row.unit)})
-                      </span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        min="0"
-                        step="0.01"
-                        value={row.quantity}
-                        onChange={(event) => cart.updateServiceRow(row.id, { quantity: parseFormattedNumber(event.target.value) })}
-                        className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-left font-semibold text-slate-800 outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                    </label>
-                    <label className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
-                      <span className="text-xs text-slate-500 dark:text-slate-400">قیمت واحد</span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        min="0"
-                        step="1000"
-                        value={row.unitPrice}
-                        onChange={(event) => cart.updateServiceRow(row.id, { unitPrice: parseFormattedNumber(event.target.value) })}
-                        className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-left font-semibold text-slate-800 outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                    </label>
-                    <div className="col-span-2 rounded-lg bg-emerald-50 p-2 dark:bg-emerald-900/20">
-                      <p className="text-xs text-emerald-700 dark:text-emerald-300">قیمت کل</p>
-                      <p className="mt-1 font-semibold text-emerald-800 dark:text-emerald-100">
-                        {formatPrice(row.totalPrice || 0, row.currency || 'تومان')}
-                      </p>
-                    </div>
-                    <label className="col-span-2 rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
-                      <span className="text-xs text-slate-500 dark:text-slate-400">توضیحات</span>
-                      <textarea
-                        value={row.description || ''}
-                        onChange={(event) => cart.updateServiceRow(row.id, { description: event.target.value })}
-                        rows={2}
-                        className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-800 outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                    </label>
-                  </div>
-                  <RowImageStrip
-                    images={row.images || []}
-                    label={row.title || 'تصویر خدمت'}
-                    onChange={(images) => cart.updateServiceRow(row.id, { images })}
-                    onUpload={cart.uploadImage}
-                  />
-                </article>
-              ))}
-            </div>
-          )}
-        </aside>
-      </div>
-
-      <section className="hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/60 lg:block">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
-          <div>
-            <h4 className="text-base font-semibold text-slate-900 dark:text-white">
-              لیست قرارداد
-            </h4>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              {hasSelectedProducts ? `${selectedRowCount} ردیف انتخاب شده` : 'محصولات و خدمات انتخاب شده اینجا نمایش داده می‌شوند'}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-              {formatSquareMeters(productsSummary.totalSquareMeters)}
-            </span>
-            <span className="rounded-lg bg-teal-50 px-3 py-2 text-sm font-bold text-teal-800 dark:bg-teal-900/30 dark:text-teal-100">
-              {formatPrice(productsSummary.totalPrice, 'تومان')}
-            </span>
-          </div>
+            );
+          })}
         </div>
-
-        {!hasSelectedProducts ? (
-          <div className="px-4 py-8 text-center">
-            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-              <FaCheck className="h-4 w-4" />
-            </div>
-            <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">
-              هنوز ردیفی در قرارداد نیست
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-right text-sm dark:divide-slate-700">
-              <thead className="bg-slate-50 text-xs font-semibold text-slate-500 dark:bg-slate-800/70 dark:text-slate-300">
-                <tr>
-                  <th className="px-3 py-3">نوع</th>
-                  <th className="min-w-[280px] px-3 py-3">شرح</th>
-                  <th className="px-3 py-3">مقدار/متراژ</th>
-                  <th className="px-3 py-3">قیمت واحد</th>
-                  <th className="px-3 py-3">مبلغ کل</th>
-                  <th className="px-3 py-3 text-center">عملیات</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {cart.items.map((product, index) => {
-                  const rowKey = `product-${index}-${product.productId || product.stoneCode || 'row'}`;
-                  const isExpanded = expandedDesktopRows.has(rowKey);
-                  const catalogProduct = product.product;
-                  const availableRemainingStones = getAvailableRemainingStoneInventory(product);
-                  const isLayerProduct = Boolean((product.meta as any)?.isLayer);
-                  const isRemainingStoneChild = Boolean((product.meta as any)?.remainingSource);
-                  const needsLegacyAddOnReview = hasUnresolvedLegacyRemainingChildAddOns(product);
-                  const shouldShowRemainingStones =
-                    !isLayerProduct &&
-                    (!isRemainingStoneChild || availableRemainingStones.length > 0) &&
-                    (availableRemainingStones.length > 0 || product.productType === 'longitudinal');
-                  const isPreparedRow = isPreparedProductType(product.productType);
-                  const preparedQuantity = isPreparedRow ? getPreparedQuantity(product) : 0;
-                  const preparedUnit = isPreparedRow ? getPreparedUnit(product) : 'count';
-                  const rowTitle = product.stoneName || catalogProduct?.namePersian || `محصول ${index + 1}`;
-
-                  return (
-                    <React.Fragment key={rowKey}>
-                      <tr className="align-top hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                        <td className="whitespace-nowrap px-3 py-3">
-                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${getProductTypeClasses(product.productType)}`}>
-                            {getContractRowTypeLabel(product)}
-                          </span>
-                        </td>
-                        <td className="px-3 py-3">
-                          <p className="font-semibold leading-6 text-slate-900 dark:text-white">{rowTitle}</p>
-                          <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                            {product.stoneCode ? `کد: ${product.stoneCode}` : 'بدون کد'}
-                            {catalogProduct?.mineNamePersian ? ` | معدن: ${catalogProduct.mineNamePersian}` : ''}
-                            {product.meta?.remainingSource ? ' | از باقی‌مانده' : ''}
-                          </p>
-                          {isPreparedRow && (
-                            <p className="mt-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                              {getPreparedKindLabel(product.preparedKind)} | {getPreparedUnitLabel(preparedUnit)}
-                            </p>
-                          )}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-slate-700 dark:text-slate-200">
-                          {isPreparedRow ? (
-                            <>
-                              <span className="font-semibold">{formatDisplayNumber(preparedQuantity)}</span>
-                              <span className="mr-1 text-xs text-slate-500 dark:text-slate-400">{getPreparedUnitLabel(preparedUnit)}</span>
-                            </>
-                          ) : (
-                            <>
-                              <span className="font-semibold">{formatSquareMeters(product.squareMeters || 0)}</span>
-                              <span className="mr-2 text-xs text-slate-500 dark:text-slate-400">
-                                {formatQuantity(product.quantity || 0)} عدد
-                              </span>
-                            </>
-                          )}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 font-semibold text-slate-700 dark:text-slate-200">
-                          {formatPrice(product.unitPrice ?? product.pricePerSquareMeter ?? 0, 'تومان')}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 font-bold text-teal-700 dark:text-teal-200">
-                          {formatPrice(product.totalPrice || 0, 'تومان')}
-                        </td>
-                        <td className="px-3 py-3">
-                          <div className="flex justify-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => toggleDesktopRow(rowKey)}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-                              title="جزئیات"
-                              aria-label="نمایش جزئیات ردیف"
-                            >
-                              <FaChevronDown className={`h-3.5 w-3.5 transition ${isExpanded ? 'rotate-180' : ''}`} />
-                            </button>
-                            {!isPreparedProductType(product.productType) && (
-                              <button
-                                type="button"
-                                onClick={() => cart.manageItemTools(index, product)}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-purple-600 transition hover:bg-purple-50 dark:text-purple-300 dark:hover:bg-purple-900/20"
-                                title="مدیریت ابزار"
-                                aria-label="مدیریت ابزار محصول"
-                              >
-                                <FaWrench className="h-4 w-4" />
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => cart.duplicateItem(index)}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
-                              title="تکثیر"
-                              aria-label="تکثیر محصول"
-                            >
-                              <FaPlus className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => cart.editItem(index)}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-blue-600 transition hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
-                              title="ویرایش"
-                              aria-label="ویرایش محصول"
-                            >
-                              <FaEdit className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => cart.removeItem(index)}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20"
-                              title="حذف"
-                              aria-label="حذف محصول"
-                            >
-                              <FaTrash className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                      {isExpanded && (
-                        <tr>
-                          <td colSpan={6} className="bg-slate-50/80 px-4 py-3 dark:bg-slate-950/30">
-                            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.6fr)]">
-                              <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900/70">
-                                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">جزئیات ردیف</p>
-                                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-700 dark:text-slate-200 xl:grid-cols-4">
-                                  <span>تعداد: {formatDisplayNumber(isPreparedRow ? preparedQuantity : product.quantity || 0)}</span>
-                                  <span>متراژ: {isPreparedRow ? getPreparedUnitLabel(preparedUnit) : formatSquareMeters(product.squareMeters || 0)}</span>
-                                  <span>نوع: {getContractRowTypeLabel(product)}</span>
-                                  <span>{product.isCut ? 'برش دارد' : 'بدون برش'}</span>
-                                </div>
-                                {needsLegacyAddOnReview && (
-                                  <LegacyRemainingAddOnReview
-                                    onAdopt={() => cart.resolveLegacyRemainingAddOns(index, 'adopt')}
-                                    onRemove={() => cart.resolveLegacyRemainingAddOns(index, 'remove')}
-                                  />
-                                )}
-                                <RowImageStrip
-                                  images={product.images || []}
-                                  label={rowTitle}
-                                  onChange={(images) => cart.updateItemImages(index, images)}
-                                  onUpload={cart.uploadImage}
-                                />
-                              </div>
-
-                              {shouldShowRemainingStones && (
-                                <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 dark:border-orange-800 dark:bg-orange-900/20">
-                                  <p className="text-sm font-semibold text-orange-800 dark:text-orange-100">
-                                    سنگ‌های باقیمانده
-                                  </p>
-                                  {availableRemainingStones.length === 0 ? (
-                                    <p className="mt-2 text-xs leading-5 text-orange-700 dark:text-orange-200">
-                                      پس از ثبت برش، باقی‌مانده‌های قابل استفاده اینجا نمایش داده می‌شوند.
-                                    </p>
-                                  ) : (
-                                    <div className="mt-2 space-y-2">
-                                      {availableRemainingStones.slice(0, 3).map((remainingStone) => (
-                                        <div
-                                          key={remainingStone.id}
-                                          className="rounded-lg border border-orange-200 bg-white p-2 text-xs dark:border-orange-800 dark:bg-slate-900/50"
-                                        >
-                                          <div className="grid grid-cols-2 gap-1 text-slate-800 dark:text-slate-100">
-                                            <span>هر قطعه: {formatDisplayNumber(remainingStone.width)} cm × {formatDisplayNumber(remainingStone.length)} m</span>
-                                            <span>موجودی: {formatDisplayNumber(remainingStone.quantity || 1)} قطعه</span>
-                                            <span>مساحت هر قطعه: {formatSquareMeters((remainingStone.width * remainingStone.length) / 100)}</span>
-                                            <span>مساحت کل: {formatSquareMeters(remainingStone.squareMeters)}</span>
-                                          </div>
-                                          {cart.useRemainingStone && (
-                                            <button
-                                              type="button"
-                                              onClick={() => cart.useRemainingStone?.(remainingStone, product)}
-                                              className="mt-2 inline-flex min-h-8 w-full items-center justify-center rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-orange-600"
-                                            >
-                                              استفاده از این موجودی
-                                            </button>
-                                          )}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-
-                {cart.serviceRows.map((row) => {
-                  const rowKey = `service-${row.id}`;
-                  const isExpanded = expandedDesktopRows.has(rowKey);
-
-                  return (
-                    <React.Fragment key={rowKey}>
-                      <tr className="align-top hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                        <td className="whitespace-nowrap px-3 py-3">
-                          <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
-                            {getServiceRowSourceLabel(row.sourceType)}
-                          </span>
-                        </td>
-                        <td className="px-3 py-3">
-                          <p className="font-semibold leading-6 text-slate-900 dark:text-white">{row.title}</p>
-                          {row.description && (
-                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                              {row.description}
-                            </p>
-                          )}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 font-semibold text-slate-700 dark:text-slate-200">
-                          {formatDisplayNumber(row.quantity)} {getServiceRowUnitLabel(row.unit)}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 font-semibold text-slate-700 dark:text-slate-200">
-                          {formatPrice(row.unitPrice || 0, row.currency || 'تومان')}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 font-bold text-emerald-700 dark:text-emerald-200">
-                          {formatPrice(row.totalPrice || 0, row.currency || 'تومان')}
-                        </td>
-                        <td className="px-3 py-3">
-                          <div className="flex justify-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => toggleDesktopRow(rowKey)}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-                              title="جزئیات"
-                              aria-label="نمایش جزئیات خدمت"
-                            >
-                              <FaChevronDown className={`h-3.5 w-3.5 transition ${isExpanded ? 'rotate-180' : ''}`} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => cart.duplicateServiceRow(row.id)}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
-                              title="تکثیر"
-                              aria-label="تکثیر خدمت"
-                            >
-                              <FaPlus className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => cart.removeServiceRow(row.id)}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20"
-                              title="حذف"
-                              aria-label="حذف خدمت"
-                            >
-                              <FaTrash className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                      {isExpanded && (
-                        <tr>
-                          <td colSpan={6} className="bg-slate-50/80 px-4 py-3 dark:bg-slate-950/30">
-                            <div className="grid gap-3 xl:grid-cols-3">
-                              <label className="rounded-lg bg-white p-2 text-xs dark:bg-slate-900/70">
-                                <span className="text-slate-500 dark:text-slate-400">
-                                  مقدار ({getServiceRowUnitLabel(row.unit)})
-                                </span>
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  min="0"
-                                  step="0.01"
-                                  value={row.quantity}
-                                  onChange={(event) => cart.updateServiceRow(row.id, { quantity: parseFormattedNumber(event.target.value) })}
-                                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-left font-semibold text-slate-800 outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                                />
-                              </label>
-                              <label className="rounded-lg bg-white p-2 text-xs dark:bg-slate-900/70">
-                                <span className="text-slate-500 dark:text-slate-400">قیمت واحد</span>
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  min="0"
-                                  step="1000"
-                                  value={row.unitPrice}
-                                  onChange={(event) => cart.updateServiceRow(row.id, { unitPrice: parseFormattedNumber(event.target.value) })}
-                                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-left font-semibold text-slate-800 outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                                />
-                              </label>
-                              <label className="rounded-lg bg-white p-2 text-xs dark:bg-slate-900/70">
-                                <span className="text-slate-500 dark:text-slate-400">توضیحات</span>
-                                <textarea
-                                  value={row.description || ''}
-                                  onChange={(event) => cart.updateServiceRow(row.id, { description: event.target.value })}
-                                  rows={2}
-                                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-800 outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                                />
-                              </label>
-                            </div>
-                            <RowImageStrip
-                              images={row.images || []}
-                              label={row.title || 'تصویر خدمت'}
-                              onChange={(images) => cart.updateServiceRow(row.id, { images })}
-                              onUpload={cart.uploadImage}
-                            />
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
       </section>
 
-      <div className="sticky bottom-3 z-30 lg:hidden">
-        <div className="rounded-xl border border-teal-500/40 bg-slate-950/95 p-3 shadow-2xl shadow-black/30 backdrop-blur">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-xs text-slate-400">
-                لیست قرارداد
-              </p>
-              <p className="truncate text-sm font-semibold text-white">
-                {selectedRowCount} ردیف | {formatPrice(productsSummary.totalPrice, 'تومان')}
-              </p>
-            </div>
-            <div className="flex flex-shrink-0 items-center gap-2">
-              <span className="rounded-lg bg-teal-500/15 px-2 py-1 text-xs font-semibold text-teal-200">
-                {formatSquareMeters(productsSummary.totalSquareMeters)}
-              </span>
-              <span className="inline-flex h-9 min-w-9 items-center justify-center rounded-full bg-teal-500 px-2 text-sm font-bold text-white">
-                {selectedRowCount}
-              </span>
-            </div>
+      <section aria-label="محصولات قرارداد">
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-2 dark:border-slate-700">
+          <h4 className="text-sm font-semibold text-slate-900 dark:text-white">محصولات قرارداد</h4>
+          <div className="flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-300">
+            <span>{formatPrice(cart.summary.totalPrice, 'تومان')}</span>
+            <span>{formatSquareMeters(cart.summary.totalSquareMeters)}</span>
+            <span>{formatQuantity(cart.summary.totalQuantity)} قطعه</span>
           </div>
         </div>
-      </div>
+
+        {projectedRows.length === 0 ? (
+          <div className="py-5 text-sm text-slate-500">هنوز محصولی اضافه نشده است</div>
+        ) : projectedRows.map(({ product, children }) => (
+          <React.Fragment key={product.rowId || product.productId}>
+            <ContractRow
+              product={product}
+              controller={controller}
+              pendingRowId={pendingRowId}
+              deleteConfirmRowId={deleteConfirmRowId}
+              onDeleteRequest={setDeleteConfirmRowId}
+              onDeleteCancel={() => setDeleteConfirmRowId(null)}
+              onDeleteConfirm={confirmDelete}
+            />
+            {children.map(child => (
+              <ContractRow
+                key={child.rowId}
+                product={child}
+                depth={1}
+                controller={controller}
+                pendingRowId={pendingRowId}
+                deleteConfirmRowId={deleteConfirmRowId}
+                onDeleteRequest={setDeleteConfirmRowId}
+                onDeleteCancel={() => setDeleteConfirmRowId(null)}
+                onDeleteConfirm={confirmDelete}
+              />
+            ))}
+          </React.Fragment>
+        ))}
+      </section>
+
+      <section className="border-t border-slate-200 pt-3 dark:border-slate-700" aria-label="خدمات مستقل">
+        <div className="flex items-center justify-between gap-3">
+          <h4 className="text-sm font-semibold text-slate-900 dark:text-white">خدمات مستقل</h4>
+          <button
+            type="button"
+            onClick={() => setShowServiceCatalog(value => !value)}
+            className="text-xs font-medium text-teal-700 dark:text-teal-300"
+          >
+            {showServiceCatalog ? 'بستن' : 'افزودن خدمت'}
+          </button>
+        </div>
+
+        {showServiceCatalog && (
+          <div className="mt-3 border-y border-slate-200 py-3 dark:border-slate-700">
+            <div className="flex gap-3 text-xs">
+              {SERVICE_SOURCE_OPTIONS.map(sourceType => (
+                <button
+                  key={sourceType}
+                  type="button"
+                  onClick={() => services.setSourceType(sourceType)}
+                  className={services.sourceType === sourceType ? 'font-semibold text-teal-700 dark:text-teal-300' : ''}
+                >
+                  {getServiceRowSourceLabel(sourceType)}
+                </button>
+              ))}
+            </div>
+            <label className="mt-3 block text-xs">
+              جستجوی خدمت
+              <input
+                type="search"
+                value={services.query}
+                onChange={event => services.setQuery(event.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-slate-700"
+              />
+            </label>
+            <div className="mt-2 max-h-48 overflow-y-auto">
+              {services.rows.map(item => (
+                <button
+                  key={`${services.sourceType}-${item.id}`}
+                  type="button"
+                  onClick={() => services.addRow(services.sourceType, item)}
+                  className="flex w-full items-center justify-between border-b border-slate-100 py-2 text-right text-xs last:border-b-0 dark:border-slate-800"
+                >
+                  <span>{item.namePersian || item.name}</span>
+                  <span>
+                    {formatPrice(getServiceRowUnitPriceFromCatalog(services.sourceType, item), 'تومان')}
+                    {' · '}افزودن
+                  </span>
+                </button>
+              ))}
+              {services.hasSearch && services.rows.length === 0 && (
+                <div className="py-3 text-xs text-slate-500">خدمتی پیدا نشد</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {cart.serviceRows.map(row => (
+          <ServiceRow
+            key={row.id}
+            row={row}
+            controller={controller}
+            confirmingDelete={serviceDeleteId === row.id}
+            onDeleteRequest={() => setServiceDeleteId(row.id)}
+            onDeleteCancel={() => setServiceDeleteId(null)}
+          />
+        ))}
+      </section>
+
+      <button
+        type="button"
+        onClick={catalog.createProduct}
+        className="text-xs text-slate-500 hover:text-teal-700 dark:text-slate-400 dark:hover:text-teal-300"
+      >
+        محصول در کاتالوگ نیست؟ ایجاد محصول
+      </button>
     </div>
   );
 };

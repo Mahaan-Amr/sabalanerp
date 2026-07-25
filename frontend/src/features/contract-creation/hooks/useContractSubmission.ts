@@ -11,6 +11,7 @@ import { mapAxiosFormErrors } from '@/lib/formErrors';
 import { CONTRACT_DRAFT_STORAGE_KEY } from '../utils/contractDraftStorage';
 import { normalizeProductFinishing } from '../utils/finishingUtils';
 import { getPreparedQuantity, getPreparedUnit, isPreparedProductType, normalizeContractProductType } from '../utils/preparedProductUtils';
+import { calculateProductOperations } from '@sabalanerp/contract-product-graph';
 import { getDeliverableProductEntries, reconcileDeliveryProductReferences } from '../utils/deliveryScheduleController';
 import { normalizeMandatoryLongitudinalCuttingPricing } from '../utils/mandatoryCuttingPricing';
 import { hasUnresolvedLegacyRemainingChildAddOns } from '../services/remainingStoneChildAddOnService';
@@ -34,6 +35,13 @@ interface UseContractSubmissionOptions {
   departments?: Array<{ id: string }>;
   mode?: 'create' | 'edit';
   contractId?: string;
+  editSession?: {
+    draftId: string;
+    browserSessionId: string;
+    leaseToken: string;
+    baseRevision: number;
+  } | null;
+  onCommitted?: () => Promise<void> | void;
 }
 
 const normalizeIranMobileNumber = (value?: string | null) => {
@@ -100,7 +108,9 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     userDepartment,
     departments,
     mode = 'create',
-    contractId
+    contractId,
+    editSession,
+    onCommitted
   } = options;
 
   const router = useRouter();
@@ -164,7 +174,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       // Calculate total amount
       const normalizedProducts = wizardData.products.map((originalProduct) => {
         const normalizedProductType = normalizeContractProductType(originalProduct.productType) || originalProduct.productType;
-        const productWithType = {
+        let productWithType = {
           ...originalProduct,
           productType: normalizedProductType,
           ...(isPreparedProductType(normalizedProductType) && {
@@ -176,6 +186,46 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
             pricePerSquareMeter: originalProduct.unitPrice ?? originalProduct.pricePerSquareMeter ?? 0
           })
         };
+        if (originalProduct.operationPolicyInput) {
+          const operationResult = calculateProductOperations(originalProduct.operationPolicyInput);
+          if (!operationResult.ok) {
+            throw new Error(operationResult.conflicts.map(conflict => conflict.message).join(' | '));
+          }
+          const appliedById = new Map(
+            (originalProduct.appliedSubServices || []).map(item => [item.id, item])
+          );
+          const finishingsById = new Map(
+            (originalProduct.finishings || []).map(item => [item.selectionId, item])
+          );
+          productWithType = {
+            ...productWithType,
+            appliedSubServices: operationResult.result.tools.map(tool => ({
+              ...(appliedById.get(tool.toolSelectionId) as any),
+              id: tool.toolSelectionId,
+              subServiceId: tool.catalogItemId,
+              meter: Number(tool.finalQuantity),
+              cost: Number(tool.amountToman),
+              calculationBase: tool.unit === 'meter' ? 'length' : 'squareMeters',
+              edges: Object.fromEntries((tool.edges || []).map(edge => [edge, true]))
+            })),
+            finishings: operationResult.result.finishings.map(finishing => ({
+              ...(finishingsById.get(finishing.finishingSelectionId) as any),
+              selectionId: finishing.finishingSelectionId,
+              finishingId: finishing.catalogItemId,
+              name: finishing.name,
+              calculationBase: finishing.unit === 'meter' ? 'length' : 'squareMeters',
+              unitPrice: Number(finishing.rateToman),
+              automaticQuantity: Number(finishing.automaticQuantity),
+              quantity: Number(finishing.finalQuantity),
+              quantityMode: finishing.quantityOverride ? 'manual' : 'auto',
+              overrideStatus: 'current',
+              cost: Number(finishing.amountToman)
+            })),
+            totalSubServiceCost: operationResult.result.tools.reduce(
+              (sum, tool) => sum + Number(tool.amountToman), 0
+            )
+          };
+        }
         const product = normalizeMandatoryLongitudinalCuttingPricing(productWithType);
         const finishing = normalizeProductFinishing(product);
         if (!finishing) return reconcileContractProductPricing({
@@ -253,6 +303,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         _relations: {
           items: normalizedProducts.map((product) => ({
             productId: product.productId,
+            productRowId: product.rowId,
             productType: product.productType,
             quantity: product.quantity,
             unitPrice: product.unitPrice ?? product.pricePerSquareMeter,
@@ -276,6 +327,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
               const product = normalizedProducts.find((candidate) => candidate.rowId === dp.productRowId);
               return {
                 productId: product?.productId || dp.productId,
+                productRowId: dp.productRowId,
                 quantity: dp.amount ?? dp.quantity,
                 notes: product?.description || null
               };
@@ -306,14 +358,13 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         }
       };
       
-      console.log('Sending contract data:', contractData);
       const response = isEditMode
-        ? await salesAPI.updateContract(editContractId as string, contractData)
-        : await salesAPI.createContract(contractData);
-      console.log('Contract submission response:', response.data);
+        ? await salesAPI.updateContract(editContractId as string, contractData, editSession || undefined)
+        : await salesAPI.createContract(contractData, editSession || undefined);
       
       if (response.data.success) {
         if (isEditMode) {
+          await onCommitted?.();
           router.push(`/dashboard/sales/contracts/${editContractId}`);
           return;
         }
@@ -347,94 +398,11 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
           }
         });
         
-        // Create contract items
-        for (const product of normalizedProducts) {
-          await salesAPI.createContractItem(createdContractId, {
-            productId: product.productId,
-            productType: product.productType,
-            quantity: product.quantity,
-            unitPrice: product.unitPrice ?? product.pricePerSquareMeter,
-            totalPrice: product.totalPrice,
-            description: product.description || null,
-            isMandatory: product.isMandatory || false,
-            mandatoryPercentage: product.mandatoryPercentage || null,
-            originalTotalPrice: product.originalTotalPrice || null,
-            // Stair system linking fields
-            stairSystemId: product.stairSystemId || null,
-            stairPartType: product.stairPartType || null
-          });
-        }
-        
-        // Create deliveries
-        for (const delivery of contractDeliveries) {
-          await salesAPI.createDelivery(createdContractId, {
-            deliveryDate: delivery.deliveryDate,
-            deliveryAddress: wizardData.project?.address || '',
-            driver: delivery.projectManagerName || undefined,
-            vehicle: delivery.receiverName || undefined,
-            notes: delivery.notes,
-            products: delivery.products
-              .filter((dp) => dp.rowType !== 'service' && !!dp.productRowId)
-              .map(dp => {
-              const product = normalizedProducts.find((candidate) => candidate.rowId === dp.productRowId);
-              return {
-                productId: product?.productId || dp.productId,
-                quantity: dp.quantity,
-                notes: product?.description || ''
-              };
-            })
-          });
-        }
-        
-        // Create payments (compound payments - one per entry)
-        for (const paymentEntry of wizardData.payment.payments) {
-          const method = paymentEntry.method as string;
-          // Map frontend method to API: CASH_CARD/CASH_SHIBA -> CASH + cashType; CHECK -> CHECK; customer balance -> RECEIPT.
-          const paymentMethod = method === 'CHECK' ? 'CHECK' : method === 'CUSTOMER_BALANCE' ? 'RECEIPT' : 'CASH';
-          const cashType = method === 'CASH_SHIBA' ? 'SHIBA' : method === 'CASH_CARD' ? 'CARD' : undefined;
-          const notes = [
-            method === 'CUSTOMER_BALANCE' ? 'استفاده از باقی مانده مشتری' : null,
-            paymentEntry.description || null
-          ].filter(Boolean).join('، ');
-
-          let paymentDate: Date | undefined;
-          if (paymentEntry.paymentDate) {
-            try {
-              paymentDate = PersianCalendar.toGregorian(paymentEntry.paymentDate, 'jYYYY/jMM/jDD');
-            } catch (error) {
-              console.error('Error converting Persian date:', error);
-            }
-          }
-          let handoverDate: Date | undefined;
-          if (paymentEntry.handoverDate) {
-            try {
-              handoverDate = PersianCalendar.toGregorian(paymentEntry.handoverDate, 'jYYYY/jMM/jDD');
-            } catch (error) {
-              console.error('Error converting handover date:', error);
-            }
-          }
-
-          const paymentStatus = paymentEntry.status === 'PAID' ? 'COMPLETED' : 'PENDING';
-
-          await salesAPI.createPayment(createdContractId, {
-            paymentMethod,
-            totalAmount: paymentEntry.amount,
-            currency: wizardData.payment.currency,
-            status: paymentStatus,
-            paymentDate: paymentDate?.toISOString(),
-            checkNumber: paymentEntry.checkNumber,
-            checkOwnerName: paymentEntry.checkOwnerName,
-            handoverDate: handoverDate?.toISOString(),
-            cashType: cashType ?? paymentEntry.cashType,
-            nationalCode: paymentEntry.nationalCode,
-            notes: notes || undefined
-          });
-        }
-        
         // Move to final step (Digital Signature) instead of redirecting
         if (typeof window !== 'undefined') {
           localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
         }
+        await onCommitted?.();
         setCurrentStep(7);
       } else {
         setErrors({ general: response.data.error || 'خطا در ثبت قرارداد' });
@@ -461,6 +429,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     departments,
     mode,
     contractId,
+    editSession,
+    onCommitted,
     router
   ]);
 

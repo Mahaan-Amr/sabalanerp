@@ -766,10 +766,12 @@ export function OperationCollectionsSection({
         })}
       </InlineCollectionSection>
 
-      <div className="border-t border-slate-200 py-2 text-xs dark:border-slate-800">
-        بدون عملیات — {calculation.ok ? calculation.result.noOperationScope : '—'}
-        {input.quantity === undefined ? 'm' : ' قطعه'}
-      </div>
+      {calculation.ok && Number(calculation.result.noOperationScope) > 0 && (
+        <div className="border-t border-slate-200 py-2 text-xs dark:border-slate-800">
+          بدون عملیات — {calculation.result.noOperationScope}
+          {input.quantity === undefined ? 'm' : ' قطعه'}
+        </div>
+      )}
     </>
   );
 }

@@ -41,6 +41,8 @@ BACKUP_DIR="${BACKUP_DIR:-backups}"
 BACKUP_TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_PATH="${BACKUP_DIR}/sabalanerp-before-deploy-${BACKUP_TIMESTAMP}.dump"
 BACKUP_TMP_PATH="${BACKUP_PATH}.tmp"
+MIGRATION_REPORT_DIR="${MIGRATION_REPORT_DIR:-reports/deploy}"
+MIGRATION_REPORT_NAME="contract-product-graph-dry-run-${BACKUP_TIMESTAMP}.json"
 
 mkdir -p "${BACKUP_DIR}"
 echo "Creating pre-migration database backup: ${BACKUP_PATH}"
@@ -75,6 +77,20 @@ if ! docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml run --rm
   exit 1
 fi
 
+echo "Running the read-only contract product graph migration audit..."
+mkdir -p "${MIGRATION_REPORT_DIR}"
+if ! docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml run --rm \
+  -v "${REPO_ROOT}/${MIGRATION_REPORT_DIR}:/migration-report" \
+  -e CONTRACT_GRAPH_BACKUP_REFERENCE="${BACKUP_PATH}" \
+  backend node dist/scripts/dry-run-contract-product-graph-migration.js \
+  --output="/migration-report/${MIGRATION_REPORT_NAME}"; then
+  echo "Contract product graph dry-run found unexplained financial drift or broken relationships."
+  echo "Review the full report at ${MIGRATION_REPORT_DIR}/${MIGRATION_REPORT_NAME}."
+  echo "Deployment stopped. The verified backup is retained at ${BACKUP_PATH}."
+  exit 1
+fi
+echo "Contract product graph dry-run report: ${MIGRATION_REPORT_DIR}/${MIGRATION_REPORT_NAME}"
+
 echo "Starting full stack..."
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml up -d
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml up -d --force-recreate --no-deps nginx
@@ -98,4 +114,4 @@ if ! docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml exec -T 
   exit 1
 fi
 
-echo "Deployment completed. HR document antivirus scanning is healthy."
+echo "Deployment completed. HR document antivirus scanning and the contract graph migration audit are healthy."

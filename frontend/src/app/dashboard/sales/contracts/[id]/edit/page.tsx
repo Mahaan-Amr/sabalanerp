@@ -34,6 +34,7 @@ interface ContractForEdit {
     resolutionNote?: string | null;
   } | null;
   contractData?: ContractWizardData | null;
+  productGraphProjection?: { revision: number } | null;
   customerId?: string;
   contractNumber: string;
   createdByUser?: {
@@ -134,7 +135,10 @@ export default function SalesContractEditPage() {
         mode="edit"
         contractId={contract.id}
         initialContractStatus={contract.status}
-        initialWizardData={contract.contractData}
+        initialWizardData={{
+          ...contract.contractData,
+          productGraphRevision: contract.productGraphProjection?.revision ?? 0
+        }}
       />
     </div>
   );

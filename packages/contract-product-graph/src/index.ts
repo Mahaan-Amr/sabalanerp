@@ -161,6 +161,19 @@ export {
   type LegacyProductGraphInput,
   type LegacyProductGraphRead
 } from './legacyReadAdapter';
+export {
+  planLegacyProductGraphMigration,
+  type LegacyMigrationPlan,
+  type LegacyMigrationReconciliation
+} from './legacyMigration';
+export {
+  projectCanonicalGraphToLegacyProducts,
+  projectCanonicalProductGraph,
+  type CanonicalContractProjection,
+  type CanonicalProjectedOperation,
+  type CanonicalProjectedProduct,
+  type CanonicalProjectionAudience
+} from './projections';
 
 export {
   parseProductGraphCommand,

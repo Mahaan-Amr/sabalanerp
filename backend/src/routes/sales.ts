@@ -1,4 +1,9 @@
 import express, { Response } from 'express';
+import {
+  parseCanonicalProductGraph,
+  projectCanonicalGraphToLegacyProducts,
+  projectCanonicalProductGraph
+} from '@sabalanerp/contract-product-graph';
 import { body, validationResult } from 'express-validator';
 import { CorrectionRequestStatus, PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
@@ -25,13 +30,41 @@ import {
 import type { ContractPrintVariant } from '../utils/printTemplate';
 import { assignLegacyRealizedCredit, reassignContractSeller, snapshotRealizedSale } from '../services/salesAttributionService';
 import {
-  loadSalesContractProductGraph,
   persistSalesContractProductGraphCommand
 } from '../services/contractProductGraphPersistence';
+import {
+  migrateLegacyContractProductGraph,
+  readContractProductGraphWithoutWriting
+} from '../services/contractProductGraphMigration';
+import { buildSellerProductHistory } from '../services/sellerProductHistory';
+import {
+  acquireSalesContractEditSession,
+  assertSalesContractEditOwnership,
+  checkpointSalesContractRecovery,
+  releaseSalesContractEditSession
+} from '../services/contractEditSessionService';
 import salesReportsRouter from './salesReports';
 
 const router = express.Router();
 const prisma = new PrismaClient();
+const rejectContractGraphWritesWhenReadOnly = (_req: any, res: Response, next: () => void) => {
+  if (String(process.env.CONTRACT_PRODUCT_GRAPH_READ_ONLY || '').toLowerCase() === 'true') {
+    res.status(503).json({
+      success: false,
+      error: 'Contract product editing is temporarily read-only.'
+    });
+    return;
+  }
+  next();
+};
+const assertRequestContractEditOwnership = async (req: any, fallbackBaseRevision = 0) =>
+  assertSalesContractEditOwnership({
+    draftId: String(req.headers['x-contract-draft-id'] || ''),
+    userId: req.user.id,
+    browserSessionId: String(req.headers['x-contract-browser-session-id'] || ''),
+    leaseToken: String(req.headers['x-contract-lease-token'] || ''),
+    baseRevision: Number(req.headers['x-contract-base-revision'] ?? fallbackBaseRevision)
+  });
 const userHasCancelAfterApprovalPermission = async (user: any): Promise<boolean> => {
   if (!user || user.role === 'ADMIN') {
     return true;
@@ -303,6 +336,115 @@ router.get('/contracts/next-number', protect, requireWorkspaceAccess(WORKSPACES.
     return;
   }
 });
+
+// @desc    Get the authenticated seller's recent/frequent catalog selections
+// @route   GET /api/sales/contracts/product-history
+// @access  Private/Sales Workspace
+router.get('/contracts/product-history', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
+  try {
+    const contracts = await prisma.salesContract.findMany({
+      where: { createdBy: req.user.id },
+      orderBy: { createdAt: 'desc' },
+      take: 250,
+      select: {
+        createdAt: true,
+        contractData: true
+      }
+    });
+    res.json({
+      success: true,
+      data: buildSellerProductHistory(contracts)
+    });
+    return;
+  } catch (error) {
+    console.error('Get seller product history error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+    return;
+  }
+});
+
+router.post(
+  '/contract-edit-sessions/:draftId/acquire',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT),
+  async (req: any, res: Response) => {
+    try {
+      const browserSessionId = String(req.body.browserSessionId || '').trim();
+      const draftId = String(req.params.draftId || '').trim();
+      const schemaVersion = Number(req.body.schemaVersion);
+      const baseRevision = Number(req.body.baseRevision);
+      if (!draftId || !browserSessionId || !Number.isInteger(schemaVersion) || !Number.isInteger(baseRevision)) {
+        return res.status(400).json({ success: false, error: 'Invalid edit session request' });
+      }
+      const result = await acquireSalesContractEditSession({
+        draftId,
+        contractId: typeof req.body.contractId === 'string' ? req.body.contractId : null,
+        userId: req.user.id,
+        browserSessionId,
+        schemaVersion,
+        baseRevision,
+        takeover: req.body.takeover === true
+      });
+      if (!result.ok) {
+        return res.status(409).json({ success: false, data: result });
+      }
+      return res.json({ success: true, data: result });
+    } catch (error) {
+      console.error('Acquire contract edit session error:', error);
+      return res.status(500).json({ success: false, error: 'Server error' });
+    }
+  }
+);
+
+router.put(
+  '/contract-edit-sessions/:draftId/recovery',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT),
+  async (req: any, res: Response) => {
+    try {
+      const result = await checkpointSalesContractRecovery({
+        draftId: String(req.params.draftId || '').trim(),
+        userId: req.user.id,
+        browserSessionId: String(req.body.browserSessionId || '').trim(),
+        leaseToken: String(req.body.leaseToken || '').trim(),
+        schemaVersion: Number(req.body.schemaVersion),
+        baseRevision: Number(req.body.baseRevision),
+        recovery: req.body.recovery
+      });
+      if (!result.ok) {
+        return res.status(409).json({ success: false, data: result });
+      }
+      return res.json({ success: true, data: result });
+    } catch (error) {
+      console.error('Checkpoint contract recovery error:', error);
+      return res.status(500).json({ success: false, error: 'Server error' });
+    }
+  }
+);
+
+router.delete(
+  '/contract-edit-sessions/:draftId',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT),
+  async (req: any, res: Response) => {
+    try {
+      const result = await releaseSalesContractEditSession({
+        draftId: String(req.params.draftId || '').trim(),
+        userId: req.user.id,
+        browserSessionId: String(req.body.browserSessionId || '').trim(),
+        leaseToken: String(req.body.leaseToken || '').trim(),
+        baseRevision: Number(req.body.baseRevision)
+      });
+      if (!result.ok) {
+        return res.status(409).json({ success: false, data: result });
+      }
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('Release contract edit session error:', error);
+      return res.status(500).json({ success: false, error: 'Server error' });
+    }
+  }
+);
 
 // @desc    Get all sales contracts
 // @route   GET /api/sales/contracts
@@ -578,12 +720,23 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
       });
     }
 
+    const printableContract = (contract as any).productGraphState
+      ? {
+          ...contract,
+          contractData: {
+            ...((contract.contractData as any) || {}),
+            products: projectCanonicalGraphToLegacyProducts(
+              parseCanonicalProductGraph((contract as any).productGraphState.graph)
+            )
+          }
+        }
+      : contract;
     const variant: ContractPrintVariant = req.query.variant === 'summary' ? 'summary' : 'original';
     const fresh = variant === 'summary' || String(req.query.fresh || 'false').toLowerCase() === 'true';
     const shouldDownload = String(req.query.download || 'false').toLowerCase() === 'true';
     const currentSignatures = (contract.signatures as any) || {};
     const cachedPdfPath = currentSignatures?.print?.pdfPath as string | undefined;
-    const pdfFingerprint = buildSalesContractPdfFingerprint(contract, variant);
+    const pdfFingerprint = buildSalesContractPdfFingerprint(printableContract, variant);
     const downloadName = variant === 'summary'
       ? buildSalesContractPdfDownloadName(contract).replace(/\.pdf$/i, '_summary.pdf')
       : buildSalesContractPdfDownloadName(contract);
@@ -615,7 +768,7 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
       }
     }
 
-    const pdfPath = await generateSalesContractPdf(contract, variant);
+    const pdfPath = await generateSalesContractPdf(printableContract, variant);
     const generatedAt = new Date().toISOString();
 
     if (variant === 'original') {
@@ -673,7 +826,7 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
 // @desc    Create new sales contract
 // @route   POST /api/sales/contracts
 // @access  Private/Sales Workspace
-router.post('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_CONTRACTS_CREATE, FEATURE_PERMISSIONS.EDIT), [
+router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_CONTRACTS_CREATE, FEATURE_PERMISSIONS.EDIT), [
   body('title').notEmpty().withMessage('Title is required'),
   body('titlePersian').notEmpty().withMessage('Persian title is required'),
   body('customerId').notEmpty().withMessage('Customer ID is required'),
@@ -689,6 +842,10 @@ router.post('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
         details: errors.array()
       });
     }
+    const editOwnership = await assertRequestContractEditOwnership(req, 0);
+    if (!editOwnership.ok) {
+      return res.status(409).json({ success: false, conflict: editOwnership });
+    }
 
     const {
       title,
@@ -701,7 +858,8 @@ router.post('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
       currency,
       notes,
       contractData,
-      potentialProjectId
+      potentialProjectId,
+      _relations
     } = req.body;
 
     // Check if user has access to this department
@@ -724,7 +882,8 @@ router.post('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
       currency,
       notes,
       contractData,
-      potentialProjectId
+      potentialProjectId,
+      _relations
     }, req.user.id);
 
     res.status(201).json({
@@ -753,6 +912,7 @@ router.post('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORK
 
 router.post(
   '/contracts/:id/product-graph/commands',
+  rejectContractGraphWritesWhenReadOnly,
   protect,
   requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT),
   requireFeatureAccess(FEATURES.SALES_CONTRACTS_EDIT, FEATURE_PERMISSIONS.EDIT),
@@ -767,6 +927,10 @@ router.post(
       }
       if (!validateContractAccess(contract, req.user)) {
         return res.status(403).json({ success: false, error: 'Access denied' });
+      }
+      const editOwnership = await assertRequestContractEditOwnership(req, Number(req.body?.baseRevision));
+      if (!editOwnership.ok) {
+        return res.status(409).json({ success: false, conflict: editOwnership });
       }
       const result = await persistSalesContractProductGraphCommand({
         contractId: contract.id,
@@ -805,7 +969,7 @@ router.get(
       if (!validateContractAccess(contract, req.user)) {
         return res.status(403).json({ success: false, error: 'Access denied' });
       }
-      const state = await loadSalesContractProductGraph(contract.id);
+      const state = await readContractProductGraphWithoutWriting(prisma, contract.id);
       return res.json({ success: true, data: state });
     } catch (error) {
       console.error('Load contract product graph error:', error);
@@ -814,10 +978,45 @@ router.get(
   }
 );
 
+router.post(
+  '/contracts/:id/product-graph/migrate',
+  rejectContractGraphWritesWhenReadOnly,
+  protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.SALES_CONTRACTS_EDIT, FEATURE_PERMISSIONS.EDIT),
+  async (req: any, res: Response) => {
+    try {
+      const contract = await prisma.salesContract.findUnique({
+        where: { id: req.params.id },
+        select: { id: true, departmentId: true }
+      });
+      if (!contract) return res.status(404).json({ success: false, error: 'Contract not found' });
+      if (!validateContractAccess(contract, req.user)) {
+        return res.status(403).json({ success: false, error: 'Access denied' });
+      }
+      const ownership = await assertRequestContractEditOwnership(req, 0);
+      if (!ownership.ok) return res.status(409).json({ success: false, conflict: ownership });
+      const result = await migrateLegacyContractProductGraph(prisma, {
+        contractId: contract.id,
+        actorId: req.user.id,
+        backupReference: String(req.body?.backupReference || process.env.CONTRACT_GRAPH_BACKUP_REFERENCE || '')
+      });
+      if (!result.ok) return res.status(422).json({ success: false, conflicts: result.conflicts });
+      return res.json({ success: true, data: result });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Migration failed';
+      return res.status(message === 'Contract not found' ? 404 : 400).json({
+        success: false,
+        error: message
+      });
+    }
+  }
+);
+
 // @desc    Update sales contract
 // @route   PUT /api/sales/contracts/:id
 // @access  Private/Sales Workspace
-router.put('/contracts/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_CONTRACTS_EDIT, FEATURE_PERMISSIONS.EDIT), [
+router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_CONTRACTS_EDIT, FEATURE_PERMISSIONS.EDIT), [
   body('title').optional().notEmpty().withMessage('Title cannot be empty'),
   body('titlePersian').optional().notEmpty().withMessage('Persian title cannot be empty'),
   body('content').optional().notEmpty().withMessage('Content cannot be empty'),
@@ -830,6 +1029,10 @@ router.put('/contracts/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, W
         error: 'Validation failed',
         details: errors.array()
       });
+    }
+    const editOwnership = await assertRequestContractEditOwnership(req, 0);
+    if (!editOwnership.ok) {
+      return res.status(409).json({ success: false, conflict: editOwnership });
     }
 
     const updatedContract = await updateContract(req.params.id, req.body, req.user.id);

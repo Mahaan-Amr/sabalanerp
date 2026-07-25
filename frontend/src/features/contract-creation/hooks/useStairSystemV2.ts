@@ -148,8 +148,9 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
       ...prev,
       stoneId: product ? product.id : null,
       stoneLabel: productLabel,
+      contractualTitle: productLabel,
       stoneProduct: product,
-      pricePerSquareMeter: product ? (product.basePrice || (product as any).pricePerSquareMeter || 0) : null,
+      pricePerSquareMeter: null,
       thicknessCm: product ? (product.thicknessValue ?? null) : null
     }));
 
@@ -239,6 +240,7 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
               name: item.name,
               description: item.description,
               pricePerLayer: Number(item.pricePerLayer) || 0,
+              calculationUnit: item.calculationUnit || 'set',
               isActive: item.isActive !== false
             }))
             .filter((option: LayerTypeOption) => option.isActive !== false);

@@ -14,6 +14,8 @@ import {
   parseContractAutosaveDraft
 } from '../../utils/contractDraftStorage';
 import {
+  adaptLegacyStairOperations,
+  appendStairLayerConfiguration,
   createFreshStairPartDraft,
   getFreshContractProductDefaults,
   getContractQuantityInputPolicy,
@@ -22,6 +24,7 @@ import {
   resolveLongitudinalQuantityOptimizationFailure,
   resolveLongitudinalWidth
 } from '../../utils/productConfigurationController';
+import { calculateProductOperations } from '@sabalanerp/contract-product-graph';
 import { calculateSmartLongitudinalCutPlan } from '../remainingStoneService';
 import { handleSmartCalculation } from '../../utils/productCalculations';
 import {
@@ -179,18 +182,130 @@ assert.deepEqual(getFreshContractProductDefaults('stair'), {
   quantity: 1,
   calibrationCutEnabled: false
 });
+
+const adaptedLegacyOperations = adaptLegacyStairOperations({
+  product: makeContractProduct({
+    rowId: 'stair-row-1',
+    appliedSubServices: [{
+      id: 'legacy-tool-selection-1',
+      subServiceId: 'tool-1',
+      subService: {
+        id: 'tool-1',
+        code: 'TOOL-1',
+        name: 'Half bullnose',
+        namePersian: 'نیم‌لول',
+        description: '',
+        pricePerMeter: 15000,
+        calculationBase: 'length',
+        isActive: true
+      },
+      meter: 30,
+      cost: 450000,
+      calculationBase: 'length',
+      edges: { front: true, left: true }
+    }],
+    finishings: [{
+      selectionId: 'legacy-finishing-selection-1',
+      finishingId: 'finishing-1',
+      name: 'ساب',
+      calculationBase: 'squareMeters',
+      unitPrice: 20000,
+      automaticQuantity: 6,
+      quantity: 6,
+      quantityMode: 'manual',
+      overrideStatus: 'current',
+      cost: 120000
+    }]
+  }),
+  productRowId: 'stair-row-1',
+  lengthMeters: 1.5,
+  widthMeters: 0.4,
+  quantity: 20
+});
+assert.ok(adaptedLegacyOperations);
+assert.deepEqual(adaptedLegacyOperations.tools[0].edges, ['front', 'left']);
+assert.equal(adaptedLegacyOperations.tools[0].rateToman, '15000');
+assert.equal(adaptedLegacyOperations.finishings[0].rateToman, '20000');
+assert.equal(adaptedLegacyOperations.finishings[0].quantityOverride?.value, '6');
+
+const unresolvedLegacyEdge = adaptLegacyStairOperations({
+  product: makeContractProduct({
+    appliedSubServices: [{
+      id: 'legacy-tool-without-edge',
+      subServiceId: 'tool-2',
+      subService: {
+        id: 'tool-2',
+        code: 'TOOL-2',
+        name: 'Legacy tool',
+        namePersian: 'ابزار قدیمی',
+        description: '',
+        pricePerMeter: 10000,
+        calculationBase: 'length',
+        isActive: false
+      },
+      meter: 10,
+      cost: 100000,
+      calculationBase: 'length'
+    }]
+  }),
+  productRowId: 'stair-row-2',
+  lengthMeters: 1,
+  widthMeters: 0.3,
+  quantity: 10
+});
+assert.ok(unresolvedLegacyEdge);
+const unresolvedCalculation = calculateProductOperations(unresolvedLegacyEdge);
+assert.equal(unresolvedCalculation.ok, false);
+if (!unresolvedCalculation.ok) {
+  assert.equal(unresolvedCalculation.conflicts[0]?.code, 'tool-edge-required');
+}
 assert.deepEqual(getFreshContractProductDefaults('slab'), {
   quantity: 1
 });
 assert.deepEqual(createFreshStairPartDraft('riser'), {
+  layerConfigurations: [],
   lengthUnit: 'm',
+  widthUnit: 'cm',
+  widthCm: 17,
   tools: [],
+  layerSourceKind: null,
+  layerSelectedRemainingStoneIds: [],
   finishingEnabled: false,
   calibrationCutEnabled: false,
+  calibrationSelection: 'automatic',
   useMandatory: true,
   mandatoryPercentage: 20,
   description: ''
 });
+assert.equal(createFreshStairPartDraft('tread').widthCm, 30);
+assert.equal(createFreshStairPartDraft('landing').widthCm, null);
+{
+  const parentDraft = {
+    ...createFreshStairPartDraft('tread'),
+    quantity: 10,
+    numberOfLayersPerStair: 2,
+    layerWidthCm: 4,
+    layerTypeId: 'double',
+    layerTypeName: 'Double',
+    layerTypePrice: 80000,
+    layerEdges: { front: true, left: true },
+    layerSourceKind: 'contractRemainder' as const,
+    layerSelectedRemainingStoneIds: ['remainder-1']
+  };
+  const appended = appendStairLayerConfiguration(parentDraft, 'layer-config-1');
+  assert.equal(appended.layerConfigurations?.length, 1);
+  assert.equal(
+    appended.layerConfigurations?.[0]?.layerConfigurationDraftId,
+    'layer-config-1'
+  );
+  assert.deepEqual(
+    appended.layerConfigurations?.[0]?.layerSelectedRemainingStoneIds,
+    ['remainder-1']
+  );
+  assert.equal(appended.numberOfLayersPerStair, null);
+  assert.equal(appended.layerSourceKind, null);
+  assert.deepEqual(appended.layerSelectedRemainingStoneIds, []);
+}
 assert.equal(resolveExistingCalibrationCutEnabled(undefined), true);
 assert.equal(resolveExistingCalibrationCutEnabled(true), true);
 assert.equal(resolveExistingCalibrationCutEnabled(false), false);

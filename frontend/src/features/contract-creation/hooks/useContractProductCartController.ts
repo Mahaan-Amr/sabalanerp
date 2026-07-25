@@ -14,6 +14,7 @@ import type {
 } from '../types/contract.types';
 import { productSupportsContractType } from '../utils/productUtils';
 import { normalizeDigits } from '@/lib/numberFormat';
+import { resolveContractRowIndex } from '../components/steps/contractCartRows';
 
 type ProductCartType = Extract<ContractUsageType, 'longitudinal' | 'stair' | 'slab' | 'prepared'>;
 
@@ -58,17 +59,16 @@ export interface ProductCartController {
     totalSquareMeters: number;
     totalQuantity: number;
   };
-  editItem: (index: number) => void;
-  manageItemTools: (index: number, product: ContractProduct) => void;
-  duplicateItem: (index: number) => void;
-  removeItem: (index: number) => void;
-  updateItemImages: (index: number, images: string[]) => void;
+  editItem: (rowId: string) => void;
+  duplicateItem: (rowId: string) => void;
+  removeItem: (rowId: string) => void;
+  updateItemImages: (rowId: string, images: string[]) => void;
   updateServiceRow: (rowId: string, updates: Partial<Pick<ContractServiceRow, 'quantity' | 'unitPrice' | 'description' | 'images'>>) => void;
   duplicateServiceRow: (rowId: string) => void;
   removeServiceRow: (rowId: string) => void;
   uploadImage: (file: File) => Promise<string>;
   useRemainingStone?: (remainingStone: RemainingStone, sourceProduct: ContractProduct) => void;
-  resolveLegacyRemainingAddOns: (index: number, action: 'adopt' | 'remove') => void;
+  resolveLegacyRemainingAddOns: (rowId: string, action: 'adopt' | 'remove') => void;
 }
 
 export interface ServiceCatalogController {
@@ -106,7 +106,6 @@ interface UseContractProductCartControllerOptions {
   productsSummary: ProductCartController['summary'];
   selectProduct: (product: Product) => void;
   editProduct: (index: number) => void;
-  manageProductTools: (index: number, product: ContractProduct) => void;
   duplicateProduct: (index: number) => void;
   removeProduct: (index: number) => void;
   updateProductImages: (index: number, images: string[]) => void;
@@ -144,7 +143,6 @@ export const useContractProductCartController = ({
   productsSummary,
   selectProduct,
   editProduct,
-  manageProductTools,
   duplicateProduct,
   removeProduct,
   updateProductImages,
@@ -207,6 +205,17 @@ export const useContractProductCartController = ({
     });
   }, [cuttingTypes, serviceSearchTerm, serviceSourceType, stoneFinishings, subServices]);
 
+  const withResolvedRow = useCallback((
+    rowId: string,
+    action: (index: number, product: ContractProduct) => void
+  ) => {
+    const index = resolveContractRowIndex(wizardData.products, rowId);
+    if (index < 0) return;
+    const product = wizardData.products[index];
+    if (!product) return;
+    action(index, product);
+  }, [wizardData.products]);
+
   return {
     catalog: {
       query: productSearchTerm,
@@ -239,17 +248,17 @@ export const useContractProductCartController = ({
       hasItems: wizardData.products.length > 0 || (wizardData.serviceRows || []).length > 0,
       hasServiceRows: (wizardData.serviceRows || []).length > 0,
       summary: productsSummary,
-      editItem: editProduct,
-      manageItemTools: manageProductTools,
-      duplicateItem: duplicateProduct,
-      removeItem: removeProduct,
-      updateItemImages: updateProductImages,
+      editItem: (rowId) => withResolvedRow(rowId, index => editProduct(index)),
+      duplicateItem: (rowId) => withResolvedRow(rowId, index => duplicateProduct(index)),
+      removeItem: (rowId) => withResolvedRow(rowId, index => removeProduct(index)),
+      updateItemImages: (rowId, images) => withResolvedRow(rowId, index => updateProductImages(index, images)),
       updateServiceRow,
       duplicateServiceRow,
       removeServiceRow,
       uploadImage,
       useRemainingStone,
-      resolveLegacyRemainingAddOns
+      resolveLegacyRemainingAddOns: (rowId, action) =>
+        withResolvedRow(rowId, index => resolveLegacyRemainingAddOns(index, action))
     },
     draft
   };

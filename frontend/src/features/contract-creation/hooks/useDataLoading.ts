@@ -62,7 +62,7 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
   const [stoneFinishingLoadState, setStoneFinishingLoadState] = useState<StoneFinishingLoadState>('idle');
 
   const [userDepartment, setUserDepartment] = useState<string | null>(null);
-  const [currentUser, setCurrentUser] = useState<{ firstName: string; lastName: string; role?: string } | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ id?: string; username?: string; firstName: string; lastName: string; role?: string } | null>(null);
   const [grantedFeatures, setGrantedFeatures] = useState<string[]>([]);
   const [grantedWorkspaces, setGrantedWorkspaces] = useState<Array<{ workspace: string; permissionLevel: string }>>([]);
   const [capabilities, setCapabilities] = useState<DataCapabilities>({
@@ -276,6 +276,8 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
         setCapabilities(nextCapabilities);
         setUserDepartment(userData.departmentId);
         setCurrentUser({
+          id: userData.id,
+          username: userData.username,
           firstName: userData.firstName || '',
           lastName: userData.lastName || '',
           role: userData.role
@@ -387,4 +389,3 @@ export const useDataLoading = (options: UseDataLoadingOptions = {}) => {
     getCuttingTypePricePerMeter
   };
 };
-

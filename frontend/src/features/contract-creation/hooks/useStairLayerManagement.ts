@@ -801,7 +801,7 @@ export const useStairLayerManagement = ({
     usedBySource.forEach((usedStones, sourceIdx) => {
       if (sourceIdx >= 0 && sourceIdx < sessionItems.length) {
         const sourceProduct = sessionItems[sourceIdx];
-        if (sourceProduct && sourceProduct.productType === 'stair' && !((sourceProduct.meta as any)?.isLayer)) {
+        if (sourceProduct && !((sourceProduct.meta as any)?.isLayer)) {
           const existingUsed = sourceProduct.usedRemainingStones || [];
           const mergedUsed = [...existingUsed, ...usedStones];
           updates.set(sourceIdx, {

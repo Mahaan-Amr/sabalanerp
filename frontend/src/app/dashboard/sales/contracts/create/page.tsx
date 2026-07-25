@@ -1,8 +1,10 @@
 'use client';
 
-import dynamic from 'next/dynamic';
+import nextDynamic from 'next/dynamic';
 
-const CreateContractWizardClient = dynamic(
+export const dynamic = 'force-dynamic';
+
+const CreateContractWizardClient = nextDynamic(
   () => import('@/features/contract-creation/CreateContractWizardClient'),
   {
     ssr: false,

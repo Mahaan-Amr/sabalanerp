@@ -25,7 +25,7 @@ export function CompactSegmentedControl<Value extends string>({
   className
 }: {
   label: string;
-  value: Value;
+  value: Value | null;
   options: readonly SegmentedOption<Value>[];
   onChange: (value: Value) => void;
   className?: string;
@@ -33,6 +33,11 @@ export function CompactSegmentedControl<Value extends string>({
   const selectRelative = (direction: 1 | -1) => {
     const enabled = options.filter(option => !option.disabled);
     const currentIndex = enabled.findIndex(option => option.value === value);
+    if (currentIndex < 0) {
+      const first = direction === 1 ? enabled[0] : enabled[enabled.length - 1];
+      if (first) onChange(first.value);
+      return;
+    }
     const nextIndex = (currentIndex + direction + enabled.length) % enabled.length;
     if (enabled[nextIndex]) onChange(enabled[nextIndex].value);
   };

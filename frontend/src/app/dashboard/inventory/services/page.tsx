@@ -59,6 +59,7 @@ interface LayerType {
   name: string;
   description?: string;
   pricePerLayer: number;
+  calculationUnit: 'set' | 'physicalPiece' | 'meter' | 'squareMeter';
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -107,10 +108,12 @@ const ServicesPage: React.FC = () => {
     id?: string;
     name: string;
     pricePerLayer: string;
+    calculationUnit: 'set' | 'physicalPiece' | 'meter' | 'squareMeter';
     description: string;
   }>({
     name: '',
     pricePerLayer: '',
+    calculationUnit: 'set',
     description: ''
   });
   const [editingLayerTypeId, setEditingLayerTypeId] = useState<string | null>(null);
@@ -316,6 +319,7 @@ const ServicesPage: React.FC = () => {
     setLayerTypeForm({
       name: '',
       pricePerLayer: '',
+      calculationUnit: 'set',
       description: ''
     });
   };
@@ -326,6 +330,7 @@ const ServicesPage: React.FC = () => {
       id: item.id,
       name: item.name,
       pricePerLayer: item.pricePerLayer?.toString() || '',
+      calculationUnit: item.calculationUnit || 'set',
       description: item.description || ''
     });
   };
@@ -350,6 +355,7 @@ const ServicesPage: React.FC = () => {
       const payload = {
         name: layerTypeForm.name.trim(),
         pricePerLayer: numericValue,
+        calculationUnit: layerTypeForm.calculationUnit,
         description: layerTypeForm.description?.trim() || ''
       };
 
@@ -910,7 +916,25 @@ const ServicesPage: React.FC = () => {
                 نوع لایه
               </h2>
               <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/30">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      واحد محاسبه
+                    </label>
+                    <select
+                      value={layerTypeForm.calculationUnit}
+                      onChange={(e) => setLayerTypeForm(prev => ({
+                        ...prev,
+                        calculationUnit: e.target.value as LayerType['calculationUnit']
+                      }))}
+                      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                    >
+                      <option value="set">هر مجموعه</option>
+                      <option value="physicalPiece">هر قطعه فیزیکی</option>
+                      <option value="meter">متر طول</option>
+                      <option value="squareMeter">مترمربع</option>
+                    </select>
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                       نام نوع لایه
@@ -984,7 +1008,8 @@ const ServicesPage: React.FC = () => {
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-slate-700">
                         <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نام</th>
-                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">قیمت هر لایه</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">نرخ موجودی</th>
+                        <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">واحد</th>
                         <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">توضیحات</th>
                         <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">وضعیت</th>
                         <th className="text-right py-3 px-4 text-slate-600 dark:text-slate-400">عملیات</th>
@@ -998,6 +1023,14 @@ const ServicesPage: React.FC = () => {
                           </td>
                           <td className="py-3 px-4 text-slate-900 dark:text-slate-100 font-mono">
                             {layerType.pricePerLayer.toLocaleString('fa-IR')} تومان
+                          </td>
+                          <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
+                            {{
+                              set: 'هر مجموعه',
+                              physicalPiece: 'هر قطعه فیزیکی',
+                              meter: 'متر طول',
+                              squareMeter: 'مترمربع'
+                            }[layerType.calculationUnit || 'set']}
                           </td>
                           <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
                             {layerType.description || '-'}

@@ -232,6 +232,289 @@ const better = (left: ReturnType<typeof objective>, right?: ReturnType<typeof ob
   return left[4] < right[4];
 };
 
+const searchBestPackingState = ({
+  sources,
+  pieces,
+  kerf
+}: {
+  sources: SourcePiece[];
+  pieces: DemandPiece[];
+  kerf: Decimal;
+}): SearchState | undefined => {
+  let bestState: SearchState | undefined;
+  let bestObjective: ReturnType<typeof objective> | undefined;
+  const memo = new Map<string, Decimal>();
+  const visit = (pieceIndex: number, state: SearchState): void => {
+    const usedCount = state.sources.filter(source => source.used).length;
+    if (bestObjective && usedCount > bestObjective[0]) return;
+    if (pieceIndex === pieces.length) {
+      const candidate = objective(state);
+      if (better(candidate, bestObjective)) {
+        bestState = state;
+        bestObjective = candidate;
+      }
+      return;
+    }
+    const piece = pieces[pieceIndex];
+    const stateKey = `${pieceIndex}|${state.sources.map(source =>
+      `${source.used ? 1 : 0}:${source.free.map(rectSignature).sort().join(';')}`
+    ).join('|')}`;
+    const currentCuts = state.cutTotal;
+    if (bestObjective && currentCuts.gt(bestObjective[1])) return;
+    const knownCuts = memo.get(stateKey);
+    if (knownCuts && knownCuts.lte(currentCuts)) return;
+    memo.set(stateKey, currentCuts);
+
+    const emitted = new Set<string>();
+    state.sources.forEach((source, sourceIndex) => {
+      const candidateRectIndexes = source.free.map((_, index) => index);
+      candidateRectIndexes.forEach(rectIndex => {
+        const rect = source.free[rectIndex];
+        (['width-first', 'length-first'] as const).forEach(splitOrder => {
+          const split = splitRect(rect, piece, kerf, splitOrder);
+          if (!split) return;
+          /*
+           * Sources with the same used/free geometry are interchangeable for
+           * the remaining search. Exploring the same placement against every
+           * identical source creates factorial branches for repeated stair
+           * pieces. Iteration order already represents the stable source
+           * tie-break, so retain only the first equivalent transition.
+           */
+          const sourceShape = `${source.used ? 1 : 0}:${
+            source.free.map(rectSignature).sort().join(';')
+          }`;
+          const optionKey = `${sourceShape}:${rectSignature(rect)}:${
+            split.free.map(rectSignature).join(';')
+          }`;
+          if (emitted.has(optionKey)) return;
+          emitted.add(optionKey);
+          const nextSources = state.sources.map((item, index) => index === sourceIndex ? {
+            ...item,
+            used: true,
+            cutCount: item.cutCount + split.cuts.length,
+            free: [...item.free.slice(0, rectIndex), ...item.free.slice(rectIndex + 1), ...split.free].sort(rectOrder)
+          } : { ...item, free: [...item.free] });
+          const placement: PackedPlacement = {
+            demandId: piece.id,
+            demandOrdinal: piece.ordinal,
+            sourceBatchId: source.batchId,
+            sourceOrdinal: source.ordinal,
+            xMeters: canonical(rect.x), yMeters: canonical(rect.y),
+            lengthMeters: canonical(piece.length), widthMeters: canonical(piece.width)
+          };
+          const cuts = split.cuts.map((cut, cutIndex): PhysicalCut => {
+            const sequence = source.cutCount + cutIndex + 1;
+            return {
+              cutId: `${source.batchId}:${source.ordinal}:cut:${sequence}`,
+              sequence,
+              axis: cut.axis,
+              sourceBatchId: source.batchId,
+              sourceOrdinal: source.ordinal,
+              positionMeters: canonical(cut.position),
+              spanStartMeters: canonical(cut.spanStart),
+              meters: canonical(cut.meters),
+              kerfMeters: canonical(kerf)
+            };
+          });
+          visit(pieceIndex + 1, {
+            sources: nextSources,
+            placements: [...state.placements, placement],
+            cuts: [...state.cuts, ...cuts],
+            cutTotal: state.cutTotal.plus(
+              split.cuts.reduce((sum, cut) => sum.plus(cut.meters), d('0'))
+            )
+          });
+        });
+      });
+    });
+  };
+  visit(0, { sources, placements: [], cuts: [], cutTotal: d('0') });
+  return bestState;
+};
+
+const uniformAxisCapacity = (
+  sourceSize: Decimal,
+  pieceSize: Decimal,
+  kerf: Decimal
+) => {
+  const upperBound = Math.floor(
+    sourceSize.plus(kerf).div(pieceSize.plus(kerf)).toNumber()
+  );
+  for (let count = upperBound; count > 0; count -= 1) {
+    const remainder = sourceSize
+      .minus(pieceSize.times(count))
+      .minus(kerf.times(Math.max(0, count - 1)));
+    if (remainder.eq(0) || remainder.gte(kerf)) return count;
+  }
+  return 0;
+};
+
+const calculateUniformGridState = ({
+  sources,
+  pieces,
+  kerf
+}: {
+  sources: SourcePiece[];
+  pieces: DemandPiece[];
+  kerf: Decimal;
+}): SearchState | undefined => {
+  const firstSourceRect = sources[0]?.free[0];
+  const firstPiece = pieces[0];
+  if (!firstSourceRect || !firstPiece ||
+      sources.some(source =>
+        source.free.length !== 1 ||
+        !source.free[0].length.eq(firstSourceRect.length) ||
+        !source.free[0].width.eq(firstSourceRect.width)
+      ) ||
+      pieces.some(piece =>
+        !piece.length.eq(firstPiece.length) ||
+        !piece.width.eq(firstPiece.width)
+      )) {
+    return undefined;
+  }
+
+  const capacity =
+    uniformAxisCapacity(firstSourceRect.length, firstPiece.length, kerf) *
+    uniformAxisCapacity(firstSourceRect.width, firstPiece.width, kerf);
+  /*
+   * Single-source exact searches stay small for normal stair geometry. Larger
+   * grids already use the strip fast path or fall back to the general search.
+   */
+  if (capacity <= 0 || capacity > 12) return undefined;
+  const sourceCount = Math.ceil(pieces.length / capacity);
+  if (sourceCount > sources.length) return undefined;
+
+  const patterns = new Map<number, {
+    state: SearchState;
+    remainderCount: number;
+    largestRemainder: Decimal;
+    signature: string;
+  }>();
+  for (let count = 1; count <= Math.min(capacity, pieces.length); count += 1) {
+    const templateSource: SourcePiece = {
+      ...sources[0],
+      free: sources[0].free.map(rect => ({ ...rect })),
+      used: false,
+      cutCount: 0
+    };
+    const state = searchBestPackingState({
+      sources: [templateSource],
+      pieces: pieces.slice(0, count),
+      kerf
+    });
+    if (!state) continue;
+    const remainders = state.sources.flatMap(source => source.free);
+    patterns.set(count, {
+      state,
+      remainderCount: remainders.length,
+      largestRemainder: remainders.reduce(
+        (largest, rect) =>
+          Decimal.max(largest, rect.length.times(rect.width)),
+        d('0')
+      ),
+      signature: state.sources
+        .flatMap(source => source.free.map(rectSignature))
+        .join(';')
+    });
+  }
+
+  interface Distribution {
+    readonly counts: readonly number[];
+    readonly cutTotal: Decimal;
+    readonly remainderCount: number;
+    readonly largestRemainder: Decimal;
+    readonly signature: string;
+  }
+  const betterDistribution = (
+    left: Distribution,
+    right?: Distribution
+  ) => {
+    if (!right) return true;
+    const cutComparison = left.cutTotal.comparedTo(right.cutTotal);
+    if (cutComparison !== 0) return cutComparison < 0;
+    if (left.remainderCount !== right.remainderCount) {
+      return left.remainderCount < right.remainderCount;
+    }
+    const largestComparison =
+      left.largestRemainder.comparedTo(right.largestRemainder);
+    if (largestComparison !== 0) return largestComparison > 0;
+    return left.signature < right.signature;
+  };
+  const memo = new Map<string, Distribution | null>();
+  const distribute = (
+    sourceIndex: number,
+    remaining: number
+  ): Distribution | undefined => {
+    if (sourceIndex === sourceCount) {
+      return remaining === 0
+        ? {
+            counts: [],
+            cutTotal: d('0'),
+            remainderCount: 0,
+            largestRemainder: d('0'),
+            signature: ''
+          }
+        : undefined;
+    }
+    const key = `${sourceIndex}:${remaining}`;
+    const cached = memo.get(key);
+    if (cached !== undefined) return cached ?? undefined;
+    const sourcesAfterThis = sourceCount - sourceIndex - 1;
+    const minimum = Math.max(1, remaining - sourcesAfterThis * capacity);
+    const maximum = Math.min(capacity, remaining - sourcesAfterThis);
+    let best: Distribution | undefined;
+    for (let count = maximum; count >= minimum; count -= 1) {
+      const pattern = patterns.get(count);
+      const rest = distribute(sourceIndex + 1, remaining - count);
+      if (!pattern || !rest) continue;
+      const candidate: Distribution = {
+        counts: [count, ...rest.counts],
+        cutTotal: pattern.state.cutTotal.plus(rest.cutTotal),
+        remainderCount: pattern.remainderCount + rest.remainderCount,
+        largestRemainder: Decimal.max(
+          pattern.largestRemainder,
+          rest.largestRemainder
+        ),
+        signature: `${
+          String(capacity - count).padStart(8, '0')
+        }:${pattern.signature}|${rest.signature}`
+      };
+      if (betterDistribution(candidate, best)) best = candidate;
+    }
+    memo.set(key, best ?? null);
+    return best;
+  };
+
+  const distribution = distribute(0, pieces.length);
+  if (!distribution) return undefined;
+  const packedSources: SourcePiece[] = [];
+  const placements: PackedPlacement[] = [];
+  const cuts: PhysicalCut[] = [];
+  let pieceOffset = 0;
+  let cutTotal = d('0');
+  distribution.counts.forEach((count, sourceIndex) => {
+    const source: SourcePiece = {
+      ...sources[sourceIndex],
+      free: sources[sourceIndex].free.map(rect => ({ ...rect })),
+      used: false,
+      cutCount: 0
+    };
+    const state = searchBestPackingState({
+      sources: [source],
+      pieces: pieces.slice(pieceOffset, pieceOffset + count),
+      kerf
+    });
+    if (!state) return;
+    packedSources.push(...state.sources);
+    placements.push(...state.placements);
+    cuts.push(...state.cuts);
+    cutTotal = cutTotal.plus(state.cutTotal);
+    pieceOffset += count;
+  });
+  if (pieceOffset !== pieces.length) return undefined;
+  return { sources: packedSources, placements, cuts, cutTotal };
+};
+
 const calculateUniformStripPlan = ({
   request,
   sources,
@@ -408,82 +691,9 @@ export const calculatePackingPlan = (request: PackingRequest): PackingResult => 
     const uniformStripPlan = calculateUniformStripPlan({ request, sources, pieces, kerf });
     if (uniformStripPlan) return { ok: true, plan: uniformStripPlan };
 
-    let bestState: SearchState | undefined;
-    let bestObjective: ReturnType<typeof objective> | undefined;
-    const memo = new Map<string, Decimal>();
-    const visit = (pieceIndex: number, state: SearchState): void => {
-      const usedCount = state.sources.filter(source => source.used).length;
-      if (bestObjective && usedCount > bestObjective[0]) return;
-      if (pieceIndex === pieces.length) {
-        const candidate = objective(state);
-        if (better(candidate, bestObjective)) {
-          bestState = state;
-          bestObjective = candidate;
-        }
-        return;
-      }
-      const piece = pieces[pieceIndex];
-      const stateKey = `${pieceIndex}|${state.sources.map(source =>
-        `${source.used ? 1 : 0}:${source.free.map(rectSignature).sort().join(';')}`
-      ).join('|')}`;
-      const currentCuts = state.cutTotal;
-      if (bestObjective && currentCuts.gt(bestObjective[1])) return;
-      const knownCuts = memo.get(stateKey);
-      if (knownCuts && knownCuts.lte(currentCuts)) return;
-      memo.set(stateKey, currentCuts);
-
-      const emitted = new Set<string>();
-      state.sources.forEach((source, sourceIndex) => {
-        const candidateRectIndexes = source.free.map((_, index) => index);
-        candidateRectIndexes.forEach(rectIndex => {
-          const rect = source.free[rectIndex];
-          (['width-first', 'length-first'] as const).forEach(splitOrder => {
-            const split = splitRect(rect, piece, kerf, splitOrder);
-            if (!split) return;
-            const optionKey = `${sourceIndex}:${rectSignature(rect)}:${split.free.map(rectSignature).join(';')}`;
-            if (emitted.has(optionKey)) return;
-            emitted.add(optionKey);
-            const nextSources = state.sources.map((item, index) => index === sourceIndex ? {
-              ...item,
-              used: true,
-              cutCount: item.cutCount + split.cuts.length,
-              free: [...item.free.slice(0, rectIndex), ...item.free.slice(rectIndex + 1), ...split.free].sort(rectOrder)
-            } : { ...item, free: [...item.free] });
-            const placement: PackedPlacement = {
-              demandId: piece.id,
-              demandOrdinal: piece.ordinal,
-              sourceBatchId: source.batchId,
-              sourceOrdinal: source.ordinal,
-              xMeters: canonical(rect.x), yMeters: canonical(rect.y),
-              lengthMeters: canonical(piece.length), widthMeters: canonical(piece.width)
-            };
-            const cuts = split.cuts.map((cut, cutIndex): PhysicalCut => {
-              const sequence = source.cutCount + cutIndex + 1;
-              return {
-                cutId: `${source.batchId}:${source.ordinal}:cut:${sequence}`,
-                sequence,
-                axis: cut.axis,
-                sourceBatchId: source.batchId,
-                sourceOrdinal: source.ordinal,
-                positionMeters: canonical(cut.position),
-                spanStartMeters: canonical(cut.spanStart),
-                meters: canonical(cut.meters),
-                kerfMeters: canonical(kerf)
-              };
-            });
-            visit(pieceIndex + 1, {
-              sources: nextSources,
-              placements: [...state.placements, placement],
-              cuts: [...state.cuts, ...cuts],
-              cutTotal: state.cutTotal.plus(
-                split.cuts.reduce((sum, cut) => sum.plus(cut.meters), d('0'))
-              )
-            });
-          });
-        });
-      });
-    };
-    visit(0, { sources, placements: [], cuts: [], cutTotal: d('0') });
+    const bestState =
+      calculateUniformGridState({ sources, pieces, kerf }) ??
+      searchBestPackingState({ sources, pieces, kerf });
     if (!bestState) return {
       ok: false,
       conflict: { code: 'insufficient-source-capacity', message: 'Entered sources cannot satisfy exact demand.' }

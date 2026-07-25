@@ -62,4 +62,44 @@ const stairInput = (motherLengthMeters?: string) => ({
   assert.equal(calculated.result.packingPlan.consumedSources.length, 4);
 }
 
+{
+  const startedAt = performance.now();
+  const calculated = calculateStairPart({
+    ...stairInput('3'),
+    quantity: 10
+  });
+  const elapsedMilliseconds = performance.now() - startedAt;
+  assert.equal(calculated.ok, true, JSON.stringify(calculated));
+  if (!calculated.ok) throw new Error('Expected repeated stair pieces to pack.');
+  assert.equal(calculated.result.packingPlan.consumedSources.length, 5);
+  assert.equal(calculated.result.packingPlan.placements.length, 10);
+  assert.equal(calculated.result.requestedAreaSquareMeters, '3.6');
+  assert.equal(calculated.result.consumedMotherAreaSquareMeters, '6');
+  assert.equal(calculated.result.paidRemainderAreaSquareMeters, '2.4');
+  assert.equal(calculated.result.baseAmountToman, '600000');
+  assert.equal(calculated.result.packingPlan.longitudinalCutMeters, '12');
+  assert.equal(calculated.result.packingPlan.crossCutMeters, '4');
+  assert.equal(calculated.result.packingPlan.remainders.length, 15);
+  assert.equal(
+    calculated.result.packingPlan.placements.every(placement =>
+      placement.lengthMeters === '1.2' && placement.widthMeters === '0.3'
+    ),
+    true
+  );
+  assert.ok(
+    elapsedMilliseconds < 500,
+    `Repeated stair packing took ${elapsedMilliseconds.toFixed(0)}ms.`
+  );
+  const replayed = calculateStairPart({
+    ...stairInput('3'),
+    quantity: 10
+  });
+  assert.equal(replayed.ok, true, JSON.stringify(replayed));
+  if (!replayed.ok) throw new Error('Expected deterministic stair replay.');
+  assert.equal(
+    replayed.result.packingPlan.resultHash,
+    calculated.result.packingPlan.resultHash
+  );
+}
+
 console.log('stair policy tests passed');

@@ -23,6 +23,7 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "docker:prod:build": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml build",
+    "check:frontend-docker-workspace": "node deploy/scripts/check-frontend-docker-workspace.mjs",
     "docker:prod:up": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml up -d",
     "docker:prod:down": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml down",
     "docker:prod:migrate": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml run --rm backend npx prisma migrate deploy",

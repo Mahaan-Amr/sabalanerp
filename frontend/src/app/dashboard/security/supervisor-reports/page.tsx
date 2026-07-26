@@ -19,7 +19,6 @@ const durationMinutes = (start?: string, end?: string | null) => {
 };
 const participantName = (person: any) => `${person.firstName} ${person.lastName}`.trim() || person.username || '-';
 const participantMeta = (person: any) => person.department?.namePersian || person.position || person.user?.username || '';
-const logParticipantName = (participant: any) => participantName(participant.personnel || participant.user);
 
 export default function SecuritySupervisorReportsPage() {
   const [categories, setCategories] = useState<any[]>([]);
@@ -50,21 +49,7 @@ export default function SecuritySupervisorReportsPage() {
     () => participants.filter((user) => form.participantIds.includes(user.id)),
     [form.participantIds, participants]
   );
-  const timelineEntries = useMemo(() => (session?.logEntries || []).map((entry: any) => ({
-    id: entry.id,
-    rowNumber: entry.rowNumber,
-    status: entry.status,
-    title: `${entry.categoryNameSnapshot}${entry.reportTypeNameSnapshot ? ` / ${entry.reportTypeNameSnapshot}` : ''}`,
-    typeDescription: entry.reportType?.description || null,
-    description: entry.description || null,
-    participants: (entry.participants || []).map(logParticipantName),
-    createdAt: entry.createdAt,
-    author: participantName(session?.personnel?.user || personnel?.user || personnel || {}),
-    voidReason: entry.voidReason || null,
-    voidedAt: entry.voidedAt || null,
-    voidedBy: entry.voidedBy || null,
-    attachments: (entry.attachments || []).map((attachment: any) => ({ id: attachment.id, name: attachment.originalName })),
-  })), [personnel, session]);
+  const timelineEntries = useMemo(() => session?.timeline || [], [session]);
 
   useEffect(() => {
     if (!participantPickerOpen) return;
@@ -201,6 +186,14 @@ export default function SecuritySupervisorReportsPage() {
       {!readOnly && message && <ErpInlineState kind="success" title={message} />}
       {error && <ErpInlineState kind={session ? 'stale' : 'error'} title={session ? 'آخرین به‌روزرسانی ناموفق بود؛ گزارش قبلی نمایش داده می‌شود.' : error} action={{ label: 'تلاش مجدد', onClick: () => loadData() }} />}
       {readOnly && session && <div className="flex items-center gap-2"><ErpStatus label="فقط‌خواندنی مدیر" tone="info" /><span className="text-xs text-slate-500">کنترل‌های عملیاتی در دسترس نیست.</span></div>}
+      {session?.corrections?.length > 0 && (
+        <ErpSection title="اصلاح زمان‌های شیفت">
+          <div className="flex flex-wrap items-center gap-2"><ErpStatus label="اصلاح‌شده توسط مدیر" tone="warning" /><span className="text-xs text-slate-500">{session.corrections.length.toLocaleString('fa-IR')} اصلاح حسابرسی‌شده</span></div>
+          <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
+            {session.corrections.map((item: any) => <div key={item.id} className="py-2 text-sm"><p className="font-semibold">{item.correctedByName} · {dateTimeFa(item.correctedAt)}</p><p className="mt-1 text-xs text-slate-500">زمان مؤثر: {dateTimeFa(item.effectiveStartedAt)} تا {dateTimeFa(item.effectiveEndedAt)}</p><p className="mt-1">{item.reason}</p></div>)}
+          </div>
+        </ErpSection>
+      )}
 
       {!session ? (
         <ErpEmptyState icon={FaClock} title="شیفت فعال برای شما پیدا نشد" description={personnel ? 'برای ثبت گزارش، ابتدا شیفت برنامه‌ریزی‌شده خود را شروع کنید.' : 'کاربر فعلی جزو نفرات حراست نیست.'} />
@@ -338,24 +331,10 @@ export default function SecuritySupervisorReportsPage() {
               </div>
             ))}
 
-            <div className="mt-4 space-y-3">
-              {(session.patrolSessions || []).map((patrol: any) => (
-                <ErpCard key={patrol.id} className="p-4">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <p className="font-semibold text-slate-900 dark:text-white">شروع {dateTimeFa(patrol.startedAt)}</p>
-                      <p className="mt-1 text-sm text-slate-500">پایان: {dateTimeFa(patrol.endedAt)} · مدت: {durationMinutes(patrol.startedAt, patrol.endedAt).toLocaleString('fa-IR')} دقیقه</p>
-                      {patrol.description && <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{patrol.description}</p>}
-                    </div>
-                    <ErpBadge tone={patrol.status === 'ACTIVE' ? 'warning' : 'success'}>{patrol.status === 'ACTIVE' ? 'فعال' : 'پایان یافته'}</ErpBadge>
-                  </div>
-                </ErpCard>
-              ))}
-            </div>
           </ErpSection>
 
           <ErpShiftTimeline
-            title="ردیف‌های گزارش شیفت"
+            title="خط زمانی شیفت"
             entries={timelineEntries}
             formatTimestamp={dateTimeFa}
             showAttachmentImages

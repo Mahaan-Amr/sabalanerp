@@ -13,6 +13,7 @@ import { renderSecurityAttendanceReportHtml, securityAttendanceStatusLabel, Secu
 import { addSecurityDays, parseSecurityBusinessDate, securityNowTime, securityPersianDate, securityPersianDateWithWeekday } from '../utils/securityBusinessDate';
 import { calculateDelayMinutes, calculateScheduledOvertime, loadApplicableWorkSchedules, resolveWorkScheduleDay, scheduledStartHasPassed } from '../utils/personnelWorkSchedule';
 import { buildDashboardRecentReports, buildSecurityDashboardAwareness } from '../services/securityDashboardAwareness';
+import { buildCombinedSecurityShiftTimeline, validateShiftSessionCorrectionPolicy } from '../services/securityShiftSessionPolicy';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -1124,16 +1125,29 @@ const slotInclude = {
   plannedPersonnel: { include: { user: true } },
   replacementPersonnel: { include: { user: true } },
   attendance: true,
-  session: true,
+  session: { include: { corrections: { orderBy: { correctedAt: 'asc' as const } } } },
   report: true,
   temporaryCoverage: { include: { personnel: { include: { user: true } } } }
 };
 const shiftLogReportTypeInclude = { include: { category: true } } as const;
 const effectivePersonnelId = (slot: any) => slot.replacementPersonnelId || slot.plannedPersonnelId;
+const decorateSecurityShiftSlot = (slot: any, now = new Date()) => {
+  const managerReviewRequired = slot.endsAt <= now && !slot.session && !slot.noShiftConfirmedAt;
+  const operationalState = slot.session?.status
+    || (slot.noShiftConfirmedAt ? 'NO_SHIFT_CONFIRMED' : managerReviewRequired ? 'MANAGER_REVIEW' : 'WAITING');
+  return {
+    ...slot,
+    effectivePersonnelId: effectivePersonnelId(slot),
+    managerReviewRequired,
+    operationalState,
+    isManagerCorrected: Boolean(slot.session?.corrections?.length),
+  };
+};
 const getSelfPersonnel = (userId: string) => prisma.securityPersonnel.findUnique({ where: { userId } });
 const activeShiftLogInclude = {
   logEntries: { include: { category: true, reportType: shiftLogReportTypeInclude, participants: { include: { user: { select: { firstName: true, lastName: true } }, personnel: { select: { firstName: true, lastName: true } } } }, attachments: true }, orderBy: { rowNumber: 'asc' as const } },
-  patrolSessions: { orderBy: { startedAt: 'desc' as const } },
+  patrolSessions: { include: { personnel: { include: { user: true } } }, orderBy: { startedAt: 'desc' as const } },
+  corrections: { orderBy: { correctedAt: 'asc' as const } },
   slot: { include: slotInclude },
   personnel: { include: { user: true } }
 };
@@ -1145,6 +1159,20 @@ const getActiveShiftSessionForUser = async (userId: string) => {
     include: activeShiftLogInclude
   });
   return { personnel, session };
+};
+const withCombinedShiftTimeline = (session: any) => {
+  if (!session) return null;
+  const author = `${session.personnel?.user?.firstName || ''} ${session.personnel?.user?.lastName || ''}`.trim()
+    || session.personnel?.user?.username
+    || null;
+  return {
+    ...session,
+    timeline: buildCombinedSecurityShiftTimeline({
+      logEntries: session.logEntries || [],
+      patrolSessions: session.patrolSessions || [],
+      defaultAuthor: author,
+    })
+  };
 };
 const markProbableNoShows = async () => {
   const now = new Date();
@@ -1332,7 +1360,16 @@ router.get('/shift-plan-slots', protect, securityView, async (req: AuthRequest, 
     where: { startsAt: { lt: to }, endsAt: { gt: from }, plan: { status: SecurityShiftPlanStatus.PUBLISHED }, ...(self ? { OR: [{ plannedPersonnelId: self.id }, { replacementPersonnelId: self.id }, { temporaryCoverage: { some: { personnelId: self.id } } }] } : {}) },
     include: slotInclude, orderBy: { startsAt: 'asc' }
   });
-  res.json({ success: true, data: slots });
+  const now = new Date();
+  res.json({ success: true, data: slots.map((slot) => decorateSecurityShiftSlot(slot, now)) });
+});
+
+router.get('/shift-plan-slots/:id', protect, securityView, async (req: AuthRequest, res: Response) => {
+  const slot = await prisma.securityShiftPlanSlot.findUnique({ where: { id: req.params.id }, include: slotInclude });
+  if (!slot || slot.plan.status !== SecurityShiftPlanStatus.PUBLISHED) {
+    return res.status(404).json({ success: false, error: 'بازه شیفت پیدا نشد.' });
+  }
+  return res.json({ success: true, data: decorateSecurityShiftSlot(slot) });
 });
 
 router.put('/shift-plan-slots/:id/replacement', protect, securityAdmin, [body('personnelId').isString().notEmpty(), body('overrideReason').optional().isString()], async (req: AuthRequest, res: Response) => {
@@ -1387,7 +1424,7 @@ router.get('/shift-workflow/me', protect, securityView, async (req: AuthRequest,
     include: slotInclude, orderBy: { startsAt: 'asc' }
   });
   const activeSession = await prisma.securityShiftSession.findFirst({ where: { status: SecurityShiftSessionStatus.ACTIVE }, include: { slot: { include: slotInclude } } });
-  const decorated = slots.map((slot) => ({ ...slot, effectivePersonnelId: effectivePersonnelId(slot), lateAlert: !slot.attendance.length && now.getTime() > slot.startsAt.getTime() + slot.plan.lateAlertMinutes * 60_000 }));
+  const decorated = slots.map((slot) => ({ ...decorateSecurityShiftSlot(slot, now), lateAlert: !slot.attendance.length && now.getTime() > slot.startsAt.getTime() + slot.plan.lateAlertMinutes * 60_000 }));
   res.json({ success: true, data: { personnel, slots: decorated, activeSession } });
 });
 
@@ -1650,7 +1687,7 @@ router.put('/attendance-roster/:personnelId/remove', protect, securityAdmin, [
 router.get('/shift-log/active', protect, securityView, async (req: AuthRequest, res: Response) => {
   try {
     const own = await getActiveShiftSessionForUser(req.user!.id);
-    if (own.session) return res.json({ success: true, data: { personnel: own.personnel, session: own.session, readOnly: false } });
+    if (own.session) return res.json({ success: true, data: { personnel: own.personnel, session: withCombinedShiftTimeline(own.session), readOnly: false } });
 
     const manager = req.user!.role === 'ADMIN' || (req as any).workspacePermission === WORKSPACE_PERMISSIONS.ADMIN;
     if (manager) {
@@ -1659,7 +1696,7 @@ router.get('/shift-log/active', protect, securityView, async (req: AuthRequest, 
         include: activeShiftLogInclude,
         orderBy: { startedAt: 'desc' },
       });
-      return res.json({ success: true, data: { personnel: session?.personnel || own.personnel, session, readOnly: true } });
+      return res.json({ success: true, data: { personnel: session?.personnel || own.personnel, session: withCombinedShiftTimeline(session), readOnly: true } });
     }
 
     if (!own.personnel) return res.status(403).json({ success: false, error: 'کاربر جزو نفرات حراست نیست.' });
@@ -1801,17 +1838,18 @@ router.post('/shift-plan-slots/:id/attendance', protect, securityEdit, async (re
 });
 
 router.post('/shift-plan-slots/:id/start', protect, securityEdit, async (req: AuthRequest, res: Response) => {
+  const actionAt = new Date();
   try {
     const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات حراست لازم است.' });
     const result = await prisma.$transaction(async (tx) => {
       const slot = await tx.securityShiftPlanSlot.findUnique({ where: { id: req.params.id }, include: { attendance: true } });
       if (!slot || effectivePersonnelId(slot) !== personnel.id) throw new Error('این شیفت به شما تخصیص ندارد.');
       if (slot.coverageStatus === SecurityShiftCoverageStatus.NEEDS_REPLACEMENT) throw new Error('این شیفت هنوز نیازمند جایگزین است.');
-      if (new Date() < slot.startsAt) throw new Error('شروع شیفت پیش از زمان برنامه‌ریزی‌شده مجاز نیست.');
+      if (actionAt < slot.startsAt) throw new Error('شروع شیفت پیش از زمان برنامه‌ریزی‌شده مجاز نیست.');
       if (!slot.attendance.some((item) => item.personnelId === personnel.id)) throw new Error('ابتدا حضور خود را ثبت کنید.');
       const active = await tx.securityShiftSession.findFirst({ where: { status: SecurityShiftSessionStatus.ACTIVE } });
       if (active) throw new Error('شیفت قبلی هنوز فعال است و باید تحویل داده شود.');
-      return tx.securityShiftSession.create({ data: { slotId: slot.id, personnelId: personnel.id } });
+      return tx.securityShiftSession.create({ data: { slotId: slot.id, personnelId: personnel.id, startedAt: actionAt } });
     }, { isolationLevel: 'Serializable' });
     res.status(201).json({ success: true, data: result });
   } catch (error: any) { res.status(409).json({ success: false, error: error.message || 'شروع شیفت ناموفق بود.' }); }
@@ -1820,6 +1858,7 @@ router.post('/shift-plan-slots/:id/start', protect, securityEdit, async (req: Au
 router.post('/shift-plan-slots/:id/end', protect, securityEdit, [
   body('closureSummary').optional({ values: 'falsy' }).isString().trim()
 ], async (req: AuthRequest, res: Response) => {
+  const actionAt = new Date();
   try {
     const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'توضیح پایان شیفت معتبر نیست.', details: errors.array() });
     const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات حراست لازم است.' });
@@ -1828,26 +1867,179 @@ router.post('/shift-plan-slots/:id/end', protect, securityEdit, [
       if (!slot?.session || slot.session.status !== SecurityShiftSessionStatus.ACTIVE || slot.session.personnelId !== personnel.id) throw new Error('شیفت فعال متعلق به شما پیدا نشد.');
       const activePatrol = await tx.securityPatrolSession.findFirst({ where: { sessionId: slot.session.id, status: SecurityPatrolStatus.ACTIVE } });
       if (activePatrol) throw new Error('پیش از پایان شیفت، گشت‌زنی فعال را با توضیحات پایان دهید.');
-      const now = new Date();
-      if (now < slot.endsAt && !slot.temporaryCoverage.some((coverage) => coverage.startsAt <= now && coverage.endsAt >= slot.endsAt)) throw new Error('پایان زودهنگام فقط پس از ثبت پوشش جایگزین تا انتهای شیفت مجاز است.');
-      return tx.securityShiftSession.update({ where: { id: slot.session.id }, data: { status: SecurityShiftSessionStatus.CLOSED, endedAt: now, overtimeMinutes: Math.max(0, Math.floor((now.getTime() - slot.endsAt.getTime()) / 60_000)), closureSummary: String(req.body.closureSummary || '').trim() || 'بدون مورد دیگر' } });
+      if (actionAt < slot.endsAt && !slot.temporaryCoverage.some((coverage) => coverage.startsAt <= actionAt && coverage.endsAt >= slot.endsAt)) throw new Error('پایان زودهنگام فقط پس از ثبت پوشش جایگزین تا انتهای شیفت مجاز است.');
+      return tx.securityShiftSession.update({ where: { id: slot.session.id }, data: { status: SecurityShiftSessionStatus.CLOSED, endedAt: actionAt, overtimeMinutes: Math.max(0, Math.floor((actionAt.getTime() - slot.endsAt.getTime()) / 60_000)), closureSummary: String(req.body.closureSummary || '').trim() || 'بدون مورد دیگر' } });
     }, { isolationLevel: 'Serializable' });
     res.json({ success: true, data: result });
   } catch (error: any) { res.status(409).json({ success: false, error: error.message || 'پایان شیفت ناموفق بود.' }); }
 });
 
 router.post('/shift-sessions/:id/force-close', protect, securityAdmin, [body('reason').isString().trim().notEmpty(), body('summary').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+  const actionAt = new Date();
   try {
     const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل و خلاصه بستن اجباری الزامی است.' });
     const result = await prisma.$transaction(async (tx) => {
       const session = await tx.securityShiftSession.findUnique({ where: { id: req.params.id }, include: { slot: true } });
       if (!session || session.status !== SecurityShiftSessionStatus.ACTIVE) throw new Error('شیفت فعال پیدا نشد.');
       const report = await tx.securitySupervisorReport.upsert({ where: { planSlotId: session.slotId }, update: {}, create: { reportDate: new Date(), planSlotId: session.slotId, authorId: req.user!.id, summary: req.body.summary.trim(), followUpNotes: `ثبت توسط مدیر در بستن اجباری: ${req.body.reason.trim()}` } });
-      const now = new Date();
-      return tx.securityShiftSession.update({ where: { id: session.id }, data: { status: SecurityShiftSessionStatus.FORCE_CLOSED, endedAt: now, overtimeMinutes: Math.max(0, Math.floor((now.getTime() - session.slot.endsAt.getTime()) / 60_000)), forceClosedBy: req.user!.id, forceCloseReason: req.body.reason.trim(), closureSummary: report.summary } });
+      return tx.securityShiftSession.update({ where: { id: session.id }, data: { status: SecurityShiftSessionStatus.FORCE_CLOSED, endedAt: actionAt, overtimeMinutes: Math.max(0, Math.floor((actionAt.getTime() - session.slot.endsAt.getTime()) / 60_000)), forceClosedBy: req.user!.id, forceCloseReason: req.body.reason.trim(), closureSummary: report.summary } });
     });
     res.json({ success: true, data: result });
   } catch (error: any) { res.status(409).json({ success: false, error: error.message || 'بستن اجباری ناموفق بود.' }); }
+});
+
+router.post('/shift-plan-slots/:id/session-correction', protect, securityAdmin, [
+  body('startedAt').optional().isISO8601(),
+  body('endedAt').optional().isISO8601(),
+  body('reason').isString().trim().notEmpty(),
+  body('deviationConfirmed').optional().isBoolean(),
+], async (req: AuthRequest, res: Response) => {
+  const correctedAt = new Date();
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'زمان‌ها و دلیل اصلاح معتبر نیست.', details: errors.array() });
+    const actor = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { firstName: true, lastName: true, username: true } });
+    const actorName = `${actor?.firstName || ''} ${actor?.lastName || ''}`.trim() || actor?.username || req.user!.username;
+    const updatedSlot = await prisma.$transaction(async (tx) => {
+      const slot = await tx.securityShiftPlanSlot.findUnique({
+        where: { id: req.params.id },
+        include: {
+          session: {
+            include: {
+              logEntries: { select: { createdAt: true } },
+              patrolSessions: { select: { startedAt: true, endedAt: true, status: true } },
+              corrections: { orderBy: { correctedAt: 'asc' } },
+            }
+          }
+        }
+      });
+      if (!slot) throw new Error('بازه شیفت پیدا نشد.');
+      if (slot.noShiftConfirmedAt) throw new Error('برای این بازه عدم انجام شیفت قبلاً تأیید شده است.');
+
+      const existingSession = slot.session;
+      const proposedStartedAt = req.body.startedAt
+        ? new Date(req.body.startedAt)
+        : existingSession?.startedAt;
+      const proposedEndedAt = req.body.endedAt
+        ? new Date(req.body.endedAt)
+        : existingSession?.endedAt || null;
+      if (!proposedStartedAt) throw new Error('زمان شروع شیفت الزامی است.');
+      if (existingSession && !req.body.startedAt && !req.body.endedAt) throw new Error('حداقل یکی از زمان‌های شیفت باید اصلاح شود.');
+
+      const personnelId = existingSession?.personnelId || effectivePersonnelId(slot);
+      const otherSessions = await tx.securityShiftSession.findMany({
+        where: { personnelId, ...(existingSession ? { id: { not: existingSession.id } } : {}) },
+        select: { startedAt: true, endedAt: true }
+      });
+      const evidenceInstants = existingSession ? [
+        ...existingSession.logEntries.map((entry) => entry.createdAt),
+        ...existingSession.patrolSessions.flatMap((patrol) => [patrol.startedAt, ...(patrol.endedAt ? [patrol.endedAt] : [])]),
+      ] : [];
+      if (proposedEndedAt && existingSession?.patrolSessions.some((patrol) => patrol.status === SecurityPatrolStatus.ACTIVE)) {
+        throw new Error('پیش از ثبت پایان اصلاح‌شده، گشت‌زنی فعال باید پایان یابد.');
+      }
+      if (!proposedEndedAt) {
+        const otherActiveSession = await tx.securityShiftSession.findFirst({
+          where: {
+            status: SecurityShiftSessionStatus.ACTIVE,
+            ...(existingSession ? { id: { not: existingSession.id } } : {}),
+          },
+          select: { id: true },
+        });
+        if (otherActiveSession) throw new Error('شیفت فعال دیگری در جریان است و ابتدا باید تحویل یا بسته شود.');
+      }
+
+      validateShiftSessionCorrectionPolicy({
+        now: correctedAt,
+        plannedStartedAt: slot.startsAt,
+        plannedEndedAt: slot.endsAt,
+        proposedStartedAt,
+        proposedEndedAt,
+        requireEndedAt: !existingSession && slot.endsAt <= correctedAt,
+        deviationConfirmed: req.body.deviationConfirmed === true,
+        evidenceInstants,
+        overlappingSessions: otherSessions,
+      });
+
+      const session = existingSession
+        ? await tx.securityShiftSession.update({
+            where: { id: existingSession.id },
+            data: {
+              startedAt: proposedStartedAt,
+              endedAt: proposedEndedAt,
+              status: proposedEndedAt && existingSession.status === SecurityShiftSessionStatus.ACTIVE
+                ? SecurityShiftSessionStatus.CLOSED
+                : existingSession.status,
+              overtimeMinutes: proposedEndedAt ? Math.max(0, Math.floor((proposedEndedAt.getTime() - slot.endsAt.getTime()) / 60_000)) : 0,
+            }
+          })
+        : await tx.securityShiftSession.create({
+            data: {
+              slotId: slot.id,
+              personnelId,
+              status: proposedEndedAt ? SecurityShiftSessionStatus.CLOSED : SecurityShiftSessionStatus.ACTIVE,
+              startedAt: proposedStartedAt,
+              endedAt: proposedEndedAt,
+              overtimeMinutes: proposedEndedAt ? Math.max(0, Math.floor((proposedEndedAt.getTime() - slot.endsAt.getTime()) / 60_000)) : 0,
+            }
+          });
+
+      await tx.securityShiftSessionCorrection.create({
+        data: {
+          sessionId: session.id,
+          correctedBy: req.user!.id,
+          correctedByName: actorName,
+          reason: req.body.reason.trim(),
+          previousStartedAt: existingSession?.startedAt || null,
+          previousEndedAt: existingSession?.endedAt || null,
+          effectiveStartedAt: proposedStartedAt,
+          effectiveEndedAt: proposedEndedAt,
+          reconstructedStart: !existingSession,
+          reconstructedEnd: Boolean(proposedEndedAt) && (!existingSession || !existingSession.endedAt),
+          correctedAt,
+        }
+      });
+
+      return tx.securityShiftPlanSlot.findUnique({ where: { id: slot.id }, include: slotInclude });
+    }, { isolationLevel: 'Serializable' });
+    if (!updatedSlot) return res.status(404).json({ success: false, error: 'بازه شیفت پیدا نشد.' });
+    return res.json({ success: true, data: decorateSecurityShiftSlot(updatedSlot, correctedAt) });
+  } catch (error: any) {
+    return res.status(409).json({ success: false, error: error.message || 'اصلاح زمان‌های شیفت ناموفق بود.' });
+  }
+});
+
+router.post('/shift-plan-slots/:id/confirm-no-shift', protect, securityAdmin, [
+  body('reason').isString().trim().notEmpty(),
+], async (req: AuthRequest, res: Response) => {
+  const confirmedAt = new Date();
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل عدم انجام شیفت الزامی است.' });
+    const actor = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { firstName: true, lastName: true, username: true } });
+    const actorName = `${actor?.firstName || ''} ${actor?.lastName || ''}`.trim() || actor?.username || req.user!.username;
+    const updated = await prisma.$transaction(async (tx) => {
+      const slot = await tx.securityShiftPlanSlot.findUnique({ where: { id: req.params.id }, include: { session: true } });
+      if (!slot) throw new Error('بازه شیفت پیدا نشد.');
+      if (slot.endsAt > confirmedAt) throw new Error('پیش از پایان بازه برنامه نمی‌توان عدم انجام شیفت را تأیید کرد.');
+      if (slot.session) throw new Error('برای این بازه جلسه شیفت ثبت شده است.');
+      if (slot.noShiftConfirmedAt) throw new Error('عدم انجام این شیفت قبلاً تأیید شده است.');
+      await tx.securityShiftPlanSlot.update({
+        where: { id: slot.id },
+        data: {
+          noShiftConfirmedAt: confirmedAt,
+          noShiftConfirmedBy: req.user!.id,
+          noShiftConfirmedByName: actorName,
+          noShiftConfirmReason: req.body.reason.trim(),
+        },
+      });
+      return tx.securityShiftPlanSlot.findUnique({ where: { id: slot.id }, include: slotInclude });
+    }, { isolationLevel: 'Serializable' });
+    if (!updated) return res.status(404).json({ success: false, error: 'بازه شیفت پیدا نشد.' });
+    return res.json({ success: true, data: decorateSecurityShiftSlot(updated, confirmedAt) });
+  } catch (error: any) {
+    return res.status(409).json({ success: false, error: error.message || 'تأیید عدم انجام شیفت ناموفق بود.' });
+  }
 });
 
 router.put('/shift-attendance/:id/correct', protect, securityAdmin, [body('arrivedAt').isISO8601(), body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
@@ -3075,7 +3267,6 @@ const securityPdfStyles = () => {
 };
 
 const securityName = (value: any) => `${value?.firstName || ''} ${value?.lastName || ''}`.trim() || value?.username || '-';
-const participantDisplayName = (participant: any) => securityName(participant.personnel || participant.user);
 const formatSecurityDateTime = (value: unknown) => value ? new Date(String(value)).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' }) : '-';
 
 const detailedShiftInclude = {
@@ -3095,7 +3286,8 @@ const detailedShiftInclude = {
         },
         orderBy: { rowNumber: 'asc' as const }
       },
-      patrolSessions: { include: { personnel: { include: { user: true } } }, orderBy: { startedAt: 'asc' as const } }
+      patrolSessions: { include: { personnel: { include: { user: true } } }, orderBy: { startedAt: 'asc' as const } },
+      corrections: { orderBy: { correctedAt: 'asc' as const } }
     }
   }
 };
@@ -3118,30 +3310,39 @@ const renderDetailedSecurityShift = (slot: any) => {
   const session = slot.session;
   if (!session) return '';
   const statusLabel = session.status === SecurityShiftSessionStatus.FORCE_CLOSED ? 'بسته‌شده توسط مدیر' : 'تکمیل‌شده';
+  const correctionBadge = session.corrections?.length ? '<span class="badge">اصلاح‌شده توسط مدیر</span>' : '';
   const temporaryNames = slot.temporaryCoverage.map((coverage: any) => securityName(coverage.personnel.user)).filter((name: string) => name !== '-');
-  const hasParticipants = session.logEntries.some((entry: any) => entry.participants.length > 0);
-
-  const logRows = session.logEntries.map((entry: any) => {
-    const voided = entry.status === SecurityShiftLogStatus.VOIDED;
-    const participants = entry.participants.map(participantDisplayName).map(securityEscapeHtml).join('، ');
-    const imageHtml = securityShiftImageHtml(entry);
-    const columnCount = hasParticipants ? 6 : 5;
+  const logEntriesById = new Map(session.logEntries.map((entry: any) => [entry.id, entry]));
+  const timelineEvents = buildCombinedSecurityShiftTimeline({
+    logEntries: session.logEntries,
+    patrolSessions: session.patrolSessions,
+    defaultAuthor: securityName(session.personnel.user),
+  });
+  const timelineRows = timelineEvents.map((event: any) => {
+    const entry = event.kind === 'SHIFT_LOG' ? logEntriesById.get(event.id) as any : null;
+    const imageHtml = entry ? securityShiftImageHtml(entry) : '';
+    const people = event.kind === 'SHIFT_LOG'
+      ? (event.participants || []).join('، ') || event.author || '-'
+      : event.author || '-';
+    const statusHtml = event.kind === 'SHIFT_LOG'
+      ? event.status === SecurityShiftLogStatus.VOIDED
+        ? `<span class="badge voided">باطل‌شده</span>${event.voidReason ? `<div class="muted">دلیل: ${securityEscapeHtml(event.voidReason)}</div>` : ''}`
+        : '<span class="badge">فعال</span>'
+      : `<span class="badge">${event.kind === 'PATROL_START' ? 'شروع' : 'پایان'}</span>`;
     return `
       <tr>
-        <td>${entry.rowNumber.toLocaleString('fa-IR')}</td>
-        <td>${securityEscapeHtml(`${entry.categoryNameSnapshot}${entry.reportTypeNameSnapshot ? ` / ${entry.reportTypeNameSnapshot}` : ''}`)}${entry.reportType?.description ? `<div class="muted">${securityEscapeHtml(entry.reportType.description)}</div>` : ''}</td>
-        <td>${securityEscapeHtml(entry.description || '-')}</td>
-        ${hasParticipants ? `<td>${participants || '-'}</td>` : ''}
-        <td>${voided ? `<span class="badge voided">باطل‌شده</span>${entry.voidedAt ? `<div class="muted">زمان ابطال: ${formatSecurityDateTime(entry.voidedAt)}</div>` : ''}${entry.voidReason ? `<div class="muted">دلیل: ${securityEscapeHtml(entry.voidReason)}</div>` : ''}` : '<span class="badge">فعال</span>'}</td>
-        <td>${formatSecurityDateTime(entry.createdAt)}</td>
+        <td>${event.rowNumber != null ? `ردیف ${event.rowNumber.toLocaleString('fa-IR')} · ` : ''}${securityEscapeHtml(event.title)}${event.typeDescription ? `<div class="muted">${securityEscapeHtml(event.typeDescription)}</div>` : ''}</td>
+        <td>${securityEscapeHtml(people)}</td>
+        <td>${securityEscapeHtml(event.description || '-')}</td>
+        <td>${statusHtml}</td>
+        <td>${formatSecurityDateTime(event.createdAt)}</td>
       </tr>
-      ${imageHtml ? `<tr><td colspan="${columnCount}">${imageHtml}</td></tr>` : ''}
+      ${imageHtml ? `<tr><td colspan="5">${imageHtml}</td></tr>` : ''}
     `;
   }).join('');
-
-  const logsSection = logRows ? `
-    <h3>گزارش‌های لحظه‌ای</h3>
-    <table><thead><tr><th>ردیف</th><th>نوع گزارش</th><th>شرح رویداد</th>${hasParticipants ? '<th>افراد مرتبط</th>' : ''}<th>وضعیت</th><th>زمان ثبت</th></tr></thead><tbody>${logRows}</tbody></table>
+  const timelineSection = timelineRows ? `
+    <h3>خط زمانی شیفت</h3>
+    <table><thead><tr><th>رویداد</th><th>نیرو / افراد مرتبط</th><th>شرح</th><th>وضعیت</th><th>زمان</th></tr></thead><tbody>${timelineRows}</tbody></table>
   ` : '';
 
   const attendanceRows = slot.attendance.map((attendance: any) => `
@@ -3156,13 +3357,17 @@ const renderDetailedSecurityShift = (slot: any) => {
     <h3>گزارش حضور و غیاب شیفت</h3>
     <table><thead><tr><th>نیرو</th><th>زمان حضور</th><th>تاخیر</th><th>اصلاح ثبت</th></tr></thead><tbody>${attendanceRows}</tbody></table>
   ` : '';
-
-  const patrolRows = session.patrolSessions.map((patrol: any) => `
-    <tr><td>${securityEscapeHtml(securityName(patrol.personnel.user))}</td><td>${formatSecurityDateTime(patrol.startedAt)}</td><td>${formatSecurityDateTime(patrol.endedAt)}</td><td>${securityEscapeHtml(patrol.description || '-')}</td></tr>
+  const correctionRows = (session.corrections || []).map((correction: any) => `
+    <tr>
+      <td>${formatSecurityDateTime(correction.correctedAt)} · ${securityEscapeHtml(correction.correctedByName)}</td>
+      <td>${formatSecurityDateTime(correction.previousStartedAt)} تا ${formatSecurityDateTime(correction.previousEndedAt)}</td>
+      <td>${formatSecurityDateTime(correction.effectiveStartedAt)} تا ${formatSecurityDateTime(correction.effectiveEndedAt)}</td>
+      <td>${securityEscapeHtml(correction.reason)}</td>
+    </tr>
   `).join('');
-  const patrolSection = patrolRows ? `
-    <h3>گشت‌زنی‌ها</h3>
-    <table><thead><tr><th>نیرو</th><th>شروع</th><th>پایان</th><th>توضیحات</th></tr></thead><tbody>${patrolRows}</tbody></table>
+  const correctionSection = correctionRows ? `
+    <h3>تاریخچه اصلاح زمان‌های شیفت</h3>
+    <table><thead><tr><th>اصلاح</th><th>زمان قبلی / ثبت‌نشده</th><th>زمان مؤثر</th><th>دلیل</th></tr></thead><tbody>${correctionRows}</tbody></table>
   ` : '';
 
   const optionalCoverageRows = [
@@ -3172,7 +3377,7 @@ const renderDetailedSecurityShift = (slot: any) => {
 
   return `
     <section class="shift">
-      <h2>${securityEscapeHtml(securityName(session.personnel.user))} <span class="badge ${session.status === SecurityShiftSessionStatus.FORCE_CLOSED ? 'force' : ''}">${statusLabel}</span></h2>
+      <h2>${securityEscapeHtml(securityName(session.personnel.user))} <span class="badge ${session.status === SecurityShiftSessionStatus.FORCE_CLOSED ? 'force' : ''}">${statusLabel}</span> ${correctionBadge}</h2>
       <table><tbody>
         <tr><th>بازه برنامه</th><td>${formatSecurityDateTime(slot.startsAt)} تا ${formatSecurityDateTime(slot.endsAt)}</td><th>بازه واقعی</th><td>${formatSecurityDateTime(session.startedAt)} تا ${formatSecurityDateTime(session.endedAt)}</td></tr>
         <tr><th>شیفت</th><td>${securityEscapeHtml(slot.plannedPersonnel.shift.namePersian)}</td><th>برنامه</th><td>${securityEscapeHtml(slot.plan.title)}</td></tr>
@@ -3181,9 +3386,9 @@ const renderDetailedSecurityShift = (slot: any) => {
       </tbody></table>
       ${session.forceCloseReason ? `<div class="note"><strong>دلیل بستن توسط مدیر:</strong> ${securityEscapeHtml(session.forceCloseReason)}</div>` : ''}
       ${session.closureSummary ? `<div class="note"><strong>خلاصه پایان:</strong> ${securityEscapeHtml(session.closureSummary)}</div>` : ''}
+      ${correctionSection}
       ${attendanceSection}
-      ${logsSection}
-      ${patrolSection}
+      ${timelineSection}
     </section>
   `;
 };
@@ -3221,6 +3426,20 @@ const securityShiftReportJson = (slot: any) => ({
   endsAt: slot.endsAt,
   startedAt: slot.session?.startedAt,
   endedAt: slot.session?.endedAt,
+  isManagerCorrected: Boolean(slot.session?.corrections?.length),
+  corrections: (slot.session?.corrections || []).map((correction: any) => ({
+    id: correction.id,
+    correctedAt: correction.correctedAt,
+    correctedBy: correction.correctedBy,
+    correctedByName: correction.correctedByName,
+    reason: correction.reason,
+    previousStartedAt: correction.previousStartedAt,
+    previousEndedAt: correction.previousEndedAt,
+    effectiveStartedAt: correction.effectiveStartedAt,
+    effectiveEndedAt: correction.effectiveEndedAt,
+    reconstructedStart: correction.reconstructedStart,
+    reconstructedEnd: correction.reconstructedEnd,
+  })),
   closureSummary: slot.session?.closureSummary || null,
   forceCloseReason: slot.session?.forceCloseReason || null,
   effectivePersonnel: slot.session?.personnel ? { id: slot.session.personnel.id, name: securityName(slot.session.personnel.user) } : null,
@@ -3229,21 +3448,11 @@ const securityShiftReportJson = (slot: any) => ({
   temporaryCoverage: (slot.temporaryCoverage || []).map((coverage: any) => ({ id: coverage.personnel.id, name: securityName(coverage.personnel.user), startsAt: coverage.startsAt, endsAt: coverage.endsAt })),
   attendance: (slot.attendance || []).map((attendance: any) => ({ id: attendance.id, personnelId: attendance.personnelId, name: securityName(attendance.personnel?.user), arrivedAt: attendance.arrivedAt, delayMinutes: attendance.delayMinutes, correctedAt: attendance.correctedAt, correctionReason: attendance.correctionReason })),
   patrols: (slot.session?.patrolSessions || []).map((patrol: any) => ({ id: patrol.id, name: securityName(patrol.personnel?.user), startedAt: patrol.startedAt, endedAt: patrol.endedAt, description: patrol.description, status: patrol.status })),
-  timeline: (slot.session?.logEntries || []).map((entry: any) => ({
-    id: entry.id,
-    rowNumber: entry.rowNumber,
-    status: entry.status,
-    title: `${entry.categoryNameSnapshot}${entry.reportTypeNameSnapshot ? ` / ${entry.reportTypeNameSnapshot}` : ''}`,
-    typeDescription: entry.reportType?.description || null,
-    description: entry.description || null,
-    participants: (entry.participants || []).map(participantDisplayName),
-    createdAt: entry.createdAt,
-    author: securityName(slot.session?.personnel?.user),
-    voidReason: entry.voidReason || null,
-    voidedAt: entry.voidedAt || null,
-    voidedBy: entry.voidedBy || null,
-    attachments: (entry.attachments || []).map((attachment: any) => ({ id: attachment.id, name: attachment.originalName }))
-  }))
+  timeline: buildCombinedSecurityShiftTimeline({
+    logEntries: slot.session?.logEntries || [],
+    patrolSessions: slot.session?.patrolSessions || [],
+    defaultAuthor: securityName(slot.session?.personnel?.user),
+  })
 });
 
 const selectedCompletedSecurityShifts = async (shiftIds: string[]) => {

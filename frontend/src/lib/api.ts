@@ -842,6 +842,7 @@ export const securityAPI = {
   publishShiftPlan: (id: string) => api.post(`/security/shift-plans/${id}/publish`),
   deleteShiftPlan: (id: string) => api.delete(`/security/shift-plans/${id}`),
   getShiftPlanSlots: (params?: any) => api.get('/security/shift-plan-slots', { params }),
+  getShiftPlanSlot: (id: string) => api.get(`/security/shift-plan-slots/${id}`),
   setShiftReplacement: (id: string, personnelId: string, overrideReason?: string) => api.put(`/security/shift-plan-slots/${id}/replacement`, { personnelId, overrideReason }),
   markShiftEmergencyUncovered: (id: string, reason: string) => api.put(`/security/shift-plan-slots/${id}/emergency-uncovered`, { reason }),
   addTemporaryShiftCoverage: (id: string, data: any) => api.post(`/security/shift-plan-slots/${id}/temporary-coverage`, data),
@@ -852,6 +853,10 @@ export const securityAPI = {
   endPlannedShift: (slotId: string, closureSummary?: string) => api.post(`/security/shift-plan-slots/${slotId}/end`, { closureSummary }),
   forceCloseShift: (sessionId: string, reason: string, summary: string) => api.post(`/security/shift-sessions/${sessionId}/force-close`, { reason, summary }),
   correctShiftAttendance: (attendanceId: string, arrivedAt: string, reason: string) => api.put(`/security/shift-attendance/${attendanceId}/correct`, { arrivedAt, reason }),
+  correctShiftSession: (slotId: string, data: { startedAt?: string; endedAt?: string; reason: string; deviationConfirmed?: boolean }) =>
+    api.post(`/security/shift-plan-slots/${slotId}/session-correction`, data),
+  confirmNoShift: (slotId: string, reason: string) =>
+    api.post(`/security/shift-plan-slots/${slotId}/confirm-no-shift`, { reason }),
   
   // Attendance management
   checkIn: (employeeId: string, entryTimeOrData?: string | Record<string, any>) =>

@@ -57,7 +57,10 @@ export default function SecurityShiftReportDetailPage() {
                 <h2 className="text-lg font-black text-slate-950 dark:text-white">{report.effectivePersonnel?.name || report.plannedPersonnel?.name || 'شیفت حراست'}</h2>
                 <p className="mt-1 text-sm text-slate-500">{report.title}</p>
               </div>
-              <ErpStatus label={report.status === 'FORCE_CLOSED' ? 'بسته‌شده توسط مدیر' : 'تکمیل‌شده'} tone="neutral" emphasis="strong" />
+              <div className="flex flex-wrap gap-2">
+                <ErpStatus label={report.status === 'FORCE_CLOSED' ? 'بسته‌شده توسط مدیر' : 'تکمیل‌شده'} tone="neutral" emphasis="strong" />
+                {report.isManagerCorrected && <ErpStatus label="اصلاح‌شده توسط مدیر" tone="warning" emphasis="strong" />}
+              </div>
             </div>
             <dl className="mt-5 grid gap-4 border-t border-slate-100 pt-4 text-sm dark:border-slate-800 sm:grid-cols-3">
               <div><dt className="text-xs text-slate-500">شروع واقعی</dt><dd className="mt-1 font-semibold">{dateTime(report.startedAt)}</dd></div>
@@ -70,6 +73,21 @@ export default function SecurityShiftReportDetailPage() {
               </div>
             )}
           </ErpSection>
+
+          {report.corrections?.length > 0 && (
+            <ErpSection title="تاریخچه اصلاح زمان‌های شیفت">
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {report.corrections.map((item: any) => (
+                  <div key={item.id} className="py-3 first:pt-0 last:pb-0">
+                    <p className="font-semibold">{item.correctedByName} · {dateTime(item.correctedAt)}</p>
+                    <p className="mt-1 text-xs text-slate-500">زمان قبلی یا ثبت‌نشده: {dateTime(item.previousStartedAt)} تا {dateTime(item.previousEndedAt)}</p>
+                    <p className="mt-1 text-xs text-slate-500">زمان مؤثر: {dateTime(item.effectiveStartedAt)} تا {dateTime(item.effectiveEndedAt)}</p>
+                    <p className="mt-2 text-sm">{item.reason}</p>
+                  </div>
+                ))}
+              </div>
+            </ErpSection>
+          )}
 
           <ErpSection title="حضور و پوشش">
             <div className="divide-y divide-slate-100 dark:divide-slate-800">

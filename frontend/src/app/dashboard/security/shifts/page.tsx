@@ -1,16 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { FaCalendarAlt, FaCheck, FaClock, FaExclamationTriangle, FaHistory, FaPlay, FaRedo, FaStop, FaTrash, FaUserEdit, FaUsers } from 'react-icons/fa';
-import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpSection, ErpSegmentedControl, ErpSkeleton, ErpStatus, ErpWorkspacePage } from '@/components/erp';
+import { ErpActionMenu, ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpSection, ErpSegmentedControl, ErpSkeleton, ErpStatus, ErpWorkspacePage } from '@/components/erp';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
 import { securityAPI } from '@/lib/api';
 import { askSecurityAction } from '@/components/SecurityNoticeHost';
+import { categorizeSecurityCoverageSlots } from './securityShiftCoverageViewModel';
 
 type ShiftView = 'current' | 'plans' | 'history';
-type DraftMode = 'replacement' | 'temporary' | 'force-close' | 'correction' | null;
+type CoverageCategory = 'open' | 'finished';
+type DraftMode = 'replacement' | 'temporary' | 'force-close' | 'attendance-correction' | 'session-correction' | 'confirm-no-shift' | null;
 
 const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-teal-600 dark:border-slate-700 dark:bg-slate-800 dark:text-white';
 const labelClass = 'mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200';
@@ -33,7 +35,8 @@ const dateTimeFa = (value: string | Date) => new Date(value).toLocaleString('fa-
 const dateFa = (value: string | Date) => PersianCalendar.toPersian(value, 'jYYYY/jMM/jDD');
 const timeFa = (value: string | Date) => new Date(value).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
 const timeInput = (value: string | Date) => new Date(value).toTimeString().slice(0, 5);
-const toIsoFromPersian = (date: string, time: string) => PersianCalendar.toGregorian(`${date} ${time}`, 'jYYYY/jMM/jDD HH:mm').toISOString();
+const dateTimeInput = (value?: string | Date | null) => value ? `${dateFa(value)} ${timeInput(value)}` : '';
+const dateTimeToIso = (value: string) => PersianCalendar.toGregorian(value, 'jYYYY/jMM/jDD HH:mm').toISOString();
 const elapsedMinutes = (from: string | Date, now: number) => Math.max(0, Math.floor((now - new Date(from).getTime()) / 60_000));
 
 export default function SecurityShiftsPage() {
@@ -48,15 +51,20 @@ export default function SecurityShiftsPage() {
   const [slots, setSlots] = useState<any[]>([]);
   const [defaults, setDefaults] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [now, setNow] = useState(Date.now());
   const [visibleMonth, setVisibleMonth] = useState(() => PersianCalendar.now().slice(0, 7));
+  const [coverageCategory, setCoverageCategory] = useState<CoverageCategory>('open');
   const [draft, setDraft] = useState<{ mode: DraftMode; slotId: string }>({ mode: null, slotId: '' });
   const [replacement, setReplacement] = useState({ personnelId: '', overrideReason: '' });
-  const [temporary, setTemporary] = useState({ personnelId: '', startsDate: PersianCalendar.now(), startsTime: '07:00', endsDate: PersianCalendar.now(), endsTime: '19:00', note: '' });
+  const [temporary, setTemporary] = useState({ personnelId: '', startsAt: `${PersianCalendar.now()} 07:00`, endsAt: `${PersianCalendar.now()} 19:00`, note: '' });
   const [forceClose, setForceClose] = useState({ reason: '', summary: '' });
-  const [correction, setCorrection] = useState({ attendanceId: '', arrivedDate: PersianCalendar.now(), arrivedTime: '07:00', reason: '' });
+  const [correction, setCorrection] = useState({ attendanceId: '', arrivedAt: `${PersianCalendar.now()} 07:00`, reason: '' });
+  const [sessionCorrection, setSessionCorrection] = useState({ startedAt: '', endedAt: '', reason: '', deviationConfirmed: false });
+  const [noShiftReason, setNoShiftReason] = useState('');
   const [form, setForm] = useState({
     title: `برنامه شیفت ${currentYear}`,
     persianYear: currentYear,
@@ -155,11 +163,16 @@ export default function SecurityShiftsPage() {
   const historySlots = useMemo(() => slots
     .filter((slot) => slot.session || slot.report || slot.attendance?.length || slot.temporaryCoverage?.length || slot.replacementPersonnelId || slot.probableNoShowAt)
     .sort((a, b) => new Date(b.session?.endedAt || b.startsAt).getTime() - new Date(a.session?.endedAt || a.startsAt).getTime()), [slots]);
+  const categorizedCoverageSlots = useMemo(() => categorizeSecurityCoverageSlots(slots), [slots]);
+  const coverageSlots = categorizedCoverageSlots[coverageCategory];
   const activeShiftWorker = currentShift?.activeSession?.personnel || (currentShift?.activeSession?.slot ? slotWorker(currentShift.activeSession.slot) : null);
   const scheduledCurrentWorker = currentShift?.currentSlot ? slotWorker(currentShift.currentSlot) : null;
   const publishedPlan = useMemo(() => plans.find((plan) => plan.status === 'PUBLISHED'), [plans]);
 
   const run = async (action: () => Promise<any>, success: string) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     try {
       setError('');
       await action();
@@ -168,6 +181,9 @@ export default function SecurityShiftsPage() {
       await load();
     } catch (err: any) {
       setError(err.response?.data?.error || 'عملیات انجام نشد.');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -185,12 +201,19 @@ export default function SecurityShiftsPage() {
   const openDraft = (mode: DraftMode, slot: any) => {
     setDraft({ mode, slotId: slot.id });
     if (mode === 'replacement') setReplacement({ personnelId: slot.replacementPersonnelId || '', overrideReason: slot.overrideReason || '' });
-    if (mode === 'temporary') setTemporary({ personnelId: '', startsDate: dateFa(slot.startsAt), startsTime: timeInput(slot.startsAt), endsDate: dateFa(slot.endsAt), endsTime: timeInput(slot.endsAt), note: '' });
+    if (mode === 'temporary') setTemporary({ personnelId: '', startsAt: dateTimeInput(slot.startsAt), endsAt: dateTimeInput(slot.endsAt), note: '' });
     if (mode === 'force-close') setForceClose({ reason: '', summary: '' });
-    if (mode === 'correction') {
+    if (mode === 'attendance-correction') {
       const attendance = slot.attendance?.[0];
-      setCorrection({ attendanceId: attendance?.id || '', arrivedDate: attendance ? dateFa(attendance.arrivedAt) : dateFa(slot.startsAt), arrivedTime: attendance ? timeInput(attendance.arrivedAt) : timeInput(slot.startsAt), reason: '' });
+      setCorrection({ attendanceId: attendance?.id || '', arrivedAt: dateTimeInput(attendance?.arrivedAt || slot.startsAt), reason: '' });
     }
+    if (mode === 'session-correction') setSessionCorrection({
+      startedAt: dateTimeInput(slot.session?.startedAt || slot.startsAt),
+      endedAt: dateTimeInput(slot.session?.endedAt || (slot.managerReviewRequired ? slot.endsAt : null)),
+      reason: '',
+      deviationConfirmed: false,
+    });
+    if (mode === 'confirm-no-shift') setNoShiftReason('');
   };
 
   const submitReplacement = (slot: any) => run(
@@ -201,8 +224,8 @@ export default function SecurityShiftsPage() {
   const submitTemporary = (slot: any) => run(
     () => securityAPI.addTemporaryShiftCoverage(slot.id, {
       personnelId: temporary.personnelId,
-      startsAt: toIsoFromPersian(temporary.startsDate, temporary.startsTime),
-      endsAt: toIsoFromPersian(temporary.endsDate, temporary.endsTime),
+      startsAt: dateTimeToIso(temporary.startsAt),
+      endsAt: dateTimeToIso(temporary.endsAt),
       note: temporary.note,
     }),
     'پوشش موقت ثبت شد.'
@@ -214,8 +237,23 @@ export default function SecurityShiftsPage() {
   );
 
   const submitCorrection = () => run(
-    () => securityAPI.correctShiftAttendance(correction.attendanceId, toIsoFromPersian(correction.arrivedDate, correction.arrivedTime), correction.reason),
+    () => securityAPI.correctShiftAttendance(correction.attendanceId, dateTimeToIso(correction.arrivedAt), correction.reason),
     'اصلاح حضور با حسابرسی ثبت شد.'
+  );
+
+  const submitSessionCorrection = (slot: any) => run(
+    () => securityAPI.correctShiftSession(slot.id, {
+      startedAt: sessionCorrection.startedAt ? dateTimeToIso(sessionCorrection.startedAt) : undefined,
+      endedAt: sessionCorrection.endedAt ? dateTimeToIso(sessionCorrection.endedAt) : undefined,
+      reason: sessionCorrection.reason,
+      deviationConfirmed: sessionCorrection.deviationConfirmed,
+    }),
+    'اصلاح زمان‌های شیفت با حسابرسی ثبت شد.'
+  );
+
+  const submitNoShiftConfirmation = (slot: any) => run(
+    () => securityAPI.confirmNoShift(slot.id, noShiftReason),
+    'عدم انجام شیفت با حسابرسی تأیید شد.'
   );
 
   const closeShift = async (slot: any) => {
@@ -227,12 +265,47 @@ export default function SecurityShiftsPage() {
   const viewOptions = useMemo(() => [{ value: 'current' as ShiftView, label: 'شیفت جاری', icon: FaPlay }, { value: 'plans' as ShiftView, label: 'برنامه شیفت‌ها', icon: FaCalendarAlt }, { value: 'history' as ShiftView, label: 'سوابق', icon: FaHistory }], []);
 
   const slotStatusBadge = (slot: any) => {
+    if (slot.operationalState === 'MANAGER_REVIEW') return <ErpBadge tone="warning">نیازمند بررسی مدیر</ErpBadge>;
+    if (slot.operationalState === 'NO_SHIFT_CONFIRMED') return <ErpBadge tone="neutral">عدم انجام شیفت تأیید شد</ErpBadge>;
     if (slot.session?.status === 'ACTIVE') return <ErpBadge tone="success">فعال</ErpBadge>;
     if (slot.session?.status === 'FORCE_CLOSED') return <ErpBadge tone="danger">بسته‌شده توسط مدیر</ErpBadge>;
     if (slot.session?.status === 'CLOSED') return <ErpBadge tone="neutral">تکمیل‌شده</ErpBadge>;
     if (slot.probableNoShowAt) return <ErpBadge tone="warning">عدم حضور احتمالی</ErpBadge>;
     if (slot.coverageStatus === 'NEEDS_REPLACEMENT') return <ErpBadge tone="danger">نیازمند جایگزین</ErpBadge>;
     return <ErpBadge tone="info">در انتظار</ErpBadge>;
+  };
+
+  const openSlotEvidence = (slot: any) => {
+    if (slot.session?.status === 'ACTIVE') return router.push('/dashboard/security/supervisor-reports');
+    if (['CLOSED', 'FORCE_CLOSED'].includes(slot.session?.status)) return router.push(`/dashboard/security/reports/shifts/${slot.id}`);
+    return router.push(`/dashboard/security/shifts/${slot.id}`);
+  };
+
+  const slotEvidenceLabel = (slot: any) => {
+    if (slot.session?.status === 'ACTIVE') return 'گزارش جاری';
+    if (['CLOSED', 'FORCE_CLOSED'].includes(slot.session?.status)) return 'گزارش شیفت';
+    return 'جزئیات برنامه';
+  };
+
+  const managementActions = (slot: any) => {
+    const actions: any[] = [];
+    if (!slot.session && !slot.noShiftConfirmedAt && !slot.managerReviewRequired) {
+      actions.push({ label: 'جایگزین', icon: FaUserEdit, onClick: () => openDraft('replacement', slot) });
+      actions.push({ label: 'پوشش موقت', icon: FaUsers, onClick: () => openDraft('temporary', slot) });
+    }
+    if (slot.attendance?.length) actions.push({ label: 'اصلاح زمان حضور', icon: FaClock, onClick: () => openDraft('attendance-correction', slot) });
+    if (!slot.noShiftConfirmedAt && (slot.session || new Date(slot.startsAt).getTime() <= now)) actions.push({ label: 'اصلاح زمان‌های شیفت', icon: FaClock, onClick: () => openDraft('session-correction', slot) });
+    if (slot.managerReviewRequired) actions.push({ label: 'تأیید عدم انجام شیفت', tone: 'danger', onClick: () => openDraft('confirm-no-shift', slot) });
+    if (slot.coverageStatus === 'NEEDS_REPLACEMENT') actions.push({
+      label: 'اضطراری بدون پوشش',
+      tone: 'danger',
+      onClick: async () => {
+        const reason = await askSecurityAction({ title: 'پوشش اضطراری', inputLabel: 'دلیل وضعیت اضطراری' });
+        if (reason) await run(() => securityAPI.markShiftEmergencyUncovered(slot.id, reason), 'وضعیت اضطراری ثبت شد.');
+      }
+    });
+    if (slot.session?.status === 'ACTIVE') actions.push({ label: 'بستن اجباری', tone: 'danger', onClick: () => openDraft('force-close', slot) });
+    return actions;
   };
 
   return (
@@ -294,7 +367,7 @@ export default function SecurityShiftsPage() {
                     <p className="font-bold">شیفت فعال از {dateTimeFa(workflow.activeSession.startedAt)}</p>
                     <p className="mt-1 text-sm">تا پایان و ثبت گزارش این شیفت، شیفت بعدی آغاز نمی‌شود.</p>
                   </div>
-                  {workflow.activeSession.personnelId === workflow.personnel?.id && workflow.activeSession.slot && <ErpButton label="گزارش و پایان شیفت" icon={FaStop} tone="danger" onClick={() => closeShift(workflow.activeSession.slot)} />}
+                  {workflow.activeSession.personnelId === workflow.personnel?.id && workflow.activeSession.slot && <ErpButton label="ثبت پایان شیفت" icon={FaStop} tone="danger" disabled={saving} onClick={() => closeShift(workflow.activeSession.slot)} />}
                 </div>
               </ErpCard>
             )}
@@ -320,9 +393,9 @@ export default function SecurityShiftsPage() {
                           {attendance ? ` · حضور ${dateTimeFa(attendance.arrivedAt)}${attendance.delayMinutes ? ` · ${attendance.delayMinutes} دقیقه تأخیر` : ''}` : ` · انتظار ${waiting.toLocaleString('fa-IR')} دقیقه`}
                         </p>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          {canAttend && <ErpButton label="ثبت حضور" icon={FaCheck} onClick={() => run(() => securityAPI.registerShiftAttendance(slot.id), 'حضور ثبت شد.')} />}
-                          {attendance && !slot.session && now >= new Date(slot.startsAt).getTime() && <ErpButton label="شروع شیفت" icon={FaPlay} tone="success" onClick={() => run(() => securityAPI.startPlannedShift(slot.id), 'شیفت شروع شد.')} />}
-                          {slot.session?.status === 'ACTIVE' && slot.session.personnelId === workflow.personnel.id && <ErpButton label="گزارش و پایان شیفت" icon={FaStop} tone="danger" onClick={() => closeShift(slot)} />}
+                          {canAttend && <ErpButton label="ثبت حضور" icon={FaCheck} disabled={saving} onClick={() => run(() => securityAPI.registerShiftAttendance(slot.id), 'حضور ثبت شد.')} />}
+                          {attendance && !slot.session && now >= new Date(slot.startsAt).getTime() && <ErpButton label="شروع شیفت" icon={FaPlay} tone="success" disabled={saving} onClick={() => run(() => securityAPI.startPlannedShift(slot.id), 'شیفت شروع شد.')} />}
+                          {slot.session?.status === 'ACTIVE' && slot.session.personnelId === workflow.personnel.id && <ErpButton label="ثبت پایان شیفت" icon={FaStop} tone="danger" disabled={saving} onClick={() => closeShift(slot)} />}
                         </div>
                       </div>
                     );
@@ -337,8 +410,16 @@ export default function SecurityShiftsPage() {
 
       {view === 'current' && defaults && (
         <ErpSection title="پوشش شیفت‌ها">
+          <ErpSegmentedControl<CoverageCategory>
+            value={coverageCategory}
+            onChange={setCoverageCategory}
+            options={[
+              { value: 'open', label: 'جاری و در انتظار', icon: FaPlay },
+              { value: 'finished', label: 'پایان‌یافته', icon: FaHistory },
+            ]}
+          />
           <div className="space-y-3">
-            {slots.map((slot) => {
+            {coverageSlots.map((slot) => {
               const worker = slotWorker(slot);
               const isDraft = draft.slotId === slot.id;
               return (
@@ -355,11 +436,9 @@ export default function SecurityShiftsPage() {
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {slotStatusBadge(slot)}
-                      <ErpButton label="جایگزین" icon={FaUserEdit} onClick={() => openDraft('replacement', slot)} />
-                      <ErpButton label="پوشش موقت" onClick={() => openDraft('temporary', slot)} />
-                      {slot.attendance?.length ? <ErpButton label="اصلاح حضور" onClick={() => openDraft('correction', slot)} /> : null}
-                      {slot.coverageStatus === 'NEEDS_REPLACEMENT' && <ErpButton label="اضطراری بدون پوشش" tone="danger" onClick={async () => { const reason = await askSecurityAction({ title: 'پوشش اضطراری', inputLabel: 'دلیل وضعیت اضطراری' }); if (reason) run(() => securityAPI.markShiftEmergencyUncovered(slot.id, reason), 'وضعیت اضطراری ثبت شد.'); }} />}
-                      {slot.session?.status === 'ACTIVE' && <ErpButton label="بستن اجباری" tone="danger" onClick={() => openDraft('force-close', slot)} />}
+                      {slot.isManagerCorrected && <ErpBadge tone="warning">اصلاح‌شده توسط مدیر</ErpBadge>}
+                      <ErpButton label={slotEvidenceLabel(slot)} variant="ghost" onClick={() => openSlotEvidence(slot)} />
+                      {managementActions(slot).length > 0 && <ErpActionMenu label="اقدامات مدیریتی شیفت" actions={managementActions(slot)} />}
                     </div>
                   </div>
 
@@ -374,10 +453,8 @@ export default function SecurityShiftsPage() {
                   {isDraft && draft.mode === 'temporary' && (
                     <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-slate-200 p-3 md:grid-cols-3 dark:border-slate-700">
                       <label><span className={labelClass}>نیروی پوشش موقت</span><select className={inputClass} value={temporary.personnelId} onChange={(e) => setTemporary({ ...temporary, personnelId: e.target.value })}><option value="">انتخاب کنید</option>{personnelOptions.map((person: any) => <option key={person.id} value={person.id}>{personName(person)}</option>)}</select></label>
-                      <label><span className={labelClass}>تاریخ شروع</span><PersianCalendarComponent value={temporary.startsDate} onChange={(startsDate) => setTemporary({ ...temporary, startsDate })} /></label>
-                      <label><span className={labelClass}>ساعت شروع</span><input className={inputClass} type="time" value={temporary.startsTime} onChange={(e) => setTemporary({ ...temporary, startsTime: e.target.value })} /></label>
-                      <label><span className={labelClass}>تاریخ پایان</span><PersianCalendarComponent value={temporary.endsDate} onChange={(endsDate) => setTemporary({ ...temporary, endsDate })} /></label>
-                      <label><span className={labelClass}>ساعت پایان</span><input className={inputClass} type="time" value={temporary.endsTime} onChange={(e) => setTemporary({ ...temporary, endsTime: e.target.value })} /></label>
+                      <label><span className={labelClass}>شروع پوشش</span><PersianCalendarComponent showTime value={temporary.startsAt} onChange={(startsAt) => setTemporary({ ...temporary, startsAt })} /></label>
+                      <label><span className={labelClass}>پایان پوشش</span><PersianCalendarComponent showTime value={temporary.endsAt} onChange={(endsAt) => setTemporary({ ...temporary, endsAt })} /></label>
                       <label><span className={labelClass}>یادداشت</span><input className={inputClass} value={temporary.note} onChange={(e) => setTemporary({ ...temporary, note: e.target.value })} /></label>
                       <ErpButton label="ثبت پوشش موقت" icon={FaCheck} disabled={!temporary.personnelId} onClick={() => submitTemporary(slot)} />
                     </div>
@@ -391,17 +468,35 @@ export default function SecurityShiftsPage() {
                     </div>
                   )}
 
-                  {isDraft && draft.mode === 'correction' && (
+                  {isDraft && draft.mode === 'attendance-correction' && (
                     <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-amber-200 p-3 md:grid-cols-4 dark:border-amber-900">
-                      <label><span className={labelClass}>تاریخ اصلاح‌شده</span><PersianCalendarComponent value={correction.arrivedDate} onChange={(arrivedDate) => setCorrection({ ...correction, arrivedDate })} /></label>
-                      <label><span className={labelClass}>ساعت اصلاح‌شده</span><input className={inputClass} type="time" value={correction.arrivedTime} onChange={(e) => setCorrection({ ...correction, arrivedTime: e.target.value })} /></label>
+                      <label className="md:col-span-2"><span className={labelClass}>زمان اصلاح‌شده حضور</span><PersianCalendarComponent showTime value={correction.arrivedAt} onChange={(arrivedAt) => setCorrection({ ...correction, arrivedAt })} /></label>
                       <label className="md:col-span-2"><span className={labelClass}>دلیل اصلاح</span><input className={inputClass} value={correction.reason} onChange={(e) => setCorrection({ ...correction, reason: e.target.value })} /></label>
                       <ErpButton label="ثبت اصلاح حضور" tone="warning" disabled={!correction.attendanceId || !correction.reason.trim()} onClick={submitCorrection} />
+                    </div>
+                  )}
+
+                  {isDraft && draft.mode === 'session-correction' && (
+                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-amber-200 p-3 md:grid-cols-2 dark:border-amber-900">
+                      <label><span className={labelClass}>شروع مؤثر شیفت</span><PersianCalendarComponent showTime value={sessionCorrection.startedAt} onChange={(startedAt) => setSessionCorrection({ ...sessionCorrection, startedAt })} /></label>
+                      <label><span className={labelClass}>پایان مؤثر شیفت</span><PersianCalendarComponent showTime value={sessionCorrection.endedAt} onChange={(endedAt) => setSessionCorrection({ ...sessionCorrection, endedAt })} clearable /></label>
+                      <label className="md:col-span-2"><span className={labelClass}>دلیل اصلاح یا بازسازی</span><textarea className={`${inputClass} min-h-24`} value={sessionCorrection.reason} onChange={(event) => setSessionCorrection({ ...sessionCorrection, reason: event.target.value })} /></label>
+                      <label className="md:col-span-2 flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={sessionCorrection.deviationConfirmed} onChange={(event) => setSessionCorrection({ ...sessionCorrection, deviationConfirmed: event.target.checked })} className="h-5 w-5 accent-[#074747]" />خروج احتمالی زمان مؤثر از بازه برنامه را بررسی و تأیید می‌کنم.</label>
+                      <ErpButton label="ثبت اصلاح زمان‌های شیفت" tone="warning" disabled={!sessionCorrection.startedAt || !sessionCorrection.reason.trim()} onClick={() => submitSessionCorrection(slot)} />
+                    </div>
+                  )}
+
+                  {isDraft && draft.mode === 'confirm-no-shift' && (
+                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-rose-200 p-3 dark:border-rose-900">
+                      <ErpInlineState kind="stale" title="این تصمیم تأیید می‌کند که در این بازه هیچ جلسه عملیاتی شیفت انجام نشده است." />
+                      <label><span className={labelClass}>دلیل عدم انجام شیفت</span><textarea className={`${inputClass} min-h-24`} value={noShiftReason} onChange={(event) => setNoShiftReason(event.target.value)} /></label>
+                      <ErpButton label="تأیید عدم انجام شیفت" tone="danger" disabled={!noShiftReason.trim()} onClick={() => submitNoShiftConfirmation(slot)} />
                     </div>
                   )}
                 </ErpCard>
               );
             })}
+            {!coverageSlots.length && <ErpEmptyState icon={coverageCategory === 'open' ? FaPlay : FaHistory} title={coverageCategory === 'open' ? 'شیفت جاری یا در انتظار وجود ندارد' : 'شیفت پایان‌یافته‌ای وجود ندارد'} />}
           </div>
         </ErpSection>
       )}

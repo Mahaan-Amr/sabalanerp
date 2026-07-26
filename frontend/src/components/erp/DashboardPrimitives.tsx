@@ -246,6 +246,7 @@ export interface ErpShiftTimelineEntry {
   voidedBy?: string | null;
   attachmentCount?: number;
   attachments?: Array<{ id: string; name?: string | null }>;
+  voidable?: boolean;
 }
 
 export function ErpShiftTimeline({
@@ -318,7 +319,7 @@ export function ErpShiftTimeline({
                       <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">ثبت: {formatTimestamp(entry.createdAt)}{entry.author ? ` · توسط ${entry.author}` : ''}</p>
                       {voided && entry.voidReason && <p className="mt-2 text-xs font-semibold text-rose-700 dark:text-rose-300">دلیل ابطال: {entry.voidReason}{entry.voidedAt ? ` · ${formatTimestamp(entry.voidedAt)}` : ''}{entry.voidedBy ? ` · عامل: ${entry.voidedBy}` : ''}</p>}
                     </div>
-                    {!voided && onVoid && (
+                    {!voided && onVoid && entry.voidable !== false && (
                       <button type="button" onClick={() => onVoid(entry)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 text-xs font-bold text-rose-700 outline-none transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-600 dark:text-rose-200 dark:hover:bg-rose-950/35">
                         <FaBan className="h-3.5 w-3.5" /> ابطال گزارش
                       </button>

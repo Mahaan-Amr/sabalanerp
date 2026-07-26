@@ -1331,8 +1331,28 @@ _Avoid_: storing gate photos as uncategorized blobs that cannot later be filtere
 
 **گزارش شیفت حراست**:
 An append-only operational log for one planned security shift, made of immutable گزارش لحظه‌ای rows and گشت‌زنی sessions. Ending a shift remains a deliberate closure action, but the main shift content lives in timestamped log entries rather than one free-text summary form.
-New entries and patrols are recorded only against the currently active planned shift session for the authenticated security user in the first version; manager backfill is intentionally out of scope.
+New entries and patrols are recorded only against the currently active planned shift session for the authenticated security user; manager reconstruction may repair the session boundary but does not backfill log entries or patrols.
 _Avoid_: گزارش سرپرست, deleting log rows, forcing duplicate final-summary text when the log already records the shift, or hiding patrol sessions inside unstructured notes
+
+**اصلاح حسابرسی‌شده جلسه شیفت حراست**:
+A manager correction of a recorded shift start or finish, or reconstruction of either missing boundary, using asserted actual times and a mandatory reason while preserving every original recorded timestamp or the fact that no click occurred. Operational views and reports use the corrected effective times but mark them visibly as manager-corrected, while audit history permanently retains the original evidence, correcting manager, correction time, and reason.
+Corrected times may fall outside the planned slot but cannot be in the future, must form a valid start-before-finish interval, must contain every retained patrol and shift-timeline event, and cannot overlap another shift session for the same guard. Unusual deviation from the planned slot requires an explicit warning and confirmation while the mandatory reason remains the accountable explanation.
+It is distinct from اصلاح زمان حضور: physical arrival and operational shift-session boundaries are corrected through separate audited actions and never silently update one another.
+Authorization belongs to users with management permission for the Security workspace, including system administrators, rather than every user carrying a generic manager role.
+اصلاح‌شده توسط مدیر is audit provenance rather than a replacement lifecycle: reconstructing only the start of a currently ongoing shift leaves it فعال with the correction marker, while a fully reconstructed past shift is پایان‌یافته with that marker.
+_Avoid_: silently editing shift timestamps, disguising a missed action as a guard click, losing the original recorded time, hiding correction provenance in reports, creating unaudited historical shift sessions, placing evidence outside the corrected session, accepting contradictory guard-session overlaps, coupling shift correction to physical-arrival correction, granting correction authority to unrelated managers, or treating correction provenance as a mutually exclusive shift status
+
+**بستن اجباری شیفت حراست**:
+A Security manager closure of an active shift at the current authoritative server time when the guard cannot complete the ordinary closure. It is displayed as بسته‌شده توسط مدیر and remains distinct from asserting or correcting a historical operational finish time.
+_Avoid_: using force-close to manufacture an earlier finish, labeling a historical correction as a current forced closure, or hiding the accountable manager and reason
+
+**پایان واقعی شیفت حراست**:
+The authoritative server timestamp captured when the guard submits the final ثبت پایان شیفت confirmation after providing the closure summary. Opening or later cancelling the closure dialog does not end the shift.
+_Avoid_: treating the first dialog-opening click as completion, using an untrusted browser clock as the authoritative time, or presenting time spent completing the closure confirmation as server delay
+
+**زمان ثبت عملیات شیفت حراست**:
+The single unrounded server timestamp captured immediately when the confirmed shift-start or shift-finish request reaches its handler and then reused for persistence and response. The interface reflects the successful value immediately and prevents duplicate submission; minute-level divergence after server receipt is a defect, while untrusted browser time is never substituted for network transit before receipt.
+_Avoid_: capturing a later timestamp after database checks, snapping an actual action to the planned slot, rounding the persisted time, trusting the client clock as authority, or leaving the user waiting for periodic refresh after success
 
 **افراد مرتبط در گزارش لحظه‌ای حراست**:
 The reporter of a گزارش لحظه‌ای is always the authenticated security user who owns the active shift session, but the related people attached to the report are active organizational personnel. New report participants should support پرسنل سازمانی, including people without a system login, while old user-based participants remain visible for historical compatibility.
@@ -1372,6 +1392,11 @@ A timestamped patrol session inside a security shift. It starts with one click a
 Shift closure is blocked while any patrol session in that shift is still active.
 _Avoid_: requiring patrol notes before the patrol happens, storing patrols as free-text shift notes, allowing accidental overlapping active patrols for the same user, or auto-ending patrols during shift closure
 
+**رویدادهای خط زمانی گشت‌زنی حراست**:
+The two linked chronological events that expose one patrol inside its shift timeline: a start event at the exact patrol start and a finish event at the exact patrol end. The finish event identifies the guard and includes duration and the required completion description so reports recorded during the patrol remain correctly ordered between the two events.
+The same combined chronology appears in the guard's active timeline, the manager's live read-only timeline, completed shift details, report preview, and PDF; active patrol controls remain separate from the recorded evidence.
+_Avoid_: collapsing a patrol into one ambiguously placed range card, duplicating the patrol as an unlinked pair, hiding intervening shift reports, or letting live, completed, preview, and exported timelines disagree
+
 **گزارش‌های حراست**:
 A manager-focused reporting workspace with exactly two report products: گزارش شیفت‌ها and گزارش حضور و غیاب حراست. It is separate from the active گزارش شیفت حراست workflow: managers search completed shifts directly, preview the selected evidence, and generate a scoped PDF instead of first choosing an analytical date range or report format.
 _Avoid_: mock analytics, decorative KPI collections, performance-report mode as a competing third product, requiring a date range before a manager can find a completed shift, or showing labels that do not match the exported evidence
@@ -1379,6 +1404,15 @@ _Avoid_: mock analytics, decorative KPI collections, performance-report mode as 
 **شیفت قبل حراست**:
 The finished security shift session with the most recent actual `endedAt`, whether normally closed or force-closed by a manager. It is based on actual completion order rather than the previous planned rota slot.
 _Avoid_: selecting the prior scheduled slot when another session finished later, or excluding force-closed sessions from the latest completed shift
+
+**دسته‌بندی پوشش شیفت‌های حراست**:
+The shift-coverage list has two operational categories: جاری و در انتظار contains the active shift first followed by upcoming waiting shifts nearest-first, including unresolved exceptional states that still require action; پایان‌یافته contains normally completed and manager-closed shifts ordered by actual finish time newest-first.
+Each row links truthfully to its available evidence: a waiting slot opens planned-shift details, an active session opens its live shift report, and a finished session opens its completed shift report.
+_Avoid_: mixing completed history into live coverage work, ordering waiting shifts farthest-first, ordering completed shifts by planned slot time, hiding unresolved coverage states in history, or presenting an empty waiting slot as an existing shift report
+
+**شیفت نیازمند بررسی مدیر**:
+A planned Security slot whose scheduled end has passed without any shift session. It remains an actionable exception in جاری و در انتظار until a Security manager either reconstructs the forgotten shift with actual start and finish times or confirms that no operational shift occurred; both outcomes require a reason and permanent audit evidence.
+_Avoid_: leaving an ended untouched slot as ordinary در انتظار, silently assuming absence, moving the unresolved slot into completed history, or resolving it without an accountable manager decision
 
 **گزارش شیفت‌ها**:
 The manager-only completed-shift report product. It lists completed shifts newest-first, supports direct search by shift identity, guard, Jalali date, or operational state, and allows one or several shifts to be selected, previewed with their complete read-only timelines, and exported as one scoped PDF. Date range is an optional advanced filter rather than the required entry point.

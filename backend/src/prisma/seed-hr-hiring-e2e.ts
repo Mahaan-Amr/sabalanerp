@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
-import { applicantOtpHash } from "../services/hrCandidateAccess";
+import { applicantOtpHash, encryptApplicantOtp } from "../services/hrCandidateAccess";
 
 const prisma = new PrismaClient();
 
@@ -239,11 +239,11 @@ async function main() {
       offlineCommunicatedAt: null,
       offlineReason: null,
       offlineConfirmedInformation: null,
-      candidateNotificationStatus: "SENT",
-      candidateNotificationError: null,
+      candidateNotificationStatus: "FAILED",
+      candidateNotificationError: "خطای آزمایشی ارسال پیامک پیشنهاد",
       candidateNotificationClaimedAt: null,
       candidateNotificationClaimToken: null,
-      candidateNotifiedAt: new Date(),
+      candidateNotifiedAt: null,
       candidateNotificationAttempts: 1,
     },
     create: {
@@ -264,8 +264,9 @@ async function main() {
       hrApprovedAt: new Date(),
       financeApprovedBy: user.id,
       financeApprovedAt: new Date(),
-      candidateNotificationStatus: "SENT",
-      candidateNotifiedAt: new Date(),
+      candidateNotificationStatus: "FAILED",
+      candidateNotificationError: "خطای آزمایشی ارسال پیامک پیشنهاد",
+      candidateNotifiedAt: null,
     },
   });
 
@@ -278,6 +279,7 @@ async function main() {
       applicationId: fixture.applicationId,
       mobileSnapshot: fixture.mobile,
       otpHash: applicantOtpHash(fixture.mobile, fixture.otp),
+      otpCiphertext: encryptApplicantOtp(fixture.mobile, fixture.otp),
       expiresAt: plusDays(7),
       createdBy: user.id,
     },

@@ -71,6 +71,7 @@ class HrHiringSmsGateway {
 
   async sendOfferReady(params: {
     phoneNumber: string;
+    code: string;
   }): Promise<HiringSmsResult> {
     if (!this.usesTestAdapter) {
       return smsService.sendHiringOfferReady(params);
@@ -78,6 +79,7 @@ class HrHiringSmsGateway {
     this.messages.push({
       phoneNumber: params.phoneNumber,
       kind: "offer",
+      code: params.code,
       text: "پیشنهاد همکاری شما آماده بررسی است. به صفحه درخواست استخدام وارد شوید.",
       sentAt: new Date().toISOString(),
     });

@@ -140,6 +140,43 @@ test("HR sends one correction request and Candidate reuses the existing OTP", as
   await candidateContext.close();
 });
 
+test("Offer notification includes the applicant's existing OTP for /apply", async ({
+  page,
+}) => {
+  await page.goto("/login");
+  await page
+    .locator('input[name="identifier"]')
+    .fill("hr.processor.e2e@sabalanerp.test");
+  await page.locator('input[name="password"]').fill("HrE2ePass123!");
+  await page.locator("form").getByRole("button", { name: "ورود" }).click();
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
+
+  await page.request.put("http://127.0.0.1:3100/api/test/hr-hiring-sms", {
+    data: { mode: "success", reset: true },
+  });
+  await page.goto("/dashboard/hr/hiring/hr-e2e-application?phase=OFFER");
+  await page
+    .getByRole("button", { name: "ارسال مجدد پیامک پیشنهاد" })
+    .click();
+  await expect(page.getByText("پیامک پیشنهاد همکاری ارسال شد.")).toBeVisible();
+
+  const smsSnapshot = await page.request.get(
+    "http://127.0.0.1:3100/api/test/hr-hiring-sms",
+  );
+  expect(await smsSnapshot.json()).toMatchObject({
+    success: true,
+    data: {
+      messages: [
+        {
+          kind: "offer",
+          phoneNumber: "09120000001",
+          code: "123456",
+        },
+      ],
+    },
+  });
+});
+
 test("Candidate accepts the latest offer with fresh dedicated evidence", async ({
   page,
 }) => {

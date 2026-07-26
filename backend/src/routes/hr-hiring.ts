@@ -22,6 +22,8 @@ import { compensationTotalRials, isValidIranianNationalCode, unresolvedActivatio
 import {
   applicantOtpHash,
   applicantSubjectHash,
+  decryptApplicantOtp,
+  encryptApplicantOtp,
   generateApplicantOtp,
   normalizeApplicantDigits,
   normalizeApplicantMobile,
@@ -77,6 +79,53 @@ const latestSubmittedFullName = async (applicationId: string) => {
   });
   const data = revision?.dataJson as Record<string, unknown> | undefined;
   return normalizedName(`${data?.firstName || ''} ${data?.lastName || ''}`);
+};
+
+const createApplicantInvitation = async (
+  applicationId: string,
+  mobile: string,
+  createdBy: string,
+) => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const otp = generateApplicantOtp();
+    try {
+      const invitation = await prisma.hrCandidateInvitation.create({ data: {
+        applicationId,
+        mobileSnapshot: mobile,
+        otpHash: applicantOtpHash(mobile, otp),
+        otpCiphertext: encryptApplicantOtp(mobile, otp),
+        expiresAt: plusDays(ACCESS_TTL_DAYS),
+        createdBy
+      }});
+      return { invitation, otp };
+    } catch (error: any) {
+      if (error?.code !== 'P2002') throw error;
+    }
+  }
+  throw new Error('تولید کد ورود یکتا ناموفق بود؛ دوباره تلاش کنید.');
+};
+
+const resolveOfferAccessCode = async (
+  applicationId: string,
+  phoneNumber: string,
+  createdBy: string,
+) => {
+  const mobile = normalizeApplicantMobile(phoneNumber);
+  if (!mobile) throw new Error('شماره همراه متقاضی معتبر نیست.');
+  const invitations = await prisma.hrCandidateInvitation.findMany({
+    where: { applicationId, mobileSnapshot: mobile, revokedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: 'desc' }
+  });
+  for (const invitation of invitations) {
+    const otp = decryptApplicantOtp(mobile, invitation.otpCiphertext);
+    if (otp) return { otp, invitationId: invitation.id, replacementIssued: false };
+  }
+  const replacement = await createApplicantInvitation(applicationId, mobile, createdBy);
+  return {
+    otp: replacement.otp,
+    invitationId: replacement.invitation.id,
+    replacementIssued: true
+  };
 };
 
 const audit = (applicationId: string, eventType: string, req: AuthRequest | express.Request, payload?: unknown, actorKind = 'USER') =>
@@ -145,11 +194,20 @@ const notifyOfferDecline = async (
 };
 
 const deliverClaimedOfferNotification = async (
+  applicationId: string,
   snapshotId: string,
   phoneNumber: string,
   claimToken: string,
+  createdBy: string,
 ) => {
-  const sms = await hrHiringSmsGateway.sendOfferReady({ phoneNumber });
+  const access = await resolveOfferAccessCode(applicationId, phoneNumber, createdBy);
+  const sms = await hrHiringSmsGateway.sendOfferReady({ phoneNumber, code: access.otp });
+  if (sms.success && access.replacementIssued) {
+    await prisma.hrCandidateInvitation.updateMany({
+      where: { applicationId, id: { not: access.invitationId }, revokedAt: null },
+      data: { revokedAt: new Date() }
+    });
+  }
   const finalized = await prisma.hrCompensationSnapshot.updateMany({
     where: { id: snapshotId, candidateNotificationClaimToken: claimToken },
     data: {
@@ -623,7 +681,7 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   const authorities = new Set(authorityRows.map((item) => item.authority));
   const canSeeHrSensitive = authorities.has('HR_PROCESSOR') || authorities.has('HR_MANAGER');
   const canSeeFinanceSensitive = authorities.has('FINANCE_RECORDER') || authorities.has('FINANCE_MANAGER');
-  const canSeeCompensation = canSeeFinanceSensitive || authorities.has('HIRING_MANAGER') || authorities.has('HR_PAYROLL_PROCESSOR') || authorities.has('HR_PAYROLL_MANAGER') || authorities.has('HR_MANAGER');
+  const canSeeCompensation = canSeeFinanceSensitive || authorities.has('HIRING_MANAGER') || authorities.has('HR_PROCESSOR') || authorities.has('HR_PAYROLL_PROCESSOR') || authorities.has('HR_PAYROLL_MANAGER') || authorities.has('HR_MANAGER');
   const data: any = row;
   data.lifecycle = projectHiringLifecycle(row, authorities);
   data.documents = canSeeHrSensitive ? data.documents.map(({ storageName: _storageName, sha256: _sha256, ...document }: any) => document) : [];
@@ -698,23 +756,7 @@ router.post('/applications/:id/invitations', requireAuthority('HR_PROCESSOR', 'H
   if (application.stage === 'CLOSED') throw new Error('برای پرونده بسته دعوت‌نامه صادر نمی‌شود.');
   const mobile = normalizeApplicantMobile(application.candidate.mobile);
   if (!mobile) throw new Error('شماره همراه متقاضی معتبر نیست.');
-  let otp = '';
-  let invitation: Awaited<ReturnType<typeof prisma.hrCandidateInvitation.create>> | null = null;
-  for (let attempt = 0; attempt < 20 && !invitation; attempt += 1) {
-    otp = generateApplicantOtp();
-    try {
-      invitation = await prisma.hrCandidateInvitation.create({ data: {
-        applicationId: application.id,
-        mobileSnapshot: mobile,
-        otpHash: applicantOtpHash(mobile, otp),
-        expiresAt: plusDays(ACCESS_TTL_DAYS),
-        createdBy: actorId(req)
-      }});
-    } catch (error: any) {
-      if (error?.code !== 'P2002') throw error;
-    }
-  }
-  if (!invitation) throw new Error('تولید کد ورود یکتا ناموفق بود؛ دوباره تلاش کنید.');
+  const { invitation, otp } = await createApplicantInvitation(application.id, mobile, actorId(req));
   const base = process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
   const entryUrl = `${base.replace(/\/$/, '')}/apply`;
   const sms = await hrHiringSmsGateway.sendInvitation({ phoneNumber: mobile, code: otp });
@@ -783,6 +825,7 @@ router.post('/applications/:id/form/return', requireAuthority('HR_PROCESSOR', 'H
         applicationId: application.id,
         mobileSnapshot: application.candidate.mobile,
         otpHash: applicantOtpHash(application.candidate.mobile, replacementOtp),
+        otpCiphertext: encryptApplicantOtp(application.candidate.mobile, replacementOtp),
         expiresAt: plusDays(ACCESS_TTL_DAYS),
         createdBy: actorId(req)
       }
@@ -867,6 +910,7 @@ router.post('/applications/:id/form/correction/retry', requireAuthority('HR_PROC
         applicationId: application.id,
         mobileSnapshot: application.candidate.mobile,
         otpHash: applicantOtpHash(application.candidate.mobile, replacementOtp),
+        otpCiphertext: encryptApplicantOtp(application.candidate.mobile, replacementOtp),
         expiresAt: plusDays(ACCESS_TTL_DAYS),
         createdBy: actorId(req)
       }
@@ -1044,9 +1088,11 @@ router.post('/applications/:id/compensation/:snapshotId/finance-approve', requir
     include: { candidate: true }
   });
   await deliverClaimedOfferNotification(
+    req.params.id,
     row.id,
     applicationWithCandidate.candidate.mobile,
     claimToken,
+    actorId(req),
   );
   res.json({ success: true });
 }));
@@ -1082,9 +1128,11 @@ router.post('/applications/:id/compensation/:snapshotId/notification/retry', req
     return res.json({ success: true, data: current });
   }
   const updated = await deliverClaimedOfferNotification(
+    req.params.id,
     snapshot.id,
     application.candidate.mobile,
     claimToken,
+    actorId(req),
   );
   await audit(req.params.id, 'OFFER_NOTIFICATION_RETRIED', req, {
     snapshotId: snapshot.id,

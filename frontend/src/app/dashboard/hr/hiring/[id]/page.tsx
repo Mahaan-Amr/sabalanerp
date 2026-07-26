@@ -988,6 +988,7 @@ export default function HiringCasePage() {
           "HR_PAYROLL_PROCESSOR",
           "HR_PAYROLL_MANAGER",
           "FINANCE_MANAGER",
+          "HR_PROCESSOR",
           "HR_MANAGER",
         ) && (
           <>

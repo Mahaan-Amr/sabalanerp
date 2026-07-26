@@ -3159,6 +3159,7 @@ model HrCandidateInvitation {
   applicationId     String
   mobileSnapshot    String
   otpHash           String
+  otpCiphertext     String?
   expiresAt         DateTime
   revokedAt         DateTime?
   lastVerifiedAt    DateTime?

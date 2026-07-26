@@ -29,8 +29,43 @@ export const normalizeApplicantOtp = (value: unknown): string | null => {
 
 const accessSecret = () => process.env.JWT_SECRET || 'development-secret';
 
+const otpEncryptionKey = () =>
+  crypto.createHash('sha256').update(`HR_APPLICANT_OTP_ENCRYPTION:${accessSecret()}`).digest();
+
 export const applicantOtpHash = (mobile: string, otp: string): string =>
   crypto.createHmac('sha256', accessSecret()).update(`HR_APPLICANT_OTP:${mobile}:${otp}`).digest('hex');
+
+export const encryptApplicantOtp = (mobile: string, otp: string): string => {
+  const normalizedOtp = normalizeApplicantOtp(otp);
+  if (!normalizedOtp) throw new Error('Applicant OTP must contain exactly six digits.');
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', otpEncryptionKey(), iv);
+  cipher.setAAD(Buffer.from(mobile, 'utf8'));
+  const encrypted = Buffer.concat([cipher.update(normalizedOtp, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return ['v1', iv.toString('base64url'), tag.toString('base64url'), encrypted.toString('base64url')].join('.');
+};
+
+export const decryptApplicantOtp = (mobile: string, ciphertext: unknown): string | null => {
+  try {
+    const [version, ivValue, tagValue, encryptedValue] = String(ciphertext || '').split('.');
+    if (version !== 'v1' || !ivValue || !tagValue || !encryptedValue) return null;
+    const decipher = crypto.createDecipheriv(
+      'aes-256-gcm',
+      otpEncryptionKey(),
+      Buffer.from(ivValue, 'base64url')
+    );
+    decipher.setAAD(Buffer.from(mobile, 'utf8'));
+    decipher.setAuthTag(Buffer.from(tagValue, 'base64url'));
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(encryptedValue, 'base64url')),
+      decipher.final()
+    ]).toString('utf8');
+    return normalizeApplicantOtp(decrypted);
+  } catch {
+    return null;
+  }
+};
 
 export const applicantSubjectHash = (kind: 'PHONE' | 'IP', value: string): string =>
   crypto.createHmac('sha256', accessSecret()).update(`HR_APPLICANT_${kind}:${value}`).digest('hex');

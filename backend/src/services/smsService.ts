@@ -22,6 +22,11 @@ interface SmsTemplateParameter {
   value: string;
 }
 
+export const buildHiringOfferTemplateParameters = (code: string): SmsTemplateParameter[] => {
+  if (!/^\d{6}$/.test(code)) throw new Error('Hiring offer access code must contain exactly six digits.');
+  return [{ name: 'Code', value: code }];
+};
+
 function maskPhoneNumber(phoneNumber: string): string {
   if (phoneNumber.length <= 4) {
     return '****';
@@ -314,12 +319,17 @@ class SmsService {
 
   async sendHiringOfferReady(params: {
     phoneNumber: string;
+    code: string;
   }): Promise<{ success: boolean; messageId?: number; error?: string; rawResponse?: unknown }> {
     if (this.environment === 'sandbox' && !this.apiKey) return { success: true };
     if (!Number.isInteger(this.hiringOfferTemplateId) || this.hiringOfferTemplateId <= 0) {
       return { success: false, error: 'قالب پیامک آماده‌شدن پیشنهاد همکاری تنظیم نشده است.' };
     }
-    return this.sendTemplate(this.formatPhoneNumber(params.phoneNumber), this.hiringOfferTemplateId, []);
+    return this.sendTemplate(
+      this.formatPhoneNumber(params.phoneNumber),
+      this.hiringOfferTemplateId,
+      buildHiringOfferTemplateParameters(params.code)
+    );
   }
 
   private async sendTemplate(

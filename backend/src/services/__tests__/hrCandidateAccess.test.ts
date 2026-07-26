@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {
   applicantOtpHash,
+  decryptApplicantOtp,
+  encryptApplicantOtp,
   applicantSubjectHash,
   generateApplicantOtp,
   normalizeApplicantMobile,
@@ -24,6 +26,12 @@ assert.equal(normalizeApplicantOtp('3022887'), null);
 assert.equal(applicantOtpHash('09123456789', '302288'), applicantOtpHash('09123456789', '302288'));
 assert.notEqual(applicantOtpHash('09123456789', '302288'), applicantOtpHash('09123456789', '302289'));
 assert.notEqual(applicantOtpHash('09123456789', '302288'), applicantOtpHash('09353456789', '302288'));
+
+const encryptedOtp = encryptApplicantOtp('09123456789', '302288');
+assert.notEqual(encryptedOtp, '302288');
+assert.equal(decryptApplicantOtp('09123456789', encryptedOtp), '302288');
+assert.equal(decryptApplicantOtp('09353456789', encryptedOtp), null);
+assert.equal(decryptApplicantOtp('09123456789', `${encryptedOtp}tampered`), null);
 assert.notEqual(applicantSubjectHash('PHONE', '09123456789'), applicantSubjectHash('IP', '09123456789'));
 
 for (let index = 0; index < 100; index += 1) assert.match(generateApplicantOtp(), /^\d{6}$/);

@@ -99,6 +99,7 @@ import {
   getOrCreateContractDraftId,
   useContractEditRecovery
 } from '@/features/contract-creation/hooks/useContractEditRecovery';
+import { resolveProductModalRecoveryState } from '@/features/contract-creation/utils/contractRecoveryModalPolicy';
 
 // Import constants
 import { PRODUCT_TYPES, WIZARD_STEPS } from '@/features/contract-creation/constants/contract.constants';
@@ -2250,6 +2251,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const setLandingExpanded = productModal.setLandingExpanded;
   const showProductModal = productModal.showProductModal;
   const setShowProductModal = productModal.setShowProductModal;
+  const closeProductModal = productModal.closeModal;
   const returnToProductModalAfterRemainderRef = useRef(false);
   const hasQuantityBeenInteracted = productModal.hasQuantityBeenInteracted;
   const setHasQuantityBeenInteracted = productModal.setHasQuantityBeenInteracted;
@@ -2491,6 +2493,37 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     contractId: contractId || wizardData.signature?.contractId || null,
     onRestore: applyContractAutosaveDraft
   });
+  const editRecoveryBlocked = editRecovery.blocked;
+  const takeoverEditRecovery = editRecovery.takeover;
+  useEffect(() => {
+    const resolvedModalState = resolveProductModalRecoveryState({
+      showProductModal,
+      selectedProduct,
+      returnToProductModalAfterRemainder: returnToProductModalAfterRemainderRef.current
+    }, editRecoveryBlocked);
+    if (
+      resolvedModalState.showProductModal === showProductModal &&
+      resolvedModalState.selectedProduct === selectedProduct &&
+      resolvedModalState.returnToProductModalAfterRemainder ===
+        returnToProductModalAfterRemainderRef.current
+    ) {
+      return;
+    }
+    closeProductModal();
+    returnToProductModalAfterRemainderRef.current = false;
+  }, [
+    closeProductModal,
+    editRecoveryBlocked,
+    selectedProduct,
+    showProductModal
+  ]);
+  const handleEditRecoveryTakeover = useCallback(async () => {
+    closeProductModal();
+    returnToProductModalAfterRemainderRef.current = false;
+    await takeoverEditRecovery();
+    closeProductModal();
+    returnToProductModalAfterRemainderRef.current = false;
+  }, [closeProductModal, takeoverEditRecovery]);
 
   // Product filtering hook provides all filtered lists
   const productFiltering = useProductFiltering({
@@ -5752,7 +5785,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             <span>این قرارداد در محل دیگری در حال ویرایش است</span>
             <button
               type="button"
-              onClick={() => void editRecovery.takeover()}
+              onClick={() => void handleEditRecoveryTakeover()}
               className="font-semibold text-teal-700 dark:text-teal-300"
             >
               ادامه ویرایش در اینجا
@@ -5811,7 +5844,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         )}
 
         {/* Product Configuration Modal */}
-        {showProductModal && productConfig.productType === 'stair' && (
+        {!editRecoveryBlocked && showProductModal && productConfig.productType === 'stair' && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4">
             <div className="stair-v2-modal bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100 rounded-xl max-w-4xl w-full max-h-[90vh] flex flex-col z-[10000]">
               <div className="stair-v2-header flex flex-shrink-0 items-center justify-between border-b border-gray-200 bg-white/95 p-4 backdrop-blur-md dark:border-gray-700 dark:bg-slate-900/95">
@@ -10079,7 +10112,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         )}
         {/* New Modal Components */}
         <ProductConfigurationModal
-          isOpen={productModal.showProductModal && productModal.productConfig.productType !== 'stair' && !!productModal.selectedProduct}
+          isOpen={!editRecoveryBlocked && productModal.showProductModal && productModal.productConfig.productType !== 'stair' && !!productModal.selectedProduct}
           onClose={() => {
             productModal.setShowProductModal(false);
             productModal.setSelectedProduct(null);

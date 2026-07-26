@@ -24,6 +24,8 @@ const statusStyle: Record<HiringLifecycleStatus, string> = {
     "border-amber-400 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-100",
   BLOCKED:
     "border-rose-500 bg-rose-50 text-rose-900 dark:bg-rose-950/30 dark:text-rose-100",
+  PAUSED:
+    "border-violet-500 bg-violet-50 text-violet-900 dark:bg-violet-950/30 dark:text-violet-100",
   UPCOMING:
     "border-slate-300 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400",
   ENDED:
@@ -38,6 +40,7 @@ const statusIcon: Record<
   ACTION_REQUIRED: FaExclamation,
   WAITING: FaClock,
   BLOCKED: FaLock,
+  PAUSED: FaBan,
   UPCOMING: FaCircle,
   ENDED: FaBan,
 };
@@ -116,7 +119,7 @@ export function HiringLifecycle({
       </div>
 
       <div
-        className="mt-4 hidden grid-cols-7 gap-2 md:grid"
+        className="mt-4 hidden grid-cols-8 gap-2 md:grid"
         role="list"
         aria-label="مراحل جذب"
       >

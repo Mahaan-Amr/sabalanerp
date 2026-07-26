@@ -137,6 +137,9 @@ async function main() {
       identityClearance: "APPROVED",
       assessmentCompletedBy: user.id,
       assessmentCompletedAt: new Date(),
+      assessmentDecision: "APPROVED",
+      assessmentDecisionBy: user.id,
+      assessmentDecisionAt: new Date(),
       assessmentReviewRequired: false,
       assessmentReviewAcknowledgedBy: null,
       assessmentReviewAcknowledgedAt: null,
@@ -151,6 +154,9 @@ async function main() {
       identityClearance: "APPROVED",
       assessmentCompletedBy: user.id,
       assessmentCompletedAt: new Date(),
+      assessmentDecision: "APPROVED",
+      assessmentDecisionBy: user.id,
+      assessmentDecisionAt: new Date(),
     },
   });
 

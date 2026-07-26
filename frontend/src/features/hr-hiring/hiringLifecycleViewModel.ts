@@ -3,6 +3,7 @@ export type HiringLifecycleStatus =
   | "ACTION_REQUIRED"
   | "WAITING"
   | "BLOCKED"
+  | "PAUSED"
   | "UPCOMING"
   | "ENDED";
 
@@ -40,12 +41,14 @@ export const hiringLifecycleStatusLabel: Record<HiringLifecycleStatus, string> =
     ACTION_REQUIRED: "اقدام شما",
     WAITING: "در انتظار",
     BLOCKED: "مسدود",
+    PAUSED: "متوقف‌شده",
     UPCOMING: "پیش رو",
     ENDED: "پایان‌یافته",
   };
 
 export const hiringLifecyclePhaseOptions = [
   ["APPLICATION", "تشکیل پرونده و فرم متقاضی"],
+  ["PRE_IDENTITY", "بررسی‌های پیش از احراز هویت"],
   ["IDENTITY", "بررسی و احراز هویت"],
   ["ASSESSMENT", "ارزیابی و تصمیم اولیه"],
   ["OFFER", "پیشنهاد همکاری و پذیرش"],

@@ -93,6 +93,13 @@ class HrHiringSmsGateway {
     return { success: true, messageId: this.messages.length };
   }
 
+  async getDeliveryReport(messageId: number) {
+    if (this.usesTestAdapter) {
+      return { success: true, deliveryState: 1, deliveryDateTime: Math.floor(Date.now() / 1000) };
+    }
+    return smsService.getDeliveryReport(messageId);
+  }
+
   configureTestAdapter(mode: TestMode, reset = false) {
     if (!this.usesTestAdapter) {
       throw new Error("درگاه آزمایشی پیامک فعال نیست.");

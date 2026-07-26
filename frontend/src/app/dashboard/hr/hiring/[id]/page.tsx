@@ -202,7 +202,7 @@ export default function HiringCasePage() {
       setError("");
       const result = await hiringAPI.get(id);
       setData(result.data.data);
-      const currentCompensation = result.data.data.compensationSnapshots?.[0];
+      const currentCompensation = result.data.data.compensationSnapshots?.find((snapshot: any) => !snapshot.obsoleteAt);
       if (Array.isArray(currentCompensation?.componentsJson))
         setComponents(currentCompensation.componentsJson);
       if (result.data.data.insuranceEnrollment)
@@ -251,11 +251,12 @@ export default function HiringCasePage() {
   };
   if (!data) return <ErpLoading />;
   const form = data.formRevisions?.[0]?.dataJson || {};
-  const compensation = data.compensationSnapshots?.[0];
+  const compensation = data.compensationSnapshots?.find((snapshot: any) => !snapshot.obsoleteAt);
   const latestContract = data.contracts?.[0];
   const hasAuthority = (...values: string[]) =>
     values.some((value) => authorities.includes(value));
   const canHrSensitive = hasAuthority("HR_PROCESSOR", "HR_MANAGER");
+  const canCompanyManager = hasAuthority("COMPANY_MANAGER");
   const canFinance = hasAuthority("FINANCE_RECORDER", "FINANCE_MANAGER");
   const selectedLifecyclePhase = data.lifecycle
     ? resolveSelectedHiringPhase(data.lifecycle, searchParams.get("phase"))
@@ -419,7 +420,19 @@ export default function HiringCasePage() {
             </ErpCard>
           </ErpSection>
         )}
-      {canHrSensitive && (
+      {selectedLifecyclePhase === "PRE_IDENTITY" &&
+        (canHrSensitive || canCompanyManager) && (
+          <PreIdentitySection
+            application={data}
+            authorities={authorities}
+            busy={busy}
+            applicationId={id}
+            run={run}
+            download={download}
+          />
+        )}
+      {(canHrSensitive ||
+        (canCompanyManager && selectedLifecyclePhase === "ASSESSMENT")) && (
         <>
           {selectedLifecyclePhase === "APPLICATION" && (
             <ErpSection
@@ -444,6 +457,50 @@ export default function HiringCasePage() {
                         <p className="mt-1 font-bold">{String(value)}</p>
                       </div>
                     ))}
+                </div>
+              </ErpCard>
+              <ErpCard className="mt-4 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <b>دعوت‌ها و وضعیت دسترسی /apply</b>
+                  <ErpButton
+                    label="ارسال مجدد دعوت و OTP جدید"
+                    icon={FaSync}
+                    disabled={busy || data.stage === "CLOSED"}
+                    onClick={() =>
+                      run(
+                        () => hiringAPI.invite(id),
+                        "OTP جدید ارسال شد؛ OTP قبلی تا اولین استفاده موفق از کد جدید، پایان اعتبار خودش یا ۳۰ دقیقه موقتاً معتبر می‌ماند.",
+                      )
+                    }
+                  />
+                </div>
+                <div className="mt-3 space-y-2">
+                  {(data.invitations || []).map((invitation: any) => (
+                    <div key={invitation.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-xs">
+                      <span className="flex flex-col gap-1">
+                        <span>{invitation.accessConfirmedAt
+                          ? "تحویل‌شده (ورود موفق متقاضی)"
+                          : invitation.providerDeliveryState
+                            ? `گزارش SMS.ir: ${hrDisplayLabel(invitation.providerDeliveryState)}`
+                            : "در انتظار گزارش ارسال"}</span>
+                        {invitation.accessConfirmedAt && invitation.providerDeliveryState && <span className="text-slate-500">گزارش ارائه‌دهنده: {hrDisplayLabel(invitation.providerDeliveryState)}</span>}
+                      </span>
+                      <span>اعتبار تا {dateTimeFa(invitation.expiresAt)}</span>
+                      {invitation.providerMessageId && !invitation.accessConfirmedAt && (
+                        <button
+                          className="rounded-lg border px-3 py-1"
+                          onClick={() =>
+                            run(
+                              () => hiringAPI.refreshInvitationDelivery(id, invitation.id),
+                              "آخرین گزارش تحویل SMS.ir دریافت شد.",
+                            )
+                          }
+                        >
+                          به‌روزرسانی گزارش تحویل
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </ErpCard>
             </ErpSection>
@@ -728,7 +785,7 @@ export default function HiringCasePage() {
           {selectedLifecyclePhase === "ASSESSMENT" && (
             <ErpSection title="ارزیابی‌های DISC / BIG FIVE / EQ">
               <ErpCard className="p-4">
-                {hasAuthority("HR_PROCESSOR") && (
+                {(hasAuthority("HR_PROCESSOR") || (hasAuthority("HR_MANAGER") && editingAssessmentId)) && (
                   <>
                     <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
                       امتیازهای درج‌شده در گزارش رسمی ارزیابی را وارد کنید. همه
@@ -890,7 +947,7 @@ export default function HiringCasePage() {
                           دریافت فایل
                         </button>
                       )}
-                      {hasAuthority("HR_PROCESSOR") &&
+                      {hasAuthority("HR_MANAGER") &&
                         item.status === "ACTIVE" && (
                           <>
                             <button
@@ -962,7 +1019,7 @@ export default function HiringCasePage() {
                     tone="success"
                   />
                 )}
-                {hasAuthority("HIRING_MANAGER") &&
+                {hasAuthority("COMPANY_MANAGER") &&
                   data.assessmentReviewRequired &&
                   data.assessmentCompletedAt && (
                     <ErpButton
@@ -977,6 +1034,14 @@ export default function HiringCasePage() {
                       }
                     />
                   )}
+                {hasAuthority("COMPANY_MANAGER") && data.assessmentCompletedAt && (
+                  <AssessmentDecisionPanel
+                    applicationId={id}
+                    currentDecision={data.assessmentDecision}
+                    busy={busy}
+                    run={run}
+                  />
+                )}
               </ErpCard>
             </ErpSection>
           )}
@@ -990,9 +1055,18 @@ export default function HiringCasePage() {
           "FINANCE_MANAGER",
           "HR_PROCESSOR",
           "HR_MANAGER",
+          "COMPANY_MANAGER",
         ) && (
           <>
             <ErpSection title="پیشنهاد حقوق و مزایا">
+              {hasAuthority("COMPANY_MANAGER") && (
+                <CollateralRequirementPanel
+                  applicationId={id}
+                  current={data.collateralRequirements?.[0]}
+                  busy={busy}
+                  run={run}
+                />
+              )}
               <ErpCard className="p-4">
                 <div className="space-y-2">
                   {components.map((item, i) => (
@@ -1999,6 +2073,16 @@ export default function HiringCasePage() {
             </ErpSection>
           </>
         )}
+      {(data.disposition ||
+        (data.stage === "CLOSED" && data.outcome !== "HIRED")) && (
+        <CaseRecoveryPanel
+          application={data}
+          authorities={authorities}
+          applicationId={id}
+          busy={busy}
+          run={run}
+        />
+      )}
     </ErpPage>
   );
 }
@@ -2009,5 +2093,629 @@ function Metric({ label, value }: { label: string; value: string }) {
       <p className="text-xs text-slate-500">{label}</p>
       <b className="mt-1 block text-xs">{value}</b>
     </ErpCard>
+  );
+}
+
+type CaseActionRunner = (
+  action: () => Promise<any>,
+  success: string,
+) => Promise<void>;
+
+function PreIdentitySection({
+  application,
+  authorities,
+  busy,
+  applicationId,
+  run,
+  download,
+}: {
+  application: any;
+  authorities: string[];
+  busy: boolean;
+  applicationId: string;
+  run: CaseActionRunner;
+  download: (request: () => Promise<any>, fileName: string) => Promise<void>;
+}) {
+  const has = (...values: string[]) =>
+    values.some((value) => authorities.includes(value));
+  const [decisionDrafts, setDecisionDrafts] = useState<Record<string, any>>({});
+  const [requirement, setRequirement] = useState({
+    title: "",
+    instructions: "",
+    evidencePolicy: "NOTE_REQUIRED",
+    dueAt: "",
+  });
+  const [results, setResults] = useState<Record<string, any>>({});
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [templateId, setTemplateId] = useState("");
+  const [templateName, setTemplateName] = useState("");
+  const decisions = application.hiringDecisions || [];
+  const latest = (kind: string) =>
+    decisions
+      .filter((item: any) => item.kind === kind)
+      .sort((a: any, b: any) => b.version - a.version)[0];
+  const decisionDefinitions = [
+    ["HR_INTERVIEW", "مصاحبه اولیه با HR", "HR_PROCESSOR"],
+    ["HR_PRELIMINARY_APPROVAL", "تأیید اولیه HR", "HR_MANAGER"],
+    ["COMPANY_APPROVAL", "تأیید مدیریت شرکت", "COMPANY_MANAGER"],
+  ];
+  useEffect(() => {
+    if (!has("COMPANY_MANAGER")) return;
+    void hiringAPI.preIdentityTemplates().then((response) => {
+      setTemplates(response.data.data || []);
+      setTemplateId(response.data.data?.[0]?.id || "");
+    });
+    // Authority membership is stable for the lifetime of this case view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <ErpSection
+      title="بررسی‌های پیش از احراز هویت"
+      description="این چک‌لیست فقط در فضای داخلی پیگیری می‌شود و در صفحه متقاضی نمایش داده نمی‌شود."
+    >
+      <div className="grid gap-3 xl:grid-cols-3">
+        {decisionDefinitions.map(([kind, label, authority]) => {
+          const current = latest(kind);
+          const draft = decisionDrafts[kind] || {
+            outcome: "POSITIVE",
+            explanation: "",
+            changeReason: "",
+          };
+          return (
+            <ErpCard key={kind} className="space-y-2 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <b>{label}</b>
+                <ErpBadge
+                  tone={
+                    current?.outcome === "POSITIVE"
+                      ? "success"
+                      : current?.outcome === "NEGATIVE"
+                        ? "danger"
+                        : "neutral"
+                  }
+                >
+                  {current?.outcome === "POSITIVE"
+                    ? "تأیید"
+                    : current?.outcome === "NEGATIVE"
+                      ? "رد"
+                      : "ثبت نشده"}
+                </ErpBadge>
+              </div>
+              {current && (
+                <div className="rounded-lg bg-slate-50 p-2 text-xs dark:bg-slate-800">
+                  <p>{current.explanation || "بدون توضیح"}</p>
+                  <small>نسخه {current.version.toLocaleString("fa-IR")}</small>
+                </div>
+              )}
+              {has(authority) && (
+                <>
+                  <select
+                    className={field}
+                    value={draft.outcome}
+                    onChange={(event) =>
+                      setDecisionDrafts({
+                        ...decisionDrafts,
+                        [kind]: { ...draft, outcome: event.target.value },
+                      })
+                    }
+                  >
+                    <option value="POSITIVE">تأیید</option>
+                    <option value="NEGATIVE">رد</option>
+                  </select>
+                  <textarea
+                    className={field}
+                    placeholder={
+                      kind === "COMPANY_APPROVAL" && draft.outcome === "POSITIVE"
+                        ? "توضیح اختیاری"
+                        : "توضیح تصمیم (الزامی)"
+                    }
+                    value={draft.explanation}
+                    onChange={(event) =>
+                      setDecisionDrafts({
+                        ...decisionDrafts,
+                        [kind]: { ...draft, explanation: event.target.value },
+                      })
+                    }
+                  />
+                  {current && (
+                    <input
+                      className={field}
+                      placeholder="دلیل تغییر تصمیم قبلی"
+                      value={draft.changeReason}
+                      onChange={(event) =>
+                        setDecisionDrafts({
+                          ...decisionDrafts,
+                          [kind]: { ...draft, changeReason: event.target.value },
+                        })
+                      }
+                    />
+                  )}
+                  <ErpButton
+                    label="ثبت نسخه تصمیم"
+                    disabled={
+                      busy ||
+                      (kind !== "COMPANY_APPROVAL" || draft.outcome === "NEGATIVE") &&
+                        !draft.explanation.trim() ||
+                      Boolean(current && !draft.changeReason.trim())
+                    }
+                    onClick={() =>
+                      run(
+                        () => hiringAPI.recordDecision(applicationId, kind, draft),
+                        "تصمیم با سابقه حسابرسی ثبت شد.",
+                      )
+                    }
+                  />
+                </>
+              )}
+            </ErpCard>
+          );
+        })}
+      </div>
+
+      <ErpCard className="mt-4 space-y-3 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <b>چک‌لیست الزامات مدیریت شرکت</b>
+          <ErpBadge
+            tone={application.preIdentityRequirementsFinalizedAt ? "success" : "warning"}
+          >
+            {application.preIdentityRequirementsFinalizedAt ? "نهایی شده" : "در حال تنظیم"}
+          </ErpBadge>
+        </div>
+        {has("COMPANY_MANAGER") && (
+          <div className="space-y-3">
+            <div className="grid gap-2 md:grid-cols-3">
+              <select className={field} value={templateId} onChange={(event) => setTemplateId(event.target.value)}>
+                <option value="">انتخاب قالب نسخه‌دار</option>
+                {templates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name} · نسخه {template.version.toLocaleString("fa-IR")}
+                  </option>
+                ))}
+              </select>
+              <ErpButton
+                label="اعمال قالب به پرونده"
+                disabled={busy || !templateId}
+                onClick={() => run(() => hiringAPI.applyPreIdentityTemplate(applicationId, templateId), "قالب چک‌لیست به پرونده اعمال شد.")}
+              />
+              <div className="flex gap-2">
+                <input className={field} placeholder="نام قالب جدید" value={templateName} onChange={(event) => setTemplateName(event.target.value)} />
+                <ErpButton
+                  label="ذخیره اقلام فعلی به‌عنوان قالب جایگاه"
+                  disabled={busy || !templateName.trim() || !(application.preIdentityChecklistItems || []).length}
+                  onClick={() =>
+                    run(
+                      () => hiringAPI.createPreIdentityTemplate({
+                        name: templateName,
+                        scopeType: "POSITION",
+                        scopeId: application.positionId,
+                        items: (application.preIdentityChecklistItems || []).map((item: any) => ({ title: item.title, instructions: item.instructions, evidencePolicy: item.evidencePolicy })),
+                      }),
+                      "نسخه جدید قالب برای این جایگاه ذخیره شد.",
+                    )
+                  }
+                />
+              </div>
+            </div>
+            <div className="grid gap-2 md:grid-cols-4">
+            <input
+              className={field}
+              placeholder="عنوان الزام یا ارزیابی سفارشی"
+              value={requirement.title}
+              onChange={(event) =>
+                setRequirement({ ...requirement, title: event.target.value })
+              }
+            />
+            <input
+              className={field}
+              placeholder="شرح و دستور پیگیری"
+              value={requirement.instructions}
+              onChange={(event) =>
+                setRequirement({ ...requirement, instructions: event.target.value })
+              }
+            />
+            <select
+              className={field}
+              value={requirement.evidencePolicy}
+              onChange={(event) =>
+                setRequirement({ ...requirement, evidencePolicy: event.target.value })
+              }
+            >
+              <option value="NOTE_REQUIRED">توضیح الزامی</option>
+              <option value="FILE_REQUIRED">فایل الزامی</option>
+              <option value="FILE_OPTIONAL">فایل اختیاری</option>
+              <option value="NO_FILE">بدون فایل</option>
+            </select>
+            <input
+              className={field}
+              type="datetime-local"
+              value={requirement.dueAt}
+              onChange={(event) =>
+                setRequirement({ ...requirement, dueAt: event.target.value })
+              }
+            />
+            <ErpButton
+              label="افزودن به چک‌لیست"
+              disabled={busy || !requirement.title.trim()}
+              onClick={() =>
+                run(
+                  () => hiringAPI.addPreIdentityItem(applicationId, requirement),
+                  "الزام جدید به چک‌لیست افزوده شد.",
+                )
+              }
+            />
+            <ErpButton
+              label="نهایی‌سازی الزامات"
+              tone="success"
+              disabled={busy || Boolean(application.preIdentityRequirementsFinalizedAt)}
+              onClick={() =>
+                run(
+                  () => hiringAPI.finalizePreIdentity(applicationId),
+                  "الزامات توسط مدیریت شرکت نهایی شد.",
+                )
+              }
+            />
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {(application.preIdentityChecklistItems || []).map((item: any) => {
+            const draft = results[item.id] || {
+              status: item.status === "PENDING" ? "IN_PROGRESS" : item.status,
+              resultExplanation: item.resultExplanation || "",
+              resultSource: item.resultSource || "",
+              file: null,
+            };
+            return (
+              <div key={item.id} className="rounded-xl border p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <b>{item.title}</b>
+                    <p className="text-xs text-slate-500">{item.instructions}</p>
+                  </div>
+                  <ErpBadge
+                    tone={
+                      item.status === "POSITIVE"
+                        ? "success"
+                        : item.status === "NEGATIVE"
+                          ? "danger"
+                          : "warning"
+                    }
+                  >
+                    {hrDisplayLabel(item.status)}
+                  </ErpBadge>
+                </div>
+                {item.resultExplanation && (
+                  <p className="mt-2 rounded-lg bg-slate-50 p-2 text-xs dark:bg-slate-800">
+                    {item.resultExplanation}
+                  </p>
+                )}
+                {has("HR_PROCESSOR", "HR_MANAGER", "COMPANY_MANAGER") && item.originalName && (
+                  <button
+                    className="mt-2 rounded-lg border px-3 py-1 text-xs"
+                    onClick={() => download(() => hiringAPI.downloadPreIdentityEvidence(applicationId, item.id), item.originalName)}
+                  >
+                    دریافت گزارش محرمانه
+                  </button>
+                )}
+                {has("HR_PROCESSOR") && !["POSITIVE", "NEGATIVE"].includes(item.status) && (
+                  <div className="mt-3 grid gap-2 md:grid-cols-4">
+                    <select
+                      className={field}
+                      value={draft.status}
+                      onChange={(event) =>
+                        setResults({
+                          ...results,
+                          [item.id]: { ...draft, status: event.target.value },
+                        })
+                      }
+                    >
+                      <option value="PENDING">در انتظار</option>
+                      <option value="IN_PROGRESS">در حال پیگیری</option>
+                      <option value="POSITIVE">مثبت</option>
+                      <option value="NEGATIVE">منفی</option>
+                    </select>
+                    <input
+                      className={field}
+                      placeholder="توضیح نتیجه HR"
+                      value={draft.resultExplanation}
+                      onChange={(event) =>
+                        setResults({
+                          ...results,
+                          [item.id]: { ...draft, resultExplanation: event.target.value },
+                        })
+                      }
+                    />
+                    <input
+                      className={field}
+                      placeholder="منبع گزارش"
+                      value={draft.resultSource}
+                      onChange={(event) =>
+                        setResults({
+                          ...results,
+                          [item.id]: { ...draft, resultSource: event.target.value },
+                        })
+                      }
+                    />
+                    <input
+                      className={field}
+                      type="file"
+                      onChange={(event) =>
+                        setResults({
+                          ...results,
+                          [item.id]: { ...draft, file: event.target.files?.[0] },
+                        })
+                      }
+                    />
+                    <ErpButton
+                      label="ثبت نتیجه HR"
+                      disabled={
+                        busy ||
+                        (["POSITIVE", "NEGATIVE"].includes(draft.status) &&
+                          !draft.resultExplanation.trim())
+                      }
+                      onClick={() => {
+                        const payload = new FormData();
+                        payload.append("status", draft.status);
+                        payload.append("resultExplanation", draft.resultExplanation);
+                        payload.append("resultSource", draft.resultSource);
+                        if (draft.file) payload.append("file", draft.file);
+                        return run(
+                          () =>
+                            hiringAPI.recordPreIdentityResult(
+                              applicationId,
+                              item.id,
+                              payload,
+                            ),
+                          "نتیجه چک‌لیست توسط HR ثبت شد.",
+                        );
+                      }}
+                    />
+                  </div>
+                )}
+                {has("HR_MANAGER") && ["POSITIVE", "NEGATIVE"].includes(item.status) && (
+                  <button
+                    type="button"
+                    className="mt-3 rounded-lg border border-amber-300 px-3 py-2 text-xs font-bold text-amber-700"
+                    onClick={() => {
+                      const reason = window.prompt("دلیل ایجاد نسخه اصلاحی نتیجه را وارد کنید:");
+                      if (reason?.trim()) void run(() => hiringAPI.correctPreIdentityItem(applicationId, item.id, reason.trim()), "نسخه اصلاحی جدید ایجاد شد.");
+                    }}
+                  >
+                    ایجاد نسخه اصلاحی
+                  </button>
+                )}
+                {has("COMPANY_MANAGER") && item.status === "NEGATIVE" && !item.managementResolution && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {["CONTINUE", "REPEAT", "RESERVE"].map((resolution) => (
+                      <button
+                        key={resolution}
+                        className="rounded-lg border px-3 py-2 text-xs font-bold"
+                        onClick={() => {
+                          const reason = window.prompt("دلیل تصمیم مدیریت شرکت را ثبت کنید:");
+                          if (reason?.trim())
+                            void run(
+                              () =>
+                                hiringAPI.resolvePreIdentityNegative(
+                                  applicationId,
+                                  item.id,
+                                  { resolution, reason: reason.trim() },
+                                ),
+                              "نتیجه منفی توسط مدیریت شرکت تعیین تکلیف شد.",
+                            );
+                        }}
+                      >
+                        {resolution === "CONTINUE"
+                          ? "ادامه با دلیل"
+                          : resolution === "REPEAT"
+                            ? "تکرار الزام"
+                            : "رد/ذخیره"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {has("HR_PROCESSOR") && application.preIdentityManagementApprovedAt && (
+          <ErpButton
+            label="ارسال پرونده به احراز هویت"
+            tone="success"
+            disabled={busy || Boolean(application.preIdentityReleasedAt)}
+            onClick={() =>
+              run(
+                () => hiringAPI.releasePreIdentity(applicationId),
+                "چک‌لیست اداری تکمیل و مرحله احراز هویت باز شد.",
+              )
+            }
+          />
+        )}
+      </ErpCard>
+    </ErpSection>
+  );
+}
+
+function AssessmentDecisionPanel({
+  applicationId,
+  currentDecision,
+  busy,
+  run,
+}: {
+  applicationId: string;
+  currentDecision?: string;
+  busy: boolean;
+  run: CaseActionRunner;
+}) {
+  const [decision, setDecision] = useState("APPROVED");
+  const [reason, setReason] = useState("");
+  const [dueAt, setDueAt] = useState("");
+  return (
+    <div className="mt-4 grid gap-2 rounded-xl border p-3 md:grid-cols-3">
+      <div className="md:col-span-3">
+        <b>تصمیم مدیریت شرکت</b>
+        {currentDecision && (
+          <span className="mr-2 text-xs text-slate-500">
+            وضعیت فعلی: {hrDisplayLabel(currentDecision)}
+          </span>
+        )}
+      </div>
+      <select className={field} value={decision} onChange={(event) => setDecision(event.target.value)}>
+        <option value="APPROVED">تأیید و تکمیل خودکار مرحله</option>
+        <option value="REPEAT_REQUIRED">تکرار ارزیابی</option>
+        <option value="RESERVE">رد/ذخیره</option>
+        <option value="REJECTED">رد نهایی</option>
+      </select>
+      <input
+        className={field}
+        placeholder={decision === "APPROVED" ? "توضیح اختیاری" : "دلیل الزامی"}
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+      />
+      {decision === "REPEAT_REQUIRED" && (
+        <input className={field} type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
+      )}
+      <ErpButton
+        label="ثبت تصمیم ارزیابی"
+        tone="success"
+        disabled={busy || (decision !== "APPROVED" && !reason.trim())}
+        onClick={() =>
+          run(
+            () => hiringAPI.decideAssessment(applicationId, { decision, reason, dueAt: dueAt || undefined }),
+            "تصمیم مدیریت شرکت درباره ارزیابی ثبت شد.",
+          )
+        }
+      />
+    </div>
+  );
+}
+
+function CollateralRequirementPanel({
+  applicationId,
+  current,
+  busy,
+  run,
+}: {
+  applicationId: string;
+  current?: any;
+  busy: boolean;
+  run: CaseActionRunner;
+}) {
+  const [draft, setDraft] = useState({
+    type: current?.type || "PROMISSORY_NOTE",
+    amountRials: current?.amountRials || "",
+    obligation: current?.obligation || "",
+    dueTiming: current?.dueTiming || "",
+    candidateExplanation: current?.candidateExplanation || "",
+  });
+  return (
+    <ErpCard className="mb-4 space-y-3 p-4">
+      <div>
+        <b>الزام وثیقه پیشنهادی مدیریت شرکت</b>
+        {current && <p className="text-xs text-slate-500">نسخه فعال {current.version.toLocaleString("fa-IR")}</p>}
+      </div>
+      <div className="grid gap-2 md:grid-cols-5">
+        <select className={field} value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value })}>
+          <option value="PROMISSORY_NOTE">سفته</option>
+          <option value="CHEQUE">چک ضمانت</option>
+          <option value="GUARANTEE">ضامن</option>
+          <option value="UNDERTAKING">تعهدنامه</option>
+          <option value="OTHER">سایر</option>
+        </select>
+        <input className={field} placeholder="مبلغ (ریال)" value={draft.amountRials} onChange={(event) => setDraft({ ...draft, amountRials: event.target.value })} />
+        <input className={field} placeholder="تعهد" value={draft.obligation} onChange={(event) => setDraft({ ...draft, obligation: event.target.value })} />
+        <input className={field} placeholder="زمان تحویل" value={draft.dueTiming} onChange={(event) => setDraft({ ...draft, dueTiming: event.target.value })} />
+        <input className={field} placeholder="توضیح قابل نمایش به متقاضی" value={draft.candidateExplanation} onChange={(event) => setDraft({ ...draft, candidateExplanation: event.target.value })} />
+      </div>
+      <ErpButton
+        label={current ? "ثبت نسخه جدید الزام وثیقه" : "ثبت الزام وثیقه"}
+        disabled={busy || !draft.candidateExplanation.trim()}
+        onClick={() =>
+          run(
+            () => hiringAPI.addCollateralRequirement(applicationId, draft),
+            current
+              ? "نسخه جدید الزام وثیقه ثبت شد؛ پیشنهاد باید دوباره پذیرفته شود."
+              : "الزام وثیقه ثبت شد.",
+          )
+        }
+      />
+    </ErpCard>
+  );
+}
+
+function CaseRecoveryPanel({
+  application,
+  authorities,
+  applicationId,
+  busy,
+  run,
+}: {
+  application: any;
+  authorities: string[];
+  applicationId: string;
+  busy: boolean;
+  run: CaseActionRunner;
+}) {
+  const [reason, setReason] = useState("");
+  const [consent, setConsent] = useState({ method: "PHONE", at: "", note: "" });
+  const has = (...values: string[]) => values.some((value) => authorities.includes(value));
+  const authorized = (application.reopenings || []).some((item: any) => item.status === "AUTHORIZED");
+  if (application.disposition) {
+    const canReactivate =
+      (application.disposition === "INITIAL_REJECTED" && has("HR_MANAGER")) ||
+      (application.disposition === "RESERVE" && has("COMPANY_MANAGER"));
+    return (
+      <ErpSection title="فعال‌سازی مجدد پرونده متوقف‌شده">
+        <ErpCard className="grid gap-2 p-4 md:grid-cols-3">
+          <p className="text-sm">برچسب فعلی: {hrDisplayLabel(application.disposition)}</p>
+          <input className={field} placeholder="دلیل فعال‌سازی مجدد" value={reason} onChange={(event) => setReason(event.target.value)} />
+          {canReactivate && (
+            <ErpButton label="فعال‌سازی مجدد" disabled={busy || !reason.trim()} onClick={() => run(() => hiringAPI.reactivateDisposition(applicationId, reason), "پرونده در همان مرحله دوباره فعال شد.")} />
+          )}
+        </ErpCard>
+      </ErpSection>
+    );
+  }
+  return (
+    <ErpSection
+      title="بازگشایی پرونده بسته"
+      description="پرونده استخدام‌شده هرگز بازگشایی نمی‌شود؛ استخدام قبلی یا لغوشده باید Application جدید بگیرد."
+    >
+      <ErpCard className="grid gap-2 p-4 md:grid-cols-3">
+        <input className={field} placeholder="دلیل بازگشایی" value={reason} onChange={(event) => setReason(event.target.value)} />
+        {has("COMPANY_MANAGER") && !authorized && (
+          <ErpButton label="صدور مجوز مدیریت شرکت" disabled={busy || !reason.trim()} onClick={() => run(() => hiringAPI.authorizeReopening(applicationId, reason), "مجوز بازگشایی صادر شد.")} />
+        )}
+        {application.outcome === "WITHDRAWN" && has("HR_MANAGER") && authorized && (
+          <>
+            <select className={field} value={consent.method} onChange={(event) => setConsent({ ...consent, method: event.target.value })}>
+              <option value="PHONE">رضایت تلفنی</option>
+              <option value="IN_PERSON">رضایت حضوری</option>
+            </select>
+            <input className={field} type="datetime-local" value={consent.at} onChange={(event) => setConsent({ ...consent, at: event.target.value })} />
+            <input className={field} placeholder="شرح رضایت جدید متقاضی" value={consent.note} onChange={(event) => setConsent({ ...consent, note: event.target.value })} />
+          </>
+        )}
+        {has("HR_MANAGER") && authorized && (
+          <ErpButton
+            label="اجرای بازگشایی توسط مدیر HR"
+            tone="success"
+            disabled={busy || !reason.trim() || (application.outcome === "WITHDRAWN" && (!consent.at || !consent.note.trim()))}
+            onClick={() =>
+              run(
+                () => hiringAPI.executeReopening(applicationId, {
+                  reason,
+                  candidateConsentMethod: application.outcome === "WITHDRAWN" ? consent.method : undefined,
+                  candidateConsentedAt: application.outcome === "WITHDRAWN" ? consent.at : undefined,
+                  candidateConsentNote: application.outcome === "WITHDRAWN" ? consent.note : undefined,
+                }),
+                "پرونده با حفظ شواهد در آخرین مرحله پیش از بسته‌شدن بازگشایی شد.",
+              )
+            }
+          />
+        )}
+      </ErpCard>
+    </ErpSection>
   );
 }

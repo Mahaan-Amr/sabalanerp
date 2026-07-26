@@ -235,3 +235,16 @@
 - [ ] یک سناریوی REJECTED پیش از تبدیل کامل و retention آن بررسی شود.
 - [ ] یک سناریوی WITHDRAWN پس از دریافت وثیقه، بازگشت و تأیید تحویل را کامل کند.
 - [ ] یک ثبت استثنایی مجاز و یک تلاش غیرمجاز اجرا شود؛ audit ثبت موفق و پاسخ `403` تلاش غیرمجاز بررسی شوند.
+# HR hiring governance and recovery (2026-07-26)
+
+- [ ] The Candidate-hidden pre-identity phase appears between form submission and Identity.
+- [ ] HR interview, preliminary HR approval, and Company Manager approval enforce their order and preserve versions.
+- [ ] HR records checklist results; Company Manager can inspect reports and resolves negative results.
+- [ ] An overdue requirement produces one HR-only reminder and is not automatically escalated to Company Manager.
+- [ ] Company Manager approval completes formal Assessment without another HR click.
+- [ ] Initial-rejected and reserve Applications pause and require explicit authorized reactivation.
+- [ ] REJECTED, WITHDRAWN, and REQUEST_CANCELLED can formally reopen; HIRED cannot.
+- [ ] OTP resend preserves the previous code during overlap and never changes saved Application form data.
+- [ ] SMS.ir delivery evidence remains distinct from successful `/apply` access confirmation.
+- [ ] Company Manager proposes Candidate-visible collateral; Finance receives and independently approves it after offer acceptance.
+- [ ] The Applicant table shows full mobile, Job/Position, lifecycle, disposition, and the three decisions with filtering, sorting, and pagination.

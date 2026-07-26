@@ -421,6 +421,35 @@ class SmsService {
     }
   }
 
+  async getDeliveryReport(messageId: number): Promise<{
+    success: boolean;
+    deliveryState?: number | null;
+    deliveryDateTime?: number | null;
+    error?: string;
+    rawResponse?: unknown;
+  }> {
+    try {
+      if (!this.apiKey) return { success: false, error: 'SMS API key is not configured' };
+      const response = await axios.get(`${this.apiUrl}/send/${messageId}`, {
+        headers: { Accept: 'application/json', 'x-api-key': this.apiKey },
+        timeout: this.requestTimeoutMs,
+        httpAgent: this.httpAgent,
+        httpsAgent: this.httpsAgent
+      });
+      if (response.data?.status !== 1) {
+        return { success: false, error: response.data?.message || 'SMS delivery report failed', rawResponse: response.data };
+      }
+      return {
+        success: true,
+        deliveryState: response.data?.data?.deliveryState ?? null,
+        deliveryDateTime: response.data?.data?.deliveryDateTime ?? null,
+        rawResponse: response.data
+      };
+    } catch (error: any) {
+      return { success: false, error: error.response?.data?.message || error.message || 'SMS delivery report failed', rawResponse: error.response?.data };
+    }
+  }
+
   /**
    * Check if SMS service is configured
    * @returns true if API key is set

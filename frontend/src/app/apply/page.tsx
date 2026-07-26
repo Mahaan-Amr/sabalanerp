@@ -7,6 +7,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import PersianCalendarComponent from "@/components/PersianCalendar";
 import PersianCalendar from "@/lib/persian-calendar";
 import { toIsoDate } from "@/features/hr/hrUi";
+import { hrDisplayLabel } from "@/features/hr/hrDisplay";
 
 const questions = [
   "به چه فعالیت‌های هنری یا ورزشی علاقه دارید؟",
@@ -893,6 +894,25 @@ export default function ApplicantFormPage() {
                 </b>
               </div>
             </div>
+            {application.compensation.collateralRequirement && (
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
+                <h3 className="font-black">شرایط وثیقه این پیشنهاد</h3>
+                <p className="mt-2 text-sm">
+                  {application.compensation.collateralRequirement.candidateExplanation}
+                </p>
+                <div className="mt-3 grid gap-2 text-xs md:grid-cols-3">
+                  <span>نوع: {hrDisplayLabel(application.compensation.collateralRequirement.type)}</span>
+                  {application.compensation.collateralRequirement.amountRials && (
+                    <span>
+                      مبلغ: {Number(application.compensation.collateralRequirement.amountRials).toLocaleString("fa-IR")} ریال
+                    </span>
+                  )}
+                  {application.compensation.collateralRequirement.dueTiming && (
+                    <span>زمان تحویل: {application.compensation.collateralRequirement.dueTiming}</span>
+                  )}
+                </div>
+              </div>
+            )}
             {!application.compensation.candidateDecision && (
               <div className="mt-4 space-y-3 border-t pt-4">
                 <label className="flex gap-2 text-sm">

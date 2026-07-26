@@ -6,7 +6,7 @@ import { usersAPI } from '@/lib/api';
 import { hiringAPI, hiringError } from '@/lib/hiringApi';
 import { authorityLabel } from '@/features/hr/hrDisplay';
 
-const authorities = ['HR_PROCESSOR', 'HR_MANAGER', 'HR_PAYROLL_PROCESSOR', 'HR_PAYROLL_MANAGER', 'FINANCE_RECORDER', 'FINANCE_MANAGER', 'HIRING_MANAGER'];
+const authorities = ['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER', 'HR_PAYROLL_PROCESSOR', 'HR_PAYROLL_MANAGER', 'FINANCE_RECORDER', 'FINANCE_MANAGER', 'HIRING_MANAGER'];
 const field = 'w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100';
 
 export default function HiringAuthoritiesPage() {

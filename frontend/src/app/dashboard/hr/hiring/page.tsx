@@ -5,22 +5,21 @@ import { useEffect, useState } from "react";
 import {
   FaCog,
   FaFilter,
-  FaPaperPlane,
   FaPlus,
   FaSync,
-  FaUserPlus,
 } from "react-icons/fa";
 import {
   ErpBadge,
   ErpButton,
   ErpCard,
-  ErpEmptyState,
   ErpLoading,
   ErpPage,
   ErpSection,
 } from "@/components/erp";
 import { hrAPI } from "@/lib/api";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
+import { dateTimeFa } from "@/features/hr/hrUi";
+import { hrDisplayLabel } from "@/features/hr/hrDisplay";
 import {
   hiringLifecyclePhaseOptions,
   hiringLifecycleStatusLabel,
@@ -42,6 +41,12 @@ const blankFilters: HiringQueueFilters = {
   attention: "",
   phase: "",
   outcome: "",
+  search: "",
+  positionId: "",
+  disposition: "",
+  sortBy: "priority",
+  sortDirection: "asc",
+  page: 1,
 };
 const field =
   "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-900";
@@ -62,6 +67,8 @@ export default function HiringCasesPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [meta, setMeta] = useState({ page: 1, totalPages: 1, total: 0 });
+  const [decisionDetail, setDecisionDetail] = useState<any>(null);
 
   const load = async (nextFilters: HiringQueueFilters = filters) => {
     try {
@@ -72,6 +79,7 @@ export default function HiringCasesPage() {
         hrAPI.getFoundation(),
       ]);
       setRows(cases.data.data);
+      setMeta(cases.data.meta || { page: 1, totalPages: 1, total: cases.data.data.length });
       setPositions(foundation.data.data.positions || []);
     } catch (cause) {
       setError(hiringError(cause));
@@ -222,6 +230,72 @@ export default function HiringCasesPage() {
         description="فیلترها از همان وضعیت محاسبه‌شده در پرونده استفاده می‌کنند."
       >
         <ErpCard className="mb-4 grid gap-3 p-4 md:grid-cols-4">
+          <input
+            className={field}
+            placeholder="جست‌وجوی نام، نام خانوادگی، موبایل یا کد ملی"
+            value={filters.search || ""}
+            onChange={(event) =>
+              setFilters({ ...filters, search: event.target.value, page: 1 })
+            }
+          />
+          <select
+            className={field}
+            value={filters.positionId || ""}
+            onChange={(event) =>
+              setFilters({ ...filters, positionId: event.target.value, page: 1 })
+            }
+          >
+            <option value="">همه شغل‌ها و جایگاه‌ها</option>
+            {positions.map((position: any) => (
+              <option key={position.id} value={position.id}>
+                {position.title}
+              </option>
+            ))}
+          </select>
+          <select
+            className={field}
+            value={filters.disposition || ""}
+            onChange={(event) =>
+              setFilters({ ...filters, disposition: event.target.value, page: 1 })
+            }
+          >
+            <option value="">همه برچسب‌ها</option>
+            <option value="INITIAL_REJECTED">رد اولیه</option>
+            <option value="RESERVE">رد/ذخیره</option>
+          </select>
+          <div className="flex gap-2">
+            <select
+              className={field}
+              value={filters.sortBy || "priority"}
+              onChange={(event) =>
+                setFilters({
+                  ...filters,
+                  sortBy: event.target.value as HiringQueueFilters["sortBy"],
+                  page: 1,
+                })
+              }
+            >
+              <option value="priority">اقدام‌های من، مسدود و آخرین تغییر</option>
+              <option value="updatedAt">آخرین تغییر</option>
+              <option value="candidateName">نام متقاضی</option>
+              <option value="position">شغل و جایگاه</option>
+              <option value="status">وضعیت پرونده</option>
+            </select>
+            <select
+              className={field}
+              value={filters.sortDirection || "desc"}
+              onChange={(event) =>
+                setFilters({
+                  ...filters,
+                  sortDirection: event.target.value as "asc" | "desc",
+                  page: 1,
+                })
+              }
+            >
+              <option value="desc">نزولی</option>
+              <option value="asc">صعودی</option>
+            </select>
+          </div>
           <select
             className={field}
             value={filters.attention}
@@ -237,6 +311,7 @@ export default function HiringCasesPage() {
             <option value="MY_ACTIONS">اقدام‌های من</option>
             <option value="BLOCKED">مسدود</option>
             <option value="WAITING">در انتظار</option>
+            <option value="PAUSED">متوقف</option>
           </select>
           <select
             className={field}
@@ -259,7 +334,8 @@ export default function HiringCasesPage() {
               setFilters({ ...filters, outcome: event.target.value })
             }
           >
-            <option value="">همه نتایج</option>
+            <option value="">فعال، متوقف و بسته (بدون استخدام‌شده)</option>
+            <option value="ALL">همه پرونده‌ها با استخدام‌شده‌ها</option>
             <option value="HIRED">استخدام‌شده</option>
             <option value="REJECTED">رد شده</option>
             <option value="WITHDRAWN">انصراف متقاضی</option>
@@ -285,82 +361,145 @@ export default function HiringCasesPage() {
           </div>
         </ErpCard>
 
-        <div className="grid gap-3 xl:grid-cols-2" aria-busy={loading}>
-          {rows.map((row) => {
-            const summary = row.lifecycleSummary;
-            return (
-              <ErpCard key={row.id} className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <Link
-                      href={`/dashboard/hr/hiring/${row.id}`}
-                      className="font-black hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-                    >
-                      {row.candidate.firstName} {row.candidate.lastName}
-                    </Link>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {row.position.title} · {row.candidate.mobile}
-                    </p>
-                  </div>
-                  {summary && (
-                    <ErpBadge tone={badgeTone(summary.status)}>
-                      {
-                        hiringLifecycleStatusLabel[
-                          summary.status as HiringLifecycleStatus
-                        ]
-                      }
-                    </ErpBadge>
-                  )}
-                </div>
-                {summary && (
-                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-black">{summary.phaseTitle}</p>
-                      <span className="text-xs text-slate-500">
-                        مرحله{" "}
-                        {Number(summary.phaseNumber).toLocaleString("fa-IR")} از
-                        ۷
+        <ErpCard className="overflow-x-auto" aria-busy={loading}>
+          <table className="min-w-[1250px] w-full text-right text-xs">
+            <thead className="bg-slate-100 dark:bg-slate-800">
+              <tr>
+                {[
+                  "متقاضی و موبایل",
+                  "شغل / جایگاه",
+                  "مرحله",
+                  "وضعیت و برچسب",
+                  "مصاحبه اولیه با HR",
+                  "تأیید اولیه HR",
+                  "تأیید مدیریت",
+                  "اقدام بعدی / مسئول",
+                  "آخرین تغییر",
+                  "عملیات",
+                ].map((title) => (
+                  <th key={title} className="whitespace-nowrap p-3 font-black">
+                    {title}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const summary = row.lifecycleSummary;
+                const decisionKinds = [
+                  "HR_INTERVIEW",
+                  "HR_PRELIMINARY_APPROVAL",
+                  "COMPANY_APPROVAL",
+                ];
+                return (
+                  <tr key={row.id} className="border-t align-top dark:border-slate-800">
+                    <td className="p-3">
+                      <Link className="font-black hover:text-emerald-600" href={`/dashboard/hr/hiring/${row.id}`}>
+                        {row.candidate.firstName} {row.candidate.lastName}
+                      </Link>
+                      <span className="mt-1 block font-mono text-slate-500" dir="ltr">
+                        {row.candidate.mobile}
                       </span>
-                    </div>
-                    <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
-                      {summary.requiredComplete.toLocaleString("fa-IR")} از{" "}
-                      {summary.requiredTotal.toLocaleString("fa-IR")} مورد
-                      الزامی
-                    </p>
-                    {summary.actionLabel && (
-                      <p className="mt-2 text-xs font-bold text-teal-700 dark:text-teal-300">
-                        اقدام بعدی: {summary.actionLabel}
-                      </p>
-                    )}
-                  </div>
-                )}
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Link
-                    className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white dark:bg-slate-100 dark:text-slate-900"
-                    href={`/dashboard/hr/hiring/${row.id}`}
-                  >
-                    باز کردن پرونده
-                  </Link>
-                  <button
-                    disabled={busy || row.stage === "CLOSED"}
-                    onClick={() => invite(row.id)}
-                    className="flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700"
-                  >
-                    <FaPaperPlane /> ارسال مجدد دعوت
-                  </button>
-                </div>
-              </ErpCard>
-            );
-          })}
+                    </td>
+                    <td className="p-3">
+                      <b>{row.position.job?.title || "—"}</b>
+                      <span className="mt-1 block text-slate-500">{row.position.title}</span>
+                    </td>
+                    <td className="p-3">
+                      <b>{summary?.phaseTitle || hrDisplayLabel(row.stage)}</b>
+                      {summary && <span className="mt-1 block text-slate-500">مرحله {summary.phaseNumber.toLocaleString("fa-IR")} از ۸</span>}
+                    </td>
+                    <td className="p-3">
+                      {summary && <ErpBadge tone={badgeTone(summary.status)}>{hiringLifecycleStatusLabel[summary.status as HiringLifecycleStatus]}</ErpBadge>}
+                      <span className="mt-2 block">{row.disposition ? hrDisplayLabel(row.disposition) : row.outcome ? hrDisplayLabel(row.outcome) : "فعال"}</span>
+                    </td>
+                    {decisionKinds.map((kind) => {
+                      const decision = row.decisions?.[kind];
+                      return (
+                        <td key={kind} className="p-3 text-center">
+                          <button
+                            type="button"
+                            className={`h-8 w-8 rounded-full text-base font-black ${decision?.outcome === "POSITIVE" ? "bg-emerald-100 text-emerald-700" : decision?.outcome === "NEGATIVE" ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-400"}`}
+                            disabled={!decision || !row.decisionDetailsVisible}
+                            title={decision ? row.decisionDetailsVisible ? "نمایش شرح و سابقه تصمیم" : "جزئیات فقط برای نقش‌های مجاز قابل مشاهده است" : "تصمیم ثبت نشده"}
+                            onClick={() => decision && row.decisionDetailsVisible && setDecisionDetail({ ...decision, kind, history: row.decisionHistory?.[kind] || [], applicant: `${row.candidate.firstName} ${row.candidate.lastName}` })}
+                          >
+                            {decision?.outcome === "POSITIVE" ? "✓" : decision?.outcome === "NEGATIVE" ? "✕" : "—"}
+                          </button>
+                        </td>
+                      );
+                    })}
+                    <td className="max-w-52 p-3">
+                      {summary?.actionLabel || "—"}
+                    </td>
+                    <td className="whitespace-nowrap p-3">{dateTimeFa(row.updatedAt)}</td>
+                    <td className="p-3">
+                      <div className="flex flex-col gap-2">
+                        <Link className="rounded-lg bg-slate-900 px-3 py-2 text-center font-bold text-white dark:bg-slate-100 dark:text-slate-900" href={`/dashboard/hr/hiring/${row.id}`}>
+                          بازکردن پرونده
+                        </Link>
+                        <button
+                          disabled={busy || row.stage === "CLOSED"}
+                          onClick={() => invite(row.id)}
+                          className="rounded-lg border px-3 py-2 disabled:opacity-50"
+                        >
+                          ارسال مجدد دعوت
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
           {!rows.length && (
-            <ErpEmptyState
-              icon={FaUserPlus}
-              title="پرونده‌ای مطابق فیلتر وجود ندارد"
-              description="فیلترها را تغییر دهید یا اولین متقاضی را ثبت کنید."
-            />
+            <div className="p-8 text-center text-sm text-slate-500">پرونده‌ای مطابق فیلترها وجود ندارد.</div>
           )}
+        </ErpCard>
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <span className="text-xs text-slate-500">
+            {meta.total.toLocaleString("fa-IR")} پرونده · صفحه {meta.page.toLocaleString("fa-IR")} از {meta.totalPages.toLocaleString("fa-IR")}
+          </span>
+          <div className="flex gap-2">
+            <button className="rounded-lg border px-3 py-2 text-xs disabled:opacity-50" disabled={loading || meta.page <= 1} onClick={() => { const next = { ...filters, page: meta.page - 1 }; setFilters(next); void load(next); }}>صفحه قبل</button>
+            <button className="rounded-lg border px-3 py-2 text-xs disabled:opacity-50" disabled={loading || meta.page >= meta.totalPages} onClick={() => { const next = { ...filters, page: meta.page + 1 }; setFilters(next); void load(next); }}>صفحه بعد</button>
+          </div>
         </div>
+
       </ErpSection>
+      {decisionDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true">
+          <ErpCard className="w-full max-w-lg p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-black">شرح تصمیم پرونده</h3>
+                <p className="mt-1 text-xs text-slate-500">{decisionDetail.applicant} · نسخه {decisionDetail.version?.toLocaleString("fa-IR")}</p>
+              </div>
+              <button className="rounded-lg border px-3 py-1 text-xs" onClick={() => setDecisionDetail(null)}>بستن</button>
+            </div>
+            <dl className="mt-4 space-y-3 text-sm">
+              <div><dt className="text-xs text-slate-500">نتیجه</dt><dd className="font-bold">{decisionDetail.outcome === "POSITIVE" ? "تأیید" : "رد"}</dd></div>
+              <div><dt className="text-xs text-slate-500">توضیح</dt><dd>{decisionDetail.explanation || "بدون توضیح"}</dd></div>
+              {decisionDetail.changeReason && <div><dt className="text-xs text-slate-500">دلیل تغییر نسخه</dt><dd>{decisionDetail.changeReason}</dd></div>}
+              {decisionDetail.decidedAt && <div><dt className="text-xs text-slate-500">زمان ثبت</dt><dd>{dateTimeFa(decisionDetail.decidedAt)}</dd></div>}
+            </dl>
+            {decisionDetail.history?.length > 1 && (
+              <div className="mt-4 border-t pt-4">
+                <b className="text-sm">سابقه نسخه‌ها</b>
+                <div className="mt-2 max-h-52 space-y-2 overflow-y-auto">
+                  {decisionDetail.history.map((item: any) => (
+                    <div key={`${item.kind}-${item.version}`} className="rounded-lg bg-slate-50 p-3 text-xs dark:bg-slate-800">
+                      <b>نسخه {item.version.toLocaleString("fa-IR")} · {item.outcome === "POSITIVE" ? "تأیید" : "رد"}</b>
+                      <p className="mt-1">{item.explanation || "بدون توضیح"}</p>
+                      {item.changeReason && <p className="mt-1 text-slate-500">دلیل تغییر: {item.changeReason}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </ErpCard>
+        </div>
+      )}
     </ErpPage>
   );
 }

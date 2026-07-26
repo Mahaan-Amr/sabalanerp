@@ -30,6 +30,38 @@ export const hiringAPI = {
   myAuthorities: () => internal.get("/me/authorities"),
   create: (data: any) => internal.post("/applications", data),
   invite: (id: string) => internal.post(`/applications/${id}/invitations`),
+  refreshInvitationDelivery: (id: string, invitationId: string) =>
+    internal.post(`/applications/${id}/invitations/${invitationId}/delivery/refresh`),
+  recordDecision: (id: string, kind: string, data: any) =>
+    internal.post(`/applications/${id}/decisions/${kind}`, data),
+  preIdentityTemplates: () => internal.get("/pre-identity/templates"),
+  createPreIdentityTemplate: (data: any) => internal.post("/pre-identity/templates", data),
+  applyPreIdentityTemplate: (id: string, templateId: string) =>
+    internal.post(`/applications/${id}/pre-identity/apply-template`, { templateId }),
+  addPreIdentityItem: (id: string, data: any) =>
+    internal.post(`/applications/${id}/pre-identity/items`, data),
+  finalizePreIdentity: (id: string) =>
+    internal.post(`/applications/${id}/pre-identity/finalize`),
+  recordPreIdentityResult: (id: string, itemId: string, data: FormData) =>
+    internal.put(`/applications/${id}/pre-identity/items/${itemId}/result`, data),
+  correctPreIdentityItem: (id: string, itemId: string, reason: string) =>
+    internal.post(`/applications/${id}/pre-identity/items/${itemId}/correct`, { reason }),
+  downloadPreIdentityEvidence: (id: string, itemId: string) =>
+    internal.get(`/applications/${id}/pre-identity/items/${itemId}/evidence/download`, { responseType: "blob" }),
+  resolvePreIdentityNegative: (id: string, itemId: string, data: any) =>
+    internal.post(`/applications/${id}/pre-identity/items/${itemId}/resolve`, data),
+  releasePreIdentity: (id: string) =>
+    internal.post(`/applications/${id}/pre-identity/release`),
+  decideAssessment: (id: string, data: any) =>
+    internal.post(`/applications/${id}/assessments/decision`, data),
+  reactivateDisposition: (id: string, reason: string) =>
+    internal.post(`/applications/${id}/disposition/reactivate`, { reason }),
+  authorizeReopening: (id: string, reason: string) =>
+    internal.post(`/applications/${id}/reopen/authorize`, { reason }),
+  executeReopening: (id: string, data: any) =>
+    internal.post(`/applications/${id}/reopen/execute`, data),
+  addCollateralRequirement: (id: string, data: any) =>
+    internal.post(`/applications/${id}/collateral-requirements`, data),
   returnForm: (id: string, data: any) =>
     internal.post(`/applications/${id}/form/return`, data),
   retryCorrectionNotification: (id: string) =>

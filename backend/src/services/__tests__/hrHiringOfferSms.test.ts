@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { buildHiringOfferTemplateParameters } from "../smsService";
+import { mapSmsIrDeliveryState } from "../hrHiringDeliveryPollingService";
 
 process.env.NODE_ENV = "test";
 process.env.HR_HIRING_E2E = "true";
@@ -29,6 +30,13 @@ const run = async () => {
     { name: "CODE", value: "123456" },
   ]);
   assert.throws(() => buildHiringOfferTemplateParameters(""), /six digits/);
+  const deliveryReport = await gateway.getDeliveryReport(1);
+  assert.equal(deliveryReport.success, true);
+  assert.equal(deliveryReport.deliveryState, 1);
+  assert.equal(typeof deliveryReport.deliveryDateTime, "number");
+  assert.equal(mapSmsIrDeliveryState(1), "DELIVERED");
+  assert.equal(mapSmsIrDeliveryState(2), "FAILED");
+  assert.equal(mapSmsIrDeliveryState(0), "ACCEPTED");
 
   console.log("HR hiring offer SMS tests passed.");
 };

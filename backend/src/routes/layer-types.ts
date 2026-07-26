@@ -40,6 +40,7 @@ router.get(
         select: {
           id: true,
           name: true,
+          pricePerLayer: true,
           calculationUnit: true,
           isActive: true
         },

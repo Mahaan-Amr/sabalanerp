@@ -107,7 +107,7 @@ const renderReport = (report: any, config: ReturnType<typeof safeConfig>) => {
     delivery: `<section><h2>تحویل و بارگیری</h2><p class="coverage">پوشش لجستیک: ${report.delivery.coverage.coveredContracts.toLocaleString('fa-IR')} از ${report.delivery.coverage.totalContracts.toLocaleString('fa-IR')} قرارداد</p>${optionalTable(table(['حقیقت', 'تعداد', 'منبع'], [
       ['تحویل وعده‌داده‌شده', report.delivery.promisedDeliveries.toLocaleString('fa-IR'), 'فروش'],
       ['بارگیری نهایی', report.delivery.finalizedLoadings.toLocaleString('fa-IR'), 'لجستیک'],
-      ['خروج ثبت‌شده', report.delivery.exitedLoadings.toLocaleString('fa-IR'), 'حراست']
+      ['خروج ثبت‌شده', report.delivery.exitedLoadings.toLocaleString('fa-IR'), 'گارد']
     ]))}</section>`,
     sellers: report.permissions.canViewSellerComparisons ? `<section><h2>عملکرد فروشندگان</h2>${optionalTable(table(
       ['فروشنده', 'ایجاد قرارداد', 'پایپ‌لاین', 'فروش قطعی', 'تعدیل', 'خالص', 'از دست رفته'],

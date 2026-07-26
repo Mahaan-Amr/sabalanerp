@@ -340,6 +340,17 @@ export const calculateCanonicalLayerDraft = (
   createCanonicalLayerCalculationRequest(params)
 );
 
+export const applyInventoryLayerTypeSelection = (
+  draft: StairPartDraftV2,
+  selected: LayerTypeOption
+): StairPartDraftV2 => ({
+  ...draft,
+  layerTypeId: selected.id,
+  layerTypeName: selected.name,
+  layerTypePrice: selected.pricePerLayer,
+  layerTypeCalculationUnit: selected.calculationUnit || 'set'
+});
+
 export const formatCanonicalLayerConflict = (
   conflict: StairLayerConflict | undefined
 ): string => {
@@ -356,7 +367,7 @@ export const formatCanonicalLayerConflict = (
   if (conflict.code === 'layer-rate-required') {
     return conflict.field.includes('material')
       ? 'قیمت سنگ را وارد کنید'
-      : 'نرخ قرارداد لایه را وارد کنید';
+      : 'قیمت نوع لایه در انبار معتبر نیست';
   }
   if (conflict.code === 'layer-cut-rate-missing') {
     return conflict.field.includes('cross')
@@ -385,7 +396,7 @@ export const formatCanonicalLayerConflict = (
       return 'عنوان نوع لایه معتبر نیست';
     }
     if (conflict.message.includes('layerRate')) {
-      return 'نرخ قراردادی نوع لایه معتبر نیست';
+      return 'قیمت نوع لایه در انبار معتبر نیست';
     }
     return `مقدار واردشده برای لایه معتبر نیست (${conflict.field})`;
   }

@@ -16,6 +16,7 @@ import {
   createFreshStairPartDraft
 } from '../../../utils/productConfigurationController';
 import {
+  applyInventoryLayerTypeSelection,
   createCanonicalStairDraftInput
 } from '../../../services/stairCalculationService';
 import {
@@ -253,7 +254,19 @@ const missingHistoricalLayerRate = validateDraftRequiredFields('tread', {
 }, []);
 assert.equal(
   missingHistoricalLayerRate.layerType,
-  'نرخ قراردادی نوع لایه باید بیشتر از صفر باشد'
+  'قیمت نوع لایه در انبار معتبر نیست'
 );
+
+const selectedInventoryLayer = applyInventoryLayerTypeSelection(freshDraft, {
+  id: 'inventory-double-layer',
+  name: 'لایه دوبل',
+  pricePerLayer: 125000,
+  calculationUnit: 'physicalPiece',
+  isActive: true
+});
+assert.equal(selectedInventoryLayer.layerTypeId, 'inventory-double-layer');
+assert.equal(selectedInventoryLayer.layerTypeName, 'لایه دوبل');
+assert.equal(selectedInventoryLayer.layerTypePrice, 125000);
+assert.equal(selectedInventoryLayer.layerTypeCalculationUnit, 'physicalPiece');
 
 console.log('stair product state tests passed');

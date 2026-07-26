@@ -125,12 +125,20 @@ export interface RemainingStone {
   cuttingCostPerMeter?: number; // cutting cost per meter
   cutType?: 'longitudinal' | 'cross' | null; // ?? ??
   quantity?: number; // quantity
+  /** Number of FIFO physical units already consumed from a batched record. */
+  physicalUnitOffset?: number;
   physicalPieces?: Array<{
     width: number;
     length: number;
     quantity: number;
     squareMeters: number;
   }>;
+  /** Ephemeral seller selection snapshot for a grouped inventory row. */
+  inventoryGroupSelection?: {
+    groupKey: string;
+    expectedQuantity: number;
+    requestedQuantity: number;
+  };
 }
 
 export interface SlabStandardDimensionEntry {

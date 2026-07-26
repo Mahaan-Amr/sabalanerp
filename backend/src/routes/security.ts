@@ -1,4 +1,4 @@
-﻿import express, { Response } from 'express';
+import express, { Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
@@ -777,7 +777,7 @@ router.post('/loading-driver-requests/:id/assign', protect, securityEdit, [body(
         include: { loading: true }
       });
       if (!request) throw new Error('درخواست راننده پیدا نشد.');
-      if (request.status !== LogisticsDriverRequestStatus.PENDING_SECURITY) throw new Error('فقط درخواست در انتظار حراست قابل ورود راننده است.');
+      if (request.status !== LogisticsDriverRequestStatus.PENDING_SECURITY) throw new Error('فقط درخواست در انتظار گارد قابل ورود راننده است.');
       if (request.loading.status !== 'DRAFT') throw new Error('راننده فقط برای پیش‌نویس بارگیری قابل ورود است.');
 
       const turn = await tx.securityDriverQueueTurn.findUnique({
@@ -1410,7 +1410,7 @@ router.post('/shift-plan-slots/:id/temporary-coverage', protect, securityAdmin, 
 router.get('/shift-workflow/me', protect, securityView, async (req: AuthRequest, res: Response) => {
   await markProbableNoShows();
   const personnel = await getSelfPersonnel(req.user!.id);
-  if (!personnel) return res.status(403).json({ success: false, error: 'کاربر جزو نفرات حراست نیست.' });
+  if (!personnel) return res.status(403).json({ success: false, error: 'کاربر جزو نفرات گارد نیست.' });
   const now = new Date();
   const from = req.query.from ? new Date(String(req.query.from)) : new Date(now.getTime() - 24 * 60 * 60_000);
   const to = req.query.to ? new Date(String(req.query.to)) : undefined;
@@ -1627,7 +1627,7 @@ router.get('/attendance-roster', protect, securityAdmin, async (req: AuthRequest
     });
   } catch (error) {
     console.error('List attendance roster error:', error);
-    res.status(500).json({ success: false, error: 'دریافت فهرست حضور و غیاب حراست ناموفق بود.' });
+    res.status(500).json({ success: false, error: 'دریافت فهرست حضور و غیاب گارد ناموفق بود.' });
   }
 });
 
@@ -1647,15 +1647,15 @@ router.post('/attendance-roster', protect, securityAdmin, [
       where: { personnelId, ...rosterMembershipWhere(effectiveDate) },
       orderBy: { effectiveFrom: 'desc' }
     });
-    if (existing) return res.json({ success: true, message: 'این فرد از قبل در فهرست حضور و غیاب حراست قرار دارد.', data: existing });
+    if (existing) return res.json({ success: true, message: 'این فرد از قبل در فهرست حضور و غیاب گارد قرار دارد.', data: existing });
 
     const membership = await prisma.securityAttendanceRosterMembership.create({
       data: { personnelId, effectiveFrom: effectiveDate, createdBy: req.user!.id }
     });
-    res.status(201).json({ success: true, message: 'فرد به فهرست حضور و غیاب حراست اضافه شد.', data: membership });
+    res.status(201).json({ success: true, message: 'فرد به فهرست حضور و غیاب گارد اضافه شد.', data: membership });
   } catch (error) {
     console.error('Add attendance roster member error:', error);
-    res.status(500).json({ success: false, error: 'افزودن به فهرست حضور و غیاب حراست ناموفق بود.' });
+    res.status(500).json({ success: false, error: 'افزودن به فهرست حضور و غیاب گارد ناموفق بود.' });
   }
 });
 
@@ -1677,10 +1677,10 @@ router.put('/attendance-roster/:personnelId/remove', protect, securityAdmin, [
       where: { id: membership.id },
       data: { effectiveTo: effectiveDate, endedBy: req.user!.id }
     });
-    res.json({ success: true, message: 'فرد از فهرست حضور و غیاب حراست حذف شد.', data: updated });
+    res.json({ success: true, message: 'فرد از فهرست حضور و غیاب گارد حذف شد.', data: updated });
   } catch (error) {
     console.error('Remove attendance roster member error:', error);
-    res.status(500).json({ success: false, error: 'حذف از فهرست حضور و غیاب حراست ناموفق بود.' });
+    res.status(500).json({ success: false, error: 'حذف از فهرست حضور و غیاب گارد ناموفق بود.' });
   }
 });
 
@@ -1699,7 +1699,7 @@ router.get('/shift-log/active', protect, securityView, async (req: AuthRequest, 
       return res.json({ success: true, data: { personnel: session?.personnel || own.personnel, session: withCombinedShiftTimeline(session), readOnly: true } });
     }
 
-    if (!own.personnel) return res.status(403).json({ success: false, error: 'کاربر جزو نفرات حراست نیست.' });
+    if (!own.personnel) return res.status(403).json({ success: false, error: 'کاربر جزو نفرات گارد نیست.' });
     res.json({ success: true, data: { personnel: own.personnel, session: null, readOnly: false } });
   } catch (error) {
     console.error('Get active shift log error:', error);
@@ -1810,7 +1810,7 @@ router.put('/shift-log/patrols/:id/finish', protect, securityEdit, [
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'توضیحات پایان گشت‌زنی الزامی است.', details: errors.array() });
     const { personnel } = await getActiveShiftSessionForUser(req.user!.id);
-    if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات حراست لازم است.' });
+    if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات گارد لازم است.' });
     const patrol = await prisma.securityPatrolSession.findUnique({ where: { id: req.params.id } });
     if (!patrol || patrol.personnelId !== personnel.id || patrol.status !== SecurityPatrolStatus.ACTIVE) return res.status(404).json({ success: false, error: 'گشت‌زنی فعال متعلق به شما پیدا نشد.' });
     const updated = await prisma.securityPatrolSession.update({
@@ -1826,7 +1826,7 @@ router.put('/shift-log/patrols/:id/finish', protect, securityEdit, [
 
 router.post('/shift-plan-slots/:id/attendance', protect, securityEdit, async (req: AuthRequest, res: Response) => {
   try {
-    const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات حراست لازم است.' });
+    const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات گارد لازم است.' });
     const slot = await prisma.securityShiftPlanSlot.findUnique({ where: { id: req.params.id }, include: { plan: true } });
     if (!slot || effectivePersonnelId(slot) !== personnel.id) return res.status(403).json({ success: false, error: 'این شیفت به شما تخصیص ندارد.' });
     const now = new Date(); const earliest = new Date(slot.startsAt.getTime() - slot.plan.earlyArrivalMinutes * 60_000);
@@ -1840,7 +1840,7 @@ router.post('/shift-plan-slots/:id/attendance', protect, securityEdit, async (re
 router.post('/shift-plan-slots/:id/start', protect, securityEdit, async (req: AuthRequest, res: Response) => {
   const actionAt = new Date();
   try {
-    const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات حراست لازم است.' });
+    const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات گارد لازم است.' });
     const result = await prisma.$transaction(async (tx) => {
       const slot = await tx.securityShiftPlanSlot.findUnique({ where: { id: req.params.id }, include: { attendance: true } });
       if (!slot || effectivePersonnelId(slot) !== personnel.id) throw new Error('این شیفت به شما تخصیص ندارد.');
@@ -1861,7 +1861,7 @@ router.post('/shift-plan-slots/:id/end', protect, securityEdit, [
   const actionAt = new Date();
   try {
     const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'توضیح پایان شیفت معتبر نیست.', details: errors.array() });
-    const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات حراست لازم است.' });
+    const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات گارد لازم است.' });
     const result = await prisma.$transaction(async (tx) => {
       const slot = await tx.securityShiftPlanSlot.findUnique({ where: { id: req.params.id }, include: { session: true, temporaryCoverage: true } });
       if (!slot?.session || slot.session.status !== SecurityShiftSessionStatus.ACTIVE || slot.session.personnelId !== personnel.id) throw new Error('شیفت فعال متعلق به شما پیدا نشد.');
@@ -2273,7 +2273,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
     const nextDay = addDays(targetDate, 1);
     const enteredAt = businessInstant(targetDate, currentTime);
     const [rosterPerson] = await loadAttendancePopulation(targetDate, { personnelId: personnel.id });
-    if (!rosterPerson) return res.status(400).json({ success: false, error: 'این فرد در فهرست حضور و غیاب حراست برای این تاریخ نیست.' });
+    if (!rosterPerson) return res.status(400).json({ success: false, error: 'این فرد در فهرست حضور و غیاب گارد برای این تاریخ نیست.' });
     const scheduleMap = await loadApplicableWorkSchedules(prisma, [personnel.id], targetDate);
     const resolvedSchedule = resolveWorkScheduleDay(scheduleMap.get(personnel.id), targetDate);
     const scheduledStartTime = resolvedSchedule.day?.startTime || null;
@@ -2635,7 +2635,7 @@ router.post('/attendance/exception', protect, requireWorkspaceAccess(WORKSPACES.
 
     const today = parseDayQuery();
     const [rosterPerson] = await loadAttendancePopulation(today, { personnelId: personnel.id });
-    if (!rosterPerson) return res.status(400).json({ success: false, error: 'این فرد در فهرست حضور و غیاب حراست برای امروز نیست.' });
+    if (!rosterPerson) return res.status(400).json({ success: false, error: 'این فرد در فهرست حضور و غیاب گارد برای امروز نیست.' });
 
     // Determine status based on exception type
     let status = 'PRESENT';
@@ -2819,7 +2819,7 @@ router.get('/operational-personnel', protect, securityView, async (_req: AuthReq
     res.json({ success: true, data, configured: data.length === 3 });
   } catch (error) {
     console.error('Get operational security personnel error:', error);
-    res.status(500).json({ success: false, error: 'دریافت جمعیت عملیاتی حراست ناموفق بود.' });
+    res.status(500).json({ success: false, error: 'دریافت جمعیت عملیاتی گارد ناموفق بود.' });
   }
 });
 
@@ -2945,7 +2945,7 @@ router.post('/personnel', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, W
     if (!user?.isActive || (!userPermission && !hasSecurityRole)) {
       return res.status(400).json({
         success: false,
-        error: 'این کاربر دسترسی حراست ندارد و نمی‌تواند به نفرات حراست اضافه شود.'
+        error: 'این کاربر دسترسی گارد ندارد و نمی‌تواند به نفرات گارد اضافه شود.'
       });
     }
 
@@ -3193,13 +3193,13 @@ router.get('/reports/security-personnel-performance', protect, securityAdmin, as
       return evidence;
     }).sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()) : [];
     res.json({ success: true, data: { range: { startDate, endDate }, summaries, evidence: selected } });
-  } catch (error: any) { console.error('Get security personnel performance error:', error); res.status(500).json({ success: false, error: error.message || 'دریافت عملکرد نیروهای حراست ناموفق بود.' }); }
+  } catch (error: any) { console.error('Get security personnel performance error:', error); res.status(500).json({ success: false, error: error.message || 'دریافت عملکرد نیروهای گارد ناموفق بود.' }); }
 });
 
 router.get('/reports/security-personnel/:id/shift-history', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const personnel = await prisma.securityPersonnel.findUnique({ where: { id: req.params.id }, include: { user: { select: { firstName: true, lastName: true, username: true } }, shift: { select: { namePersian: true } } } });
-    if (!personnel) return res.status(404).json({ success: false, error: 'نیروی حراست پیدا نشد.' });
+    if (!personnel) return res.status(404).json({ success: false, error: 'نیروی گارد پیدا نشد.' });
     const startDate = req.query.startDate ? parseDayQuery(req.query.startDate) : undefined;
     const requestedEnd = req.query.endDate ? parseDayQuery(req.query.endDate, startDate) : undefined;
     const endDate = startDate && requestedEnd && requestedEnd < startDate ? startDate : requestedEnd;
@@ -3420,7 +3420,7 @@ const securityPersonnelIds = (value: unknown, maximum = 100) => normalizedSecuri
 
 const securityShiftReportJson = (slot: any) => ({
   id: slot.id,
-  title: slot.plan?.title || 'شیفت حراست',
+  title: slot.plan?.title || 'شیفت گارد',
   status: slot.session?.status,
   startsAt: slot.startsAt,
   endsAt: slot.endsAt,
@@ -3480,7 +3480,7 @@ const selectedShiftAttendance = (slots: any[], requestedPersonnelIds: string[]) 
       const attendance = (slot.attendance || []).find((item: any) => item.personnelId === personnelId);
       rows.push({
         shiftId: slot.id,
-        shiftTitle: slot.plan?.title || 'شیفت حراست',
+        shiftTitle: slot.plan?.title || 'شیفت گارد',
         shiftStartsAt: slot.startsAt,
         shiftEndsAt: slot.endsAt,
         personnelId,
@@ -3572,10 +3572,10 @@ router.post('/reports/attendance.pdf', protect, securityAdmin, async (req: AuthR
     if (requestedPersonnelIds.length && result.selectedPersonnelIds.length !== requestedPersonnelIds.length) return res.status(400).json({ success: false, error: 'یک یا چند نفر انتخاب‌شده در دامنه شیفت‌ها وجود ندارد.' });
     const stateLabel: Record<string, string> = { PRESENT: 'حاضر', LATE: 'با تأخیر', ABSENT: 'غایب' };
     const rows = result.rows.map((row) => `<tr><td>${securityEscapeHtml(row.personnelName)}</td><td>${securityEscapeHtml(row.shiftTitle)}</td><td>${formatSecurityDateTime(row.shiftStartsAt)} تا ${formatSecurityDateTime(row.shiftEndsAt)}</td><td>${stateLabel[row.state]}</td><td>${formatSecurityDateTime(row.arrivedAt)}</td><td>${row.delayMinutes ? `${row.delayMinutes.toLocaleString('fa-IR')} دقیقه` : '—'}</td></tr>`).join('');
-    const html = `${securityPdfStyles()}<div class="sheet"><header class="header"><div><h1>گزارش حضور و غیاب حراست</h1><div class="meta">${slots.length.toLocaleString('fa-IR')} شیفت · ${result.selectedPersonnelIds.length.toLocaleString('fa-IR')} نفر · زمان تولید: ${formatSecurityDateTime(new Date())}</div></div></header><table><thead><tr><th>نیرو</th><th>شیفت</th><th>بازه</th><th>وضعیت</th><th>حضور</th><th>تأخیر</th></tr></thead><tbody>${rows || '<tr><td colspan="6">داده‌ای در دامنه انتخاب‌شده وجود ندارد.</td></tr>'}</tbody></table></div>`;
-    const pdfPath = await generatePdfFromHtml({ fileName: `security-attendance-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '14mm', left: '5mm' }, displayHeaderFooter: true, headerTemplate: '<span></span>', footerTemplate: '<div style="width:100%;font-size:8px;color:#64748b;text-align:center;direction:rtl">گزارش حضور و غیاب حراست · صفحه <span class="pageNumber"></span> از <span class="totalPages"></span></div>' });
+    const html = `${securityPdfStyles()}<div class="sheet"><header class="header"><div><h1>گزارش حضور و غیاب گارد</h1><div class="meta">${slots.length.toLocaleString('fa-IR')} شیفت · ${result.selectedPersonnelIds.length.toLocaleString('fa-IR')} نفر · زمان تولید: ${formatSecurityDateTime(new Date())}</div></div></header><table><thead><tr><th>نیرو</th><th>شیفت</th><th>بازه</th><th>وضعیت</th><th>حضور</th><th>تأخیر</th></tr></thead><tbody>${rows || '<tr><td colspan="6">داده‌ای در دامنه انتخاب‌شده وجود ندارد.</td></tr>'}</tbody></table></div>`;
+    const pdfPath = await generatePdfFromHtml({ fileName: `security-attendance-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '14mm', left: '5mm' }, displayHeaderFooter: true, headerTemplate: '<span></span>', footerTemplate: '<div style="width:100%;font-size:8px;color:#64748b;text-align:center;direction:rtl">گزارش حضور و غیاب گارد · صفحه <span class="pageNumber"></span> از <span class="totalPages"></span></div>' });
     return res.download(pdfPath, 'security-attendance.pdf', () => fs.unlink(pdfPath, () => undefined));
-  } catch (error: any) { console.error('Export selected security attendance error:', error); return res.status(500).json({ success: false, error: 'ساخت گزارش حضور و غیاب حراست ناموفق بود.' }); }
+  } catch (error: any) { console.error('Export selected security attendance error:', error); return res.status(500).json({ success: false, error: 'ساخت گزارش حضور و غیاب گارد ناموفق بود.' }); }
 });
 
 router.get('/reports/latest-completed-shift', protect, securityAdmin, async (_req: AuthRequest, res: Response) => {
@@ -3599,7 +3599,7 @@ router.get('/reports/latest-completed-shift.pdf', protect, securityAdmin, async 
       ${securityPdfStyles()}
       <div class="sheet">
         <header class="header">
-          <div><h1>گزارش‌های حراست شیفت قبل</h1><div class="meta">پایان واقعی شیفت: ${formatSecurityDateTime(slot.session?.endedAt)} | زمان تولید: ${formatSecurityDateTime(new Date())}</div></div>
+          <div><h1>گزارش‌های گارد شیفت قبل</h1><div class="meta">پایان واقعی شیفت: ${formatSecurityDateTime(slot.session?.endedAt)} | زمان تولید: ${formatSecurityDateTime(new Date())}</div></div>
           <div class="meta">آخرین شیفت بر اساس زمان پایان واقعی</div>
         </header>
         ${renderDetailedSecurityShift(slot)}
@@ -3663,7 +3663,7 @@ router.get('/reports/security-personnel-performance.pdf', protect, securityAdmin
       ${securityPdfStyles()}
       <div class="sheet">
         <header class="header">
-          <div><h1>گزارش عملکرد نیروهای حراست</h1><div class="meta">بازه: ${securityEscapeHtml(rangeLabel)} | زمان تولید: ${formatSecurityDateTime(new Date())}</div></div>
+          <div><h1>گزارش عملکرد نیروهای گارد</h1><div class="meta">بازه: ${securityEscapeHtml(rangeLabel)} | زمان تولید: ${formatSecurityDateTime(new Date())}</div></div>
           <div class="meta">فقط شیفت‌های پایان‌یافته در این خروجی آمده‌اند.</div>
         </header>
         ${summaryCards ? `<div class="cards">${summaryCards}</div>` : ''}
@@ -3674,7 +3674,7 @@ router.get('/reports/security-personnel-performance.pdf', protect, securityAdmin
     res.download(pdfPath, 'security-personnel-performance.pdf', () => fs.unlink(pdfPath, () => undefined));
   } catch (error) {
     console.error('Export security personnel performance PDF error:', error);
-    res.status(500).json({ success: false, error: 'ساخت PDF عملکرد نیروهای حراست ناموفق بود.' });
+    res.status(500).json({ success: false, error: 'ساخت PDF عملکرد نیروهای گارد ناموفق بود.' });
   }
 });
 
@@ -3735,7 +3735,7 @@ router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, re
     }), { total: 0, present: 0, absent: 0, late: 0 });
     const startLabel = securityPersianDate(startDate);
     const endLabel = securityPersianDate(addDays(startDate, days - 1));
-    const title = days === 1 ? `گزارش حراست ${securityPersianDateWithWeekday(startDate)}` : `گزارش حراست ${startLabel} تا ${endLabel}`;
+    const title = days === 1 ? `گزارش گارد ${securityPersianDateWithWeekday(startDate)}` : `گزارش گارد ${startLabel} تا ${endLabel}`;
     const generatedAt = formatSecurityDateTime(new Date());
     if (format === 'excel') {
       const workbook = XLSX.utils.book_new();

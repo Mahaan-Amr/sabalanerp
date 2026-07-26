@@ -1,1 +1,16 @@
-[]
+[
+  {
+    "file": "frontend/src/app/dashboard/inventory/services/page.tsx",
+    "line": 1093,
+    "token": "{(finishing.unitPrice ?? finishing.pricePerSquareMeter).toLocaleString('fa-IR')} تومان",
+    "class": "question-marks",
+    "confidence": 0.65
+  },
+  {
+    "file": "frontend/src/app/dashboard/inventory/services/stone-finishings/edit/[id]/page.tsx",
+    "line": 40,
+    "token": "pricePerSquareMeter: (data.unitPrice ?? data.pricePerSquareMeter)?.toString() || '',",
+    "class": "question-marks",
+    "confidence": 0.65
+  }
+]

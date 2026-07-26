@@ -34,6 +34,7 @@ import PersianCalendarComponent from '@/components/PersianCalendar';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { formatDisplayNumber, formatPrice, formatPriceWithRial, formatDimensions, formatSquareMeters, formatQuantity, normalizeDigits, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
+import EnhancedDropdown from '@/components/EnhancedDropdown';
 import StoneCanvas from '@/components/StoneCanvas';
 
 // Import new step components
@@ -219,6 +220,7 @@ import { SAW_KERF_CM } from '@/features/contract-creation/utils/sawKerf';
 import {
   calculateCanonicalLayerDraft,
   calculateLayerSourcePlan,
+  applyInventoryLayerTypeSelection,
   createCanonicalLayerCalculationRequest,
   createCanonicalStairDraftInput,
   formatCanonicalLayerConflict,
@@ -3881,7 +3883,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       id: `partition_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       width: 0,
       length: 0,
-      quantity: 1,
+      quantity:
+        sanitizedRemainingStone.inventoryGroupSelection?.requestedQuantity || 1,
       squareMeters: 0
     }]);
     remainingStoneModal.setPartitionLengthUnit(sourceProduct.lengthUnit || 'm');
@@ -6852,7 +6855,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 if (!draft.layerTypeId || !(Number(draft.layerTypePrice) > 0)) {
                                   layerErrors.layerType = !draft.layerTypeId
                                     ? 'نوع لایه را انتخاب کنید'
-                                    : 'نرخ قرارداد لایه را وارد کنید';
+                                    : 'قیمت نوع لایه در انبار معتبر نیست';
                                 }
                                 if (!draft.layerWidthCm || !hasLayerEdgeSelection(draft.layerEdges)) {
                                   layerErrors.width = 'عرض و سمت‌های لایه را کامل کنید';
@@ -7051,13 +7054,32 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   <label className="mb-2 block text-xs font-medium text-gray-700 dark:text-gray-300">
                                     نوع لایه
                                   </label>
-                                  <select
-                                    className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-gray-800 outline-none focus:border-teal-500 dark:border-gray-600 dark:text-white"
+                                  <EnhancedDropdown
+                                    className="w-full"
                                     value={draft.layerTypeId || ''}
                                     disabled={stairSystemV2.layerTypesStatus !== 'ready'}
-                                    aria-label="انتخاب نوع لایه"
-                                    onChange={(e) => {
-                                      const selectedId = e.target.value;
+                                    placeholder="انتخاب نوع لایه…"
+                                    noOptionsText="نوع لایه فعالی وجود ندارد"
+                                    options={[
+                                      ...(draft.layerTypeId &&
+                                      !stairSystemV2.layerTypes.some(option => option.id === draft.layerTypeId)
+                                        ? [{
+                                            value: draft.layerTypeId,
+                                            label: `${draft.layerTypeName || 'نوع لایه ثبت‌شده'}${
+                                              stairSystemV2.layerTypesStatus === 'ready' ||
+                                              stairSystemV2.layerTypesStatus === 'empty'
+                                                ? ' — غیرفعال در کاتالوگ فعلی'
+                                                : ' — اطلاعات ذخیره‌شده'
+                                            }`,
+                                            disabled: true
+                                          }]
+                                        : []),
+                                      ...stairSystemV2.layerTypes.map((option: LayerTypeOption) => ({
+                                        value: option.id,
+                                        label: option.name
+                                      }))
+                                    ]}
+                                    onChange={(selectedId) => {
                                       if (!selectedId) {
                                         setDraft({
                                           ...draft,
@@ -7079,34 +7101,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       }
                                       const selected = stairSystemV2.layerTypes.find(option => option.id === selectedId);
                                       if (selected) {
-                                        clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'layerType');
-                                        setDraft({
-                                          ...draft,
-                                          layerTypeId: selected.id,
-                                          layerTypeName: selected.name,
-                                          layerTypePrice: null,
-                                          layerTypeCalculationUnit: selected.calculationUnit || 'set'
-                                        });
+                                        setDraft(applyInventoryLayerTypeSelection(draft, selected));
+                                        if (selected.pricePerLayer > 0) {
+                                          clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'layerType');
+                                        }
                                       }
                                     }}
-                                  >
-                                    <option value="">انتخاب نوع لایه...</option>
-                                    {draft.layerTypeId &&
-                                      !stairSystemV2.layerTypes.some(option => option.id === draft.layerTypeId) && (
-                                        <option value={draft.layerTypeId}>
-                                          {draft.layerTypeName || 'نوع لایه ثبت‌شده'}
-                                          {stairSystemV2.layerTypesStatus === 'ready' ||
-                                          stairSystemV2.layerTypesStatus === 'empty'
-                                            ? ' — غیرفعال در کاتالوگ فعلی'
-                                            : ' — اطلاعات ذخیره‌شده'}
-                                        </option>
-                                      )}
-                                    {stairSystemV2.layerTypes.map((option: LayerTypeOption) => (
-                                      <option key={option.id} value={option.id}>
-                                        {option.name}
-                                      </option>
-                                    ))}
-                                  </select>
+                                  />
                                   {stairSystemV2.layerTypesStatus === 'loading' && (
                                     <p className="mt-1 text-xs text-slate-500">در حال دریافت انواع لایه…</p>
                                   )}
@@ -7133,29 +7134,16 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     </p>
                                   )}
                                   {draft.layerTypeId && (
-                                    <label className="mt-3 block text-xs font-medium text-gray-700 dark:text-gray-300">
-                                      نرخ قرارداد
-                                      <FormattedNumberInput
-                                        value={draft.layerTypePrice ?? null}
-                                        onChange={(value) => {
-                                          setDraft({
-                                            ...draft,
-                                            layerTypePrice: value
-                                          });
-                                          if (value > 0) {
-                                            clearDraftFieldErrorWrapper(
-                                              stairSystemV2.stairActivePart,
-                                              'layerType'
-                                            );
-                                          }
-                                        }}
-                                        min={0}
-                                        disabled={!stairSystemV2.layerTypes.some(
-                                          option => option.id === draft.layerTypeId
-                                        )}
-                                        className="mt-1 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm focus:border-orange-500 focus:outline-none dark:border-gray-600"
-                                      />
-                                      <span className="mt-1 block text-[11px] text-gray-500">
+                                    <div className="mt-3 grid grid-cols-2 gap-3 border-y border-slate-200 py-2 text-xs dark:border-slate-800">
+                                      <div>
+                                        <span className="block text-slate-500 dark:text-slate-400">قیمت نوع لایه</span>
+                                        <strong className="mt-1 block text-sm text-slate-900 dark:text-slate-100">
+                                          {formatPrice(Number(draft.layerTypePrice) || 0)}
+                                        </strong>
+                                      </div>
+                                      <div>
+                                        <span className="block text-slate-500 dark:text-slate-400">واحد محاسبه</span>
+                                        <strong className="mt-1 block text-sm text-slate-900 dark:text-slate-100">
                                         {(stairSystemV2.layerTypes.find(
                                           option => option.id === draft.layerTypeId
                                         )?.calculationUnit || draft.layerTypeCalculationUnit) === 'physicalPiece'
@@ -7169,8 +7157,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                               )?.calculationUnit || draft.layerTypeCalculationUnit) === 'squareMeter'
                                               ? 'مترمربع'
                                               : 'هر مجموعه'}
-                                      </span>
-                                    </label>
+                                        </strong>
+                                      </div>
+                                    </div>
                                   )}
                                 </div>
 
@@ -8381,32 +8370,28 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   );
                 })()}
 
-                {/* Session group summary (enhanced table) */}
-                <div className="mt-4 border-t border-gray-200 dark:border-gray-700 pt-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-1 h-6 bg-gradient-to-b from-purple-500 to-purple-600 rounded-full"></div>
-                    <h4 className="text-base font-semibold text-gray-800 dark:text-white">خلاصه اقلام افزوده شده</h4>
-                    <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full text-xs font-medium">
+                {/* Session group summary */}
+                <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">خلاصه اقلام افزوده شده</h4>
+                    <span className="rounded-full bg-teal-50 px-2.5 py-1 text-xs font-bold text-teal-700 dark:bg-teal-950/60 dark:text-teal-200">
                       {stairSystemV2.stairSessionItems.length} آیتم
                     </span>
                   </div>
                   {stairSystemV2.stairSessionItems.length === 0 ? (
-                    <div className="text-center py-6 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
-                      <p className="text-sm text-gray-400 dark:text-gray-500">هنوز آیتمی افزوده نشده است.</p>
+                    <div className="rounded-xl border border-dashed border-slate-300 py-6 text-center dark:border-slate-700">
+                      <p className="text-sm text-slate-400 dark:text-slate-500">هنوز آیتمی افزوده نشده است.</p>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
+                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
                       <table className="min-w-full text-sm">
                         <thead>
-                          <tr className="bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-900/30 dark:to-purple-800/30 border-b border-purple-200 dark:border-purple-700">
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">بخش</th>
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">ابعاد</th>
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">تعداد</th>
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">متر مربع</th>
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">قیمت متر مربع</th>
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">ابزارها</th>
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">هزینه ابزار</th>
-                            <th className="text-right py-3 px-4 font-semibold text-purple-900 dark:text-purple-200">جمع جز</th>
+                          <tr className="border-b border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900">
+                            {['بخش', 'ابعاد', 'تعداد', 'متر مربع', 'قیمت متر مربع', 'ابزارها', 'هزینه ابزار', 'جمع جزء'].map(label => (
+                              <th key={label} className="whitespace-nowrap px-4 py-3 text-right text-xs font-bold text-slate-600 dark:text-slate-300">
+                                {label}
+                              </th>
+                            ))}
                           </tr>
                         </thead>
                         <tbody>
@@ -8419,7 +8404,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               : (it.stairPartType === 'tread' ? 'کف پله' : it.stairPartType === 'riser' ? 'خیز پله' : 'پاگرد');
                             const partTypeColor = isLayer
                               ? 'orange'
-                              : (it.stairPartType === 'tread' ? 'purple' : it.stairPartType === 'riser' ? 'blue' : 'indigo');
+                              : (it.stairPartType === 'tread' ? 'teal' : it.stairPartType === 'riser' ? 'blue' : 'indigo');
                             const lengthDisplay = it.lengthUnit === 'm' ? `${formatDisplayNumber(it.length)} m` : `${formatDisplayNumber(it.length)} cm`;
                             const widthDisplay = `${formatDisplayNumber(it.width)} cm`;
                             const stairMeta = ((it as any).meta?.stair) || {};
@@ -8435,10 +8420,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             const finishing = normalizeProductFinishing(it);
 
                             return (
-                              <tr key={idx} className={`border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${idx % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50/50 dark:bg-gray-800/30'}`}>
+                              <tr key={idx} className="border-b border-slate-100 transition-colors last:border-b-0 hover:bg-slate-50/70 dark:border-slate-800 dark:hover:bg-slate-900/70">
                                 <td className="py-3 px-4">
                                   <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
-                                    partTypeColor === 'purple' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300' :
+                                    partTypeColor === 'teal' ? 'bg-teal-50 text-teal-700 dark:bg-teal-950/60 dark:text-teal-200' :
                                     partTypeColor === 'blue' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
                                     partTypeColor === 'orange' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300' :
                                     'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'
@@ -8462,7 +8447,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     <span className="font-medium">{formatDisplayNumber(it.quantity || 0)} عدد</span>
                                     {(baseStoneQuantity > 0 || (isLayer && layerInfo)) && (
                                       <details className="text-xs text-slate-600 dark:text-slate-300">
-                                        <summary className="cursor-pointer font-semibold text-purple-600 dark:text-purple-300">
+                                        <summary className="cursor-pointer font-semibold text-teal-700 dark:text-teal-300">
                                           جزئیات
                                         </summary>
                                         <div className="mt-1 space-y-1">
@@ -8500,13 +8485,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     <span className="text-xs text-gray-400 dark:text-gray-500">-</span>
                                   ) : (
                                     <details className="text-xs">
-                                      <summary className="cursor-pointer font-semibold text-purple-600 dark:text-purple-300">
+                                      <summary className="cursor-pointer font-semibold text-teal-700 dark:text-teal-300">
                                         جزئیات خدمات
                                       </summary>
                                       <div className="mt-2 flex flex-col gap-1.5">
                                         {((it as any).meta?.tools || []).map((t: any, i: number) => (
-                                          <div key={i} className="bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded border border-purple-200 dark:border-purple-800">
-                                            <span className="font-medium text-purple-700 dark:text-purple-300">{t.name}</span>
+                                          <div key={i} className="rounded border border-slate-200 bg-slate-50 px-2 py-1 dark:border-slate-700 dark:bg-slate-900">
+                                            <span className="font-medium text-slate-800 dark:text-slate-200">{t.name}</span>
                                             <span className="text-gray-600 dark:text-gray-400"> • {formatDisplayNumber(t.computedMeters || 0)} m</span>
                                             <span className="text-gray-500 dark:text-gray-500"> × {formatPrice(t.pricePerMeter || 0)}</span>
                                           </div>
@@ -8529,7 +8514,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 </td>
                                 <td className="py-3 px-4">
                                   {toolsTotal > 0 ? (
-                                    <span className="font-medium text-purple-600 dark:text-purple-400">{formatPrice(toolsTotal)}</span>
+                                    <span className="font-medium text-slate-700 dark:text-slate-300">{formatPrice(toolsTotal)}</span>
                                   ) : (
                                     <span className="text-xs text-gray-400 dark:text-gray-500">-</span>
                                   )}
@@ -8544,8 +8529,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               </tr>
                             );
                           })}
-                          <tr className="bg-gradient-to-r from-teal-50 to-teal-100 dark:from-teal-900/30 dark:to-teal-800/30 border-t-2 border-teal-300 dark:border-teal-700">
-                            <td className="py-3 px-4 font-bold text-teal-900 dark:text-teal-200" colSpan={7}>جمع کل گروه</td>
+                          <tr className="border-t border-teal-200 bg-teal-50/70 dark:border-teal-900 dark:bg-teal-950/40">
+                            <td className="px-4 py-3 font-bold text-teal-900 dark:text-teal-200" colSpan={7}>جمع کل گروه</td>
                             <td className="py-3 px-4">
                               <span className="font-bold text-lg text-teal-700 dark:text-teal-300">
                                 {formatPrice(sumNumericValues(stairSystemV2.stairSessionItems, (item) => item.totalPrice))}
@@ -8643,9 +8628,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                          [stairSystemV2.stairActivePart]: {
                            ...prev[stairSystemV2.stairActivePart],
                            layerType: invalidLayerType
-                             ? (!layerDraft.layerTypeId
-                               ? 'نوع لایه را انتخاب کنید'
-                               : 'نرخ قرارداد لایه را وارد کنید')
+                              ? (!layerDraft.layerTypeId
+                                ? 'نوع لایه را انتخاب کنید'
+                                : 'قیمت نوع لایه در انبار معتبر نیست')
                              : undefined,
                            width: invalidLayerGeometry
                              ? 'عرض و سمت‌های لایه را کامل کنید'

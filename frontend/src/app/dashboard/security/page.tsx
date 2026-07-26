@@ -180,7 +180,7 @@ export default function SecurityDashboardPage() {
       : null;
 
   return (
-    <ErpWorkspacePage title="حراست" context={PersianCalendar.formatForDisplay(today)}>
+    <ErpWorkspacePage title="گارد" context={PersianCalendar.formatForDisplay(today)}>
       {!permissionsLoading && showShiftShell && shiftLoading && !shiftAwareness && <ErpDashboardSkeleton variant="panel" />}
       {!permissionsLoading && showShiftShell && shiftError && !shiftAwareness && <ErpInlineError message={shiftError} onRetry={() => loadCurrentShift()} />}
       {shiftAwareness?.authorized && overview && (

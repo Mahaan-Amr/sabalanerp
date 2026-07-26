@@ -211,7 +211,7 @@ export default function SecurityVehiclesPage() {
       setPairPhotos({ driverLicensePhotos: [], vehicleCardPhotos: [], driverPhotos: [] });
       setEditingPairId(null);
       setPlateParts({ left: '', letter: 'ط', middle: '', iran: '' });
-      setMessage('راننده و خودرو در حراست ثبت شد.');
+      setMessage('راننده و خودرو در گارد ثبت شد.');
       await loadData();
     } catch (err: any) {
       setError(err.response?.data?.error || 'ثبت راننده و خودرو ناموفق بود.');

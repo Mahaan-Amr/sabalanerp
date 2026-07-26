@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { replayRemainingStoneAllocations } from '../remainingStoneAllocationReplayService';
 import type { ContractProduct, RemainingStone } from '../../types/contract.types';
 import { ensureContractProductRowIds } from '../../utils/contractProductIdentity';
-import { getAvailableRemainingStoneInventory } from '../../utils/remainingStoneGuards';
+import {
+  getAvailableRemainingStoneInventory,
+  getRemainingStoneInventoryGroupKey
+} from '../../utils/remainingStoneGuards';
 import {
   hasUnresolvedLegacyRemainingChildAddOns,
   recalculateRemainingChildAddOns,
@@ -180,6 +183,112 @@ const child = (rowId: string, sourceRowId: string, order: number): ContractProdu
   assert.equal(result.conflicts[0].childRowId, second.rowId);
   assert.equal(result.products, originalProducts);
   assert.equal(parent.remainingStones[0].width, 60);
+}
+
+{
+  const inventory = Array.from({ length: 32 }, (_, index): RemainingStone => ({
+    id: `fifo-stock-${String(index + 1).padStart(2, '0')}`,
+    width: 10,
+    length: 1.6,
+    quantity: 1,
+    squareMeters: 0.16,
+    isAvailable: true,
+    sourceCutId: `fifo-source-${String(index + 1).padStart(2, '0')}`
+  }));
+  const parent = source('source-group-fifo', inventory);
+  const groupedChild = child('child-group-ten', parent.rowId as string, 0);
+  groupedChild.width = 10;
+  groupedChild.diameterOrWidth = 10;
+  groupedChild.length = 1.6;
+  groupedChild.quantity = 10;
+  groupedChild.squareMeters = 1.6;
+  groupedChild.meta.remainingSource.sourceGroupKey =
+    getRemainingStoneInventoryGroupKey(inventory[0]);
+
+  const result = replayRemainingStoneAllocations({
+    products: [parent, groupedChild],
+    sourceRowId: parent.rowId as string
+  });
+
+  assert.equal(result.ok, true);
+  const remaining = getAvailableRemainingStoneInventory(result.products[0]);
+  assert.equal(
+    remaining.reduce((sum, item) => sum + Number(item.quantity || 1), 0),
+    22
+  );
+  assert.deepEqual(
+    result.products[1].meta.remainingSource.consumedSourceStoneIds,
+    inventory.slice(0, 10).map(item => item.id),
+    'equal pieces must be consumed FIFO without selecting each physical row'
+  );
+}
+
+{
+  const inventory = [
+    stock(10, 1.6, 10),
+    { ...stock(30, 0.1, 1), id: 'other-geometry' }
+  ];
+  const parent = source('source-stale-group', inventory);
+  const staleChild = child('child-stale-group', parent.rowId as string, 0);
+  const key = getRemainingStoneInventoryGroupKey(inventory[0]);
+  staleChild.meta.remainingSource.sourceGroupKey = key;
+
+  const result = replayRemainingStoneAllocations({
+    products: [parent, staleChild],
+    sourceRowId: parent.rowId as string,
+    inventoryExpectations: [{
+      groupKey: key,
+      expectedQuantity: 12,
+      beforeChildRowId: staleChild.rowId as string
+    }]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.products[0], parent, 'stale inventory must reject atomically');
+  assert.match(result.conflicts[0].reason, /12.*10|10.*12/);
+}
+
+{
+  const inventory = [stock(10, 1.6, 32)];
+  const parent = source('source-expectation-after-prior', inventory);
+  const key = getRemainingStoneInventoryGroupKey(inventory[0]);
+  const prior = child('child-prior-group', parent.rowId as string, 0);
+  prior.width = 10;
+  prior.diameterOrWidth = 10;
+  prior.length = 1.6;
+  prior.quantity = 2;
+  prior.squareMeters = 0.32;
+  prior.meta.remainingSource.sourceGroupKey = key;
+  const next = child('child-next-group', parent.rowId as string, 1);
+  next.width = 10;
+  next.diameterOrWidth = 10;
+  next.length = 1.6;
+  next.quantity = 10;
+  next.squareMeters = 1.6;
+  next.meta.remainingSource.sourceGroupKey = key;
+
+  const result = replayRemainingStoneAllocations({
+    products: [parent, prior, next],
+    sourceRowId: parent.rowId as string,
+    inventoryExpectations: [{
+      groupKey: key,
+      expectedQuantity: 30,
+      beforeChildRowId: next.rowId as string
+    }]
+  });
+
+  assert.equal(result.ok, true, 'stale check must run after prior FIFO allocations replay');
+  assert.equal(
+    getAvailableRemainingStoneInventory(result.products[0])
+      .reduce((sum, item) => sum + Number(item.quantity || 1), 0),
+    20
+  );
+  assert.deepEqual(
+    result.products[2].meta.remainingSource.consumedSourceStoneIds,
+    Array.from({ length: 10 }, (_, index) =>
+      `${inventory[0].id}:unit:${index + 3}`
+    )
+  );
 }
 
 {

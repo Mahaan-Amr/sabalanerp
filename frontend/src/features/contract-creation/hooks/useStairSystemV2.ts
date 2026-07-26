@@ -217,7 +217,7 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
         .map((item: any): LayerTypeOption => ({
           id: item.id,
           name: item.name,
-          pricePerLayer: 0,
+          pricePerLayer: Number(item.pricePerLayer) || 0,
           calculationUnit: item.calculationUnit || 'set',
           isActive: item.isActive !== false
         }))

@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -605,7 +605,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
         return [
           {
             name: 'Security Dashboard',
-            namePersian: 'داشبورد حراست',
+            namePersian: 'داشبورد گارد',
             href: '/dashboard/security',
             icon: FaChartLine,
             show: true
@@ -655,14 +655,14 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
           },
           {
             name: 'Personnel',
-            namePersian: 'کارکنان حراست',
+            namePersian: 'کارکنان گارد',
             href: '/dashboard/security/personnel',
             icon: FaShieldAlt,
             show: hasPermission(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN)
           },
           {
             name: 'Settings',
-            namePersian: 'تنظیمات حراست',
+            namePersian: 'تنظیمات گارد',
             href: '/dashboard/security/settings',
             icon: FaCog,
             show: hasPermission(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN)

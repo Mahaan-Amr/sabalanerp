@@ -48,7 +48,7 @@ Replace the existing broad reporting interface with two manager-focused report p
 30. As a user, I want completed, archived, cancelled, and unavailable states neutral unless actionable, so that visual urgency remains truthful.
 31. As a Security user, I want navigation ordered around daily operations before management and configuration, so that frequent destinations are easiest to reach.
 32. As a user without permission for a destination, I want it hidden rather than disabled, so that navigation reflects my actual scope.
-33. As a user, I want the Security navigation order to be داشبورد حراست، حضور و غیاب، گزارش شیفت، خودرویی، استثناها و مأموریت‌ها، شیفت‌ها، گزارش‌ها، کارکنان حراست، تنظیمات حراست, so that every Security surface uses one information architecture.
+33. As a user, I want the Security navigation order to be داشبورد گارد، حضور و غیاب، گزارش شیفت، خودرویی، استثناها و مأموریت‌ها، شیفت‌ها، گزارش‌ها، کارکنان گارد، تنظیمات گارد, so that every Security surface uses one information architecture.
 34. As an attendance operator, I want the selected day or shift and truthful summary first, so that I understand the list context immediately.
 35. As an attendance operator, I want the complete personnel list to be the primary content, so that dashboard summaries are not duplicated.
 36. As an attendance operator, I want expected and actual entry/exit context alongside attendance state, so that irregular records can be understood.
@@ -89,7 +89,7 @@ Replace the existing broad reporting interface with two manager-focused report p
 71. As a PDF reader, I want only the title, scope, essential timestamps and statuses, useful summary, evidence rows or timeline, generation time, and page numbers, so that the output is concise and auditable.
 72. As a PDF reader, I want decorative charts, helper text, empty columns, controls, repeated metadata, and oversized branding omitted, so that the report stays straight to the point.
 73. As a manager, I want report details read-only unless an existing correction workflow applies, so that reporting does not become a competing operational editor.
-74. As a Security administrator, I want تنظیمات حراست to be a compact index, so that unrelated configuration is not crowded onto one page.
+74. As a Security administrator, I want تنظیمات گارد to be a compact index, so that unrelated configuration is not crowded onto one page.
 75. As a Security administrator, I want فهرست حضور و غیاب and ساختار گزارش شیفت on separate routes, so that each configuration task is focused.
 76. As a shift planner, I want the derived current A/B/C operational population shown with shift planning rather than settings, so that source and effect appear together.
 77. As a Security administrator, I want report categories and nested types in one hierarchical view, so that their relationship is obvious.
@@ -119,7 +119,7 @@ Replace the existing broad reporting interface with two manager-focused report p
 
 - The redesign covers the Security dashboard, attendance, vehicles, shifts, Security personnel, exceptions and missions, active shift report, reports, report details, settings, settings subpages, and Security-specific navigation presentation.
 - The shared application shell, top bar, workspace switcher, and other workspaces remain visually unchanged.
-- Security navigation uses this canonical order: داشبورد حراست، حضور و غیاب، گزارش شیفت، خودرویی، استثناها و مأموریت‌ها، شیفت‌ها، گزارش‌ها، کارکنان حراست، تنظیمات حراست. Daily operations and management/configuration are separated subtly. Inaccessible destinations are hidden.
+- Security navigation uses this canonical order: داشبورد گارد، حضور و غیاب، گزارش شیفت، خودرویی، استثناها و مأموریت‌ها، شیفت‌ها، گزارش‌ها، کارکنان گارد، تنظیمات گارد. Daily operations and management/configuration are separated subtly. Inaccessible destinations are hidden.
 - Page headers use one compact Persian title, optional quiet Jalali date or record identifier, at most one primary action, and contextual secondary actions. Detail pages use a back link and record identity instead of breadcrumb clutter.
 - Descriptions are absent by default and retained only for risk prevention, unusual states, genuine ambiguity, loading, empty, error, permission, or audit context.
 - Pages are view-first. Inline actions are limited to immediate low-risk single-outcome changes. Short forms use responsive sheets; complex or high-risk workflows use focused pages. Destructive, corrective, approval, and audit-sensitive actions require explicit confirmation.
@@ -135,7 +135,7 @@ Replace the existing broad reporting interface with two manager-focused report p
 - Reports are reduced to گزارش شیفت‌ها and گزارش حضور و غیاب. Completed shifts are searchable directly and newest-first; date range is optional advanced filtering. Shift reports support one or several selected completed shifts. Attendance reports support one or several selected shifts and one or several personnel. Every export is preceded by an exact preview and scope-labelled action.
 - Report PDFs use a minimal identity and contain only required scope, essential facts, evidence, concise useful summary, generation time, and page numbers. Empty sections, decorative charts, helper copy, controls, repeated metadata, empty columns, and oversized branding are omitted.
 - Existing performance-report and Excel interfaces are removed from this Security reports page, but backend behavior or historical data is not deleted merely because it is no longer exposed there.
-- تنظیمات حراست becomes an index with separate pages for فهرست حضور و غیاب and ساختار گزارش شیفت. Category/type configuration is hierarchical and focused. Current A/B/C population moves to shifts.
+- تنظیمات گارد becomes an index with separate pages for فهرست حضور و غیاب and ساختار گزارش شیفت. Category/type configuration is hierarchical and focused. Current A/B/C population moves to shifts.
 - Independent sections own initial loading, empty, error, retry, refresh, and stale-data states. Live operational views silently refresh every 30 seconds and preserve last successful data on refresh failure. Stable history/settings views refresh explicitly or after mutation.
 - Motion explains entry and state change: stable shell, subtle section entrance, consistent sheets/dialogs/expansion/tabs/chips/menus, restrained interactive feedback, animated list/status change, gentle numeric transitions, and brief live-entry highlight. Most interaction motion is 160–280 ms. Continuous decorative motion is excluded. Reduced motion retains non-spatial feedback.
 - Shared ERP primitives provide compact page header, responsive data view, filters and mobile sheet, status, menus, sheets/dialogs/confirmation, Persian date/date-range fields, data states, expandable detail, timeline foundation, and report-scope selection.

@@ -24,6 +24,7 @@ export interface RemainingPartitionAllocation {
   summaryError: string;
   consumedSourcePieces: number;
   remainingAreas: RemainingStone[];
+  remainingAreaSheetIndexes: Map<string, number>;
   physicalPiecesByRow: Map<string, StonePartition[]>;
 }
 
@@ -94,6 +95,7 @@ export const allocateRemainingStonePartitions = (
       summaryError: 'سنگ باقی‌مانده انتخاب‌شده قابل استفاده نیست.',
       consumedSourcePieces: 0,
       remainingAreas: [],
+      remainingAreaSheetIndexes: new Map(),
       physicalPiecesByRow: new Map()
     };
   }
@@ -128,6 +130,7 @@ export const allocateRemainingStonePartitions = (
       summaryError: `${rowErrors.size} پارتیشن دارای مشکل است. لطفاً ابعاد را بررسی و اصلاح کنید.`,
       consumedSourcePieces: 0,
       remainingAreas: [],
+      remainingAreaSheetIndexes: new Map(),
       physicalPiecesByRow: new Map()
     };
   }
@@ -206,17 +209,23 @@ export const allocateRemainingStonePartitions = (
       summaryError: `${rowErrors.size} پارتیشن دارای مشکل است. لطفاً ابعاد را بررسی و اصلاح کنید.`,
       consumedSourcePieces: sheets.length,
       remainingAreas: [],
+      remainingAreaSheetIndexes: new Map(),
       physicalPiecesByRow
     };
   }
 
+  const remainingAreaSheetIndexes = new Map<string, number>();
   const remainingAreas = sheets.flatMap((sheet, sheetIndex) =>
     calculateRemainingAreasAfterPartitions(sheet, stockInfo.sanitized.width, stockInfo.sanitized.length)
-      .map((area, areaIndex) => ({
-        ...area,
-        id: `remaining_partition_${Date.now()}_${sheetIndex}_${areaIndex}`,
-        quantity: 1
-      }))
+      .map((area, areaIndex) => {
+        const id = `remaining_partition_${Date.now()}_${sheetIndex}_${areaIndex}`;
+        remainingAreaSheetIndexes.set(id, sheetIndex);
+        return {
+          ...area,
+          id,
+          quantity: 1
+        };
+      })
   );
 
   return {
@@ -225,6 +234,7 @@ export const allocateRemainingStonePartitions = (
     summaryError: '',
     consumedSourcePieces: sheets.length,
     remainingAreas,
+    remainingAreaSheetIndexes,
     physicalPiecesByRow
   };
 };

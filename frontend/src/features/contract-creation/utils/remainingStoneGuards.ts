@@ -2,6 +2,16 @@ import type { ContractProduct, RemainingStone } from '../types/contract.types';
 
 const EPSILON = 0.000001;
 
+export interface RemainingStoneInventoryGroup {
+  key: string;
+  width: number;
+  length: number;
+  quantity: number;
+  pieceSquareMeters: number;
+  totalSquareMeters: number;
+  stones: RemainingStone[];
+}
+
 const toNumber = (value: unknown): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -19,6 +29,46 @@ const buildMergeKey = (stone: RemainingStone): string => {
   ].join('|');
 };
 
+export const getRemainingStoneInventoryGroupKey = (
+  stone: Pick<RemainingStone, 'width' | 'length' | 'isAvailable'>
+): string => [
+  stone.isAvailable === false ? 'unavailable' : 'available',
+  String(Math.max(0, toNumber(stone.width))),
+  String(Math.max(0, toNumber(stone.length)))
+].join('|');
+
+export const groupRemainingStoneInventory = (
+  stones: RemainingStone[]
+): RemainingStoneInventoryGroup[] => {
+  const groups = new Map<string, RemainingStoneInventoryGroup>();
+
+  normalizeRemainingStoneCollection(stones)
+    .filter(isUsableRemainingStone)
+    .forEach((stone) => {
+      const key = getRemainingStoneInventoryGroupKey(stone);
+      const quantity = Math.max(1, Math.trunc(Number(stone.quantity || 1)));
+      const pieceSquareMeters = (stone.width * stone.length) / 100;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.quantity += quantity;
+        existing.totalSquareMeters += pieceSquareMeters * quantity;
+        existing.stones.push(stone);
+        return;
+      }
+      groups.set(key, {
+        key,
+        width: stone.width,
+        length: stone.length,
+        quantity,
+        pieceSquareMeters,
+        totalSquareMeters: pieceSquareMeters * quantity,
+        stones: [stone]
+      });
+    });
+
+  return Array.from(groups.values());
+};
+
 export const sanitizeRemainingStoneEntry = (stone: RemainingStone): RemainingStone => {
   const width = Math.max(0, toNumber(stone.width));
   const length = Math.max(0, toNumber(stone.length));
@@ -27,17 +77,21 @@ export const sanitizeRemainingStoneEntry = (stone: RemainingStone): RemainingSto
 
   const explicitQuantity = Math.floor(toNumber(stone.quantity));
   const inferredQuantity =
-    pieceSquareMeters > EPSILON && rawSquareMeters > EPSILON
-      ? Math.floor((rawSquareMeters + EPSILON) / pieceSquareMeters)
+    pieceSquareMeters > 0 && rawSquareMeters > 0
+      ? Math.max(1, Math.floor((rawSquareMeters / pieceSquareMeters) + EPSILON))
       : 0;
   const quantity = explicitQuantity > 0 ? explicitQuantity : inferredQuantity;
 
   const squareMeters =
-    quantity > 0 && pieceSquareMeters > EPSILON
+    quantity > 0 && pieceSquareMeters > 0
       ? pieceSquareMeters * quantity
       : 0;
 
-  const hasValidGeometry = width > EPSILON && length > EPSILON && squareMeters > EPSILON && quantity >= 1;
+  const hasValidGeometry =
+    width > 0 &&
+    length > 0 &&
+    squareMeters > 0 &&
+    quantity >= 1;
   const isAvailable = stone.isAvailable !== false && hasValidGeometry;
 
   return {
@@ -54,9 +108,9 @@ export const isUsableRemainingStone = (stone: RemainingStone): boolean => {
   const sanitized = sanitizeRemainingStoneEntry(stone);
   return (
     sanitized.isAvailable === true &&
-    sanitized.width > EPSILON &&
-    sanitized.length > EPSILON &&
-    sanitized.squareMeters > EPSILON &&
+    sanitized.width > 0 &&
+    sanitized.length > 0 &&
+    sanitized.squareMeters > 0 &&
     (sanitized.quantity || 0) >= 1
   );
 };

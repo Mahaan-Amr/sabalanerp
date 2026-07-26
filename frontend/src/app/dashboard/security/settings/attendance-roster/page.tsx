@@ -24,7 +24,7 @@ export default function AttendanceRosterSettingsPage() {
   const rows = useMemo(() => items.filter((item) => { const query = search.trim().toLowerCase(); const name = `${item.personnel.firstName} ${item.personnel.lastName}`.toLowerCase(); return (!query || name.includes(query)) && (scope === 'all' || item.isInRoster === (scope === 'included')); }), [items, scope, search]);
 
   const toggle = async (item: AttendanceRosterItem) => {
-    const accepted = await askSecurityAction({ title: item.isInRoster ? 'خروج از فهرست حضور و غیاب' : 'افزودن به فهرست حضور و غیاب', description: item.isInRoster ? 'این تغییر از امروز اعمال می‌شود؛ سوابق تاریخی فرد حفظ خواهد شد.' : 'از امروز وضعیت حضور و غیاب این فرد در حراست محاسبه می‌شود.' });
+    const accepted = await askSecurityAction({ title: item.isInRoster ? 'خروج از فهرست حضور و غیاب' : 'افزودن به فهرست حضور و غیاب', description: item.isInRoster ? 'این تغییر از امروز اعمال می‌شود؛ سوابق تاریخی فرد حفظ خواهد شد.' : 'از امروز وضعیت حضور و غیاب این فرد در گارد محاسبه می‌شود.' });
     if (!accepted) return;
     setUpdatingId(item.personnel.id); setError(''); setMessage('');
     try { const effectiveDate = PersianCalendar.toGregorianDateOnly(PersianCalendar.now()); const response = item.isInRoster ? await securityAPI.removeAttendanceRosterMember(item.personnel.id, { effectiveDate }) : await securityAPI.addAttendanceRosterMember({ personnelId: item.personnel.id, effectiveDate }); setMessage(response.data.message || 'فهرست به‌روزرسانی شد.'); await load(); } catch (requestError: any) { setError(requestError.response?.data?.error || 'تغییر فهرست حضور و غیاب ناموفق بود.'); } finally { setUpdatingId(''); }

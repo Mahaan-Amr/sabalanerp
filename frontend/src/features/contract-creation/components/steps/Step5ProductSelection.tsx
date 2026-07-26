@@ -13,7 +13,8 @@ import type {
   ContractProduct,
   ContractServiceRow,
   ContractServiceRowSourceType,
-  Product
+  Product,
+  RemainingStone
 } from '../../types/contract.types';
 import type { ContractProductCartController } from '../../hooks/useContractProductCartController';
 import { generateFullProductName, inferCatalogContractType } from '../../utils/productUtils';
@@ -22,7 +23,11 @@ import {
   getServiceRowUnitLabel,
   getServiceRowUnitPriceFromCatalog
 } from '../../utils/contractServiceRows';
-import { getAvailableRemainingStoneInventory } from '../../utils/remainingStoneGuards';
+import {
+  getAvailableRemainingStoneInventory,
+  groupRemainingStoneInventory,
+  type RemainingStoneInventoryGroup
+} from '../../utils/remainingStoneGuards';
 import {
   getPreparedQuantity,
   getPreparedUnit,
@@ -156,6 +161,89 @@ const RowImages: React.FC<{
   );
 };
 
+const RemainingInventoryGroupRow: React.FC<{
+  group: RemainingStoneInventoryGroup;
+  sourceProduct: ContractProduct;
+  onUse: (stone: RemainingStone, sourceProduct: ContractProduct) => void;
+}> = ({ group, sourceProduct, onUse }) => {
+  const [quantity, setQuantity] = useState(1);
+  const safeQuantity = Math.min(
+    group.quantity,
+    Math.max(1, Math.trunc(Number(quantity) || 1))
+  );
+
+  const selectGroup = () => {
+    const representative = group.stones[0];
+    onUse({
+      ...representative,
+      quantity: safeQuantity,
+      squareMeters: group.pieceSquareMeters * safeQuantity,
+      inventoryGroupSelection: {
+        groupKey: group.key,
+        expectedQuantity: group.quantity,
+        requestedQuantity: safeQuantity
+      }
+    }, sourceProduct);
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-2.5 dark:border-slate-700 dark:bg-slate-900/50">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="font-medium text-slate-800 dark:text-slate-100">
+            {formatDisplayNumber(group.quantity)} قطعه × (
+            {formatDisplayNumber(group.length)}m × {formatDisplayNumber(group.width)}cm)
+          </div>
+          <div className="mt-0.5 text-slate-500 dark:text-slate-400">
+            هر قطعه {formatSquareMeters(group.pieceSquareMeters)}
+            {' · '}مجموع {formatSquareMeters(group.totalSquareMeters)}
+          </div>
+        </div>
+        <div className="flex items-end gap-2">
+          <label className="text-[11px] text-slate-500 dark:text-slate-400">
+            تعداد استفاده
+            <input
+              type="text"
+              inputMode="numeric"
+              value={formatDisplayNumber(safeQuantity)}
+              onChange={(event) => {
+                const next = Math.trunc(parseFormattedNumber(event.target.value));
+                setQuantity(Math.min(group.quantity, Math.max(1, next || 1)));
+              }}
+              className="mt-1 block w-24 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-center text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+              aria-label="تعداد قطعات باقی‌مانده برای استفاده"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={selectGroup}
+            className="rounded-md bg-teal-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-teal-700"
+          >
+            استفاده
+          </button>
+        </div>
+      </div>
+      <details className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+        <summary className="cursor-pointer select-none">جزئیات شناسه‌های فیزیکی</summary>
+        <div className="mt-1 max-h-24 overflow-y-auto font-mono" dir="ltr">
+          {group.stones.flatMap(stone =>
+            Array.from(
+              { length: Math.max(1, Math.trunc(Number(stone.quantity || 1))) },
+              (_, index) => (
+                <div key={`${stone.id}-${index}`}>
+                  {(stone.quantity && stone.quantity > 1) || stone.physicalUnitOffset
+                    ? `${stone.id}:unit:${Number(stone.physicalUnitOffset || 0) + index + 1}`
+                    : stone.id}
+                </div>
+              )
+            )
+          )}
+        </div>
+      </details>
+    </div>
+  );
+};
+
 const ContractRow: React.FC<{
   product: ContractProduct;
   depth?: number;
@@ -180,6 +268,12 @@ const ContractRow: React.FC<{
   const tools = getToolRows(product);
   const finishings = getFinishingRows(product);
   const remaining = getAvailableRemainingStoneInventory(product);
+  const remainingGroups = groupRemainingStoneInventory(remaining);
+  const remainingQuantity = remainingGroups.reduce(
+    (sum, group) => sum + group.quantity,
+    0
+  );
+  const useRemainingStone = controller.cart.useRemainingStone;
   const pending = pendingRowId === rowId;
   const confirmingDelete = deleteConfirmRowId === rowId;
 
@@ -242,23 +336,19 @@ const ContractRow: React.FC<{
         {tools.map(tool => <div key={tool.id}>ابزار — {tool.label}</div>)}
         {finishings.map(finishing => <div key={finishing.id}>پرداخت — {finishing.label}</div>)}
         {product.description && <div>توضیحات — {product.description}</div>}
-        {remaining.length > 0 && (
-          <div className="space-y-1">
-            <div>باقی‌مانده — {remaining.length} قطعه</div>
-            {controller.cart.useRemainingStone && remaining.map(piece => (
-              <div key={piece.id} className="flex flex-wrap items-center gap-2 pr-3">
-                <span>
-                  {formatDisplayNumber(piece.width)}cm × {formatDisplayNumber(piece.length)}m
-                  {' · '}{formatSquareMeters(piece.squareMeters)}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => controller.cart.useRemainingStone?.(piece, product)}
-                  className="font-medium text-teal-700 dark:text-teal-300"
-                >
-                  استفاده
-                </button>
-              </div>
+        {remainingGroups.length > 0 && (
+          <div className="space-y-2">
+            <div className="font-medium text-slate-700 dark:text-slate-200">
+              باقی‌مانده — {formatDisplayNumber(remainingQuantity)} قطعه در{' '}
+              {formatDisplayNumber(remainingGroups.length)} گروه هندسی
+            </div>
+            {useRemainingStone && remainingGroups.map(group => (
+              <RemainingInventoryGroupRow
+                key={group.key}
+                group={group}
+                sourceProduct={product}
+                onUse={useRemainingStone}
+              />
             ))}
           </div>
         )}

@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect } from 'react';
 import { 
@@ -307,7 +307,7 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
           <div className="flex items-center space-x-2 space-x-reverse">
             <FaExclamationTriangle className="h-4 w-4 text-yellow-500" />
             <span className="text-sm text-yellow-500">
-              نسخه موبایل - ورود و خروج سریع حراست
+              نسخه موبایل - ورود و خروج سریع گارد
             </span>
           </div>
         </div>

@@ -54,7 +54,7 @@ export default function SecurityShiftReportDetailPage() {
           <ErpSection>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-black text-slate-950 dark:text-white">{report.effectivePersonnel?.name || report.plannedPersonnel?.name || 'شیفت حراست'}</h2>
+                <h2 className="text-lg font-black text-slate-950 dark:text-white">{report.effectivePersonnel?.name || report.plannedPersonnel?.name || 'شیفت گارد'}</h2>
                 <p className="mt-1 text-sm text-slate-500">{report.title}</p>
               </div>
               <div className="flex flex-wrap gap-2">

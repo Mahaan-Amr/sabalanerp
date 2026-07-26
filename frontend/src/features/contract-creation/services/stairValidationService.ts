@@ -208,7 +208,7 @@ export const validateDraftRequiredFields = (
   if (hasLayerConfiguration && !draft.layerTypeId) {
     errors.layerType = 'انتخاب نوع لایه الزامی است';
   } else if (hasLayerConfiguration && !(Number(draft.layerTypePrice) > 0)) {
-    errors.layerType = 'نرخ قراردادی نوع لایه باید بیشتر از صفر باشد';
+    errors.layerType = 'قیمت نوع لایه در انبار معتبر نیست';
   }
 
   if (hasLayerConfiguration && !draft.layerSourceKind) {

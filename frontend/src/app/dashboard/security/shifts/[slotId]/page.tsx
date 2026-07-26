@@ -53,7 +53,7 @@ export default function SecurityPlannedShiftDetailPage() {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-black">{personName(slot.replacementPersonnel || slot.plannedPersonnel)}</h2>
-                <p className="mt-1 text-sm text-slate-500">{slot.plan?.title || 'برنامه شیفت حراست'}</p>
+                <p className="mt-1 text-sm text-slate-500">{slot.plan?.title || 'برنامه شیفت گارد'}</p>
               </div>
               <ErpBadge tone={slot.operationalState === 'MANAGER_REVIEW' ? 'warning' : 'neutral'}>{status}</ErpBadge>
             </div>
@@ -67,7 +67,7 @@ export default function SecurityPlannedShiftDetailPage() {
           {slot.managerReviewRequired && <ErpInlineState kind="stale" title="بازه برنامه پایان یافته اما جلسه شیفت ثبت نشده است؛ تصمیم مدیر در صفحه شیفت‌ها لازم است." />}
           {slot.noShiftConfirmedAt && (
             <ErpSection title="تصمیم مدیر">
-              <p className="text-sm font-semibold">عدم انجام شیفت در {dateTime(slot.noShiftConfirmedAt)} توسط {slot.noShiftConfirmedByName || 'مدیر حراست'} تأیید شد.</p>
+              <p className="text-sm font-semibold">عدم انجام شیفت در {dateTime(slot.noShiftConfirmedAt)} توسط {slot.noShiftConfirmedByName || 'مدیر گارد'} تأیید شد.</p>
               <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{slot.noShiftConfirmReason}</p>
             </ErpSection>
           )}

@@ -1733,7 +1733,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     getCuttingTypePricePerMeter
   );
 
-  const stairConflictMessage = (code: string, motherLength?: number | null) => {
+  const stairConflictMessage = (
+    code: string,
+    motherLength?: number | null,
+    field?: string
+  ) => {
     if (code === 'stair-mother-dimensions-required') {
       return 'عرض مادر در موجودی ثبت نشده است';
     }
@@ -1744,9 +1748,21 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return 'بعد عرضی از عرض مادر سنگ بیشتر است';
     }
     if (code === 'stair-price-required') return 'قیمت را وارد کنید';
-    if (code === 'stair-cut-rate-missing') return 'نرخ برش در موجودی ثبت نشده است';
+    if (code === 'stair-cut-rate-missing') {
+      return field?.includes('cross')
+        ? 'نرخ برش عرضی در موجودی ثبت نشده است'
+        : 'نرخ برش طولی در موجودی ثبت نشده است';
+    }
     if (code === 'stair-quantity-required') return 'تعداد را وارد کنید';
     return 'ابعاد را کامل کنید';
+  };
+
+  const focusCalculationError = (targetId: string) => {
+    requestAnimationFrame(() => {
+      const target = document.getElementById(targetId);
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target?.focus({ preventScroll: true });
+    });
   };
 
   const computeFinishingCost = (
@@ -3346,6 +3362,24 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         // Reconstruct session items from the clicked row scope only.
         stairSystemV2.setStairSessionItems([...scopedStairProducts]);
 
+        const cutRateSnapshotsFromProduct = (p: ContractProduct) => {
+          const longitudinal = p.cuttingBreakdown?.find(
+            cut => cut.type === 'longitudinal'
+          );
+          const cross = p.cuttingBreakdown?.find(
+            cut => cut.type === 'cross'
+          );
+          return {
+            ...(longitudinal
+              ? {
+                  longitudinal: longitudinal.rate,
+                  calibration: longitudinal.rate
+                }
+              : {}),
+            ...(cross ? { cross: cross.rate } : {})
+          };
+        };
+
         // Helper function to convert ContractProduct to StairPartDraftV2
         const productToDraft = (p: ContractProduct, partType: StairStepperPart): StairPartDraftV2 => {
           const metaTools = ((p.meta as any)?.tools || []).filter((tool: any) => !isGeneratedStairCutTool(tool));
@@ -3381,6 +3415,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             });
 
           return {
+            cutRateSnapshots: cutRateSnapshotsFromProduct(p),
             operationPolicyInput: legacyOperationPolicyInput,
             stoneId: p.productId,
             stoneLabel: p.stoneName,
@@ -3468,6 +3503,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             const layerAltStoneMeta = (layerProduct.meta as any)?.layerAltStone;
             return {
               ...draft,
+              cutRateSnapshots: cutRateSnapshotsFromProduct(layerProduct),
               layerConfigurationDraftId:
                 layerInfo?.layerConfigurationId ||
                 layerProduct.rowId ||
@@ -6028,14 +6064,17 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     <div className="space-y-6">
                       {!totals.canonicalCalculation.ok && (
                         <div
+                          id="stair-calculation-summary"
+                          tabIndex={-1}
                           className="border-y border-red-200 py-2 text-xs text-red-600 dark:border-red-900 dark:text-red-300"
-                          role="status"
+                          role="alert"
                         >
                           {totals.canonicalCalculation.conflicts.map((conflict) => (
                             <div key={`${conflict.code}:${conflict.field}`}>
                               {stairConflictMessage(
                                 conflict.code,
-                                draft.stoneProduct?.motherLengthValue
+                                draft.stoneProduct?.motherLengthValue,
+                                conflict.field
                               )}
                             </div>
                           ))}
@@ -7806,16 +7845,21 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   if (draft.layerSourceKind !== 'parentMaterial' || stairLengthM <= 0) {
                                     return [];
                                   }
-                                  return usagePreview.remainingStoneGroups
-                                    .filter(group => group.widthCm > 0 && group.quantity > 0)
-                                    .map((group, index) => ({
-                                      id: `preview_layer_source_${draft.stoneId || 'main'}_${index}`,
-                                      width: group.widthCm,
-                                      length: stairLengthM,
-                                      squareMeters: (group.widthCm / 100) * stairLengthM * group.quantity,
+                                  if (!usagePreview.canonicalCalculation.ok) {
+                                    return [];
+                                  }
+                                  return usagePreview.canonicalCalculation.result
+                                    .packingPlan.remainders.map(remainder => ({
+                                      id: remainder.remainingStoneId,
+                                      width: Number(remainder.widthMeters) * 100,
+                                      length: Number(remainder.lengthMeters),
+                                      squareMeters:
+                                        Number(remainder.widthMeters) *
+                                        Number(remainder.lengthMeters),
                                       isAvailable: true,
-                                      sourceCutId: `preview_layer_source_${draft.stoneId || 'main'}_${index}`,
-                                      quantity: group.quantity
+                                      sourceCutId:
+                                        `${remainder.sourceBatchId}:${remainder.sourceOrdinal}`,
+                                      quantity: 1
                                     }));
                                 })();
                                 const previewAvailableRemainingStones =
@@ -8511,7 +8555,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                      >((fieldErrors, conflict) => {
                        const message = stairConflictMessage(
                          conflict.code,
-                         draft.stoneProduct?.motherLengthValue
+                         draft.stoneProduct?.motherLengthValue,
+                         conflict.field
                        );
                        if (conflict.field === 'lengthMeters' || conflict.field === 'motherDimensions') {
                          fieldErrors.length = message;
@@ -8521,6 +8566,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                          fieldErrors.pricePerSquareMeter = message;
                        } else if (conflict.field === 'quantity') {
                          fieldErrors.quantity = message;
+                       } else if (conflict.code === 'stair-cut-rate-missing') {
+                         fieldErrors.cutRate = message;
                        }
                        return fieldErrors;
                      }, {});
@@ -8531,6 +8578,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                          ...nextErrors
                        }
                      }));
+                     focusCalculationError('stair-calculation-summary');
                      return;
                    }
                    const layerDraftsForValidation = [
@@ -8755,14 +8803,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       remainingWidth: totals.leftoverWidthCm,
                       length: actualLengthM * 100 * baseStoneQuantity,
                       cuttingCost: totals.cuttingCostLongitudinal,
-                      cuttingCostPerMeter: totals.cuttingCostPerMeterLongitudinal || totals.cuttingCostPerMeter,
+                      cuttingCostPerMeter: totals.cuttingCostPerMeterLongitudinal,
                       orientation: 'longitudinal'
                     };
                     cutDetails = [cutDetail];
                     cuttingBreakdown.push({
                       type: 'longitudinal',
-                      meters: totals.cuttingMetersLongitudinal || (actualLengthM * baseStoneQuantity),
-                      rate: totals.cuttingCostPerMeterLongitudinal || totals.cuttingCostPerMeter,
+                      meters: totals.cuttingMetersLongitudinal,
+                      rate: totals.cuttingCostPerMeterLongitudinal,
                       cost: totals.cuttingCostLongitudinal
                     });
                   }
@@ -8797,15 +8845,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           remainingWidth: remainingLength * 100,
                           length: originalWidthCm * baseStoneQuantity,
                           cuttingCost: totals.cuttingCostCross,
-                          cuttingCostPerMeter: totals.cuttingCostPerMeterCross || totals.cuttingCostPerMeter,
+                          cuttingCostPerMeter: totals.cuttingCostPerMeterCross,
                           orientation: 'cross'
                         }
                       ];
                     }
                     cuttingBreakdown.push({
                       type: 'cross',
-                      meters: totals.cuttingMetersCross || ((originalWidthCm / 100) * baseStoneQuantity),
-                      rate: totals.cuttingCostPerMeterCross || totals.cuttingCostPerMeter,
+                      meters: totals.cuttingMetersCross,
+                      rate: totals.cuttingCostPerMeterCross,
                       cost: totals.cuttingCostCross
                     });
                    }
@@ -9055,6 +9103,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             )
                           }
                         }));
+                        focusCalculationError('stair-layer-calculation-summary');
                         return;
                       }
                       canonicalPreflightInventory = [...preflight.inventory];
@@ -9490,12 +9539,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         break;
                       }
 
-                      const longitudinalLayerRate =
-                        (layerStoneProduct as any)?.cuttingCostPerMeter ??
-                        getCuttingTypePricePerMeter('LONG');
-                      const crossLayerRate =
-                        (layerStoneProduct as any)?.crossCuttingCostPerMeter ??
-                        getCuttingTypePricePerMeter('CROSS');
+                      const longitudinalLayerRate = Number(
+                        canonicalLayerRequest.input.longitudinalCutRateToman ??
+                        canonicalLayerRequest.input.calibrationCutRateToman ??
+                        0
+                      );
+                      const crossLayerRate = Number(
+                        canonicalLayerRequest.input.crossCutRateToman ?? 0
+                      );
                       const totalLongitudinalLayerMeters =
                         Number(
                           canonicalLayerResult.packingPlan
@@ -9508,31 +9559,25 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         Number(
                           canonicalLayerResult.packingPlan.crossCutMeters
                         );
-                      if (
-                        (totalLongitudinalLayerMeters > 0 &&
-                          longitudinalLayerRate === null) ||
-                        (totalCrossLayerMeters > 0 && crossLayerRate === null)
-                      ) {
-                        stairSystemV2.setStairDraftErrors(prev => ({
-                          ...prev,
-                          [stairSystemV2.stairActivePart]: {
-                            ...prev[stairSystemV2.stairActivePart],
-                            layerSource: totalLongitudinalLayerMeters > 0 &&
-                              longitudinalLayerRate === null
-                              ? 'نرخ برش طولی در موجودی ثبت نشده است'
-                              : 'نرخ برش عرضی در موجودی ثبت نشده است'
-                          }
-                        }));
-                        layerProcessingFailed = true;
-                        break;
-                      }
-                      const safeLongitudinalLayerRate =
-                        longitudinalLayerRate ?? 0;
-                      const safeCrossLayerRate = crossLayerRate ?? 0;
+                      const safeLongitudinalLayerRate = longitudinalLayerRate;
+                      const safeCrossLayerRate = crossLayerRate;
                       const longitudinalLayerCost =
-                        totalLongitudinalLayerMeters * safeLongitudinalLayerRate;
+                        canonicalLayerResult.cuttingPricingLines
+                          .filter(line =>
+                            line.lineId.endsWith(':longitudinal') ||
+                            line.lineId.endsWith(':calibration')
+                          )
+                          .reduce(
+                            (sum, line) => sum + Number(line.amountToman),
+                            0
+                          );
                       const crossLayerCost =
-                        totalCrossLayerMeters * safeCrossLayerRate;
+                        canonicalLayerResult.cuttingPricingLines
+                          .filter(line => line.lineId.endsWith(':cross'))
+                          .reduce(
+                            (sum, line) => sum + Number(line.amountToman),
+                            0
+                          );
                       const layerMandatoryCuttingPolicy = usingAlternateLayerStone
                         ? ((draft.layerUseMandatory ?? true) && (draft.layerMandatoryPercentage ?? 0) > 0)
                         : (isDraftMandatory && mandatoryPercentageValue > 0);

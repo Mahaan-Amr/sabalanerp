@@ -36,6 +36,14 @@ export type StairLayerSourceSelection =
       readonly selectedRemainingStoneIds: readonly StableIdentity<'remaining-stone'>[];
     }
   | {
+      readonly kind: 'parent-material';
+      readonly selectedRemainingStoneIds: readonly StableIdentity<'remaining-stone'>[];
+      readonly catalogProductId: string;
+      readonly catalogSnapshotVersion: string;
+      readonly materialRateToman: CanonicalDecimal;
+      readonly sourceRows: readonly StairLayerNewSourceRow[];
+    }
+  | {
       readonly kind: 'new-material';
       readonly catalogProductId: string;
       readonly catalogSnapshotVersion: string;
@@ -104,7 +112,15 @@ export interface StairLayerConfigurationResult {
   readonly physicalStripCount: number;
   readonly physicalStrips: readonly StairLayerPhysicalStripDemand[];
   readonly packingPlan: PackingPlan;
-  readonly materialPricingReason: 'paid-material' | 'new-material';
+  readonly materialPricingReason: 'paid-material' | 'new-material' | 'mixed-material';
+  readonly materialSourceSplit: {
+    readonly paidSourceCount: number;
+    readonly paidMaterialSquareMeters: CanonicalDecimal;
+    readonly paidMaterialAmountToman: CanonicalDecimal;
+    readonly newSourceCount: number;
+    readonly newMaterialSquareMeters: CanonicalDecimal;
+    readonly newMaterialAmountToman: CanonicalDecimal;
+  };
   readonly layerPricingQuantity: CanonicalDecimal;
   readonly layerPricingLine: PricedLine;
   readonly materialPricingLine?: PricedLine;
@@ -238,6 +254,47 @@ export const parseStairLayerConfigurationInput = (
   } else if (sourceKind === 'new-material') {
     parsedSource = {
       kind: sourceKind,
+      catalogProductId: text(source.catalogProductId, 'source.catalogProductId'),
+      catalogSnapshotVersion: text(
+        source.catalogSnapshotVersion,
+        'source.catalogSnapshotVersion'
+      ),
+      materialRateToman: decimal(
+        source.materialRateToman,
+        'source.materialRateToman'
+      ),
+      sourceRows: array(source.sourceRows, 'source.sourceRows').map((item, index) => {
+        const row = object(item, `source.sourceRows.${index}`);
+        return {
+          sourceRowId: parseStableIdentity(
+            'layer-source-row',
+            text(row.sourceRowId, `source.sourceRows.${index}.sourceRowId`)
+          ),
+          lengthMeters: decimal(
+            row.lengthMeters,
+            `source.sourceRows.${index}.lengthMeters`
+          ),
+          widthMeters: decimal(
+            row.widthMeters,
+            `source.sourceRows.${index}.widthMeters`
+          ),
+          quantity: integer(
+            row.quantity,
+            `source.sourceRows.${index}.quantity`
+          )
+        };
+      })
+    };
+  } else if (sourceKind === 'parent-material') {
+    parsedSource = {
+      kind: sourceKind,
+      selectedRemainingStoneIds: array(
+        source.selectedRemainingStoneIds,
+        'source.selectedRemainingStoneIds'
+      ).map((item, index) => parseStableIdentity(
+        'remaining-stone',
+        text(item, `source.selectedRemainingStoneIds.${index}`)
+      )),
       catalogProductId: text(source.catalogProductId, 'source.catalogProductId'),
       catalogSnapshotVersion: text(
         source.catalogSnapshotVersion,
@@ -486,8 +543,57 @@ export const calculateStairLayerConfiguration = ({
       { stock: PaidRemainderStock; batchId: StableIdentity<'source-batch'> }
     >();
     const selectedIds = new Set<string>();
-    const packingSources = input.source.kind === 'new-material'
-      ? input.source.sourceRows.map((source, index) => {
+    const paidSourceIds =
+      input.source.kind === 'paid-remainder' ||
+      input.source.kind === 'parent-material'
+        ? input.source.selectedRemainingStoneIds
+        : [];
+    const paidPackingSources = paidSourceIds.flatMap((remainingStoneId, index) => {
+      parseStableIdentity('remaining-stone', remainingStoneId);
+      if (selectedIds.has(remainingStoneId)) {
+        throw new TypeError(
+          `selectedRemainingStoneIds.${index} duplicates a selected source.`
+        );
+      }
+      selectedIds.add(remainingStoneId);
+      const matchingStocks = availableInventory.filter(
+        item =>
+          item.remainingStoneId === remainingStoneId ||
+          item.remainingStoneId.startsWith(
+            `${remainingStoneId}:layer-remainder:`
+          )
+      );
+      if (matchingStocks.length === 0) {
+        throw new RangeError(`Selected remaining stone ${remainingStoneId} is unavailable.`);
+      }
+      return matchingStocks.map(stock => {
+        if ([...stockBySyntheticBatch.values()].some(
+          item => item.stock.remainingStoneId === stock.remainingStoneId
+        )) {
+          throw new TypeError(
+            `selectedRemainingStoneIds.${index} overlaps another selected source.`
+          );
+        }
+        const batchId = parseStableIdentity(
+          'source-batch',
+          `${input.sourceBatchId}:paid:${stock.remainingStoneId}`
+        );
+        stockBySyntheticBatch.set(batchId, { stock, batchId });
+        return {
+          sourceBatchId: batchId,
+          lengthMeters: stock.lengthMeters,
+          widthMeters: stock.widthMeters,
+          quantity: stock.quantity,
+          allocationPriority: 0
+        };
+      });
+    });
+    const newSourceRows =
+      input.source.kind === 'new-material' ||
+      input.source.kind === 'parent-material'
+        ? input.source.sourceRows
+        : [];
+    const newPackingSources = newSourceRows.map((source, index) => {
           parseStableIdentity('layer-source-row', source.sourceRowId);
           positiveInteger(source.quantity, `sourceRows.${index}.quantity`);
           if (d(source.lengthMeters).lte(0) || d(source.widthMeters).lte(0)) {
@@ -500,48 +606,11 @@ export const calculateStairLayerConfiguration = ({
             ),
             lengthMeters: source.lengthMeters,
             widthMeters: source.widthMeters,
-            quantity: source.quantity
+            quantity: source.quantity,
+            allocationPriority: input.source.kind === 'parent-material' ? 1 : 0
           };
-        })
-      : input.source.selectedRemainingStoneIds.flatMap((remainingStoneId, index) => {
-          parseStableIdentity('remaining-stone', remainingStoneId);
-          if (selectedIds.has(remainingStoneId)) {
-            throw new TypeError(
-              `selectedRemainingStoneIds.${index} duplicates a selected source.`
-            );
-          }
-          selectedIds.add(remainingStoneId);
-          const matchingStocks = availableInventory.filter(
-            item =>
-              item.remainingStoneId === remainingStoneId ||
-              item.remainingStoneId.startsWith(
-                `${remainingStoneId}:layer-remainder:`
-              )
-          );
-          if (matchingStocks.length === 0) {
-            throw new RangeError(`Selected remaining stone ${remainingStoneId} is unavailable.`);
-          }
-          return matchingStocks.map(stock => {
-            if ([...stockBySyntheticBatch.values()].some(
-              item => item.stock.remainingStoneId === stock.remainingStoneId
-            )) {
-              throw new TypeError(
-                `selectedRemainingStoneIds.${index} overlaps another selected source.`
-              );
-            }
-            const batchId = parseStableIdentity(
-              'source-batch',
-              `${input.sourceBatchId}:paid:${stock.remainingStoneId}`
-            );
-            stockBySyntheticBatch.set(batchId, { stock, batchId });
-            return {
-              sourceBatchId: batchId,
-              lengthMeters: stock.lengthMeters,
-              widthMeters: stock.widthMeters,
-              quantity: stock.quantity
-            };
-          });
         });
+    const packingSources = [...paidPackingSources, ...newPackingSources];
     if (packingSources.length === 0) {
       return {
         ok: false,
@@ -553,7 +622,8 @@ export const calculateStairLayerConfiguration = ({
       };
     }
     if (
-      input.source.kind === 'new-material' &&
+      (input.source.kind === 'new-material' ||
+        input.source.kind === 'parent-material') &&
       d(input.source.materialRateToman).lte(0)
     ) {
       return {
@@ -701,14 +771,24 @@ export const calculateStairLayerConfiguration = ({
       strips
     );
     const consumedByBatch = consumedCountByBatch(packing.plan);
-    const materialQuantity = input.source.kind === 'new-material'
-      ? canonical(packingSources.reduce((sum, source) => {
+    const newMaterialQuantity =
+      input.source.kind === 'new-material' ||
+      input.source.kind === 'parent-material'
+        ? canonical(newPackingSources.reduce((sum, source) => {
           const consumed = consumedByBatch.get(source.sourceBatchId) ?? 0;
           return sum.plus(
             d(source.lengthMeters).times(source.widthMeters).times(consumed)
           );
         }, d(0)))
-      : canonical(0);
+        : canonical(0);
+    const paidMaterialQuantity = canonical(
+      [...stockBySyntheticBatch.values()].reduce((sum, { stock, batchId }) => {
+        const consumed = consumedByBatch.get(batchId) ?? 0;
+        return sum.plus(
+          d(stock.lengthMeters).times(stock.widthMeters).times(consumed)
+        );
+      }, d(0))
+    );
     const pricing = calculatePricing({
       policyVersion: input.pricingPolicyVersion,
       roundingPolicyVersion: input.roundingPolicyVersion,
@@ -718,10 +798,11 @@ export const calculateStairLayerConfiguration = ({
           quantity: layerQuantity,
           rateToman: input.layerRateToman
         },
-        ...(input.source.kind === 'new-material'
+        ...(input.source.kind === 'new-material' ||
+        input.source.kind === 'parent-material'
           ? [{
               lineId: `${input.layerConfigurationId}:material`,
-              quantity: materialQuantity,
+              quantity: newMaterialQuantity,
               rateToman: input.source.materialRateToman
             }]
           : []),
@@ -759,7 +840,10 @@ export const calculateStairLayerConfiguration = ({
     );
 
     let inventory = availableInventory.map(cloneStock);
-    if (input.source.kind === 'paid-remainder') {
+    if (
+      input.source.kind === 'paid-remainder' ||
+      input.source.kind === 'parent-material'
+    ) {
       const byId = new Map(inventory.map(stock => [stock.remainingStoneId, stock]));
       stockBySyntheticBatch.forEach(({ stock, batchId }) => {
         const consumed = consumedByBatch.get(batchId) ?? 0;
@@ -787,12 +871,14 @@ export const calculateStairLayerConfiguration = ({
       return {
         remainingStoneId: parseStableIdentity(
           'remaining-stone',
-          input.source.kind === 'paid-remainder' && paidRootId
+          paidRootId
             ? `${paidRootId}:layer-remainder:${input.layerConfigurationId}:${index + 1}`
             : `${input.layerConfigurationId}:remainder:${index + 1}`
         ),
         ownerProductRowId: input.parentProductRowId,
-        catalogProductId: input.source.kind === 'new-material'
+        catalogProductId:
+          input.source.kind === 'new-material' ||
+          input.source.kind === 'parent-material'
           ? input.source.catalogProductId
           : stockBySyntheticBatch.get(remainder.sourceBatchId)
               ?.stock.catalogProductId ?? '',
@@ -811,6 +897,16 @@ export const calculateStairLayerConfiguration = ({
 
     const layerAmountToman = layerPricingLine.amountToman;
     const materialAmountToman = materialPricingLine?.amountToman ?? canonical(0);
+    const paidSourceCount = paidPackingSources.reduce(
+      (sum, source) =>
+        sum + (consumedByBatch.get(source.sourceBatchId) ?? 0),
+      0
+    );
+    const newSourceCount = newPackingSources.reduce(
+      (sum, source) =>
+        sum + (consumedByBatch.get(source.sourceBatchId) ?? 0),
+      0
+    );
     const cuttingAmountToman = sumAmounts(
       cuttingPricingLines.map(line => line.amountToman)
     );
@@ -830,9 +926,20 @@ export const calculateStairLayerConfiguration = ({
       physicalStripCount: strips.reduce((sum, strip) => sum + strip.quantity, 0),
       physicalStrips: strips,
       packingPlan: packing.plan,
-      materialPricingReason: input.source.kind === 'new-material'
-        ? 'new-material' as const
-        : 'paid-material' as const,
+      materialPricingReason:
+        paidSourceCount > 0 && newSourceCount > 0
+          ? 'mixed-material' as const
+          : newSourceCount > 0
+            ? 'new-material' as const
+            : 'paid-material' as const,
+      materialSourceSplit: {
+        paidSourceCount,
+        paidMaterialSquareMeters: paidMaterialQuantity,
+        paidMaterialAmountToman: canonical(0),
+        newSourceCount,
+        newMaterialSquareMeters: newMaterialQuantity,
+        newMaterialAmountToman: materialAmountToman
+      },
       layerPricingQuantity: layerQuantity,
       layerPricingLine,
       ...(materialPricingLine ? { materialPricingLine } : {}),

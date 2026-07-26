@@ -126,25 +126,42 @@ export const createCanonicalLayerCalculationRequest = ({
     0,
     Math.trunc(Number(draft.numberOfLayersPerStair || 0))
   );
-  const newStone = draft.layerStoneProduct;
-  const baseMaterialRate = Number(draft.layerPricePerSquareMeter || 0);
-  const effectiveMaterialRate = draft.layerUseMandatory
-    ? baseMaterialRate * (
-        1 + Number(draft.layerMandatoryPercentage || 0) / 100
-      )
+  const usesParentMaterial = draft.layerSourceKind === 'parentMaterial';
+  const sourceStone = usesParentMaterial
+    ? draft.stoneProduct
+    : draft.layerStoneProduct;
+  const baseMaterialRate = Number(
+    usesParentMaterial
+      ? draft.pricePerSquareMeter
+      : draft.layerPricePerSquareMeter
+  ) || 0;
+  const usesMandatory = usesParentMaterial
+    ? draft.useMandatory
+    : draft.layerUseMandatory;
+  const mandatoryPercentage = usesParentMaterial
+    ? draft.mandatoryPercentage
+    : draft.layerMandatoryPercentage;
+  const effectiveMaterialRate = usesMandatory
+    ? baseMaterialRate * (1 + Number(mandatoryPercentage || 0) / 100)
     : baseMaterialRate;
-  const sourceLengthMeters = Number(newStone?.motherLengthValue || 0);
-  const sourceWidthMeters = Number(newStone?.widthValue || 0) / 100;
+  const sourceLengthMeters = usesParentMaterial
+    ? getDraftStandardLengthMeters(draft)
+    : Number(sourceStone?.motherLengthValue || 0);
+  const sourceWidthMeters = Number(sourceStone?.widthValue || 0) / 100;
   const sourceBatchId = parseStableIdentity(
     'source-batch',
     `layer-source:${layerConfigurationId}`
   );
   const longitudinalRate =
-    (newStone as any)?.cuttingCostPerMeter ??
+    draft.cutRateSnapshots?.longitudinal ??
     getCuttingTypePricePerMeter('LONG');
   const crossRate =
-    (newStone as any)?.crossCuttingCostPerMeter ??
+    draft.cutRateSnapshots?.cross ??
     getCuttingTypePricePerMeter('CROSS');
+  const calibrationRate =
+    draft.cutRateSnapshots?.calibration ??
+    draft.cutRateSnapshots?.longitudinal ??
+    getCuttingTypePricePerMeter('LONG');
   const parentLengthMeters = getActualLengthMeters(draft);
   const parentCrossDimensionMeters = Number(draft.widthCm || 0) / 100;
   const stripWidthMeters = Number(draft.layerWidthCm || 0) / 100;
@@ -213,6 +230,22 @@ export const createCanonicalLayerCalculationRequest = ({
   const selectedPaidIds = draft.layerSourceKind === 'contractRemainder'
     ? (draft.layerSelectedRemainingStoneIds || [])
     : parentRemainingStoneIds;
+  const freshMaterialSource = {
+    catalogProductId: usesParentMaterial
+      ? draft.stoneId || sourceStone?.id || ''
+      : draft.layerStoneProductId || sourceStone?.id || '',
+    catalogSnapshotVersion: 'inventory-product-v1',
+    materialRateToman: toCanonicalDecimal(effectiveMaterialRate),
+    sourceRows: [{
+      sourceRowId: parseStableIdentity(
+        'layer-source-row',
+        `layer-source-row:${layerConfigurationId}`
+      ),
+      lengthMeters: toCanonicalDecimal(sourceLengthMeters),
+      widthMeters: toCanonicalDecimal(sourceWidthMeters),
+      quantity: sourceQuantityUpperBound
+    }]
+  };
 
   return {
     parent: {
@@ -242,39 +275,33 @@ export const createCanonicalLayerCalculationRequest = ({
       source: draft.layerSourceKind === 'newMaterial'
         ? {
             kind: 'new-material',
-            catalogProductId:
-              draft.layerStoneProductId || newStone?.id || '',
-            catalogSnapshotVersion: 'inventory-product-v1',
-            materialRateToman: toCanonicalDecimal(
-              effectiveMaterialRate
-            ),
-            sourceRows: [{
-              sourceRowId: parseStableIdentity(
-                'layer-source-row',
-                `layer-source-row:${layerConfigurationId}`
-              ),
-              lengthMeters: toCanonicalDecimal(sourceLengthMeters),
-              widthMeters: toCanonicalDecimal(sourceWidthMeters),
-              quantity: sourceQuantityUpperBound
-            }]
+            ...freshMaterialSource
           }
-        : {
-            kind: 'paid-remainder',
-            selectedRemainingStoneIds: selectedPaidIds.map(id =>
-              parseStableIdentity('remaining-stone', id)
-            )
-          },
+        : draft.layerSourceKind === 'parentMaterial'
+          ? {
+              kind: 'parent-material',
+              selectedRemainingStoneIds: selectedPaidIds.map(id =>
+                parseStableIdentity('remaining-stone', id)
+              ),
+              ...freshMaterialSource
+            }
+          : {
+              kind: 'paid-remainder',
+              selectedRemainingStoneIds: selectedPaidIds.map(id =>
+                parseStableIdentity('remaining-stone', id)
+              )
+            },
       kerfMeters: toCanonicalDecimal(kerfMeters),
       calibrationEnabled: Boolean(draft.calibrationCutEnabled),
-      ...(longitudinalRate === null
+      ...(longitudinalRate == null
         ? {}
         : { longitudinalCutRateToman: toCanonicalDecimal(longitudinalRate) }),
-      ...(crossRate === null
+      ...(crossRate == null
         ? {}
         : { crossCutRateToman: toCanonicalDecimal(crossRate) }),
-      ...(longitudinalRate === null
+      ...(calibrationRate == null
         ? {}
-        : { calibrationCutRateToman: toCanonicalDecimal(longitudinalRate) }),
+        : { calibrationCutRateToman: toCanonicalDecimal(calibrationRate) }),
       sideOperations,
       ...(draft.layerDescription
         ? { description: draft.layerDescription }
@@ -327,8 +354,16 @@ export const createCanonicalStairDraftInput = (
   const motherLengthMeters = getDraftStandardLengthMeters(draft);
   const motherWidthMeters = Number(draft.stoneProduct?.widthValue || 0) / 100;
   const crossDimensionMeters = Number(draft.widthCm || 0) / 100;
-  const longitudinalRate = getCuttingTypePricePerMeter('LONG');
-  const crossRate = getCuttingTypePricePerMeter('CROSS');
+  const longitudinalRate =
+    draft.cutRateSnapshots?.longitudinal ??
+    getCuttingTypePricePerMeter('LONG');
+  const crossRate =
+    draft.cutRateSnapshots?.cross ??
+    getCuttingTypePricePerMeter('CROSS');
+  const calibrationRate =
+    draft.cutRateSnapshots?.calibration ??
+    draft.cutRateSnapshots?.longitudinal ??
+    getCuttingTypePricePerMeter('LONG');
   const rowSeed = `${draft.stoneProduct?.id || 'unselected'}:${part}`;
 
   return {
@@ -368,15 +403,15 @@ export const createCanonicalStairDraftInput = (
     sawKerfMeters: toCanonicalDecimal(Number(draft.sawKerfCm || 0.3) / 100),
     calibrationEnabled: Boolean(draft.calibrationCutEnabled),
     calibrationSelection: draft.calibrationSelection || 'automatic',
-    ...(longitudinalRate === null
+    ...(longitudinalRate == null
       ? {}
       : { longitudinalCutRateToman: toCanonicalDecimal(longitudinalRate) }),
-    ...(crossRate === null
+    ...(crossRate == null
       ? {}
       : { crossCutRateToman: toCanonicalDecimal(crossRate) }),
-    ...(longitudinalRate === null
+    ...(calibrationRate == null
       ? {}
-      : { calibrationCutRateToman: toCanonicalDecimal(longitudinalRate) })
+      : { calibrationCutRateToman: toCanonicalDecimal(calibrationRate) })
   };
 };
 
@@ -1041,7 +1076,7 @@ export const computeTotalsV2 = (
       : 0;
     cuttingMetersLongitudinal = cuttingMetersLongitudinalProduction + cuttingMetersLongitudinalCalibration;
     cuttingCostPerMeterLongitudinal =
-      (draft.stoneProduct as any)?.cuttingCostPerMeter ??
+      draft.cutRateSnapshots?.longitudinal ??
       getCuttingTypePricePerMeter('LONG') ??
       0;
     if (cuttingCostPerMeterLongitudinal > 0) {
@@ -1051,9 +1086,8 @@ export const computeTotalsV2 = (
 
   if (needsLengthCut && stoneQuantityForPricing > 0) {
     const crossRateFromConfig =
-      (draft.stoneProduct as any)?.crossCuttingCostPerMeter ??
+      draft.cutRateSnapshots?.cross ??
       getCuttingTypePricePerMeter('CROSS') ??
-      getCuttingTypePricePerMeter('LONG') ??
       0;
     cuttingCostPerMeterCross = crossRateFromConfig;
     const sourceWidthInMeters = originalWidthCm / 100;

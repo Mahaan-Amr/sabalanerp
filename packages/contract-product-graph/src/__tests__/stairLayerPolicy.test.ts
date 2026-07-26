@@ -209,6 +209,80 @@ const input = (
 }
 
 {
+  const paidStock: PaidRemainderStock = {
+    remainingStoneId: parseStableIdentity('remaining-stone', 'mixed-paid-stock-1'),
+    ownerProductRowId: parentRowId,
+    catalogProductId: 'stone-1',
+    sourceBatchId: parseStableIdentity('source-batch', 'mixed-parent-batch'),
+    lengthMeters: decimal('1.2'),
+    widthMeters: decimal('0.04'),
+    quantity: 1,
+    creationOrder: 0,
+    materialPaid: true
+  };
+  const mixed = calculateStairLayerConfiguration({
+    input: input({
+      targetSides: ['front'],
+      layersPerParentPiece: 1,
+      sideOperations: [],
+      layerRateToman: decimal('1000'),
+      longitudinalCutRateToman: decimal('20000'),
+      crossCutRateToman: decimal('80000'),
+      calibrationCutRateToman: decimal('20000'),
+      source: {
+        kind: 'parent-material',
+        selectedRemainingStoneIds: [paidStock.remainingStoneId],
+        catalogProductId: 'stone-1',
+        catalogSnapshotVersion: 'stone-v4',
+        materialRateToman: decimal('1000000'),
+        sourceRows: [{
+          sourceRowId: parseStableIdentity(
+            'layer-source-row',
+            'mixed-new-source-row-1'
+          ),
+          lengthMeters: decimal('1.2'),
+          widthMeters: decimal('0.08'),
+          quantity: 2
+        }]
+      }
+    }),
+    parent: {
+      lengthMeters: decimal('1.2'),
+      crossDimensionMeters: decimal('0.3'),
+      quantity: 2
+    },
+    availableInventory: [paidStock]
+  });
+  assert.equal(mixed.ok, true, JSON.stringify(mixed));
+  if (!mixed.ok) throw new Error('Expected parent material to cover shortage with fresh stone.');
+  assert.deepEqual(mixed.result.materialSourceSplit, {
+    paidSourceCount: 1,
+    paidMaterialSquareMeters: '0.048',
+    paidMaterialAmountToman: '0',
+    newSourceCount: 1,
+    newMaterialSquareMeters: '0.096',
+    newMaterialAmountToman: '96000'
+  });
+  assert.equal(mixed.result.materialPricingReason, 'mixed-material');
+  assert.equal(mixed.result.materialAmountToman, '96000');
+  assert.equal(mixed.result.packingPlan.placements.length, 2);
+  assert.equal(
+    mixed.result.packingPlan.placements[0]?.sourceBatchId.includes(':paid:'),
+    true,
+    'paid parent remainder must be consumed before fresh parent stone'
+  );
+  assert.equal(
+    mixed.result.packingPlan.placements[1]?.sourceBatchId.includes(':new:'),
+    true
+  );
+  assert.equal(
+    mixed.inventory.some(stock => stock.remainingStoneId === paidStock.remainingStoneId),
+    false,
+    'consumed paid parent remainder must leave inventory'
+  );
+}
+
+{
   const stock: PaidRemainderStock = {
     remainingStoneId: parseStableIdentity('remaining-stone', 'paid-stock-1'),
     ownerProductRowId: parentRowId,

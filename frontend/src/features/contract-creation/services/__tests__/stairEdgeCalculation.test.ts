@@ -4,6 +4,9 @@ import {
   computeToolMetersForTool,
   calculateCanonicalLayerDraft,
   calculateLayerSourcePlan,
+  computeTotalsV2,
+  createCanonicalStairDraftInput,
+  formatCanonicalLayerConflict,
   getLayerEdgeDemands,
   getTotalLayerLengthPerStairM
 } from '../stairCalculationService';
@@ -193,6 +196,78 @@ for (const part of ['tread', 'riser', 'landing'] as StairStepperPart[]) {
       canonicalLayer.result.physicalStripCount
     );
   }
+}
+
+{
+  const sourceProduct = {
+    id: 'stair-rate-stone',
+    code: 'STAIR-RATE',
+    name: 'Stair rate stone',
+    namePersian: 'سنگ نرخ برش',
+    currency: 'تومان',
+    isAvailable: true,
+    widthValue: 30,
+    motherLengthValue: 1.6
+  } as Product;
+  const rateDraft = stairDraft({
+    stoneId: sourceProduct.id,
+    stoneProduct: sourceProduct,
+    lengthValue: 1.5,
+    standardLengthValue: 1.6,
+    standardLengthUnit: 'm',
+    widthCm: 30,
+    quantity: 10,
+    pricePerSquareMeter: 1_500_000
+  });
+  const onlyLong = (code: string) => code === 'LONG' ? 20_000 : null;
+  const missingCross = computeTotalsV2('tread', rateDraft, onlyLong);
+  assert.equal(
+    missingCross.cuttingCostPerMeterCross,
+    0,
+    'legacy totals must never substitute LONG for a missing CROSS rate'
+  );
+  assert.equal(missingCross.canonicalCalculation.ok, false);
+  if (missingCross.canonicalCalculation.ok) {
+    throw new Error('Expected missing CROSS to block canonical stair calculation.');
+  }
+  assert.deepEqual(
+    missingCross.canonicalCalculation.conflicts.map(conflict => [
+      conflict.code,
+      conflict.field
+    ]),
+    [['stair-cut-rate-missing', 'crossCutRateToman']]
+  );
+
+  const zeroRates = computeTotalsV2('tread', rateDraft, () => 0);
+  assert.equal(zeroRates.canonicalCalculation.ok, true, JSON.stringify(zeroRates));
+  assert.equal(zeroRates.cuttingCostCross, 0);
+  assert.ok(zeroRates.cuttingMetersCross > 0);
+
+  const editedInput = createCanonicalStairDraftInput(
+    'tread',
+    {
+      ...rateDraft,
+      cutRateSnapshots: {
+        longitudinal: 12_000,
+        cross: 34_000
+      }
+    },
+    () => 99_000
+  );
+  assert.equal(editedInput.longitudinalCutRateToman, '12000');
+  assert.equal(editedInput.crossCutRateToman, '34000');
+  assert.equal(editedInput.calibrationCutRateToman, '12000');
+}
+
+{
+  assert.equal(
+    formatCanonicalLayerConflict({
+      code: 'layer-cut-rate-missing',
+      field: 'crossCutRateToman',
+      message: 'Cross layer cutting rate is missing.'
+    }),
+    'نرخ برش عرضی در موجودی ثبت نشده است'
+  );
 }
 
 console.log('stairEdgeCalculation tests passed');

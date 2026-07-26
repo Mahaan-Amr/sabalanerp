@@ -11,6 +11,12 @@ export interface PackingSourceBatch {
   readonly lengthMeters: CanonicalDecimal;
   readonly widthMeters: CanonicalDecimal;
   readonly quantity: number;
+  /**
+   * Lower values are consumed first when differently priced source classes
+   * participate in one exact plan. Ordinary callers omit this and retain the
+   * historical geometry-only objective.
+   */
+  readonly allocationPriority?: number;
 }
 
 export interface PackingDemand {
@@ -90,6 +96,7 @@ interface Rect { x: Decimal; y: Decimal; length: Decimal; width: Decimal }
 interface SourcePiece {
   batchId: SourceBatchId;
   ordinal: number;
+  allocationPriority: number;
   free: Rect[];
   used: boolean;
   cutCount: number;
@@ -205,8 +212,27 @@ const splitRect = (
   return { free: free.sort(rectOrder), cuts };
 };
 
-const objective = (state: SearchState): [number, Decimal, number, Decimal, string] => {
+const objective = (
+  state: SearchState
+): [number, Decimal, number, Decimal, number, Decimal, string] => {
   const used = state.sources.filter(source => source.used);
+  const nonPreferredUsed = used.filter(
+    source => source.allocationPriority > 0
+  ).length;
+  const sourceByIdentity = new Map(
+    state.sources.map(source => [
+      `${source.batchId}:${source.ordinal}`,
+      source
+    ])
+  );
+  const preferredPlacementArea = state.placements.reduce((sum, placement) => {
+    const source = sourceByIdentity.get(
+      `${placement.sourceBatchId}:${placement.sourceOrdinal}`
+    );
+    return source?.allocationPriority === 0
+      ? sum.plus(d(placement.lengthMeters).times(placement.widthMeters))
+      : sum;
+  }, d('0'));
   const cutMeters = state.cutTotal;
   const remainders = used.flatMap(source => source.free);
   const largest = remainders.reduce(
@@ -218,18 +244,29 @@ const objective = (state: SearchState): [number, Decimal, number, Decimal, strin
   const consumedOrder = state.sources.flatMap((source, index) =>
     source.used ? [String(index).padStart(8, '0')] : []
   ).join(',');
-  return [used.length, cutMeters, remainders.length, largest.negated(), `${consumedOrder}|${signature}`];
+  return [
+    nonPreferredUsed,
+    preferredPlacementArea.negated(),
+    used.length,
+    cutMeters,
+    remainders.length,
+    largest.negated(),
+    `${consumedOrder}|${signature}`
+  ];
 };
 
 const better = (left: ReturnType<typeof objective>, right?: ReturnType<typeof objective>) => {
   if (!right) return true;
   if (left[0] !== right[0]) return left[0] < right[0];
-  const cutComparison = left[1].comparedTo(right[1]);
-  if (cutComparison !== 0) return cutComparison < 0;
+  const preferredAreaComparison = left[1].comparedTo(right[1]);
+  if (preferredAreaComparison !== 0) return preferredAreaComparison < 0;
   if (left[2] !== right[2]) return left[2] < right[2];
-  const largestComparison = left[3].comparedTo(right[3]);
+  const cutComparison = left[3].comparedTo(right[3]);
+  if (cutComparison !== 0) return cutComparison < 0;
+  if (left[4] !== right[4]) return left[4] < right[4];
+  const largestComparison = left[5].comparedTo(right[5]);
   if (largestComparison !== 0) return largestComparison < 0;
-  return left[4] < right[4];
+  return left[6] < right[6];
 };
 
 const searchBestPackingState = ({
@@ -245,8 +282,10 @@ const searchBestPackingState = ({
   let bestObjective: ReturnType<typeof objective> | undefined;
   const memo = new Map<string, Decimal>();
   const visit = (pieceIndex: number, state: SearchState): void => {
-    const usedCount = state.sources.filter(source => source.used).length;
-    if (bestObjective && usedCount > bestObjective[0]) return;
+    const nonPreferredUsed = state.sources.filter(
+      source => source.used && source.allocationPriority > 0
+    ).length;
+    if (bestObjective && nonPreferredUsed > bestObjective[0]) return;
     if (pieceIndex === pieces.length) {
       const candidate = objective(state);
       if (better(candidate, bestObjective)) {
@@ -260,7 +299,6 @@ const searchBestPackingState = ({
       `${source.used ? 1 : 0}:${source.free.map(rectSignature).sort().join(';')}`
     ).join('|')}`;
     const currentCuts = state.cutTotal;
-    if (bestObjective && currentCuts.gt(bestObjective[1])) return;
     const knownCuts = memo.get(stateKey);
     if (knownCuts && knownCuts.lte(currentCuts)) return;
     memo.set(stateKey, currentCuts);
@@ -280,7 +318,9 @@ const searchBestPackingState = ({
            * pieces. Iteration order already represents the stable source
            * tie-break, so retain only the first equivalent transition.
            */
-          const sourceShape = `${source.used ? 1 : 0}:${
+          const sourceShape = `${source.allocationPriority}:${
+            source.used ? 1 : 0
+          }:${
             source.free.map(rectSignature).sort().join(';')
           }`;
           const optionKey = `${sourceShape}:${rectSignature(rect)}:${
@@ -656,10 +696,18 @@ export const calculatePackingPlan = (request: PackingRequest): PackingResult => 
       if (!positiveInteger(source.quantity) || length.lte(0) || width.lte(0)) {
         throw new TypeError('Source dimensions and quantity must be positive.');
       }
+      const allocationPriority = source.allocationPriority ?? 0;
+      if (
+        !Number.isSafeInteger(allocationPriority) ||
+        allocationPriority < 0
+      ) {
+        throw new TypeError('Source allocation priority must be a non-negative integer.');
+      }
       for (let ordinal = 1; ordinal <= source.quantity; ordinal += 1) {
         sources.push({
           batchId: source.sourceBatchId,
           ordinal,
+          allocationPriority,
           used: false,
           cutCount: 0,
           free: [{ x: d('0'), y: d('0'), length, width }]

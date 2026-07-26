@@ -60,7 +60,7 @@ export const useProductCalculations = (options: UseProductCalculationsOptions) =
   // Get cutting type price per meter
   const getCuttingTypePricePerMeter = useCallback((cutTypeCode: string): number | null => {
     const cuttingType = cuttingTypes.find(ct => ct.code === cutTypeCode && ct.pricePerMeter !== null && ct.pricePerMeter !== undefined);
-    return cuttingType?.pricePerMeter || null;
+    return cuttingType?.pricePerMeter ?? null;
   }, [cuttingTypes]);
 
   // Calculate auto cutting cost

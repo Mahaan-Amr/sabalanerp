@@ -785,6 +785,16 @@ export interface ToolSelectionV2 {
 }
 
 export interface StairPartDraftV2 {
+  /**
+   * Rates already committed for physical cut directions. Editing geometry
+   * reuses these snapshots; only a newly introduced direction resolves the
+   * current inventory rate.
+   */
+  cutRateSnapshots?: {
+    longitudinal?: number;
+    cross?: number;
+    calibration?: number;
+  };
   /** Stable identity for one independent layer configuration draft. */
   layerConfigurationDraftId?: string;
   /**
@@ -893,6 +903,7 @@ export interface StairDraftFieldErrors {
   layerSource?: string;
   layerMandatoryPercentage?: string;
   mandatoryPercentage?: string;
+  cutRate?: string;
 }
 
 export interface LayerTypeOption {

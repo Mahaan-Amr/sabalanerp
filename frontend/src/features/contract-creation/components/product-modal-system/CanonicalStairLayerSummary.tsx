@@ -27,6 +27,8 @@ export function CanonicalStairLayerSummary({
 
   return (
     <section
+      id="stair-layer-calculation-summary"
+      tabIndex={-1}
       aria-busy={state.calculating}
       className="divide-y divide-slate-200 border-y border-slate-200 text-xs dark:divide-slate-700 dark:border-slate-700"
     >
@@ -62,6 +64,26 @@ export function CanonicalStairLayerSummary({
             </strong>
           </div>
           <div className="flex justify-between gap-3 py-1.5">
+            <span>باقی‌مانده پرداخت‌شده</span>
+            <strong>
+              {number(calculation.result.materialSourceSplit.paidSourceCount)} قطعه
+              {' · '}
+              {number(calculation.result.materialSourceSplit.paidMaterialSquareMeters)} m²
+              {' · '}
+              {number(calculation.result.materialSourceSplit.paidMaterialAmountToman)} تومان
+            </strong>
+          </div>
+          <div className="flex justify-between gap-3 py-1.5">
+            <span>سنگ تازه برای کسری</span>
+            <strong>
+              {number(calculation.result.materialSourceSplit.newSourceCount)} قطعه
+              {' · '}
+              {number(calculation.result.materialSourceSplit.newMaterialSquareMeters)} m²
+              {' · '}
+              {number(calculation.result.materialSourceSplit.newMaterialAmountToman)} تومان
+            </strong>
+          </div>
+          <div className="flex justify-between gap-3 py-1.5">
             <span>برش</span>
             <strong>
               طولی {number(calculation.result.packingPlan.longitudinalCutMeters)}m ·
@@ -69,6 +91,26 @@ export function CanonicalStairLayerSummary({
               کالیبر {number(calculation.result.packingPlan.calibrationMeters)}m
             </strong>
           </div>
+          {calculation.result.cuttingPricingLines.map(line => {
+            const direction = line.lineId.endsWith(':longitudinal')
+              ? 'طولی'
+              : line.lineId.endsWith(':cross')
+                ? 'عرضی'
+                : 'کالیبر';
+            return (
+              <div
+                key={line.lineId}
+                className="flex justify-between gap-3 py-1.5"
+              >
+                <span>هزینه برش {direction}</span>
+                <strong>
+                  {number(line.quantity)}m × {number(line.rateToman)} تومان
+                  {' = '}
+                  {number(line.amountToman)} تومان
+                </strong>
+              </div>
+            );
+          })}
           <div className="flex justify-between gap-3 py-1.5">
             <span>باقی‌مانده</span>
             <strong>

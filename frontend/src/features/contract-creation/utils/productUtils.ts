@@ -173,7 +173,7 @@ export const getCuttingTypePricePerMeter = (
   const cuttingType = cuttingTypes.find(
     ct => ct.code === cutTypeCode && ct.pricePerMeter !== null && ct.pricePerMeter !== undefined
   );
-  return cuttingType?.pricePerMeter || null;
+  return cuttingType?.pricePerMeter ?? null;
 };
 
 

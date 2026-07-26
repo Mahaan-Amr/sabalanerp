@@ -1,20 +1,12 @@
 // useProductCalculations Hook
 // Provides calculation handlers and utilities for product configuration
 
-import { useCallback, useMemo } from 'react';
+import { useCallback } from 'react';
 import type { ContractProduct, Product, ContractWizardData } from '../types/contract.types';
 import {
   handleSmartCalculation as smartCalculation,
-  calculateStoneMetrics,
-  calculateSlabMetrics,
-  calculateTreadMetrics,
-  calculateRiserMetrics,
-  calculateLandingMetrics,
-  getSlabStandardDimensions,
-  determineSlabLineCutPlan,
-  buildSlabCutDetails
+  calculateStoneMetrics
 } from '../utils/productCalculations';
-import { calculateNosingCuttingCost } from '../services/stairMetricsService';
 import { generateFullProductName } from '../utils/formatUtils';
 
 interface UseProductCalculationsOptions {
@@ -41,13 +33,8 @@ export const useProductCalculations = (options: UseProductCalculationsOptions) =
     widthUnit,
     hasQuantityBeenInteracted,
     cuttingTypes,
-    wizardData,
-    selectedProduct,
-    isEditMode,
     isMandatory,
     mandatoryPercentage,
-    errors,
-    setErrors
   } = options;
 
   // Get effective quantity for calculations
@@ -112,11 +99,6 @@ export const useProductCalculations = (options: UseProductCalculationsOptions) =
     });
   }, [isMandatory, mandatoryPercentage]);
 
-  // Get slab standard dimensions wrapper
-  const getSlabStandardDimensionsWrapper = useCallback(() => {
-    return getSlabStandardDimensions(selectedProduct, productConfig, lengthUnit);
-  }, [selectedProduct, productConfig, lengthUnit]);
-
   // Generate full product name
   const generateFullProductNameWrapper = useCallback((product: Product) => {
     return generateFullProductName(product);
@@ -129,14 +111,6 @@ export const useProductCalculations = (options: UseProductCalculationsOptions) =
     calculateAutoCuttingCost,
     handleSmartCalculation,
     calculateStoneMetrics: calculateStoneMetricsWrapper,
-    calculateSlabMetrics,
-    calculateTreadMetrics,
-    calculateRiserMetrics,
-    calculateLandingMetrics,
-    calculateNosingCuttingCost,
-    getSlabStandardDimensions: getSlabStandardDimensionsWrapper,
-    determineSlabLineCutPlan,
-    buildSlabCutDetails,
     generateFullProductName: generateFullProductNameWrapper
   };
 };

@@ -2,6 +2,12 @@
 // Manages remaining stone modal state and handlers
 
 import { useState, useCallback } from 'react';
+import {
+  calculateProductOperations,
+  parseCanonicalDecimal,
+  parseStableIdentity,
+  type ProductOperationsInput
+} from '@sabalanerp/contract-product-graph';
 import type {
   RemainingStone,
   ContractProduct,
@@ -67,7 +73,6 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
 
   // Modal visibility
   const [showRemainingStoneModal, setShowRemainingStoneModal] = useState(false);
-  const [showRemainingStoneCAD, setShowRemainingStoneCAD] = useState(false);
 
   // Selected remaining stone
   const [selectedRemainingStone, setSelectedRemainingStone] = useState<RemainingStone | null>(null);
@@ -312,6 +317,33 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     const remainingAreas = mergeRemainingStoneCollection(
       validation.remainingAreas.filter(piece => piece.width > 0 && piece.length > 0 && (piece.quantity || 0) > 0)
     );
+    const childRowIds = normalizedRows.map(() => createContractProductRowId());
+    const operationCalculations = normalizedRows.map((row, index) => {
+      const stored = remainingStoneConfig.operationPolicyInput;
+      if (!stored) return null;
+      const input: ProductOperationsInput = {
+        ...stored,
+        productRowId: parseStableIdentity('product-row', childRowIds[index]),
+        lengthMeters: parseCanonicalDecimal(String(row.length)),
+        widthMeters: parseCanonicalDecimal(String(row.width / 100)),
+        quantity: row.quantity
+      };
+      return {
+        input,
+        calculation: calculateProductOperations(input)
+      };
+    });
+    const invalidOperation = operationCalculations.find(
+      item => item && !item.calculation.ok
+    );
+    if (invalidOperation && !invalidOperation.calculation.ok) {
+      setErrors({
+        products:
+          invalidOperation.calculation.conflicts[0]?.message ||
+          'عملیات محصول نیاز به اصلاح دارد'
+      });
+      return;
+    }
 
     const cuttingCostPerMeter = sourceProduct.cuttingCostPerMeter || getCuttingTypePricePerMeter('LONG') || 0;
     const hasAnyCut = normalizedRows.some(row =>
@@ -319,6 +351,11 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     );
 
     const childProducts: ContractProduct[] = normalizedRows.map((row, index) => {
+      const operation = operationCalculations[index];
+      const operationResult = operation?.calculation.ok
+        ? operation.calculation.result
+        : null;
+      const operationsAmount = Number(operationResult?.totalAmountToman || 0);
       const physicalPieces = validation.physicalPiecesByRow.get(row.id) || [];
       const splitCount = physicalPieces.length;
       const wasSplit = splitCount > row.quantity;
@@ -333,12 +370,14 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
       const cutType: 'longitudinal' | 'cross' | null = lengthCut ? 'cross' : (widthCut ? 'longitudinal' : null);
 
       return {
-        rowId: createContractProductRowId(),
+        rowId: childRowIds[index],
         productId: sourceProduct.productId,
         product: sourceProduct.product,
         productType: sourceProduct.productType,
         stoneCode: `${sourceProduct.stoneCode}-R${selectedRemainingStone.id.slice(-4)}-${index + 1}`,
-        stoneName: `${sourceProduct.stoneName} (از سنگ باقی‌مانده)`,
+        stoneName:
+          remainingStoneConfig.stoneName ||
+          `${sourceProduct.stoneName} (از سنگ باقی‌مانده)`,
         diameterOrWidth: row.width,
         length: row.length,
         width: row.width,
@@ -346,8 +385,10 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
         squareMeters: row.squareMeters,
         pricePerSquareMeter: 0,
         unitPrice: 0,
-        totalPrice: cuttingCost,
-        description: `ایجاد شده از سنگ باقی‌مانده • پارتیشن ${index + 1}${wasSplit ? ` • تقسیم فیزیکی: ${splitCount} قطعه` : ''}`,
+        totalPrice: cuttingCost + operationsAmount,
+        description:
+          remainingStoneConfig.description ||
+          `ایجاد شده از سنگ باقی‌مانده • پارتیشن ${index + 1}${wasSplit ? ` • تقسیم فیزیکی: ${splitCount} قطعه` : ''}`,
         currency: sourceProduct.currency,
         sawKerfEnabled: remainingStoneSawKerfEnabled,
         sawKerfCm: remainingStoneSawKerfEnabled ? SAW_KERF_CM : null,
@@ -375,10 +416,48 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
         parentProductIndex: sourceProductIndex,
         parentProductRowId: sourceProductRowId,
         remainingStoneAllocationOrder: nextAllocationOrder + index,
-        appliedSubServices: [],
-        totalSubServiceCost: 0,
-        usedLengthForSubServices: 0,
-        usedSquareMetersForSubServices: 0,
+        operationPolicyInput: operation?.input,
+        appliedSubServices: operationResult?.tools.map(tool => ({
+          id: tool.toolSelectionId,
+          subServiceId: tool.catalogItemId,
+          subService: {
+            id: tool.catalogItemId,
+            code: tool.catalogItemId,
+            namePersian: tool.name,
+            pricePerMeter: Number(tool.rateToman),
+            calculationBase: tool.unit === 'meter' ? 'length' : 'squareMeters',
+            isActive: false
+          },
+          meter: Number(tool.finalQuantity),
+          cost: Number(tool.amountToman),
+          calculationBase: tool.unit === 'meter' ? 'length' : 'squareMeters',
+          edges: Object.fromEntries(
+            (tool.edges || []).map(edge => [edge, true])
+          )
+        })) || [],
+        totalSubServiceCost: operationResult?.tools.reduce(
+          (sum, tool) => sum + Number(tool.amountToman),
+          0
+        ) || 0,
+        usedLengthForSubServices: operationResult?.tools
+          .filter(tool => tool.unit === 'meter')
+          .reduce((sum, tool) => sum + Number(tool.finalQuantity), 0) || 0,
+        usedSquareMetersForSubServices: operationResult?.tools
+          .filter(tool => tool.unit === 'squareMeter')
+          .reduce((sum, tool) => sum + Number(tool.finalQuantity), 0) || 0,
+        finishings: operationResult?.finishings.map(finishing => ({
+          selectionId: finishing.finishingSelectionId,
+          finishingId: finishing.catalogItemId,
+          name: finishing.name,
+          calculationBase:
+            finishing.unit === 'meter' ? 'length' : 'squareMeters',
+          unitPrice: Number(finishing.rateToman),
+          automaticQuantity: Number(finishing.automaticQuantity),
+          quantity: Number(finishing.finalQuantity),
+          quantityMode: finishing.quantityOverride ? 'manual' : 'auto',
+          overrideStatus: 'current',
+          cost: Number(finishing.amountToman)
+        })) || [],
         meta: {
           remainingSource: {
             sourceProductRowId,
@@ -400,7 +479,9 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
           pricing: {
             materialCost: 0,
             cuttingCost,
-            totalPrice: cuttingCost
+            operationsCost: operationsAmount,
+            totalPrice: cuttingCost + operationsAmount,
+            materialPricingReason: 'calculated-in-source-product'
           },
           sawKerf: remainingStoneSawKerfEnabled
             ? {
@@ -468,6 +549,7 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     validateRowsAgainstStock,
     resolveSourceProduct,
     remainingStoneSawKerfEnabled,
+    remainingStoneConfig,
     wizardData.products
   ]);
 
@@ -475,8 +557,6 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     // Modal state
     showRemainingStoneModal,
     setShowRemainingStoneModal,
-    showRemainingStoneCAD,
-    setShowRemainingStoneCAD,
 
     // Selected remaining stone
     selectedRemainingStone,

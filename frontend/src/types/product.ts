@@ -17,6 +17,7 @@ export interface Product {
   widthCode: string;
   widthValue: number;
   widthName: string;
+  motherLengthValue: number | null;
   
   thicknessCode: string;
   thicknessValue: number;
@@ -81,6 +82,7 @@ export interface ProductCreateData {
   widthCode: string;
   widthValue: number;
   widthName: string;
+  motherLengthValue?: number | null;
   thicknessCode: string;
   thicknessValue: number;
   thicknessName: string;
@@ -111,6 +113,7 @@ export interface ProductCreateData {
 
 export interface ProductUpdateData {
   basePrice?: number | null;
+  motherLengthValue?: number | null;
   currency?: string;
   isAvailable?: boolean;
   leadTime?: number | null;

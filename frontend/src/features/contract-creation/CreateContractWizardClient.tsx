@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  FaArrowRight, 
-  FaArrowLeft, 
+import dynamic from 'next/dynamic';
+import {
+  FaArrowRight,
+  FaArrowLeft,
   FaCheck,
   FaCalendarAlt,
   FaUser,
@@ -34,7 +35,6 @@ import { downloadBlobResponse } from '@/lib/downloadFile';
 import { formatDisplayNumber, formatPrice, formatPriceWithRial, formatDimensions, formatSquareMeters, formatQuantity, normalizeDigits, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import StoneCanvas from '@/components/StoneCanvas';
-import { StoneCADDesigner } from '@/components/stone-cad/StoneCADDesigner';
 
 // Import new step components
 import { Step1ContractDate } from '@/features/contract-creation/components/steps/Step1ContractDate';
@@ -52,15 +52,38 @@ import { WizardNavigation } from '@/features/contract-creation/components/shared
 // Import modal components
 import { ProductConfigurationModal } from '@/features/contract-creation/components/modals/ProductConfigurationModal';
 import { RemainingStoneModal } from '@/features/contract-creation/components/modals/RemainingStoneModal';
-import { SubServiceModal } from '@/features/contract-creation/components/modals/SubServiceModal';
 import { PaymentEntryModal } from '@/features/contract-creation/components/modals/PaymentEntryModal';
+import {
+  AutoGrowingDescription,
+  CompactSegmentedControl,
+  CompactSwitch,
+  CompactUnitSwitch,
+  OperationCollectionsSection,
+  ReservedRowsSkeleton,
+  StairQuantityModeSection,
+  toStaircaseQuantityIntent,
+  type StairQuantityInputDraft
+} from '@/features/contract-creation/components/product-modal-system';
+
+const CanonicalStairLayerSummary = dynamic(
+  () => import(
+    '@/features/contract-creation/components/product-modal-system/CanonicalStairLayerSummary'
+  ).then(module => module.CanonicalStairLayerSummary),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="border-y border-slate-200 py-2 dark:border-slate-700">
+        <ReservedRowsSkeleton rows={6} />
+      </div>
+    )
+  }
+);
 
 // Import hooks
 import { useContractWizard } from '@/features/contract-creation/hooks/useContractWizard';
 import { useProductModal } from '@/features/contract-creation/hooks/useProductModal';
 import { useProductCalculations } from '@/features/contract-creation/hooks/useProductCalculations';
 import { useRemainingStoneModal } from '@/features/contract-creation/hooks/useRemainingStoneModal';
-import { useSubServiceModal } from '@/features/contract-creation/hooks/useSubServiceModal';
 import { usePaymentHandlers } from '@/features/contract-creation/hooks/usePaymentHandlers';
 import { useDigitalSignature } from '@/features/contract-creation/hooks/useDigitalSignature';
 import { useStairSystemV2 } from '@/features/contract-creation/hooks/useStairSystemV2';
@@ -71,13 +94,18 @@ import { useDataLoading } from '@/features/contract-creation/hooks/useDataLoadin
 import { useContractSummary } from '@/features/contract-creation/hooks/useContractSummary';
 import { useProductFiltering } from '@/features/contract-creation/hooks/useProductFiltering';
 import { useContractProductCartController } from '@/features/contract-creation/hooks/useContractProductCartController';
+import { useSellerProductHistory } from '@/features/contract-creation/hooks/useSellerProductHistory';
+import {
+  getOrCreateContractDraftId,
+  useContractEditRecovery
+} from '@/features/contract-creation/hooks/useContractEditRecovery';
+import { resolveProductModalRecoveryState } from '@/features/contract-creation/utils/contractRecoveryModalPolicy';
 
 // Import constants
-import { NOSING_TYPES, PRODUCT_TYPES, WIZARD_STEPS } from '@/features/contract-creation/constants/contract.constants';
+import { PRODUCT_TYPES, WIZARD_STEPS } from '@/features/contract-creation/constants/contract.constants';
 
 // Import utilities
-import { generateCompactProductName, generateFullProductName, generateSlabContractProductName, productSupportsContractType } from '@/features/contract-creation/utils/productUtils';
-import { determineSlabLineCutPlan } from '@/features/contract-creation/utils/productCalculations';
+import { generateCompactProductName, generateFullProductName, generateSlabContractProductName, inferCatalogContractType, productSupportsContractRoute, productSupportsContractType } from '@/features/contract-creation/utils/productUtils';
 import {
   hasLayerEdgeSelection,
   deriveLayerEdgesFromTools,
@@ -102,11 +130,11 @@ import {
 import {
   calculateLongitudinalMaterialPricing,
   calculateSmartLongitudinalCutPlan,
-  calculateSlabRemainingStones,
-  hasLongitudinalGeometryChanged,
-  hasSlabGeometryChanged
+  hasLongitudinalGeometryChanged
 } from '@/features/contract-creation/services/remainingStoneService';
 import {
+  adaptLegacyStairOperations,
+  appendStairLayerConfiguration,
   createFreshStairPartDraft,
   getFreshContractProductDefaults,
   mergeEditedRemainingStoneState,
@@ -136,6 +164,10 @@ import {
   createContractAutosaveDraft,
   parseContractAutosaveDraft
 } from '@/features/contract-creation/utils/contractDraftStorage';
+import {
+  CONTRACT_RECOVERY_SCHEMA_VERSION,
+  type ContractRecoveryScope
+} from '@/features/contract-creation/utils/contractRecoveryJournal';
 import {
   getContractGrossPayableTotal,
   getContractProductNonServiceSubtotal,
@@ -184,7 +216,200 @@ import {
   normalizeProductFinishing
 } from '@/features/contract-creation/utils/finishingUtils';
 import { SAW_KERF_CM } from '@/features/contract-creation/utils/sawKerf';
-import { calculateLayerSourcePlan } from '@/features/contract-creation/services/stairCalculationService';
+import {
+  calculateCanonicalLayerDraft,
+  calculateLayerSourcePlan,
+  createCanonicalLayerCalculationRequest,
+  createCanonicalStairDraftInput,
+  formatCanonicalLayerConflict,
+  toCanonicalLayerInventory,
+  computeTotalsV2 as computeCanonicalStairTotalsV2
+} from '@/features/contract-creation/services/stairCalculationService';
+import {
+  calculateProductOperations,
+  calculateSlab,
+  parseCanonicalDecimal,
+  parseStableIdentity,
+  resolveStaircaseQuantity,
+  type ProductOperationsInput
+} from '@sabalanerp/contract-product-graph';
+
+const refreshOperationGeometry = (
+  input: ProductOperationsInput | undefined,
+  length: number,
+  lengthUnit: 'cm' | 'm',
+  width: number,
+  widthUnit: 'cm' | 'm',
+  quantity: number
+): ProductOperationsInput | undefined => input ? {
+  ...input,
+  lengthMeters: parseCanonicalDecimal(String(lengthUnit === 'cm' ? length / 100 : length)),
+  widthMeters: parseCanonicalDecimal(String(widthUnit === 'cm' ? width / 100 : width)),
+  ...(quantity > 0 ? { quantity: Math.trunc(quantity) } : { quantity: undefined })
+} : undefined;
+
+const materializeOperationSnapshots = (
+  input: ProductOperationsInput | undefined
+) => {
+  if (!input) {
+    return {
+      ok: true as const,
+      appliedSubServices: [] as AppliedSubService[],
+      finishings: [] as ContractProduct['finishings'],
+      toolsCost: 0,
+      finishingsCost: 0
+    };
+  }
+
+  const calculation = calculateProductOperations(input);
+  if (!calculation.ok) {
+    return {
+      ok: false as const,
+      message: calculation.conflicts.map(conflict => conflict.message).join(' | ')
+    };
+  }
+
+  return {
+    ok: true as const,
+    appliedSubServices: calculation.result.tools.map(tool => ({
+      id: tool.toolSelectionId,
+      subServiceId: tool.catalogItemId,
+      subService: {
+        id: tool.catalogItemId,
+        code: tool.catalogItemId,
+        name: tool.name,
+        namePersian: tool.name,
+        pricePerMeter: Number(tool.rateToman),
+        calculationBase:
+          tool.unit === 'meter' ? 'length' as const : 'squareMeters' as const,
+        isActive: !tool.outsideCurrentCatalog
+      },
+      meter: Number(tool.finalQuantity),
+      cost: Number(tool.amountToman),
+      calculationBase: tool.unit === 'meter' ? 'length' as const : 'squareMeters' as const,
+      edges: Object.fromEntries((tool.edges || []).map(edge => [edge, true]))
+    })),
+    finishings: calculation.result.finishings.map(finishing => ({
+      selectionId: finishing.finishingSelectionId,
+      finishingId: finishing.catalogItemId,
+      name: finishing.name,
+      calculationBase:
+        finishing.unit === 'meter' ? 'length' as const : 'squareMeters' as const,
+      unitPrice: Number(finishing.rateToman),
+      automaticQuantity: Number(finishing.automaticQuantity),
+      quantity: Number(finishing.finalQuantity),
+      quantityMode: finishing.quantityOverride ? 'manual' as const : 'auto' as const,
+      overrideStatus: 'current' as const,
+      cost: Number(finishing.amountToman)
+    })),
+    toolsCost: calculation.result.tools.reduce(
+      (sum, tool) => sum + Number(tool.amountToman),
+      0
+    ),
+    finishingsCost: calculation.result.finishings.reduce(
+      (sum, finishing) => sum + Number(finishing.amountToman),
+      0
+    )
+  };
+};
+
+const createStairOperationInput = (
+  part: StairStepperPart,
+  draft: StairPartDraftV2,
+  productId: string
+): ProductOperationsInput => ({
+  policyVersion: 'calculation-v1',
+  pricingPolicyVersion: 'pricing-v1',
+  roundingPolicyVersion: 'rounding-v1',
+  productRowId: draft.operationPolicyInput?.productRowId || parseStableIdentity(
+    'product-row',
+    `stair-draft:${productId}:${part}`
+  ),
+  lengthMeters: parseCanonicalDecimal(String(getActualLengthMeters(draft))),
+  widthMeters: parseCanonicalDecimal(String(Number(draft.widthCm || 0) / 100)),
+  ...(Number.isSafeInteger(draft.quantity) && Number(draft.quantity) > 0
+    ? { quantity: Number(draft.quantity) }
+    : {}),
+  groups: draft.operationPolicyInput?.groups ?? [],
+  tools: draft.operationPolicyInput?.tools ?? [],
+  finishings: draft.operationPolicyInput?.finishings ?? []
+});
+
+const createLayerSideOperationInput = (
+  part: StairStepperPart,
+  draft: StairPartDraftV2,
+  side: 'front' | 'back' | 'left' | 'right',
+  productId: string
+): ProductOperationsInput => {
+  const current = draft.layerSideOperations?.[side];
+  const sideLengthMeters =
+    side === 'front' || side === 'back'
+      ? getActualLengthMeters(draft)
+      : Number(draft.widthCm || 0) / 100;
+  const quantity =
+    Number(draft.quantity || 0) *
+    Number(draft.numberOfLayersPerStair || 0);
+  return {
+    policyVersion: 'calculation-v1',
+    pricingPolicyVersion: 'pricing-v1',
+    roundingPolicyVersion: 'rounding-v1',
+    productRowId: current?.productRowId || parseStableIdentity(
+      'product-row',
+      `stair-layer-draft:${productId}:${part}:${
+        draft.layerConfigurationDraftId || 'current'
+      }:${side}`
+    ),
+    lengthMeters: parseCanonicalDecimal(String(sideLengthMeters)),
+    widthMeters: parseCanonicalDecimal(
+      String(Number(draft.layerWidthCm || 0) / 100)
+    ),
+    ...(Number.isSafeInteger(quantity) && quantity > 0 ? { quantity } : {}),
+    groups: current?.groups ?? [],
+    tools: current?.tools ?? [],
+    finishings: current?.finishings ?? []
+  };
+};
+
+const cloneLayerOperationsForSide = (
+  template: ProductOperationsInput,
+  target: ProductOperationsInput,
+  side: 'front' | 'back' | 'left' | 'right'
+): ProductOperationsInput => {
+  const scopedIdentity = (value: string) =>
+    `${value.replace(/:layer-side:(front|back|left|right)$/, '')}:layer-side:${side}`;
+  const groupIds = new Map(
+    template.groups.map(group => [
+      String(group.operationGroupId),
+      parseStableIdentity(
+        'operation-group',
+        scopedIdentity(String(group.operationGroupId))
+      )
+    ])
+  );
+  return {
+    ...target,
+    groups: template.groups.map(group => ({
+      ...group,
+      operationGroupId: groupIds.get(String(group.operationGroupId))!
+    })),
+    tools: template.tools.map(tool => ({
+      ...tool,
+      toolSelectionId: parseStableIdentity(
+        'tool-selection',
+        scopedIdentity(String(tool.toolSelectionId))
+      ),
+      operationGroupId: groupIds.get(String(tool.operationGroupId))!
+    })),
+    finishings: template.finishings.map(finishing => ({
+      ...finishing,
+      finishingSelectionId: parseStableIdentity(
+        'finishing-selection',
+        scopedIdentity(String(finishing.finishingSelectionId))
+      ),
+      operationGroupId: groupIds.get(String(finishing.operationGroupId))!
+    }))
+  };
+};
 
 // Import all types from types file
 import type {
@@ -477,7 +702,7 @@ export default function CreateContractWizard({
     if (step === 4) return 4;
     return Math.max(1, Math.min(step - 1, WIZARD_STEPS.length));
   };
-  
+
   // Use contract wizard hook for step management
   const {
     currentStep,
@@ -497,11 +722,10 @@ export default function CreateContractWizard({
     setStateRestored,
     restorationAttempted
   } = useContractWizard();
-  
+
   // Use wizard state, but allow local overrides if needed
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [draftRestoredNotice, setDraftRestoredNotice] = useState(false);
   const [autosaveHydrated, setAutosaveHydrated] = useState(false);
   const [discountRanges, setDiscountRanges] = useState<DiscountRange[]>([]);
   const [discountPercentInput, setDiscountPercentInput] = useState<number>(0);
@@ -527,10 +751,47 @@ export default function CreateContractWizard({
   }, [currentStep, isCollaborationContract, setCurrentStep]);
 
   // Stair stepper v2 states are now provided by useStairSystemV2 hook
-  const [useStairFlowV2, setUseStairFlowV2] = useState(true); // Feature flag - stays local
   const stairSystemV2 = useStairSystemV2({
     onError: (error) => setErrors({ stairSystem: error })
   });
+  const [stairQuantityDraft, setStairQuantityDraft] =
+    useState<StairQuantityInputDraft>({
+      mode: 'steps',
+      totalSteps: '',
+      numberOfStaircases: '',
+      stepsPerStaircase: ''
+    });
+  const [stairQuantityManuallyEdited, setStairQuantityManuallyEdited] = useState({
+    tread: false,
+    riser: false
+  });
+
+  const updateStairQuantityDraft = useCallback((next: StairQuantityInputDraft) => {
+    setStairQuantityDraft(next);
+    try {
+      const totalSteps = resolveStaircaseQuantity(
+        toStaircaseQuantityIntent(next)
+      ).totalSteps;
+      if (!stairQuantityManuallyEdited.tread) {
+        stairSystemV2.setDraftTread(current => ({
+          ...current,
+          quantity: totalSteps
+        }));
+      }
+      if (!stairQuantityManuallyEdited.riser) {
+        stairSystemV2.setDraftRiser(current => ({
+          ...current,
+          quantity: totalSteps
+        }));
+      }
+    } catch {
+      // Incomplete staircase quantity stays in the draft without overwriting parts.
+    }
+  }, [
+    stairQuantityManuallyEdited.riser,
+    stairQuantityManuallyEdited.tread,
+    stairSystemV2
+  ]);
 
   // Layer management functions are now provided by useStairLayerManagement hook
   const layerManagement = useStairLayerManagement({
@@ -570,6 +831,9 @@ export default function CreateContractWizard({
     loadInitialData: loadData,
     getCuttingTypePricePerMeter
   } = dataLoading;
+  const sellerProductHistory = useSellerProductHistory(
+    currentUser?.id || currentUser?.username || null
+  );
 
   const customerOptions = useMemo(
     () => isCollaborationContract
@@ -698,11 +962,11 @@ export default function CreateContractWizard({
 
   // Delivery step state is now provided by useDeliverySchedule hook
   const deliverySchedule = useDeliverySchedule(wizardData.products);
-  
+
   // Digital Signature (Step 8) state is now provided by useDigitalSignature hook
   const digitalSignature = useDigitalSignature({
     onError: (error) => setErrors({ signature: error }),
-    onSuccess: (message) => console.log(message)
+    onSuccess: () => undefined
   });
   const [pdfActionLoading, setPdfActionLoading] = useState(false);
   const [printActionLoading, setPrintActionLoading] = useState(false);
@@ -908,7 +1172,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   // ============================================================================
   // 🎯 LAYER PRODUCT HELPER FUNCTIONS - Refactored for clarity and reliability
   // ============================================================================
-  
+
   /**
    * Find an existing layer product with the same configuration
    * Same configuration = same parent part, same edges, same dimensions, same layers per stair
@@ -922,27 +1186,27 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     if (!draft.layerEdges || !draft.layerWidthCm || !draft.numberOfLayersPerStair) {
       return null;
     }
-    
+
     return sessionItems.find(item => {
       const itemIsLayer = ((item.meta as any)?.isLayer) || false;
       if (!itemIsLayer) return false;
-      
+
       const itemLayerInfo = (item.meta as any)?.layerInfo;
       const itemLayerEdges = (item.meta as any)?.layerEdges;
 
       if (itemLayerInfo?.parentProductIndexInSession !== parentProductIndexInSession) return false;
-      
+
       // Check if same parent part
       if (itemLayerInfo?.parentPartType !== parentPartType) return false;
-      
+
       // Check if same edges configuration (exact match)
-      const edgesMatch = 
+      const edgesMatch =
         (itemLayerEdges?.front || false) === (draft.layerEdges?.front || false) &&
         (itemLayerEdges?.left || false) === (draft.layerEdges?.left || false) &&
         (itemLayerEdges?.right || false) === (draft.layerEdges?.right || false) &&
         (itemLayerEdges?.back || false) === (draft.layerEdges?.back || false) &&
         (itemLayerEdges?.perimeter || false) === (draft.layerEdges?.perimeter || false);
-      
+
       if (!edgesMatch) return false;
 
       const itemLayerTypeId = ((item.meta as any)?.layerType)?.id || item.layerTypeId || null;
@@ -971,26 +1235,26 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         const draftMandatoryPercent = draft.layerMandatoryPercentage ?? 0;
         if (Math.abs(itemMandatoryPercent - draftMandatoryPercent) > 0.0001) return false;
       }
-      
+
       // Check if same dimensions (with tolerance for floating point)
       const widthTolerance = 0.01; // 0.01cm tolerance
       if (Math.abs(item.width - (draft.layerWidthCm || 0)) > widthTolerance) return false;
-      
+
       // Check length (convert to same unit for comparison)
-      const itemLengthInDraftUnit = item.lengthUnit === draft.lengthUnit 
-        ? item.length 
+      const itemLengthInDraftUnit = item.lengthUnit === draft.lengthUnit
+        ? item.length
         : (item.lengthUnit === 'm' ? item.length * 100 : item.length / 100);
       const lengthTolerance = draft.lengthUnit === 'm' ? 0.001 : 0.1; // 0.001m or 0.1cm
       const draftLengthForComparison = convertMetersToUnit(getActualLengthMeters(draft), draft.lengthUnit || 'm');
       if (Math.abs(itemLengthInDraftUnit - draftLengthForComparison) > lengthTolerance) return false;
-      
+
       // Check if same number of layers per stair
       if (itemLayerInfo?.numberOfLayersPerStair !== draft.numberOfLayersPerStair) return false;
-      
+
       return true;
     }) || null;
   };
-  
+
   /**
    * Collect all available remaining stones from all stair parts in session
    * Excludes already used remaining stones
@@ -1000,7 +1264,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     currentProductRemainingStones: RemainingStone[]
   ): RemainingStone[] => {
     const allAvailable: RemainingStone[] = [];
-    
+
     // Collect from all non-layer products in session (including longitudinal and slab)
     sessionItems.forEach(item => {
       const itemIsLayer = ((item.meta as any)?.isLayer) || false;
@@ -1008,7 +1272,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         allAvailable.push(...getAvailableRemainingStoneInventory(item));
       }
     });
-    
+
     // Also include remaining stones from the current product (if any)
     currentProductRemainingStones.forEach(rs => {
       const sanitizedStone = sanitizeRemainingStoneEntry(rs);
@@ -1016,8 +1280,17 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         allAvailable.push(sanitizedStone);
       }
     });
-    
+
     return normalizeRemainingStoneCollection(allAvailable).filter(isUsableRemainingStone);
+  };
+
+  const remainingStoneLineageKeys = (stone: RemainingStone): string[] => {
+    const keys = [stone.id, stone.sourceCutId].filter(
+      (value): value is string => Boolean(value)
+    );
+    const layerSourceMatch = stone.id.match(/^used_layer_(.*)_\d+$/);
+    if (layerSourceMatch?.[1]) keys.push(layerSourceMatch[1]);
+    return keys;
   };
 
   useEffect(() => {
@@ -1055,7 +1328,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       updateWizardData({ products: normalizedProducts });
     }
   }, [currentStep, wizardData.products, updateWizardData]);
-  
+
   /**
    * Calculate layer metrics: how many layers from remaining stones vs new stones,
    * cutting costs, and used remaining stones
@@ -1091,7 +1364,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       edgeDemands
     } = params;
     const layerKerfCm = params.sawKerfEnabled ? (params.sawKerfCm || SAW_KERF_CM) : 0;
-    
+
     if (layerWidthCm <= 0) {
       return {
         layersFromRemainingStones: 0,
@@ -1108,7 +1381,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
     const widthMeters = layerWidthCm / 100;
     const fallbackLength = layerLengthM > 0
-      ? layerLengthM 
+      ? layerLengthM
       : (availableRemainingStones[0]?.length || 0);
 
     const demands = (edgeDemands && edgeDemands.length)
@@ -1273,7 +1546,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         })),
       ...residualWidthPieces
     ];
-    
+
     return {
       layersFromRemainingStones,
       layersFromNewStones,
@@ -1291,12 +1564,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       crossCuttingMeters
     };
   };
-  
+
   /**
    * Create a new layer product
    */
 
-  const computeTotalsV2 = (
+  const computeLegacyTotalsV2 = (
     part: StairStepperPart,
     draft: StairPartDraftV2
   ): {
@@ -1336,7 +1609,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         toolsPrice += meters * (t.pricePerMeter || 0);
       }
     }
-    
+
     // 🎯 CRITICAL: Use original width for pricing (like long stone products)
     // Display sqm uses user-entered width, but pricing uses original width
     const {
@@ -1451,6 +1724,31 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     };
   };
 
+  const computeTotalsV2 = (
+    part: StairStepperPart,
+    draft: StairPartDraftV2
+  ) => computeCanonicalStairTotalsV2(
+    part,
+    draft,
+    getCuttingTypePricePerMeter
+  );
+
+  const stairConflictMessage = (code: string, motherLength?: number | null) => {
+    if (code === 'stair-mother-dimensions-required') {
+      return 'عرض مادر در موجودی ثبت نشده است';
+    }
+    if (code === 'stair-maximum-mother-length-exceeded') {
+      return `حداکثر طول این سنگ ${formatDisplayNumber(motherLength || 0)} متر است`;
+    }
+    if (code === 'stair-maximum-mother-width-exceeded') {
+      return 'بعد عرضی از عرض مادر سنگ بیشتر است';
+    }
+    if (code === 'stair-price-required') return 'قیمت را وارد کنید';
+    if (code === 'stair-cut-rate-missing') return 'نرخ برش در موجودی ثبت نشده است';
+    if (code === 'stair-quantity-required') return 'تعداد را وارد کنید';
+    return 'ابعاد را کامل کنید';
+  };
+
   const computeFinishingCost = (
     draft: StairPartDraftV2,
     pricingSquareMeters: number
@@ -1533,7 +1831,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setCurrentStep(1);
     setStateRestored(true);
     setAutosaveHydrated(true);
-    setDraftRestoredNotice(false);
     if (typeof window !== 'undefined') {
       localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
       localStorage.removeItem('contractWizardState');
@@ -1609,7 +1906,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   useEffect(() => {
     let active = true;
     const term = stairSystemV2.stoneSearchTerm?.trim();
-    if (!useStairFlowV2) return;
     if (!term) {
       stairSystemV2.setStoneSearchResults([]);
       return;
@@ -1617,17 +1913,29 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     stairSystemV2.setIsSearchingStones(true);
     const timeout = setTimeout(async () => {
       try {
-        const res = await salesAPI.getProducts({ search: term, limit: 10, contractType: 'stair' });
+        const [stairResponse, longitudinalResponse] = await Promise.all([
+          salesAPI.getProducts({ search: term, limit: 10, contractType: 'stair' }),
+          salesAPI.getProducts({
+            search: term,
+            limit: 10,
+            contractType: 'longitudinal'
+          })
+        ]);
         if (!active) return;
-        const rawItems: Product[] = (res?.data?.items || res?.data?.data || []) as Product[];
-        
+        const rawItems: Product[] = [
+          ...(stairResponse?.data?.items || stairResponse?.data?.data || []),
+          ...(longitudinalResponse?.data?.items ||
+            longitudinalResponse?.data?.data ||
+            [])
+        ] as Product[];
+
         const localFallbackProducts = products.filter(product =>
-          productSupportsContractType(product, 'stair') &&
+          productSupportsContractRoute(product, 'stair') &&
           productMatchesSearch(product, term, generateFullProductName(product))
         );
         const uniqueProducts = uniqueProductsByIdentity([...rawItems, ...localFallbackProducts]);
         const stairEligibleProducts = uniqueProducts.filter(product =>
-          productSupportsContractType(product, 'stair')
+          productSupportsContractRoute(product, 'stair')
         );
         stairSystemV2.setStoneSearchResults(stairEligibleProducts);
       } catch (e) {
@@ -1638,12 +1946,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       }
     }, 300);
     return () => { active = false; clearTimeout(timeout); };
-  }, [stairSystemV2.stoneSearchTerm, useStairFlowV2, products]);
+  }, [stairSystemV2.stoneSearchTerm, products]);
 
   useEffect(() => {
     let active = true;
     const term = stairSystemV2.layerStoneSearchTerm?.trim();
-    if (!useStairFlowV2) return;
     if (!term) {
       stairSystemV2.setLayerStoneSearchResults([]);
       return;
@@ -1651,15 +1958,27 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     stairSystemV2.setIsSearchingLayerStones(true);
     const timeout = setTimeout(async () => {
       try {
-        const res = await salesAPI.getProducts({ search: term, limit: 10, contractType: 'stair' });
+        const [stairResponse, longitudinalResponse] = await Promise.all([
+          salesAPI.getProducts({ search: term, limit: 10, contractType: 'stair' }),
+          salesAPI.getProducts({
+            search: term,
+            limit: 10,
+            contractType: 'longitudinal'
+          })
+        ]);
         if (!active) return;
-        const rawItems: Product[] = (res?.data?.items || res?.data?.data || []) as Product[];
+        const rawItems: Product[] = [
+          ...(stairResponse?.data?.items || stairResponse?.data?.data || []),
+          ...(longitudinalResponse?.data?.items ||
+            longitudinalResponse?.data?.data ||
+            [])
+        ] as Product[];
         const localFallbackProducts = products.filter(product =>
-          productSupportsContractType(product, 'stair') &&
+          productSupportsContractRoute(product, 'stair') &&
           productMatchesSearch(product, term, generateFullProductName(product))
         );
         const stairEligible = uniqueProductsByIdentity([...rawItems, ...localFallbackProducts])
-          .filter(product => productSupportsContractType(product, 'stair'));
+          .filter(product => productSupportsContractRoute(product, 'stair'));
         stairSystemV2.setLayerStoneSearchResults(stairEligible);
       } catch (e) {
         console.error('Layer stone search failed', e);
@@ -1672,13 +1991,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       active = false;
       clearTimeout(timeout);
     };
-  }, [stairSystemV2.layerStoneSearchTerm, useStairFlowV2, products]);
+  }, [stairSystemV2.layerStoneSearchTerm, products]);
 
   // Debounced tools search
   useEffect(() => {
     let active = true;
     const term = stairSystemV2.toolsSearchTerm?.trim();
-    if (!useStairFlowV2) return;
     if (!capabilities.canLoadSubServices) {
       stairSystemV2.setToolsResults([]);
       stairSystemV2.setIsSearchingTools(false);
@@ -1702,11 +2020,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       }
     }, 300);
     return () => { active = false; clearTimeout(timeout); };
-  }, [stairSystemV2.toolsSearchTerm, useStairFlowV2, capabilities.canLoadSubServices]);
+  }, [stairSystemV2.toolsSearchTerm, capabilities.canLoadSubServices]);
 
   // Preload tools list once when modal flow is used
   useEffect(() => {
-    if (!useStairFlowV2) return;
     if (!capabilities.canLoadSubServices) {
       stairSystemV2.setToolsResults([]);
       return;
@@ -1720,19 +2037,18 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         console.error('Initial tools preload failed', e);
       }
     })();
-  }, [useStairFlowV2, capabilities.canLoadSubServices]);
-  
+  }, [capabilities.canLoadSubServices]);
+
   // Product modal state is now managed by useProductModal hook (see above)
-  
-  // SubService modal state is now provided by useSubServiceModal hook
-  
+
+
   // Payment entry modal state is now provided by usePaymentHandlers hook
-  
+
   // Stair stone specific state (old - keeping for backward compatibility during transition)
   const [treadWidthUnit, setTreadWidthUnit] = useState<'cm' | 'm'>('m'); // Default to meters for tread width
-  
+
   // Product modal state (mandatory, quantity, touched fields, stair system) is now managed by useProductModal hook
-  
+
   // Helper function to initialize stair system config
   const initializeStairSystemConfig = (defaultProduct: Product | null): StairSystemConfig => {
     return {
@@ -1798,10 +2114,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       }
     };
   };
-  
+
   // Helper functions are now provided by useProductModal and useProductCalculations hooks
   // Remaining stone modal state is now provided by useRemainingStoneModal hook
-  
+
   // Get current Persian date with fallback
   const getCurrentPersianDate = () => {
     try {
@@ -1864,7 +2180,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   // Initialize product modal hook
   const productModal = useProductModal({
-    useStairFlowV2,
     errors,
     setErrors
   });
@@ -1895,11 +2210,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setErrors,
     handleSmartCalculation: productCalculations.handleSmartCalculation,
     getEffectiveQuantity: productCalculations.getEffectiveQuantity
-  });
-
-  // Initialize sub-service modal hook
-  const subServiceModal = useSubServiceModal({
-    setErrors
   });
 
   // Initialize payment handlers hook
@@ -1939,10 +2249,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const setRiserExpanded = productModal.setRiserExpanded;
   const landingExpanded = productModal.landingExpanded;
   const setLandingExpanded = productModal.setLandingExpanded;
-  const showCADDesigner = productModal.showCADDesigner;
-  const setShowCADDesigner = productModal.setShowCADDesigner;
   const showProductModal = productModal.showProductModal;
   const setShowProductModal = productModal.setShowProductModal;
+  const closeProductModal = productModal.closeModal;
+  const returnToProductModalAfterRemainderRef = useRef(false);
   const hasQuantityBeenInteracted = productModal.hasQuantityBeenInteracted;
   const setHasQuantityBeenInteracted = productModal.setHasQuantityBeenInteracted;
   const treadProductSearchTerm = productModal.treadProductSearchTerm;
@@ -1964,7 +2274,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setLandingProductSearchTerm,
     stairSystemV2
   ]);
-  
+
   // Calculation handler aliases
   const getEffectiveQuantity = productCalculations.getEffectiveQuantity;
   const getQuantityDisplayValue = productCalculations.getQuantityDisplayValue;
@@ -1972,14 +2282,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const calculateAutoCuttingCost = productCalculations.calculateAutoCuttingCost;
   const handleSmartCalculation = productCalculations.handleSmartCalculation;
   const calculateStoneMetrics = productCalculations.calculateStoneMetrics;
-  const calculateTreadMetrics = productCalculations.calculateTreadMetrics;
-  const calculateRiserMetrics = productCalculations.calculateRiserMetrics;
-  const calculateLandingMetrics = productCalculations.calculateLandingMetrics;
-  const calculateNosingCuttingCost = productCalculations.calculateNosingCuttingCost;
-  const calculateSlabMetrics = productCalculations.calculateSlabMetrics;
-  const getSlabStandardDimensions = productCalculations.getSlabStandardDimensions;
-  const determineSlabLineCutPlan = productCalculations.determineSlabLineCutPlan;
-  const buildSlabCutDetails = productCalculations.buildSlabCutDetails;
   const generateFullProductName = productCalculations.generateFullProductName;
   const handleFieldFocus = productModal.handleFieldFocus;
 
@@ -1990,18 +2292,18 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       productModal.setLengthUnit(newUnit);
       return;
     }
-    
+
     const currentLength = productModal.productConfig.length;
     let convertedLength = currentLength;
-    
+
     if (productModal.lengthUnit === 'cm' && newUnit === 'm') {
       convertedLength = currentLength / 100;
     } else if (productModal.lengthUnit === 'm' && newUnit === 'cm') {
       convertedLength = currentLength * 100;
     }
-    
+
     productModal.setLengthUnit(newUnit);
-    
+
     productModal.setProductConfig(prev => {
       const updatedConfig = { ...prev, length: convertedLength };
       const smartResult = productCalculations.handleSmartCalculation('length', convertedLength, updatedConfig, newUnit, productModal.widthUnit, productCalculations.getEffectiveQuantity());
@@ -2018,27 +2320,27 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       productModal.setWidthUnit(newUnit);
       return;
     }
-    
+
     const currentWidth = productModal.productConfig.width;
     let convertedWidth = currentWidth;
-    
+
     if (productModal.widthUnit === 'cm' && newUnit === 'm') {
       convertedWidth = currentWidth / 100;
     } else if (productModal.widthUnit === 'm' && newUnit === 'cm') {
       convertedWidth = currentWidth * 100;
     }
-    
+
     // Validate width after unit conversion
     if (productModal.selectedProduct) {
-      const originalWidth = (productModal.isEditMode && productModal.productConfig.originalWidth) 
-        ? productModal.productConfig.originalWidth 
+      const originalWidth = (productModal.isEditMode && productModal.productConfig.originalWidth)
+        ? productModal.productConfig.originalWidth
         : (productModal.selectedProduct?.widthValue || 0);
-      
+
       if (convertedWidth > 0 && originalWidth > 0) {
         const convertedWidthInCm = newUnit === 'm' ? convertedWidth * 100 : convertedWidth;
         if (convertedWidthInCm > originalWidth) {
-          setErrors({ 
-            products: `عرض وارد شده (${convertedWidth}${newUnit === 'm' ? 'm' : 'cm'}) بیشتر از عرض اصلی سنگ (${originalWidth}cm) است. لطفاً عرضی کمتر یا مساوی با ${originalWidth}cm وارد کنید.` 
+          setErrors({
+            products: `عرض وارد شده (${convertedWidth}${newUnit === 'm' ? 'm' : 'cm'}) بیشتر از عرض اصلی سنگ (${originalWidth}cm) است. لطفاً عرضی کمتر یا مساوی با ${originalWidth}cm وارد کنید.`
           });
         } else {
           if (errors.products && errors.products.includes('عرض وارد شده')) {
@@ -2047,9 +2349,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         }
       }
     }
-    
+
     productModal.setWidthUnit(newUnit);
-    
+
     productModal.setProductConfig(prev => {
       const updatedConfig = { ...prev, width: convertedWidth };
       const smartResult = productCalculations.handleSmartCalculation('width', convertedWidth, updatedConfig, productModal.lengthUnit, newUnit, productCalculations.getEffectiveQuantity());
@@ -2061,6 +2363,168 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     });
   }, [productModal, productCalculations, errors, setErrors]);
 
+  const applyContractAutosaveDraft = useCallback((draft: ReturnType<typeof createContractAutosaveDraft>) => {
+    setCurrentStep(clampContractDraftStep(draft.currentStep, WIZARD_STEPS.length));
+    setWizardData(normalizeWizardFinishingProducts(draft.wizardData));
+    setCustomerSearchTerm(draft.searches?.customerSearchTerm || '');
+    setProductSearchTerm(draft.searches?.productSearchTerm || '');
+    setTreadProductSearchTerm(draft.searches?.treadProductSearchTerm || '');
+    setRiserProductSearchTerm(draft.searches?.riserProductSearchTerm || '');
+    setLandingProductSearchTerm(draft.searches?.landingProductSearchTerm || '');
+    stairSystemV2.setStoneSearchTerm(draft.searches?.stairStoneSearchTerm || '');
+
+    const savedProductModal = draft.productModal || {};
+    if (savedProductModal.selectedProduct !== undefined) setSelectedProduct(savedProductModal.selectedProduct as Product | null);
+    if (savedProductModal.productConfig) setProductConfig(savedProductModal.productConfig as Partial<ContractProduct>);
+    if (savedProductModal.lengthUnit === 'cm' || savedProductModal.lengthUnit === 'm') setLengthUnit(savedProductModal.lengthUnit);
+    if (savedProductModal.widthUnit === 'cm' || savedProductModal.widthUnit === 'm') setWidthUnit(savedProductModal.widthUnit);
+    if (typeof savedProductModal.isMandatory === 'boolean') setIsMandatory(savedProductModal.isMandatory);
+    if (typeof savedProductModal.mandatoryPercentage === 'number') setMandatoryPercentage(savedProductModal.mandatoryPercentage);
+    if (typeof savedProductModal.hasQuantityBeenInteracted === 'boolean') {
+      setHasQuantityBeenInteracted(savedProductModal.hasQuantityBeenInteracted);
+    }
+    if (savedProductModal.quantityType === 'steps' || savedProductModal.quantityType === 'staircases') {
+      setQuantityType(savedProductModal.quantityType);
+    }
+    if (savedProductModal.stairSystemConfig) setStairSystemConfig(savedProductModal.stairSystemConfig as any);
+    if (typeof savedProductModal.showProductModal === 'boolean') {
+      setShowProductModal(savedProductModal.showProductModal);
+    }
+
+    const savedRemaining = savedProductModal.remainingStone as Record<string, unknown> | undefined;
+    if (savedRemaining) {
+      if (typeof savedRemaining.isOpen === 'boolean') remainingStoneModal.setShowRemainingStoneModal(savedRemaining.isOpen);
+      if ('selectedStone' in savedRemaining) remainingStoneModal.setSelectedRemainingStone(savedRemaining.selectedStone as RemainingStone | null);
+      if ('sourceProduct' in savedRemaining) remainingStoneModal.setSelectedRemainingStoneSourceProduct(savedRemaining.sourceProduct as ContractProduct | null);
+      if (savedRemaining.config) remainingStoneModal.setRemainingStoneConfig(savedRemaining.config as Partial<ContractProduct>);
+      if (Array.isArray(savedRemaining.partitions)) remainingStoneModal.setPartitions(savedRemaining.partitions as StonePartition[]);
+      if (savedRemaining.lengthUnit === 'cm' || savedRemaining.lengthUnit === 'm') remainingStoneModal.setRemainingStoneLengthUnit(savedRemaining.lengthUnit);
+      if (savedRemaining.widthUnit === 'cm' || savedRemaining.widthUnit === 'm') remainingStoneModal.setRemainingStoneWidthUnit(savedRemaining.widthUnit);
+      if (savedRemaining.partitionLengthUnit === 'cm' || savedRemaining.partitionLengthUnit === 'm') remainingStoneModal.setPartitionLengthUnit(savedRemaining.partitionLengthUnit);
+      if (savedRemaining.partitionWidthUnit === 'cm' || savedRemaining.partitionWidthUnit === 'm') remainingStoneModal.setPartitionWidthUnit(savedRemaining.partitionWidthUnit);
+      if (typeof savedRemaining.isMandatory === 'boolean') remainingStoneModal.setRemainingStoneIsMandatory(savedRemaining.isMandatory);
+      if (typeof savedRemaining.mandatoryPercentage === 'number') remainingStoneModal.setRemainingStoneMandatoryPercentage(savedRemaining.mandatoryPercentage);
+      if (typeof savedRemaining.sawKerfEnabled === 'boolean') remainingStoneModal.setRemainingStoneSawKerfEnabled(savedRemaining.sawKerfEnabled);
+    }
+
+    const savedStairSystem = draft.stairSystemV2 || {};
+    if (savedStairSystem.draftTread) stairSystemV2.setDraftTread(savedStairSystem.draftTread as StairPartDraftV2);
+    if (savedStairSystem.draftRiser) stairSystemV2.setDraftRiser(savedStairSystem.draftRiser as StairPartDraftV2);
+    if (savedStairSystem.draftLanding) stairSystemV2.setDraftLanding(savedStairSystem.draftLanding as StairPartDraftV2);
+    if (savedStairSystem.stairActivePart === 'tread' || savedStairSystem.stairActivePart === 'riser' || savedStairSystem.stairActivePart === 'landing') {
+      stairSystemV2.setStairActivePart(savedStairSystem.stairActivePart);
+    }
+    if (Array.isArray(savedStairSystem.stairSessionItems)) {
+      stairSystemV2.setStairSessionItems(savedStairSystem.stairSessionItems as ContractProduct[]);
+    }
+    if (typeof savedStairSystem.stairSessionId === 'string' || savedStairSystem.stairSessionId === null) {
+      stairSystemV2.setStairSessionId(savedStairSystem.stairSessionId as string | null);
+    }
+    if (savedStairSystem.quantityDraft) {
+      setStairQuantityDraft(savedStairSystem.quantityDraft as StairQuantityInputDraft);
+    }
+    if (savedStairSystem.quantityManuallyEdited) {
+      setStairQuantityManuallyEdited(
+        savedStairSystem.quantityManuallyEdited as {
+          tread: boolean;
+          riser: boolean;
+        }
+      );
+    }
+
+    const savedPaymentModal = draft.productModal?.paymentEntryForm;
+    if (savedPaymentModal) paymentHandlers.setPaymentEntryForm(savedPaymentModal as any);
+    if (typeof savedProductModal.showPaymentEntryModal === 'boolean') {
+      paymentHandlers.setShowPaymentEntryModal(savedProductModal.showPaymentEntryModal);
+    }
+
+    setStateRestored(true);
+    restorationAttempted.current = true;
+  }, [
+    paymentHandlers,
+    remainingStoneModal,
+    restorationAttempted,
+    setCurrentStep,
+    setCustomerSearchTerm,
+    setHasQuantityBeenInteracted,
+    setIsMandatory,
+    setLandingProductSearchTerm,
+    setLengthUnit,
+    setMandatoryPercentage,
+    setProductConfig,
+    setProductSearchTerm,
+    setQuantityType,
+    setRiserProductSearchTerm,
+    setSelectedProduct,
+    setShowProductModal,
+    setStairSystemConfig,
+    setStateRestored,
+    setTreadProductSearchTerm,
+    setWidthUnit,
+    setWizardData,
+    stairSystemV2
+  ]);
+
+  const recoveryUserId = currentUser?.id || currentUser?.username || null;
+  const recoveryBaseRevision = Number(
+    (initialWizardData as any)?.productGraphRevision ??
+    (initialWizardData as any)?.canonicalRevision ??
+    0
+  );
+  const recoveryDraftId = useMemo(
+    () => recoveryUserId
+      ? getOrCreateContractDraftId(recoveryUserId, contractId || wizardData.signature?.contractId)
+      : null,
+    [contractId, recoveryUserId, wizardData.signature?.contractId]
+  );
+  const recoveryScope = useMemo<ContractRecoveryScope | null>(
+    () => recoveryUserId && recoveryDraftId
+      ? {
+          userId: recoveryUserId,
+          draftId: recoveryDraftId,
+          schemaVersion: CONTRACT_RECOVERY_SCHEMA_VERSION,
+          baseRevision: recoveryBaseRevision
+        }
+      : null,
+    [recoveryBaseRevision, recoveryDraftId, recoveryUserId]
+  );
+  const editRecovery = useContractEditRecovery({
+    scope: recoveryScope,
+    contractId: contractId || wizardData.signature?.contractId || null,
+    onRestore: applyContractAutosaveDraft
+  });
+  const editRecoveryBlocked = editRecovery.blocked;
+  const takeoverEditRecovery = editRecovery.takeover;
+  useEffect(() => {
+    const resolvedModalState = resolveProductModalRecoveryState({
+      showProductModal,
+      selectedProduct,
+      returnToProductModalAfterRemainder: returnToProductModalAfterRemainderRef.current
+    }, editRecoveryBlocked);
+    if (
+      resolvedModalState.showProductModal === showProductModal &&
+      resolvedModalState.selectedProduct === selectedProduct &&
+      resolvedModalState.returnToProductModalAfterRemainder ===
+        returnToProductModalAfterRemainderRef.current
+    ) {
+      return;
+    }
+    closeProductModal();
+    returnToProductModalAfterRemainderRef.current = false;
+  }, [
+    closeProductModal,
+    editRecoveryBlocked,
+    selectedProduct,
+    showProductModal
+  ]);
+  const handleEditRecoveryTakeover = useCallback(async () => {
+    closeProductModal();
+    returnToProductModalAfterRemainderRef.current = false;
+    await takeoverEditRecovery();
+    closeProductModal();
+    returnToProductModalAfterRemainderRef.current = false;
+  }, [closeProductModal, takeoverEditRecovery]);
+
   // Product filtering hook provides all filtered lists
   const productFiltering = useProductFiltering({
     customers: customerOptions,
@@ -2070,7 +2534,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     treadProductSearchTerm,
     riserProductSearchTerm,
     landingProductSearchTerm,
-    selectedProductTypeForAddition: wizardData.selectedProductTypeForAddition
+    selectedProductTypeForAddition: wizardData.selectedProductTypeForAddition,
+    sellerProductHistory: sellerProductHistory.history
   });
   const {
     filteredCustomers,
@@ -2100,53 +2565,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return;
     }
 
-    setCurrentStep(clampContractDraftStep(draft.currentStep, WIZARD_STEPS.length));
-    setWizardData(normalizeWizardFinishingProducts(draft.wizardData));
-    setCustomerSearchTerm(draft.searches?.customerSearchTerm || '');
-    setProductSearchTerm(draft.searches?.productSearchTerm || '');
-    setTreadProductSearchTerm(draft.searches?.treadProductSearchTerm || '');
-    setRiserProductSearchTerm(draft.searches?.riserProductSearchTerm || '');
-    setLandingProductSearchTerm(draft.searches?.landingProductSearchTerm || '');
-    stairSystemV2.setStoneSearchTerm(draft.searches?.stairStoneSearchTerm || '');
-
-    const savedProductModal = draft.productModal || {};
-    if (savedProductModal.selectedProduct !== undefined) setSelectedProduct(savedProductModal.selectedProduct as Product | null);
-    if (savedProductModal.productConfig) setProductConfig(savedProductModal.productConfig as Partial<ContractProduct>);
-    if (savedProductModal.lengthUnit === 'cm' || savedProductModal.lengthUnit === 'm') setLengthUnit(savedProductModal.lengthUnit);
-    if (savedProductModal.widthUnit === 'cm' || savedProductModal.widthUnit === 'm') setWidthUnit(savedProductModal.widthUnit);
-    if (typeof savedProductModal.isMandatory === 'boolean') setIsMandatory(savedProductModal.isMandatory);
-    if (typeof savedProductModal.mandatoryPercentage === 'number') setMandatoryPercentage(savedProductModal.mandatoryPercentage);
-    if (typeof savedProductModal.hasQuantityBeenInteracted === 'boolean') {
-      setHasQuantityBeenInteracted(savedProductModal.hasQuantityBeenInteracted);
-    }
-    if (savedProductModal.quantityType === 'steps' || savedProductModal.quantityType === 'staircases') {
-      setQuantityType(savedProductModal.quantityType);
-    }
-    if (savedProductModal.stairSystemConfig) setStairSystemConfig(savedProductModal.stairSystemConfig as any);
-
-    const savedStairSystem = draft.stairSystemV2 || {};
-    if (savedStairSystem.draftTread) stairSystemV2.setDraftTread(savedStairSystem.draftTread as StairPartDraftV2);
-    if (savedStairSystem.draftRiser) stairSystemV2.setDraftRiser(savedStairSystem.draftRiser as StairPartDraftV2);
-    if (savedStairSystem.draftLanding) stairSystemV2.setDraftLanding(savedStairSystem.draftLanding as StairPartDraftV2);
-    if (savedStairSystem.stairActivePart === 'tread' || savedStairSystem.stairActivePart === 'riser' || savedStairSystem.stairActivePart === 'landing') {
-      stairSystemV2.setStairActivePart(savedStairSystem.stairActivePart);
-    }
-    if (Array.isArray(savedStairSystem.stairSessionItems)) {
-      stairSystemV2.setStairSessionItems(savedStairSystem.stairSessionItems as ContractProduct[]);
-    }
-    if (typeof savedStairSystem.stairSessionId === 'string' || savedStairSystem.stairSessionId === null) {
-      stairSystemV2.setStairSessionId(savedStairSystem.stairSessionId as string | null);
-    }
-
-    const savedPaymentModal = draft.productModal?.paymentEntryForm;
-    if (savedPaymentModal) paymentHandlers.setPaymentEntryForm(savedPaymentModal as any);
-
-    setShowProductModal(false);
-    remainingStoneModal.setShowRemainingStoneModal(false);
-    paymentHandlers.setShowPaymentEntryModal(false);
-    setStateRestored(true);
-    restorationAttempted.current = true;
-    setDraftRestoredNotice(true);
+    applyContractAutosaveDraft(draft);
     setAutosaveHydrated(true);
   }, []);
 
@@ -2165,6 +2584,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       Boolean(landingProductSearchTerm.trim()) ||
       Boolean(stairSystemV2.stoneSearchTerm.trim()) ||
       Boolean(selectedProduct) ||
+      remainingStoneModal.showRemainingStoneModal ||
+      paymentHandlers.showPaymentEntryModal ||
       stairSystemV2.stairSessionItems.length > 0;
 
     if (!hasMeaningfulDraftProgress) {
@@ -2192,7 +2613,23 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         hasQuantityBeenInteracted,
         quantityType,
         stairSystemConfig,
-        paymentEntryForm: paymentHandlers.paymentEntryForm
+        showProductModal,
+        paymentEntryForm: paymentHandlers.paymentEntryForm,
+        showPaymentEntryModal: paymentHandlers.showPaymentEntryModal,
+        remainingStone: {
+          isOpen: remainingStoneModal.showRemainingStoneModal,
+          selectedStone: remainingStoneModal.selectedRemainingStone,
+          sourceProduct: remainingStoneModal.selectedRemainingStoneSourceProduct,
+          config: remainingStoneModal.remainingStoneConfig,
+          partitions: remainingStoneModal.partitions,
+          lengthUnit: remainingStoneModal.remainingStoneLengthUnit,
+          widthUnit: remainingStoneModal.remainingStoneWidthUnit,
+          partitionLengthUnit: remainingStoneModal.partitionLengthUnit,
+          partitionWidthUnit: remainingStoneModal.partitionWidthUnit,
+          isMandatory: remainingStoneModal.remainingStoneIsMandatory,
+          mandatoryPercentage: remainingStoneModal.remainingStoneMandatoryPercentage,
+          sawKerfEnabled: remainingStoneModal.remainingStoneSawKerfEnabled
+        }
       },
       stairSystemV2: {
         draftTread: stairSystemV2.draftTread,
@@ -2200,7 +2637,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         draftLanding: stairSystemV2.draftLanding,
         stairActivePart: stairSystemV2.stairActivePart,
         stairSessionId: stairSystemV2.stairSessionId,
-        stairSessionItems: stairSystemV2.stairSessionItems
+        stairSessionItems: stairSystemV2.stairSessionItems,
+        quantityDraft: stairQuantityDraft,
+        quantityManuallyEdited: stairQuantityManuallyEdited
       }
     });
   }, [
@@ -2222,12 +2661,28 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     quantityType,
     stairSystemConfig,
     paymentHandlers.paymentEntryForm,
+    paymentHandlers.showPaymentEntryModal,
+    remainingStoneModal.partitions,
+    remainingStoneModal.remainingStoneConfig,
+    remainingStoneModal.remainingStoneIsMandatory,
+    remainingStoneModal.remainingStoneLengthUnit,
+    remainingStoneModal.remainingStoneMandatoryPercentage,
+    remainingStoneModal.remainingStoneSawKerfEnabled,
+    remainingStoneModal.remainingStoneWidthUnit,
+    remainingStoneModal.selectedRemainingStone,
+    remainingStoneModal.selectedRemainingStoneSourceProduct,
+    remainingStoneModal.showRemainingStoneModal,
+    remainingStoneModal.partitionLengthUnit,
+    remainingStoneModal.partitionWidthUnit,
+    showProductModal,
     stairSystemV2.draftTread,
     stairSystemV2.draftRiser,
     stairSystemV2.draftLanding,
     stairSystemV2.stairActivePart,
     stairSystemV2.stairSessionId,
-    stairSystemV2.stairSessionItems
+    stairSystemV2.stairSessionItems,
+    stairQuantityDraft,
+    stairQuantityManuallyEdited
   ]);
 
   const flushContractAutosaveDraft = useCallback(() => {
@@ -2250,6 +2705,18 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     buildContractAutosaveDraft,
     isContractEditMode,
     wizardData.signature?.contractId
+  ]);
+
+  useEffect(() => {
+    if (!editRecovery.ready || editRecovery.blocked) return;
+    const draft = buildContractAutosaveDraft();
+    if (!draft) return;
+    editRecovery.queueRecovery(draft);
+  }, [
+    buildContractAutosaveDraft,
+    editRecovery.blocked,
+    editRecovery.queueRecovery,
+    editRecovery.ready
   ]);
 
   useEffect(() => {
@@ -2300,29 +2767,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     const urlParams = new URLSearchParams(window.location.search);
     const returnTo = urlParams.get('returnTo');
     const step = urlParams.get('step');
-    
-    console.log('🔍 Contract wizard useEffect triggered:', {
-      returnTo,
-      step,
-      currentStep,
-      stateRestored
-    });
-    
+
     if (returnTo === 'contract' && step && !restorationAttempted.current) {
       // Restore wizard state from localStorage
       (async () => {
         const savedState = localStorage.getItem('contractWizardState');
-        console.log('💾 Saved state from localStorage:', savedState);
 
         if (savedState) {
           try {
             const { currentStep: savedStep, wizardData: savedWizardData } = JSON.parse(savedState);
-            console.log('🔄 Restoring wizard state:', {
-              urlStep: step,
-              savedStep,
-              savedWizardData,
-              currentStepBeforeRestore: currentStep
-            });
 
             // Use the saved step instead of URL step parameter
             setCurrentStep(normalizeWizardStep(savedStep));
@@ -2334,7 +2787,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             localStorage.removeItem('contractWizardState');
 
             // Refresh data to show newly created entities
-            console.log('🔄 Refreshing data after successful creation...');
             await loadData();
             await generateContractNumber();
 
@@ -2350,7 +2802,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               }
             }
 
-            console.log('✅ Wizard state restored successfully to step:', savedStep);
           } catch (error) {
             console.error('❌ Error restoring wizard state:', error);
             // If restoration fails, use URL step as fallback
@@ -2359,32 +2810,22 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             restorationAttempted.current = true;
 
             // Refresh data to show newly created entities
-            console.log('🔄 Refreshing data after successful creation (fallback)...');
             await loadData();
             await generateContractNumber();
           }
         } else {
           // If no saved state, use URL step as fallback
-          console.log('⚠️ No saved state found, using URL step:', step);
           setCurrentStep(normalizeWizardStep(parseInt(step, 10)));
           setStateRestored(true);
           restorationAttempted.current = true;
 
           // Refresh data to show newly created entities
-          console.log('🔄 Refreshing data after successful creation (no saved state)...');
           await loadData();
           await generateContractNumber();
         }
       })().finally(() => setAutosaveHydrated(true));
     }
   }, []);
-
-
-  // Debug effect to track currentStep changes
-  useEffect(() => {
-    console.log('📊 currentStep changed to:', currentStep);
-  }, [currentStep]);
-
 
   const generateContractNumber = async () => {
     try {
@@ -2420,7 +2861,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return { ...prev, ...updates };
     });
   };
-  
+
   // Helper function to update a specific stair part
   const updateStairPart = (partType: 'tread' | 'riser' | 'landing', updates: Partial<StairPart>) => {
     setStairSystemConfig(prev => {
@@ -2431,7 +2872,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       };
     });
   };
-  
+
   const syncDraftWithProduct = (partType: 'tread' | 'riser' | 'landing', product: Product | null) => {
     const updater =
       partType === 'tread' ? stairSystemV2.setDraftTread :
@@ -2445,8 +2886,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       stoneId: product ? product.id : null,
       stoneLabel: productLabel,
       stoneProduct: product,
-      pricePerSquareMeter: product ? (product.basePrice || (product as any).pricePerSquareMeter || 0) : null,
-      thicknessCm: product ? (product.thicknessValue ?? null) : null
+      contractualTitle: product ? productLabel : '',
+      pricePerSquareMeter: null,
+      thicknessCm: product ? (product.thicknessValue ?? null) : null,
+      standardLengthValue: null,
+      standardLengthUnit: 'm',
+      operationPolicyInput: product
+        ? createStairOperationInput(partType, prev, product.id)
+        : undefined
     }));
 
     if (product) {
@@ -2489,18 +2936,18 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   // This ensures each part maintains its own product selection independently
   useEffect(() => {
     // Get the draft for the currently active part
-    const draft = 
+    const draft =
       stairSystemV2.stairActivePart === 'tread' ? stairSystemV2.draftTread :
       stairSystemV2.stairActivePart === 'riser' ? stairSystemV2.draftRiser :
       stairSystemV2.draftLanding;
-    
+
     // Extract the product label from the draft
     // Priority: stoneLabel (explicitly set with full name) > generateFullProductName from stoneProduct > fallback
-    const label = draft.stoneLabel || 
+    const label = draft.stoneLabel ||
                   (draft.stoneProduct ? generateFullProductName(draft.stoneProduct) : '') ||
-                  draft.stoneProduct?.namePersian || 
+                  draft.stoneProduct?.namePersian ||
                   draft.stoneProduct?.name || '';
-    
+
     // Update search term to reflect the active part's product selection
     // This ensures when switching parts, the search term shows the product for that part
     stairSystemV2.setStoneSearchTerm(label);
@@ -2521,7 +2968,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     updateStairPart(partType, {
       productId: product.id,
       product: product,
-      pricePerSquareMeter: product.basePrice || 0
+      pricePerSquareMeter: 0
     });
     syncDraftWithProduct(partType, product);
   };
@@ -2597,16 +3044,24 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
     if (selectedProductType === 'stair') {
       const freshStairDefaults = getFreshContractProductDefaults('stair');
-      if (useStairFlowV2) {
+
         const [currentDraft, setCurrentDraft] = getActiveDraft();
         const productLabel = product.namePersian || product.name || '';
+        setStairQuantityDraft({
+          mode: 'steps',
+          totalSteps: '',
+          numberOfStaircases: '',
+          stepsPerStaircase: ''
+        });
+        setStairQuantityManuallyEdited({ tread: false, riser: false });
 
         setCurrentDraft({
           ...currentDraft,
           stoneId: product.id,
           stoneLabel: productLabel,
+          contractualTitle: productLabel,
           stoneProduct: product,
-          pricePerSquareMeter: product.basePrice || 0,
+          pricePerSquareMeter: null,
           thicknessCm: product.thicknessValue || null,
           calibrationCutEnabled: freshStairDefaults.calibrationCutEnabled
         });
@@ -2617,60 +3072,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           product,
           productType: 'stair'
         });
-      } else {
-        const stairConfig = initializeStairSystemConfig(product);
-        setStairSystemConfig(stairConfig);
 
-        const defaultConfig: Partial<ContractProduct> = {
-          productId: product.id,
-          product,
-          productType: 'stair',
-          stoneCode: product.code,
-          stoneName: product.namePersian,
-          diameterOrWidth: product.widthValue,
-          length: 0,
-          width: 0,
-          quantity: freshStairDefaults.quantity,
-          squareMeters: 0,
-          pricePerSquareMeter: product.basePrice || 0,
-          totalPrice: 0,
-          description: '',
-          currency: 'تومان',
-          sawKerfEnabled: false,
-          sawKerfCm: null,
-          calibrationCutEnabled: freshStairDefaults.calibrationCutEnabled,
-          lengthUnit: 'm',
-          widthUnit: 'cm',
-          isMandatory: false,
-          mandatoryPercentage: 20,
-          originalTotalPrice: 0,
-          isCut: false,
-          cutType: null,
-          originalWidth: product.widthValue,
-          originalLength: 0,
-          cuttingCost: 0,
-          cuttingCostPerMeter: 0,
-          cutDescription: '',
-          remainingStones: [],
-          cutDetails: [],
-          usedRemainingStones: [],
-          totalUsedRemainingWidth: 0,
-          totalUsedRemainingLength: 0,
-          appliedSubServices: [],
-          totalSubServiceCost: 0,
-          usedLengthForSubServices: 0,
-          usedSquareMetersForSubServices: 0
-        };
-        setProductConfig(defaultConfig);
-        setTreadWidthUnit('m');
-        setQuantityType('steps');
-        setTreadExpanded(true);
-        setRiserExpanded(true);
-        setLandingExpanded(false);
-        setTreadProductSearchTerm('');
-        setRiserProductSearchTerm('');
-        setLandingProductSearchTerm('');
-      }
       return;
     }
 
@@ -2680,7 +3082,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       const defaultOriginalLength = lengthUnit === 'm'
         ? defaultStandardLengthCm / 100
         : defaultStandardLengthCm;
-      const slabProductName = generateSlabContractProductName(product);
+      const slabProductName = product.namePersian || generateSlabContractProductName(product);
       const defaultConfig: Partial<ContractProduct> = {
         productId: product.id,
         product,
@@ -2779,9 +3181,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   // Handle product selection and open configuration modal
   const handleProductSelection = (product: Product) => {
     const rememberedType = wizardData.selectedProductTypeForAddition;
-    const selectedProductType = rememberedType && productSupportsContractType(product, rememberedType)
+    const selectedProductType = rememberedType && productSupportsContractRoute(product, rememberedType)
       ? rememberedType
-      : null;
+      : inferCatalogContractType(product);
 
     setSelectedProduct(product);
     initializeProductConfigForType(product, selectedProductType);
@@ -2811,10 +3213,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   // Handle unit conversion for length
   const handleLengthUnitChange = (newUnit: 'cm' | 'm') => {
     if (!productConfig.length) return;
-    
+
     const currentLength = productConfig.length;
     let convertedLength = currentLength;
-    
+
     if (lengthUnit === 'cm' && newUnit === 'm') {
       // Convert cm to m
       convertedLength = currentLength / 100;
@@ -2822,26 +3224,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       // Convert m to cm
       convertedLength = currentLength * 100;
     }
-    
-    console.log('🔄 Length Unit Conversion:', {
-      from: lengthUnit,
-      to: newUnit,
-      original: currentLength,
-      converted: convertedLength
-    });
-    
+
+
     setLengthUnit(newUnit);
     setProductConfig(prev => {
       const updatedConfig = { ...prev, length: convertedLength };
       // Trigger smart calculation with new unit
       const smartResult = handleSmartCalculation('length', convertedLength, updatedConfig, newUnit, widthUnit, getEffectiveQuantity());
-      console.log('🔄 Length Unit Change Result:', {
-        originalLength: currentLength,
-        convertedLength,
-        newUnit,
-        smartResult,
-        finalSquareMeters: smartResult.squareMeters
-      });
       return {
         ...updatedConfig,
         width: smartResult.width,
@@ -2853,10 +3242,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   // Handle unit conversion for width
   const handleWidthUnitChange = (newUnit: 'cm' | 'm') => {
     if (!productConfig.width) return;
-    
+
     const currentWidth = productConfig.width;
     let convertedWidth = currentWidth;
-    
+
     if (widthUnit === 'cm' && newUnit === 'm') {
       // Convert cm to m
       convertedWidth = currentWidth / 100;
@@ -2864,25 +3253,19 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       // Convert m to cm
       convertedWidth = currentWidth * 100;
     }
-    
-    console.log('🔄 Width Unit Conversion:', {
-      from: widthUnit,
-      to: newUnit,
-      original: currentWidth,
-      converted: convertedWidth
-    });
-    
+
+
     // Validate width after unit conversion
-    const originalWidth = (isEditMode && productConfig.originalWidth) 
-      ? productConfig.originalWidth 
+    const originalWidth = (isEditMode && productConfig.originalWidth)
+      ? productConfig.originalWidth
       : (selectedProduct?.widthValue || 0);
-    
+
     if (convertedWidth > 0 && originalWidth > 0) {
       const convertedWidthInCm = newUnit === 'm' ? convertedWidth * 100 : convertedWidth;
       if (convertedWidthInCm > originalWidth) {
         // Show error message
-        setErrors({ 
-          products: `عرض وارد شده (${convertedWidth}${newUnit === 'm' ? 'm' : 'cm'}) بیشتر از عرض اصلی سنگ (${originalWidth}cm) است. لطفاً عرضی کمتر یا مساوی با ${originalWidth}cm وارد کنید.` 
+        setErrors({
+          products: `عرض وارد شده (${convertedWidth}${newUnit === 'm' ? 'm' : 'cm'}) بیشتر از عرض اصلی سنگ (${originalWidth}cm) است. لطفاً عرضی کمتر یا مساوی با ${originalWidth}cm وارد کنید.`
         });
       } else {
         // Clear error if width is valid after unit conversion
@@ -2891,68 +3274,54 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         }
       }
     }
-    
+
     setWidthUnit(newUnit);
     setProductConfig(prev => {
       const updatedConfig = { ...prev, width: convertedWidth };
       // Trigger smart calculation with new unit
       const smartResult = handleSmartCalculation('width', convertedWidth, updatedConfig, lengthUnit, newUnit, getEffectiveQuantity());
-      console.log('🔄 Width Unit Change Result:', {
-        originalWidth: currentWidth,
-        convertedWidth,
-        newUnit,
-        smartResult,
-        finalSquareMeters: smartResult.squareMeters
-      });
       return {
         ...updatedConfig,
         length: smartResult.length,
         squareMeters: smartResult.squareMeters
       };
     });
-    
+
     // Log stone cutting eligibility after unit change
-    console.log('📏 Width Unit Changed:', {
-      userWidth: convertedWidth,
-      userWidthUnit: newUnit,
-      userWidthInCm: newUnit === 'm' ? convertedWidth * 100 : convertedWidth
-    });
   };
 
   // Remaining stone handlers are now provided by useRemainingStoneModal hook
   // Handle editing an existing product
   const handleEditProduct = (index: number) => {
-    console.log('🔵 handleEditProduct called:', { index, totalProducts: wizardData.products.length });
     const savedProduct = wizardData.products[index];
     const product = savedProduct ? restoreLongitudinalCustomerRequest(savedProduct) : savedProduct;
     if (!product) {
       console.error('❌ Product not found at index:', index);
       return;
     }
-    console.log('🔵 Product found:', { productType: product.productType, stairSystemId: product.stairSystemId });
-    
+
     // Check if this is a stair system product
     if (!isRemainingStoneChild(product) && product.productType === 'stair' && product.stairSystemId) {
       // Handle stair system editing
       // Find all products with the same stairSystemId
-      const stairSystemProducts = wizardData.products.filter(p => 
-        p.productType === 'stair' && 
+      const stairSystemProducts = wizardData.products.filter(p =>
+        p.productType === 'stair' &&
         p.stairSystemId === product.stairSystemId
       );
-      
+
       // Find tread, riser, and landing products (exclude layer products)
-      const treadProduct = stairSystemProducts.find(p => 
+      const treadProduct = stairSystemProducts.find(p =>
         p.stairPartType === 'tread' && !((p.meta as any)?.isLayer)
       );
-      const riserProduct = stairSystemProducts.find(p => 
+      const riserProduct = stairSystemProducts.find(p =>
         p.stairPartType === 'riser' && !((p.meta as any)?.isLayer)
       );
-      const landingProduct = stairSystemProducts.find(p => 
+      const landingProduct = stairSystemProducts.find(p =>
         p.stairPartType === 'landing' && !((p.meta as any)?.isLayer)
       );
-      
+
       // Check if using new V2 flow
-      if (useStairFlowV2) {
+
         const clickedParentIndex = isStairLayerProduct(product)
           ? wizardData.products.findIndex((candidate, candidateIndex) =>
               isStairMainProduct(candidate) && (
@@ -2973,10 +3342,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         // NEW V2 FLOW: Reconstruct only the clicked row and its attached layer.
         // Set session ID to existing stairSystemId
         stairSystemV2.setStairSessionId(product.stairSystemId);
-        
+
         // Reconstruct session items from the clicked row scope only.
         stairSystemV2.setStairSessionItems([...scopedStairProducts]);
-        
+
         // Helper function to convert ContractProduct to StairPartDraftV2
         const productToDraft = (p: ContractProduct, partType: StairStepperPart): StairPartDraftV2 => {
           const metaTools = ((p.meta as any)?.tools || []).filter((tool: any) => !isGeneratedStairCutTool(tool));
@@ -2994,10 +3363,28 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           // For layer products, extract layer info from meta
           // For regular products, layer info should be null
           const isLayer = (p.meta as any)?.isLayer || false;
-          
+          const draftLengthMeters = (p.lengthUnit || 'm') === 'cm'
+            ? Number(p.length || 0) / 100
+            : Number(p.length || 0);
+          const draftWidthMeters = (p.widthUnit || 'cm') === 'm'
+            ? Number(p.width || 0)
+            : Number(p.width || 0) / 100;
+          const legacyOperationPolicyInput = p.operationPolicyInput ||
+            adaptLegacyStairOperations({
+              product: p,
+              productRowId:
+                p.rowId ||
+                `legacy-stair-row:${p.stairSystemId || 'unknown'}:${partType}`,
+              lengthMeters: draftLengthMeters,
+              widthMeters: draftWidthMeters,
+              quantity: p.quantity
+            });
+
           return {
+            operationPolicyInput: legacyOperationPolicyInput,
             stoneId: p.productId,
             stoneLabel: p.stoneName,
+            contractualTitle: p.stoneName,
             stoneProduct: p.product,
             pricePerSquareMeter: p.pricePerSquareMeter ?? p.unitPrice ?? p.product?.basePrice ?? 0,
             useMandatory: typeof p.isMandatory === 'boolean' ? p.isMandatory : undefined,
@@ -3007,15 +3394,21 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             thicknessCm: p.diameterOrWidth,
             lengthValue: p.length,
             lengthUnit: p.lengthUnit || 'm', // Default to meters for length
-            widthCm: p.width,
+            widthCm: (p.widthUnit || 'cm') === 'm'
+              ? Number(p.width || 0) * 100
+              : p.width,
+            widthUnit: p.widthUnit || 'cm',
             quantity: p.quantity,
             squareMeters: p.squareMeters,
             sawKerfEnabled: !!p.sawKerfEnabled,
             sawKerfCm: p.sawKerfEnabled ? (p.sawKerfCm || SAW_KERF_CM) : null,
-            tools: tools.map((t: any) => ({
+            tools: legacyOperationPolicyInput ? [] : tools.map((t: any) => ({
+              selectionId: t.selectionId || t.id || crypto.randomUUID(),
               toolId: t.toolId,
               name: t.name,
               pricePerMeter: t.pricePerMeter,
+              calculationBase: t.calculationBase || 'length',
+              coveredQuantity: t.coveredQuantity ?? p.quantity,
               front: t.edges?.front || false,
               left: t.edges?.left || false,
               right: t.edges?.right || false,
@@ -3029,13 +3422,25 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             // Note: layerPricePerSquareMeter is not needed - layers use the same price as the main stair part
             numberOfLayersPerStair: isLayer && layerInfo ? layerInfo.numberOfLayersPerStair : null,
             layerWidthCm: isLayer ? p.width : null,
-            standardLengthValue: partType === 'riser'
-              ? null
-              : (p.standardLengthValue ?? (p.meta as any)?.stair?.standardLength?.value ?? null),
-            standardLengthUnit: partType === 'riser'
-              ? (p.lengthUnit || 'm')
-              : ((p.standardLengthUnit as UnitType) ?? (p.meta as any)?.stair?.standardLength?.unit ?? (p.lengthUnit || 'm')),
-            finishingEnabled: !!(p.finishingId || p.finishingCost || metaFinishing.id || metaFinishing.cost),
+            standardLengthValue:
+              (p.meta as any)?.stair?.motherLengthMode === 'explicit'
+                ? Number(
+                    p.standardLengthValue ||
+                    (p.meta as any)?.stair?.motherLengthMeters ||
+                    0
+                  ) || null
+                : null,
+            standardLengthUnit:
+              (p.meta as any)?.stair?.motherLengthMode === 'explicit'
+                ? (
+                    p.standardLengthUnit ||
+                    (p.meta as any)?.stair?.motherLengthDisplayUnit ||
+                    'm'
+                  )
+                : 'm',
+            finishingEnabled: legacyOperationPolicyInput
+              ? false
+              : !!(p.finishingId || p.finishingCost || metaFinishing.id || metaFinishing.cost),
             finishingId: p.finishingId || metaFinishing.id || null,
             finishingCode: p.finishingCode || metaFinishing.code || null,
             finishingLabel: p.finishingName || metaFinishing.name || null,
@@ -3044,30 +3449,70 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             finishingCalculationBase: p.finishingCalculationBase || metaFinishing.calculationBase || 'squareMeters',
             finishingQuantity: p.finishingQuantity || p.finishingSquareMeters || metaFinishing.quantity || null,
             calibrationCutEnabled: resolveExistingCalibrationCutEnabled(p.calibrationCutEnabled),
+            calibrationSelection: (p.meta as any)?.stair?.calibrationSelection || 'manual',
             description: p.description || ''
           };
         };
-        
+
         // Helper function to find and merge layer info into draft
         const mergeLayerInfo = (draft: StairPartDraftV2, partType: 'tread' | 'riser' | 'landing'): StairPartDraftV2 => {
-          // Find layer product for this part type
-          const layerProduct = scopedStairProducts.find(p =>
-            (p.meta as any)?.isLayer && 
+          const layerProducts = scopedStairProducts.filter(p =>
+            (p.meta as any)?.isLayer &&
             (p.meta as any)?.layerInfo?.parentPartType === partType
           );
-          
-          if (layerProduct) {
+
+          if (layerProducts.length > 0) {
+            const configurations = layerProducts.map((layerProduct, index) => {
             const layerInfo = (layerProduct.meta as any)?.layerInfo;
             const layerTypeMeta = (layerProduct.meta as any)?.layerType;
             const layerAltStoneMeta = (layerProduct.meta as any)?.layerAltStone;
             return {
               ...draft,
+              layerConfigurationDraftId:
+                layerInfo?.layerConfigurationId ||
+                layerProduct.rowId ||
+                `legacy-layer:${partType}:${index}`,
+              layerConfigurations: [],
               numberOfLayersPerStair: layerInfo?.numberOfLayersPerStair || null,
               layerWidthCm: layerProduct.width || null,
               layerEdges: ((layerProduct.meta as any)?.layerEdges) || undefined,
               layerTypeId: layerProduct.layerTypeId ?? layerTypeMeta?.id ?? null,
               layerTypeName: layerProduct.layerTypeName ?? layerTypeMeta?.name ?? null,
               layerTypePrice: layerProduct.layerTypePrice ?? layerTypeMeta?.pricePerLayer ?? null,
+              layerSourceKind: layerInfo?.sourceKind ||
+                (layerProduct.layerUseDifferentStone || layerAltStoneMeta
+                  ? 'newMaterial'
+                  : Array.isArray(layerProduct.usedRemainingStones) &&
+                    layerProduct.usedRemainingStones.length > 0
+                    ? 'contractRemainder'
+                    : 'parentMaterial'),
+              layerSelectedRemainingStoneIds:
+                layerInfo?.selectedRemainingStoneIds ||
+                (layerProduct.usedRemainingStones || []).map(stone => stone.id),
+              layerDescription:
+                layerInfo?.description || layerProduct.description || '',
+              layerSideOperations: Array.isArray(
+                (layerProduct.meta as any)?.layerSideOperations
+              )
+                ? Object.fromEntries(
+                    (layerProduct.meta as any).layerSideOperations
+                      .filter((entry: any) => entry?.side && entry?.input)
+                      .map((entry: any) => [entry.side, entry.input])
+                  )
+                : {},
+              layerOperationEditingScope:
+                (layerProduct.meta as any)?.layerOperationEditingScope ||
+                'all',
+              layerDetachedOperationSides:
+                (layerProduct.meta as any)?.layerDetachedOperationSides ||
+                (
+                  Array.isArray((layerProduct.meta as any)?.layerSideOperations)
+                    ? (layerProduct.meta as any).layerSideOperations
+                        .map((entry: any) => entry?.side)
+                        .filter(Boolean)
+                    : []
+                ),
+              layerRemovedSideConflicts: [],
               layerUseDifferentStone: layerProduct.layerUseDifferentStone || !!layerAltStoneMeta,
               layerStoneProductId: layerProduct.layerUseDifferentStone
                 ? (layerProduct.layerStoneProductId || layerAltStoneMeta?.id || layerProduct.productId)
@@ -3078,7 +3523,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 : null,
               layerPricePerSquareMeter: layerProduct.layerUseDifferentStone
                 ? (layerProduct.layerStoneBasePricePerSquareMeter || layerAltStoneMeta?.basePricePerSquareMeter || layerProduct.layerStonePricePerSquareMeter || layerProduct.pricePerSquareMeter)
-                : draft.pricePerSquareMeter,
+                : null,
               layerUseMandatory: layerProduct.layerUseDifferentStone
                 ? (layerProduct.layerUseMandatory ?? ((layerAltStoneMeta?.mandatoryPercentage ?? 0) > 0))
                 : undefined,
@@ -3090,49 +3535,44 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               layerManualSourceLengthM: layerInfo?.manualSource?.lengthM || null,
               layerManualSourceQuantity: layerInfo?.manualSource?.quantity || null
             };
+            });
+            return {
+              ...draft,
+              layerConfigurations: configurations
+            };
           }
           return draft;
         };
-        
+
         const baseDraft = productToDraft(clickedMainProduct, clickedPartType);
         const scopedDraft = layerManagement.normalizeLayerAltStoneSettings(mergeLayerInfo(baseDraft, clickedPartType));
         stairSystemV2.setDraftTread(clickedPartType === 'tread' ? scopedDraft : createFreshStairPartDraft('tread'));
         stairSystemV2.setDraftRiser(clickedPartType === 'riser' ? scopedDraft : createFreshStairPartDraft('riser'));
         stairSystemV2.setDraftLanding(clickedPartType === 'landing' ? scopedDraft : createFreshStairPartDraft('landing'));
         stairSystemV2.setStairActivePart(clickedPartType);
-        
+
         // Set product config for modal type detection
         setProductConfig({
           productId: product.productId,
           product: product.product,
           productType: 'stair'
         });
-        
+
         // Set product type for wizard
         updateWizardData({ selectedProductTypeForAddition: 'stair' });
-        
+
         setIsEditMode(true);
         setEditingProductIndex(safeParentIndex);
         setTouchedFields(new Set());
         setErrors({});
         setShowProductModal(true);
-        
-        console.log('✅ Stair V2 edit initialized:', {
-          stairSystemId: product.stairSystemId,
-          sessionItems: scopedStairProducts.length,
-          clickedPartType,
-          partsFound: {
-            tread: clickedPartType === 'tread',
-            riser: clickedPartType === 'riser',
-            landing: clickedPartType === 'landing'
-          }
-        });
-        
+
+
         return;
-      }
-      
+
+
       // OLD FLOW: Continue with existing logic
-      
+
       // Get common stair system info from first product
       const firstProduct = stairSystemProducts[0] || product;
       const numberOfSteps = firstProduct.numberOfSteps || 0;
@@ -3140,7 +3580,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       // numberOfStaircases is stored in the product, but we'll default to 1 if not found
       // This is a common field across all parts of the same stair system
       const numberOfStaircases = quantityType === 'staircases' ? Math.max(1, Math.floor(numberOfSteps / Math.max(1, (treadProduct?.quantity || numberOfSteps)))) : 1;
-      
+
       // Reconstruct stair system config
       const editedStairConfig: StairSystemConfig = {
         numberOfSteps: numberOfSteps,
@@ -3204,73 +3644,62 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           currency: landingProduct?.currency || 'تومان'
         }
       };
-      
+
       // Set stair system config
       setStairSystemConfig(editedStairConfig);
-      
+
       // Set product config for modal (needed for modal type detection)
       setProductConfig({
         ...product,
         productType: 'stair'
       });
-      
+
       // IMPORTANT: Set selectedProduct to enable modal rendering (modal requires selectedProduct && showProductModal)
       // Use the first available product from the stair system, or the current product as fallback
       const defaultProductForModal = treadProduct?.product || riserProduct?.product || landingProduct?.product || product.product;
       setSelectedProduct(defaultProductForModal);
-      
+
       // Set product type for wizard
       updateWizardData({ selectedProductTypeForAddition: 'stair' });
-      
+
       // Reset product search terms
       setTreadProductSearchTerm('');
       setRiserProductSearchTerm('');
       setLandingProductSearchTerm('');
-      
+
       // Expand all sections
       setTreadExpanded(true);
       setRiserExpanded(true);
       setLandingExpanded(true);
-      
+
       setIsEditMode(true);
       setEditingProductIndex(index); // Store the index of the first product in the stair system
       setTouchedFields(new Set());
       setErrors({}); // Clear errors when opening edit modal
       setShowProductModal(true);
-      
-      console.log('✅ Stair system edit initialized:', {
-        stairSystemId: product.stairSystemId,
-        numberOfSteps,
-        quantityType,
-        partsFound: {
-          tread: !!treadProduct,
-          riser: !!riserProduct,
-          landing: !!landingProduct
-        },
-        config: editedStairConfig
-      });
-      
+
+
       return;
     }
-    
+
     // Handle longitudinal product editing (existing logic)
     setSelectedProduct(product.product);
-    
+
     // Set unit information for proper display
     setLengthUnit(product.lengthUnit || 'm');
     setWidthUnit(product.widthUnit || 'cm');
-    
+
     // Set mandatory pricing state
     setIsMandatory(product.isMandatory || false);
     setMandatoryPercentage(product.mandatoryPercentage || 20);
-    
+
     // Set quantity interaction tracking - if quantity > 1, it has been interacted with
     setHasQuantityBeenInteracted((product.quantity || 0) > 0);
-    
+
     // Set product config with all fields including remaining stone tracking
     // For slab products, ensure slabStandardDimensions is properly loaded
     let slabStandardDimensions = product.slabStandardDimensions || [];
-    
+
     // Backward compatibility: if slabStandardDimensions is empty but legacy fields exist, create an entry
     if (product.productType === 'slab' && slabStandardDimensions.length === 0) {
       if (product.slabStandardLengthCm && product.slabStandardWidthCm) {
@@ -3282,7 +3711,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         }];
       }
     }
-    
+
     setProductConfig({
       ...product,
       productType: normalizeContractProductType(product.productType) || product.productType,
@@ -3317,17 +3746,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       totalSubServiceCost: product.totalSubServiceCost || 0,
       usedLengthForSubServices: product.usedLengthForSubServices || 0,
       usedSquareMetersForSubServices: product.usedSquareMetersForSubServices || 0,
-      // Preserve CAD Design if available
-      cadDesign: product.cadDesign || null
     });
-    
+
     // Set product type for wizard
     updateWizardData({
       selectedProductTypeForAddition: isRemainingStoneChild(product)
         ? 'longitudinal'
         : (normalizeContractProductType(product.productType) || 'longitudinal')
     });
-    
+
     setIsEditMode(true);
     setEditingProductIndex(index);
     setTouchedFields(new Set()); // Reset touched fields for edit session
@@ -3343,22 +3770,17 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return;
     }
 
-    console.log('🎯 handleCreateFromRemainingStone called!');
-    console.log('🔍 Source Product Debug:', {
-      sourceProduct: sourceProduct,
-      pricePerSquareMeter: sourceProduct.pricePerSquareMeter,
-      isMandatory: sourceProduct.isMandatory,
-      mandatoryPercentage: sourceProduct.mandatoryPercentage
-    });
-    
+
     remainingStoneModal.setSelectedRemainingStone(sanitizedRemainingStone);
     remainingStoneModal.setSelectedRemainingStoneSourceProduct(sourceProduct); // Store source product for later use
-    
+    returnToProductModalAfterRemainderRef.current = showProductModal;
+    setShowProductModal(false);
+
     // Find parent product index in wizardData.products for explicit parent-child relationship
     const parentProductIndex = wizardData.products.findIndex((product) =>
       (!!sourceProduct.rowId && product.rowId === sourceProduct.rowId) || product === sourceProduct
     );
-    
+
     // Initialize configuration with remaining stone data
     // Use source product's quantity as default (represents remaining pieces available)
     // IMPORTANT: The child's stoneCode is parent's stoneCode + "-R" + last 4 chars of remainingStone.id
@@ -3404,19 +3826,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       // Set explicit parent reference (if parent found)
       parentProductIndex: parentProductIndex >= 0 ? parentProductIndex : undefined
     };
-    
-    console.log('🔍 Default Config Created:', {
-      defaultConfig: defaultConfig,
-      pricePerSquareMeter: defaultConfig.pricePerSquareMeter
-    });
-    
+
+
     remainingStoneModal.setRemainingStoneConfig(defaultConfig);
     // Inherit unit information from source product
     remainingStoneModal.setRemainingStoneLengthUnit(sourceProduct.lengthUnit || 'm');
     remainingStoneModal.setRemainingStoneWidthUnit(sourceProduct.widthUnit || 'cm');
     remainingStoneModal.setRemainingStoneIsMandatory(false);
     remainingStoneModal.setRemainingStoneMandatoryPercentage(0);
-    
+
     // Initialize partitions array (start with one empty partition)
     remainingStoneModal.setPartitions([{
       id: `partition_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -3427,7 +3845,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }]);
     remainingStoneModal.setPartitionLengthUnit(sourceProduct.lengthUnit || 'm');
     remainingStoneModal.setPartitionWidthUnit(sourceProduct.widthUnit || 'cm');
-    
+
     remainingStoneModal.setShowRemainingStoneModal(true);
   };
 
@@ -3724,9 +4142,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     serviceSourceType,
     setServiceSourceType,
     productsSummary: contractCartSummary,
-    selectProduct: handleProductSelection,
+    selectProduct: (product) => {
+      sellerProductHistory.recordSelection(product.id);
+      handleProductSelection(product);
+    },
     editProduct: handleEditProduct,
-    manageProductTools: (index, product) => subServiceModal.openModal(index, product),
     duplicateProduct: handleDuplicateProduct,
     removeProduct: handleRemoveProductFromContract,
     updateProductImages: handleUpdateProductImages,
@@ -3989,23 +4409,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   // Handle product configuration and add to contract
   const handleAddProductToContract = () => {
-    console.log('🚀 handleAddProductToContract called!');
-    console.log('🔍 Main Product Validation Debug:', {
-      selectedProduct: selectedProduct,
-      productConfig: productConfig,
-      productType: productConfig.productType || wizardData.selectedProductTypeForAddition,
-      hasLength: !!productConfig.length,
-      hasWidth: !!productConfig.width,
-      hasSquareMeters: !!productConfig.squareMeters,
-      hasQuantity: !!productConfig.quantity,
-      hasPricePerSquareMeter: !!productConfig.pricePerSquareMeter
-    });
-    
+
     if (!selectedProduct || !productConfig) {
-      console.log('❌ Missing selectedProduct or productConfig');
       return;
     }
-    
+
     // Resolve product type from modal selection (fallback to remembered type)
     const productType = normalizeContractProductType(productConfig.productType || wizardData.selectedProductTypeForAddition);
     if (!productType) {
@@ -4013,7 +4421,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       setErrors({ products: 'لطفاً ابتدا نوع محصول را انتخاب کنید' });
       return;
     }
-    
+
     if (productType === 'prepared') {
       const preparedKind = productConfig.preparedKind || inferPreparedKindFromProduct(selectedProduct);
       const preparedUnit = getPreparedUnit(productConfig as ContractProduct);
@@ -4028,6 +4436,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       const squareMeters = preparedUnit === 'squareMeter' ? preparedQuantity : 0;
       const totalPrice = preparedQuantity * unitPrice;
       const finalProduct: ContractProduct = {
+        rowId: isEditMode && editingProductIndex !== null
+          ? wizardData.products[editingProductIndex]?.rowId || createContractProductRowId()
+          : createContractProductRowId(),
         productId: selectedProduct.id,
         product: selectedProduct,
         productType: 'prepared',
@@ -4096,757 +4507,223 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }
 
     // Handle different product types
-    if (productType === 'stair') {
-      // STAIR SYSTEM (دستگاه پله) VALIDATION AND CREATION
-      if (!stairSystemConfig) {
-        setErrors({ products: 'خطا در پیکربندی سیستم پله' });
-        return;
-      }
-      
-      // Validate that at least one part is selected
-      const hasSelectedPart = stairSystemConfig.tread.isSelected || 
-                              stairSystemConfig.riser.isSelected || 
-                              stairSystemConfig.landing.isSelected;
-      
-      if (!hasSelectedPart) {
-        setErrors({ products: 'لطفاً حداقل یکی از بخش‌های پله (کف پله، خیز پله، یا پاگرد) را انتخاب کنید' });
-        return;
-      }
-      
-      // Validate common configuration
-      if (!stairSystemConfig.numberOfSteps || stairSystemConfig.numberOfSteps <= 0) {
-        setErrors({ products: 'لطفاً تعداد پله را وارد کنید' });
-        return;
-      }
-      
-      if (stairSystemConfig.quantityType === 'staircases' && 
-          (!stairSystemConfig.numberOfStaircases || stairSystemConfig.numberOfStaircases <= 0)) {
-        setErrors({ products: 'لطفاً تعداد پله‌کان کامل را وارد کنید' });
-        return;
-      }
-      
-      // Generate unique stair system ID (only for new systems, preserve for edits)
-      let stairSystemId: string;
-      if (isEditMode && editingProductIndex !== null) {
-        // Preserve existing stairSystemId when editing
-        const editingProduct = wizardData.products[editingProductIndex];
-        stairSystemId = editingProduct?.stairSystemId || `stair_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      } else {
-        stairSystemId = `stair_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      }
-      
-      const productsToAdd: ContractProduct[] = [];
-      
-      // Process Tread (کف پله)
-      if (stairSystemConfig.tread.isSelected) {
-        const tread = stairSystemConfig.tread;
-        
-        if (!tread.product || !tread.productId) {
-          setErrors({ products: 'لطفاً محصول برای کف پله را انتخاب کنید' });
-          return;
-        }
-        
-        if (!tread.treadWidth || tread.treadWidth <= 0) {
-          setErrors({ products: 'لطفاً طول پله را برای کف پله وارد کنید' });
-          return;
-        }
-        
-        if (!tread.treadDepth || tread.treadDepth <= 0) {
-          setErrors({ products: 'لطفاً عرض پله را برای کف پله وارد کنید' });
-          return;
-        }
-        
-        if (!tread.quantity || tread.quantity <= 0) {
-          setErrors({ products: 'لطفاً تعداد را برای کف پله وارد کنید' });
-          return;
-        }
-        
-        if (!tread.pricePerSquareMeter || tread.pricePerSquareMeter <= 0) {
-          setErrors({ products: 'لطفاً فی هر متر مربع را برای کف پله وارد کنید' });
-          return;
-        }
-        
-        // Calculate tread metrics
-        const treadMetrics = calculateTreadMetrics({
-          treadWidth: tread.treadWidth,
-          treadWidthUnit: tread.lengthUnit || 'm',
-          treadDepth: tread.treadDepth,
-          quantity: tread.quantity,
-          quantityType: stairSystemConfig.quantityType,
-          numberOfStaircases: stairSystemConfig.numberOfStaircases || 1
-        });
-        
-        // Calculate nosing cost (only for tread)
-        const nosingCost = calculateNosingCuttingCost({
-          nosingType: tread.nosingType || 'none',
-          treadWidth: tread.treadWidth,
-          treadWidthUnit: tread.lengthUnit || 'm',
-          numberOfSteps: tread.quantity,
-          numberOfStaircases: stairSystemConfig.quantityType === 'staircases' ? (stairSystemConfig.numberOfStaircases || 1) : 1,
-          quantityType: stairSystemConfig.quantityType
-        });
-        
-        // Calculate pricing
-        const basePrice = treadMetrics.totalArea * tread.pricePerSquareMeter;
-        const mandatoryPrice = tread.isMandatory && tread.mandatoryPercentage
-          ? basePrice * (tread.mandatoryPercentage / 100)
-          : 0;
-        const totalPrice = basePrice + mandatoryPrice + nosingCost.cuttingCost;
-        
-        productsToAdd.push({
-          productId: tread.productId,
-          product: tread.product,
-          productType: 'stair',
-          stairSystemId: stairSystemId,
-          stairPartType: 'tread',
-          stoneCode: tread.product.code,
-          stoneName: generateCompactProductName(tread.product) || tread.product.namePersian,
-          diameterOrWidth: tread.product.widthValue,
-          length: 0,
-          width: 0,
-          quantity: treadMetrics.totalQuantity,
-          squareMeters: treadMetrics.totalArea,
-          pricePerSquareMeter: tread.pricePerSquareMeter,
-          totalPrice: totalPrice,
-          description: tread.description || `کف پله - دستگاه پله`,
-          currency: 'تومان',
-          lengthUnit: 'm',
-          widthUnit: 'cm',
-          isMandatory: tread.isMandatory,
-          mandatoryPercentage: tread.mandatoryPercentage,
-          originalTotalPrice: basePrice,
-          isCut: false,
-          cutType: null,
-          originalWidth: tread.product.widthValue,
-          originalLength: 0,
-          cuttingCost: 0,
-          cuttingCostPerMeter: 0,
-          cutDescription: '',
-          remainingStones: [],
-          cutDetails: [],
-          usedRemainingStones: [],
-          totalUsedRemainingWidth: 0,
-          totalUsedRemainingLength: 0,
-          appliedSubServices: [],
-          totalSubServiceCost: 0,
-          usedLengthForSubServices: 0,
-          usedSquareMetersForSubServices: 0,
-          // Stair-specific fields
-          treadWidth: tread.treadWidth,
-          treadDepth: tread.treadDepth,
-          numberOfSteps: stairSystemConfig.numberOfSteps,
-          quantityType: stairSystemConfig.quantityType,
-          nosingType: tread.nosingType,
-          nosingOverhang: tread.nosingOverhang,
-          nosingCuttingCost: nosingCost.cuttingCost,
-          nosingCuttingCostPerMeter: nosingCost.cuttingCostPerMeter
-        });
-      }
-      
-      // Process Riser (خیز پله)
-      if (stairSystemConfig.riser.isSelected) {
-        const riser = stairSystemConfig.riser;
-        
-        if (!riser.product || !riser.productId) {
-          setErrors({ products: 'لطفاً محصول برای خیز پله را انتخاب کنید' });
-          return;
-        }
-        
-        if (!riser.riserHeight || riser.riserHeight <= 0) {
-          setErrors({ products: 'لطفاً ارتفاع قائمه را برای خیز پله وارد کنید' });
-          return;
-        }
-        
-        if (!riser.quantity || riser.quantity <= 0) {
-          setErrors({ products: 'لطفاً تعداد را برای خیز پله وارد کنید' });
-          return;
-        }
-        
-        if (!riser.pricePerSquareMeter || riser.pricePerSquareMeter <= 0) {
-          setErrors({ products: 'لطفاً فی هر متر مربع را برای خیز پله وارد کنید' });
-          return;
-        }
-        
-        // Get tread width for riser calculation (from tread part if available, otherwise use default)
-        // CRITICAL: Riser calculation depends on tread width, so we need to validate it
-        const treadWidth = stairSystemConfig.tread.treadWidth;
-        const treadWidthUnit = stairSystemConfig.tread.lengthUnit || 'm';
-        
-        // Validate that tread width is available if riser is selected
-        // If tread is not selected, we can't calculate riser area accurately
-        if (!treadWidth || treadWidth <= 0) {
-          // If tread is not selected, we can't use its width
-          if (!stairSystemConfig.tread.isSelected) {
-            setErrors({ products: 'برای محاسبه خیز پله، ابتدا باید کف پله را انتخاب کرده و طول پله را وارد کنید' });
-            return;
-          }
-          // If tread is selected but width is not set
-          setErrors({ products: 'لطفاً طول پله را برای کف پله وارد کنید تا بتوان خیز پله را محاسبه کرد' });
-          return;
-        }
-        
-        // Calculate riser metrics
-        const riserMetrics = calculateRiserMetrics({
-          treadWidth: treadWidth,
-          treadWidthUnit: treadWidthUnit,
-          riserHeight: riser.riserHeight,
-          quantity: riser.quantity,
-          quantityType: stairSystemConfig.quantityType,
-          numberOfStaircases: stairSystemConfig.numberOfStaircases || 1
-        });
-        
-        // Calculate pricing
-        const basePrice = riserMetrics.totalArea * riser.pricePerSquareMeter;
-        const mandatoryPrice = riser.isMandatory && riser.mandatoryPercentage
-          ? basePrice * (riser.mandatoryPercentage / 100)
-          : 0;
-        const totalPrice = basePrice + mandatoryPrice;
-        
-        productsToAdd.push({
-          productId: riser.productId,
-          product: riser.product,
-          productType: 'stair',
-          stairSystemId: stairSystemId,
-          stairPartType: 'riser',
-          stoneCode: riser.product.code,
-          stoneName: generateCompactProductName(riser.product) || riser.product.namePersian,
-          diameterOrWidth: riser.product.widthValue,
-          length: 0,
-          width: 0,
-          quantity: riserMetrics.totalQuantity,
-          squareMeters: riserMetrics.totalArea,
-          pricePerSquareMeter: riser.pricePerSquareMeter,
-          totalPrice: totalPrice,
-          description: riser.description || `خیز پله - دستگاه پله`,
-          currency: 'تومان',
-          lengthUnit: 'm',
-          widthUnit: 'cm',
-          isMandatory: riser.isMandatory,
-          mandatoryPercentage: riser.mandatoryPercentage,
-          originalTotalPrice: basePrice,
-          isCut: false,
-          cutType: null,
-          originalWidth: riser.product.widthValue,
-          originalLength: 0,
-          cuttingCost: 0,
-          cuttingCostPerMeter: 0,
-          cutDescription: '',
-          remainingStones: [],
-          cutDetails: [],
-          usedRemainingStones: [],
-          totalUsedRemainingWidth: 0,
-          totalUsedRemainingLength: 0,
-          appliedSubServices: [],
-          totalSubServiceCost: 0,
-          usedLengthForSubServices: 0,
-          usedSquareMetersForSubServices: 0,
-          // Stair-specific fields
-          riserHeight: riser.riserHeight,
-          numberOfSteps: stairSystemConfig.numberOfSteps,
-          quantityType: stairSystemConfig.quantityType
-        });
-      }
-      
-      // Process Landing (پاگرد)
-      if (stairSystemConfig.landing.isSelected) {
-        const landing = stairSystemConfig.landing;
-        
-        if (!landing.product || !landing.productId) {
-          setErrors({ products: 'لطفاً محصول برای پاگرد را انتخاب کنید' });
-          return;
-        }
-        
-        if (!landing.numberOfLandings || landing.numberOfLandings <= 0) {
-          setErrors({ products: 'لطفاً تعداد پاگرد را وارد کنید' });
-          return;
-        }
-        
-        if (!landing.landingWidth || landing.landingWidth <= 0) {
-          setErrors({ products: 'لطفاً عرض پاگرد را وارد کنید' });
-          return;
-        }
-        
-        if (!landing.landingDepth || landing.landingDepth <= 0) {
-          setErrors({ products: 'لطفاً عمق پاگرد را وارد کنید' });
-          return;
-        }
-        
-        if (!landing.pricePerSquareMeter || landing.pricePerSquareMeter <= 0) {
-          setErrors({ products: 'لطفاً فی هر متر مربع را برای پاگرد وارد کنید' });
-          return;
-        }
-        
-        // Calculate landing metrics
-        const landingMetrics = calculateLandingMetrics({
-          landingWidth: landing.landingWidth,
-          landingDepth: landing.landingDepth,
-          numberOfLandings: landing.numberOfLandings,
-          quantityType: stairSystemConfig.quantityType,
-          numberOfStaircases: stairSystemConfig.numberOfStaircases || 1
-        });
-        
-        // Calculate pricing
-        const basePrice = landingMetrics.totalArea * landing.pricePerSquareMeter;
-        const mandatoryPrice = landing.isMandatory && landing.mandatoryPercentage
-          ? basePrice * (landing.mandatoryPercentage / 100)
-          : 0;
-        const totalPrice = basePrice + mandatoryPrice;
-        
-        productsToAdd.push({
-          productId: landing.productId,
-          product: landing.product,
-          productType: 'stair',
-          stairSystemId: stairSystemId,
-          stairPartType: 'landing',
-          stoneCode: landing.product.code,
-          stoneName: generateCompactProductName(landing.product) || landing.product.namePersian,
-          diameterOrWidth: landing.product.widthValue,
-          length: 0,
-          width: 0,
-          quantity: landingMetrics.totalQuantity,
-          squareMeters: landingMetrics.totalArea,
-          pricePerSquareMeter: landing.pricePerSquareMeter,
-          totalPrice: totalPrice,
-          description: landing.description || `پاگرد - دستگاه پله`,
-          currency: 'تومان',
-          lengthUnit: 'm',
-          widthUnit: 'cm',
-          isMandatory: landing.isMandatory,
-          mandatoryPercentage: landing.mandatoryPercentage,
-          originalTotalPrice: basePrice,
-          isCut: false,
-          cutType: null,
-          originalWidth: landing.product.widthValue,
-          originalLength: 0,
-          cuttingCost: 0,
-          cuttingCostPerMeter: 0,
-          cutDescription: '',
-          remainingStones: [],
-          cutDetails: [],
-          usedRemainingStones: [],
-          totalUsedRemainingWidth: 0,
-          totalUsedRemainingLength: 0,
-          appliedSubServices: [],
-          totalSubServiceCost: 0,
-          usedLengthForSubServices: 0,
-          usedSquareMetersForSubServices: 0,
-          // Stair-specific fields
-          landingWidth: landing.landingWidth,
-          landingDepth: landing.landingDepth,
-          numberOfLandings: landing.numberOfLandings,
-          quantityType: stairSystemConfig.quantityType
-        });
-      }
-      
-      // Handle editing vs adding
-      if (isEditMode && editingProductIndex !== null) {
-        // Editing mode: Remove old stair system products and add new ones
-        const editingProduct = wizardData.products[editingProductIndex];
-        const oldStairSystemId = editingProduct?.stairSystemId;
-        
-        // Remove all products with the same stairSystemId
-        const updatedProducts = wizardData.products.filter(p => 
-          !(p.productType === 'stair' && p.stairSystemId === oldStairSystemId)
-        );
-        
-        // Add updated products with the same stairSystemId (preserve ID for grouping)
-        productsToAdd.forEach(p => {
-          p.stairSystemId = oldStairSystemId; // Preserve the original stairSystemId
-        });
-        
-        updateWizardData({
-          products: [...updatedProducts, ...productsToAdd],
-          selectedProductTypeForAddition: productType
-        });
-        
-        console.log('✅ Successfully updated stair system in contract!', {
-          stairSystemId: oldStairSystemId,
-          partsUpdated: productsToAdd.length,
-          parts: productsToAdd.map(p => p.stairPartType)
-        });
-      } else {
-        // Adding new stair system
-        updateWizardData({
-          products: [...wizardData.products, ...productsToAdd],
-          selectedProductTypeForAddition: productType
-        });
-        
-        console.log('✅ Successfully added stair system to contract!', {
-          stairSystemId,
-          partsAdded: productsToAdd.length,
-          parts: productsToAdd.map(p => p.stairPartType)
-        });
-      }
-      
-      // Close modal and reset state
-      setShowProductModal(false);
-      setSelectedProduct(null);
-      setProductConfig({});
-      setStairSystemConfig(null);
-      setTreadWidthUnit('m');
-      setQuantityType('steps');
-      setIsMandatory(false);
-      setMandatoryPercentage(20);
-      setIsEditMode(false);
-      setEditingProductIndex(null);
-      setTouchedFields(new Set());
-      clearProductAdditionSearches();
-      setErrors({});
-      
-      return;
-    }
-    
     // SLAB STONE VALIDATION AND CALCULATION
-    if (productType === 'slab') {
-      // Validate required fields - at least one of length/width or squareMeters must be provided
-      const hasDimensions = (productConfig.length && productConfig.width) || productConfig.squareMeters;
-      const hasRequiredFields = productConfig.quantity && productConfig.pricePerSquareMeter;
-      
-      if (!hasDimensions) {
-        setErrors({ products: 'لطفاً طول و عرض یا متر مربع را وارد کنید' });
+    if (productType === 'slab' && productConfig.slabPolicyInput) {
+      const canonicalSlabCalculation = calculateSlab(productConfig.slabPolicyInput);
+      if (!canonicalSlabCalculation.ok) {
+        setErrors({
+          products: canonicalSlabCalculation.conflicts
+            .map(conflict => conflict.message)
+            .join(' | ')
+        });
         return;
       }
-      
-      if (!hasRequiredFields) {
-        if (!productConfig.quantity) {
-          setErrors({ products: 'لطفاً تعداد را وارد کنید' });
-        } else if (!productConfig.pricePerSquareMeter) {
-          setErrors({ products: 'لطفاً فی هر متر مربع را وارد کنید' });
-        } else {
-          setErrors({ products: 'لطفاً تعداد و فی هر متر مربع را وارد کنید' });
-        }
-        return;
-      }
-      
-      // Validate standard dimensions
-      const standardDimensions = productConfig.slabStandardDimensions || [];
-      const wantedQuantity = productConfig.quantity || 0;
-      const totalStandardQuantity = standardDimensions.reduce((sum, entry) => sum + (entry.quantity || 0), 0);
-      
-      if (standardDimensions.length === 0) {
-        setErrors({ products: 'لطفاً حداقل یک ابعاد استاندارد را اضافه کنید' });
-          return;
-      }
-      
-      if (totalStandardQuantity !== wantedQuantity) {
-          setErrors({ 
-          products: `مجموع تعداد ابعاد استاندارد (${totalStandardQuantity}) باید برابر با تعداد درخواستی (${wantedQuantity}) باشد` 
-          });
-          return;
-      }
-      
-      // Validate that standard dimensions are >= wanted dimensions
-      const userWidthInCm = productConfig.width 
-        ? (widthUnit === 'm' ? productConfig.width * 100 : productConfig.width)
-        : 0;
-      const userLengthInCm = productConfig.length 
-        ? (lengthUnit === 'm' ? productConfig.length * 100 : productConfig.length)
-        : 0;
-      
-      for (const entry of standardDimensions) {
-        if (userLengthInCm > 0 && entry.standardLengthCm < userLengthInCm) {
-          setErrors({ 
-            products: `طول استاندارد (${entry.standardLengthCm}cm) نمی‌تواند کمتر از طول درخواستی (${userLengthInCm}cm) باشد` 
-          });
-          return;
-        }
-        if (userWidthInCm > 0 && entry.standardWidthCm < userWidthInCm) {
-          setErrors({ 
-            products: `عرض استاندارد (${entry.standardWidthCm}cm) نمی‌تواند کمتر از عرض درخواستی (${userWidthInCm}cm) باشد` 
-          });
-          return;
-        }
-        if (entry.quantity <= 0) {
-          setErrors({ products: 'تعداد هر ابعاد استاندارد باید بیشتر از صفر باشد' });
-          return;
-        }
-      }
-      
-      // For backward compatibility, use first entry as default if needed
-      const { standardLengthCm, standardWidthCm } = getSlabStandardDimensions();
-      const originalWidthCm = standardWidthCm || selectedProduct.widthValue || 0;
-      const originalLengthCm = standardLengthCm || (selectedProduct as any)?.lengthValue || 300;
-      const originalWidthInCurrentUnit = widthUnit === 'm' ? originalWidthCm / 100 : originalWidthCm;
-      const originalLengthInCurrentUnit = lengthUnit === 'm' ? originalLengthCm / 100 : originalLengthCm;
-      
-      // Determine if cuts are needed (2D: longitudinal + cross)
-      
-      const needsLongitudinalCut = userWidthInCm > 0 && userWidthInCm < originalWidthCm && originalWidthCm > 0;
-      const needsCrossCut = userLengthInCm > 0 && userLengthInCm < originalLengthCm && originalLengthCm > 0;
-      const sawKerfEnabled = !!productConfig.sawKerfEnabled;
-      const sawKerfCm = sawKerfEnabled ? (productConfig.sawKerfCm || SAW_KERF_CM) : null;
-      const consumedWidthForPricingCm = sawKerfEnabled && needsLongitudinalCut
-        ? userWidthInCm + (sawKerfCm || 0)
-        : userWidthInCm;
-      const consumedLengthForPricingCm = sawKerfEnabled && needsCrossCut
-        ? userLengthInCm + (sawKerfCm || 0)
-        : userLengthInCm;
-      
-      // Automatically fetch cutting costs if cuts should be applied
-      let cuttingCostPerMeterLongitudinal = 0;
-      let cuttingCostPerMeterCross = 0;
-      
-      if (needsLongitudinalCut) {
-        cuttingCostPerMeterLongitudinal = getCuttingTypePricePerMeter('LONG') || 0;
-      }
-      if (needsCrossCut) {
-        cuttingCostPerMeterCross = getCuttingTypePricePerMeter('CROSS') || getCuttingTypePricePerMeter('LONG') || 0;
-      }
-      
-      const slabCuttingMode = productConfig.slabCuttingMode || 'lineBased';
-      const slabCuttingPricePerSquareMeter = productConfig.slabCuttingPricePerSquareMeter || 0;
-      
-      // Calculate metrics - use effective quantity
-      const effectiveQuantity = getEffectiveQuantity();
-      
-      // For line-based cutting, we need to calculate line plan for each standard dimension entry
-      // For now, use the first entry for line plan calculation (can be enhanced later)
-      const firstStandardEntry = standardDimensions[0];
-      const linePlanStandardLengthCm = firstStandardEntry?.standardLengthCm || originalLengthCm;
-      const linePlanStandardWidthCm = firstStandardEntry?.standardWidthCm || originalWidthCm;
-      const linePlan = determineSlabLineCutPlan({
-        requestedLengthCm: userLengthInCm,
-        requestedWidthCm: userWidthInCm,
-        standardLengthCm: linePlanStandardLengthCm,
-        standardWidthCm: linePlanStandardWidthCm
-      });
-      
-      const calculated = calculateSlabMetrics({
-        length: productConfig.length,
-        width: productConfig.width,
-        quantity: effectiveQuantity,
-        squareMeters: productConfig.squareMeters,
-        pricePerSquareMeter: productConfig.pricePerSquareMeter,
-        lengthUnit: lengthUnit,
-        widthUnit: widthUnit,
-        isMandatory: false, // Slab stones don't use mandatory pricing
-        mandatoryPercentage: 0, // Slab stones don't use mandatory pricing
-        originalLength: originalLengthInCurrentUnit,
-        originalWidth: originalWidthInCurrentUnit,
-        standardDimensions: standardDimensions,
-        cuttingCostPerMeterLongitudinal: cuttingCostPerMeterLongitudinal,
-        cuttingCostPerMeterCross: cuttingCostPerMeterCross,
-        slabCuttingMode,
-        slabCuttingPricePerSquareMeter,
-        lineCutLongitudinalMeters: linePlan.longitudinalMeters,
-        lineCutCrossMeters: linePlan.crossMeters
-      });
-      
-      // Calculate برش قائم (vertical edge cuts) cost
-      // IMPORTANT: برش قائم is calculated for each standard dimension entry using its own dimensions and quantity
-      // This is because برش قائم happens on the standard stones BEFORE they are cut to desired dimensions
-      const verticalCutSides = productConfig.slabVerticalCutSides || {
-        top: true,
-        bottom: true,
-        left: true,
-        right: true
-      };
-      const verticalCutCostPerMeter = getCuttingTypePricePerMeter('VERTICAL') || getCuttingTypePricePerMeter('LONG') || 0;
-      
-      const allCutDetails: StoneCut[] = buildSlabCutDetails({
-        requestedLengthCm: userLengthInCm,
-        requestedWidthCm: userWidthInCm,
-        standardDimensions,
-        slabCuttingMode,
-        cuttingCostPerMeterLongitudinal,
-        cuttingCostPerMeterCross,
-        verticalCutSides,
-        verticalCutCostPerMeter
-      });
-      const lineCuttingCost = slabCuttingMode === 'lineBased'
-        ? allCutDetails
-            .filter((cut) => cut.type !== 'vertical')
-            .reduce((sum, cut) => sum + (cut.cost ?? cut.cuttingCost ?? 0), 0)
-        : calculated.cuttingCost;
-      const totalVerticalCutCost = allCutDetails
-        .filter((cut) => cut.type === 'vertical')
-        .reduce((sum, cut) => sum + (cut.cost ?? cut.cuttingCost ?? 0), 0);
-      const finalTotalCuttingCost = lineCuttingCost + totalVerticalCutCost;
-      
-      // Create a combined slab cutting result
-      const slabRemaining = calculateSlabRemainingStones({
-        requestedWidthCm: userWidthInCm,
-        requestedLengthCm: userLengthInCm,
-        standardDimensions,
-        sawKerfEnabled,
-        sawKerfCm
-      });
 
-      const slabCutting = {
-        needsLongitudinalCut,
-        needsCrossCut,
-        remainingPieces: slabRemaining.remainingStones,
-        cutDetails: allCutDetails,
-        cuttingCost: finalTotalCuttingCost // Include vertical cut cost
-      };
-      
-      const lineBasedDescription = slabCutting.needsLongitudinalCut && slabCutting.needsCrossCut
-        ? `برش طولی و عرضی (طول: ${originalLengthCm}cm → ${userLengthInCm}cm، عرض: ${originalWidthCm}cm → ${userWidthInCm}cm)`
-        : (slabCutting.needsLongitudinalCut 
-          ? `برش طولی (${originalWidthCm}cm → ${userWidthInCm}cm)`
-          : (slabCutting.needsCrossCut 
-            ? `برش کله بر (${originalLengthCm}cm → ${userLengthInCm}cm)`
-            : ''));
-      const perSquareMeterDescription = slabCuttingMode === 'perSquareMeter' && slabCuttingPricePerSquareMeter > 0
-        ? `برش بر متر مربع (${formatSquareMeters(calculated.squareMeters || 0)} × ${formatPrice(slabCuttingPricePerSquareMeter, 'تومان')})`
-        : 'بر اساس متر مربع';
-      
-      const finishingEnabled = !!(productConfig as any).finishingEnabled;
-      const selectedFinishing = finishingEnabled && productConfig.finishingId
-        ? stoneFinishings.find(option => option.id === productConfig.finishingId)
-        : undefined;
-      const finishingSnapshot = resolveFinishingSnapshot({
-        enabled: finishingEnabled,
-        selectedFinishing,
-        config: productConfig,
-        productType: 'slab',
-        length: calculated.length,
-        lengthUnit,
-        quantity: effectiveQuantity,
-        squareMeters: calculated.squareMeters
+      const slab = canonicalSlabCalculation.result;
+      const slabLengthUnit = slab.lengthDisplayUnit;
+      const slabWidthUnit = slab.widthDisplayUnit;
+      const displayLength = slabLengthUnit === 'cm'
+        ? Number(slab.lengthMeters) * 100
+        : Number(slab.lengthMeters);
+      const displayWidth = slabWidthUnit === 'cm'
+        ? Number(slab.widthMeters) * 100
+        : Number(slab.widthMeters);
+      const standardDimensions: SlabStandardDimensionEntry[] = slab.sourceRows.map(source => ({
+        id: source.sourceRowId,
+        standardLengthCm: Number(source.lengthMeters) * 100,
+        standardWidthCm: Number(source.widthMeters) * 100,
+        quantity: source.quantity
+      }));
+      const firstSource = standardDimensions[0];
+      const sawKerfCm = Number(productConfig.slabPolicyInput.kerfMeters) * 100;
+      const sawKerfEnabled = sawKerfCm > 0;
+      const lineBased = slab.cuttingPricingMethod === 'lineBased';
+      const longitudinalMeters = Number(slab.packingPlan.longitudinalCutMeters);
+      const crossMeters = Number(slab.packingPlan.crossCutMeters);
+      const longitudinalRate = Number(
+        productConfig.slabPolicyInput.longitudinalCutRateToman ?? 0
+      );
+      const crossRate = Number(productConfig.slabPolicyInput.crossCutRateToman ?? 0);
+      const totalCuttingCost =
+        Number(slab.cuttingAmountToman) + Number(slab.verticalCutAmountToman);
+      const remainingStones: RemainingStone[] = slab.packingPlan.remainders.map(
+        remainder => ({
+          id: remainder.remainingStoneId,
+          width: Number(remainder.widthMeters) * 100,
+          length: Number(remainder.lengthMeters),
+          squareMeters:
+            Number(remainder.widthMeters) * Number(remainder.lengthMeters),
+          isAvailable: true,
+          sourceCutId: `${remainder.sourceBatchId}:${remainder.sourceOrdinal}`,
+          position: {
+            startWidth: Number(remainder.xMeters) * 100,
+            startLength: Number(remainder.yMeters)
+          },
+          quantity: 1
+        })
+      );
+      const cutDetails: StoneCut[] = slab.packingPlan.cuts.map(cut => {
+        const isLongitudinal = cut.axis === 'longitudinal';
+        const rate = isLongitudinal ? longitudinalRate : crossRate;
+        const meters = Number(cut.meters);
+        return {
+          id: cut.cutId,
+          type: isLongitudinal ? 'longitudinal' : 'cross',
+          orientation: cut.axis,
+          meters,
+          rate,
+          cost: Math.round(meters * rate),
+          originalWidth: firstSource?.standardWidthCm ?? 0,
+          cutWidth: displayWidth,
+          remainingWidth: 0,
+          length: meters,
+          cuttingCost: Math.round(meters * rate),
+          cuttingCostPerMeter: rate
+        };
       });
-      const finishingPricePerSquareMeter = finishingSnapshot.unitPrice;
-      const finishingSquareMeters = finishingSnapshot.calculationBase === 'squareMeters' ? finishingSnapshot.quantity || 0 : 0;
-      const finishingCost = finishingSnapshot.cost;
+      if (slab.verticalCutPricingLine) {
+        const verticalMeters = Number(slab.verticalCutPricingLine.quantity);
+        const verticalRate = Number(slab.verticalCutPricingLine.rateToman);
+        cutDetails.push({
+          id: `${productConfig.slabPolicyInput.sourceBatchId}:vertical`,
+          type: 'vertical',
+          selectedSides: [...productConfig.slabPolicyInput.verticalCutSides],
+          meters: verticalMeters,
+          rate: verticalRate,
+          cost: Number(slab.verticalCutPricingLine.amountToman),
+          originalWidth: firstSource?.standardWidthCm ?? 0,
+          cutWidth: displayWidth,
+          remainingWidth: 0,
+          length: verticalMeters,
+          cuttingCost: Number(slab.verticalCutPricingLine.amountToman),
+          cuttingCostPerMeter: verticalRate
+        });
+      }
+
+      const operationPolicyInput = refreshOperationGeometry(
+        productConfig.operationPolicyInput,
+        displayLength,
+        slabLengthUnit,
+        displayWidth,
+        slabWidthUnit,
+        slab.quantity
+      );
+      const operations = materializeOperationSnapshots(operationPolicyInput);
+      if (!operations.ok) {
+        setErrors({ products: operations.message });
+        return;
+      }
 
       const previousSlabProduct =
-        isEditMode && editingProductIndex !== null ? wizardData.products[editingProductIndex] : null;
-      const slabGeometryChanged = hasSlabGeometryChanged({
-        previousProduct: previousSlabProduct
-          ? {
-              width: previousSlabProduct.width,
-              widthUnit: previousSlabProduct.widthUnit as 'cm' | 'm',
-              length: previousSlabProduct.length,
-              lengthUnit: previousSlabProduct.lengthUnit as 'cm' | 'm',
-              quantity: previousSlabProduct.quantity,
-              slabStandardDimensions: previousSlabProduct.slabStandardDimensions || []
-            }
-          : null,
-        nextWidthValueCm: userWidthInCm,
-        nextLengthValueCm: userLengthInCm,
-        nextQuantity: effectiveQuantity,
-        nextStandardDimensions: standardDimensions
-      });
-      const computedSlabRemainingStones =
-        isEditMode && !slabGeometryChanged
-          ? (productConfig.remainingStones || previousSlabProduct?.remainingStones || [])
-          : slabCutting.remainingPieces;
-      const resetSlabRemainingUsage = isEditMode && slabGeometryChanged;
-      const slabConsumedAreaSqm = sawKerfEnabled && (needsLongitudinalCut || needsCrossCut)
-        ? (consumedWidthForPricingCm * consumedLengthForPricingCm * effectiveQuantity) / 10000
-        : calculated.squareMeters;
-      const slabMaterialTotalPrice = slabConsumedAreaSqm * (productConfig.pricePerSquareMeter || 0);
-      const slabBaseMaterialPrice = sawKerfEnabled ? slabMaterialTotalPrice : calculated.originalTotalPrice;
-
-      // Create final product configuration for slab stone
-      const finalProduct: ContractProduct = {
+        isEditMode && editingProductIndex !== null
+          ? wizardData.products[editingProductIndex]
+          : null;
+      const finalProduct: ContractProduct = reconcileContractProductPricing({
         rowId: previousSlabProduct?.rowId || createContractProductRowId(),
         productId: selectedProduct.id,
         product: selectedProduct,
         productType: 'slab',
+        slabPolicyInput: productConfig.slabPolicyInput,
         stoneCode: productConfig.stoneCode || selectedProduct.code,
-        stoneName: generateSlabContractProductName(selectedProduct),
+        stoneName:
+          productConfig.stoneName || generateSlabContractProductName(selectedProduct),
         diameterOrWidth: productConfig.diameterOrWidth || selectedProduct.widthValue,
-        length: calculated.length,
-        width: calculated.width,
-        quantity: effectiveQuantity,
-        squareMeters: calculated.squareMeters,
-        pricePerSquareMeter: productConfig.pricePerSquareMeter || 0,
-        totalPrice: slabBaseMaterialPrice + finalTotalCuttingCost,
+        length: displayLength,
+        width: displayWidth,
+        quantity: slab.quantity,
+        squareMeters: Number(slab.finishedAreaSquareMeters),
+        pricePerSquareMeter: Number(
+          productConfig.slabPolicyInput.baseMaterialRateToman
+        ),
+        totalPrice:
+          Number(slab.totalAmountToman) +
+          operations.toolsCost +
+          operations.finishingsCost,
         description: productConfig.description || '',
-        images: Array.isArray(productConfig.images) ? [...productConfig.images] : [...(selectedProduct.images || [])],
-        sawKerfEnabled,
-        sawKerfCm,
-        finishingId: finishingEnabled ? (productConfig.finishingId || null) : null,
-        finishingCode: finishingEnabled ? (productConfig.finishingCode || selectedFinishing?.code || null) : null,
-        finishingName: finishingEnabled
-          ? (productConfig.finishingName || selectedFinishing?.namePersian || selectedFinishing?.name || null)
-          : null,
-        finishingPricePerSquareMeter: finishingEnabled ? finishingPricePerSquareMeter : null,
-        finishingUnitPrice: finishingEnabled ? finishingSnapshot.unitPrice : null,
-        finishingCalculationBase: finishingEnabled ? finishingSnapshot.calculationBase : null,
-        finishingQuantity: finishingEnabled ? finishingSnapshot.quantity : null,
-        finishingCost: finishingEnabled ? finishingCost : null,
-        finishingSquareMeters: finishingEnabled && finishingCost > 0 ? finishingSquareMeters : null,
+        images: Array.isArray(productConfig.images)
+          ? [...productConfig.images]
+          : [...(selectedProduct.images || [])],
         currency: 'تومان',
-        lengthUnit: lengthUnit,
-        widthUnit: widthUnit,
-        isMandatory: false, // Slab stones don't use mandatory pricing
-        mandatoryPercentage: 0, // Slab stones don't use mandatory pricing
-        originalTotalPrice: slabBaseMaterialPrice,
-        // Slab cutting fields (2D)
-        isCut: slabCutting.needsLongitudinalCut || slabCutting.needsCrossCut,
-        cutType: slabCutting.needsLongitudinalCut && slabCutting.needsCrossCut ? 'cross' : (slabCutting.needsLongitudinalCut ? 'longitudinal' : null),
-        originalWidth: originalWidthCm,
-        originalLength: originalLengthInCurrentUnit,
-        cuttingCost: slabCutting.cuttingCost || calculated.cuttingCost, // Use calculated cutting cost from all entries (includes برش قائم)
-        cuttingCostPerMeter: slabCuttingMode === 'lineBased'
-          ? (cuttingCostPerMeterLongitudinal || cuttingCostPerMeterCross || 0)
+        lengthUnit: slabLengthUnit,
+        widthUnit: slabWidthUnit,
+        isMandatory: false,
+        mandatoryPercentage: 0,
+        originalTotalPrice: Number(slab.materialAmountToman),
+        sawKerfEnabled,
+        sawKerfCm: sawKerfEnabled ? sawKerfCm : null,
+        isCut: slab.packingPlan.cuts.length > 0,
+        cutType:
+          longitudinalMeters > 0 && crossMeters > 0
+            ? 'cross'
+            : longitudinalMeters > 0
+              ? 'longitudinal'
+              : null,
+        originalWidth: firstSource?.standardWidthCm ?? 0,
+        originalLength:
+          slabLengthUnit === 'm'
+            ? (firstSource?.standardLengthCm ?? 0) / 100
+            : firstSource?.standardLengthCm ?? 0,
+        cuttingCost: totalCuttingCost,
+        physicalCuttingCost: totalCuttingCost,
+        cuttingCostPerMeter: lineBased
+          ? longitudinalRate || crossRate
           : 0,
-        cutDescription: slabCuttingMode === 'lineBased' ? lineBasedDescription : perSquareMeterDescription,
-        // برش قائم fields
-        slabVerticalCutSides: verticalCutSides,
-        slabVerticalCutCost: totalVerticalCutCost,
-        slabVerticalCutCostPerMeter: verticalCutCostPerMeter,
-        remainingStones: computedSlabRemainingStones,
-        cutDetails: (isEditMode && productConfig.cutDetails) ? productConfig.cutDetails : slabCutting.cutDetails,
-        usedRemainingStones: resetSlabRemainingUsage ? [] : ((isEditMode && productConfig.usedRemainingStones) ? productConfig.usedRemainingStones : []),
-        totalUsedRemainingWidth: resetSlabRemainingUsage ? 0 : ((isEditMode && productConfig.totalUsedRemainingWidth) ? productConfig.totalUsedRemainingWidth : 0),
-        totalUsedRemainingLength: resetSlabRemainingUsage ? 0 : ((isEditMode && productConfig.totalUsedRemainingLength) ? productConfig.totalUsedRemainingLength : 0),
-        remainingStoneSourceInventory: normalizeRemainingStoneCollection(slabCutting.remainingPieces),
-        appliedSubServices: (isEditMode && productConfig.appliedSubServices) ? productConfig.appliedSubServices : [],
-        totalSubServiceCost: (isEditMode && productConfig.totalSubServiceCost !== undefined) ? productConfig.totalSubServiceCost : 0,
-        usedLengthForSubServices: (isEditMode && productConfig.usedLengthForSubServices !== undefined) ? productConfig.usedLengthForSubServices : 0,
-        usedSquareMetersForSubServices: (isEditMode && productConfig.usedSquareMetersForSubServices !== undefined) ? productConfig.usedSquareMetersForSubServices : 0,
-        // Legacy single standard dimension fields (for backward compatibility)
-        slabStandardLengthCm: originalLengthCm,
-        slabStandardWidthCm: originalWidthCm,
-        // New multiple standard dimensions support
+        cutDescription: lineBased ? 'برش براساس خطوط واقعی چیدمان' : 'برش براساس مترمربع',
+        slabVerticalCutSides: Object.fromEntries(
+          (['top', 'bottom', 'left', 'right'] as const).map(side => [
+            side,
+            productConfig.slabPolicyInput!.verticalCutSides.includes(side)
+          ])
+        ) as ContractProduct['slabVerticalCutSides'],
+        slabVerticalCutCost: Number(slab.verticalCutAmountToman),
+        slabVerticalCutCostPerMeter:
+          productConfig.slabPolicyInput.verticalCutRateToman === undefined
+            ? 0
+            : Number(productConfig.slabPolicyInput.verticalCutRateToman),
+        remainingStones,
+        remainingStoneSourceInventory: normalizeRemainingStoneCollection(remainingStones),
+        cutDetails,
+        usedRemainingStones: [],
+        totalUsedRemainingWidth: 0,
+        totalUsedRemainingLength: 0,
+        operationPolicyInput,
+        appliedSubServices: operations.appliedSubServices,
+        totalSubServiceCost: operations.toolsCost,
+        usedLengthForSubServices: 0,
+        usedSquareMetersForSubServices: 0,
+        finishings: operations.finishings,
+        finishingCost: operations.finishingsCost,
+        slabStandardLengthCm: firstSource?.standardLengthCm ?? 0,
+        slabStandardWidthCm: firstSource?.standardWidthCm ?? 0,
         slabStandardDimensions: standardDimensions,
-        slabCuttingMode,
-        slabCuttingPricePerSquareMeter: slabCuttingMode === 'perSquareMeter' ? slabCuttingPricePerSquareMeter : null,
-        slabLineCuttingStrategy: linePlan.axisUsingStandard,
-        slabLineCuttingLongitudinalMeters: linePlan.longitudinalMeters,
-        slabLineCuttingCrossMeters: linePlan.crossMeters,
-        // CAD Design (if available)
-        cadDesign: productConfig.cadDesign || null,
+        slabCuttingMode: lineBased ? 'lineBased' : 'perSquareMeter',
+        slabCuttingPricePerSquareMeter:
+          lineBased
+            ? null
+            : Number(productConfig.slabPolicyInput.squareMeterCutRateToman ?? 0),
+        slabLineCuttingStrategy: 'length',
+        slabLineCuttingLongitudinalMeters: longitudinalMeters,
+        slabLineCuttingCrossMeters: crossMeters,
         meta: {
+          calculation: {
+            policyVersion: slab.calculationPolicyVersion,
+            inputHash: slab.inputHash,
+            resultHash: slab.resultHash,
+            packingPolicyVersion: slab.packingPlan.policyVersion
+          },
           sawKerf: sawKerfEnabled
-            ? {
-                enabled: true,
-                cm: sawKerfCm,
-                consumedWidthCm: consumedWidthForPricingCm,
-                consumedLengthCm: consumedLengthForPricingCm,
-                consumedAreaSqm: slabConsumedAreaSqm
-              }
-            : undefined,
-          finishing: finishingEnabled && finishingCost > 0
-            ? {
-                id: productConfig.finishingId || null,
-                code: productConfig.finishingCode || selectedFinishing?.code || null,
-                name: productConfig.finishingName || selectedFinishing?.namePersian || selectedFinishing?.name || null,
-                pricePerSquareMeter: finishingPricePerSquareMeter,
-                unitPrice: finishingSnapshot.unitPrice,
-                calculationBase: finishingSnapshot.calculationBase,
-                quantity: finishingSnapshot.quantity,
-                unitLabel: getFinishingUnitLabel(finishingSnapshot.calculationBase),
-                squareMeters: finishingSquareMeters,
-                cost: finishingCost
-              }
+            ? { enabled: true, cm: sawKerfCm }
             : undefined
         } as any
-      };
-      
-      // Add SubService costs to totalPrice if they exist
-      const existingSubServiceCost = (isEditMode && productConfig.totalSubServiceCost) ? productConfig.totalSubServiceCost : 0;
-      finalProduct.totalPrice = slabBaseMaterialPrice + finalTotalCuttingCost + existingSubServiceCost + finishingCost;
-      
-      // Add to contract or update existing product
+      });
+
       if (isEditMode && editingProductIndex !== null) {
         const updatedProducts = ensureContractProductRowIds(wizardData.products);
         updatedProducts[editingProductIndex] = finalProduct;
         const sourceRowId = finalProduct.rowId as string;
-        const hasRemainingChildren = updatedProducts.some((product) => product.parentProductRowId === sourceRowId);
+        const hasRemainingChildren = updatedProducts.some(
+          product => product.parentProductRowId === sourceRowId
+        );
         if (hasRemainingChildren) {
           const replay = replayRemainingStoneAllocations({
             products: updatedProducts,
@@ -4854,20 +4731,28 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             sourceInventory: finalProduct.remainingStoneSourceInventory
           });
           if (!replay.ok) {
-            setErrors({ products: formatRemainingStoneReplayConflicts(replay.conflicts) });
+            setErrors({
+              products: formatRemainingStoneReplayConflicts(replay.conflicts)
+            });
             return;
           }
-          updateWizardData({ products: replay.products, selectedProductTypeForAddition: productType });
+          updateWizardData({
+            products: replay.products,
+            selectedProductTypeForAddition: productType
+          });
         } else {
-          updateWizardData({ products: updatedProducts, selectedProductTypeForAddition: productType });
+          updateWizardData({
+            products: updatedProducts,
+            selectedProductTypeForAddition: productType
+          });
         }
       } else {
-        updateWizardData({ products: [...wizardData.products, finalProduct], selectedProductTypeForAddition: productType });
+        updateWizardData({
+          products: [...wizardData.products, finalProduct],
+          selectedProductTypeForAddition: productType
+        });
       }
-      
-      console.log('✅ Successfully added slab product to contract!', { finalProduct });
-      
-      // Close modal and reset state
+
       setShowProductModal(false);
       setSelectedProduct(null);
       setProductConfig({});
@@ -4880,10 +4765,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       setTouchedFields(new Set());
       clearProductAdditionSearches();
       setErrors({});
-      
       return;
     }
-    
+
+    if (productType === 'slab' && !productConfig.slabPolicyInput) {
+      setErrors({ products: 'ابعاد، تعداد و اسلب‌های منبع را کامل کنید' });
+      return;
+    }
+
     // LONGITUDINAL STONE VALIDATION AND CALCULATION (existing logic)
     const widthResolvedProductConfig = resolveLongitudinalWidth(
       productConfig,
@@ -4916,26 +4805,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     const hasRequiredFields =
       (enteredLongitudinalQuantity > 0 || longitudinalQuantityOptimizerIntent) &&
       (editingRemainingStoneChild || productConfig.pricePerSquareMeter);
-    
-    console.log('🔍 Main Product Validation Results:', {
-      hasDimensions,
-      hasRequiredFields,
-      length: productConfig.length,
-      width: productConfig.width,
-      squareMeters: productConfig.squareMeters,
-      quantity: productConfig.quantity,
-      pricePerSquareMeter: productConfig.pricePerSquareMeter
-    });
-    
+
+
     if (!hasDimensions) {
-      console.log('❌ Missing dimensions');
       setErrors({ products: 'لطفاً طول و عرض یا متر مربع را وارد کنید' });
       return;
     }
-    
+
     if (!hasRequiredFields) {
-      console.log('❌ Missing required fields - quantity:', productConfig.quantity, 'pricePerSquareMeter:', productConfig.pricePerSquareMeter);
-      
+
       // Provide more specific error messages
       if (!productConfig.quantity && !longitudinalQuantityOptimizerIntent) {
         setErrors({ products: 'لطفاً تعداد را وارد کنید' });
@@ -4946,38 +4824,37 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       }
       return;
     }
-    
+
     // Use productConfig.originalWidth when editing, otherwise use selectedProduct.widthValue
-    const originalWidthForCalculation = (isEditMode && productConfig.originalWidth) 
-      ? productConfig.originalWidth 
+    const originalWidthForCalculation = (isEditMode && productConfig.originalWidth)
+      ? productConfig.originalWidth
       : selectedProduct.widthValue;
-    
+
     // Validate width: cannot exceed original width
     if (productConfig.width && originalWidthForCalculation > 0) {
       const userWidthInCm = widthUnit === 'm' ? productConfig.width * 100 : productConfig.width;
       if (userWidthInCm > originalWidthForCalculation) {
-        setErrors({ 
-          products: `عرض وارد شده (${productConfig.width}${widthUnit === 'm' ? 'm' : 'cm'}) بیشتر از عرض اصلی سنگ (${originalWidthForCalculation}cm) است. لطفاً عرضی کمتر یا مساوی با ${originalWidthForCalculation}cm وارد کنید.` 
+        setErrors({
+          products: `عرض وارد شده (${productConfig.width}${widthUnit === 'm' ? 'm' : 'cm'}) بیشتر از عرض اصلی سنگ (${originalWidthForCalculation}cm) است. لطفاً عرضی کمتر یا مساوی با ${originalWidthForCalculation}cm وارد کنید.`
         });
         return;
       }
     }
-    
+
     // Determine if longitudinal cut should be automatically selected (before calculating metrics)
     // Convert width to cm for comparison
-    const userWidthForComparison = productConfig.width 
+    const userWidthForComparison = productConfig.width
       ? (widthUnit === 'm' ? productConfig.width * 100 : productConfig.width)
       : 0;
     const shouldAutoSelectLongitudinalCut = userWidthForComparison > 0 && userWidthForComparison < originalWidthForCalculation && originalWidthForCalculation > 0;
-    
+
     // Automatically fetch cutting cost per meter if cut should be applied
     let cuttingCostPerMeterForCalc = productConfig.cuttingCostPerMeter || 0;
     if (shouldAutoSelectLongitudinalCut && !cuttingCostPerMeterForCalc) {
       // Fetch price from cutting types for "LONG" (برش طولی)
       cuttingCostPerMeterForCalc = getCuttingTypePricePerMeter('LONG') || 0;
-      console.log('🔧 Auto-fetched cutting cost per meter before calculation:', cuttingCostPerMeterForCalc);
     }
-    
+
     // Calculate metrics - use effective quantity (default to 1 if not interacted)
     const effectiveQuantity = enteredLongitudinalQuantity > 0 ? enteredLongitudinalQuantity : 1;
     const calculated = calculateStoneMetrics({
@@ -4994,22 +4871,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       originalWidth: originalWidthForCalculation,
       cuttingCostPerMeter: cuttingCostPerMeterForCalc // Use fetched value if available
     });
-    
+
     // Get final width for display/logging
     const userEnteredWidth = calculated.width;
     const originalWidth = originalWidthForCalculation;
     const userEnteredWidthInCm = widthUnit === 'm' ? userEnteredWidth * 100 : userEnteredWidth;
-    
-    console.log('🔍 Auto Cut Selection Logic:', {
-      userEnteredWidth,
-      originalWidth,
-      userEnteredWidthInCm,
-      shouldAutoSelectLongitudinalCut,
-      comparison: `${userEnteredWidthInCm} < ${originalWidth} = ${userEnteredWidthInCm < originalWidth}`,
-      cuttingCostPerMeterForCalc,
-      calculatedCuttingCost: calculated.cuttingCost
-    });
-    
+
+
     const finishingEnabled = !!(productConfig as any).finishingEnabled;
     const selectedFinishing = finishingEnabled && productConfig.finishingId
       ? stoneFinishings.find(option => option.id === productConfig.finishingId)
@@ -5131,7 +4999,20 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       cutType: shouldCutByGeometry ? 'longitudinal' : null,
       cuttingBreakdown: smartCutPlan.enabled ? smartCutPlan.cuttingBreakdown : undefined
     });
-    
+    const operationPolicyInput = refreshOperationGeometry(
+      productConfig.operationPolicyInput,
+      customerFields.length,
+      lengthUnit,
+      customerFields.width,
+      widthUnit,
+      customerFields.quantity
+    );
+    const operationSnapshots = materializeOperationSnapshots(operationPolicyInput);
+    if (!operationSnapshots.ok) {
+      setErrors({ products: operationSnapshots.message });
+      return;
+    }
+
     // Create final product configuration for longitudinal stone
     const finalProduct: ContractProduct = {
       rowId: previousLongitudinalProduct?.rowId || createContractProductRowId(),
@@ -5140,6 +5021,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       productType: editingRemainingStoneChild
         ? (previousLongitudinalProduct?.productType || 'longitudinal')
         : 'longitudinal',
+      longitudinalPolicyInput: productConfig.longitudinalPolicyInput,
       stoneCode: productConfig.stoneCode || selectedProduct.code,
       stoneName: productConfig.stoneName || selectedProduct.namePersian,
       diameterOrWidth: productConfig.diameterOrWidth || selectedProduct.widthValue,
@@ -5184,8 +5066,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       originalWidth: (isEditMode && productConfig.originalWidth) ? productConfig.originalWidth : selectedProduct.widthValue,
       // Store originalLength when product is first created (when not from remaining stone)
       // For products created from remaining stone, originalLength is set in handleCreateFromRemainingStone
-      originalLength: (isEditMode && productConfig.originalLength !== undefined) 
-        ? productConfig.originalLength 
+      originalLength: (isEditMode && productConfig.originalLength !== undefined)
+        ? productConfig.originalLength
         : (lengthUnit === 'm' ? customerFields.length : (customerFields.length / 100)),
       cuttingCost: billableCuttingCost,
       physicalCuttingCost: calculatedCuttingCost,
@@ -5215,10 +5097,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         ? undefined
         : normalizeRemainingStoneCollection(smartCutPlan.remainingStones),
       // SubService tracking - preserve when editing
-      appliedSubServices: (isEditMode && productConfig.appliedSubServices) ? productConfig.appliedSubServices : [],
-      totalSubServiceCost: (isEditMode && productConfig.totalSubServiceCost !== undefined) ? productConfig.totalSubServiceCost : 0,
-      usedLengthForSubServices: (isEditMode && productConfig.usedLengthForSubServices !== undefined) ? productConfig.usedLengthForSubServices : 0,
-      usedSquareMetersForSubServices: (isEditMode && productConfig.usedSquareMetersForSubServices !== undefined) ? productConfig.usedSquareMetersForSubServices : 0,
+      operationPolicyInput,
+      appliedSubServices: operationSnapshots.appliedSubServices,
+      totalSubServiceCost: operationSnapshots.toolsCost,
+      usedLengthForSubServices: productConfig.usedLengthForSubServices ?? 0,
+      usedSquareMetersForSubServices: productConfig.usedSquareMetersForSubServices ?? 0,
+      finishings: operationSnapshots.finishings,
       meta: {
         ...(editingRemainingStoneChild && previousLongitudinalProduct?.meta?.remainingSource
           ? { remainingSource: previousLongitudinalProduct.meta.remainingSource }
@@ -5247,7 +5131,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           : undefined
       } as any
     };
-    
+
     if (smartCutPlan.derivedQuantity) {
       const recalculatedAddOns = recalculateRemainingChildAddOns(finalProduct);
       if (!recalculatedAddOns.ok) {
@@ -5259,13 +5143,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
     // Add operation costs after optimizer-owned geometry has recalculated its add-ons.
     const existingSubServiceCost = Number(finalProduct.totalSubServiceCost || 0);
-    const resolvedFinishingCost = Number(finalProduct.finishingCost || 0);
+    const resolvedFinishingCost =
+      operationSnapshots.finishingsCost + Number(finalProduct.finishingCost || 0);
     finalProduct.totalPrice =
       (editingRemainingStoneChild ? 0 : longitudinalMaterialPricing.totalPrice) +
       billableCuttingCost +
       existingSubServiceCost +
       resolvedFinishingCost;
-    
+
     // Add to contract or update existing product
     if (isEditMode && editingProductIndex !== null) {
       const updatedProducts = ensureContractProductRowIds(wizardData.products);
@@ -5308,14 +5193,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         selectedProductTypeForAddition: productType
       });
     }
-    
-    console.log('✅ Successfully added main product to contract!', {
-      finalProduct: finalProduct,
-      isEditMode: isEditMode,
-      editingProductIndex: editingProductIndex,
-      totalProducts: isEditMode ? wizardData.products.length : wizardData.products.length + 1
-    });
-    
+
+
     // Close modal and reset state
     setShowProductModal(false);
     setSelectedProduct(null);
@@ -5562,12 +5441,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setErrors({});
   };
 
-  const shouldShowLegacyStairModal =
-    showProductModal &&
-    !useStairFlowV2 &&
-    ((productConfig.productType || wizardData.selectedProductTypeForAddition) === 'stair') &&
-    (selectedProduct || (productConfig.productType === 'stair' && stairSystemConfig));
-
   const renderStepContent = () => {
     switch (currentStep) {
       case 1:
@@ -5579,7 +5452,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             currentUser={currentUser || undefined}
           />
         );
-        
+
       case 2:
         return (
           <Step2CustomerSelection
@@ -5594,7 +5467,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             isOwnerScopedUser={currentUser?.role !== 'ADMIN'}
           />
         );
-        
+
       case 3:
         return (
           <Step3ProjectManagement
@@ -5846,7 +5719,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           />
         );
       }
-        
+
       default:
         return null;
     }
@@ -5870,9 +5743,22 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     userDepartment: userDepartment || undefined,
     departments,
     mode,
-    contractId
+    contractId,
+    editSession: recoveryScope && editRecovery.leaseToken ? {
+      draftId: recoveryScope.draftId,
+      browserSessionId: editRecovery.browserSessionId,
+      leaseToken: editRecovery.leaseToken,
+      baseRevision: recoveryScope.baseRevision
+    } : null,
+    onCommitted: editRecovery.release
   });
   const handleWizardSubmit = () => {
+    if (!editRecovery.ready || !editRecovery.leaseToken || editRecovery.blocked) {
+      setErrors({ general: editRecovery.blocked
+        ? 'این قرارداد در محل دیگری در حال ویرایش است'
+        : 'اتصال ایمن ویرایش هنوز آماده نیست' });
+      return;
+    }
     if (isContractCreationComplete) {
       router.push('/dashboard/sales/contracts');
       return;
@@ -5880,7 +5766,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
     contractSubmission.handleCreateContract();
   };
-  
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 py-4 sm:py-8 relative z-0">
       <div className="max-w-7xl mx-auto px-3 sm:px-4 relative z-0">
@@ -5894,50 +5780,24 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           </p>
         </div>
 
-        {draftRestoredNotice && (
-          <div className="mb-4 rounded-xl border border-teal-400/40 bg-teal-50 px-4 py-3 text-sm text-teal-900 shadow-sm dark:bg-teal-900/20 dark:text-teal-100">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>پیش‌نویس ذخیره‌شده بازیابی شد.</span>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setDraftRestoredNotice(false)}
-                  className="rounded-lg border border-teal-500/50 px-3 py-2 font-semibold transition hover:bg-teal-100 dark:hover:bg-teal-900/40"
-                >
-                  ادامه
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
-                    localStorage.removeItem('contractWizardState');
-                    setDraftRestoredNotice(false);
-                    setCurrentStep(1);
-                    setWizardData({
-                      contractKind,
-                      contractDate: getCurrentPersianDate(),
-                      contractNumber: '',
-                      creatorSequenceNumber: null,
-                      customerId: '',
-                      customer: null,
-                      projectId: '',
-                      project: null,
-                      selectedProductTypeForAddition: null,
-                      products: [],
-                      serviceRows: [],
-                      deliveries: [],
-                      payment: { payments: [], currency: 'تومان', totalContractAmount: 0 },
-                      signature: null
-                    });
-                  }}
-                  className="rounded-lg bg-slate-800 px-3 py-2 font-semibold text-white transition hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
-                >
-                  شروع مجدد
-                </button>
-              </div>
-            </div>
+        {editRecovery.blocked && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-y border-amber-300 py-3 text-sm text-amber-900 dark:border-amber-800 dark:text-amber-100">
+            <span>این قرارداد در محل دیگری در حال ویرایش است</span>
+            <button
+              type="button"
+              onClick={() => void handleEditRecoveryTakeover()}
+              className="font-semibold text-teal-700 dark:text-teal-300"
+            >
+              ادامه ویرایش در اینجا
+            </button>
           </div>
         )}
+
+        <div
+          aria-disabled={editRecovery.blocked}
+          {...(editRecovery.blocked ? ({ inert: '' } as any) : {})}
+          className={editRecovery.blocked ? 'pointer-events-none select-none opacity-70' : ''}
+        >
 
         {/* Progress Bar */}
         <WizardProgressBar
@@ -5962,7 +5822,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           onPrevious={goToPreviousStep}
           onNext={goToNextStep}
           onSubmit={handleWizardSubmit}
-          loading={loading || wizardLoading || contractSubmission.isSubmitting}
+          loading={loading || wizardLoading || contractSubmission.isSubmitting || !editRecovery.ready}
           canGoNext={true}
           canGoPrevious={visibleCurrentStep > 1}
           showSubmitOnEveryStep={isContractEditMode}
@@ -5984,21 +5844,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         )}
 
         {/* Product Configuration Modal */}
-        {showProductModal && useStairFlowV2 && productConfig.productType === 'stair' && (
+        {!editRecoveryBlocked && showProductModal && productConfig.productType === 'stair' && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4">
-            <div className="bg-white dark:bg-gray-800 rounded-xl max-w-4xl w-full max-h-[90vh] flex flex-col z-[10000]">
-              <div className="p-6 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 flex items-center justify-between flex-shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-1 h-8 bg-gradient-to-b from-purple-500 to-purple-600 rounded-full"></div>
-                  <h3 className="text-xl font-bold text-purple-900 dark:text-purple-200">{isEditMode ? 'ویرایش محصول' : 'افزودن محصول'}</h3>
-                  {isEditMode && (
-                    <span className="px-2.5 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-xs font-semibold">
-                      حالت ویرایش
-                    </span>
-                  )}
-                </div>
-                <button 
-                  className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg p-2 transition-colors" 
+            <div className="stair-v2-modal bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100 rounded-xl max-w-4xl w-full max-h-[90vh] flex flex-col z-[10000]">
+              <div className="stair-v2-header flex flex-shrink-0 items-center justify-between border-b border-gray-200 bg-white/95 p-4 backdrop-blur-md dark:border-gray-700 dark:bg-slate-900/95">
+                <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                  تنظیمات محصول
+                </h3>
+                <button
+                  className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg p-2 transition-colors"
                   onClick={() => setShowProductModal(false)}
                   title="بستن"
                 >
@@ -6007,116 +5861,70 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               </div>
 
               {/* Type Switcher (stair V2 modal) */}
-              <div className="px-6 py-3 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-900/40 dark:to-slate-800/40 flex-shrink-0">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">نوع محصول:</span>
-                  <div className="flex flex-wrap gap-2">
-                    {(['longitudinal', 'stair', 'slab'] as const).map((type) => {
-                      const typeLabel = PRODUCT_TYPES.find((item) => item.id === type)?.name ?? type;
-                      const isSelected = productConfig.productType === type;
-                      return (
-                        <button
-                          key={type}
-                          type="button"
-                          disabled={isEditMode}
-                          onClick={() => handleV2ModalProductTypeChange(type)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                            isSelected
-                              ? 'bg-gradient-to-r from-teal-500 to-teal-600 border-teal-400 text-white shadow-sm'
-                              : 'bg-slate-900/60 border-slate-500/70 text-slate-200 hover:border-teal-400 hover:text-teal-200'
-                          } ${isEditMode ? 'opacity-60 cursor-not-allowed' : ''}`}
-                        >
-                          {typeLabel}
-                        </button>
-                      );
-                    })}
+              <div className="stair-v2-type-selector flex-shrink-0 border-b border-gray-200 bg-white/95 px-4 py-2 backdrop-blur-md dark:border-gray-700 dark:bg-slate-900/95">
+                {isEditMode ? (
+                  <div className="flex min-h-8 items-center justify-between text-xs">
+                    <span className="font-semibold text-slate-600 dark:text-slate-300">نوع محصول</span>
+                    <span className="text-slate-900 dark:text-slate-100">پله</span>
                   </div>
-                  {isEditMode && (
-                    <span className="text-xs text-slate-500 dark:text-slate-400">در حالت ویرایش قابل تغییر نیست</span>
-                  )}
-                </div>
+                ) : (
+                  <CompactSegmentedControl
+                    label="نوع محصول"
+                    value={productConfig.productType || 'stair'}
+                    options={[
+                      { value: 'longitudinal', label: 'طولی' },
+                      { value: 'stair', label: 'پله' },
+                      { value: 'slab', label: 'اسلب' },
+                      { value: 'prepared', label: 'آماده' }
+                    ]}
+                    onChange={type =>
+                      handleV2ModalProductTypeChange(type as ContractUsageType)}
+                  />
+                )}
               </div>
-              
-              {/* Step Indicators */}
-              {(() => {
-                const [currentDraft] = getActiveDraft();
-                const hasStone = !!currentDraft.stoneId;
-                const hasThickness = !!currentDraft.thicknessCm;
-                const hasLength = hasLengthMeasurement(currentDraft);
-                const hasWidth = !!currentDraft.widthCm;
-                const hasQuantity = !!currentDraft.quantity;
-                const hasSqm = !!currentDraft.squareMeters;
-                const hasPrice = !!currentDraft.pricePerSquareMeter;
-                const hasTools = (currentDraft.tools || []).length > 0;
-                const hasTotal = !!currentDraft.totalPrice;
-                
-                return (
-                  <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-900/50 dark:to-gray-800/50 flex-shrink-0">
-                    <div className="flex items-center gap-2 overflow-x-auto">
-                      <div className="flex items-center gap-1.5 text-xs whitespace-nowrap">
-                        <span className={`px-3 py-1.5 rounded-lg font-medium transition-all ${true ? 'bg-gradient-to-r from-teal-500 to-teal-600 text-white shadow-md' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>0. نوع</span>
-                        <span className="text-gray-400 dark:text-gray-500">→</span>
-                        <span className={`px-3 py-1.5 rounded-lg font-medium transition-all ${hasStone ? 'bg-gradient-to-r from-teal-500 to-teal-600 text-white shadow-md' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>1. انتخاب سنگ</span>
-                        <span className="text-gray-400 dark:text-gray-500">→</span>
-                        <span className={`px-3 py-1.5 rounded-lg font-medium transition-all ${hasThickness ? 'bg-gradient-to-r from-teal-500 to-teal-600 text-white shadow-md' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>2. ضخامت</span>
-                        <span className="text-gray-400 dark:text-gray-500">→</span>
-                        <span className={`px-3 py-1.5 rounded-lg font-medium transition-all ${hasLength ? 'bg-gradient-to-r from-teal-500 to-teal-600 text-white shadow-md' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>3. طول</span>
-                        <span className="text-gray-400 dark:text-gray-500">→</span>
-                        <span className={`px-3 py-1.5 rounded-lg font-medium transition-all ${hasWidth ? 'bg-gradient-to-r from-teal-500 to-teal-600 text-white shadow-md' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>4. عرض</span>
-                        <span className="text-gray-400 dark:text-gray-500">→</span>
-                        <span className={`px-3 py-1.5 rounded-lg font-medium transition-all ${hasQuantity ? 'bg-gradient-to-r from-teal-500 to-teal-600 text-white shadow-md' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>5. تعداد</span>
-                        <span className="text-gray-400 dark:text-gray-500">→</span>
-                        <span className={`px-3 py-1.5 rounded-lg font-medium transition-all ${hasSqm ? 'bg-gradient-to-r from-teal-500 to-teal-600 text-white shadow-md' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>6. متر مربع</span>
-                        <span className="text-gray-400 dark:text-gray-500">→</span>
-                        <span className={`px-3 py-1.5 rounded-lg font-medium transition-all ${hasPrice ? 'bg-gradient-to-r from-teal-500 to-teal-600 text-white shadow-md' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>7. قیمت</span>
-                        <span className="text-gray-400 dark:text-gray-500">→</span>
-                            <span className={`px-3 py-1.5 rounded-lg font-medium transition-all ${hasTools ? 'bg-gradient-to-r from-teal-500 to-teal-600 text-white shadow-md' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>8. ابزار</span>
-                            <span className="text-gray-400 dark:text-gray-500">→</span>
-                        {stairSystemV2.stairActivePart !== 'riser' && (
-                          <>
-                            <span className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                              (currentDraft.numberOfLayersPerStair &&
-                                currentDraft.numberOfLayersPerStair > 0 &&
-                                currentDraft.layerWidthCm &&
-                                currentDraft.pricePerSquareMeter &&
-                                (stairSystemV2.layerTypes.length === 0 || currentDraft.layerTypeId))
-                                ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-md'
-                                : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-                            }`}>9. لایه‌ها</span>
-                            <span className="text-gray-400 dark:text-gray-500">→</span>
-                          </>
-                        )}
-                        <span className={`px-3 py-1.5 rounded-lg font-medium transition-all ${hasTotal ? 'bg-gradient-to-r from-teal-500 to-teal-600 text-white shadow-md' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>{stairSystemV2.stairActivePart !== 'riser' ? '10. جمع کل' : '9. جمع کل'}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-              
-              <div className="flex-1 overflow-y-auto">
+
+              <div className="stair-v2-body flex-1 overflow-y-auto bg-white dark:bg-slate-900">
                 <div className="p-6 space-y-6">
-                  {/* Part Selector - Enhanced */}
-                  <div className="bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 rounded-lg border border-purple-200 dark:border-purple-700 p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-1 h-6 bg-gradient-to-b from-purple-500 to-purple-600 rounded-full"></div>
-                      <label htmlFor="stair-part-select" className="text-sm font-semibold text-purple-900 dark:text-purple-200">بخش:</label>
-                      <select
-                        id="stair-part-select"
-                        className="flex-1 rounded-lg bg-white dark:bg-gray-800 px-4 py-2 border border-purple-300 dark:border-purple-600 text-gray-800 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
-                        value={stairSystemV2.stairActivePart}
-                        onChange={(e) => setActivePart(e.target.value as StairStepperPart)}
-                        aria-label="انتخاب بخش پله"
-                      >
-                        <option value="tread">کف پله</option>
-                        <option value="riser">خیز</option>
-                        <option value="landing">پاگرد</option>
-                      </select>
-                    </div>
+                  {!isEditMode && (
+                    <StairQuantityModeSection
+                      state={stairQuantityDraft}
+                      onChange={updateStairQuantityDraft}
+                    />
+                  )}
+                  <div className="border-b border-slate-200 py-3 dark:border-slate-700">
+                    <CompactSegmentedControl
+                      label="انتخاب بخش پله"
+                      value={stairSystemV2.stairActivePart}
+                      options={[
+                        { value: 'tread', label: 'کف پله' },
+                        { value: 'riser', label: 'خیز' },
+                        { value: 'landing', label: 'پاگرد' }
+                      ]}
+                      onChange={(part) => setActivePart(part as StairStepperPart)}
+                    />
                   </div>
                 {(() => {
                   const [draft, setDraft] = getActiveDraft();
                   const totals = computeTotalsV2(stairSystemV2.stairActivePart, draft);
-                  const chargeableCuttingCost = totals.billableCuttingCost;
+                  const canonicalStairPreview = totals.canonicalCalculation.ok
+                    ? totals.canonicalCalculation.result
+                    : null;
+                   const stairOperationPreview = draft.operationPolicyInput &&
+                     draft.stoneProduct &&
+                     getActualLengthMeters(draft) > 0 &&
+                     Number(draft.widthCm) > 0 &&
+                     Number(draft.quantity) > 0
+                       ? calculateProductOperations(createStairOperationInput(
+                           stairSystemV2.stairActivePart,
+                           draft,
+                           draft.stoneProduct.id
+                         ))
+                       : null;
+                   const stairOperationPreviewAmount =
+                     stairOperationPreview?.ok
+                       ? Number(stairOperationPreview.result.totalAmountToman)
+                       : 0;
+                   const chargeableCuttingCost = totals.billableCuttingCost;
                   const chargeableCuttingCostLongitudinal = totals.billableCuttingCostLongitudinal;
                   const chargeableCuttingCostCross = totals.billableCuttingCostCross;
                   const draftErrors = stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart] || {};
@@ -6176,42 +5984,102 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   const mandatoryEnabled = draft.useMandatory ?? defaultMandatoryEnabled;
                   const supportsMandatory = stairSystemV2.stairActivePart === 'tread' || stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
                   const mandatoryPercentageValue = draft.mandatoryPercentage ?? 20;
+                  const setLayerSideEnabled = (
+                    side: 'front' | 'back' | 'left' | 'right',
+                    enabled: boolean
+                  ) => {
+                    const currentOperations =
+                      draft.layerSideOperations?.[side];
+                    const hasOperations = Boolean(
+                      currentOperations &&
+                      (
+                        currentOperations.tools.length > 0 ||
+                        currentOperations.finishings.length > 0
+                      )
+                    );
+                    const isDedicated =
+                      draft.layerDetachedOperationSides?.includes(side);
+                    const nextConflicts = new Set(
+                      draft.layerRemovedSideConflicts || []
+                    );
+                    const nextOperations = {
+                      ...(draft.layerSideOperations || {})
+                    };
+                    if (!enabled && hasOperations && isDedicated) {
+                      nextConflicts.add(side);
+                    } else if (!enabled) {
+                      delete nextOperations[side];
+                      nextConflicts.delete(side);
+                    } else {
+                      nextConflicts.delete(side);
+                    }
+                    setDraft({
+                      ...draft,
+                      layerEdges: {
+                        ...(draft.layerEdges || {}),
+                        perimeter: false,
+                        [side]: enabled
+                      },
+                      layerSideOperations: nextOperations,
+                      layerRemovedSideConflicts: Array.from(nextConflicts)
+                    });
+                  };
                   return (
                     <div className="space-y-6">
-                      {/* Input Fields Section - Enhanced */}
-                      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
-                        <div className="flex items-center gap-2 mb-4">
-                          <div className="w-1 h-5 bg-gradient-to-b from-teal-500 to-teal-600 rounded-full"></div>
-                          <h5 className="text-sm font-semibold text-gray-800 dark:text-white">اطلاعات محصول</h5>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                              <span className="flex items-center gap-1">
-                                <span className="w-2 h-2 rounded-full bg-teal-500"></span>
-                                نوع سنگ
-                              </span>
-                            </label>
-                            <div className="relative">
-                              <input 
-                                className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all" 
-                                placeholder="جستجو در نوع برش، جنس سنگ، معدن، نوع پرداخت، رنگ/خصوصیات" 
-                                value={stairSystemV2.stoneSearchTerm} 
-                                onChange={(e) => stairSystemV2.setStoneSearchTerm(e.target.value)} 
-                              />
-                              {draft.stoneProduct && (
-                                <div className="mt-2 p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-lg">
-                                  <div className="text-sm font-medium text-teal-800 dark:text-teal-200">{draft.stoneLabel}</div>
-                                  {draft.stoneProduct.basePrice && (
-                                    <div className="text-xs text-teal-600 dark:text-teal-400 mt-1">
-                                      قیمت: {formatPrice(draft.stoneProduct.basePrice)}
-                                    </div>
-                                  )}
-                                </div>
+                      {!totals.canonicalCalculation.ok && (
+                        <div
+                          className="border-y border-red-200 py-2 text-xs text-red-600 dark:border-red-900 dark:text-red-300"
+                          role="status"
+                        >
+                          {totals.canonicalCalculation.conflicts.map((conflict) => (
+                            <div key={`${conflict.code}:${conflict.field}`}>
+                              {stairConflictMessage(
+                                conflict.code,
+                                draft.stoneProduct?.motherLengthValue
                               )}
                             </div>
-                            {stairSystemV2.stoneSearchTerm && (
-                              <div className="mt-2 max-h-48 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
+                          ))}
+                        </div>
+                      )}
+                      {/* Input Fields Section - Enhanced */}
+                      <div className="border-b border-gray-200 py-3 dark:border-gray-700">
+                        {draft.stoneProduct && (
+                          <div className="mb-3 border-y border-slate-100 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-300">
+                            {draft.stoneProduct.namePersian}
+                            {draft.stoneProduct.widthValue
+                              ? ` · عرض مادر ${formatDisplayNumber(draft.stoneProduct.widthValue)}cm`
+                              : ''}
+                            {draft.stoneProduct.thicknessValue
+                              ? ` · ضخامت ${formatDisplayNumber(draft.stoneProduct.thicknessValue)}cm`
+                              : ''}
+                          </div>
+                        )}
+                        <label className="mb-4 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                          عنوان محصول
+                          <input
+                            value={draft.contractualTitle || ''}
+                            onChange={(event) => setDraft({
+                              ...draft,
+                              contractualTitle: event.target.value
+                            })}
+                            className="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-transparent px-3 text-sm font-normal outline-none focus:border-teal-500 dark:border-slate-600"
+                          />
+                        </label>
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                          <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              نوع سنگ
+                            </label>
+                            <div className="relative">
+                              <input
+                                className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-gray-800 transition-all focus:border-teal-500 focus:outline-none dark:border-gray-600 dark:text-white"
+                                value={stairSystemV2.stoneSearchTerm}
+                                onChange={(e) => stairSystemV2.setStoneSearchTerm(e.target.value)}
+                              />
+                            </div>
+                            {stairSystemV2.stoneSearchTerm &&
+                              stairSystemV2.stoneSearchTerm !== draft.stoneLabel && (
+                              <div className="mt-2 max-h-48 divide-y divide-gray-100 overflow-auto border-y border-gray-200 bg-white dark:divide-gray-700 dark:border-gray-700 dark:bg-gray-800">
                                 {stairSystemV2.isSearchingStones && (
                                   <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">
                                     <span className="animate-pulse">در حال جستجو...</span>
@@ -6221,10 +6089,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">نتیجه‌ای یافت نشد</div>
                                 )}
                                 {stairSystemV2.stoneSearchResults.map((p: Product) => (
-                                  <button 
-                                    key={p.id} 
-                                    type="button" 
-                                    className="w-full text-right px-4 py-2.5 hover:bg-teal-50 dark:hover:bg-teal-900/20 text-sm border-b border-gray-100 dark:border-gray-700 last:border-0 transition-colors" 
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    className="w-full text-right px-4 py-2.5 hover:bg-teal-50 dark:hover:bg-teal-900/20 text-sm border-b border-gray-100 dark:border-gray-700 last:border-0 transition-colors"
                                     onClick={() => {
                                       selectProductForStairPart(stairSystemV2.stairActivePart, p);
                                     }}
@@ -6233,132 +6101,183 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     <div className="font-medium text-gray-800 dark:text-white">
                                       {p.fullName || generateFullProductName(p) || p.namePersian || p.name}
                                     </div>
-                                    {p.basePrice && (
-                                      <div className="text-xs text-teal-600 dark:text-teal-400 mt-0.5">{formatPrice(p.basePrice)}</div>
-                                    )}
                                   </button>
                                 ))}
                               </div>
                             )}
                           </div>
-                          
+
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                              <span className="flex items-center gap-1">
-                                <span className="w-2 h-2 rounded-full bg-teal-500"></span>
-                                قطر (سانتی‌متر)
-                              </span>
+                            <label className="mb-2 flex items-center justify-between text-sm font-medium text-gray-700 dark:text-gray-300">
+                              <span>طول</span>
+                              <CompactUnitSwitch
+                                label="واحد طول"
+                                value={draft.lengthValue === null || draft.lengthValue === undefined
+                                  ? ''
+                                  : String(draft.lengthValue)}
+                                unit={draft.lengthUnit || 'm'}
+                                onChange={(next) => setDraft({
+                                  ...draft,
+                                  lengthValue: next.value ? Number(next.value) : null,
+                                  lengthUnit: next.unit
+                                })}
+                              />
                             </label>
                             <FormattedNumberInput
-                              value={draft.stoneProduct?.thicknessValue ?? draft.thicknessCm ?? null}
-                              onChange={(_value) => {}}
-                              min={1}
-                              step={1}
-                              disabled
-                              className="w-full rounded-lg bg-gray-100 dark:bg-gray-700/60 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-600 dark:text-gray-300 cursor-not-allowed"
-                              placeholder="ابتدا محصول را انتخاب کنید"
-                            />
-                            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                              قطر به صورت خودکار از مشخصات محصول انتخاب شده تنظیم می‌شود و قابل تغییر نیست.
-                            </p>
-                          {draftErrors.thickness && (
-                            <p className="mt-1 text-xs text-red-500">{draftErrors.thickness}</p>
-                          )}
-                          </div>
-                          
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                              <span className="flex items-center gap-1">
-                                <span className="w-2 h-2 rounded-full bg-teal-500"></span>
-                                طول
-                              </span>
-                            </label>
-                            <div className="flex gap-2">
-                              <FormattedNumberInput
                                 value={draft.lengthValue ?? null}
                             onChange={(value) => {
                               const normalizedValue = value && value > 0 ? value : null;
                               const updatedDraft: StairPartDraftV2 = { ...draft, lengthValue: normalizedValue };
                               const error = validateDraftNumericFields(stairSystemV2.stairActivePart, updatedDraft, 'length', value);
-                              if (error) {
-                                stairSystemV2.setStairDraftErrors(prev => ({
-                                  ...prev,
-                                  [stairSystemV2.stairActivePart]: { ...prev[stairSystemV2.stairActivePart], length: error }
-                                }));
-                              } else {
-                                clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'length');
-                              }
+                              const motherLengthError = validateDraftNumericFields(
+                                stairSystemV2.stairActivePart,
+                                updatedDraft,
+                                'motherLength',
+                                updatedDraft.standardLengthValue ?? null
+                              );
+                              stairSystemV2.setStairDraftErrors(prev => ({
+                                ...prev,
+                                [stairSystemV2.stairActivePart]: {
+                                  ...prev[stairSystemV2.stairActivePart],
+                                  length: error || undefined,
+                                  motherLength: motherLengthError || undefined
+                                }
+                              }));
                               setDraft(updatedDraft);
                             }}
                                 min={0}
                                 step={0.01}
-                                className="flex-1 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                                placeholder="مثال: 1.2"
+                                className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
                               />
-                              <select
-                                className="rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all font-medium"
-                                value={draft.lengthUnit || 'm'}
-                                onChange={(e) => setDraft({ ...draft, lengthUnit: (e.target.value as UnitType) })}
-                                aria-label="واحد طول"
-                              >
-                                <option value="cm">cm</option>
-                                <option value="m">m</option>
-                              </select>
-                            </div>
-                            {stairSystemV2.stairActivePart !== 'riser' && (
                             <div className="mt-3">
-                              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
-                                طول استاندارد (برای قیمت‌گذاری)
-                              </label>
-                              <div className="flex gap-2">
-                                <FormattedNumberInput
-                                  value={draft.standardLengthValue ?? null}
-                                  onChange={(value) => {
-                                    const normalized = value && value > 0 ? value : null;
-                                    const updatedDraft: StairPartDraftV2 = { ...draft, standardLengthValue: normalized };
-                                    if (normalized && normalized > 0) {
-                                      clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'length');
-                                    }
+                              <label className="mb-2 flex items-center justify-between text-sm font-medium text-gray-700 dark:text-gray-300">
+                                <span>طول مادر</span>
+                                <CompactUnitSwitch
+                                  label="واحد طول مادر"
+                                  value={
+                                    draft.standardLengthValue === null ||
+                                    draft.standardLengthValue === undefined
+                                      ? ''
+                                      : String(draft.standardLengthValue)
+                                  }
+                                  unit={
+                                    draft.standardLengthUnit ||
+                                    draft.lengthUnit ||
+                                    'm'
+                                  }
+                                  onChange={next => {
+                                    const updatedDraft: StairPartDraftV2 = {
+                                      ...draft,
+                                      standardLengthValue: next.value
+                                        ? Number(next.value)
+                                        : null,
+                                      standardLengthUnit: next.unit
+                                    };
+                                    const error = validateDraftNumericFields(
+                                      stairSystemV2.stairActivePart,
+                                      updatedDraft,
+                                      'motherLength',
+                                      updatedDraft.standardLengthValue ?? null
+                                    );
+                                    stairSystemV2.setStairDraftErrors(previous => ({
+                                      ...previous,
+                                      [stairSystemV2.stairActivePart]: {
+                                        ...previous[stairSystemV2.stairActivePart],
+                                        motherLength: error || undefined
+                                      }
+                                    }));
                                     setDraft(updatedDraft);
                                   }}
-                                  min={0}
-                                  step={0.01}
-                                  className="flex-1 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                                  placeholder="مثال: 1.2"
                                 />
-                                <select
-                                  className="rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all font-medium"
-                                  value={draft.standardLengthUnit || draft.lengthUnit || 'm'}
-                                  onChange={(e) => setDraft({ ...draft, standardLengthUnit: (e.target.value as UnitType) })}
-                                  aria-label="واحد طول استاندارد"
-                                >
-                                  <option value="m">m</option>
-                                  <option value="cm">cm</option>
-                                </select>
-                              </div>
-                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                اگر طول واقعی وارد نشود، از همین طول استاندارد برای محاسبه قیمت استفاده می‌شود.
-                              </p>
+                              </label>
+                              <FormattedNumberInput
+                                value={draft.standardLengthValue ?? null}
+                                onChange={value => {
+                                  const normalized =
+                                    value && value > 0 ? value : null;
+                                  const updatedDraft: StairPartDraftV2 = {
+                                    ...draft,
+                                    standardLengthValue: normalized
+                                  };
+                                  const error = validateDraftNumericFields(
+                                    stairSystemV2.stairActivePart,
+                                    updatedDraft,
+                                    'motherLength',
+                                    normalized
+                                  );
+                                  stairSystemV2.setStairDraftErrors(previous => ({
+                                    ...previous,
+                                    [stairSystemV2.stairActivePart]: {
+                                      ...previous[stairSystemV2.stairActivePart],
+                                      motherLength: error || undefined
+                                    }
+                                  }));
+                                  setDraft(updatedDraft);
+                                }}
+                                min={0}
+                                step={0.01}
+                                className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-2.5 text-gray-800 transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-700/50 dark:text-white"
+                              />
+                              {draftErrors.motherLength && (
+                                <p className="mt-1 text-xs text-red-500">
+                                  {draftErrors.motherLength}
+                                </p>
+                              )}
                             </div>
-                            )}
                           {draftErrors.length && (
                             <p className="mt-1 text-xs text-red-500">{draftErrors.length}</p>
                           )}
                           </div>
-                          
+
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                              <span className="flex items-center gap-1">
-                                <span className="w-2 h-2 rounded-full bg-teal-500"></span>
-                                عرض (سانتی‌متر)
+                            <label className="mb-2 flex items-center justify-between text-sm font-medium text-gray-700 dark:text-gray-300">
+                              <span>
+                                {stairSystemV2.stairActivePart === 'tread'
+                                  ? 'عمق'
+                                  : stairSystemV2.stairActivePart === 'riser'
+                                    ? 'ارتفاع'
+                                    : 'عرض'}
                               </span>
+                              <CompactUnitSwitch
+                                label={
+                                  stairSystemV2.stairActivePart === 'tread'
+                                    ? 'واحد عمق'
+                                    : stairSystemV2.stairActivePart === 'riser'
+                                      ? 'واحد ارتفاع'
+                                      : 'واحد عرض'
+                                }
+                                value={draft.widthCm === null || draft.widthCm === undefined
+                                  ? ''
+                                  : String((draft.widthUnit || 'cm') === 'm'
+                                    ? draft.widthCm / 100
+                                    : draft.widthCm)}
+                                unit={draft.widthUnit || 'cm'}
+                                onChange={(next) => setDraft({
+                                  ...draft,
+                                  widthUnit: next.unit
+                                })}
+                              />
                             </label>
                             <FormattedNumberInput
-                              value={draft.widthCm ?? null}
+                              value={draft.widthCm === null || draft.widthCm === undefined
+                                ? null
+                                : (draft.widthUnit || 'cm') === 'm'
+                                  ? draft.widthCm / 100
+                                  : draft.widthCm}
                             onChange={(value) => {
-                              const updatedDraft = { ...draft, widthCm: value && value > 0 ? value : null };
+                              const canonicalWidthCm = value && value > 0
+                                ? (draft.widthUnit || 'cm') === 'm'
+                                  ? value * 100
+                                  : value
+                                : null;
+                              const updatedDraft = { ...draft, widthCm: canonicalWidthCm };
                               // 🎯 Validate using comprehensive validation function
-                              const error = validateDraftNumericFields(stairSystemV2.stairActivePart, updatedDraft, 'width', value);
+                              const error = validateDraftNumericFields(
+                                stairSystemV2.stairActivePart,
+                                updatedDraft,
+                                'width',
+                                canonicalWidthCm
+                              );
                               if (error) {
                                 stairSystemV2.setStairDraftErrors(prev => ({
                                   ...prev,
@@ -6372,23 +6291,28 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               min={0}
                               step={0.1}
                               className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                              placeholder="مثال: 40"
                             />
                           {draftErrors.width && (
                             <p className="mt-1 text-xs text-red-500">{draftErrors.width}</p>
                           )}
                           </div>
-                          
+
                           <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                              <span className="flex items-center gap-1">
-                                <span className="w-2 h-2 rounded-full bg-teal-500"></span>
-                                تعداد
-                              </span>
+                              تعداد
                             </label>
                             <FormattedNumberInput
                               value={draft.quantity ?? null}
                             onChange={(value) => {
+                              if (
+                                stairSystemV2.stairActivePart === 'tread' ||
+                                stairSystemV2.stairActivePart === 'riser'
+                              ) {
+                                setStairQuantityManuallyEdited(current => ({
+                                  ...current,
+                                  [stairSystemV2.stairActivePart]: true
+                                }));
+                              }
                               // 🎯 Ensure integer value for quantity
                               const intValue = value ? Math.floor(value) : null;
                               const updatedDraft = { ...draft, quantity: intValue && intValue > 0 ? intValue : null };
@@ -6407,7 +6331,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               min={1}
                               step={1}
                               className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                              placeholder="مثال: 100"
                             />
                           {draftErrors.quantity && (
                             <p className="mt-1 text-xs text-red-500">{draftErrors.quantity}</p>
@@ -6415,7 +6338,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           </div>
                           {draft.stoneProduct && totals.piecesPerStone > 0 && totals.baseStoneQuantity > 0 && (
                             <div className="md:col-span-2">
-                              <div className="mt-2 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-4 py-3 text-xs leading-5 text-teal-700 dark:text-teal-200">
+                              <div className="mt-2 border-y border-slate-100 py-2 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:text-slate-300">
                                 <div>
                                   ظرفیت برش هر سنگ: تا {formatDisplayNumber(totals.piecesPerStone)} قطعه با عرض {formatDisplayNumber(draft.widthCm ?? 0)} سانتی‌متر.
                                 </div>
@@ -6428,29 +6351,59 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               </div>
                             </div>
                           )}
-                          
-                          <div>
-                            <label htmlFor="sqm-auto-calc" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                              <span className="flex items-center gap-1">
-                                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                                متر مربع (خودکار)
+
+                          <div className="md:col-span-2 divide-y divide-slate-100 border-y border-slate-100 text-sm dark:divide-slate-700 dark:border-slate-700">
+                            <div className="flex min-h-10 items-center justify-between">
+                              <span className="text-slate-500 dark:text-slate-400">
+                                محصول نهایی
                               </span>
-                            </label>
-                            <input
-                              id="sqm-auto-calc"
-                              className="w-full rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 px-4 py-2.5 text-blue-700 dark:text-blue-300 font-semibold cursor-not-allowed"
-                              value={formatDisplayNumber(totals.sqm)}
-                              readOnly
-                              aria-label="متر مربع محاسبه شده خودکار"
-                            />
+                              <strong>
+                                {formatDisplayNumber(
+                                  canonicalStairPreview
+                                    ? Number(canonicalStairPreview.requestedAreaSquareMeters)
+                                    : totals.sqm
+                                )}m²
+                              </strong>
+                            </div>
+                            <div className="flex min-h-10 items-center justify-between">
+                              <span className="text-slate-500 dark:text-slate-400">
+                                سنگ مادر مصرفی
+                              </span>
+                              <strong>
+                                {canonicalStairPreview
+                                  ? `${formatDisplayNumber(Number(canonicalStairPreview.consumedMotherAreaSquareMeters))}m²`
+                                  : '—'}
+                              </strong>
+                            </div>
+                            <div className="flex min-h-10 items-center justify-between">
+                              <span className="text-slate-500 dark:text-slate-400">
+                                باقی‌مانده پرداخت‌شده
+                              </span>
+                              <strong>
+                                {canonicalStairPreview
+                                  ? `${formatDisplayNumber(Number(canonicalStairPreview.paidRemainderAreaSquareMeters))}m²`
+                                  : '—'}
+                              </strong>
+                            </div>
+                            <div className="flex min-h-10 items-center justify-between">
+                              <span className="text-slate-500 dark:text-slate-400">
+                                مبلغ ماده
+                              </span>
+                              <strong>
+                                {canonicalStairPreview
+                                  ? formatPrice(Number(canonicalStairPreview.baseAmountToman))
+                                  : '—'}
+                              </strong>
+                            </div>
                           </div>
-                          
+
                           <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                              <span className="flex items-center gap-1">
-                                <span className="w-2 h-2 rounded-full bg-teal-500"></span>
-                                قیمت هر متر مربع
-                              </span>
+                              {stairSystemV2.stairActivePart === 'tread'
+                                ? 'فی کف پله'
+                                : stairSystemV2.stairActivePart === 'riser'
+                                  ? 'فی خیز'
+                                  : 'فی پاگرد'}
                             </label>
                             <FormattedNumberInput
                               value={draft.pricePerSquareMeter ?? null}
@@ -6471,23 +6424,18 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               min={0}
                               step={1000}
                               className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                              placeholder="مثال: 1,500,000"
                             />
                           {draftErrors.pricePerSquareMeter && (
                             <p className="mt-1 text-xs text-red-500">{draftErrors.pricePerSquareMeter}</p>
                           )}
                           </div>
                           {supportsMandatory && (
-                            <div className="md:col-span-2 rounded-lg border border-yellow-100 dark:border-yellow-800 bg-white dark:bg-gray-900/30 p-4">
+                            <div className="md:col-span-2 border-y border-slate-100 py-2 dark:border-slate-700">
                               <div className="flex items-center gap-2">
-                                <input
-                                  id="mandatory-pricing-checkbox"
-                                  type="checkbox"
-                                  className="rounded border-gray-300 text-yellow-600 focus:ring-yellow-500"
+                                <CompactSwitch
+                                  label="حکمی"
                                   checked={mandatoryEnabled}
-                                  aria-label="فعال‌سازی قیمت‌گذاری حکمی"
-                                  onChange={(e) => {
-                                    const nextValue = e.target.checked;
+                                  onChange={(nextValue) => {
                                     const updatedDraft = {
                                       ...draft,
                                       useMandatory: nextValue,
@@ -6499,14 +6447,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     setDraft(updatedDraft);
                                   }}
                                 />
-                                <div>
-                                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                    حکمی (افزایش قیمت)
-                                  </label>
-                                  <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                    در صورت فعال بودن، قیمت سنگ این بخش به صورت درصدی افزایش داده می‌شود.
-                                  </p>
-                                </div>
+                                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                  حکمی
+                                </span>
                               </div>
                               {mandatoryEnabled && (
                                 <div className="mt-3 flex items-center gap-2">
@@ -6531,9 +6474,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     className="w-24 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent text-sm"
                                   />
                                   <span className="text-xs text-gray-600 dark:text-gray-300">%</span>
-                                  <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                    قیمت پایه با {formatDisplayNumber(mandatoryPercentageValue)}% افزایش محاسبه می‌شود.
-                                  </p>
                                 </div>
                               )}
                               {draftErrors.mandatoryPercentage && (
@@ -6545,7 +6485,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           )}
                           {totals.billableCuttingCost > 0 && (
                             <div className="md:col-span-2">
-                              <div className="mt-2 rounded-lg border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-xs leading-5 text-amber-700 dark:text-amber-200">
+                              <div className="mt-2 border-y border-slate-100 py-2 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:text-slate-300">
                                 {totals.billableCuttingCostLongitudinal > 0 && (
                                   <div>
                                     هزینه برش طولی: {formatPrice(totals.billableCuttingCostLongitudinal)} ({formatDisplayNumber(totals.cuttingMetersLongitudinal || (lengthMInfo * totals.baseStoneQuantity))} m × {formatPrice(totals.shouldChargeCuttingCost ? (totals.cuttingCostPerMeterLongitudinal || totals.cuttingCostPerMeter) : 0)})
@@ -6567,21 +6507,75 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         </div>
                       </div>
 
-                      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <div className="border-b border-gray-200 py-3 dark:border-gray-700">
+                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
                           توضیحات
-                        </label>
-                        <textarea
+                        <AutoGrowingDescription
                           value={draft.description || ''}
                           onChange={(event) => setDraft({ ...draft, description: event.target.value })}
-                          rows={3}
-                          className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                          placeholder="توضیحات این بخش از سنگ پله..."
+                          className="mt-1"
                         />
+                        </label>
                       </div>
 
+                      {draft.stoneProduct &&
+                        getActualLengthMeters(draft) > 0 &&
+                        Number(draft.widthCm) > 0 &&
+                        Number(draft.quantity) > 0 && (
+                          <div id="stair-operations-section">
+                            <OperationCollectionsSection
+                              input={createStairOperationInput(
+                                stairSystemV2.stairActivePart,
+                                draft,
+                                draft.stoneProduct.id
+                              )}
+                              onChange={(operationPolicyInput) =>
+                                setDraft({ ...draft, operationPolicyInput })}
+                              loadTools={async () => subServices.map(tool => ({
+                                catalogItemId: tool.id,
+                                catalogSnapshotVersion: String(
+                                  (tool as SubService & { updatedAt?: string }).updatedAt ||
+                                  'current'
+                                ),
+                                name: tool.namePersian || tool.name || tool.code,
+                                unit: tool.calculationBase === 'squareMeters'
+                                  ? 'squareMeter' as const
+                                  : 'meter' as const,
+                                rateToman: tool.pricePerMeter === null ||
+                                  tool.pricePerMeter === undefined
+                                  ? null
+                                  : String(tool.pricePerMeter)
+                              }))}
+                              loadFinishings={async () => stoneFinishings.map(finishing => ({
+                                catalogItemId: finishing.id,
+                                catalogSnapshotVersion: String(
+                                  (finishing as StoneFinishing & { updatedAt?: string }).updatedAt ||
+                                  'current'
+                                ),
+                                name: finishing.namePersian || finishing.name || finishing.code || 'پرداخت',
+                                unit: finishing.calculationBase === 'length'
+                                  ? 'meter' as const
+                                  : 'squareMeter' as const,
+                                rateToman: (() => {
+                                  const rate = finishing.calculationBase === 'length'
+                                    ? finishing.unitPrice
+                                    : finishing.pricePerSquareMeter ?? finishing.unitPrice;
+                                  return rate === null || rate === undefined
+                                    ? null
+                                    : String(rate);
+                                })(),
+                                incompatibleCatalogItemIds:
+                                  finishing.incompatibleWithIds || []
+                              }))}
+                              toolCacheKey="stair-product-tools"
+                              finishingCacheKey="stair-product-finishings"
+                            />
+                          </div>
+                        )}
+
                       {/* Tools Section - Enhanced */}
-                      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
+                      {false && (
+                      <div id="stair-tools-section" className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
                         <div className="flex items-center justify-between mb-4">
                           <div className="flex items-center gap-2">
                             <div className="w-1 h-5 bg-gradient-to-b from-purple-500 to-purple-600 rounded-full"></div>
@@ -6594,13 +6588,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">افزودن ابزار</label>
-                            <input 
-                              className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all" 
-                              placeholder="جستجو در ابزارها" 
-                              value={stairSystemV2.toolsSearchTerm} 
-                              onChange={(e) => stairSystemV2.setToolsSearchTerm(e.target.value)} 
-                              onFocus={() => stairSystemV2.setToolsDropdownOpen(true)} 
-                              onBlur={() => setTimeout(() => stairSystemV2.setToolsDropdownOpen(false), 150)} 
+                            <input
+                              className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
+                              value={stairSystemV2.toolsSearchTerm}
+                              onChange={(e) => stairSystemV2.setToolsSearchTerm(e.target.value)}
+                              onFocus={() => stairSystemV2.setToolsDropdownOpen(true)}
+                              onBlur={() => setTimeout(() => stairSystemV2.setToolsDropdownOpen(false), 150)}
                             />
                             {(stairSystemV2.toolsDropdownOpen || stairSystemV2.toolsSearchTerm) && (
                               <div className="mt-2 max-h-48 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
@@ -6613,14 +6606,32 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">نتیجه‌ای یافت نشد</div>
                                 )}
                                 {stairSystemV2.toolsResults.map((t: any) => (
-                                  <button 
-                                    key={t.id} 
-                                    type="button" 
-                                    className="w-full text-right px-4 py-2.5 hover:bg-purple-50 dark:hover:bg-purple-900/20 text-sm border-b border-gray-100 dark:border-gray-700 last:border-0 transition-colors" 
+                                  <button
+                                    key={t.id}
+                                    type="button"
+                                    className="w-full text-right px-4 py-2.5 hover:bg-purple-50 dark:hover:bg-purple-900/20 text-sm border-b border-gray-100 dark:border-gray-700 last:border-0 transition-colors"
                                     onClick={() => {
-                                      const exists = (draft.tools || []).some(x => x.toolId === t.id);
-                                      if (exists) return;
-                                      setDraft({ ...draft, tools: [ ...(draft.tools || []), { toolId: t.id, name: t.namePersian || t.name, pricePerMeter: t.pricePerMeter || t.price || t.costPerMeter || 0, front: false, left: false, right: false, back: false, perimeter: false } ] });
+                                      setDraft({
+                                        ...draft,
+                                        tools: [
+                                          ...(draft.tools || []),
+                                          {
+                                            selectionId: crypto.randomUUID(),
+                                            toolId: t.id,
+                                            name: t.namePersian || t.name,
+                                            pricePerMeter: t.pricePerMeter || t.price || t.costPerMeter || 0,
+                                            calculationBase: t.calculationBase === 'squareMeters'
+                                              ? 'squareMeters'
+                                              : 'length',
+                                            coveredQuantity: draft.quantity || null,
+                                            front: false,
+                                            left: false,
+                                            right: false,
+                                            back: false,
+                                            perimeter: false
+                                          }
+                                        ]
+                                      });
                                       stairSystemV2.setToolsSearchTerm('');
                                       stairSystemV2.setToolsDropdownOpen(false);
                                     }}
@@ -6649,17 +6660,17 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   const meters = computeToolMetersForTool(stairSystemV2.stairActivePart, draft, tool);
                                   const tp = meters * (tool.pricePerMeter || 0);
                                   return (
-                                    <div key={tool.toolId} className="p-3 rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20 shadow-sm">
+                                    <div key={tool.selectionId || `${tool.toolId}:${idx}`} className="p-3 rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20 shadow-sm">
                                       <div className="flex items-center justify-between mb-3">
                                         <div className="font-medium text-purple-800 dark:text-purple-200 text-sm">{tool.name}</div>
                                         <div className="flex items-center gap-2 text-xs">
                                           <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded font-medium">
-                                            {formatDisplayNumber(meters)} m
+                                            {formatDisplayNumber(meters)} {tool.calculationBase === 'squareMeters' ? 'm²' : 'm'}
                                           </span>
                                           <span className="font-semibold text-purple-600 dark:text-purple-400">{formatPrice(tp)}</span>
-                                          <button 
-                                            type="button" 
-                                            className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 px-2 py-1 rounded transition-colors" 
+                                          <button
+                                            type="button"
+                                            className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 px-2 py-1 rounded transition-colors"
                                             onClick={() => {
                                               const tools = (draft.tools || []).filter((_, i) => i !== idx);
                                               setDraft({ ...draft, tools });
@@ -6670,73 +6681,109 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           </button>
                                         </div>
                                       </div>
+                                      <label className="mb-2 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                                        <span>تعداد قطعات</span>
+                                        <input
+                                          value={tool.coveredQuantity ?? draft.quantity ?? ''}
+                                          onChange={(event) => {
+                                            const value = Number(event.target.value);
+                                            const tools = [...(draft.tools || [])];
+                                            tools[idx] = {
+                                              ...tool,
+                                              coveredQuantity: Number.isInteger(value) && value > 0
+                                                ? value
+                                                : null
+                                            };
+                                            setDraft({ ...draft, tools });
+                                          }}
+                                          inputMode="numeric"
+                                          className="h-8 w-20 rounded-md border border-slate-300 bg-transparent px-2 dark:border-slate-700"
+                                        />
+                                      </label>
+                                      {(tool.coveredQuantity || 0) > Number(draft.quantity || 0) && (
+                                        <div className="mb-2 text-[11px] text-red-600">
+                                          تعداد تحت عملیات از تعداد محصول بیشتر است
+                                        </div>
+                                      )}
+                                      {tool.calculationBase !== 'squareMeters' && (
                                       <div className="flex flex-wrap gap-2 text-xs">
                                         <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
-                                            <input 
-                                              type="checkbox" 
-                                              checked={!!tool.perimeter} 
+                                            <input
+                                              type="checkbox"
+                                              checked={!!tool.perimeter}
                                               onChange={(e) => {
                                                 const tools = [...(draft.tools || [])];
                                                 tools[idx] = { ...tool, perimeter: e.target.checked };
                                                 setDraft({ ...draft, tools });
-                                              }} 
+                                              }}
                                               className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                                            /> 
+                                            />
                                             <span className="text-gray-700 dark:text-gray-300">محیط کامل</span>
                                         </label>
                                         <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
-                                          <input 
-                                            type="checkbox" 
-                                            checked={!!tool.front} 
+                                          <input
+                                            type="checkbox"
+                                            checked={!!tool.front}
                                             onChange={(e) => {
-                                              const tools = [...(draft.tools || [])]; 
-                                              tools[idx] = { ...tool, front: e.target.checked }; 
+                                              const tools = [...(draft.tools || [])];
+                                              tools[idx] = { ...tool, front: e.target.checked };
                                               setDraft({ ...draft, tools });
-                                            }} 
+                                            }}
                                             className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                                          /> 
+                                          />
                                           <span className="text-gray-700 dark:text-gray-300">جلو</span>
                                         </label>
                                         <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
-                                            <input 
-                                              type="checkbox" 
-                                              checked={!!tool.back} 
+                                            <input
+                                              type="checkbox"
+                                              checked={!!tool.back}
                                               onChange={(e) => {
-                                                const tools = [...(draft.tools || [])]; 
-                                                tools[idx] = { ...tool, back: e.target.checked }; 
+                                                const tools = [...(draft.tools || [])];
+                                                tools[idx] = { ...tool, back: e.target.checked };
                                                 setDraft({ ...draft, tools });
-                                              }} 
+                                              }}
                                               className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                                            /> 
+                                            />
                                             <span className="text-gray-700 dark:text-gray-300">عقب</span>
                                         </label>
                                         <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
-                                          <input 
-                                            type="checkbox" 
-                                            checked={!!tool.left} 
+                                          <input
+                                            type="checkbox"
+                                            checked={!!tool.left}
                                             onChange={(e) => {
-                                              const tools = [...(draft.tools || [])]; 
-                                              tools[idx] = { ...tool, left: e.target.checked }; 
+                                              const tools = [...(draft.tools || [])];
+                                              tools[idx] = { ...tool, left: e.target.checked };
                                               setDraft({ ...draft, tools });
-                                            }} 
+                                            }}
                                             className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                                          /> 
+                                          />
                                           <span className="text-gray-700 dark:text-gray-300">چپ</span>
                                         </label>
                                         <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
-                                          <input 
-                                            type="checkbox" 
-                                            checked={!!tool.right} 
+                                          <input
+                                            type="checkbox"
+                                            checked={!!tool.right}
                                             onChange={(e) => {
-                                              const tools = [...(draft.tools || [])]; 
-                                              tools[idx] = { ...tool, right: e.target.checked }; 
+                                              const tools = [...(draft.tools || [])];
+                                              tools[idx] = { ...tool, right: e.target.checked };
                                               setDraft({ ...draft, tools });
-                                            }} 
+                                            }}
                                             className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                                          /> 
+                                          />
                                           <span className="text-gray-700 dark:text-gray-300">راست</span>
                                         </label>
                                       </div>
+                                      )}
+                                      {tool.calculationBase !== 'squareMeters' &&
+                                        !tool.perimeter &&
+                                        !tool.front &&
+                                        !tool.back &&
+                                        !tool.left &&
+                                        !tool.right && (
+                                          <div className="mt-2 text-[11px] text-red-600">
+                                            حداقل یک لبه را انتخاب کنید
+                                          </div>
+                                        )}
                                     </div>
                                   );
                                 })}
@@ -6745,25 +6792,116 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           </div>
                         </div>
                       </div>
+                      )}
 
-                      {/* Layers Section (لایه‌ها) - Enhanced */}
-                      {/* 🎯 Hide layers section for riser */}
-                      {stairSystemV2.stairActivePart !== 'riser' && (
-                      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-2">
-                            <div className="w-1 h-5 bg-gradient-to-b from-orange-500 to-orange-600 rounded-full"></div>
-                            <h5 className="text-sm font-semibold text-gray-800 dark:text-white">لایه‌ها</h5>
-                          </div>
-                          <span className="text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 px-2 py-1 rounded">لایه‌های اضافی برای هر پله</span>
+                      {/* Inline stair layer configurations */}
+                      {true && (
+                      <div className="border-y border-gray-200 py-3 dark:border-gray-700">
+                        <div className="mb-3 flex items-center justify-between">
+                          <h5 className="text-sm font-semibold text-gray-800 dark:text-white">لایه‌ها</h5>
+                          {(draft.numberOfLayersPerStair || 0) > 0 && (
+                            <button
+                              type="button"
+                              className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300"
+                              onClick={() => {
+                                const layerErrors: StairDraftFieldErrors = {};
+                                if (!draft.layerTypeId || !(Number(draft.layerTypePrice) > 0)) {
+                                  layerErrors.layerType = !draft.layerTypeId
+                                    ? 'نوع لایه را انتخاب کنید'
+                                    : 'نرخ قرارداد لایه را وارد کنید';
+                                }
+                                if (!draft.layerWidthCm || !hasLayerEdgeSelection(draft.layerEdges)) {
+                                  layerErrors.width = 'عرض و سمت‌های لایه را کامل کنید';
+                                }
+                                if (!draft.layerSourceKind) {
+                                  layerErrors.layerSource = 'منبع سنگ لایه را انتخاب کنید';
+                                } else if (draft.layerRemovedSideConflicts?.length) {
+                                  layerErrors.layerSource = 'عملیات سمت حذف‌شده را تعیین تکلیف کنید';
+                                } else if (
+                                  draft.layerSourceKind === 'contractRemainder' &&
+                                  !(draft.layerSelectedRemainingStoneIds?.length)
+                                ) {
+                                  layerErrors.layerSource = 'باقی‌مانده موردنظر را انتخاب کنید';
+                                } else if (
+                                  draft.layerSourceKind === 'newMaterial' &&
+                                  (!draft.layerStoneProductId ||
+                                    !(Number(draft.layerPricePerSquareMeter) > 0))
+                                ) {
+                                  layerErrors.layerStone = !draft.layerStoneProductId
+                                    ? 'سنگ جدید را انتخاب کنید'
+                                    : undefined;
+                                  layerErrors.layerStonePrice =
+                                    draft.layerStoneProductId &&
+                                    !(Number(draft.layerPricePerSquareMeter) > 0)
+                                      ? 'قیمت را وارد کنید'
+                                      : undefined;
+                                }
+                                if (Object.values(layerErrors).some(Boolean)) {
+                                  stairSystemV2.setStairDraftErrors(prev => ({
+                                    ...prev,
+                                    [stairSystemV2.stairActivePart]: {
+                                      ...prev[stairSystemV2.stairActivePart],
+                                      ...layerErrors
+                                    }
+                                  }));
+                                  return;
+                                }
+                                setDraft(appendStairLayerConfiguration(
+                                  draft,
+                                  createContractProductRowId()
+                                ));
+                              }}
+                            >
+                              افزودن لایه دیگر
+                            </button>
+                          )}
                         </div>
+                        {(draft.layerConfigurations || []).length > 0 && (
+                          <div className="mb-3 divide-y divide-slate-200 border-y border-slate-200 text-xs dark:divide-slate-700 dark:border-slate-700">
+                            {(draft.layerConfigurations || []).map((configuration, index) => (
+                              <div
+                                key={configuration.layerConfigurationDraftId || index}
+                                className="flex items-center justify-between gap-3 py-2"
+                              >
+                                <span>
+                                  {configuration.layerTypeName || 'لایه'} ·{' '}
+                                  {formatDisplayNumber(configuration.numberOfLayersPerStair || 0)} برای هر قطعه ·{' '}
+                                  {formatDisplayNumber(configuration.layerWidthCm || 0)}cm
+                                </span>
+                                <span className="flex items-center gap-3">
+                                  <button
+                                    type="button"
+                                    className="font-semibold text-teal-700 hover:underline dark:text-teal-300"
+                                    onClick={() => setDraft({
+                                      ...configuration,
+                                      layerConfigurations: (draft.layerConfigurations || [])
+                                        .filter((_, configurationIndex) =>
+                                          configurationIndex !== index)
+                                    })}
+                                  >
+                                    ویرایش
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="font-semibold text-red-600 hover:underline"
+                                    onClick={() => setDraft({
+                                      ...draft,
+                                      layerConfigurations: (draft.layerConfigurations || [])
+                                        .filter((_, configurationIndex) =>
+                                          configurationIndex !== index)
+                                    })}
+                                  >
+                                    حذف
+                                  </button>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                              <span className="flex items-center gap-1">
-                                <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                                تعداد لایه برای هر پله
-                              </span>
+                            <label className="mb-2 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                              تعداد لایه برای هر پله
                             </label>
                             <FormattedNumberInput
                               value={draft.numberOfLayersPerStair ?? null}
@@ -6771,7 +6909,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 // 🎯 Ensure integer value and validate
                                 const intValue = value ? Math.floor(value) : null;
                                 const requiresLayerType = stairSystemV2.layerTypes.length > 0;
-                                if (intValue && intValue > 0 && intValue <= 10) { // Reasonable max: 10 layers per stair
+                                if (intValue && intValue > 0) {
                                   let updatedDraft: StairPartDraftV2 = { ...draft, numberOfLayersPerStair: intValue };
                                   if (!hasLayerEdgeSelection(updatedDraft.layerEdges)) {
                                     updatedDraft = deriveLayerEdgesFromTools(updatedDraft, stairSystemV2.stairActivePart);
@@ -6780,8 +6918,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   if (requiresLayerType && !draft.layerTypeId) {
                                     stairSystemV2.setStairDraftErrors(prev => ({
                                       ...prev,
-                                      [stairSystemV2.stairActivePart]: { 
-                                        ...prev[stairSystemV2.stairActivePart], 
+                                      [stairSystemV2.stairActivePart]: {
+                                        ...prev[stairSystemV2.stairActivePart],
                                         layerType: 'لطفاً نوع لایه را انتخاب کنید'
                                       }
                                     }));
@@ -6804,36 +6942,19 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'layerStone');
                                   clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'layerStonePrice');
                                   clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'layerMandatoryPercentage');
-                                } else if (intValue > 10) {
-                                  // Show error for too many layers
-                                  stairSystemV2.setStairDraftErrors(prev => ({
-                                    ...prev,
-                                    [stairSystemV2.stairActivePart]: { 
-                                      ...prev[stairSystemV2.stairActivePart], 
-                                      quantity: 'تعداد لایه برای هر پله نمی‌تواند بیشتر از 10 باشد'
-                                    }
-                                  }));
                                 }
                               }}
                               min={1}
                               step={1}
-                              max={10}
-                              className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
-                              placeholder="مثال: 1 (برای دوبل)"
+                              className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-gray-800 outline-none focus:border-teal-500 dark:border-gray-600 dark:text-white"
                             />
-                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                              تعداد لایه‌هایی که برای هر پله نیاز است (مثال: 1 برای دوبل)
-                            </p>
                           </div>
-                          
+
                           {draft.numberOfLayersPerStair && draft.numberOfLayersPerStair > 0 && (
                             <>
                               <div>
-                                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                  <span className="flex items-center gap-1">
-                                    <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                                    عرض لایه (سانتی‌متر)
-                                  </span>
+                                <label className="mb-2 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                                  عرض لایه
                                 </label>
                                 <FormattedNumberInput
                                   value={draft.layerWidthCm ?? null}
@@ -6844,21 +6965,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       const originalWidthCm = draft.stoneProduct?.widthValue || 0;
                                       const mainWidthCm = draft.widthCm || 0;
                                       const availableWidthCm = originalWidthCm - mainWidthCm;
-                                      
+
                                       if (originalWidthCm > 0 && value > availableWidthCm && availableWidthCm > 0) {
                                         stairSystemV2.setStairDraftErrors(prev => ({
                                           ...prev,
-                                          [stairSystemV2.stairActivePart]: { 
-                                            ...prev[stairSystemV2.stairActivePart], 
+                                          [stairSystemV2.stairActivePart]: {
+                                            ...prev[stairSystemV2.stairActivePart],
                                             width: `عرض لایه (${formatDisplayNumber(value)}cm) نمی‌تواند بیشتر از عرض باقی‌مانده (${formatDisplayNumber(availableWidthCm)}cm) باشد`
-                                          }
-                                        }));
-                                      } else if (value < 0.5) {
-                                        stairSystemV2.setStairDraftErrors(prev => ({
-                                          ...prev,
-                                          [stairSystemV2.stairActivePart]: { 
-                                            ...prev[stairSystemV2.stairActivePart], 
-                                            width: 'عرض لایه باید حداقل 0.5 سانتی‌متر باشد'
                                           }
                                         }));
                                       } else {
@@ -6867,45 +6980,37 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     }
                                     setDraft(updatedDraft);
                                   }}
-                                  min={0.5}
+                                  min={0}
                                   step={0.1}
-                                  className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
-                                  placeholder="مثال: 15"
+                                  className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-gray-800 outline-none focus:border-teal-500 dark:border-gray-600 dark:text-white"
                                 />
                               </div>
-                              
-                              
-                              <div className="md:col-span-2 rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50/40 dark:bg-orange-900/10 px-4 py-3">
-                                <label className="flex items-start gap-2 cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={!!draft.sawKerfEnabled}
-                                    onChange={(event) => setDraft({
-                                      ...draft,
-                                      sawKerfEnabled: event.target.checked,
-                                      sawKerfCm: event.target.checked ? (draft.sawKerfCm || SAW_KERF_CM) : null
-                                    })}
-                                    className="mt-0.5 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
-                                  />
-                                  <span>
-                                    <span className="block text-xs font-semibold text-gray-700 dark:text-gray-200">محاسبه خوراک اره برای پله و لایه</span>
-                                    <span className="mt-1 block text-[11px] text-gray-500 dark:text-gray-400">
-                                      عرض تمام‌شده لایه تغییر نمی‌کند؛ خوراک اره {formatDisplayNumber(draft.sawKerfCm || SAW_KERF_CM)} سانتی‌متر فقط در چیدمان منبع، باقیمانده و برش‌ها لحاظ می‌شود.
-                                    </span>
-                                  </span>
-                                </label>
+
+
+                              <div className="md:col-span-2 flex min-h-9 items-center justify-between border-b border-gray-200 py-2 text-xs dark:border-gray-700">
+                                <span className="font-semibold text-gray-800 dark:text-white">
+                                  خوراک اره
+                                </span>
+                                <CompactSwitch
+                                  label="خوراک اره"
+                                  checked={Boolean(draft.sawKerfEnabled)}
+                                  onChange={(checked) => setDraft({
+                                    ...draft,
+                                    sawKerfEnabled: checked,
+                                    sawKerfCm: checked
+                                      ? (draft.sawKerfCm || SAW_KERF_CM)
+                                      : null
+                                  })}
+                                />
                               </div>
 
                               {stairSystemV2.layerTypes.length > 0 && (
                                 <div>
-                                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                    <span className="flex items-center gap-1">
-                                      <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                                      نوع لایه
-                                    </span>
+                                  <label className="mb-2 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                                    نوع لایه
                                   </label>
                                   <select
-                                    className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all font-medium"
+                                    className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-gray-800 outline-none focus:border-teal-500 dark:border-gray-600 dark:text-white"
                                     value={draft.layerTypeId || ''}
                                     disabled={stairSystemV2.isLoadingLayerTypes}
                                     aria-label="انتخاب نوع لایه"
@@ -6921,8 +7026,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                         if ((draft.numberOfLayersPerStair || 0) > 0) {
                                           stairSystemV2.setStairDraftErrors(prev => ({
                                             ...prev,
-                                            [stairSystemV2.stairActivePart]: { 
-                                              ...prev[stairSystemV2.stairActivePart], 
+                                            [stairSystemV2.stairActivePart]: {
+                                              ...prev[stairSystemV2.stairActivePart],
                                               layerType: 'لطفاً نوع لایه را انتخاب کنید'
                                             }
                                           }));
@@ -6936,7 +7041,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           ...draft,
                                           layerTypeId: selected.id,
                                           layerTypeName: selected.name,
-                                          layerTypePrice: selected.pricePerLayer
+                                          layerTypePrice: null
                                         });
                                       }
                                     }}
@@ -6944,7 +7049,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     <option value="">انتخاب نوع لایه...</option>
                                     {stairSystemV2.layerTypes.map((option: LayerTypeOption) => (
                                       <option key={option.id} value={option.id}>
-                                        {option.name} - {option.pricePerLayer.toLocaleString('fa-IR')} تومان
+                                        {option.name}
                                       </option>
                                     ))}
                                   </select>
@@ -6958,58 +7063,160 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       {stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart]?.layerType}
                                     </p>
                                   )}
+                                  {draft.layerTypeId && (
+                                    <label className="mt-3 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                                      نرخ قرارداد
+                                      <FormattedNumberInput
+                                        value={draft.layerTypePrice ?? null}
+                                        onChange={(value) => {
+                                          setDraft({
+                                            ...draft,
+                                            layerTypePrice: value
+                                          });
+                                          if (value > 0) {
+                                            clearDraftFieldErrorWrapper(
+                                              stairSystemV2.stairActivePart,
+                                              'layerType'
+                                            );
+                                          }
+                                        }}
+                                        min={0}
+                                        className="mt-1 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm focus:border-orange-500 focus:outline-none dark:border-gray-600"
+                                      />
+                                      <span className="mt-1 block text-[11px] text-gray-500">
+                                        {stairSystemV2.layerTypes.find(
+                                          option => option.id === draft.layerTypeId
+                                        )?.calculationUnit === 'physicalPiece'
+                                          ? 'هر قطعه فیزیکی'
+                                          : stairSystemV2.layerTypes.find(
+                                              option => option.id === draft.layerTypeId
+                                            )?.calculationUnit === 'meter'
+                                            ? 'متر طول'
+                                            : stairSystemV2.layerTypes.find(
+                                                option => option.id === draft.layerTypeId
+                                              )?.calculationUnit === 'squareMeter'
+                                              ? 'مترمربع'
+                                              : 'هر مجموعه'}
+                                      </span>
+                                    </label>
+                                  )}
                                 </div>
                               )}
 
-                              <div className="md:col-span-2">
-                                <div className="border border-dashed border-orange-200 dark:border-orange-800 rounded-lg p-4 bg-orange-50/30 dark:bg-orange-900/10">
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      <h6 className="text-xs font-semibold text-orange-700 dark:text-orange-300">
-                                        استفاده از سنگ متفاوت برای لایه‌ها
-                                      </h6>
-                                      <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                                        می‌توانید سنگ دیگری را برای لایه‌ها انتخاب کرده و قیمت مستقل آن را ثبت کنید.
-                                      </p>
+                              <div className="md:col-span-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+                                <div className="mb-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                  منبع سنگ لایه
+                                </div>
+                                <CompactSegmentedControl
+                                  label="منبع سنگ لایه"
+                                  value={draft.layerSourceKind || null}
+                                  options={[
+                                    { value: 'parentMaterial', label: 'سنگ والد' },
+                                    { value: 'contractRemainder', label: 'باقی‌مانده قرارداد' },
+                                    { value: 'newMaterial', label: 'سنگ جدید' }
+                                  ] as const}
+                                  onChange={(sourceKind) => {
+                                    setDraft({
+                                      ...draft,
+                                      layerSourceKind: sourceKind,
+                                      layerSelectedRemainingStoneIds: [],
+                                      layerUseDifferentStone: sourceKind === 'newMaterial',
+                                      layerStoneProductId: sourceKind === 'newMaterial'
+                                        ? draft.layerStoneProductId
+                                        : null,
+                                      layerStoneProduct: sourceKind === 'newMaterial'
+                                        ? draft.layerStoneProduct
+                                        : null,
+                                      layerStoneLabel: sourceKind === 'newMaterial'
+                                        ? draft.layerStoneLabel
+                                        : null,
+                                      layerPricePerSquareMeter: sourceKind === 'newMaterial'
+                                        ? draft.layerPricePerSquareMeter
+                                        : null,
+                                      layerShortageSource: null,
+                                      layerManualSourceWidthCm: null,
+                                      layerManualSourceLengthM: null,
+                                      layerManualSourceQuantity: null
+                                    });
+                                    clearDraftFieldErrorWrapper(
+                                      stairSystemV2.stairActivePart,
+                                      'layerSource'
+                                    );
+                                  }}
+                                  className="w-full [&_button]:flex-1"
+                                />
+                                {stairSystemV2.stairDraftErrors[
+                                  stairSystemV2.stairActivePart
+                                ]?.layerSource && (
+                                  <p className="mt-1 text-xs text-red-500">
+                                    {stairSystemV2.stairDraftErrors[
+                                      stairSystemV2.stairActivePart
+                                    ]?.layerSource}
+                                  </p>
+                                )}
+                                {draft.layerSourceKind === 'contractRemainder' && (() => {
+                                  const availableRemainders = collectAvailableRemainingStones(
+                                    [...wizardData.products, ...stairSystemV2.stairSessionItems],
+                                    []
+                                  );
+                                  if (availableRemainders.length === 0) {
+                                    return (
+                                      <div className="py-2 text-xs text-slate-500">
+                                        باقی‌مانده‌ای وجود ندارد
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <div className="mt-2 divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-700 dark:border-slate-700">
+                                      {availableRemainders.map(stone => {
+                                        const selected = Boolean(
+                                          draft.layerSelectedRemainingStoneIds?.includes(stone.id)
+                                        );
+                                        return (
+                                          <button
+                                            key={stone.id}
+                                            type="button"
+                                            aria-pressed={selected}
+                                            onClick={() => {
+                                              const current =
+                                                draft.layerSelectedRemainingStoneIds || [];
+                                              setDraft({
+                                                ...draft,
+                                                layerSelectedRemainingStoneIds: selected
+                                                  ? current.filter(id => id !== stone.id)
+                                                  : [...current, stone.id]
+                                              });
+                                              clearDraftFieldErrorWrapper(
+                                                stairSystemV2.stairActivePart,
+                                                'layerSource'
+                                              );
+                                            }}
+                                            className="flex w-full items-center justify-between gap-3 py-2 text-right text-xs"
+                                          >
+                                            <span>
+                                              {formatDisplayNumber(stone.width)}cm ×{' '}
+                                              {formatDisplayNumber(stone.length)}m ·{' '}
+                                              {formatDisplayNumber(stone.quantity || 1)} عدد
+                                            </span>
+                                            <span className={selected
+                                              ? 'font-semibold text-teal-700 dark:text-teal-300'
+                                              : 'text-slate-500'}
+                                            >
+                                              {selected ? 'انتخاب‌شده' : 'استفاده'}
+                                            </span>
+                                          </button>
+                                        );
+                                      })}
                                     </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (draft.layerUseDifferentStone) {
-                                          setDraft({
-                                            ...draft,
-                                            layerUseDifferentStone: false,
-                                            layerStoneProductId: null,
-                                            layerStoneProduct: null,
-                                            layerStoneLabel: null,
-                                            layerPricePerSquareMeter: null,
-                                            layerUseMandatory: undefined,
-                                            layerMandatoryPercentage: null
-                                          });
-                                          clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'layerStone');
-                                          clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'layerStonePrice');
-                                          clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'layerMandatoryPercentage');
-                                        } else {
-                                          setDraft({
-                                            ...draft,
-                                            layerUseDifferentStone: true,
-                                            layerStoneProductId: null,
-                                            layerStoneProduct: null,
-                                            layerStoneLabel: null,
-                                            layerPricePerSquareMeter: draft.pricePerSquareMeter || null,
-                                            layerUseMandatory: true,
-                                            layerMandatoryPercentage: draft.layerMandatoryPercentage ?? 20
-                                          });
-                                        }
-                                      }}
-                                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                                        draft.layerUseDifferentStone
-                                          ? 'bg-orange-500 text-white hover:bg-orange-600'
-                                          : 'bg-white dark:bg-gray-900/40 text-orange-600 border border-orange-200 dark:border-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/40'
-                                      }`}
-                                    >
-                                      {draft.layerUseDifferentStone ? 'غیرفعال‌سازی' : 'فعال‌سازی'}
-                                    </button>
+                                  );
+                                })()}
+                              </div>
+
+                              {draft.layerSourceKind === 'newMaterial' && (
+                              <div className="md:col-span-2">
+                                <div className="border-t border-slate-200 pt-3 dark:border-slate-700">
+                                  <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                    سنگ جدید
                                   </div>
 
                                   {draft.layerUseDifferentStone && (
@@ -7021,8 +7228,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                         {!draft.layerStoneProduct ? (
                                           <>
                                             <input
-                                              className="w-full rounded-lg bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
-                                              placeholder="نام سنگ مورد نظر را جستجو کنید"
+                                              className="w-full rounded-lg bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
                                               value={stairSystemV2.layerStoneSearchTerm}
                                               onChange={(e) => stairSystemV2.setLayerStoneSearchTerm(e.target.value)}
                                               onFocus={() => stairSystemV2.setLayerStoneDropdownOpen(true)}
@@ -7051,7 +7257,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                                         layerStoneProductId: p.id,
                                                         layerStoneProduct: p,
                                                         layerStoneLabel: altLabel,
-                                                        layerPricePerSquareMeter: p.basePrice || draft.layerPricePerSquareMeter || draft.pricePerSquareMeter || null,
+                                                        layerPricePerSquareMeter: null,
                                                         layerUseMandatory: draft.layerUseMandatory ?? true,
                                                         layerMandatoryPercentage: draft.layerMandatoryPercentage ?? 20
                                                       });
@@ -7063,9 +7269,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                                     <div className="font-medium text-gray-800 dark:text-white">
                                                       {(p as any).fullName || generateFullProductName(p as Product) || p.namePersian || p.name}
                                                     </div>
-                                                    {p.basePrice && (
-                                                      <div className="text-xs text-orange-600 dark:text-orange-400 mt-0.5">{formatPrice(p.basePrice)}</div>
-                                                    )}
                                                   </button>
                                                 ))}
                                               </div>
@@ -7134,7 +7337,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                         <FormattedNumberInput
                                           value={draft.layerPricePerSquareMeter ?? null}
                                           onChange={(value) => {
-                                            const updatedDraft = { ...draft, layerPricePerSquareMeter: value && value > 0 ? value : null };
+                                            const updatedDraft = {
+                                              ...draft,
+                                              layerPricePerSquareMeter: value
+                                            };
                                             const error = validateDraftNumericFields(stairSystemV2.stairActivePart, updatedDraft, 'layerStonePrice', value);
                                             if (error) {
                                               stairSystemV2.setStairDraftErrors(prev => ({
@@ -7149,7 +7355,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           min={0}
                                           step={1000}
                                           className="w-full rounded-lg bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
-                                          placeholder="مثال: 1,800,000"
                                         />
                                         {stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart]?.layerStonePrice && (
                                           <p className="mt-1 text-xs text-red-500">
@@ -7228,6 +7433,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   )}
                                 </div>
                               </div>
+                              )}
 
                               {/* 🎯 Layer Edge Selection */}
                               <div className="md:col-span-2">
@@ -7239,106 +7445,74 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 </label>
                                 <div className="flex flex-wrap gap-2 p-3 bg-orange-50/50 dark:bg-orange-900/10 rounded-lg border border-orange-200 dark:border-orange-800">
                                   <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
-                                      <input 
-                                        type="checkbox" 
-                                        checked={!!(draft.layerEdges?.perimeter)} 
+                                      <input
+                                        type="checkbox"
+                                        checked={!!(draft.layerEdges?.perimeter)}
                                         onChange={(e) => {
                                           const currentEdges = draft.layerEdges || {};
-                                          setDraft({ 
-                                            ...draft, 
-                                            layerEdges: { 
-                                              ...currentEdges, 
+                                          setDraft({
+                                            ...draft,
+                                            layerEdges: {
+                                              ...currentEdges,
                                               perimeter: e.target.checked,
                                               // If perimeter is checked, uncheck individual edges
                                               front: e.target.checked ? false : currentEdges.front,
                                               left: e.target.checked ? false : currentEdges.left,
                                               right: e.target.checked ? false : currentEdges.right,
                                               back: e.target.checked ? false : currentEdges.back
-                                            } 
+                                            }
                                           });
-                                        }} 
+                                        }}
                                         className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
-                                      /> 
+                                      />
                                       <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">محیط کامل</span>
                                   </label>
                                   <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
-                                    <input 
-                                      type="checkbox" 
-                                      checked={!!(draft.layerEdges?.front)} 
-                                      onChange={(e) => {
-                                        const currentEdges = draft.layerEdges || {};
-                                        setDraft({ 
-                                          ...draft, 
-                                          layerEdges: { 
-                                            ...currentEdges, 
-                                            front: e.target.checked,
-                                            perimeter: e.target.checked ? false : currentEdges.perimeter
-                                          } 
-                                        });
-                                      }} 
+                                    <input
+                                      type="checkbox"
+                                      checked={!!(draft.layerEdges?.front)}
+                                      onChange={(e) =>
+                                        setLayerSideEnabled('front', e.target.checked)
+                                      }
                                       className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                                       disabled={!!(draft.layerEdges?.perimeter)}
-                                    /> 
+                                    />
                                     <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">جلو</span>
                                   </label>
                                   <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
-                                      <input 
-                                        type="checkbox" 
-                                        checked={!!(draft.layerEdges?.back)} 
-                                        onChange={(e) => {
-                                          const currentEdges = draft.layerEdges || {};
-                                          setDraft({ 
-                                            ...draft, 
-                                            layerEdges: { 
-                                              ...currentEdges, 
-                                              back: e.target.checked,
-                                              perimeter: e.target.checked ? false : currentEdges.perimeter
-                                            } 
-                                          });
-                                        }} 
+                                      <input
+                                        type="checkbox"
+                                        checked={!!(draft.layerEdges?.back)}
+                                        onChange={(e) =>
+                                          setLayerSideEnabled('back', e.target.checked)
+                                        }
                                         className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                                         disabled={!!(draft.layerEdges?.perimeter)}
-                                      /> 
+                                      />
                                       <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">عقب</span>
                                   </label>
                                   <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
-                                    <input 
-                                      type="checkbox" 
-                                      checked={!!(draft.layerEdges?.left)} 
-                                      onChange={(e) => {
-                                        const currentEdges = draft.layerEdges || {};
-                                        setDraft({ 
-                                          ...draft, 
-                                          layerEdges: { 
-                                            ...currentEdges, 
-                                            left: e.target.checked,
-                                            perimeter: e.target.checked ? false : currentEdges.perimeter
-                                          } 
-                                        });
-                                      }} 
+                                    <input
+                                      type="checkbox"
+                                      checked={!!(draft.layerEdges?.left)}
+                                      onChange={(e) =>
+                                        setLayerSideEnabled('left', e.target.checked)
+                                      }
                                       className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                                       disabled={!!(draft.layerEdges?.perimeter)}
-                                    /> 
+                                    />
                                     <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">چپ</span>
                                   </label>
                                   <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
-                                    <input 
-                                      type="checkbox" 
-                                      checked={!!(draft.layerEdges?.right)} 
-                                      onChange={(e) => {
-                                        const currentEdges = draft.layerEdges || {};
-                                        setDraft({ 
-                                          ...draft, 
-                                          layerEdges: { 
-                                            ...currentEdges, 
-                                            right: e.target.checked,
-                                            perimeter: e.target.checked ? false : currentEdges.perimeter
-                                          } 
-                                        });
-                                      }} 
+                                    <input
+                                      type="checkbox"
+                                      checked={!!(draft.layerEdges?.right)}
+                                      onChange={(e) =>
+                                        setLayerSideEnabled('right', e.target.checked)
+                                      }
                                       className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                                       disabled={!!(draft.layerEdges?.perimeter)}
-                                    /> 
+                                    />
                                     <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">راست</span>
                                   </label>
                                 </div>
@@ -7347,25 +7521,289 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     لطفاً حداقل یک لبه را انتخاب کنید
                                   </p>
                                 )}
+                                {(draft.layerRemovedSideConflicts || []).map(side => {
+                                  const sideLabel = {
+                                    front: 'جلو',
+                                    back: 'عقب',
+                                    left: 'چپ',
+                                    right: 'راست'
+                                  }[side];
+                                  const sideOperations =
+                                    draft.layerSideOperations?.[side];
+                                  return (
+                                    <div
+                                      key={`removed-layer-side:${side}`}
+                                      className="mt-2 border-y border-red-200 py-2 text-xs dark:border-red-900"
+                                    >
+                                      <div className="font-semibold text-red-600 dark:text-red-300">
+                                        سمت {sideLabel} دارای عملیات اختصاصی است
+                                      </div>
+                                      <div className="mt-1 text-slate-500 dark:text-slate-400">
+                                        {(sideOperations?.tools.length || 0)} ابزار · {(sideOperations?.finishings.length || 0)} پرداخت
+                                      </div>
+                                      <div className="mt-2 flex gap-3">
+                                        <button
+                                          type="button"
+                                          className="font-semibold text-teal-700 dark:text-teal-300"
+                                          onClick={() =>
+                                            setLayerSideEnabled(side, true)
+                                          }
+                                        >
+                                          بازگرداندن سمت
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="font-semibold text-red-600"
+                                          onClick={() => {
+                                            const nextOperations = {
+                                              ...(draft.layerSideOperations || {})
+                                            };
+                                            delete nextOperations[side];
+                                            setDraft({
+                                              ...draft,
+                                              layerSideOperations: nextOperations,
+                                              layerDetachedOperationSides: (
+                                                draft.layerDetachedOperationSides ||
+                                                []
+                                              ).filter(item => item !== side),
+                                              layerRemovedSideConflicts: (
+                                                draft.layerRemovedSideConflicts ||
+                                                []
+                                              ).filter(item => item !== side)
+                                            });
+                                          }}
+                                        >
+                                          حذف سمت و عملیات آن
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
-                              
-                              {draft.numberOfLayersPerStair && draft.layerWidthCm && draft.pricePerSquareMeter && draft.quantity && 
+
+                              {draft.layerWidthCm &&
+                                draft.numberOfLayersPerStair &&
+                                draft.quantity &&
+                                draft.stoneProduct &&
+                                (() => {
+                                  const selectedSides = (
+                                    ['front', 'back', 'left', 'right'] as const
+                                  ).filter(side =>
+                                    draft.layerEdges?.perimeter ||
+                                    Boolean(draft.layerEdges?.[side])
+                                  );
+                                  if (selectedSides.length === 0) return null;
+                                  const sideLabels = {
+                                    front: 'جلو',
+                                    back: 'عقب',
+                                    left: 'چپ',
+                                    right: 'راست'
+                                  } as const;
+                                  const requestedScope =
+                                    draft.layerOperationEditingScope || 'all';
+                                  const editingScope =
+                                    requestedScope === 'all' ||
+                                    selectedSides.includes(requestedScope)
+                                      ? requestedScope
+                                      : 'all';
+                                  const referenceSide =
+                                    editingScope === 'all'
+                                      ? selectedSides[0]
+                                      : editingScope;
+                                  const referenceInput =
+                                    createLayerSideOperationInput(
+                                      stairSystemV2.stairActivePart,
+                                      draft,
+                                      referenceSide,
+                                      draft.stoneProduct!.id
+                                    );
+                                  const sideBreakdown = selectedSides.map(side => {
+                                    const input = createLayerSideOperationInput(
+                                      stairSystemV2.stairActivePart,
+                                      draft,
+                                      side,
+                                      draft.stoneProduct!.id
+                                    );
+                                    const calculation =
+                                      calculateProductOperations(input);
+                                    return {
+                                      side,
+                                      input,
+                                      calculation
+                                    };
+                                  });
+                                  return (
+                                    <div className="md:col-span-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+                                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                        <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                          عملیات لایه
+                                        </span>
+                                        <CompactSegmentedControl
+                                          label="اعمال روی"
+                                          value={editingScope}
+                                          options={[
+                                            { value: 'all', label: 'همه نوارها' },
+                                            ...selectedSides.map(side => ({
+                                              value: side,
+                                              label: sideLabels[side]
+                                            }))
+                                          ]}
+                                          onChange={scope => setDraft({
+                                            ...draft,
+                                            layerOperationEditingScope:
+                                              scope as
+                                                | 'all'
+                                                | 'front'
+                                                | 'back'
+                                                | 'left'
+                                                | 'right'
+                                          })}
+                                        />
+                                      </div>
+                                      <OperationCollectionsSection
+                                        input={referenceInput}
+                                        onChange={operationInput => {
+                                          if (editingScope === 'all') {
+                                            const nextSideOperations = {
+                                              ...(draft.layerSideOperations || {})
+                                            };
+                                            selectedSides.forEach(side => {
+                                              nextSideOperations[side] =
+                                                cloneLayerOperationsForSide(
+                                                  operationInput,
+                                                  createLayerSideOperationInput(
+                                                    stairSystemV2.stairActivePart,
+                                                    draft,
+                                                    side,
+                                                    draft.stoneProduct!.id
+                                                  ),
+                                                  side
+                                                );
+                                            });
+                                            setDraft({
+                                              ...draft,
+                                              layerSideOperations:
+                                                nextSideOperations,
+                                              layerDetachedOperationSides: (
+                                                draft.layerDetachedOperationSides ||
+                                                []
+                                              ).filter(side =>
+                                                !selectedSides.includes(side)
+                                              )
+                                            });
+                                            return;
+                                          }
+                                          setDraft({
+                                            ...draft,
+                                            layerSideOperations: {
+                                              ...(draft.layerSideOperations || {}),
+                                              [editingScope]: operationInput
+                                            },
+                                            layerDetachedOperationSides: Array.from(
+                                              new Set([
+                                                ...(
+                                                  draft.layerDetachedOperationSides ||
+                                                  []
+                                                ),
+                                                editingScope
+                                              ])
+                                            )
+                                          });
+                                        }}
+                                        toolCacheKey="stair-layer-tools"
+                                        finishingCacheKey="stair-layer-finishings"
+                                        loadTools={async () => subServices.map(tool => ({
+                                          catalogItemId: tool.id,
+                                          catalogSnapshotVersion: String(
+                                            (tool as SubService & { updatedAt?: string }).updatedAt ||
+                                            'current'
+                                          ),
+                                          name: tool.namePersian || tool.name || tool.code,
+                                          unit: tool.calculationBase === 'squareMeters'
+                                            ? 'squareMeter' as const
+                                            : 'meter' as const,
+                                          rateToman: tool.pricePerMeter === null ||
+                                            tool.pricePerMeter === undefined
+                                            ? null
+                                            : String(tool.pricePerMeter)
+                                        }))}
+                                        loadFinishings={async () => stoneFinishings.map(finishing => ({
+                                          catalogItemId: finishing.id,
+                                          catalogSnapshotVersion: String(
+                                            (finishing as StoneFinishing & { updatedAt?: string }).updatedAt ||
+                                            'current'
+                                          ),
+                                          name: finishing.namePersian ||
+                                            finishing.name ||
+                                            finishing.code ||
+                                            'پرداخت',
+                                          unit: finishing.calculationBase === 'length'
+                                            ? 'meter' as const
+                                            : 'squareMeter' as const,
+                                          rateToman: (() => {
+                                            const rate = finishing.calculationBase === 'length'
+                                              ? (finishing as StoneFinishing & {
+                                                  pricePerMeter?: number | null
+                                                }).pricePerMeter
+                                              : (finishing as StoneFinishing & {
+                                                  pricePerSquareMeter?: number | null
+                                                }).pricePerSquareMeter;
+                                            return rate === null || rate === undefined
+                                              ? null
+                                              : String(rate);
+                                          })()
+                                        }))}
+                                      />
+                                      <div className="mt-2 divide-y divide-slate-100 border-y border-slate-100 text-xs dark:divide-slate-800 dark:border-slate-800">
+                                        {sideBreakdown.map(entry => (
+                                          <div
+                                            key={entry.side}
+                                            className="flex min-h-8 items-center justify-between gap-3"
+                                          >
+                                            <span className="text-slate-500 dark:text-slate-400">
+                                              {sideLabels[entry.side]} — {entry.input.quantity || 0} × {formatDisplayNumber(Number(entry.input.lengthMeters))}m
+                                            </span>
+                                            <strong>
+                                              {entry.calculation.ok
+                                                ? formatPrice(Number(entry.calculation.result.totalAmountToman))
+                                                : '—'}
+                                            </strong>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                              <label className="md:col-span-2 border-t border-slate-200 pt-3 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                                توضیحات لایه
+                                <textarea
+                                  value={draft.layerDescription || ''}
+                                  onChange={event => setDraft({
+                                    ...draft,
+                                    layerDescription: event.target.value
+                                  })}
+                                  rows={1}
+                                  className="mt-1 max-h-24 min-h-9 w-full resize-none overflow-y-auto rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm font-normal focus:border-teal-500 focus:outline-none dark:border-slate-700"
+                                />
+                              </label>
+
+                              {draft.numberOfLayersPerStair && draft.layerWidthCm && draft.pricePerSquareMeter && draft.quantity &&
                                (stairSystemV2.layerTypes.length === 0 || draft.layerTypeId) &&
                                draft.layerEdges && (draft.layerEdges.front || draft.layerEdges.left || draft.layerEdges.right || draft.layerEdges.back || draft.layerEdges.perimeter) && (() => {
                                 // 🎯 Use computeLayerSqmV2 for consistent calculation (accounts for overlap)
                                 const totalLayers = draft.quantity * draft.numberOfLayersPerStair;
                                 const totalLayerSqm = layerManagement.computeLayerSqmV2(stairSystemV2.stairActivePart, draft);
-                                
+
                                 const layerWidthCm = draft.layerWidthCm || 0;
-                                const stoneWidthCm = draft.layerUseDifferentStone 
+                                const stoneWidthCm = draft.layerUseDifferentStone
                                   ? (draft.layerStoneProduct?.widthValue || draft.stoneProduct?.widthValue || 0)
                                   : (draft.stoneProduct?.widthValue || 0);
                                 const stairLengthM = getActualLengthMeters(draft);
-                                
+
                                 const edgeDemandsPreview = getLayerEdgeDemands(stairSystemV2.stairActivePart, draft);
                                 const previewMainRemainingStones: RemainingStone[] = (() => {
                                   const usagePreview = computeTotalsV2(stairSystemV2.stairActivePart, draft);
-                                  if (draft.layerUseDifferentStone || stairLengthM <= 0) {
+                                  if (draft.layerSourceKind !== 'parentMaterial' || stairLengthM <= 0) {
                                     return [];
                                   }
                                   return usagePreview.remainingStoneGroups
@@ -7380,10 +7818,20 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       quantity: group.quantity
                                     }));
                                 })();
-                                const previewAvailableRemainingStones = draft.layerUseDifferentStone
-                                  ? []
-                                  : previewMainRemainingStones;
-                                const layerMetricsPreview = draft.layerUseDifferentStone
+                                const previewAvailableRemainingStones =
+                                  draft.layerSourceKind === 'parentMaterial'
+                                    ? previewMainRemainingStones
+                                    : draft.layerSourceKind === 'contractRemainder'
+                                      ? collectAvailableRemainingStones(
+                                          [...wizardData.products, ...stairSystemV2.stairSessionItems],
+                                          []
+                                        ).filter(stone =>
+                                          (draft.layerSelectedRemainingStoneIds || []).includes(
+                                            stone.id
+                                          )
+                                        )
+                                      : [];
+                                const layerMetricsPreview = draft.layerSourceKind === 'newMaterial'
                                   ? {
                                       layersFromRemainingStones: 0,
                                       layersFromNewStones: edgeDemandsPreview.length
@@ -7411,7 +7859,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       sawKerfEnabled: !!draft.sawKerfEnabled,
                                       sawKerfCm: draft.sawKerfCm || SAW_KERF_CM
                                     });
-                                
+
                                 const previewSourceLengthM = draft.layerShortageSource === 'manualWarehouse'
                                   ? (draft.layerManualSourceLengthM || 0)
                                   : (getPricingLengthMeters(draft) || stairLengthM);
@@ -7419,39 +7867,88 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   ? (draft.layerManualSourceWidthCm || 0)
                                   : stoneWidthCm;
                                 const previewSourcePlan = calculateLayerSourcePlan({
-                                  demands: (layerMetricsPreview.unfulfilledDemands || []) as Array<{
-                                    edge: LayerEdgeDemand['edge'];
-                                    lengthM: number;
-                                    quantity: number;
-                                  }>,
+                                  demands: draft.layerSourceKind === 'newMaterial'
+                                    ? (layerMetricsPreview.unfulfilledDemands || []) as Array<{
+                                        edge: LayerEdgeDemand['edge'];
+                                        lengthM: number;
+                                        quantity: number;
+                                      }>
+                                    : [],
                                   sourceWidthCm: previewSourceWidthCm,
                                   sourceLengthM: previewSourceLengthM,
                                   layerWidthCm,
                                   sawKerfEnabled: !!draft.sawKerfEnabled,
                                   sawKerfCm: draft.sawKerfCm || SAW_KERF_CM
                                 });
-                                const stoneAreaUsedSqm = previewSourcePlan.sourceAreaSqm;
-                                
+                                const legacyStoneAreaUsedSqm = previewSourcePlan.sourceAreaSqm;
+
                                 // Use the same price as the main stair part
-                                const pricePerSqm = draft.pricePerSquareMeter || 0;
+                                const pricePerSqm = draft.layerSourceKind === 'newMaterial'
+                                  ? (draft.layerPricePerSquareMeter || 0)
+                                  : 0;
                                 const layerTypeUnitPrice = draft.layerTypePrice || 0;
-                                
-                                // 🎯 FIX: Calculate layer type cost based on total length per stair × number of stairs × layer type price per meter
-                                // مجموع طوله های لایه برای یک پله (چپ + راست + جلو) × تعداد پله ها × هزینه هر نوع لایه
+
                                 const totalLayerLengthPerStairM = layerManagement.getTotalLayerLengthPerStairM(stairSystemV2.stairActivePart, draft);
                                 const totalLayerLengthM = totalLayerLengthPerStairM * draft.quantity;
-                                const layerTypeCostPreview = totalLayerLengthM * layerTypeUnitPrice;
-                                
+                                const layerCalculationUnit = stairSystemV2.layerTypes.find(
+                                  option => option.id === draft.layerTypeId
+                                )?.calculationUnit || 'set';
+                                const previewParentRowId =
+                                  draft.operationPolicyInput?.productRowId ||
+                                  `stair-layer-preview:${draft.stoneId || 'main'}:${stairSystemV2.stairActivePart}`;
+                                const canonicalLayerPreviewRequest =
+                                  createCanonicalLayerCalculationRequest({
+                                    part: stairSystemV2.stairActivePart,
+                                    draft,
+                                    parentProductRowId: previewParentRowId,
+                                    creationOrder:
+                                      (draft.layerConfigurations || []).length,
+                                    availableInventory: toCanonicalLayerInventory({
+                                      stones: previewAvailableRemainingStones,
+                                      ownerProductRowId: previewParentRowId,
+                                      catalogProductId:
+                                        draft.layerStoneProductId ||
+                                        draft.stoneId ||
+                                        ''
+                                    }),
+                                    parentRemainingStoneIds:
+                                      previewMainRemainingStones.map(stone =>
+                                        stone.id
+                                      ),
+                                    layerUnit: layerCalculationUnit,
+                                    getCuttingTypePricePerMeter
+                                  });
+                                const stoneAreaUsedSqm =
+                                  legacyStoneAreaUsedSqm;
+                                const physicalStripCount = edgeDemandsPreview.reduce(
+                                  (sum, demand) => sum + demand.layersNeeded,
+                                  0
+                                );
+                                const layerPricingQuantity =
+                                  layerCalculationUnit === 'physicalPiece'
+                                    ? physicalStripCount
+                                    : layerCalculationUnit === 'meter'
+                                      ? totalLayerLengthM
+                                      : layerCalculationUnit === 'squareMeter'
+                                        ? totalLayerSqm
+                                        : totalLayers;
+                                const layerTypeCostPreview =
+                                  layerPricingQuantity * layerTypeUnitPrice;
+
                                 // 🎯 FIX: Calculate layer stone price based on stone area used, NOT layer square meters
                                 // Use stone area used for pricing (includes waste/remaining pieces)
                                 const pricingStoneAreaSqm = stoneAreaUsedSqm > 0 ? stoneAreaUsedSqm : (layerMetricsPreview.squareMetersFromNew || 0);
                                 const baseLayerCost = pricingStoneAreaSqm * pricePerSqm;
-                                const layerTotalPrice = baseLayerCost + layerTypeCostPreview;
-                                
+                                const layerTotalPrice =
+                                  baseLayerCost + layerTypeCostPreview;
+
                                 return (
                                   <div className="md:col-span-2">
-                                    <div className="mt-2 rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/20 px-4 py-3 text-xs leading-5 text-orange-700 dark:text-orange-200">
-                                      <div className="font-semibold mb-1">خلاصه لایه‌ها:</div>
+                                    <CanonicalStairLayerSummary
+                                      request={canonicalLayerPreviewRequest}
+                                    />
+                                    <div className="hidden">
+                                      <div className="py-2 font-semibold">خلاصه لایه</div>
                                       <div>تعداد کل لایه‌ها: {formatDisplayNumber(totalLayers)} عدد ({formatDisplayNumber(draft.quantity)} پله × {formatDisplayNumber(draft.numberOfLayersPerStair)} لایه)</div>
                                       <div className="mt-1">
                                         <span className="font-medium">لبه‌های انتخاب شده: </span>
@@ -7468,15 +7965,19 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                         )}
                                       </div>
                                       <div>متر مربع تمام‌شده لایه: {formatSquareMeters(totalLayerSqm)}</div>
-                                      <div>سنگ منبع جدید: {formatDisplayNumber(previewSourcePlan.sourceStoneQuantity)} قطعه / {formatSquareMeters(previewSourcePlan.sourceAreaSqm)}</div>
-                                      <div>قطعات فیزیکی کارگاه: {formatDisplayNumber(edgeDemandsPreview.reduce((sum, demand) => sum + demand.layersNeeded, 0))} نوار</div>
-                                      {!draft.layerUseDifferentStone && (
+                                      <div>سنگ منبع مصرفی: {formatDisplayNumber(
+                                        previewSourcePlan.sourceStoneQuantity
+                                      )} قطعه / {formatSquareMeters(stoneAreaUsedSqm)}</div>
+                                      <div>قطعات فیزیکی کارگاه: {formatDisplayNumber(
+                                        edgeDemandsPreview.reduce((sum, demand) => sum + demand.layersNeeded, 0)
+                                      )} نوار</div>
+                                      {draft.layerSourceKind !== 'newMaterial' && (
                                         <div className="text-teal-700 dark:text-teal-300">
                                           از باقی‌مانده سنگ اصلی: {formatDisplayNumber(layerMetricsPreview.layersFromRemainingStones || 0)} لایه
                                           {` | نیاز به سنگ اصلی جدید: ${formatDisplayNumber(layerMetricsPreview.layersFromNewStones || 0)} لایه`}
                                         </div>
                                       )}
-                                      {!draft.layerUseDifferentStone && (layerMetricsPreview.layersFromNewStones || 0) > 0 && (
+                                      {false && (layerMetricsPreview.layersFromNewStones || 0) > 0 && (
                                         <div className="mt-3 rounded-lg border border-orange-300 bg-white/80 p-3 dark:border-orange-700 dark:bg-slate-900/50">
                                           <div className="mb-2 font-semibold text-orange-800 dark:text-orange-200">منبع تامین کمبود لایه</div>
                                           <div className="grid gap-2 md:grid-cols-3">
@@ -7511,7 +8012,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                                 value={draft.layerManualSourceWidthCm ?? null}
                                                 onChange={(value) => setDraft({ ...draft, layerManualSourceWidthCm: value || null })}
                                                 className="rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm dark:border-orange-800 dark:bg-slate-900"
-                                                placeholder="عرض cm"
                                                 min={0}
                                                 step={0.1}
                                               />
@@ -7519,7 +8019,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                                 value={draft.layerManualSourceLengthM ?? null}
                                                 onChange={(value) => setDraft({ ...draft, layerManualSourceLengthM: value || null })}
                                                 className="rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm dark:border-orange-800 dark:bg-slate-900"
-                                                placeholder="طول m"
                                                 min={0}
                                                 step={0.1}
                                               />
@@ -7527,7 +8026,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                                 value={draft.layerManualSourceQuantity ?? null}
                                                 onChange={(value) => setDraft({ ...draft, layerManualSourceQuantity: value ? Math.floor(value) : null })}
                                                 className="rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm dark:border-orange-800 dark:bg-slate-900"
-                                                placeholder="تعداد"
                                                 min={1}
                                                 step={1}
                                               />
@@ -7554,7 +8052,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">
                                             هزینه نوع لایه ({draft.layerTypeName || '-'}): {formatPrice(layerTypeCostPreview)}
                                             <span className="text-xs text-gray-500 dark:text-gray-500 ml-1">
-                                              ({formatDisplayNumber(totalLayerLengthPerStairM)} متر × {formatDisplayNumber(draft.quantity)} پله × {formatPrice(layerTypeUnitPrice)}/متر)
+                                              ({formatDisplayNumber(layerPricingQuantity)} × {formatPrice(layerTypeUnitPrice)})
                                             </span>
                                           </div>
                                         )}
@@ -7572,27 +8070,29 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       </div>
                       )}
 
-                      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
-                        <label className="flex items-start gap-3 text-sm text-gray-700 dark:text-gray-200">
-                          <input
-                            type="checkbox"
-                            className="mt-1 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
-                            checked={draft.calibrationCutEnabled ?? true}
-                            onChange={(e) => setDraft({
-                              ...draft,
-                              calibrationCutEnabled: e.target.checked
-                            })}
-                          />
-                          <span>
-                            <span className="block font-medium text-gray-800 dark:text-white">برش کالیبر</span>
-                            <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-                              در صورت وجود برش عرض سنگ، یک برش طولی لبه به متراژ برش اضافه می‌شود.
-                            </span>
-                          </span>
-                        </label>
+                      <div className="flex min-h-9 items-center justify-between border-b border-gray-200 py-2 text-xs dark:border-gray-700">
+                        <span className="font-semibold text-gray-800 dark:text-white">برش کالیبر</span>
+                        <CompactSwitch
+                          label="برش کالیبر"
+                          checked={draft.calibrationSelection === 'manual'
+                            ? Boolean(draft.calibrationCutEnabled)
+                            : totals.canonicalCalculation.ok
+                              ? totals.canonicalCalculation.result.calibrationEnabled
+                              : false}
+                          disabled={totals.canonicalCalculation.ok
+                            ? Number(totals.canonicalCalculation.result.crossDimensionMeters) ===
+                                Number(totals.canonicalCalculation.result.motherWidthMeters) ||
+                              Number(totals.canonicalCalculation.result.packingPlan.longitudinalCutMeters) === 0
+                            : true}
+                          onChange={checked => setDraft({
+                            ...draft,
+                            calibrationCutEnabled: checked,
+                            calibrationSelection: 'manual'
+                          })}
+                        />
                       </div>
 
-                      {stoneFinishings.length > 0 && (
+                      {false && stoneFinishings.length > 0 && (
                         <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
                           <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2">
@@ -7676,7 +8176,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       finishingSearchTerm: e.target.value
                                     } as any)}
                                     className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                                    placeholder="نام پرداخت سنگ را جستجو کنید..."
                                   />
                                   <div className="max-h-44 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 divide-y divide-gray-200 dark:divide-gray-700">
                                     {visibleStoneFinishings.length > 0 ? visibleStoneFinishings.map(option => {
@@ -7750,9 +8249,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       max={maxFinishingQuantity || undefined}
                                       step={0.01}
                                       className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                                      placeholder={finishingCalculationBase === 'squareMeters' ? 'مثال: 28.8' : 'مثال: 125'}
                                     />
-                                    {maxFinishingQuantity !== null && maxFinishingQuantity > 0 && (
+                                    {Number(maxFinishingQuantity || 0) > 0 && (
                                       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                                         حداکثر قابل استفاده: {formatDisplayNumber(maxFinishingQuantity)} {finishingUnitLabel}
                                       </p>
@@ -7783,7 +8281,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         </div>
                       </div>
                       )}
-                      {stoneFinishings.length === 0 && (
+                      {false && stoneFinishings.length === 0 && (
                         <div className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-xs text-amber-700 dark:text-amber-200">
                           {stoneFinishingLoadState === 'forbidden'
                             ? 'دسترسی شما برای مشاهده پرداخت‌ها کافی نیست.'
@@ -7792,12 +8290,16 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       )}
 
                       {/* Part Total - Enhanced */}
-                      <div className="bg-gradient-to-r from-teal-50 to-teal-100 dark:from-teal-900/30 dark:to-teal-800/30 rounded-lg border-2 border-teal-300 dark:border-teal-700 p-4 flex items-center justify-between shadow-sm">
-                        <div className="flex items-center gap-2">
-                          <div className="w-1 h-6 bg-gradient-to-b from-teal-500 to-teal-600 rounded-full"></div>
-                          <span className="text-sm font-semibold text-teal-900 dark:text-teal-200">جمع کل این بخش</span>
-                        </div>
-                        <div className="text-xl font-bold text-teal-700 dark:text-teal-300">{formatPrice(totals.partTotal || 0)}</div>
+                      <div className="flex min-h-10 items-center justify-between border-y border-slate-200 py-2 text-sm dark:border-slate-700">
+                        <span className="font-semibold text-slate-600 dark:text-slate-300">
+                          جمع این بخش
+                        </span>
+                        <strong className="text-slate-900 dark:text-slate-100">
+                          {formatPrice(
+                            (totals.partTotal || 0) +
+                            stairOperationPreviewAmount
+                          )}
+                        </strong>
                       </div>
                     </div>
                   );
@@ -7836,11 +8338,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             const toolsTotal = sumNumericValues(((it as any).meta?.tools || []), (tool: any) => tool.totalPrice);
                             const isLayer = ((it as any).meta?.isLayer) || false;
                             const layerInfo = ((it as any).meta?.layerInfo) || null;
-                            const partTypeLabel = isLayer 
+                            const partTypeLabel = isLayer
                               ? `لایه ${it.stairPartType === 'tread' ? 'کف پله' : it.stairPartType === 'riser' ? 'خیز پله' : 'پاگرد'}`
                               : (it.stairPartType === 'tread' ? 'کف پله' : it.stairPartType === 'riser' ? 'خیز پله' : 'پاگرد');
-                            const partTypeColor = isLayer 
-                              ? 'orange' 
+                            const partTypeColor = isLayer
+                              ? 'orange'
                               : (it.stairPartType === 'tread' ? 'purple' : it.stairPartType === 'riser' ? 'blue' : 'indigo');
                             const lengthDisplay = it.lengthUnit === 'm' ? `${formatDisplayNumber(it.length)} m` : `${formatDisplayNumber(it.length)} cm`;
                             const widthDisplay = `${formatDisplayNumber(it.width)} cm`;
@@ -7855,7 +8357,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 ? [{ widthCm: leftoverWidthMeta, quantity: remainingStoneQuantityMeta }]
                                 : []);
                             const finishing = normalizeProductFinishing(it);
-                            
+
                             return (
                               <tr key={idx} className={`border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${idx % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50/50 dark:bg-gray-800/30'}`}>
                                 <td className="py-3 px-4">
@@ -7981,14 +8483,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 </div>
                 </div>
               </div>
-              <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-2 flex-shrink-0">
+              <div className="stair-v2-footer flex flex-shrink-0 items-center justify-end gap-2 border-t border-gray-200 bg-white/95 p-4 backdrop-blur-md dark:border-gray-700 dark:bg-slate-900/95">
                 <button type="button" className="px-3 py-2 rounded-md bg-gray-200 dark:bg-gray-700" onClick={() => setShowProductModal(false)}>انصراف</button>
                 <button type="button" className="min-h-11 rounded-lg border border-teal-400/60 bg-teal-500/10 px-4 py-2 text-sm font-semibold text-teal-700 transition hover:bg-teal-500/20 dark:text-teal-200" onClick={() => {
                   const [draft] = getActiveDraft();
                   // Validate required fields
                   const fieldErrors = validateDraftRequiredFields(stairSystemV2.stairActivePart, draft, stairSystemV2.layerTypes);
                   const hasErrors = Object.values(fieldErrors).some(Boolean);
-                  if (hasErrors) {
+                   if (hasErrors) {
                     stairSystemV2.setStairDraftErrors(prev => ({
                       ...prev,
                       [stairSystemV2.stairActivePart]: {
@@ -8001,20 +8503,142 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   }
                   stairSystemV2.setStairDraftErrors(prev => ({ ...prev, [stairSystemV2.stairActivePart]: {} }));
                   setErrors({});
-                  const sid = stairSystemV2.ensureStairSessionId();
-                  const totals = computeTotalsV2(stairSystemV2.stairActivePart, draft);
-                  const chargeableCuttingCost = totals.billableCuttingCost;
+                   const sid = stairSystemV2.ensureStairSessionId();
+                   const totals = computeTotalsV2(stairSystemV2.stairActivePart, draft);
+                   if (!totals.canonicalCalculation.ok) {
+                     const nextErrors = totals.canonicalCalculation.conflicts.reduce<
+                       Record<string, string>
+                     >((fieldErrors, conflict) => {
+                       const message = stairConflictMessage(
+                         conflict.code,
+                         draft.stoneProduct?.motherLengthValue
+                       );
+                       if (conflict.field === 'lengthMeters' || conflict.field === 'motherDimensions') {
+                         fieldErrors.length = message;
+                       } else if (conflict.field === 'crossDimensionMeters') {
+                         fieldErrors.width = message;
+                       } else if (conflict.field === 'baseRateToman') {
+                         fieldErrors.pricePerSquareMeter = message;
+                       } else if (conflict.field === 'quantity') {
+                         fieldErrors.quantity = message;
+                       }
+                       return fieldErrors;
+                     }, {});
+                     stairSystemV2.setStairDraftErrors(prev => ({
+                       ...prev,
+                       [stairSystemV2.stairActivePart]: {
+                         ...prev[stairSystemV2.stairActivePart],
+                         ...nextErrors
+                       }
+                     }));
+                     return;
+                   }
+                   const layerDraftsForValidation = [
+                     ...(draft.layerConfigurations || []),
+                     ...((draft.numberOfLayersPerStair || 0) > 0 ? [draft] : [])
+                   ];
+                   for (const layerDraft of layerDraftsForValidation) {
+                     const invalidLayerType =
+                       !layerDraft.layerTypeId ||
+                       !(Number(layerDraft.layerTypePrice) > 0);
+                     const invalidLayerGeometry =
+                       !layerDraft.layerWidthCm ||
+                       !hasLayerEdgeSelection(layerDraft.layerEdges);
+                     const invalidLayerSource =
+                       !layerDraft.layerSourceKind ||
+                       (
+                         layerDraft.layerSourceKind === 'contractRemainder' &&
+                         !(layerDraft.layerSelectedRemainingStoneIds?.length)
+                       ) ||
+                       (
+                         layerDraft.layerSourceKind === 'newMaterial' &&
+                         (
+                           !layerDraft.layerStoneProductId ||
+                           !(Number(layerDraft.layerPricePerSquareMeter) > 0)
+                         )
+                       );
+                     if (invalidLayerType || invalidLayerGeometry || invalidLayerSource) {
+                       stairSystemV2.setStairDraftErrors(prev => ({
+                         ...prev,
+                         [stairSystemV2.stairActivePart]: {
+                           ...prev[stairSystemV2.stairActivePart],
+                           layerType: invalidLayerType
+                             ? (!layerDraft.layerTypeId
+                               ? 'نوع لایه را انتخاب کنید'
+                               : 'نرخ قرارداد لایه را وارد کنید')
+                             : undefined,
+                           width: invalidLayerGeometry
+                             ? 'عرض و سمت‌های لایه را کامل کنید'
+                             : undefined,
+                           layerSource: invalidLayerSource
+                             ? 'منبع سنگ لایه را کامل کنید'
+                             : undefined
+                         }
+                       }));
+                       return;
+                     }
+                   }
+                   const hasInvalidTool = (draft.tools || []).some(tool =>
+                     (tool.coveredQuantity || 0) > Number(draft.quantity || 0) ||
+                     (
+                       tool.calculationBase !== 'squareMeters' &&
+                       !tool.perimeter &&
+                       !tool.front &&
+                       !tool.back &&
+                       !tool.left &&
+                       !tool.right
+                     )
+                   );
+                   if (hasInvalidTool) {
+                     document.getElementById('stair-tools-section')?.scrollIntoView({
+                       block: 'center',
+                       behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+                         ? 'auto'
+                         : 'smooth'
+                     });
+                     return;
+                   }
+                   const stairOperationPolicyInput = draft.operationPolicyInput
+                     ? createStairOperationInput(
+                         stairSystemV2.stairActivePart,
+                         draft,
+                         draft.stoneProduct?.id || draft.stoneId || 'unselected'
+                       )
+                     : undefined;
+                   let stairOperationsAmount = 0;
+                   if (stairOperationPolicyInput) {
+                     const operationCalculation = calculateProductOperations(
+                       stairOperationPolicyInput
+                     );
+                     if (!operationCalculation.ok) {
+                       document.getElementById('stair-operations-section')?.scrollIntoView({
+                         block: 'center',
+                         behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+                           ? 'auto'
+                           : 'smooth'
+                       });
+                       return;
+                     }
+                     stairOperationsAmount = Number(
+                       operationCalculation.result.totalAmountToman
+                     );
+                   }
+                   const canonicalStairResult = totals.canonicalCalculation.result;
+                   const chargeableCuttingCost = totals.billableCuttingCost;
                   const actualLengthM = getActualLengthMeters(draft);
                   const pricingLengthM = getPricingLengthMeters(draft);
                   const widthM = (draft.widthCm || 0) / 100;
                   const toolsMeters = computeToolsMetersV2(stairSystemV2.stairActivePart, draft);
                   let metaTools = (draft.tools || []).map(t => {
                     const meters = computeToolMetersForTool(stairSystemV2.stairActivePart, draft, t);
-                    return {
-                      toolId: t.toolId,
-                      name: t.name,
-                      pricePerMeter: t.pricePerMeter,
-                      edges: { front: !!t.front, left: !!t.left, right: !!t.right, back: !!t.back, perimeter: !!t.perimeter },
+                     return {
+                       selectionId: t.selectionId,
+                       toolId: t.toolId,
+                       name: t.name,
+                       pricePerMeter: t.pricePerMeter,
+                       calculationBase: t.calculationBase || 'length',
+                       coveredQuantity: t.coveredQuantity ?? draft.quantity,
+                       edges: { front: !!t.front, left: !!t.left, right: !!t.right, back: !!t.back, perimeter: !!t.perimeter },
                       computedMeters: meters,
                       totalPrice: meters * (t.pricePerMeter || 0)
                     };
@@ -8055,12 +8679,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     };
 
                     return {
-                      id: `applied_${tool.toolId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                      id: tool.selectionId || `applied_${tool.toolId}_${crypto.randomUUID()}`,
                       subServiceId: tool.toolId,
                       subService: selectedSubService || fallbackSubService,
                       meter: meters,
                       cost: meters * (tool.pricePerMeter || 0),
-                      calculationBase: selectedSubService?.calculationBase || 'length',
+                      calculationBase: tool.calculationBase || selectedSubService?.calculationBase || 'length',
                       edges: {
                         front: !!tool.front,
                         left: !!tool.left,
@@ -8070,12 +8694,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       }
                     };
                   });
-                  
+
                   // 🎯 Use original width for pricing (like long stone products)
                   const originalWidthCm = stoneProduct.widthValue || 0;
                   const userWidthCm = draft.widthCm || 0;
                   const baseStoneQuantity = totals.baseStoneQuantity;
-                  
+
                   const defaultMandatoryForPart = stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
                   const isDraftMandatory = draft.useMandatory ?? defaultMandatoryForPart;
                   const mandatoryPercentageValue = draft.mandatoryPercentage ?? 20;
@@ -8083,11 +8707,16 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     ? totals.baseMaterialPrice * (mandatoryPercentageValue / 100)
                     : 0;
                   const basePrice = totals.baseMaterialPrice + mandatoryAmount;
-                  const totalPrice = basePrice + toolsTotal + finishingCost + chargeableCuttingCost;
-                  
+                   const totalPrice =
+                     basePrice +
+                     toolsTotal +
+                     finishingCost +
+                     stairOperationsAmount +
+                     chargeableCuttingCost;
+
                   const hasWidthCut = totals.cuttingMetersLongitudinal > 0;
                   const hasLengthCut = totals.cuttingMetersCross > 0;
-                  
+
                   // Calculate remaining stone if product was cut
                   let remainingStones: RemainingStone[] = [];
                   let isCut = false;
@@ -8096,7 +8725,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   let cuttingCostPerMeter = totals.cuttingCostPerMeter;
                   let cutDetails: StoneCut[] = [];
                   const cuttingBreakdown: CuttingBreakdownEntry[] = [];
-                  
+
                   if (hasWidthCut) {
                     isCut = true;
                     cutType = 'longitudinal';
@@ -8117,7 +8746,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           };
                         });
                     }
-                    
+
                     const cutId = `cut_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                     const cutDetail: StoneCut = {
                       id: cutId,
@@ -8137,8 +8766,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       cost: totals.cuttingCostLongitudinal
                     });
                   }
-                  
-                  if (hasLengthCut) {
+
+                   if (hasLengthCut) {
                     isCut = true;
                     if (!hasWidthCut) {
                       cutType = 'cross';
@@ -8157,7 +8786,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         quantity: baseStoneQuantity
                       };
                       remainingStones = [...remainingStones, crossRemaining];
-                      
+
                       const crossCutId = `cut_cross_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                       cutDetails = [
                         ...cutDetails,
@@ -8179,25 +8808,68 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       rate: totals.cuttingCostPerMeterCross || totals.cuttingCostPerMeter,
                       cost: totals.cuttingCostCross
                     });
-                  }
-                  
-                  const storedLengthValue = convertMetersToUnit(actualLengthM, draft.lengthUnit || 'm');
-                  const product: ContractProduct = {
-                    rowId: isEditMode && editingProductIndex !== null
-                      ? resolveEditedContractProductRowId(wizardData.products, editingProductIndex)
-                      : createContractProductRowId(),
+                   }
+
+                   remainingStones = canonicalStairResult.packingPlan.remainders.map(
+                     (remainder) => ({
+                       id: remainder.remainingStoneId,
+                       width: Number(remainder.widthMeters) * 100,
+                       length: Number(remainder.lengthMeters),
+                       squareMeters:
+                         Number(remainder.widthMeters) *
+                         Number(remainder.lengthMeters),
+                       isAvailable: true,
+                       sourceCutId: `${remainder.sourceBatchId}:${remainder.sourceOrdinal}`,
+                       quantity: 1,
+                       position: {
+                         startWidth: Number(remainder.xMeters) * 100,
+                         startLength: Number(remainder.yMeters)
+                       }
+                     })
+                   );
+
+                   const storedLengthValue = convertMetersToUnit(actualLengthM, draft.lengthUnit || 'm');
+                   const nextProductRowId = isEditMode && editingProductIndex !== null
+                     ? resolveEditedContractProductRowId(wizardData.products, editingProductIndex)
+                     : createContractProductRowId();
+                   const stairPartPolicyInput = {
+                     ...createCanonicalStairDraftInput(
+                       stairSystemV2.stairActivePart,
+                       draft,
+                       getCuttingTypePricePerMeter
+                     ),
+                     stairSystemId: parseStableIdentity('stair-system', sid),
+                     sourceBatchId: parseStableIdentity(
+                       'source-batch',
+                       `stair:${nextProductRowId}`
+                     )
+                   };
+                   const product: ContractProduct = {
+                    rowId: nextProductRowId,
                     productId: draft.stoneId!,
                     product: stoneProduct,
                     productType: 'stair',
+                    stairPartPolicyInput,
+                    operationPolicyInput: stairOperationPolicyInput
+                      ? {
+                          ...stairOperationPolicyInput,
+                          productRowId: parseStableIdentity(
+                            'product-row',
+                            nextProductRowId
+                          )
+                        }
+                      : undefined,
                     stairSystemId: sid,
                     stairPartType: stairSystemV2.stairActivePart,
                     stoneCode: stoneProduct.code,
-                    stoneName: generateCompactProductName(stoneProduct) || draft.stoneLabel || stoneProduct.namePersian || stoneProduct.name || '',
+                    stoneName: draft.contractualTitle || generateCompactProductName(stoneProduct) || draft.stoneLabel || stoneProduct.namePersian || stoneProduct.name || '',
                     diameterOrWidth: draft.thicknessCm || stoneProduct.thicknessValue || 0, // قطر = ضخامت (thickness)
                     length: storedLengthValue,
                     lengthUnit: draft.lengthUnit || 'cm',
-                    width: draft.widthCm!,
-                    widthUnit: 'cm',
+                    width: (draft.widthUnit || 'cm') === 'm'
+                      ? draft.widthCm! / 100
+                      : draft.widthCm!,
+                    widthUnit: draft.widthUnit || 'cm',
                     quantity: draft.quantity!,
                     squareMeters: totals.sqm,
                     pricePerSquareMeter: draft.pricePerSquareMeter!,
@@ -8217,7 +8889,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     cuttingCost: cuttingCost,
                     physicalCuttingCost: totals.cuttingCost,
                     cuttingCostPerMeter: cuttingCostPerMeter,
-                    calibrationCutEnabled: draft.calibrationCutEnabled ?? true,
+                    calibrationCutEnabled: canonicalStairResult.calibrationEnabled,
                     cutDescription: isCut
                       ? hasWidthCut && hasLengthCut
                         ? `برش طولی (${originalWidthCm}cm → ${userWidthCm}cm) و برش عرضی (${formatDisplayNumber(pricingLengthM)}m → ${formatDisplayNumber(actualLengthM)}m)`
@@ -8242,10 +8914,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       (applied) => applied.meter
                     ),
                     cuttingBreakdown: cuttingBreakdown.length ? cuttingBreakdown : undefined,
-                    standardLengthValue: stairSystemV2.stairActivePart === 'riser' ? null : (draft.standardLengthValue ?? null),
-                    standardLengthUnit: stairSystemV2.stairActivePart === 'riser'
-                      ? (draft.lengthUnit || 'm')
-                      : (draft.standardLengthUnit || draft.lengthUnit || 'm'),
+                    standardLengthValue:
+                      draft.standardLengthValue &&
+                      draft.standardLengthValue > 0
+                        ? draft.standardLengthValue
+                        : null,
+                    standardLengthUnit:
+                      draft.standardLengthUnit || draft.lengthUnit || 'm',
                     actualLengthMeters: actualLengthM || null,
                     finishingId: draft.finishingEnabled ? draft.finishingId || null : null,
                     finishingCode: draft.finishingEnabled ? (selectedFinishing?.code || null) : null,
@@ -8261,22 +8936,31 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       meters: { lengthM: actualLengthM, widthM, toolsMeters },
                       tools: metaTools,
                       stair: {
+                        motherLengthMeters: canonicalStairResult.motherLengthMeters,
+                        motherLengthMode: canonicalStairResult.motherLengthMode,
+                        motherLengthDisplayUnit:
+                          canonicalStairResult.motherLengthDisplayUnit,
+                        motherWidthMeters: canonicalStairResult.motherWidthMeters,
+                        consumedMotherAreaSquareMeters:
+                          canonicalStairResult.consumedMotherAreaSquareMeters,
+                        paidRemainderAreaSquareMeters:
+                          canonicalStairResult.paidRemainderAreaSquareMeters,
+                        calculationPolicyVersion: canonicalStairResult.calculationPolicyVersion,
+                        packingPolicyVersion: canonicalStairResult.packingPlan.policyVersion,
+                        inputHash: canonicalStairResult.inputHash,
+                        resultHash: canonicalStairResult.resultHash,
                         baseStoneQuantity: totals.baseStoneQuantity,
                         piecesPerStone: totals.piecesPerStone,
                         leftoverWidthCmPerStone: totals.leftoverWidthCm,
                         remainingStoneQuantity: totals.remainingStoneQuantity,
                         remainingStoneGroups: totals.remainingStoneGroups,
                         pricingSquareMeters: totals.pricingSquareMeters,
-                        calibrationCutEnabled: draft.calibrationCutEnabled ?? true,
+                        calibrationCutEnabled: canonicalStairResult.calibrationEnabled,
+                        calibrationSelection: draft.calibrationSelection || 'automatic',
                         cuttingMetersLongitudinal: totals.cuttingMetersLongitudinal,
                         cuttingMetersLongitudinalProduction: totals.cuttingMetersLongitudinalProduction,
                         cuttingMetersLongitudinalCalibration: totals.cuttingMetersLongitudinalCalibration,
                         cuttingMetersCross: totals.cuttingMetersCross,
-                        standardLength: stairSystemV2.stairActivePart !== 'riser' && draft.standardLengthValue ? {
-                          value: draft.standardLengthValue,
-                          unit: draft.standardLengthUnit || draft.lengthUnit || 'm',
-                          meters: pricingLengthM
-                        } : undefined,
                       },
                       finishing: draft.finishingEnabled && finishingCost > 0 ? {
                         id: draft.finishingId,
@@ -8295,17 +8979,90 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   // ============================================================================
                   // 🎯 REFACTORED LAYER HANDLING - Single state update for all changes
                   // ============================================================================
-                  
+
                   // Check if layers are defined with edges selected
                   const hasLayerEdges = draft.layerEdges && (
-                    draft.layerEdges.front || 
-                    draft.layerEdges.left || 
-                    draft.layerEdges.right || 
-                    draft.layerEdges.back || 
+                    draft.layerEdges.front ||
+                    draft.layerEdges.left ||
+                    draft.layerEdges.right ||
+                    draft.layerEdges.back ||
                     draft.layerEdges.perimeter
                   );
-                  
+
+                  const layerDraftsForPreflight = [
+                    ...(draft.layerConfigurations || []),
+                    ...((draft.numberOfLayersPerStair || 0) > 0 ? [draft] : [])
+                  ];
+                  if (layerDraftsForPreflight.length > 0) {
+                    const parentPreflightInventory =
+                      getAvailableRemainingStoneInventory(product);
+                    const availablePreflightStones =
+                      collectAvailableRemainingStones(
+                        [
+                          ...wizardData.products,
+                          ...stairSystemV2.stairSessionItems
+                        ],
+                        parentPreflightInventory
+                      );
+                    let canonicalPreflightInventory =
+                      toCanonicalLayerInventory({
+                        stones: availablePreflightStones,
+                        ownerProductRowId: product.rowId!,
+                        catalogProductId: product.productId
+                      });
+
+                    for (
+                      let layerCreationOrder = 0;
+                      layerCreationOrder < layerDraftsForPreflight.length;
+                      layerCreationOrder += 1
+                    ) {
+                      const layerDraft = {
+                        ...layerDraftsForPreflight[layerCreationOrder],
+                        layerConfigurations: [],
+                        stoneId: draft.stoneId,
+                        stoneLabel: draft.stoneLabel,
+                        stoneProduct: draft.stoneProduct,
+                        thicknessCm: draft.thicknessCm,
+                        lengthValue: draft.lengthValue,
+                        lengthUnit: draft.lengthUnit,
+                        widthCm: draft.widthCm,
+                        widthUnit: draft.widthUnit,
+                        quantity: draft.quantity,
+                        squareMeters: draft.squareMeters
+                      };
+                      const layerUnit =
+                        stairSystemV2.layerTypes.find(
+                          option => option.id === layerDraft.layerTypeId
+                        )?.calculationUnit || 'set';
+                      const preflight = calculateCanonicalLayerDraft({
+                        part: stairSystemV2.stairActivePart,
+                        draft: layerDraft,
+                        parentProductRowId: product.rowId!,
+                        creationOrder: layerCreationOrder,
+                        availableInventory: canonicalPreflightInventory,
+                        parentRemainingStoneIds:
+                          parentPreflightInventory.map(stone => stone.id),
+                        layerUnit,
+                        getCuttingTypePricePerMeter
+                      });
+                      if (!preflight.ok) {
+                        stairSystemV2.setStairDraftErrors(previous => ({
+                          ...previous,
+                          [stairSystemV2.stairActivePart]: {
+                            ...previous[stairSystemV2.stairActivePart],
+                            layerSource: formatCanonicalLayerConflict(
+                              preflight.conflicts[0]
+                            )
+                          }
+                        }));
+                        return;
+                      }
+                      canonicalPreflightInventory = [...preflight.inventory];
+                    }
+                  }
+
                   // Prepare all updates in a single transaction
+                  let stairSessionCommitSucceeded = true;
                   stairSystemV2.setStairSessionItems(prev => {
                     const shouldReplaceActivePartInSession = isEditMode && editingProductIndex !== null;
                     const baseItems = shouldReplaceActivePartInSession
@@ -8322,22 +9079,79 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     // Start with adding the main stair part product
                     const updatedItems = [...baseItems, product];
                     const mainStairPartIndex = updatedItems.length - 1;
-                    
-                    // Process layers if configured
-                    if (draft.numberOfLayersPerStair && draft.numberOfLayersPerStair > 0 && 
-                        draft.layerWidthCm && hasLayerEdges && layerManagement.getLayerEffectivePricePerSquareMeter(draft) && 
+
+                    // Process every independent layer configuration in stable
+                    // creation order. A currently edited configuration is last.
+                    const parentDraft = draft;
+                    const layerDrafts = [
+                      ...(draft.layerConfigurations || []),
+                      ...((draft.numberOfLayersPerStair || 0) > 0 ? [draft] : [])
+                    ];
+                    const parentLayerInventory =
+                      getAvailableRemainingStoneInventory(product);
+                    const parentLayerLineage = new Set(
+                      parentLayerInventory.flatMap(remainingStoneLineageKeys)
+                    );
+                    let layerReplayInventory = collectAvailableRemainingStones(
+                      [...wizardData.products, ...baseItems],
+                      parentLayerInventory
+                    );
+                    const initialLayerReplayInventory = [...layerReplayInventory];
+                    const layerReplayProductPool = [
+                      ...wizardData.products,
+                      ...baseItems,
+                      product
+                    ];
+                    let canonicalLayerReplayInventory =
+                      layerReplayInventory.flatMap((stone) => {
+                        const sourceProduct = layerReplayProductPool.find(
+                          candidate =>
+                            (candidate.remainingStoneSourceInventory || [])
+                              .some(item => item.id === stone.id) ||
+                            (candidate.remainingStones || [])
+                              .some(item => item.id === stone.id)
+                        ) || product;
+                        return toCanonicalLayerInventory({
+                          stones: [stone],
+                          ownerProductRowId:
+                            sourceProduct.rowId || product.rowId!,
+                          catalogProductId:
+                            sourceProduct.productId || product.productId
+                        });
+                      });
+                    let layerProcessingFailed = false;
+                    for (
+                      let layerCreationOrder = 0;
+                      layerCreationOrder < layerDrafts.length;
+                      layerCreationOrder += 1
+                    ) {
+                      const layerDraft = layerDrafts[layerCreationOrder];
+                      const draft: StairPartDraftV2 = {
+                        ...layerDraft,
+                        layerConfigurations: [],
+                        stoneId: parentDraft.stoneId,
+                        stoneLabel: parentDraft.stoneLabel,
+                        stoneProduct: parentDraft.stoneProduct,
+                        thicknessCm: parentDraft.thicknessCm,
+                        lengthValue: parentDraft.lengthValue,
+                        lengthUnit: parentDraft.lengthUnit,
+                        widthCm: parentDraft.widthCm,
+                        widthUnit: parentDraft.widthUnit,
+                        quantity: parentDraft.quantity,
+                        squareMeters: parentDraft.squareMeters
+                      };
+                      const hasLayerEdges = hasLayerEdgeSelection(draft.layerEdges);
+                    if (draft.numberOfLayersPerStair && draft.numberOfLayersPerStair > 0 &&
+                        draft.layerWidthCm && hasLayerEdges && layerManagement.getLayerEffectivePricePerSquareMeter(draft) &&
                         draft.quantity) {
-                      
-                      // 🎯 STEP 1: Find existing layer product inside this session only.
-                      // Stair rows can repeat independently, so matching contract rows must not merge across rows.
-                      const existingLayerInSession = findExistingLayerProduct(
-                        updatedItems,
-                        draft,
-                        stairSystemV2.stairActivePart,
-                        mainStairPartIndex
-                      );
-                      const existingLayerProduct = existingLayerInSession;
-                      
+
+                      // Every explicit layer configuration remains independent.
+                      // Similar names, dimensions, sides, or rates never authorize
+                      // silent merging of commercial or allocation snapshots.
+                      const existingLayerProduct = (
+                        (): ContractProduct | null => null
+                      )();
+
                       // 🎯 STEP 2: Calculate layer metrics
                       const totalLayerSqm = layerManagement.computeLayerSqmV2(stairSystemV2.stairActivePart, draft);
                       const layerWidthCm = draft.layerWidthCm || 0;
@@ -8348,25 +9162,48 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       const layerLengthM = layerManagement.getMaxLayerLengthM(stairSystemV2.stairActivePart, draft) || mainStairLengthM;
                       const layerEdgeDemands = getLayerEdgeDemands(stairSystemV2.stairActivePart, draft);
                       const layerStoneProduct = layerManagement.getLayerStoneProductForDraft(draft, stoneProduct);
-                      const usingAlternateLayerStone = !!(draft.layerUseDifferentStone && draft.layerStoneProduct);
+                      const usingAlternateLayerStone =
+                        draft.layerSourceKind === 'newMaterial' &&
+                        !!draft.layerStoneProduct;
                       const baseLayerPricePerSqm = layerManagement.getLayerBasePricePerSquareMeter(draft);
                       const effectiveLayerPricePerSqm = layerManagement.getLayerEffectivePricePerSquareMeter(draft);
 
                       // Get cutting cost per meter for layer calculations
                       const layerCuttingCostPerMeter =
                         (layerStoneProduct as any)?.cuttingCostPerMeter ??
-                        getCuttingTypePricePerMeter('LONG') ??
-                        0;
-                      
+                        getCuttingTypePricePerMeter('LONG');
+
                       // 🎯 STEP 3: Collect all available remaining stones
                       // Automatic allocation is intentionally limited to this exact
                       // parent row. Compatible sibling remainders require an explicit
                       // user choice; otherwise two simultaneous edits could consume
                       // the same remainder.
-                      const allAvailableRemainingStones = usingAlternateLayerStone
-                        ? []
-                        : getAvailableRemainingStoneInventory(product);
-                      
+                      const allAvailableRemainingStones = (() => {
+                        if (draft.layerSourceKind === 'newMaterial') return [];
+                        if (draft.layerSourceKind === 'parentMaterial') {
+                          return layerReplayInventory.filter(stone =>
+                            remainingStoneLineageKeys(stone).some(key =>
+                              parentLayerLineage.has(key)
+                            )
+                          );
+                        }
+                        if (draft.layerSourceKind === 'contractRemainder') {
+                          const selectedRemainders = initialLayerReplayInventory.filter(
+                            stone => (draft.layerSelectedRemainingStoneIds || [])
+                              .includes(stone.id)
+                          );
+                          const selectedLineage = new Set(
+                            selectedRemainders.flatMap(remainingStoneLineageKeys)
+                          );
+                          return layerReplayInventory.filter(stone =>
+                            remainingStoneLineageKeys(stone).some(key =>
+                              selectedLineage.has(key)
+                            )
+                          );
+                        }
+                        return [];
+                      })();
+
                       // 🎯 STEP 4: Calculate layer metrics (remaining stone usage, cutting costs, etc.)
                       const totalLayerDemand = layerEdgeDemands.length
                         ? layerEdgeDemands.reduce((sum, demand) => sum + demand.layersNeeded, 0)
@@ -8404,43 +9241,216 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             layerWidthCm,
                             layerLengthM,
                             availableRemainingStones: allAvailableRemainingStones,
-                            cuttingCostPerMeter: layerCuttingCostPerMeter,
+                            cuttingCostPerMeter: layerCuttingCostPerMeter ?? 0,
                             edgeDemands: layerEdgeDemands,
                             sawKerfEnabled: !!draft.sawKerfEnabled,
                             sawKerfCm: draft.sawKerfCm || SAW_KERF_CM
                           });
 
-                      if (!usingAlternateLayerStone && layerMetrics.layersFromNewStones > 0 && !draft.layerShortageSource) {
-                        setErrors({ products: 'برای کمبود سنگ لایه، منبع تامین را انتخاب کنید.' });
-                        return baseItems;
+                      if (false &&
+                        draft.layerSourceKind !== 'newMaterial' &&
+                        layerMetrics.layersFromNewStones > 0
+                      ) {
+                        stairSystemV2.setStairDraftErrors(prev => ({
+                          ...prev,
+                          [stairSystemV2.stairActivePart]: {
+                            ...prev[stairSystemV2.stairActivePart],
+                            layerSource: 'منبع انتخاب‌شده برای لایه کافی نیست'
+                          }
+                        }));
+                        layerProcessingFailed = true;
+                        break;
                       }
 
-                      if (draft.layerShortageSource === 'manualWarehouse') {
-                        if (!draft.layerManualSourceWidthCm || !draft.layerManualSourceLengthM || !draft.layerManualSourceQuantity) {
-                          setErrors({ products: 'برای تامین دستی لایه از انبار، عرض، طول و تعداد سنگ موجود را وارد کنید.' });
-                          return baseItems;
-                        }
-                      }
-                      
                       // 🎯 STEP 5: Calculate pricing
                       const layerSqmPerStair = totalLayerSqm / (draft.quantity * draft.numberOfLayersPerStair);
                       const layerTypeUnitPrice = draft.layerTypePrice || 0;
-                      
-                      // 🎯 FIX: Calculate layer type cost based on total length per stair × number of stairs × layer type price per meter
-                      // مجموع طوله های لایه برای یک پله (چپ + راست + جلو) × تعداد پله ها × هزینه هر نوع لایه
                       const totalLayerLengthPerStairM = layerManagement.getTotalLayerLengthPerStairM(stairSystemV2.stairActivePart, draft);
                       const totalLayerLengthM = totalLayerLengthPerStairM * draft.quantity;
-                      const layerTypeCost = totalLayerLengthM * layerTypeUnitPrice;
-                      
-                      const manualWarehouse = draft.layerShortageSource === 'manualWarehouse';
-                      const sourceWidthCm = manualWarehouse
-                        ? (draft.layerManualSourceWidthCm || 0)
-                        : (layerStoneProduct?.widthValue || originalWidthCm);
+                      const layerCalculationUnit = stairSystemV2.layerTypes.find(
+                        option => option.id === draft.layerTypeId
+                      )?.calculationUnit || 'set';
+                      const canonicalInventoryBefore =
+                        canonicalLayerReplayInventory;
+                      const canonicalLayerParameters = {
+                          part: stairSystemV2.stairActivePart,
+                          draft,
+                          parentProductRowId: product.rowId!,
+                          creationOrder: layerCreationOrder,
+                          availableInventory: canonicalLayerReplayInventory,
+                          parentRemainingStoneIds:
+                            parentLayerInventory.map(stone => stone.id),
+                          layerUnit: layerCalculationUnit,
+                          getCuttingTypePricePerMeter
+                        };
+                      const canonicalLayerRequest =
+                        createCanonicalLayerCalculationRequest(
+                          canonicalLayerParameters
+                        );
+                      const canonicalLayerCalculation =
+                        calculateCanonicalLayerDraft(
+                          canonicalLayerParameters
+                        );
+                      if (!canonicalLayerCalculation.ok) {
+                        stairSystemV2.setStairDraftErrors(prev => ({
+                          ...prev,
+                          [stairSystemV2.stairActivePart]: {
+                            ...prev[stairSystemV2.stairActivePart],
+                            layerSource:
+                              formatCanonicalLayerConflict(
+                                canonicalLayerCalculation.conflicts[0]
+                              )
+                          }
+                        }));
+                        layerProcessingFailed = true;
+                        break;
+                      }
+                      const canonicalLayerResult =
+                        canonicalLayerCalculation.result;
+                      const authoritativeLayerSqm =
+                        canonicalLayerResult.physicalStrips.reduce(
+                          (sum, strip) =>
+                            sum +
+                            Number(strip.lengthMeters) *
+                              Number(strip.widthMeters) *
+                              strip.quantity,
+                          0
+                        );
+                      canonicalLayerReplayInventory =
+                        [...canonicalLayerCalculation.inventory];
+                      const canonicalInventoryAfterById = new Map(
+                        canonicalLayerReplayInventory.map(stone => [
+                          stone.remainingStoneId,
+                          stone
+                        ])
+                      );
+                      const canonicalUsedRemainingStones =
+                        canonicalInventoryBefore.flatMap(stock => {
+                          const afterQuantity =
+                            canonicalInventoryAfterById.get(
+                              stock.remainingStoneId
+                            )?.quantity || 0;
+                          const consumedQuantity =
+                            stock.quantity - afterQuantity;
+                          return consumedQuantity > 0
+                            ? [{
+                                id: stock.remainingStoneId,
+                                width:
+                                  Number(stock.widthMeters) * 100,
+                                length:
+                                  Number(stock.lengthMeters),
+                                squareMeters:
+                                  Number(stock.widthMeters) *
+                                  Number(stock.lengthMeters) *
+                                  consumedQuantity,
+                                isAvailable: false,
+                                sourceCutId: stock.sourceBatchId,
+                                quantity: consumedQuantity
+                              } satisfies RemainingStone]
+                            : [];
+                        });
+                      const layerPricingQuantity =
+                        Number(canonicalLayerResult.layerPricingQuantity);
+                      const layerTypeCost =
+                        Number(canonicalLayerResult.layerAmountToman);
+                      const selectedLayerSides = (
+                        ['front', 'back', 'left', 'right'] as const
+                      ).filter(side =>
+                        draft.layerEdges?.perimeter ||
+                        Boolean(draft.layerEdges?.[side])
+                      );
+                      const layerSideOperationCalculations = selectedLayerSides
+                        .filter(side => Boolean(draft.layerSideOperations?.[side]))
+                        .map(side => ({
+                          side,
+                          input: createLayerSideOperationInput(
+                            stairSystemV2.stairActivePart,
+                            draft,
+                            side,
+                            draft.stoneProduct?.id || draft.stoneId || 'unselected'
+                          )
+                        }))
+                        .map(entry => ({
+                          ...entry,
+                          calculation: calculateProductOperations(entry.input)
+                        }));
+                      const invalidLayerOperation =
+                        layerSideOperationCalculations.find(entry =>
+                          !entry.calculation.ok
+                        );
+                      if (invalidLayerOperation) {
+                        stairSystemV2.setStairDraftErrors(prev => ({
+                          ...prev,
+                          [stairSystemV2.stairActivePart]: {
+                            ...prev[stairSystemV2.stairActivePart],
+                            layerSource: 'عملیات لایه نیاز به اصلاح دارد'
+                          }
+                        }));
+                        layerProcessingFailed = true;
+                        break;
+                      }
+                      const layerOperationsAmount =
+                        Number(canonicalLayerResult.operationsAmountToman);
+                      const layerAppliedSubServices: AppliedSubService[] =
+                        layerSideOperationCalculations.flatMap(entry =>
+                          entry.calculation.ok
+                              ? entry.calculation.result.tools.map(tool => ({
+                                id: tool.toolSelectionId,
+                                subServiceId: tool.catalogItemId,
+                                subService: subServices.find(service =>
+                                  service.id === tool.catalogItemId
+                                ) || ({
+                                  id: tool.catalogItemId,
+                                  name: tool.name,
+                                  namePersian: tool.name,
+                                  code: tool.catalogItemId,
+                                  pricePerMeter: Number(tool.rateToman),
+                                  calculationBase: tool.unit === 'meter'
+                                    ? 'length'
+                                    : 'squareMeters'
+                                } as SubService),
+                                meter: Number(tool.finalQuantity),
+                                cost: Number(tool.amountToman),
+                                calculationBase: tool.unit === 'meter'
+                                  ? 'length' as const
+                                  : 'squareMeters' as const,
+                                edges: Object.fromEntries(
+                                  (tool.edges || []).map(edge => [edge, true])
+                                ) as AppliedSubService['edges']
+                              }))
+                            : []
+                        );
+                      const layerFinishings = layerSideOperationCalculations.flatMap(
+                        entry => entry.calculation.ok
+                          ? entry.calculation.result.finishings.map(finishing => ({
+                              selectionId: finishing.finishingSelectionId,
+                              finishingId: finishing.catalogItemId,
+                              name: finishing.name,
+                              calculationBase: finishing.unit === 'meter'
+                                ? 'length' as const
+                                : 'squareMeters' as const,
+                              unitPrice: Number(finishing.rateToman),
+                              automaticQuantity: Number(
+                                finishing.automaticQuantity
+                              ),
+                              quantity: Number(finishing.finalQuantity),
+                              quantityMode: finishing.quantityOverride
+                                ? 'manual' as const
+                                : 'auto' as const,
+                              overrideStatus: 'current' as const,
+                              cost: Number(finishing.amountToman)
+                            }))
+                          : []
+                      );
+
+                      const sourceWidthCm =
+                        layerStoneProduct?.widthValue || originalWidthCm;
                       // A newly charged source uses the catalog/standard pricing
                       // length. Parent remainders already carry their exact length.
-                      const sourceLengthM = manualWarehouse
-                        ? (draft.layerManualSourceLengthM || 0)
-                        : (getPricingLengthMeters(draft) || mainStairLengthM);
+                      const sourceLengthM =
+                        Number(layerStoneProduct?.motherLengthValue || 0) ||
+                        getPricingLengthMeters(draft) ||
+                        mainStairLengthM;
                       const inheritedSawKerfEnabled = !!draft.sawKerfEnabled;
                       const inheritedSawKerfCm = inheritedSawKerfEnabled
                         ? (draft.sawKerfCm || SAW_KERF_CM)
@@ -8449,17 +9459,19 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         edge: LayerEdgeDemand['edge'];
                         lengthM: number;
                         quantity: number;
-                      }> = (layerMetrics.unfulfilledDemands && layerMetrics.unfulfilledDemands.length)
+                      }> = draft.layerSourceKind === 'newMaterial' &&
+                        layerMetrics.unfulfilledDemands &&
+                        layerMetrics.unfulfilledDemands.length
                         ? layerMetrics.unfulfilledDemands as Array<{
                             edge: LayerEdgeDemand['edge'];
                             lengthM: number;
                             quantity: number;
                           }>
-                        : [{
+                        : draft.layerSourceKind === 'newMaterial' ? [{
                             edge: 'front' as LayerEdgeDemand['edge'],
                             lengthM: layerLengthM,
                             quantity: layerMetrics.layersFromNewStones
-                          }];
+                          }] : [];
                       const layerSourcePlan = calculateLayerSourcePlan({
                         demands: shortageDemands,
                         sourceWidthCm,
@@ -8474,34 +9486,60 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         layerSourcePlan.physicalPieceQuantity !== shortagePieceQuantity
                       )) {
                         setErrors({ products: 'ابعاد سنگ منبع برای تولید لایه کافی نیست.' });
-                        return baseItems;
-                      }
-
-                      if (manualWarehouse && (draft.layerManualSourceQuantity || 0) < layerSourcePlan.sourceStoneQuantity) {
-                        setErrors({ products: `تعداد سنگ انبار کافی نیست؛ حداقل ${layerSourcePlan.sourceStoneQuantity} قطعه لازم است.` });
-                        return baseItems;
+                        layerProcessingFailed = true;
+                        break;
                       }
 
                       const longitudinalLayerRate =
                         (layerStoneProduct as any)?.cuttingCostPerMeter ??
-                        getCuttingTypePricePerMeter('LONG') ??
-                        0;
+                        getCuttingTypePricePerMeter('LONG');
                       const crossLayerRate =
                         (layerStoneProduct as any)?.crossCuttingCostPerMeter ??
-                        getCuttingTypePricePerMeter('CROSS') ??
-                        longitudinalLayerRate;
-                      const totalLongitudinalLayerMeters = layerSourcePlan.longitudinalCuttingMeters +
-                        (layerMetrics.longitudinalCuttingMeters || 0);
-                      const totalCrossLayerMeters = layerSourcePlan.crossCuttingMeters +
-                        (layerMetrics.crossCuttingMeters || 0);
-                      const longitudinalLayerCost = totalLongitudinalLayerMeters * longitudinalLayerRate;
-                      const crossLayerCost = totalCrossLayerMeters * crossLayerRate;
+                        getCuttingTypePricePerMeter('CROSS');
+                      const totalLongitudinalLayerMeters =
+                        Number(
+                          canonicalLayerResult.packingPlan
+                            .longitudinalCutMeters
+                        ) +
+                        Number(
+                          canonicalLayerResult.packingPlan.calibrationMeters
+                        );
+                      const totalCrossLayerMeters =
+                        Number(
+                          canonicalLayerResult.packingPlan.crossCutMeters
+                        );
+                      if (
+                        (totalLongitudinalLayerMeters > 0 &&
+                          longitudinalLayerRate === null) ||
+                        (totalCrossLayerMeters > 0 && crossLayerRate === null)
+                      ) {
+                        stairSystemV2.setStairDraftErrors(prev => ({
+                          ...prev,
+                          [stairSystemV2.stairActivePart]: {
+                            ...prev[stairSystemV2.stairActivePart],
+                            layerSource: totalLongitudinalLayerMeters > 0 &&
+                              longitudinalLayerRate === null
+                              ? 'نرخ برش طولی در موجودی ثبت نشده است'
+                              : 'نرخ برش عرضی در موجودی ثبت نشده است'
+                          }
+                        }));
+                        layerProcessingFailed = true;
+                        break;
+                      }
+                      const safeLongitudinalLayerRate =
+                        longitudinalLayerRate ?? 0;
+                      const safeCrossLayerRate = crossLayerRate ?? 0;
+                      const longitudinalLayerCost =
+                        totalLongitudinalLayerMeters * safeLongitudinalLayerRate;
+                      const crossLayerCost =
+                        totalCrossLayerMeters * safeCrossLayerRate;
                       const layerMandatoryCuttingPolicy = usingAlternateLayerStone
                         ? ((draft.layerUseMandatory ?? true) && (draft.layerMandatoryPercentage ?? 0) > 0)
                         : (isDraftMandatory && mandatoryPercentageValue > 0);
-                      const chargeableLayerCuttingCost = longitudinalLayerCost +
-                        (layerMandatoryCuttingPolicy ? 0 : crossLayerCost);
-                      const physicalLayerCuttingCost = longitudinalLayerCost + crossLayerCost;
+                      const chargeableLayerCuttingCost =
+                        Number(canonicalLayerResult.cuttingAmountToman);
+                      const physicalLayerCuttingCost =
+                        Number(canonicalLayerResult.cuttingAmountToman);
                       const layerCutDetails: StoneCut[] = [
                         {
                           id: `layer-long-${product.rowId}`,
@@ -8509,14 +9547,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           orientation: 'longitudinal',
                           label: 'برش طولی لایه',
                           meters: totalLongitudinalLayerMeters,
-                          rate: longitudinalLayerRate,
+                          rate: safeLongitudinalLayerRate,
                           cost: longitudinalLayerCost,
                           originalWidth: sourceWidthCm,
                           cutWidth: layerWidthCm,
                           remainingWidth: Math.max(0, sourceWidthCm - layerWidthCm),
                           length: sourceLengthM * 100,
                           cuttingCost: longitudinalLayerCost,
-                          cuttingCostPerMeter: longitudinalLayerRate
+                          cuttingCostPerMeter: safeLongitudinalLayerRate
                         },
                         {
                           id: `layer-cross-${product.rowId}`,
@@ -8524,36 +9562,41 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           orientation: 'cross',
                           label: 'برش عرضی لایه',
                           meters: totalCrossLayerMeters,
-                          rate: crossLayerRate,
+                          rate: safeCrossLayerRate,
                           cost: crossLayerCost,
                           originalWidth: sourceWidthCm,
                           cutWidth: layerWidthCm,
                           remainingWidth: Math.max(0, sourceWidthCm - layerWidthCm),
                           length: sourceLengthM * 100,
                           cuttingCost: crossLayerCost,
-                          cuttingCostPerMeter: crossLayerRate
+                          cuttingCostPerMeter: safeCrossLayerRate
                         }
                       ].filter(detail => (detail.meters || 0) > 0) as StoneCut[];
-                      const stoneAreaUsedSqm = layerSourcePlan.sourceAreaSqm;
+                      const stoneAreaUsedSqm = Number(
+                        canonicalLayerResult.materialPricingLine?.quantity || 0
+                      );
                       const pricingStoneAreaSqm = stoneAreaUsedSqm;
                       // 🎯 FIX: Layer material price should be based on stone area used, NOT layer square meters
                       // 🎯 NOTE: effectiveLayerPricePerSqm already includes mandatory pricing if applicable
                       // Example: stoneAreaUsedSqm (0.976 m²) × pricePerSqm (700,000) = 683,200 تومان
-                      const layerMaterialPrice = pricingStoneAreaSqm * effectiveLayerPricePerSqm;
+                      const layerMaterialPrice =
+                        Number(canonicalLayerResult.materialAmountToman);
                       // 🎯 FIX: Ensure layerTotalPrice is always a number (not string) and properly rounded
-                      const layerTotalPrice = Number((layerMaterialPrice + layerTypeCost + chargeableLayerCuttingCost).toFixed(2));
-                      
+                      const layerTotalPrice = Number(
+                        canonicalLayerResult.totalAmountToman
+                      );
+
                       // 🎯 STEP 6: Handle existing session layer merge OR create a new layer product
                       if (existingLayerProduct) {
                         const existingLayerIndex = updatedItems.findIndex(item => item === existingLayerProduct);
-                        
+
                         if (existingLayerIndex >= 0) {
                           // Merge existing layer product in session
                           const mergedLayerProduct = layerManagement.mergeLayerProduct(existingLayerProduct, {
                             draft,
                             parentPartType: stairSystemV2.stairActivePart,
                             newLayersNeeded: totalLayers,
-                            newLayerSqm: totalLayerSqm,
+                            newLayerSqm: authoritativeLayerSqm,
                             layerMaterialPrice,
                             layerTypeCost,
                             totalLayerCuttingCost: chargeableLayerCuttingCost,
@@ -8588,7 +9631,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           stairSystemId: sid,
                           parentPartType: stairSystemV2.stairActivePart,
                           totalLayers,
-                          totalLayerSqm,
+                          totalLayerSqm: authoritativeLayerSqm,
                           layerMaterialPrice,
                           layerTotalPrice,
                           layerTypeCost,
@@ -8596,14 +9639,29 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           layersFromNewStones: layerMetrics.layersFromNewStones,
                           totalLayerCuttingCost: chargeableLayerCuttingCost,
                           layerCutDetails,
-                          layerRemainingPieces: [
-                            ...(layerMetrics.layerRemainingPieces || []),
-                            ...layerSourcePlan.remainingStones
-                          ],
-                          usedRemainingStonesForLayers: layerMetrics.usedRemainingStonesForLayers,
+                          layerRemainingPieces:
+                            canonicalLayerResult.generatedRemainders.map(
+                              remainder => ({
+                                id: remainder.remainingStoneId,
+                                width:
+                                  Number(remainder.widthMeters) * 100,
+                                length:
+                                  Number(remainder.lengthMeters),
+                                squareMeters:
+                                  Number(remainder.widthMeters) *
+                                  Number(remainder.lengthMeters) *
+                                  remainder.quantity,
+                                isAvailable: true,
+                                sourceCutId: remainder.sourceBatchId,
+                                quantity: remainder.quantity
+                              })
+                            ),
+                          usedRemainingStonesForLayers:
+                            canonicalUsedRemainingStones,
                           originalWidthCm: sourceWidthCm,
                           lengthM: sourceLengthM,
-                          layerCuttingCostPerMeter,
+                          layerCuttingCostPerMeter:
+                            layerCuttingCostPerMeter ?? 0,
                           parentProductIndexInSession: mainStairPartIndex,
                           layerPricePerSquareMeter: effectiveLayerPricePerSqm,
                           layerStoneLabel: draft.layerUseDifferentStone
@@ -8622,9 +9680,30 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           layerManualSourceQuantity: draft.layerManualSourceQuantity || null,
                           stoneAreaUsedSqm: stoneAreaUsedSqm
                         });
+                        const layerProductRowId =
+                          draft.layerConfigurationDraftId ||
+                          createContractProductRowId();
                         updatedItems.push({
                           ...newLayerProduct,
-                          rowId: createContractProductRowId(),
+                          description:
+                            draft.layerDescription || newLayerProduct.description,
+                          appliedSubServices: layerAppliedSubServices,
+                          totalSubServiceCost: layerAppliedSubServices.reduce(
+                            (sum, operation) => sum + operation.cost,
+                            0
+                          ),
+                          usedLengthForSubServices: layerAppliedSubServices
+                            .filter(operation =>
+                              operation.calculationBase === 'length'
+                            )
+                            .reduce((sum, operation) => sum + operation.meter, 0),
+                          usedSquareMetersForSubServices: layerAppliedSubServices
+                            .filter(operation =>
+                              operation.calculationBase === 'squareMeters'
+                            )
+                            .reduce((sum, operation) => sum + operation.meter, 0),
+                          finishings: layerFinishings,
+                          rowId: layerProductRowId,
                           parentProductRowId: product.rowId,
                           sawKerfEnabled: inheritedSawKerfEnabled,
                           sawKerfCm: inheritedSawKerfEnabled ? inheritedSawKerfCm : null,
@@ -8633,13 +9712,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             {
                               type: 'longitudinal',
                               meters: totalLongitudinalLayerMeters,
-                              rate: longitudinalLayerRate,
+                              rate: safeLongitudinalLayerRate,
                               cost: longitudinalLayerCost
                             },
                             {
                               type: 'cross',
                               meters: totalCrossLayerMeters,
-                              rate: crossLayerRate,
+                              rate: safeCrossLayerRate,
                               cost: crossLayerCost
                             }
                           ].filter(entry => entry.meters > 0) as CuttingBreakdownEntry[],
@@ -8647,44 +9726,128 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             ...newLayerProduct.meta,
                             layerInfo: {
                               ...(newLayerProduct.meta as any)?.layerInfo,
+                              layerConfigurationId:
+                                layerProductRowId,
                               parentProductRowId: product.rowId,
                               layerSetQuantity: totalLayers,
                               physicalPieceQuantity: totalLayerDemand,
                               physicalPiecesPerLayerSet,
+                              calculationUnit: layerCalculationUnit,
+                              pricingQuantity: layerPricingQuantity,
+                              manualRateToman: layerTypeUnitPrice,
+                              sourceKind: draft.layerSourceKind,
+                              selectedRemainingStoneIds:
+                                draft.layerSelectedRemainingStoneIds || [],
+                              description: draft.layerDescription || '',
                               edges: draft.layerEdges
                             },
+                            layerSideOperations:
+                              layerSideOperationCalculations.map(entry => ({
+                                side: entry.side,
+                                input: entry.input,
+                                result: entry.calculation.ok
+                                  ? entry.calculation.result
+                                  : null
+                              })),
+                            layerOperationEditingScope:
+                              draft.layerOperationEditingScope || 'all',
+                            layerDetachedOperationSides:
+                              draft.layerDetachedOperationSides || [],
                             layerSourcePlan: {
-                              sourceStoneQuantity: layerSourcePlan.sourceStoneQuantity,
-                              sourceAreaSqm: layerSourcePlan.sourceAreaSqm,
+                              canonicalInput:
+                                canonicalLayerRequest.input,
+                              canonicalInputHash:
+                                canonicalLayerResult.inputHash,
+                              canonicalResultHash:
+                                canonicalLayerResult.resultHash,
+                              calculationPolicyVersion:
+                                canonicalLayerResult
+                                  .calculationPolicyVersion,
+                              packingPlan:
+                                canonicalLayerResult.packingPlan,
+                              generatedRemainders:
+                                canonicalLayerResult.generatedRemainders,
+                              sourceStoneQuantity:
+                                canonicalLayerResult.packingPlan
+                                  .consumedSources.length,
+                              sourceAreaSqm: stoneAreaUsedSqm,
                               sourceWidthCm: layerSourcePlan.sourceWidthCm,
                               sourceLengthM: layerSourcePlan.sourceLengthM,
                               columnsPerStone: layerSourcePlan.columnsPerStone,
-                              physicalPieceQuantity: layerSourcePlan.physicalPieceQuantity,
-                              fromAlreadyPaidStone: layerMetrics.layersFromRemainingStones,
-                              fromNewStone: layerMetrics.layersFromNewStones,
+                              physicalPieceQuantity:
+                                canonicalLayerResult.physicalStripCount,
+                              fromAlreadyPaidStone:
+                                draft.layerSourceKind === 'newMaterial'
+                                  ? 0
+                                  : canonicalLayerResult.physicalStripCount,
+                              fromNewStone:
+                                draft.layerSourceKind === 'newMaterial'
+                                  ? canonicalLayerResult.physicalStripCount
+                                  : 0,
                               fromAlreadyPaidSets: physicalPiecesPerLayerSet > 0
-                                ? layerMetrics.layersFromRemainingStones / physicalPiecesPerLayerSet
+                                ? (
+                                    draft.layerSourceKind === 'newMaterial'
+                                      ? 0
+                                      : canonicalLayerResult
+                                          .physicalStripCount /
+                                        physicalPiecesPerLayerSet
+                                  )
                                 : 0,
                               fromNewSets: physicalPiecesPerLayerSet > 0
-                                ? layerMetrics.layersFromNewStones / physicalPiecesPerLayerSet
+                                ? (
+                                    draft.layerSourceKind === 'newMaterial'
+                                      ? canonicalLayerResult
+                                          .physicalStripCount /
+                                        physicalPiecesPerLayerSet
+                                      : 0
+                                  )
                                 : 0,
                               sawKerfEnabled: inheritedSawKerfEnabled,
                               sawKerfCm: inheritedSawKerfEnabled ? inheritedSawKerfCm : null,
                               mandatoryCuttingPolicy: layerMandatoryCuttingPolicy,
-                              allocations: layerSourcePlan.allocations
+                              allocations:
+                                canonicalLayerResult.packingPlan.placements
                             }
                           }
                         });
                       }
-                      
+
                       // 🎯 STEP 7: Update remaining stone usage tracking
-                      if (layerMetrics.usedRemainingStonesForLayers.length > 0) {
+                      if (canonicalUsedRemainingStones.length > 0) {
+                        const consumedLineage = new Set(
+                          canonicalUsedRemainingStones.flatMap(
+                            remainingStoneLineageKeys
+                          )
+                        );
+                        layerReplayInventory = normalizeRemainingStoneCollection([
+                          ...layerReplayInventory.filter(stone =>
+                            !remainingStoneLineageKeys(stone).some(key =>
+                              consumedLineage.has(key)
+                            )
+                          ),
+                          ...canonicalLayerResult.generatedRemainders.map(
+                            remainder => ({
+                              id: remainder.remainingStoneId,
+                              width:
+                                Number(remainder.widthMeters) * 100,
+                              length:
+                                Number(remainder.lengthMeters),
+                              squareMeters:
+                                Number(remainder.widthMeters) *
+                                Number(remainder.lengthMeters) *
+                                remainder.quantity,
+                              isAvailable: true,
+                              sourceCutId: remainder.sourceBatchId,
+                              quantity: remainder.quantity
+                            })
+                          )
+                        ]).filter(isUsableRemainingStone);
                         const remainingStoneUpdates = layerManagement.updateRemainingStoneUsage(
                           updatedItems,
-                          layerMetrics.usedRemainingStonesForLayers,
+                          canonicalUsedRemainingStones,
                           mainStairPartIndex
                         );
-                        
+
                         // Apply all remaining stone usage updates
                         remainingStoneUpdates.forEach((updatedProduct, idx) => {
                           if (idx >= 0 && idx < updatedItems.length) {
@@ -8693,56 +9856,24 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         });
                       }
                     }
-                    
+                    }
+                    if (layerProcessingFailed) {
+                      stairSessionCommitSucceeded = false;
+                      return baseItems;
+                    }
+
                     return updatedItems;
                   });
-                  
+                  if (!stairSessionCommitSucceeded) {
+                    return;
+                  }
+
                   // Reset fields for quick next entry (keep unit toggle)
                   const [, setDraft] = getActiveDraft();
-                  const defaultMandatoryAfterReset = stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
                   setDraft({
-                    stoneId: null,
-                    stoneLabel: '',
-                    stoneProduct: null,
-                    pricePerSquareMeter: null,
-                    useMandatory: defaultMandatoryAfterReset,
-                    mandatoryPercentage: defaultMandatoryAfterReset ? 20 : null,
-                    thicknessCm: null,
-                    lengthValue: null,
-                    lengthUnit: draft.lengthUnit || 'm', // Default to meters for length
-                    widthCm: null,
-                    quantity: null,
-                    squareMeters: null,
-                    tools: [],
-                    totalPrice: null,
-                    // Reset layer fields
-                    numberOfLayersPerStair: null,
-                    layerWidthCm: null,
-                    layerTypeId: null,
-                    layerTypeName: null,
-                    layerTypePrice: null,
-                    layerEdges: undefined,
-                    layerUseDifferentStone: false,
-                    layerStoneProductId: null,
-                    layerStoneProduct: null,
-                    layerStoneLabel: null,
-                    layerPricePerSquareMeter: null,
-                    layerUseMandatory: undefined,
-                    layerMandatoryPercentage: null,
-                    layerShortageSource: null,
-                    layerManualSourceWidthCm: null,
-                    layerManualSourceLengthM: null,
-                    layerManualSourceQuantity: null,
-                    standardLengthValue: null,
-                    standardLengthUnit: draft.lengthUnit || 'm',
-                    finishingEnabled: false,
-                    finishingId: null,
-                    finishingCode: null,
-                    finishingLabel: null,
-                    finishingPricePerSquareMeter: null,
-                    finishingUnitPrice: null,
-                    finishingCalculationBase: null,
-                    finishingQuantity: null
+                    ...createFreshStairPartDraft(stairSystemV2.stairActivePart),
+                    lengthUnit: draft.lengthUnit || 'm',
+                    standardLengthUnit: draft.lengthUnit || 'm'
                   });
                   stairSystemV2.setStoneSearchTerm('');
                   stairSystemV2.setToolsSearchTerm('');
@@ -8751,13 +9882,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 }}>افزودن این بخش</button>
                 <button type="button" className="min-h-11 rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:from-teal-600 hover:to-teal-700" onClick={() => {
                   if (!stairSystemV2.stairSessionItems.length) { setShowProductModal(false); return; }
-                  
+
                   // Handle edit mode: replace existing products instead of adding new ones
                   if (isEditMode && editingProductIndex !== null) {
                     const productsWithRowIds = ensureContractProductRowIds(wizardData.products);
                     const oldProduct = productsWithRowIds[editingProductIndex];
                     const oldStairSystemId = oldProduct?.stairSystemId;
-                    
+
                     if (oldStairSystemId) {
                       const productsToAdd = prepareStairEditReplacementRowIdentities(
                         stairSystemV2.stairSessionItems,
@@ -8811,9 +9942,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     // Add mode: append session items to wizardData
                     // 🎯 Set parentProductIndex for layer products to link them to their parent stair part
                     const currentProductsCount = wizardData.products.length;
-                    
+
                     const sessionItemsToAdd: ContractProduct[] = [...stairSystemV2.stairSessionItems];
-                    
+
                     // Create a map of session items to their final indices in wizardData.products
                     const sessionToFinalIndexMap = new Map<ContractProduct, number>();
                     let nonLayerCount = 0;
@@ -8825,22 +9956,22 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         nonLayerCount++;
                       }
                     });
-                    
+
                     // Now map all items and set parentProductIndex for layers
                     const productsToAdd = sessionItemsToAdd.map((item) => {
                       const isLayer = ((item.meta as any)?.isLayer) || false;
                       if (isLayer) {
                         const layerInfo = (item.meta as any)?.layerInfo;
                         const parentIndexInSession = layerInfo?.parentProductIndexInSession;
-                        
+
                         if (parentIndexInSession !== undefined && parentIndexInSession >= 0) {
                           // Find the parent product in original session items (not filtered)
                           const parentInSession = stairSystemV2.stairSessionItems[parentIndexInSession];
-                          
+
                           if (parentInSession) {
                             // Get the parent's final index from our map
                             const parentFinalIndex = sessionToFinalIndexMap.get(parentInSession);
-                            
+
                             if (parentFinalIndex !== undefined && parentFinalIndex >= 0) {
                               return {
                                 ...item,
@@ -8870,12 +10001,32 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       }
                       return item;
                     });
-                    
+
                     const updatedProducts = [...wizardData.products];
-                    updateWizardData({ products: [...updatedProducts, ...productsToAdd], selectedProductTypeForAddition: 'stair' });
+                    let combinedProducts = [...updatedProducts, ...productsToAdd];
+                    productsToAdd
+                      .filter(item =>
+                        (item.meta as any)?.isLayer &&
+                        (item.meta as any)?.layerInfo?.sourceKind ===
+                          'contractRemainder'
+                      )
+                      .forEach(layerItem => {
+                        const sourceUpdates = layerManagement.updateRemainingStoneUsage(
+                          combinedProducts,
+                          layerItem.usedRemainingStones || [],
+                          -1
+                        );
+                        sourceUpdates.forEach((updatedProduct, index) => {
+                          combinedProducts[index] = updatedProduct;
+                        });
+                      });
+                    updateWizardData({
+                      products: combinedProducts,
+                      selectedProductTypeForAddition: 'stair'
+                    });
                     clearProductAdditionSearches();
                   }
-                  
+
                   stairSystemV2.setStairSessionItems([]);
                   stairSystemV2.setStairSessionId(null);
                   setIsEditMode(false);
@@ -8883,3171 +10034,85 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   setShowProductModal(false);
                 }}>اتمام و افزودن به قرارداد</button>
               </div>
+              <style jsx global>{`
+                .stair-v2-modal {
+                  overflow: hidden;
+                  border: 1px solid rgb(226 232 240);
+                  box-shadow: 0 24px 70px rgb(15 23 42 / 0.28);
+                }
+                .dark .stair-v2-modal {
+                  border-color: rgb(51 65 85);
+                }
+                .stair-v2-modal [class*="bg-gradient"] {
+                  background-image: none !important;
+                }
+                .stair-v2-header,
+                .stair-v2-type-selector,
+                .stair-v2-footer {
+                  padding-inline: 1rem !important;
+                  backdrop-filter: blur(12px);
+                }
+                .stair-v2-header {
+                  min-height: 4rem;
+                  padding-block: .75rem !important;
+                }
+                .stair-v2-header > div > div:first-child,
+                .stair-v2-step-indicators {
+                  display: none !important;
+                }
+                .stair-v2-type-selector button {
+                  min-height: 2rem;
+                  border-radius: .5rem !important;
+                  box-shadow: none !important;
+                }
+                .stair-v2-body > div {
+                  padding: .75rem 1rem !important;
+                  gap: 0 !important;
+                }
+                .stair-v2-body [class*="shadow"] {
+                  box-shadow: none !important;
+                }
+                .stair-v2-modal input::placeholder,
+                .stair-v2-modal textarea::placeholder {
+                  color: transparent !important;
+                }
+                .stair-v2-body [class*="rounded-2xl"],
+                .stair-v2-body [class*="rounded-xl"] {
+                  border-radius: .5rem !important;
+                }
+                .stair-v2-body [class*="from-purple"],
+                .stair-v2-body [class*="from-orange"],
+                .stair-v2-body [class*="from-blue"],
+                .stair-v2-body [class*="from-green"],
+                .stair-v2-body [class*="from-teal"] {
+                  background-color: transparent !important;
+                }
+                .stair-v2-body section,
+                .stair-v2-body details,
+                .stair-v2-body .border {
+                  box-shadow: none !important;
+                }
+                .stair-v2-footer {
+                  min-height: 4rem;
+                  position: sticky;
+                  bottom: 0;
+                }
+                @media (prefers-reduced-motion: reduce) {
+                  .stair-v2-modal *,
+                  .stair-v2-modal *::before,
+                  .stair-v2-modal *::after {
+                    scroll-behavior: auto !important;
+                    transition-duration: 0.01ms !important;
+                    animation-duration: 0.01ms !important;
+                  }
+                }
+              `}</style>
             </div>
           </div>
         )}
-        {shouldShowLegacyStairModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4">
-            <div className="bg-white dark:bg-gray-800 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto z-[10000]">
-              <div className="p-6">
-                <div className="flex justify-between items-center mb-6">
-                  <h3 className="text-xl font-semibold text-gray-800 dark:text-white">
-                    {isEditMode ? 'ویرایش محصول پله' : 'محصول پله'}
-                  </h3>
-                  <button
-                    onClick={() => {
-                      // Validate before closing if it's a stair system
-                      if (productConfig.productType === 'stair' && stairSystemConfig) {
-                        const hasSelectedPart = stairSystemConfig.tread.isSelected ||
-                                                stairSystemConfig.riser.isSelected ||
-                                                stairSystemConfig.landing.isSelected;
-
-                        if (!hasSelectedPart) {
-                          setErrors({ products: 'لطفاً حداقل یکی از بخش‌های پله (کف پله، خیز پله، یا پاگرد) را انتخاب کنید' });
-                          return;
-                        }
-                      }
-
-                      setShowProductModal(false);
-                      setSelectedProduct(null);
-                      setProductConfig({});
-                      setLengthUnit('m');
-                      setWidthUnit('cm');
-                      setIsMandatory(false);
-                      setMandatoryPercentage(20);
-                      setIsEditMode(false);
-                      setEditingProductIndex(null);
-                      setTouchedFields(new Set()); // Reset touched fields
-                      setStairSystemConfig(null);
-                      setErrors({});
-                    }}
-                    className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                    aria-label="بستن پنجره"
-                    title="بستن"
-                  >
-                    <FaTimes className="w-6 h-6" />
-                  </button>
-                </div>
-
-                {/* Error Display */}
-                {errors.products && (
-                  <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                    <p className="text-red-600 dark:text-red-400 text-sm">{errors.products}</p>
-                  </div>
-                )}
-
-                {/* Product Info - Show for longitudinal and slab products */}
-                {selectedProduct && (productConfig.productType === 'longitudinal' || productConfig.productType === 'slab') && (
-                  <div className={`mb-6 p-4 rounded-lg ${
-                    productConfig.productType === 'slab' 
-                      ? 'bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border border-indigo-200 dark:border-indigo-800' 
-                      : 'bg-gray-50 dark:bg-gray-700'
-                  }`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-medium text-gray-800 dark:text-white">
-                          {selectedProduct.namePersian}
-                        </h4>
-                        {productConfig.productType === 'slab' && (
-                          <span className="px-2 py-1 bg-indigo-500 text-white text-xs rounded-full font-medium">
-                            سنگ اسلب
-                          </span>
-                        )}
-                        {productConfig.productType === 'longitudinal' && (
-                          <span className="px-2 py-1 bg-teal-500 text-white text-xs rounded-full font-medium">
-                            سنگ طولی
-                          </span>
-                        )}
-                      </div>
-                      {isEditMode && (
-                        <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 text-xs rounded-full">
-                          حالت ویرایش
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-gray-600 dark:text-gray-300">
-                      {selectedProduct.stoneTypeNamePersian} • عرض {selectedProduct.widthValue}×ضخامت {selectedProduct.thicknessValue}cm
-                      {productConfig.productType === 'slab' && (
-                        <span className="ml-2 text-indigo-600 dark:text-indigo-400">• برش دو بعدی (طول و عرض)</span>
-                      )}
-                    </p>
-                  </div>
-                )}
-                
-                {/* Stair System Info - Show when editing stair system */}
-                {productConfig.productType === 'stair' && stairSystemConfig && (
-                  <div className="mb-6 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
-                    <div className="flex items-center justify-between mb-2">
-                      <h4 className="font-medium text-purple-800 dark:text-purple-200">
-                        ویرایش دستگاه پله
-                      </h4>
-                      {isEditMode && (
-                        <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 text-xs rounded-full">
-                          حالت ویرایش
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-purple-600 dark:text-purple-300">
-                      {stairSystemConfig.numberOfSteps} پله ({stairSystemConfig.quantityType === 'steps' ? 'تعداد پله' : 'تعداد پله‌کان'})
-                    </p>
-                  </div>
-                )}
-
-                {/* Configuration Form */}
-                <div className="space-y-4">
-                  {/* Conditional rendering based on product type */}
-                  {productConfig.productType === 'stair' ? (
-                    /* STAIR SYSTEM (دستگاه پله) CONFIGURATION FORM - 3 Sections */
-                    <>
-                      {/* Common Configuration */}
-                      <div className="space-y-4">
-                        {/* Quantity Type Switcher */}
-                        <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-4 bg-gray-50 dark:bg-gray-700/50">
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                            نوع تعداد:
-                          </label>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setQuantityType('steps');
-                                updateStairSystemConfig(prev => prev ? { ...prev, quantityType: 'steps' } : null);
-                              }}
-                              className={`flex-1 px-4 py-3 rounded-lg transition-all font-medium ${
-                                stairSystemConfig?.quantityType === 'steps'
-                                  ? 'bg-teal-500 text-white shadow-lg'
-                                  : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                              }`}
-                            >
-                              تعداد پله
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setQuantityType('staircases');
-                                updateStairSystemConfig(prev => prev ? { ...prev, quantityType: 'staircases' } : null);
-                              }}
-                              className={`flex-1 px-4 py-3 rounded-lg transition-all font-medium ${
-                                stairSystemConfig?.quantityType === 'staircases'
-                                  ? 'bg-teal-500 text-white shadow-lg'
-                                  : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                              }`}
-                            >
-                              تعداد پله‌کان کامل
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Number of Steps (Common) */}
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            {stairSystemConfig?.quantityType === 'steps' ? 'تعداد پله' : 'تعداد پله در هر پله‌کان'}
-                          </label>
-                          <FormattedNumberInput
-                            value={stairSystemConfig?.numberOfSteps || 0}
-                            onChange={(value) => {
-                              updateStairSystemConfig(prev => {
-                                if (!prev) return null;
-                                const newNumberOfSteps = value || 0;
-                                // Update default quantities for tread and riser if they haven't been manually changed
-                                return {
-                                  ...prev,
-                                  numberOfSteps: newNumberOfSteps,
-                                  tread: {
-                                    ...prev.tread,
-                                    quantity: prev.tread.quantity === 0 || prev.tread.quantity === prev.numberOfSteps 
-                                      ? newNumberOfSteps 
-                                      : prev.tread.quantity
-                                  },
-                                  riser: {
-                                    ...prev.riser,
-                                    quantity: prev.riser.quantity === 0 || prev.riser.quantity === prev.numberOfSteps 
-                                      ? newNumberOfSteps 
-                                      : prev.riser.quantity
-                                  }
-                                };
-                              });
-                            }}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                            min={0}
-                            step={1}
-                            placeholder="تعداد پله"
-                          />
-                        </div>
-
-                        {/* Number of Staircases (if quantityType === 'staircases') */}
-                        {stairSystemConfig?.quantityType === 'staircases' && (
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                              تعداد پله‌کان کامل
-                            </label>
-                            <FormattedNumberInput
-                              value={stairSystemConfig?.numberOfStaircases || 1}
-                              onChange={(value) => {
-                                updateStairSystemConfig(prev => prev ? { ...prev, numberOfStaircases: value || 1 } : null);
-                              }}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                              min={1}
-                              step={1}
-                              placeholder="1"
-                            />
-                          </div>
-                        )}
-                      </div>
-                      {/* Three Collapsible Sections for Stair Parts */}
-                      <div className="space-y-4">
-                        {/* Section 1: کف پله (Tread) */}
-                        <div className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => setTreadExpanded(!treadExpanded)}
-                            className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                          >
-                            <div className="flex items-center gap-3">
-                              <input
-                                id="tread-selection-checkbox"
-                                type="checkbox"
-                                checked={stairSystemConfig?.tread.isSelected || false}
-                                onChange={(e) => {
-                                  updateStairPart('tread', { isSelected: e.target.checked });
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                                aria-label="انتخاب کف پله"
-                                className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                              />
-                              <span className="font-semibold text-gray-800 dark:text-white">کف پله (Tread)</span>
-                            </div>
-                            {treadExpanded ? (
-                              <FaChevronUp className="text-gray-500 dark:text-gray-400" />
-                            ) : (
-                              <FaChevronDown className="text-gray-500 dark:text-gray-400" />
-                            )}
-                          </button>
-                          
-                          {treadExpanded && stairSystemConfig && (
-                            <div className="p-4 space-y-4 border-t border-gray-200 dark:border-gray-600">
-                              {/* Product Selection for Tread */}
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                  انتخاب محصول:
-                                </label>
-                                {stairSystemConfig.tread.product ? (
-                                  <div className="p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-lg mb-2">
-                                    <div className="flex items-center justify-between">
-                                      <div>
-                                        <p className="font-medium text-gray-800 dark:text-white">
-                                          {generateFullProductName(stairSystemConfig.tread.product)}
-                                        </p>
-                                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                                          {stairSystemConfig.tread.product.stoneTypeNamePersian} • عرض {stairSystemConfig.tread.product.widthValue}×ضخامت {stairSystemConfig.tread.product.thicknessValue}cm
-                                        </p>
-                                      </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          updateStairPart('tread', {
-                                            productId: null,
-                                            product: null,
-                                            pricePerSquareMeter: 0
-                                          });
-                                          syncDraftWithProduct('tread', null);
-                                          if (stairSystemV2.stairActivePart === 'tread') {
-                                            stairSystemV2.setStoneSearchTerm('');
-                                          }
-                                          setTreadProductSearchTerm('');
-                                        }}
-                                        className="text-sm text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teال-300"
-                                      >
-                                        تغییر
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="mb-2">
-                                    <div className="relative">
-                                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                        <FaSearch className="h-5 w-5 text-gray-400" />
-                                      </div>
-                                      <input
-                                        type="text"
-                                        placeholder="جستجو محصول..."
-                                        value={treadProductSearchTerm}
-                                        onChange={(e) => setTreadProductSearchTerm(e.target.value)}
-                                        className="w-full pr-10 pl-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                      />
-                                    </div>
-                                    {treadProductSearchTerm && (
-                                      <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800">
-                                        {filteredTreadProducts.map((product) => (
-                                          <div
-                                            key={product.id}
-                                            onClick={() => {
-                                              selectProductForStairPart('tread', product);
-                                              setTreadProductSearchTerm('');
-                                            }}
-                                            className="p-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-b-0"
-                                          >
-                                            <p className="font-medium text-gray-800 dark:text-white text-sm">
-                                              {generateFullProductName(product)}
-                                            </p>
-                                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                              {product.basePrice ? formatPrice(product.basePrice, product.currency) : 'قیمت نامشخص'}
-                                            </p>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Tread Dimensions */}
-                              {stairSystemConfig.tread.product && (
-                                <>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {/* Tread Width */}
-                                    <div>
-                                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                        طول پله (عرض پله‌کان)
-                                      </label>
-                                      <div className="space-y-2">
-                                        <FormattedNumberInput
-                                          value={stairSystemConfig.tread.treadWidth || 0}
-                                          onChange={(value) => {
-                                            updateStairPart('tread', { treadWidth: value || 0 });
-                                          }}
-                                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                          min={0}
-                                          step={0.1}
-                          decimalScale={4}
-                          placeholder="طول پله"
-                                        />
-                                        <div className="flex gap-1">
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              updateStairPart('tread', { lengthUnit: 'cm' });
-                                              if (stairSystemConfig.tread.treadWidth) {
-                                                const converted = stairSystemConfig.tread.lengthUnit === 'm' ? stairSystemConfig.tread.treadWidth * 100 : stairSystemConfig.tread.treadWidth;
-                                                updateStairPart('tread', { treadWidth: converted });
-                                              }
-                                            }}
-                                            className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-all ${
-                                              stairSystemConfig.tread.lengthUnit === 'cm'
-                                                ? 'bg-teal-500 text-white shadow-lg'
-                                                : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                                            }`}
-                                          >
-                                            سانتی‌متر (cm)
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              updateStairPart('tread', { lengthUnit: 'm' });
-                                              if (stairSystemConfig.tread.treadWidth) {
-                                                const converted = stairSystemConfig.tread.lengthUnit === 'cm' ? stairSystemConfig.tread.treadWidth / 100 : stairSystemConfig.tread.treadWidth;
-                                                updateStairPart('tread', { treadWidth: converted });
-                                              }
-                                            }}
-                                            className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-all ${
-                                              stairSystemConfig.tread.lengthUnit === 'm'
-                                                ? 'bg-teal-500 text-white shadow-lg'
-                                                : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                                            }`}
-                                          >
-                                            متر (m)
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    {/* Tread Depth */}
-                                    <div>
-                                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                        عرض پله (عمق پله) (cm)
-                                      </label>
-                                      <FormattedNumberInput
-                                        value={stairSystemConfig.tread.treadDepth || 30}
-                                        onChange={(value) => {
-                                          updateStairPart('tread', { treadDepth: value || 30 });
-                                        }}
-                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                        min={0}
-                                        step={0.1}
-                          decimalScale={4}
-                          placeholder="30"
-                                      />
-                                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                        معمولاً 28-32 سانتی‌متر
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  {/* Quantity for Tread */}
-                                  <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                      تعداد (پیش‌فرض: {stairSystemConfig.numberOfSteps || 0})
-                                    </label>
-                                    <FormattedNumberInput
-                                      value={stairSystemConfig.tread.quantity || stairSystemConfig.numberOfSteps || 0}
-                                      onChange={(value) => {
-                                        updateStairPart('tread', { quantity: value || 0 });
-                                      }}
-                                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                      min={0}
-                                      step={1}
-                                      placeholder={`${stairSystemConfig.numberOfSteps || 0}`}
-                                    />
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                      به طور پیش‌فرض با تعداد پله همگام است، اما می‌توانید تغییر دهید
-                                    </p>
-                                  </div>
-
-                                  {/* Tread Calculations */}
-                                  {(() => {
-                                    const treadMetrics = calculateTreadMetrics({
-                                      treadWidth: stairSystemConfig.tread.treadWidth || 0,
-                                      treadWidthUnit: stairSystemConfig.tread.lengthUnit || 'm',
-                                      treadDepth: stairSystemConfig.tread.treadDepth || 30,
-                                      quantity: stairSystemConfig.tread.quantity || stairSystemConfig.numberOfSteps || 0,
-                                      quantityType: stairSystemConfig.quantityType,
-                                      numberOfStaircases: stairSystemConfig.numberOfStaircases || 1
-                                    });
-                                    
-                                    const nosingCost = calculateNosingCuttingCost({
-                                      nosingType: stairSystemConfig.tread.nosingType || 'none',
-                                      treadWidth: stairSystemConfig.tread.treadWidth || 0,
-                                      treadWidthUnit: stairSystemConfig.tread.lengthUnit || 'm',
-                                      numberOfSteps: stairSystemConfig.tread.quantity || stairSystemConfig.numberOfSteps || 0,
-                                      numberOfStaircases: stairSystemConfig.quantityType === 'staircases' ? (stairSystemConfig.numberOfStaircases || 1) : 1,
-                                      quantityType: stairSystemConfig.quantityType
-                                    });
-                                    
-                                    const basePrice = treadMetrics.totalArea * (stairSystemConfig.tread.pricePerSquareMeter || 0);
-                                    const mandatoryPrice = stairSystemConfig.tread.isMandatory && stairSystemConfig.tread.mandatoryPercentage
-                                      ? basePrice * (stairSystemConfig.tread.mandatoryPercentage / 100)
-                                      : 0;
-                                    const totalPrice = basePrice + mandatoryPrice + nosingCost.cuttingCost;
-                                    
-                                    // Update stair part with calculated values
-                                    // Always update if squareMeters or totalPrice changed (to handle price/mandatory/nosing changes)
-                                    // Use Math.abs to handle floating point comparison issues
-                                    const squareMetersChanged = Math.abs((stairSystemConfig.tread.squareMeters || 0) - treadMetrics.totalArea) > 0.001;
-                                    const totalPriceChanged = Math.abs((stairSystemConfig.tread.totalPrice || 0) - totalPrice) > 0.01;
-                                    
-                                    if (squareMetersChanged || totalPriceChanged) {
-                                      // Use requestAnimationFrame for better state update timing
-                                      requestAnimationFrame(() => {
-                                        updateStairPart('tread', {
-                                          squareMeters: treadMetrics.totalArea,
-                                          totalPrice: totalPrice,
-                                          originalTotalPrice: basePrice,
-                                          nosingCuttingCost: nosingCost.cuttingCost,
-                                          nosingCuttingCostPerMeter: nosingCost.cuttingCostPerMeter
-                                        });
-                                      });
-                                    }
-                                    
-                                    return (
-                                      <div className="space-y-3">
-                                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-                                          <div className="grid grid-cols-2 gap-3 text-sm">
-                                            <div>
-                                              <span className="text-gray-600 dark:text-gray-400">متر مربع:</span>
-                                              <span className="font-semibold text-gray-800 dark:text-white mr-2">
-                                                {formatSquareMeters(treadMetrics.totalArea)}
-                                              </span>
-                                            </div>
-                                            <div>
-                                              <span className="text-gray-600 dark:text-gray-400">تعداد:</span>
-                                              <span className="font-semibold text-gray-800 dark:text-white mr-2">
-                                                {formatDisplayNumber(treadMetrics.totalQuantity)}
-                                              </span>
-                                            </div>
-                                          </div>
-                                        </div>
-
-                                        {/* Nosing Configuration (only for tread) */}
-                                        <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-3">
-                                          <label htmlFor="tread-nosing-type-select" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                            نوع پیشانی:
-                                          </label>
-                                          <select
-                                            id="tread-nosing-type-select"
-                                            value={stairSystemConfig.tread.nosingType || 'none'}
-                                            aria-label="انتخاب نوع پیشانی کف پله"
-                                            onChange={(e) => {
-                                              updateStairPart('tread', { nosingType: e.target.value });
-                                            }}
-                                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
-                                          >
-                                            {NOSING_TYPES.filter(n => n.available).map(nosing => (
-                                              <option key={nosing.id} value={nosing.id}>
-                                                {nosing.name} {nosing.cuttingCostPerMeter > 0 ? `(${formatPrice(nosing.cuttingCostPerMeter, 'تومان')}/متر)` : ''}
-                                              </option>
-                                            ))}
-                                          </select>
-                                          {nosingCost.cuttingCost > 0 && (
-                                            <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
-                                              هزینه برش پیشانی: {formatPrice(nosingCost.cuttingCost, 'تومان')}
-                                            </p>
-                                          )}
-                                        </div>
-
-                                        {/* Price per Square Meter */}
-                                        <div>
-                                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                            فی هر متر مربع (تومان):
-                                          </label>
-                                          <FormattedNumberInput
-                                            value={stairSystemConfig.tread.pricePerSquareMeter || 0}
-                                            onChange={(value) => {
-                                              updateStairPart('tread', { pricePerSquareMeter: value || 0 });
-                                            }}
-                                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                            min={0}
-                                            step={1000}
-                                            placeholder="قیمت هر متر مربع"
-                                          />
-                                        </div>
-
-                                        {/* Mandatory Pricing for Tread */}
-                                        <div className="border-t border-gray-200 dark:border-gray-600 pt-3">
-                                          <div className="flex items-center space-x-3 space-x-reverse mb-2">
-                                            <input
-                                              id="tread-mandatory-v1-checkbox"
-                                              type="checkbox"
-                                              checked={stairSystemConfig.tread.isMandatory || false}
-                                              aria-label="قیمت‌گذاری حکمی برای کف پله"
-                                              onChange={(e) => {
-                                                updateStairPart('tread', { isMandatory: e.target.checked });
-                                              }}
-                                              className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                                            />
-                                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                              حکمی (افزایش قیمت)
-                                            </label>
-                                          </div>
-                                          {stairSystemConfig.tread.isMandatory && (
-                                            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
-                                              <div className="flex items-center space-x-3 space-x-reverse">
-                                                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                                  درصد افزایش:
-                                                </label>
-                                                <FormattedNumberInput
-                                                  value={stairSystemConfig.tread.mandatoryPercentage || 20}
-                                                  onChange={(value) => {
-                                                    updateStairPart('tread', { mandatoryPercentage: value || 20 });
-                                                  }}
-                                                  className="w-20 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
-                                                  min={0}
-                                                  max={100}
-                                                />
-                                                <span className="text-sm text-gray-600 dark:text-gray-400">%</span>
-                                              </div>
-                                            </div>
-                                          )}
-                                        </div>
-
-                                        {/* Total Price for Tread */}
-                                        {totalPrice > 0 && (
-                                          <div className="bg-gradient-to-r from-teal-50 to-teal-100 dark:from-teal-900/30 dark:to-teal-800/30 border border-teal-200 dark:border-teal-800 rounded-lg p-3">
-                                            <div className="flex justify-between items-center">
-                                              <span className="text-sm font-medium text-teal-800 dark:text-teal-200">
-                                                قیمت کل کف پله:
-                                              </span>
-                                              <span className="text-lg font-bold text-teal-900 dark:text-teal-100">
-                                                {formatPrice(totalPrice, 'تومان')}
-                                              </span>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  })()}
-                                </>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        {/* Section 2: خیز پله (Riser) */}
-                        <div className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => setRiserExpanded(!riserExpanded)}
-                            className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                          >
-                            <div className="flex items-center gap-3">
-                              <input
-                                id="riser-selection-checkbox"
-                                type="checkbox"
-                                checked={stairSystemConfig?.riser.isSelected || false}
-                                onChange={(e) => {
-                                  updateStairPart('riser', { isSelected: e.target.checked });
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                                aria-label="انتخاب خیز پله"
-                                className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                              />
-                              <span className="font-semibold text-gray-800 dark:text-white">خیز پله (Riser)</span>
-                            </div>
-                            {riserExpanded ? (
-                              <FaChevronUp className="text-gray-500 dark:text-gray-400" />
-                            ) : (
-                              <FaChevronDown className="text-gray-500 dark:text-gray-400" />
-                            )}
-                          </button>
-                          
-                          {riserExpanded && stairSystemConfig && (
-                            <div className="p-4 space-y-4 border-t border-gray-200 dark:border-gray-600">
-                              {/* Product Selection for Riser */}
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                  انتخاب محصول:
-                                </label>
-                                {stairSystemConfig.riser.product ? (
-                                  <div className="p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-lg mb-2">
-                                    <div className="flex items-center justify-between">
-                                      <div>
-                                        <p className="font-medium text-gray-800 dark:text-white">
-                                          {generateFullProductName(stairSystemConfig.riser.product)}
-                                        </p>
-                                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                                          {stairSystemConfig.riser.product.stoneTypeNamePersian} • عرض {stairSystemConfig.riser.product.widthValue}×ضخامت {stairSystemConfig.riser.product.thicknessValue}cm
-                                        </p>
-                                      </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          updateStairPart('riser', {
-                                            productId: null,
-                                            product: null,
-                                            pricePerSquareMeter: 0
-                                          });
-                                          syncDraftWithProduct('riser', null);
-                                          if (stairSystemV2.stairActivePart === 'riser') {
-                                            stairSystemV2.setStoneSearchTerm('');
-                                          }
-                                          setRiserProductSearchTerm('');
-                                        }}
-                                        className="text-sm text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teال-300"
-                                      >
-                                        تغییر
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="mb-2">
-                                    <div className="relative">
-                                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                        <FaSearch className="h-5 w-5 text-gray-400" />
-                                      </div>
-                                      <input
-                                        type="text"
-                                        placeholder="جستجو محصول..."
-                                        value={riserProductSearchTerm}
-                                        onChange={(e) => setRiserProductSearchTerm(e.target.value)}
-                                        className="w-full pr-10 pl-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                      />
-                                    </div>
-                                    {riserProductSearchTerm && (
-                                      <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800">
-                                        {filteredRiserProducts.map((product) => (
-                                          <div
-                                            key={product.id}
-                                            onClick={() => {
-                                              selectProductForStairPart('riser', product);
-                                              setRiserProductSearchTerm('');
-                                            }}
-                                            className="p-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-b-0"
-                                          >
-                                            <p className="font-medium text-gray-800 dark:text-white text-sm">
-                                              {generateFullProductName(product)}
-                                            </p>
-                                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                              {product.basePrice ? formatPrice(product.basePrice, product.currency) : 'قیمت نامشخص'}
-                                            </p>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Riser Dimensions */}
-                              {stairSystemConfig.riser.product && (
-                                <>
-                                  <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                      ارتفاع قائمه (cm)
-                                    </label>
-                                    <FormattedNumberInput
-                                      value={stairSystemConfig.riser.riserHeight || 17}
-                                      onChange={(value) => {
-                                        updateStairPart('riser', { riserHeight: value || 17 });
-                                      }}
-                                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                      min={0}
-                                      step={0.1}
-                          decimalScale={4}
-                          placeholder="17"
-                                    />
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                      معمولاً 15-19 سانتی‌متر
-                                    </p>
-                                  </div>
-
-                                  {/* Quantity for Riser */}
-                                  <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                      تعداد (پیش‌فرض: {stairSystemConfig.numberOfSteps || 0})
-                                    </label>
-                                    <FormattedNumberInput
-                                      value={stairSystemConfig.riser.quantity || stairSystemConfig.numberOfSteps || 0}
-                                      onChange={(value) => {
-                                        updateStairPart('riser', { quantity: value || 0 });
-                                      }}
-                                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                      min={0}
-                                      step={1}
-                                      placeholder={`${stairSystemConfig.numberOfSteps || 0}`}
-                                    />
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                      به طور پیش‌فرض با تعداد پله همگام است، اما می‌توانید تغییر دهید
-                                    </p>
-                                  </div>
-
-                                  {/* Riser Calculations */}
-                                  {(() => {
-                                    const treadWidth = stairSystemConfig.tread.treadWidth || 100;
-                                    const treadWidthUnit = stairSystemConfig.tread.lengthUnit || 'm';
-                                    
-                                    const riserMetrics = calculateRiserMetrics({
-                                      treadWidth: treadWidth,
-                                      treadWidthUnit: treadWidthUnit,
-                                      riserHeight: stairSystemConfig.riser.riserHeight || 17,
-                                      quantity: stairSystemConfig.riser.quantity || stairSystemConfig.numberOfSteps || 0,
-                                      quantityType: stairSystemConfig.quantityType,
-                                      numberOfStaircases: stairSystemConfig.numberOfStaircases || 1
-                                    });
-                                    
-                                    const basePrice = riserMetrics.totalArea * (stairSystemConfig.riser.pricePerSquareMeter || 0);
-                                    const mandatoryPrice = stairSystemConfig.riser.isMandatory && stairSystemConfig.riser.mandatoryPercentage
-                                      ? basePrice * (stairSystemConfig.riser.mandatoryPercentage / 100)
-                                      : 0;
-                                    const totalPrice = basePrice + mandatoryPrice;
-                                    
-                                    // Update riser part with calculated values
-                                    // Always update if squareMeters or totalPrice changed (to handle price/mandatory changes)
-                                    // Use Math.abs to handle floating point comparison issues
-                                    const squareMetersChanged = Math.abs((stairSystemConfig.riser.squareMeters || 0) - riserMetrics.totalArea) > 0.001;
-                                    const totalPriceChanged = Math.abs((stairSystemConfig.riser.totalPrice || 0) - totalPrice) > 0.01;
-                                    
-                                    if (squareMetersChanged || totalPriceChanged) {
-                                      // Use requestAnimationFrame for better state update timing
-                                      requestAnimationFrame(() => {
-                                        updateStairPart('riser', {
-                                          squareMeters: riserMetrics.totalArea,
-                                          totalPrice: totalPrice,
-                                          originalTotalPrice: basePrice
-                                        });
-                                      });
-                                    }
-                                    
-                                    return (
-                                      <div className="space-y-3">
-                                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-                                          <div className="grid grid-cols-2 gap-3 text-sm">
-                                            <div>
-                                              <span className="text-gray-600 dark:text-gray-400">متر مربع:</span>
-                                              <span className="font-semibold text-gray-800 dark:text-white mr-2">
-                                                {formatSquareMeters(riserMetrics.totalArea)}
-                                              </span>
-                                            </div>
-                                            <div>
-                                              <span className="text-gray-600 dark:text-gray-400">تعداد:</span>
-                                              <span className="font-semibold text-gray-800 dark:text-white mr-2">
-                                                {formatDisplayNumber(riserMetrics.totalQuantity)}
-                                              </span>
-                                            </div>
-                                          </div>
-                                        </div>
-
-                                        {/* Price per Square Meter */}
-                                        <div>
-                                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                            فی هر متر مربع (تومان):
-                                          </label>
-                                          <FormattedNumberInput
-                                            value={stairSystemConfig.riser.pricePerSquareMeter || 0}
-                                            onChange={(value) => {
-                                              updateStairPart('riser', { pricePerSquareMeter: value || 0 });
-                                            }}
-                                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                            min={0}
-                                            step={1000}
-                                            placeholder="قیمت هر متر مربع"
-                                          />
-                                        </div>
-
-                                        {/* Mandatory Pricing for Riser */}
-                                        <div className="border-t border-gray-200 dark:border-gray-600 pt-3">
-                                          <div className="flex items-center space-x-3 space-x-reverse mb-2">
-                                            <input
-                                              id="riser-mandatory-v1-checkbox"
-                                              type="checkbox"
-                                              checked={stairSystemConfig.riser.isMandatory || false}
-                                              aria-label="قیمت‌گذاری حکمی برای خیز پله"
-                                              onChange={(e) => {
-                                                updateStairPart('riser', { isMandatory: e.target.checked });
-                                              }}
-                                              className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                                            />
-                                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                              حکمی (افزایش قیمت)
-                                            </label>
-                                          </div>
-                                          {stairSystemConfig.riser.isMandatory && (
-                                            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
-                                              <div className="flex items-center space-x-3 space-x-reverse">
-                                                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                                  درصد افزایش:
-                                                </label>
-                                                <FormattedNumberInput
-                                                  value={stairSystemConfig.riser.mandatoryPercentage || 20}
-                                                  onChange={(value) => {
-                                                    updateStairPart('riser', { mandatoryPercentage: value || 20 });
-                                                  }}
-                                                  className="w-20 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
-                                                  min={0}
-                                                  max={100}
-                                                />
-                                                <span className="text-sm text-gray-600 dark:text-gray-400">%</span>
-                                              </div>
-                                            </div>
-                                          )}
-                                        </div>
-
-                                        {/* Total Price for Riser */}
-                                        {totalPrice > 0 && (
-                                          <div className="bg-gradient-to-r from-teal-50 to-teal-100 dark:from-teal-900/30 dark:to-teal-800/30 border border-teal-200 dark:border-teal-800 rounded-lg p-3">
-                                            <div className="flex justify-between items-center">
-                                              <span className="text-sm font-medium text-teal-800 dark:text-teal-200">
-                                                قیمت کل خیز پله:
-                                              </span>
-                                              <span className="text-lg font-bold text-teal-900 dark:text-teal-100">
-                                                {formatPrice(totalPrice, 'تومان')}
-                                              </span>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  })()}
-                                </>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        {/* Section 3: پاگرد (Landing) */}
-                        <div className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => setLandingExpanded(!landingExpanded)}
-                            className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                          >
-                            <div className="flex items-center gap-3">
-                              <input
-                                id="landing-selection-checkbox"
-                                type="checkbox"
-                                checked={stairSystemConfig?.landing.isSelected || false}
-                                onChange={(e) => {
-                                  updateStairPart('landing', { isSelected: e.target.checked });
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                                aria-label="انتخاب پاگرد"
-                                className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                              />
-                              <span className="font-semibold text-gray-800 dark:text-white">پاگرد (Landing)</span>
-                            </div>
-                            {landingExpanded ? (
-                              <FaChevronUp className="text-gray-500 dark:text-gray-400" />
-                            ) : (
-                              <FaChevronDown className="text-gray-500 dark:text-gray-400" />
-                            )}
-                          </button>
-                          
-                          {landingExpanded && stairSystemConfig && (
-                            <div className="p-4 space-y-4 border-t border-gray-200 dark:border-gray-600">
-                              {/* Product Selection for Landing */}
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                  انتخاب محصول:
-                                </label>
-                                {stairSystemConfig.landing.product ? (
-                                  <div className="p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-lg mb-2">
-                                    <div className="flex items-center justify-between">
-                                      <div>
-                                        <p className="font-medium text-gray-800 dark:text-white">
-                                          {generateFullProductName(stairSystemConfig.landing.product)}
-                                        </p>
-                                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                                          {stairSystemConfig.landing.product.stoneTypeNamePersian} • عرض {stairSystemConfig.landing.product.widthValue}×ضخامت {stairSystemConfig.landing.product.thicknessValue}cm
-                                        </p>
-                                      </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          updateStairPart('landing', {
-                                            productId: null,
-                                            product: null,
-                                            pricePerSquareMeter: 0
-                                          });
-                                          syncDraftWithProduct('landing', null);
-                                          if (stairSystemV2.stairActivePart === 'landing') {
-                                            stairSystemV2.setStoneSearchTerm('');
-                                          }
-                                          setLandingProductSearchTerm('');
-                                        }}
-                                        className="text-sm text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teال-300"
-                                      >
-                                        تغییر
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="mb-2">
-                                    <div className="relative">
-                                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                        <FaSearch className="h-5 w-5 text-gray-400" />
-                                      </div>
-                                      <input
-                                        type="text"
-                                        placeholder="جستجو محصول..."
-                                        value={landingProductSearchTerm}
-                                        onChange={(e) => setLandingProductSearchTerm(e.target.value)}
-                                        className="w-full pr-10 pl-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                      />
-                                    </div>
-                                    {landingProductSearchTerm && (
-                                      <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800">
-                                        {filteredLandingProducts.map((product) => (
-                                          <div
-                                            key={product.id}
-                                            onClick={() => {
-                                              selectProductForStairPart('landing', product);
-                                              setLandingProductSearchTerm('');
-                                            }}
-                                            className="p-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-b-0"
-                                          >
-                                            <p className="font-medium text-gray-800 dark:text-white text-sm">
-                                              {generateFullProductName(product)}
-                                            </p>
-                                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                              {product.basePrice ? formatPrice(product.basePrice, product.currency) : 'قیمت نامشخص'}
-                                            </p>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Landing Dimensions */}
-                              {stairSystemConfig.landing.product && (
-                                <>
-                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div>
-                                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                        تعداد پاگرد
-                                      </label>
-                                      <FormattedNumberInput
-                                        value={stairSystemConfig.landing.numberOfLandings || 0}
-                                        onChange={(value) => {
-                                          updateStairPart('landing', { numberOfLandings: value || 0 });
-                                        }}
-                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                        min={0}
-                                        step={1}
-                                        placeholder="0"
-                                      />
-                                    </div>
-                                    {stairSystemConfig.landing.numberOfLandings && stairSystemConfig.landing.numberOfLandings > 0 && (
-                                      <>
-                                        <div>
-                                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                            عرض پاگرد (cm)
-                                          </label>
-                                          <FormattedNumberInput
-                                            value={stairSystemConfig.landing.landingWidth || 0}
-                                            onChange={(value) => {
-                                              updateStairPart('landing', { landingWidth: value || 0 });
-                                            }}
-                                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                            min={0}
-                                            step={0.1}
-                          decimalScale={4}
-                          placeholder="عرض"
-                                          />
-                                        </div>
-                                        <div>
-                                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                            عمق پاگرد (cm)
-                                          </label>
-                                          <FormattedNumberInput
-                                            value={stairSystemConfig.landing.landingDepth || 0}
-                                            onChange={(value) => {
-                                              updateStairPart('landing', { landingDepth: value || 0 });
-                                            }}
-                                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                            min={0}
-                                            step={0.1}
-                          decimalScale={4}
-                          placeholder="عمق"
-                                          />
-                                        </div>
-                                      </>
-                                    )}
-                                  </div>
-
-                                  {/* Landing Calculations */}
-                                  {(() => {
-                                    const landingMetrics = calculateLandingMetrics({
-                                      landingWidth: stairSystemConfig.landing.landingWidth || 0,
-                                      landingDepth: stairSystemConfig.landing.landingDepth || 0,
-                                      numberOfLandings: stairSystemConfig.landing.numberOfLandings || 0,
-                                      quantityType: stairSystemConfig.quantityType,
-                                      numberOfStaircases: stairSystemConfig.numberOfStaircases || 1
-                                    });
-                                    
-                                    const basePrice = landingMetrics.totalArea * (stairSystemConfig.landing.pricePerSquareMeter || 0);
-                                    const mandatoryPrice = stairSystemConfig.landing.isMandatory && stairSystemConfig.landing.mandatoryPercentage
-                                      ? basePrice * (stairSystemConfig.landing.mandatoryPercentage / 100)
-                                      : 0;
-                                    const totalPrice = basePrice + mandatoryPrice;
-                                    
-                                    // Update landing part with calculated values
-                                    // Always update if squareMeters or totalPrice changed (to handle price/mandatory changes)
-                                    // Use Math.abs to handle floating point comparison issues
-                                    const squareMetersChanged = Math.abs((stairSystemConfig.landing.squareMeters || 0) - landingMetrics.totalArea) > 0.001;
-                                    const totalPriceChanged = Math.abs((stairSystemConfig.landing.totalPrice || 0) - totalPrice) > 0.01;
-                                    
-                                    if (squareMetersChanged || totalPriceChanged) {
-                                      // Use requestAnimationFrame for better state update timing
-                                      requestAnimationFrame(() => {
-                                        updateStairPart('landing', {
-                                          squareMeters: landingMetrics.totalArea,
-                                          quantity: landingMetrics.totalQuantity,
-                                          totalPrice: totalPrice,
-                                          originalTotalPrice: basePrice
-                                        });
-                                      });
-                                    }
-                                    
-                                    return (
-                                      <div className="space-y-3">
-                                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-                                          <div className="grid grid-cols-2 gap-3 text-sm">
-                                            <div>
-                                              <span className="text-gray-600 dark:text-gray-400">متر مربع:</span>
-                                              <span className="font-semibold text-gray-800 dark:text-white mr-2">
-                                                {formatSquareMeters(landingMetrics.totalArea)}
-                                              </span>
-                                            </div>
-                                            <div>
-                                              <span className="text-gray-600 dark:text-gray-400">تعداد:</span>
-                                              <span className="font-semibold text-gray-800 dark:text-white mr-2">
-                                                {formatDisplayNumber(landingMetrics.totalQuantity)}
-                                              </span>
-                                            </div>
-                                          </div>
-                                        </div>
-
-                                        {/* Price per Square Meter */}
-                                        <div>
-                                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                            فی هر متر مربع (تومان):
-                                          </label>
-                                          <FormattedNumberInput
-                                            value={stairSystemConfig.landing.pricePerSquareMeter || 0}
-                                            onChange={(value) => {
-                                              updateStairPart('landing', { pricePerSquareMeter: value || 0 });
-                                            }}
-                                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                            min={0}
-                                            step={1000}
-                                            placeholder="قیمت هر متر مربع"
-                                          />
-                                        </div>
-
-                                        {/* Mandatory Pricing for Landing */}
-                                        <div className="border-t border-gray-200 dark:border-gray-600 pt-3">
-                                          <div className="flex items-center space-x-3 space-x-reverse mb-2">
-                                            <input
-                                              id="landing-mandatory-v1-checkbox"
-                                              type="checkbox"
-                                              checked={stairSystemConfig.landing.isMandatory || false}
-                                              aria-label="قیمت‌گذاری حکمی برای پاگرد"
-                                              onChange={(e) => {
-                                                updateStairPart('landing', { isMandatory: e.target.checked });
-                                              }}
-                                              className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                                            />
-                                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                              حکمی (افزایش قیمت)
-                                            </label>
-                                          </div>
-                                          {stairSystemConfig.landing.isMandatory && (
-                                            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
-                                              <div className="flex items-center space-x-3 space-x-reverse">
-                                                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                                  درصد افزایش:
-                                                </label>
-                                                <FormattedNumberInput
-                                                  value={stairSystemConfig.landing.mandatoryPercentage || 20}
-                                                  onChange={(value) => {
-                                                    updateStairPart('landing', { mandatoryPercentage: value || 20 });
-                                                  }}
-                                                  className="w-20 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
-                                                  min={0}
-                                                  max={100}
-                                                />
-                                                <span className="text-sm text-gray-600 dark:text-gray-400">%</span>
-                                              </div>
-                                            </div>
-                                          )}
-                                        </div>
-
-                                        {/* Total Price for Landing */}
-                                        {totalPrice > 0 && (
-                                          <div className="bg-gradient-to-r from-teal-50 to-teal-100 dark:from-teal-900/30 dark:to-teal-800/30 border border-teal-200 dark:border-teal-800 rounded-lg p-3">
-                                            <div className="flex justify-between items-center">
-                                              <span className="text-sm font-medium text-teal-800 dark:text-teal-200">
-                                                قیمت کل پاگرد:
-                                              </span>
-                                              <span className="text-lg font-bold text-teal-900 dark:text-teal-100">
-                                                {formatPrice(totalPrice, 'تومان')}
-                                              </span>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  })()}
-                                </>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        {/* Total Summary */}
-                        {stairSystemConfig && (() => {
-                          // Calculate totals directly from current values to ensure accuracy
-                          // This avoids relying on state that might not be updated yet
-                          
-                          // Calculate Tread Total
-                          let treadTotal = 0;
-                          if (stairSystemConfig.tread.isSelected && stairSystemConfig.tread.product) {
-                            const treadMetrics = calculateTreadMetrics({
-                              treadWidth: stairSystemConfig.tread.treadWidth || 0,
-                              treadWidthUnit: stairSystemConfig.tread.lengthUnit || 'm',
-                              treadDepth: stairSystemConfig.tread.treadDepth || 30,
-                              quantity: stairSystemConfig.tread.quantity || stairSystemConfig.numberOfSteps || 0,
-                              quantityType: stairSystemConfig.quantityType,
-                              numberOfStaircases: stairSystemConfig.numberOfStaircases || 1
-                            });
-                            
-                            const nosingCost = calculateNosingCuttingCost({
-                              nosingType: stairSystemConfig.tread.nosingType || 'none',
-                              treadWidth: stairSystemConfig.tread.treadWidth || 0,
-                              treadWidthUnit: stairSystemConfig.tread.lengthUnit || 'm',
-                              numberOfSteps: stairSystemConfig.tread.quantity || stairSystemConfig.numberOfSteps || 0,
-                              numberOfStaircases: stairSystemConfig.quantityType === 'staircases' ? (stairSystemConfig.numberOfStaircases || 1) : 1,
-                              quantityType: stairSystemConfig.quantityType
-                            });
-                            
-                            const basePrice = treadMetrics.totalArea * (stairSystemConfig.tread.pricePerSquareMeter || 0);
-                            const mandatoryPrice = stairSystemConfig.tread.isMandatory && stairSystemConfig.tread.mandatoryPercentage
-                              ? basePrice * (stairSystemConfig.tread.mandatoryPercentage / 100)
-                              : 0;
-                            treadTotal = basePrice + mandatoryPrice + nosingCost.cuttingCost;
-                          }
-                          
-                          // Calculate Riser Total
-                          let riserTotal = 0;
-                          if (stairSystemConfig.riser.isSelected && stairSystemConfig.riser.product) {
-                            const treadWidth = stairSystemConfig.tread.treadWidth || 100;
-                            const treadWidthUnit = stairSystemConfig.tread.lengthUnit || 'm';
-                            
-                            const riserMetrics = calculateRiserMetrics({
-                              treadWidth: treadWidth,
-                              treadWidthUnit: treadWidthUnit,
-                              riserHeight: stairSystemConfig.riser.riserHeight || 17,
-                              quantity: stairSystemConfig.riser.quantity || stairSystemConfig.numberOfSteps || 0,
-                              quantityType: stairSystemConfig.quantityType,
-                              numberOfStaircases: stairSystemConfig.numberOfStaircases || 1
-                            });
-                            
-                            const basePrice = riserMetrics.totalArea * (stairSystemConfig.riser.pricePerSquareMeter || 0);
-                            const mandatoryPrice = stairSystemConfig.riser.isMandatory && stairSystemConfig.riser.mandatoryPercentage
-                              ? basePrice * (stairSystemConfig.riser.mandatoryPercentage / 100)
-                              : 0;
-                            riserTotal = basePrice + mandatoryPrice;
-                          }
-                          
-                          // Calculate Landing Total
-                          let landingTotal = 0;
-                          if (stairSystemConfig.landing.isSelected && stairSystemConfig.landing.product) {
-                            const landingMetrics = calculateLandingMetrics({
-                              landingWidth: stairSystemConfig.landing.landingWidth || 0,
-                              landingDepth: stairSystemConfig.landing.landingDepth || 0,
-                              numberOfLandings: stairSystemConfig.landing.numberOfLandings || 0,
-                              quantityType: stairSystemConfig.quantityType,
-                              numberOfStaircases: stairSystemConfig.numberOfStaircases || 1
-                            });
-                            
-                            const basePrice = landingMetrics.totalArea * (stairSystemConfig.landing.pricePerSquareMeter || 0);
-                            const mandatoryPrice = stairSystemConfig.landing.isMandatory && stairSystemConfig.landing.mandatoryPercentage
-                              ? basePrice * (stairSystemConfig.landing.mandatoryPercentage / 100)
-                              : 0;
-                            landingTotal = basePrice + mandatoryPrice;
-                          }
-                          
-                          const grandTotal = treadTotal + riserTotal + landingTotal;
-                          
-                          return (
-                            <div className="bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-900/30 dark:to-purple-800/30 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
-                              <h4 className="text-sm font-semibold text-purple-800 dark:text-purple-200 mb-3">
-                                خلاصه دستگاه پله:
-                              </h4>
-                              <div className="space-y-2 text-sm">
-                                {stairSystemConfig.tread.isSelected && treadTotal > 0 && (
-                                  <div className="flex justify-between">
-                                    <span className="text-gray-700 dark:text-gray-300">کف پله:</span>
-                                    <span className="font-semibold text-gray-800 dark:text-white">
-                                      {formatPrice(treadTotal, 'تومان')}
-                                    </span>
-                                  </div>
-                                )}
-                                {stairSystemConfig.riser.isSelected && riserTotal > 0 && (
-                                  <div className="flex justify-between">
-                                    <span className="text-gray-700 dark:text-gray-300">خیز پله:</span>
-                                    <span className="font-semibold text-gray-800 dark:text-white">
-                                      {formatPrice(riserTotal, 'تومان')}
-                                    </span>
-                                  </div>
-                                )}
-                                {stairSystemConfig.landing.isSelected && landingTotal > 0 && (
-                                  <div className="flex justify-between">
-                                    <span className="text-gray-700 dark:text-gray-300">پاگرد:</span>
-                                    <span className="font-semibold text-gray-800 dark:text-white">
-                                      {formatPrice(landingTotal, 'تومان')}
-                                    </span>
-                                  </div>
-                                )}
-                                <div className="border-t border-purple-200 dark:border-purple-700 pt-2 mt-2">
-                                  <div className="flex justify-between">
-                                    <span className="font-bold text-purple-800 dark:text-purple-200">جمع کل:</span>
-                                    <span className="font-bold text-lg text-purple-900 dark:text-purple-100">
-                                      {formatPrice(grandTotal, 'تومان')}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    </>
-                  ) : null}
-                  
-                  {/* Conditional for longitudinal and slab stones (only shown if not stair) */}
-                  {(productConfig.productType === 'longitudinal' || productConfig.productType === 'slab') && (
-                    <>
-                      {/* LONGITUDINAL STONE CONFIGURATION FORM (existing) */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            نام کامل سنگ
-                          </label>
-                          <div className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-600 text-gray-800 dark:text-white">
-                            {selectedProduct ? generateFullProductName(selectedProduct) : 'لطفاً محصول را انتخاب کنید'}
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            نام یا نوع سنگ
-                          </label>
-                          <input
-                            type="text"
-                            value={productConfig.stoneName || ''}
-                            onFocus={() => handleFieldFocus('stoneName', productConfig.stoneName, '')}
-                            onChange={(e) => setProductConfig(prev => ({ ...prev, stoneName: e.target.value }))}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                          />
-                        </div>
-                      </div>
-                  {/* For Slab: Enhanced Requested Dimensions Section */}
-                  {productConfig.productType === 'slab' ? (
-                    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl p-6 shadow-lg">
-                      <div className="flex items-center gap-3 mb-5">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 dark:from-blue-600 dark:to-indigo-700 flex items-center justify-center shadow-md">
-                          <FaRuler className="text-white text-xl" />
-                        </div>
-                    <div>
-                          <h4 className="text-lg font-bold text-blue-900 dark:text-blue-100">ابعاد درخواستی</h4>
-                          <p className="text-xs text-blue-700 dark:text-blue-300">مشخصات مورد نیاز برای محصول نهایی</p>
-                        </div>
-                      </div>
-                      
-                      {/* Length and Width Inputs in Row */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                        {/* Length Input */}
-                        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-2 border-blue-200 dark:border-blue-700 shadow-sm">
-                          <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                            <FaRuler className="text-blue-600 dark:text-blue-400" />
-                            طول درخواستی
-                      </label>
-                        <FormattedNumberInput
-                          value={productConfig.length || 0}
-                          onFocus={() => handleFieldFocus('length', productConfig.length, 0)}
-                          onChange={(value) => {
-                            // Update the length first
-                              setProductConfig(prev => {
-                                const updatedConfig = resolveLongitudinalWidth(
-                                  { ...prev, length: value },
-                                  selectedProduct,
-                                  widthUnit,
-                                  isEditMode
-                                );
-                                // Trigger smart calculation with updated config
-                                const smartResult = handleSmartCalculation('length', value, updatedConfig, lengthUnit, widthUnit, getEffectiveQuantity());
-                                const finalConfig = {
-                                  ...updatedConfig,
-                                width: smartResult.width,
-                                squareMeters: smartResult.squareMeters
-                              };
-                              
-                              // For slab products, validate length against original length
-                              if (prev.productType === 'slab' && value > 0) {
-                                const userLengthInCm = lengthUnit === 'm' ? value * 100 : value;
-                                const originalLength = (isEditMode && prev.originalLength !== undefined) 
-                                  ? prev.originalLength 
-                                  : ((selectedProduct as any).lengthValue || 300);
-                                const originalLengthCm = lengthUnit === 'm' ? originalLength * 100 : originalLength;
-                                
-                                if (originalLengthCm > 0 && userLengthInCm > originalLengthCm) {
-                                  setErrors({ 
-                                    products: `طول وارد شده (${value}${lengthUnit === 'm' ? 'm' : 'cm'}) بیشتر از طول اصلی اسلب (${originalLengthCm / (lengthUnit === 'm' ? 100 : 1)}${lengthUnit === 'm' ? 'm' : 'cm'}) است. لطفاً طولی کمتر یا مساوی وارد کنید.` 
-                                  });
-                                } else if (errors.products && errors.products.includes('طول وارد شده')) {
-                                  setErrors({});
-                                }
-                              }
-                              
-                              // Check if we need to auto-select longitudinal cut after smart calculation
-                              const userWidthInCm = widthUnit === 'm' ? finalConfig.width * 100 : finalConfig.width;
-                              // Use productConfig.originalWidth when editing, otherwise use selectedProduct.widthValue
-                              const originalWidth = (isEditMode && prev.originalWidth) ? prev.originalWidth : (selectedProduct?.widthValue || 0);
-                              const shouldAutoSelectLongitudinalCut = userWidthInCm < originalWidth && userWidthInCm > 0;
-                              
-                              console.log('📏 Length Changed - Auto Cut Selection:', {
-                                userLength: value,
-                                userLengthUnit: lengthUnit,
-                                calculatedWidth: finalConfig.width,
-                                userWidthInCm,
-                                originalWidth,
-                                shouldAutoSelectLongitudinalCut,
-                                comparison: `${userWidthInCm} < ${originalWidth} = ${userWidthInCm < originalWidth}`
-                              });
-                              
-                              // Automatically get cutting type price if cut should be applied
-                              let cuttingCostPerMeter: number | null | undefined = prev.cuttingCostPerMeter || null;
-                              if (shouldAutoSelectLongitudinalCut && !cuttingCostPerMeter) {
-                                // Fetch price from cutting types for "LONG" (برش طولی)
-                                cuttingCostPerMeter = getCuttingTypePricePerMeter('LONG');
-                                console.log('🔧 Auto-fetched cutting cost per meter from services:', cuttingCostPerMeter);
-                              } else if (!shouldAutoSelectLongitudinalCut) {
-                                // Clear cutting cost if cut is not needed
-                                cuttingCostPerMeter = undefined;
-                              }
-                              
-                              // Calculate cutting cost automatically
-                              const effectiveQuantity = getEffectiveQuantity();
-                              const updatedCuttingCost = calculateAutoCuttingCost(
-                                value,
-                                lengthUnit,
-                                cuttingCostPerMeter,
-                                effectiveQuantity
-                              );
-                              
-                              // Auto-select cut type based on calculated width
-                              if (shouldAutoSelectLongitudinalCut && cuttingCostPerMeter) {
-                                return {
-                                  ...finalConfig,
-                                  isCut: true,
-                                  cutType: 'longitudinal',
-                                  cuttingCostPerMeter: cuttingCostPerMeter,
-                                  cuttingCost: updatedCuttingCost
-                                };
-                              } else {
-                                return {
-                                  ...finalConfig,
-                                  isCut: false,
-                                  cutType: null,
-                                  cuttingCostPerMeter: undefined,
-                                  cuttingCost: 0
-                                };
-                              }
-                            });
-                          }}
-                          className="w-full px-4 py-3 text-base border-2 border-blue-300 dark:border-blue-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                          min={0}
-                          step={0.1}
-                          decimalScale={4}
-                          placeholder="مقدار طول"
-                        />
-                          <div className="flex gap-2 mt-3">
-                          <button
-                            type="button"
-                            onClick={() => handleLengthUnitChange('cm')}
-                              className={`flex-1 px-4 py-2.5 text-sm font-semibold rounded-lg transition-all ${
-                              lengthUnit === 'cm'
-                                  ? 'bg-blue-600 text-white shadow-md'
-                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                            }`}
-                          >
-                            سانتی‌متر (cm)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleLengthUnitChange('m')}
-                              className={`flex-1 px-4 py-2.5 text-sm font-semibold rounded-lg transition-all ${
-                              lengthUnit === 'm'
-                                  ? 'bg-blue-600 text-white shadow-md'
-                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                            }`}
-                          >
-                            متر (m)
-                          </button>
-                        </div>
-                      </div>
-                        
-                        {/* Width Input */}
-                        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-2 border-blue-200 dark:border-blue-700 shadow-sm">
-                          <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                            <FaRuler className="text-blue-600 dark:text-blue-400" />
-                            عرض درخواستی
-                      </label>
-                        <FormattedNumberInput
-                          value={productConfig.width || 0}
-                          onFocus={() => {
-                            handleFieldFocus('width', productConfig.width, 0);
-                            // Clear width error on focus to allow user to fix it
-                            if (errors.products && errors.products.includes('عرض وارد شده')) {
-                              setErrors({});
-                            }
-                          }}
-                          onChange={(value) => {
-                            // Update the width first
-                            setProductConfig(prev => {
-                              const updatedConfig = { ...prev, width: value };
-                              // Trigger smart calculation with updated config
-                              const smartResult = handleSmartCalculation('width', value, updatedConfig, lengthUnit, widthUnit, getEffectiveQuantity());
-                              return {
-                                ...updatedConfig,
-                                length: smartResult.length,
-                                squareMeters: smartResult.squareMeters
-                              };
-                            });
-                            
-                            // Calculate width in cm for comparison
-                            const userWidthInCm = widthUnit === 'm' ? value * 100 : value;
-                            
-                            // Get original width for validation
-                            const originalWidth = (isEditMode && productConfig.originalWidth) 
-                              ? productConfig.originalWidth 
-                              : (selectedProduct?.widthValue || 0);
-                            
-                            // Validate: width cannot exceed original width
-                            if (value > 0 && originalWidth > 0 && userWidthInCm > originalWidth) {
-                              // Show error message
-                              setErrors({ 
-                                products: `عرض وارد شده (${value}${widthUnit === 'm' ? 'm' : 'cm'}) بیشتر از عرض اصلی سنگ (${originalWidth}cm) است. لطفاً عرضی کمتر یا مساوی با ${originalWidth}cm وارد کنید.` 
-                              });
-                            } else {
-                              // Clear error if width is valid
-                              if (errors.products && errors.products.includes('عرض وارد شده')) {
-                                setErrors({});
-                              }
-                            }
-                            
-                            // Use productConfig.originalWidth when editing, otherwise use selectedProduct.widthValue
-                            setProductConfig(prev => {
-                              const originalWidth = (isEditMode && prev.originalWidth) ? prev.originalWidth : (selectedProduct?.widthValue || 0);
-                              const shouldAutoSelectLongitudinalCut = userWidthInCm < originalWidth && userWidthInCm > 0;
-                              
-                              // Log width change and auto-selection logic
-                              console.log('📏 Width Changed - Auto Cut Selection:', {
-                                userWidth: value,
-                                userWidthUnit: widthUnit,
-                                userWidthInCm,
-                                originalWidth,
-                                shouldAutoSelectLongitudinalCut,
-                                comparison: `${userWidthInCm} < ${originalWidth} = ${userWidthInCm < originalWidth}`
-                              });
-                              
-                              // Automatically get cutting type price if cut should be applied
-                              let cuttingCostPerMeter: number | null | undefined = prev.cuttingCostPerMeter || null;
-                              if (shouldAutoSelectLongitudinalCut && !cuttingCostPerMeter) {
-                                // Fetch price from cutting types for "LONG" (برش طولی)
-                                cuttingCostPerMeter = getCuttingTypePricePerMeter('LONG');
-                                console.log('🔧 Auto-fetched cutting cost per meter from services:', cuttingCostPerMeter);
-                              } else if (!shouldAutoSelectLongitudinalCut) {
-                                // Clear cutting cost if cut is not needed
-                                cuttingCostPerMeter = undefined;
-                              }
-                              
-                              // Calculate cutting cost automatically
-                              const effectiveQuantity = getEffectiveQuantity();
-                              const updatedCuttingCost = calculateAutoCuttingCost(
-                                prev.length,
-                                lengthUnit,
-                                cuttingCostPerMeter,
-                                effectiveQuantity
-                              );
-                              
-                              // Update cut type based on width comparison
-                              if (shouldAutoSelectLongitudinalCut && cuttingCostPerMeter) {
-                                return {
-                                  ...prev,
-                                  isCut: true,
-                                  cutType: 'longitudinal',
-                                  cuttingCostPerMeter: cuttingCostPerMeter,
-                                  cuttingCost: updatedCuttingCost
-                                };
-                              } else {
-                                return {
-                                  ...prev,
-                                  isCut: false,
-                                  cutType: null,
-                                  cuttingCostPerMeter: undefined,
-                                  cuttingCost: 0
-                                };
-                              }
-                            });
-                          }}
-                          className={`w-full px-4 py-3 text-base border-2 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 transition-all ${
-                            errors.products && errors.products.includes('عرض وارد شده')
-                              ? 'border-red-500 dark:border-red-500 focus:ring-red-500 focus:border-red-500'
-                              : 'border-blue-300 dark:border-blue-600 focus:ring-blue-500 focus:border-blue-500'
-                          }`}
-                          min={0}
-                          step={0.1}
-                          decimalScale={4}
-                          placeholder="مقدار عرض"
-                        />
-                          <div className="flex gap-2 mt-3">
-                            <button
-                              type="button"
-                              onClick={() => handleWidthUnitChange('cm')}
-                              className={`flex-1 px-4 py-2.5 text-sm font-semibold rounded-lg transition-all ${
-                                widthUnit === 'cm'
-                                  ? 'bg-blue-600 text-white shadow-md'
-                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                              }`}
-                            >
-                              سانتی‌متر (cm)
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleWidthUnitChange('m')}
-                              className={`flex-1 px-4 py-2.5 text-sm font-semibold rounded-lg transition-all ${
-                                widthUnit === 'm'
-                                  ? 'bg-blue-600 text-white shadow-md'
-                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                              }`}
-                            >
-                              متر (m)
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {/* Quantity and Summary Row */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-2 border-blue-200 dark:border-blue-700">
-                          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                            تعداد
-                          </label>
-                          <FormattedNumberInput
-                            value={getQuantityDisplayValue()}
-                            onFocus={() => handleFieldFocus('quantity', getQuantityDisplayValue(), 0)}
-                            onChange={(value) => {
-                              // Check if quantity is being cleared/deleted (empty or 0)
-                              const isQuantityCleared = !value || value === 0;
-                              
-                              // Mark quantity as interacted
-                              if (!hasQuantityBeenInteracted) {
-                                setHasQuantityBeenInteracted(true);
-                                console.log('🎯 Quantity First Interaction');
-                              }
-                              
-                              // Handle mandatory pricing based on quantity state
-                              if (isQuantityCleared) {
-                                // If quantity is cleared, uncheck mandatory pricing and reset interaction state
-                                setIsMandatory(false);
-                                setHasQuantityBeenInteracted(false);
-                                console.log('🔄 Quantity Cleared - Deactivating mandatory pricing and resetting interaction state');
-                              } else {
-                                // If quantity has a value, activate mandatory pricing
-                                setIsMandatory(true);
-                                console.log('✅ Quantity Has Value - Activating mandatory pricing');
-                              }
-                              
-                              // Update the quantity
-                              setProductConfig(prev => {
-                                const updatedConfig = { ...prev, quantity: value };
-                                // Use effective quantity for calculations
-                                const effectiveQuantity = value || 1;
-                                // Trigger smart calculation with effective quantity
-                                const smartResult = handleSmartCalculation('quantity', effectiveQuantity, updatedConfig, lengthUnit, widthUnit, effectiveQuantity);
-                                
-                                // Recalculate cutting cost automatically using helper function
-                                const updatedCuttingCost = calculateAutoCuttingCost(
-                                  updatedConfig.length,
-                                  lengthUnit,
-                                  prev.cuttingCostPerMeter || null,
-                                  effectiveQuantity
-                                );
-                                
-                                return {
-                                  ...updatedConfig,
-                                  squareMeters: smartResult.squareMeters,
-                                  cuttingCost: updatedCuttingCost
-                                };
-                              });
-                              
-                              console.log('📊 Quantity Changed:', {
-                                displayValue: value,
-                                effectiveQuantity: value || 1,
-                                isQuantityCleared,
-                                hasBeenInteracted: !isQuantityCleared,
-                                mandatoryActivated: !isQuantityCleared
-                              });
-                            }}
-                            className="w-full px-4 py-3 text-base border-2 border-blue-300 dark:border-blue-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                            min={1}
-                            placeholder="تعداد"
-                          />
-                        </div>
-                        
-                        {/* Summary Card */}
-                        <div className="bg-gradient-to-br from-blue-100 to-indigo-100 dark:from-blue-900/30 dark:to-indigo-900/30 rounded-lg p-4 border-2 border-blue-300 dark:border-blue-600">
-                          <p className="text-xs font-semibold text-blue-800 dark:text-blue-200 mb-2">خلاصه ابعاد</p>
-                          <div className="space-y-2">
-                            <div className="flex justify-between items-center">
-                              <span className="text-sm text-gray-600 dark:text-gray-400">طول:</span>
-                              <span className="text-sm font-bold text-gray-900 dark:text-white">
-                                {productConfig.length ? `${formatDisplayNumber(productConfig.length)} ${lengthUnit === 'm' ? 'm' : 'cm'}` : 'ثبت نشده'}
-                              </span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="text-sm text-gray-600 dark:text-gray-400">عرض:</span>
-                              <span className="text-sm font-bold text-gray-900 dark:text-white">
-                                {productConfig.width ? `${formatDisplayNumber(productConfig.width)} ${widthUnit === 'm' ? 'm' : 'cm'}` : 'ثبت نشده'}
-                              </span>
-                            </div>
-                            <div className="flex justify-between items-center pt-2 border-t border-blue-300 dark:border-blue-700">
-                              <span className="text-sm text-gray-600 dark:text-gray-400">تعداد:</span>
-                              <span className="text-sm font-bold text-blue-900 dark:text-blue-100">
-                                {productConfig.quantity || 0} عدد
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    /* For Non-Slab: Original Layout */
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          طول
-                        </label>
-                        <div className="space-y-2">
-                          <FormattedNumberInput
-                            value={productConfig.length || 0}
-                            onFocus={() => handleFieldFocus('length', productConfig.length, 0)}
-                            onChange={(value) => {
-                              setProductConfig(prev => {
-                                const updatedConfig = resolveLongitudinalWidth(
-                                  { ...prev, length: value },
-                                  selectedProduct,
-                                  widthUnit,
-                                  isEditMode
-                                );
-                                const smartResult = handleSmartCalculation('length', value, updatedConfig, lengthUnit, widthUnit, getEffectiveQuantity());
-                                return {
-                                  ...updatedConfig,
-                                  width: smartResult.width,
-                                  squareMeters: smartResult.squareMeters
-                                };
-                              });
-                            }}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                            min={0}
-                            step={0.1}
-                          decimalScale={4}
-                          placeholder="مقدار طول"
-                          />
-                          <div className="flex gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleLengthUnitChange('cm')}
-                              className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-all ${
-                                lengthUnit === 'cm'
-                                  ? 'bg-teal-500 text-white shadow-lg'
-                                  : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                              }`}
-                            >
-                              سانتی‌متر (cm)
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleLengthUnitChange('m')}
-                              className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-all ${
-                                lengthUnit === 'm'
-                                  ? 'bg-teal-500 text-white shadow-lg'
-                                  : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                              }`}
-                            >
-                              متر (m)
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          عرض
-                        </label>
-                        <div className="space-y-2">
-                          <FormattedNumberInput
-                            value={productConfig.width || 0}
-                            onFocus={() => handleFieldFocus('width', productConfig.width, 0)}
-                            onChange={(value) => {
-                              setProductConfig(prev => {
-                                const updatedConfig = { ...prev, width: value };
-                                const smartResult = handleSmartCalculation('width', value, updatedConfig, lengthUnit, widthUnit, getEffectiveQuantity());
-                                return {
-                                  ...updatedConfig,
-                                  length: smartResult.length,
-                                  squareMeters: smartResult.squareMeters
-                                };
-                              });
-                            }}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                          min={0}
-                          step={0.1}
-                          decimalScale={4}
-                          placeholder="مقدار عرض"
-                        />
-                        <div className="flex gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleWidthUnitChange('cm')}
-                            className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-all ${
-                              widthUnit === 'cm'
-                                ? 'bg-teal-500 text-white shadow-lg'
-                                : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                            }`}
-                          >
-                            سانتی‌متر (cm)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleWidthUnitChange('m')}
-                            className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-all ${
-                              widthUnit === 'm'
-                                ? 'bg-teal-500 text-white shadow-lg'
-                                : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                            }`}
-                          >
-                            متر (m)
-                          </button>
-                      </div>
-                    </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          تعداد
-                        </label>
-                        <FormattedNumberInput
-                          value={getQuantityDisplayValue()}
-                          onFocus={() => handleFieldFocus('quantity', getQuantityDisplayValue(), 0)}
-                          onChange={(value) => {
-                            const isQuantityCleared = !value || value === 0;
-                            if (!hasQuantityBeenInteracted) {
-                              setHasQuantityBeenInteracted(true);
-                            }
-                            if (isQuantityCleared) {
-                              setIsMandatory(false);
-                              setHasQuantityBeenInteracted(false);
-                            } else {
-                              setIsMandatory(true);
-                            }
-                            setProductConfig(prev => {
-                              const updatedConfig = { ...prev, quantity: value };
-                              const effectiveQuantity = value || 1;
-                              const smartResult = handleSmartCalculation('quantity', effectiveQuantity, updatedConfig, lengthUnit, widthUnit, effectiveQuantity);
-                              const updatedCuttingCost = calculateAutoCuttingCost(
-                                updatedConfig.length,
-                                lengthUnit,
-                                prev.cuttingCostPerMeter || null,
-                                effectiveQuantity
-                              );
-                              return {
-                                ...updatedConfig,
-                                squareMeters: smartResult.squareMeters,
-                                cuttingCost: updatedCuttingCost
-                              };
-                            });
-                          }}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                          min={1}
-                          placeholder="تعداد"
-                        />
-                      </div>
-                        </div>
-                      )
-                    </div>
-                  )}
-                  
-                  {/* Slab-specific sections */}
-                  {productConfig.productType === 'slab' && (() => {
-                      const slabCuttingMode = productConfig.slabCuttingMode || 'lineBased';
-                      const requestedLengthCm = productConfig.length ? (lengthUnit === 'm' ? productConfig.length * 100 : productConfig.length) : 0;
-                      const requestedWidthCm = productConfig.width ? (widthUnit === 'm' ? productConfig.width * 100 : productConfig.width) : 0;
-                      const wantedQuantity = productConfig.quantity || 0;
-                      
-                      // Get standard dimensions array or initialize empty
-                      const standardDimensions = productConfig.slabStandardDimensions || [];
-                      
-                      // Calculate total quantity from standard dimensions
-                      const totalStandardQuantity = standardDimensions.reduce((sum, entry) => sum + (entry.quantity || 0), 0);
-                      
-                      // Calculate total area for pricing
-                      const totalStandardAreaSqm = standardDimensions.reduce((sum, entry) => {
-                        return sum + ((entry.standardLengthCm * entry.standardWidthCm * entry.quantity) / 10000);
-                      }, 0);
-                      
-                      // Validation: check if standard dimensions are >= wanted dimensions
-                      const validateStandardDimensions = (entry: SlabStandardDimensionEntry): string | null => {
-                        if (entry.standardLengthCm < requestedLengthCm) {
-                          return `طول استاندارد (${entry.standardLengthCm}cm) نمی‌تواند کمتر از طول درخواستی (${requestedLengthCm}cm) باشد`;
-                        }
-                        if (entry.standardWidthCm < requestedWidthCm) {
-                          return `عرض استاندارد (${entry.standardWidthCm}cm) نمی‌تواند کمتر از عرض درخواستی (${requestedWidthCm}cm) باشد`;
-                        }
-                        if (entry.quantity <= 0) {
-                          return 'تعداد باید بیشتر از صفر باشد';
-                        }
-                        return null;
-                      };
-                      
-                      // Add new standard dimension entry
-                      const handleAddStandardDimension = () => {
-                        const newEntry: SlabStandardDimensionEntry = {
-                          id: `std_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                          standardLengthCm: requestedLengthCm || 300,
-                          standardWidthCm: requestedWidthCm || 200,
-                          quantity: 1
-                        };
-                        setProductConfig(prev => ({
-                          ...prev,
-                          slabStandardDimensions: [...(prev.slabStandardDimensions || []), newEntry]
-                        }));
-                      };
-                      
-                      // Update standard dimension entry
-                      const handleUpdateStandardDimension = (id: string, field: keyof SlabStandardDimensionEntry, value: number) => {
-                        setProductConfig(prev => {
-                          const updated = (prev.slabStandardDimensions || []).map(entry => 
-                            entry.id === id ? { ...entry, [field]: value } : entry
-                          );
-                          return { ...prev, slabStandardDimensions: updated };
-                        });
-                      };
-                      
-                      // Remove standard dimension entry
-                      const handleRemoveStandardDimension = (id: string) => {
-                        setProductConfig(prev => ({
-                          ...prev,
-                          slabStandardDimensions: (prev.slabStandardDimensions || []).filter(entry => entry.id !== id)
-                        }));
-                      };
-                      
-                      return (
-                        <div className="space-y-6">
-                          {/* ابعاد استاندارد Section */}
-                          <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-indigo-200 dark:border-indigo-800 shadow-lg overflow-hidden">
-                            <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 dark:from-indigo-600 dark:to-indigo-700 px-6 py-4">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                                    <FaWarehouse className="text-white text-lg" />
-                                  </div>
-                                  <div>
-                                    <h4 className="text-lg font-bold text-white">ابعاد استاندارد موجود در انبار</h4>
-                                    <p className="text-xs text-indigo-100">ابعاد سنگ‌های موجود در انبار را اضافه کنید</p>
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={handleAddStandardDimension}
-                                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-indigo-700 bg-white rounded-lg hover:bg-indigo-50 transition-all shadow-md hover:shadow-lg transform hover:scale-105"
-                                >
-                                  <FaPlus className="text-base" />
-                                  افزودن ابعاد
-                                </button>
-                              </div>
-                            </div>
-                            
-                            <div className="p-6">
-                              {standardDimensions.length > 0 ? (
-                                <div className="space-y-4">
-                                  <div className="overflow-x-auto -mx-6 px-6">
-                                    <table className="w-full text-sm">
-                                      <thead>
-                                        <tr className="bg-indigo-50 dark:bg-indigo-900/30 border-b-2 border-indigo-200 dark:border-indigo-700">
-                                          <th className="text-right py-3 px-4 font-semibold text-indigo-900 dark:text-indigo-100">طول استاندارد (cm)</th>
-                                          <th className="text-right py-3 px-4 font-semibold text-indigo-900 dark:text-indigo-100">عرض استاندارد (cm)</th>
-                                          <th className="text-right py-3 px-4 font-semibold text-indigo-900 dark:text-indigo-100">تعداد</th>
-                                          <th className="text-right py-3 px-4 font-semibold text-indigo-900 dark:text-indigo-100">مساحت (m²)</th>
-                                          <th className="text-right py-3 px-4 font-semibold text-indigo-900 dark:text-indigo-100">عملیات</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                                        {standardDimensions.map((entry, index) => {
-                                          const validationError = validateStandardDimensions(entry);
-                                          const entryAreaSqm = (entry.standardLengthCm * entry.standardWidthCm * entry.quantity) / 10000;
-                                          const isValid = !validationError && entry.standardLengthCm >= requestedLengthCm && entry.standardWidthCm >= requestedWidthCm;
-                                          
-                                          return (
-                                            <tr 
-                                              key={entry.id} 
-                                              className={`transition-colors hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10 ${
-                                                validationError 
-                                                  ? 'bg-red-50 dark:bg-red-900/20' 
-                                                  : isValid 
-                                                    ? 'bg-green-50/30 dark:bg-green-900/10' 
-                                                    : ''
-                                              }`}
-                                            >
-                                              <td className="py-3 px-4">
-                                                <div className="space-y-1">
-                                                  <FormattedNumberInput
-                                                    value={entry.standardLengthCm}
-                                                    onChange={(value) => handleUpdateStandardDimension(entry.id, 'standardLengthCm', value || 0)}
-                                                    min={requestedLengthCm}
-                                                    className={`w-full px-3 py-2 text-sm border rounded-lg transition-all ${
-                                                      validationError && entry.standardLengthCm < requestedLengthCm 
-                                                        ? 'border-red-500 bg-red-50 dark:bg-red-900/20' 
-                                                        : isValid
-                                                          ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
-                                                          : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700'
-                                                    } focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500`}
-                                                  />
-                                                  {validationError && entry.standardLengthCm < requestedLengthCm && (
-                                                    <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-                                                      <FaTimes className="text-xs" />
-                                                      {validationError}
-                                                    </p>
-                                                  )}
-                                                  {isValid && entry.standardLengthCm >= requestedLengthCm && (
-                                                    <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
-                                                      <FaCheck className="text-xs" />
-                                                      مناسب
-                                                    </p>
-                                                  )}
-                                                </div>
-                                              </td>
-                                              <td className="py-3 px-4">
-                                                <div className="space-y-1">
-                                                  <FormattedNumberInput
-                                                    value={entry.standardWidthCm}
-                                                    onChange={(value) => handleUpdateStandardDimension(entry.id, 'standardWidthCm', value || 0)}
-                                                    min={requestedWidthCm}
-                                                    className={`w-full px-3 py-2 text-sm border rounded-lg transition-all ${
-                                                      validationError && entry.standardWidthCm < requestedWidthCm 
-                                                        ? 'border-red-500 bg-red-50 dark:bg-red-900/20' 
-                                                        : isValid
-                                                          ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
-                                                          : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700'
-                                                    } focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500`}
-                                                  />
-                                                  {validationError && entry.standardWidthCm < requestedWidthCm && (
-                                                    <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-                                                      <FaTimes className="text-xs" />
-                                                      {validationError}
-                                                    </p>
-                                                  )}
-                                                  {isValid && entry.standardWidthCm >= requestedWidthCm && (
-                                                    <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
-                                                      <FaCheck className="text-xs" />
-                                                      مناسب
-                                                    </p>
-                                                  )}
-                                                </div>
-                                              </td>
-                                              <td className="py-3 px-4">
-                                                <FormattedNumberInput
-                                                  value={entry.quantity}
-                                                  onChange={(value) => handleUpdateStandardDimension(entry.id, 'quantity', value || 0)}
-                                                  min={1}
-                                                  className={`w-full px-3 py-2 text-sm border rounded-lg ${
-                                                    validationError && entry.quantity <= 0 
-                                                      ? 'border-red-500 bg-red-50 dark:bg-red-900/20' 
-                                                      : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700'
-                                                  } focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500`}
-                                                />
-                                              </td>
-                                              <td className="py-3 px-4">
-                                                <div className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                                                  {formatSquareMeters(entryAreaSqm)}
-                                                </div>
-                                              </td>
-                                              <td className="py-3 px-4">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleRemoveStandardDimension(entry.id)}
-                                                  className="p-2 text-red-600 dark:text-red-400 hover:text-white hover:bg-red-600 dark:hover:bg-red-700 rounded-lg transition-all"
-                                                  title="حذف"
-                                                >
-                                                  <FaTrash className="text-base" />
-                                                </button>
-                                              </td>
-                                            </tr>
-                                          );
-                                        })}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                  
-                                  {/* Summary Footer */}
-                                  <div className="bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-900/30 dark:to-blue-900/30 rounded-lg p-4 border border-indigo-200 dark:border-indigo-700">
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
-                                      <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-indigo-200 dark:border-indigo-700">
-                                        <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">مجموع تعداد</p>
-                                        <p className={`text-xl font-bold ${totalStandardQuantity === wantedQuantity ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                                          {totalStandardQuantity}
-                                        </p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">از {wantedQuantity} مورد نیاز</p>
-                                      </div>
-                                      <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-indigo-200 dark:border-indigo-700">
-                                        <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">مجموع مساحت</p>
-                                        <p className="text-xl font-bold text-indigo-600 dark:text-indigo-400">
-                                          {formatSquareMeters(totalStandardAreaSqm)}
-                                        </p>
-                                      </div>
-                                      <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-indigo-200 dark:border-indigo-700">
-                                        <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">وضعیت</p>
-                                        {totalStandardQuantity === wantedQuantity ? (
-                                          <div className="flex items-center gap-2">
-                                            <FaCheck className="text-green-600 dark:text-green-400" />
-                                            <span className="text-sm font-semibold text-green-600 dark:text-green-400">تعداد کافی است</span>
-                                          </div>
-                                        ) : totalStandardQuantity < wantedQuantity ? (
-                                          <div className="flex items-center gap-2">
-                                            <FaTimes className="text-red-600 dark:text-red-400" />
-                                            <span className="text-sm font-semibold text-red-600 dark:text-red-400">
-                                              {wantedQuantity - totalStandardQuantity} عدد کم است
-                                            </span>
-                                          </div>
-                                        ) : (
-                                          <div className="flex items-center gap-2">
-                                            <FaTimes className="text-orange-600 dark:text-orange-400" />
-                                            <span className="text-sm font-semibold text-orange-600 dark:text-orange-400">
-                                              {totalStandardQuantity - wantedQuantity} عدد اضافه
-                                            </span>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="text-center py-12">
-                                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center">
-                                    <FaWarehouse className="text-2xl text-indigo-500 dark:text-indigo-400" />
-                                  </div>
-                                  <p className="text-gray-600 dark:text-gray-400 mb-2">هنوز ابعاد استانداردی اضافه نشده است</p>
-                                  <p className="text-sm text-gray-500 dark:text-gray-500">برای شروع، دکمه "افزودن ابعاد" را کلیک کنید</p>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* نوع محاسبه برش Section */}
-                          <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-indigo-200 dark:border-indigo-800 shadow-lg overflow-hidden">
-                            <div className="bg-gradient-to-r from-purple-500 to-purple-600 dark:from-purple-600 dark:to-purple-700 px-6 py-4">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                                  <FaTools className="text-white text-lg" />
-                                </div>
-                                <div>
-                                  <h4 className="text-lg font-bold text-white">نوع محاسبه برش</h4>
-                                  <p className="text-xs text-purple-100">روش محاسبه هزینه برش را انتخاب کنید</p>
-                                </div>
-                              </div>
-                            </div>
-                            
-                            <div className="p-6">
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                                <button
-                                  type="button"
-                                  onClick={() => setProductConfig(prev => ({ ...prev, slabCuttingMode: 'perSquareMeter' }))}
-                                  className={`relative p-5 rounded-xl border-2 transition-all transform hover:scale-105 ${
-                                    slabCuttingMode === 'perSquareMeter'
-                                      ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white border-indigo-600 shadow-xl'
-                                      : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-indigo-400 dark:hover:border-indigo-500'
-                                  }`}
-                                >
-                                  {slabCuttingMode === 'perSquareMeter' && (
-                                    <div className="absolute top-3 right-3">
-                                      <div className="w-6 h-6 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                                        <FaCheck className="text-white text-sm" />
-                                      </div>
-                                    </div>
-                                  )}
-                                  <div className="text-center">
-                                    <div className={`w-12 h-12 mx-auto mb-3 rounded-lg flex items-center justify-center ${
-                                      slabCuttingMode === 'perSquareMeter' ? 'bg-white/20' : 'bg-indigo-100 dark:bg-indigo-900/30'
-                                    }`}>
-                                      <FaSquare className={`text-2xl ${slabCuttingMode === 'perSquareMeter' ? 'text-white' : 'text-indigo-600 dark:text-indigo-400'}`} />
-                                    </div>
-                                    <h5 className="font-bold text-lg mb-1">بر اساس متر مربع</h5>
-                                    <p className="text-xs opacity-90">محاسبه بر اساس مساحت قطعه نهایی</p>
-                                  </div>
-                                </button>
-                                
-                                <button
-                                  type="button"
-                                  onClick={() => setProductConfig(prev => ({ ...prev, slabCuttingMode: 'lineBased' }))}
-                                  className={`relative p-5 rounded-xl border-2 transition-all transform hover:scale-105 ${
-                                    slabCuttingMode === 'lineBased'
-                                      ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white border-indigo-600 shadow-xl'
-                                      : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-indigo-400 dark:hover:border-indigo-500'
-                                  }`}
-                                >
-                                  {slabCuttingMode === 'lineBased' && (
-                                    <div className="absolute top-3 right-3">
-                                      <div className="w-6 h-6 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                                        <FaCheck className="text-white text-sm" />
-                                      </div>
-                                    </div>
-                                  )}
-                                  <div className="text-center">
-                                    <div className={`w-12 h-12 mx-auto mb-3 rounded-lg flex items-center justify-center ${
-                                      slabCuttingMode === 'lineBased' ? 'bg-white/20' : 'bg-indigo-100 dark:bg-indigo-900/30'
-                                    }`}>
-                                      <FaRuler className={`text-2xl ${slabCuttingMode === 'lineBased' ? 'text-white' : 'text-indigo-600 dark:text-indigo-400'}`} />
-                                    </div>
-                                    <h5 className="font-bold text-lg mb-1">بر اساس خطوط</h5>
-                                    <p className="text-xs opacity-90">محاسبه بر اساس طول خطوط برش</p>
-                                  </div>
-                                </button>
-                              </div>
-                              
-                              {slabCuttingMode === 'perSquareMeter' ? (
-                                <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-lg p-4 border border-indigo-200 dark:border-indigo-700">
-                                  <label className="block text-sm font-semibold text-indigo-900 dark:text-indigo-100 mb-2">
-                                    هزینه برش هر متر مربع (تومان)
-                                  </label>
-                                  <FormattedNumberInput
-                                    value={productConfig.slabCuttingPricePerSquareMeter || 0}
-                                    onChange={(value) => setProductConfig(prev => ({ ...prev, slabCuttingPricePerSquareMeter: value || 0 }))}
-                                    min={0}
-                                    placeholder="مثلاً 150,000"
-                                    className="w-full px-4 py-3 text-base border-2 border-indigo-300 dark:border-indigo-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                  />
-                                  <p className="text-xs text-indigo-700 dark:text-indigo-300 mt-2 flex items-center gap-1">
-                                    <FaSquare className="text-xs" />
-                                    هزینه برش بر اساس متر مربع قطعه نهایی محاسبه می‌شود.
-                                  </p>
-                                </div>
-                              ) : (
-                                <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-lg p-4 border border-indigo-200 dark:border-indigo-700">
-                                  <p className="text-sm text-indigo-800 dark:text-indigo-200 mb-3 leading-relaxed">
-                                    در این حالت هزینه برش بر اساس طول خطوط طولی و عرضی محاسبه می‌شود. طول برش اصلی برابر بعدی است که به ابعاد استاندارد نزدیک‌تر باشد و برش دیگر بر اساس بعد درخواستی محاسبه می‌گردد.
-                                  </p>
-                                  {(() => {
-                                    if (standardDimensions.length > 0 && requestedLengthCm > 0 && requestedWidthCm > 0) {
-                                      const firstEntry = standardDimensions[0];
-                                      const linePlanPreview = determineSlabLineCutPlan({
-                                        requestedLengthCm,
-                                        requestedWidthCm,
-                                        standardLengthCm: firstEntry.standardLengthCm,
-                                        standardWidthCm: firstEntry.standardWidthCm
-                                      });
-                                      return (
-                                        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-2 border-indigo-300 dark:border-indigo-600">
-                                          <p className="font-semibold mb-3 text-indigo-900 dark:text-indigo-100 flex items-center gap-2">
-                                            <FaRuler className="text-indigo-600 dark:text-indigo-400" />
-                                            خلاصه محاسبه خطوط (نمونه برای اولین ابعاد استاندارد)
-                                          </p>
-                                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                            <div className="bg-indigo-50 dark:bg-indigo-900/30 rounded-lg p-3">
-                                              <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">برش اصلی</p>
-                                              <p className="font-bold text-indigo-700 dark:text-indigo-300">
-                                                {linePlanPreview.axisUsingStandard === 'length' ? 'طول' : 'عرض'}
-                                              </p>
-                                            </div>
-                                            <div className="bg-indigo-50 dark:bg-indigo-900/30 rounded-lg p-3">
-                                              <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">خطوط طولی</p>
-                                              <p className="font-bold text-indigo-700 dark:text-indigo-300">
-                                                {formatDisplayNumber(linePlanPreview.longitudinalMeters)} m
-                                              </p>
-                                            </div>
-                                            <div className="bg-indigo-50 dark:bg-indigo-900/30 rounded-lg p-3">
-                                              <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">خطوط عرضی</p>
-                                              <p className="font-bold text-indigo-700 dark:text-indigo-300">
-                                                {formatDisplayNumber(linePlanPreview.crossMeters)} m
-                                              </p>
-                                            </div>
-                                          </div>
-                                          {standardDimensions.length > 1 && (
-                                            <div className="mt-3 pt-3 border-t border-indigo-200 dark:border-indigo-700">
-                                              <p className="text-xs text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
-                                                <FaTimes className="text-xs" />
-                                                توجه: محاسبه برای هر ابعاد استاندارد به صورت جداگانه انجام می‌شود.
-                                              </p>
-                                            </div>
-                                          )}
-                                        </div>
-                                      );
-                                    }
-                                    return null;
-                                  })()}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* برش قائم Section - 4 Side Edge Cuts */}
-                          <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-teal-200 dark:border-teal-800 shadow-lg overflow-hidden">
-                            <div className="bg-gradient-to-r from-teal-500 to-teal-600 dark:from-teal-600 dark:to-teal-700 px-6 py-4">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                                  <FaRuler className="text-white text-lg" />
-                                </div>
-                                <div>
-                                  <h4 className="text-lg font-bold text-white">برش قائم (پرداخت لبه‌ها)</h4>
-                                  <p className="text-xs text-teal-100">انتخاب لبه‌هایی که نیاز به برش قائم دارند</p>
-                                </div>
-                              </div>
-                            </div>
-                            
-                            <div className="p-6">
-                              <p className="text-sm text-gray-700 dark:text-gray-300 mb-4 leading-relaxed">
-                                هر سنگ استاندارد اسلب نیاز به برش قائم روی لبه‌ها دارد تا تمام لبه‌ها صاف و دقیق شوند و آماده برای برش‌های اصلی باشند.
-                              </p>
-                              
-                              {/* Visual representation of slab with 4 sides */}
-                              <div className="bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-teal-900/20 dark:to-cyan-900/20 rounded-xl p-6 border-2 border-teal-200 dark:border-teal-700 mb-4">
-                                <div className="relative mx-auto" style={{ width: '200px', height: '150px' }}>
-                                  {/* Slab representation */}
-                                  <div className="absolute inset-0 bg-white dark:bg-gray-700 rounded-lg border-2 border-teal-300 dark:border-teal-600 shadow-md"></div>
-                                  
-                                  {/* Top side checkbox */}
-                                  <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                                    <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg border-2 border-teal-300 dark:border-teal-600 shadow-sm hover:shadow-md transition-all">
-                                      <input
-                                        type="checkbox"
-                                        checked={productConfig.slabVerticalCutSides?.top !== false}
-                                        onChange={(e) => setProductConfig(prev => ({
-                                          ...prev,
-                                          slabVerticalCutSides: {
-                                            top: e.target.checked,
-                                            bottom: prev.slabVerticalCutSides?.bottom !== false,
-                                            left: prev.slabVerticalCutSides?.left !== false,
-                                            right: prev.slabVerticalCutSides?.right !== false
-                                          }
-                                        }))}
-                                        className="w-4 h-4 text-teal-600 rounded focus:ring-teal-500"
-                                      />
-                                      <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">بالا</span>
-                                    </label>
-                                  </div>
-                                  
-                                  {/* Bottom side checkbox */}
-                                  <div className="absolute -bottom-3 left-1/2 transform -translate-x-1/2">
-                                    <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg border-2 border-teal-300 dark:border-teal-600 shadow-sm hover:shadow-md transition-all">
-                                      <input
-                                        type="checkbox"
-                                        checked={productConfig.slabVerticalCutSides?.bottom !== false}
-                                        onChange={(e) => setProductConfig(prev => ({
-                                          ...prev,
-                                          slabVerticalCutSides: {
-                                            top: prev.slabVerticalCutSides?.top !== false,
-                                            bottom: e.target.checked,
-                                            left: prev.slabVerticalCutSides?.left !== false,
-                                            right: prev.slabVerticalCutSides?.right !== false
-                                          }
-                                        }))}
-                                        className="w-4 h-4 text-teal-600 rounded focus:ring-teal-500"
-                                      />
-                                      <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">پایین</span>
-                                    </label>
-                                  </div>
-                                  
-                                  {/* Left side checkbox */}
-                                  <div className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-1/2">
-                                    <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg border-2 border-teal-300 dark:border-teal-600 shadow-sm hover:shadow-md transition-all">
-                                      <input
-                                        type="checkbox"
-                                        checked={productConfig.slabVerticalCutSides?.left !== false}
-                                        onChange={(e) => setProductConfig(prev => ({
-                                          ...prev,
-                                          slabVerticalCutSides: {
-                                            top: prev.slabVerticalCutSides?.top !== false,
-                                            bottom: prev.slabVerticalCutSides?.bottom !== false,
-                                            left: e.target.checked,
-                                            right: prev.slabVerticalCutSides?.right !== false
-                                          }
-                                        }))}
-                                        className="w-4 h-4 text-teal-600 rounded focus:ring-teal-500"
-                                      />
-                                      <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">چپ</span>
-                                    </label>
-                                  </div>
-                                  
-                                  {/* Right side checkbox */}
-                                  <div className="absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-1/2">
-                                    <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg border-2 border-teal-300 dark:border-teal-600 shadow-sm hover:shadow-md transition-all">
-                                      <input
-                                        type="checkbox"
-                                        checked={productConfig.slabVerticalCutSides?.right !== false}
-                                        onChange={(e) => setProductConfig(prev => ({
-                                          ...prev,
-                                          slabVerticalCutSides: {
-                                            top: prev.slabVerticalCutSides?.top !== false,
-                                            bottom: prev.slabVerticalCutSides?.bottom !== false,
-                                            left: prev.slabVerticalCutSides?.left !== false,
-                                            right: e.target.checked
-                                          }
-                                        }))}
-                                        className="w-4 h-4 text-teal-600 rounded focus:ring-teal-500"
-                                      />
-                                      <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">راست</span>
-                                    </label>
-                                  </div>
-                                </div>
-                              </div>
-                              
-                              {/* Cost preview */}
-                              {(() => {
-                                const verticalCutSides = productConfig.slabVerticalCutSides || { top: true, bottom: true, left: true, right: true };
-                                const activeSides = Object.values(verticalCutSides).filter(Boolean).length;
-                                const hasActiveSides = activeSides > 0;
-                                const verticalCutCostPerMeter = getCuttingTypePricePerMeter('VERTICAL') || getCuttingTypePricePerMeter('LONG') || 0;
-                                
-                                // Calculate برش قائم for each standard dimension entry
-                                let totalMeters = 0;
-                                let totalEstimatedCost = 0;
-                                
-                                if (hasActiveSides && verticalCutCostPerMeter > 0 && standardDimensions.length > 0) {
-                                  // Loop through each standard dimension entry
-                                  for (const entry of standardDimensions) {
-                                    // Calculate perimeter for this entry based on standard dimensions
-                                    let entryMeters = 0;
-                                    if (verticalCutSides.top) entryMeters += entry.standardWidthCm / 100; // width in meters
-                                    if (verticalCutSides.bottom) entryMeters += entry.standardWidthCm / 100;
-                                    if (verticalCutSides.left) entryMeters += entry.standardLengthCm / 100; // length in meters
-                                    if (verticalCutSides.right) entryMeters += entry.standardLengthCm / 100;
-                                    
-                                    // Multiply by quantity for this entry
-                                    const entryTotalMeters = entryMeters * entry.quantity;
-                                    totalMeters += entryTotalMeters;
-                                    
-                                    // Calculate cost for this entry
-                                    const entryCost = entryTotalMeters * verticalCutCostPerMeter;
-                                    totalEstimatedCost += entryCost;
-                                  }
-                                }
-                                
-                                if (hasActiveSides && totalMeters > 0 && verticalCutCostPerMeter > 0) {
-                                  return (
-                                    <div className="bg-teal-50 dark:bg-teal-900/20 rounded-lg p-4 border border-teal-200 dark:border-teal-700">
-                                      <div className="flex items-center justify-between mb-2">
-                                        <p className="text-sm font-semibold text-teal-900 dark:text-teal-100">
-                                          هزینه برش قائم (پیش‌نمایش)
-                                        </p>
-                                        <span className="text-xs text-teal-700 dark:text-teal-300">
-                                          {activeSides} لبه فعال
-                                        </span>
-                                      </div>
-                                      <div className="grid grid-cols-2 gap-3 text-sm">
-                                        <div>
-                                          <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">مجموع طول لبه‌ها</p>
-                                          <p className="font-bold text-teal-700 dark:text-teal-300">
-                                            {formatDisplayNumber(totalMeters)} متر
-                                          </p>
-                                        </div>
-                                        <div>
-                                          <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">هزینه کل</p>
-                                          <p className="font-bold text-teal-700 dark:text-teal-300">
-                                            {formatPrice(totalEstimatedCost, 'تومان')}
-                                          </p>
-                                        </div>
-                                      </div>
-                                      {standardDimensions.length > 1 && (
-                                        <div className="mt-3 pt-3 border-t border-teal-200 dark:border-teal-700">
-                                          <p className="text-xs text-teal-600 dark:text-teal-400 flex items-center gap-1">
-                                            <FaTimes className="text-xs" />
-                                            محاسبه برای هر ابعاد استاندارد به صورت جداگانه انجام می‌شود.
-                                          </p>
-                                        </div>
-                                      )}
-                        </div>
-                      );
-                                }
-                                return null;
-                              })()}
-                            </div>
-                          </div>
-
-                          {/* CAD Designer Section */}
-                          <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-indigo-200 dark:border-indigo-800 shadow-lg overflow-hidden mt-6">
-                            <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 dark:from-indigo-600 dark:to-indigo-700 px-6 py-4">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                                    <FaRuler className="text-white text-lg" />
-                                  </div>
-                                  <div>
-                                    <h4 className="text-lg font-bold text-white">ابزار طراحی CAD</h4>
-                                    <p className="text-xs text-indigo-100">طراحی و برنامه‌ریزی برش‌ها به صورت بصری</p>
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => setShowCADDesigner(!showCADDesigner)}
-                                  className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors text-sm font-medium"
-                                >
-                                  {showCADDesigner ? 'مخفی کردن' : 'نمایش'}
-                                </button>
-                              </div>
-                            </div>
-                            
-                            {showCADDesigner && (
-                              <div className="p-6">
-                                <p className="text-sm text-gray-700 dark:text-gray-300 mb-4 leading-relaxed">
-                                  از این ابزار برای طراحی و برنامه‌ریزی برش‌ها روی سنگ‌های استاندارد استفاده کنید. می‌توانید ابعاد مورد نظر را رسم کنید و هزینه‌ها به صورت خودکار محاسبه می‌شوند.
-                                </p>
-                                
-                                {standardDimensions && standardDimensions.length > 0 ? (
-                                  <StoneCADDesigner
-                                    originalLength={productConfig.length || 0}
-                                    originalWidth={productConfig.width || 0}
-                                    lengthUnit={lengthUnit}
-                                    widthUnit={widthUnit}
-                                    standardDimensions={standardDimensions}
-                                    productType="slab"
-                                    mode="design"
-                                    enableCostCalculation={true}
-                                    enableAutoSync={true}
-                                    onDimensionsCalculated={(dims) => {
-                                      // Sync CAD dimensions with product config
-                                      if (dims.length && dims.width) {
-                                        setProductConfig(prev => ({
-                                          ...prev,
-                                          length: dims.length,
-                                          width: dims.width,
-                                          squareMeters: dims.squareMeters
-                                        }));
-                                      }
-                                    }}
-                                    onCostCalculated={(cost) => {
-                                      // Update cutting cost in product config
-                                      setProductConfig(prev => ({
-                                        ...prev,
-                                        cuttingCost: cost
-                                      }));
-                                    }}
-                                    onDesignChange={(design) => {
-                                      // Store CAD design for later use
-                                      setProductConfig(prev => ({
-                                        ...prev,
-                                        cadDesign: design
-                                      }));
-                                    }}
-                                    initialDesign={productConfig.cadDesign || null}
-                                  />
-                                ) : (
-                                  <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-                                    <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                                      لطفاً ابتدا ابعاد استاندارد را اضافه کنید تا بتوانید از ابزار طراحی استفاده کنید.
-                                    </p>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        تعداد
-                      </label>
-                      <FormattedNumberInput
-                        value={getQuantityDisplayValue()}
-                        onFocus={() => handleFieldFocus('quantity', getQuantityDisplayValue(), 0)}
-                        onChange={(value) => {
-                          // Check if quantity is being cleared/deleted (empty or 0)
-                          const isQuantityCleared = !value || value === 0;
-                          
-                          // Mark quantity as interacted
-                          if (!hasQuantityBeenInteracted) {
-                            setHasQuantityBeenInteracted(true);
-                            console.log('🎯 Quantity First Interaction');
-                          }
-                          
-                          // Handle mandatory pricing based on quantity state
-                          if (isQuantityCleared) {
-                            // If quantity is cleared, uncheck mandatory pricing and reset interaction state
-                            setIsMandatory(false);
-                            setHasQuantityBeenInteracted(false);
-                            console.log('🔄 Quantity Cleared - Deactivating mandatory pricing and resetting interaction state');
-                          } else {
-                            // If quantity has a value, activate mandatory pricing
-                            setIsMandatory(true);
-                            console.log('✅ Quantity Has Value - Activating mandatory pricing');
-                          }
-                          
-                          // Update the quantity
-                          setProductConfig(prev => {
-                            const updatedConfig = { ...prev, quantity: value };
-                            // Use effective quantity for calculations
-                            const effectiveQuantity = value || 1;
-                            // Trigger smart calculation with effective quantity
-                            const smartResult = handleSmartCalculation('quantity', effectiveQuantity, updatedConfig, lengthUnit, widthUnit, effectiveQuantity);
-                            
-                            // Recalculate cutting cost automatically using helper function
-                            const updatedCuttingCost = calculateAutoCuttingCost(
-                              updatedConfig.length,
-                              lengthUnit,
-                              prev.cuttingCostPerMeter || null,
-                              effectiveQuantity
-                            );
-                            
-                            return {
-                              ...updatedConfig,
-                              squareMeters: smartResult.squareMeters,
-                              cuttingCost: updatedCuttingCost
-                            };
-                          });
-                          
-                          console.log('📊 Quantity Changed:', {
-                            displayValue: value,
-                            effectiveQuantity: value || 1,
-                            isQuantityCleared,
-                            hasBeenInteracted: !isQuantityCleared,
-                            mandatoryActivated: !isQuantityCleared
-                          });
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                        min={1}
-                        placeholder="تعداد"
-                      />
-                    </div>
-                  </>)}
-
-                  {/* Unit Selection Help Text - Only for slab/longitudinal */}
-                  {(productConfig.productType === 'longitudinal' || productConfig.productType === 'slab') && (
-                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-                      <p className="text-sm text-blue-700 dark:text-blue-300">
-                        <strong>راهنمای انتخاب واحد:</strong> برای هر فیلد طول و عرض، روی دکمه‌های "سانتی‌متر" یا "متر" کلیک کنید تا واحد مورد نظر را انتخاب کنید. 
-                        دکمه انتخاب شده با رنگ آبی نمایش داده می‌شود. سیستم به طور خودکار محاسبات را انجام می‌دهد.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Slab 2D Cutting Info Cards */}
-                  {productConfig.productType === 'slab' && selectedProduct && (() => {
-                    const { standardLengthCm, standardWidthCm } = getSlabStandardDimensions();
-                    const originalWidth = standardWidthCm || selectedProduct.widthValue || 0;
-                    const originalLengthCm = standardLengthCm || (selectedProduct as any)?.lengthValue || 300;
-                    
-                    const userWidthInCm = productConfig.width 
-                      ? (widthUnit === 'm' ? productConfig.width * 100 : productConfig.width)
-                      : 0;
-                    const userLengthInCm = productConfig.length 
-                      ? (lengthUnit === 'm' ? productConfig.length * 100 : productConfig.length)
-                      : 0;
-                    const needsLongitudinalCut = userWidthInCm > 0 && userWidthInCm < originalWidth && originalWidth > 0;
-                    const needsCrossCut = userLengthInCm > 0 && userLengthInCm < originalLengthCm && originalLengthCm > 0;
-                    const hasCuts = needsLongitudinalCut || needsCrossCut;
-                    const slabCuttingMode = productConfig.slabCuttingMode || 'lineBased';
-                    const effectiveQuantity = getEffectiveQuantity();
-                    const linePlan = determineSlabLineCutPlan({
-                      requestedLengthCm: userLengthInCm,
-                      requestedWidthCm: userWidthInCm,
-                      standardLengthCm,
-                      standardWidthCm
-                    });
-                    
-                    const requestedAreaSqm = productConfig.squareMeters && productConfig.squareMeters > 0
-                      ? productConfig.squareMeters
-                      : (userLengthInCm > 0 && userWidthInCm > 0
-                          ? (userLengthInCm * userWidthInCm * effectiveQuantity) / 10000
-                          : 0);
-                    
-                    const cuttingCostPerMeterLongitudinal = needsLongitudinalCut ? (getCuttingTypePricePerMeter('LONG') || 0) : 0;
-                    const cuttingCostPerMeterCross = needsCrossCut ? (getCuttingTypePricePerMeter('CROSS') || getCuttingTypePricePerMeter('LONG') || 0) : 0;
-                    
-                    const longitudinalCuttingCost = needsLongitudinalCut && slabCuttingMode === 'lineBased' && cuttingCostPerMeterLongitudinal > 0
-                      ? linePlan.longitudinalMeters * cuttingCostPerMeterLongitudinal * effectiveQuantity
-                      : 0;
-                    const crossCuttingCost = needsCrossCut && slabCuttingMode === 'lineBased' && cuttingCostPerMeterCross > 0
-                      ? linePlan.crossMeters * cuttingCostPerMeterCross * effectiveQuantity
-                      : 0;
-                    const totalCuttingCost = slabCuttingMode === 'lineBased' ? (longitudinalCuttingCost + crossCuttingCost) : 0;
-                    
-                    const remainingWidth = originalWidth - userWidthInCm;
-                    const remainingLength = originalLengthCm - userLengthInCm;
-                    const remainingPiecesCount = (remainingWidth > 0 ? 1 : 0) + (remainingLength > 0 ? 1 : 0) + (remainingWidth > 0 && remainingLength > 0 ? 1 : 0);
-                    const showLineCard = slabCuttingMode === 'lineBased' && hasCuts && productConfig.length && productConfig.width;
-                    
-                    if (!showLineCard && slabCuttingMode === 'lineBased' && !requestedAreaSqm) {
-                      return null;
-                    }
-                    
-                    return (
-                      <div className="space-y-3">
-                        {slabCuttingMode === 'perSquareMeter' ? (
-                          <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4">
-                            <div className="flex items-center gap-2 mb-2">
-                              <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
-                              <h5 className="text-sm font-semibold text-indigo-800 dark:text-indigo-200">
-                                برش بر اساس متر مربع
-                              </h5>
-                            </div>
-                            <p className="text-xs text-indigo-700 dark:text-indigo-300">
-                              {requestedAreaSqm > 0
-                                ? `مساحت هدف: ${formatSquareMeters(requestedAreaSqm)}`
-                                : 'برای محاسبه دقیق، طول و عرض درخواستی را وارد کنید.'}
-                            </p>
-                            {productConfig.slabCuttingPricePerSquareMeter ? (
-                              <p className="text-xs text-indigo-700 dark:text-indigo-300 mt-1">
-                                هزینه برش: {formatPrice(productConfig.slabCuttingPricePerSquareMeter)} × {formatSquareMeters(requestedAreaSqm || 0)}
-                              </p>
-                            ) : (
-                              <p className="text-xs text-indigo-500 dark:text-indigo-200 mt-1">
-                                لطفاً هزینه برش هر متر مربع را وارد کنید.
-                              </p>
-                            )}
-                          </div>
-                        ) : showLineCard ? (
-                        <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
-                            <h5 className="text-sm font-semibold text-indigo-800 dark:text-indigo-200">
-                              اطلاعات برش دو بعدی
-                            </h5>
-                          </div>
-                          <div className="space-y-2 text-xs text-indigo-700 dark:text-indigo-300">
-                            {needsLongitudinalCut && (
-                              <div>
-                                <span className="font-medium">برش طولی:</span> عرض {formatDisplayNumber(originalWidth)}cm → {formatDisplayNumber(userWidthInCm)}cm
-                                {cuttingCostPerMeterLongitudinal > 0 && (
-                                  <span className="ml-2">
-                                      ({formatDisplayNumber(linePlan.longitudinalMeters)} m × {formatPrice(cuttingCostPerMeterLongitudinal)} = {formatPrice(longitudinalCuttingCost)})
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            {needsCrossCut && (
-                              <div>
-                                <span className="font-medium">{needsLongitudinalCut ? 'برش عرضی' : 'برش کله بر'}:</span> طول {formatDisplayNumber(originalLengthCm)}cm → {formatDisplayNumber(userLengthInCm)}cm
-                                {cuttingCostPerMeterCross > 0 && (
-                                  <span className="ml-2">
-                                      ({formatDisplayNumber(linePlan.crossMeters)} m × {formatPrice(cuttingCostPerMeterCross)} = {formatPrice(crossCuttingCost)})
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            {totalCuttingCost > 0 && (
-                              <div className="mt-2 pt-2 border-t border-indigo-200 dark:border-indigo-700">
-                                <span className="font-semibold">هزینه کل برش: {formatPrice(totalCuttingCost)}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        ) : null}
-                        
-                        {hasCuts && productConfig.length && productConfig.width && remainingPiecesCount > 0 && (
-                          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
-                            <div className="flex items-center gap-2 mb-2">
-                              <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-                              <h5 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
-                                باقیمانده‌های اسلب ({remainingPiecesCount} قطعه)
-                              </h5>
-                            </div>
-                            <div className="space-y-1 text-xs text-amber-700 dark:text-amber-300">
-                              {remainingWidth > 0 && userLengthInCm > 0 && (
-                                <div>
-                                  • قطعه عرضی: {formatDisplayNumber(remainingWidth)}cm × {formatDisplayNumber(userLengthInCm)}cm
-                                  <span className="text-amber-600 dark:text-amber-400 ml-1">
-                                    ({formatSquareMeters((remainingWidth * userLengthInCm * effectiveQuantity) / 10000)})
-                                  </span>
-                                </div>
-                              )}
-                              {remainingLength > 0 && userWidthInCm > 0 && (
-                                <div>
-                                  • قطعه طولی: {formatDisplayNumber(userWidthInCm)}cm × {formatDisplayNumber(remainingLength)}cm
-                                  <span className="text-amber-600 dark:text-amber-400 ml-1">
-                                    ({formatSquareMeters((userWidthInCm * remainingLength * effectiveQuantity) / 10000)})
-                                  </span>
-                                </div>
-                              )}
-                              {remainingWidth > 0 && remainingLength > 0 && (
-                                <div>
-                                  • قطعه گوشه: {formatDisplayNumber(remainingWidth)}cm × {formatDisplayNumber(remainingLength)}cm
-                                  <span className="text-amber-600 dark:text-amber-400 ml-1">
-                                    ({formatSquareMeters((remainingWidth * remainingLength * effectiveQuantity) / 10000)})
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {productConfig.productType === 'longitudinal' && selectedProduct && (
-                    (() => {
-                      const sourceWidthCm = Number(selectedProduct.widthValue || 0);
-                      const requestedWidthCm = widthUnit === 'm'
-                        ? Number(productConfig.width || 0) * 100
-                        : Number(productConfig.width || 0);
-                      const requestedLengthM = lengthUnit === 'cm'
-                        ? Number(productConfig.length || 0) / 100
-                        : Number(productConfig.length || 0);
-                      const preserveDerivedQuantityPreview =
-                        !!productConfig.smartCutDerivedQuantity &&
-                        !touchedFields.has('quantity') &&
-                        !touchedFields.has('length');
-                      const plan = calculateSmartLongitudinalCutPlan({
-                        originalWidthCm: sourceWidthCm,
-                        enteredWidth: productConfig.smartCutDerivedDimension === 'width' && !touchedFields.has('width') ? 0 : requestedWidthCm,
-                        enteredWidthUnit: 'cm',
-                        enteredLength: productConfig.smartCutDerivedDimension === 'length' && !touchedFields.has('length')
-                          ? 0
-                          : (preserveDerivedQuantityPreview
-                            ? Number(productConfig.smartCutPlan?.totalRequestedLengthM || requestedLengthM)
-                            : requestedLengthM),
-                        enteredLengthUnit: 'm',
-                        quantity: preserveDerivedQuantityPreview
-                          ? 0
-                          : (Number(productConfig.quantity) > 0 ? Number(productConfig.quantity) : 0),
-                        requestedAreaSqm: Number(productConfig.squareMeters || 0),
-                        longitudinalRatePerMeter: getCuttingTypePricePerMeter('LONG') || 0,
-                        crossRatePerMeter: getCuttingTypePricePerMeter('CROSS') || 0,
-                        optimizationEnabled: true,
-                        allowPhysicalSplitting: !!productConfig.smartCutAllowPhysicalSplitting,
-                        sawKerfEnabled: !!productConfig.sawKerfEnabled,
-                        sawKerfCm: productConfig.sawKerfEnabled ? (productConfig.sawKerfCm || SAW_KERF_CM) : null,
-                        calibrationCutEnabled: productConfig.calibrationCutEnabled ?? true
-                      });
-
-                      if (!plan.enabled) return null;
-
-                      return (
-                        <div className="bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-lg p-4">
-                          <div className="flex items-center justify-between gap-3 mb-3">
-                            <h5 className="text-sm font-semibold text-teal-800 dark:text-teal-200">
-                              پیشنهاد برش هوشمند
-                            </h5>
-                            {currentUser && ['ADMIN', 'MANAGER'].includes(currentUser.role || '') ? (
-                              <button
-                                type="button"
-                                onClick={() => router.push('/dashboard/inventory/services')}
-                                className="text-xs text-teal-700 dark:text-teal-300 hover:underline"
-                              >
-                                ویرایش نرخ‌های برش در تنظیمات خدمات
-                              </button>
-                            ) : (
-                              <span className="text-xs text-teal-700 dark:text-teal-300">
-                                خودکار و قابل بازبینی
-                              </span>
-                            )}
-                          </div>
-                          {plan.derivedQuantity ? (
-                            <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-200">
-                              تعداد صفر به معنی بهینه‌سازی خودکار است: {formatDisplayNumber(plan.requestedQuantity)} قطعه با طول {formatDisplayNumber(plan.requestedLengthM)} متر تولید می‌شود.
-                            </div>
-                          ) : (
-                          <label className="mb-3 flex items-start gap-2 rounded-md border border-teal-200 bg-white/60 px-3 py-2 text-xs text-teal-900 dark:border-teal-700 dark:bg-slate-900/30 dark:text-teal-100">
-                            <input
-                              type="checkbox"
-                              checked={!!productConfig.smartCutAllowPhysicalSplitting}
-                              onChange={(event) => setProductConfig((current) => ({
-                                ...current,
-                                smartCutAllowPhysicalSplitting: event.target.checked
-                              }))}
-                              className="mt-0.5"
-                            />
-                            <span>
-                              تقسیم فیزیکی طول صریح مجاز است
-                              <span className="mt-0.5 block text-teal-700 dark:text-teal-300">
-                                فقط در صورت تأیید، یک طول واردشده می‌تواند به چند قطعه کوتاه‌تر تبدیل شود.
-                              </span>
-                            </span>
-                          </label>
-                          )}
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-teal-900 dark:text-teal-100">
-                            {plan.derivedDimension && (
-                              <p className="md:col-span-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-200">
-                                {plan.derivedDimension === 'width' ? 'عرض' : 'طول'} توسط سیستم محاسبه شده و پس از ذخیره قابل ردیابی است.
-                              </p>
-                            )}
-                            <div className="space-y-1">
-                              <p className="font-medium">قطعات تولیدی</p>
-                              {plan.productionPieces.map((piece, pieceIndex) => (
-                                <p key={pieceIndex}>
-                                  {formatDisplayNumber(piece.quantity)} × عرض {formatDisplayNumber(piece.widthCm)}cm × طول {formatDisplayNumber(piece.lengthM)}m
-                                </p>
-                              ))}
-                            </div>
-                            <div className="space-y-1">
-                              <p>سطح مصرفی: {formatSquareMeters(plan.consumedAreaSqm)}</p>
-                              <p>سطح درخواستی: {formatSquareMeters(plan.requestedAreaSqm)}</p>
-                              {plan.sawKerfEnabled && (
-                                <p>خوراک اره: عرض مصرفی هر قطعه {formatDisplayNumber(plan.consumedWidthCm)}cm</p>
-                              )}
-                              {plan.remainingStones.map((stone, stoneIndex) => (
-                                <p key={stoneIndex}>
-                                  باقی‌مانده: عرض {formatDisplayNumber(stone.width)}cm × طول {formatDisplayNumber(stone.length)}m
-                                </p>
-                              ))}
-                            </div>
-                            {plan.warnings.filter((warning) => warning.includes('خوراک اره')).map((warning, warningIndex) => (
-                              <p key={`kerf-warning-${warningIndex}`} className="md:col-span-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
-                                {warning}
-                              </p>
-                            ))}
-                            {plan.cuttingBreakdown.length > 0 && (
-                              <div className="md:col-span-2 pt-2 border-t border-teal-200 dark:border-teal-700 space-y-1">
-                                {plan.cuttingBreakdown.map((cut, cutIndex) => (
-                                  <p key={cutIndex}>
-                                    {cut.type === 'longitudinal' ? 'برش طولی' : 'برش عرضی'}: {formatDisplayNumber(cut.meters)}m × {formatPrice(cut.rate)} = {formatPrice(cut.cost)}
-                                  </p>
-                                ))}
-                                <p className="font-semibold">
-                                  جمع هزینه برش: {formatPrice(plan.totalCuttingCost)}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()
-                  )}
-
-                  {productConfig.productType !== 'prepared' && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        فی هر متر مربع (تومان)
-                      </label>
-                      <FormattedNumberInput
-                        value={productConfig.pricePerSquareMeter || 0}
-                        onFocus={() => handleFieldFocus('pricePerSquareMeter', productConfig.pricePerSquareMeter, 0)}
-                        onChange={(value) => setProductConfig(prev => ({ ...prev, pricePerSquareMeter: value }))}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                        min={0}
-                        step={1000}
-                        placeholder="فی هر متر مربع (تومان)"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        متر مربع
-                      </label>
-                      <FormattedNumberInput
-                        key={`square-meters-${lengthUnit}-${widthUnit}`}
-                        value={(() => {
-                          console.log('🎯 متر مربع Field Value:', {
-                            productConfigSquareMeters: productConfig.squareMeters,
-                            lengthUnit,
-                            widthUnit,
-                            finalValue: productConfig.squareMeters || 0
-                          });
-                          return productConfig.squareMeters || 0;
-                        })()}
-                        onFocus={() => handleFieldFocus('squareMeters', productConfig.squareMeters, 0)}
-                        onChange={(value) => {
-                          // Update the square meters first
-                          setProductConfig(prev => {
-                            // Get original width for calculations
-                            const originalWidth = (isEditMode && prev.originalWidth) ? prev.originalWidth : (selectedProduct?.widthValue || 0);
-                            
-                            // Check if user entered ONLY squareMeters (no length, no width)
-                            const hasNoLength = !prev.length || prev.length === 0;
-                            const hasNoWidth = !prev.width || prev.width === 0;
-                            const onlySquareMetersEntered = hasNoLength && hasNoWidth && value > 0;
-                            
-                            let updatedConfig = { ...prev, squareMeters: value };
-                            
-                            // If only squareMeters is entered, automatically set width to original width
-                            if (onlySquareMetersEntered && originalWidth > 0) {
-                              // Convert original width to the selected width unit
-                              const originalWidthInSelectedUnit = widthUnit === 'cm' 
-                                ? originalWidth 
-                                : (originalWidth / 100);
-                              
-                              // Set width to original width
-                              updatedConfig = {
-                                ...updatedConfig,
-                                width: originalWidthInSelectedUnit
-                              };
-                              
-                              console.log('🎯 Auto-setting width to original width:', {
-                                originalWidth,
-                                widthUnit,
-                                originalWidthInSelectedUnit,
-                                squareMeters: value
-                              });
-                            }
-                            
-                            // Trigger smart calculation with updated config
-                            const smartResult = handleSmartCalculation('squareMeters', value, updatedConfig, lengthUnit, widthUnit, getEffectiveQuantity());
-                            const finalConfig = {
-                              ...updatedConfig,
-                              length: smartResult.length,
-                              width: smartResult.width || updatedConfig.width // Preserve auto-set width if smart calculation doesn't return width
-                            };
-                            
-                            // Check if we need to auto-select longitudinal cut after smart calculation
-                            const userWidthInCm = widthUnit === 'm' ? (finalConfig.width || 0) * 100 : (finalConfig.width || 0);
-                            
-                            // Validate: calculated width cannot exceed original width
-                            if (finalConfig.width && finalConfig.width > 0 && originalWidth > 0 && userWidthInCm > originalWidth) {
-                              // Show error message
-                              setErrors({ 
-                                products: `عرض نهایی شده (${finalConfig.width.toFixed(2)}${widthUnit === 'm' ? 'm' : 'cm'}) بیشتر از عرض اصلی سنگ (${originalWidth}cm) است. لطفاً عرض را کاهش دهید تا از ${originalWidth}cm بیشتر نشود.` 
-                              });
-                            } else {
-                              // Clear error if calculated width is valid
-                              if (errors.products && errors.products.includes('عرض محاسبه شده')) {
-                                setErrors({});
-                              }
-                            }
-                            
-                            const shouldAutoSelectLongitudinalCut = userWidthInCm < originalWidth;
-                            
-                            console.log('📏 Square Meters Changed - Auto Cut Selection:', {
-                              userSquareMeters: value,
-                              calculatedWidth: finalConfig.width,
-                              userWidthInCm,
-                              originalWidth,
-                              shouldAutoSelectLongitudinalCut,
-                              comparison: `${userWidthInCm} < ${originalWidth} = ${userWidthInCm < originalWidth}`
-                            });
-                            
-                            // Auto-select cut type based on calculated width
-                            if (shouldAutoSelectLongitudinalCut) {
-                              return {
-                                ...finalConfig,
-                                isCut: true,
-                                cutType: 'longitudinal'
-                              };
-                            } else {
-                              return {
-                                ...finalConfig,
-                                isCut: false,
-                                cutType: null
-                              };
-                            }
-                          });
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                        min={0}
-                        step={0.01}
-                        decimalScale={4}
-                        placeholder="محاسبه شده یا وارد کنید"
-                      />
-                    </div>
-                  </div>
-                  )}
-
-                  {productConfig.productType !== 'prepared' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      توضیحات
-                    </label>
-                    <textarea
-                      value={productConfig.description || ''}
-                      onFocus={() => handleFieldFocus('description', productConfig.description, '')}
-                      onChange={(e) => setProductConfig(prev => ({ ...prev, description: e.target.value }))}
-                      rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                      placeholder="توضیحات اضافی..."
-                    />
-                  </div>
-                  )}
-                  {/* Mandatory Pricing Section - Only for longitudinal stones */}
-                  {productConfig.productType === 'longitudinal' && (
-                  <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
-                    <div className="flex items-center space-x-3 space-x-reverse mb-4">
-                      <input
-                        type="checkbox"
-                        id="isMandatory"
-                        checked={isMandatory}
-                        onChange={(e) => setIsMandatory(e.target.checked)}
-                        className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                      />
-                      <div className="flex flex-col">
-                        <label htmlFor="isMandatory" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                          حکمی (افزایش قیمت)
-                        </label>
-                        {hasQuantityBeenInteracted && (
-                          <span className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                            {isMandatory ? 'با قیمت حکمی محاسبه می‌شود' : 'بدون قیمت حکمی محاسبه می‌شود'}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {isMandatory && (
-                      <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-                        <div className="flex items-center space-x-3 space-x-reverse">
-                          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                            درصد افزایش:
-                          </label>
-                          <FormattedNumberInput
-                            value={mandatoryPercentage}
-                            onChange={(value) => setMandatoryPercentage(value)}
-                            className="w-20 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
-                            min={0}
-                            max={100}
-                          />
-                          <span className="text-sm text-gray-600 dark:text-gray-400">%</span>
-                        </div>
-                        <p className="text-xs text-yellow-700 dark:text-yellow-300 mt-2">
-                          قیمت نهایی با {mandatoryPercentage}% افزایش محاسبه خواهد شد
-                        </p>
-                        
-                        {/* Price Preview */}
-                        {(() => {
-                          console.log('🔍 Price Preview Calculation:', {
-                            productConfigWidth: productConfig.width,
-                            length: productConfig.length,
-                            quantity: productConfig.quantity,
-                            pricePerSquareMeter: productConfig.pricePerSquareMeter
-                          });
-                          
-                          // Use productConfig.originalWidth when editing, otherwise use selectedProduct.widthValue
-                          const originalWidthForCalculation = (isEditMode && productConfig.originalWidth) 
-                            ? productConfig.originalWidth 
-                            : (selectedProduct?.widthValue || 0);
-                          
-                          const calculated = calculateStoneMetrics({
-                            length: productConfig.length,
-                            width: productConfig.width,
-                            quantity: productConfig.quantity,
-                            squareMeters: productConfig.squareMeters,
-                            pricePerSquareMeter: productConfig.pricePerSquareMeter,
-                            lengthUnit: lengthUnit,
-                            widthUnit: widthUnit,
-                            isMandatory: isMandatory,
-                            mandatoryPercentage: mandatoryPercentage,
-                            isCut: productConfig.isCut || false,
-                            originalWidth: originalWidthForCalculation,
-                            cuttingCostPerMeter: productConfig.cuttingCostPerMeter || 0
-                          });
-                          
-                          console.log('🔍 Price Preview Result:', {
-                            originalTotalPrice: calculated.originalTotalPrice,
-                            totalPrice: calculated.totalPrice,
-                            squareMeters: calculated.squareMeters
-                          });
-                          
-                          if (calculated.originalTotalPrice > 0) {
-                            return (
-                              <div className="mt-3 p-2 bg-white dark:bg-gray-800 rounded border border-yellow-300 dark:border-yellow-600">
-                                <div className="text-xs text-gray-600 dark:text-gray-400">
-                                  قیمت اصلی: {formatPrice(calculated.originalTotalPrice, 'تومان')}
-                                </div>
-                                <div className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                                  قیمت نهایی: {formatPrice(calculated.totalPrice, 'تومان')}
-                                </div>
-                              </div>
-                            );
-                          }
-                          return null;
-                        })()}
-                  </div>
-                )}
-            </div>
-              )}
-            </div>
-
-                {/* Action Buttons */}
-                <div className="flex justify-end gap-3 mt-6">
-                  <button
-                    onClick={() => {
-                      // Validate before closing if it's a stair system
-                      if (productConfig.productType === 'stair' && stairSystemConfig) {
-                        const hasSelectedPart = stairSystemConfig.tread.isSelected || 
-                                                stairSystemConfig.riser.isSelected || 
-                                                stairSystemConfig.landing.isSelected;
-                        
-                        if (!hasSelectedPart) {
-                          setErrors({ products: 'لطفاً حداقل یکی از بخش‌های پله (کف پله، خیز پله، یا پاگرد) را انتخاب کنید' });
-                          return;
-                        }
-                      }
-                      
-                      setShowProductModal(false);
-                      setSelectedProduct(null);
-                      setProductConfig({});
-                      setLengthUnit('m');
-                      setWidthUnit('cm');
-                      setIsMandatory(false);
-                      setMandatoryPercentage(20);
-                      setIsEditMode(false);
-                      setEditingProductIndex(null);
-                      setTouchedFields(new Set()); // Reset touched fields
-                      setStairSystemConfig(null);
-                      setErrors({});
-                    }}
-                    className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
-                  >
-                    انصراف
-                  </button>
-                  <button
-                    onClick={() => {
-                      console.log('🔘 Main Product Button clicked!');
-                      handleAddProductToContract();
-                    }}
-                    className="px-6 py-2 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white rounded-lg transition-all duration-200 font-medium"
-                  >
-                    {isEditMode ? 'ویرایش بخش' : 'افزودن به لیست'}
-                  </button>
-                </div>
-              </div>
-            </div>
-            </div>
-        )}
-        {/* SubService Selection Modal - Now using SubServiceModal component (see below) */}
-
         {/* New Modal Components */}
         <ProductConfigurationModal
-          isOpen={productModal.showProductModal && !(productModal.productConfig.productType === 'stair' && useStairFlowV2) && (!!productModal.selectedProduct || productModal.productConfig.productType === 'stair')}
+          isOpen={!editRecoveryBlocked && productModal.showProductModal && productModal.productConfig.productType !== 'stair' && !!productModal.selectedProduct}
           onClose={() => {
             productModal.setShowProductModal(false);
             productModal.setSelectedProduct(null);
@@ -12055,79 +10120,17 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           selectedProduct={productModal.selectedProduct}
           productConfig={productModal.productConfig}
           setProductConfig={productModal.setProductConfig}
-          lengthUnit={productModal.lengthUnit}
           setLengthUnit={productModal.setLengthUnit}
-          widthUnit={productModal.widthUnit}
           setWidthUnit={productModal.setWidthUnit}
-          isMandatory={productModal.isMandatory}
           setIsMandatory={productModal.setIsMandatory}
-          mandatoryPercentage={productModal.mandatoryPercentage}
           setMandatoryPercentage={productModal.setMandatoryPercentage}
           isEditMode={productModal.isEditMode}
-          setIsEditMode={productModal.setIsEditMode}
-          editingProductIndex={productModal.editingProductIndex}
-          setEditingProductIndex={productModal.setEditingProductIndex}
-          touchedFields={productModal.touchedFields}
-          setTouchedFields={productModal.setTouchedFields}
-          stairSystemConfig={productModal.stairSystemConfig}
-          setStairSystemConfig={productModal.setStairSystemConfig}
-          quantityType={productModal.quantityType}
-          setQuantityType={productModal.setQuantityType}
-          treadExpanded={productModal.treadExpanded}
-          setTreadExpanded={productModal.setTreadExpanded}
-          riserExpanded={productModal.riserExpanded}
-          setRiserExpanded={productModal.setRiserExpanded}
-          landingExpanded={productModal.landingExpanded}
-          setLandingExpanded={productModal.setLandingExpanded}
-          showCADDesigner={productModal.showCADDesigner}
-          setShowCADDesigner={productModal.setShowCADDesigner}
-          errors={errors}
-          setErrors={setErrors}
-          hasQuantityBeenInteracted={productModal.hasQuantityBeenInteracted}
-          setHasQuantityBeenInteracted={productModal.setHasQuantityBeenInteracted}
           onSave={handleAddProductToContract}
           onProductTypeChange={handleModalProductTypeChange}
           wizardData={wizardData}
-          updateWizardData={updateWizardData}
-          handleSmartCalculation={productCalculations.handleSmartCalculation}
-          calculateStoneMetrics={productCalculations.calculateStoneMetrics}
           getCuttingTypePricePerMeter={productCalculations.getCuttingTypePricePerMeter}
-          calculateAutoCuttingCost={productCalculations.calculateAutoCuttingCost}
-          getEffectiveQuantity={productCalculations.getEffectiveQuantity}
-          getQuantityDisplayValue={productCalculations.getQuantityDisplayValue}
-          handleFieldFocus={productModal.handleFieldFocus}
-          handleLengthUnitChange={handleLengthUnitChangeWithCalc}
-          handleWidthUnitChange={handleWidthUnitChangeWithCalc}
-          generateFullProductName={productCalculations.generateFullProductName}
-          calculateTreadMetrics={productCalculations.calculateTreadMetrics}
-          calculateRiserMetrics={productCalculations.calculateRiserMetrics}
-          calculateLandingMetrics={productCalculations.calculateLandingMetrics}
-          calculateNosingCuttingCost={productCalculations.calculateNosingCuttingCost}
-          getSlabStandardDimensions={productCalculations.getSlabStandardDimensions}
-          determineSlabLineCutPlan={productCalculations.determineSlabLineCutPlan}
-          NOSING_TYPES={[...NOSING_TYPES] as any[]}
-          cuttingTypes={cuttingTypes}
-          products={products}
           stoneFinishings={stoneFinishings}
-          finishingLoadState={stoneFinishingLoadState}
-          updateStairSystemConfig={updateStairSystemConfig}
-          updateStairPart={updateStairPart}
-          selectProductForStairPart={selectProductForStairPart}
-          syncDraftWithProduct={syncDraftWithProduct}
-          filteredTreadProducts={filteredTreadProducts}
-          filteredRiserProducts={filteredRiserProducts}
-          filteredLandingProducts={filteredLandingProducts}
-          treadProductSearchTerm={treadProductSearchTerm}
-          setTreadProductSearchTerm={setTreadProductSearchTerm}
-          riserProductSearchTerm={riserProductSearchTerm}
-          setRiserProductSearchTerm={setRiserProductSearchTerm}
-          landingProductSearchTerm={landingProductSearchTerm}
-          setLandingProductSearchTerm={setLandingProductSearchTerm}
-          useStairFlowV2={useStairFlowV2}
-          stairActivePart={stairSystemV2.stairActivePart}
-          setStoneSearchTerm={stairSystemV2.setStoneSearchTerm}
-          handleCreateFromRemainingStone={handleCreateFromRemainingStone}
-          collectAvailableRemainingStones={collectAvailableRemainingStones}
+          subServices={subServices}
         />
 
         <RemainingStoneModal
@@ -12135,50 +10138,34 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           onClose={() => {
             remainingStoneModal.setShowRemainingStoneModal(false);
             remainingStoneModal.setSelectedRemainingStone(null);
+            if (returnToProductModalAfterRemainderRef.current) {
+              returnToProductModalAfterRemainderRef.current = false;
+              setShowProductModal(true);
+            }
           }}
           remainingStone={remainingStoneModal.selectedRemainingStone}
-          onCreatePartitions={remainingStoneModal.handleAddRemainingStoneToContract}
-          wizardData={wizardData}
+          sourceProduct={remainingStoneModal.selectedRemainingStoneSourceProduct}
+          remainingStoneConfig={remainingStoneModal.remainingStoneConfig}
+          setRemainingStoneConfig={remainingStoneModal.setRemainingStoneConfig}
+          subServices={subServices}
+          stoneFinishings={stoneFinishings}
+          onCreatePartitions={() => {
+            returnToProductModalAfterRemainderRef.current = false;
+            remainingStoneModal.handleAddRemainingStoneToContract();
+          }}
           partitions={remainingStoneModal.partitions}
           setPartitions={remainingStoneModal.setPartitions}
           partitionWidthUnit={remainingStoneModal.partitionWidthUnit}
           setPartitionWidthUnit={remainingStoneModal.setPartitionWidthUnit}
           partitionLengthUnit={remainingStoneModal.partitionLengthUnit}
           setPartitionLengthUnit={remainingStoneModal.setPartitionLengthUnit}
-          showRemainingStoneCAD={remainingStoneModal.showRemainingStoneCAD}
-          setShowRemainingStoneCAD={remainingStoneModal.setShowRemainingStoneCAD}
           handleAddPartition={remainingStoneModal.handleAddPartition}
           handleUpdatePartition={remainingStoneModal.handleUpdatePartition}
           handleRemovePartition={remainingStoneModal.handleRemovePartition}
           partitionValidationErrors={remainingStoneModal.partitionValidationErrors}
           errors={errors}
-          remainingStoneIsMandatory={remainingStoneModal.remainingStoneIsMandatory}
-          setRemainingStoneIsMandatory={remainingStoneModal.setRemainingStoneIsMandatory}
-          remainingStoneMandatoryPercentage={remainingStoneModal.remainingStoneMandatoryPercentage}
-          setRemainingStoneMandatoryPercentage={remainingStoneModal.setRemainingStoneMandatoryPercentage}
           remainingStoneSawKerfEnabled={remainingStoneModal.remainingStoneSawKerfEnabled}
           setRemainingStoneSawKerfEnabled={remainingStoneModal.setRemainingStoneSawKerfEnabled}
-        />
-
-        <SubServiceModal
-          isOpen={subServiceModal.showSubServiceModal}
-          onClose={subServiceModal.closeModal}
-          productIndex={subServiceModal.selectedSubServiceProductIndex || 0}
-          onSave={() => {
-            // Handle sub-service save - the modal will use its internal state
-            subServiceModal.closeModal();
-          }}
-          wizardData={wizardData}
-          updateWizardData={updateWizardData}
-          subServices={subServices}
-          selectedSubServices={subServiceModal.selectedSubServices}
-          setSelectedSubServices={subServiceModal.setSelectedSubServices}
-          subServiceMeterValues={subServiceModal.subServiceMeterValues}
-          setSubServiceMeterValues={subServiceModal.setSubServiceMeterValues}
-          subServiceCalculationBases={subServiceModal.subServiceCalculationBases}
-          setSubServiceCalculationBases={subServiceModal.setSubServiceCalculationBases}
-          errors={errors}
-          setErrors={setErrors}
         />
 
         {paymentHandlers.showPaymentEntryModal && (
@@ -12197,6 +10184,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             onContinueNationalCodeConflict={paymentHandlers.handleContinueNationalCodeConflict}
           />
         )}
+        </div>
       </div>
     </div>
   );

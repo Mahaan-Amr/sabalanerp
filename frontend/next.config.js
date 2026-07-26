@@ -1,5 +1,24 @@
 /** @type {import('next').NextConfig} */
+const path = require('path');
+
 const nextConfig = {
+  // Keep production builds isolated from an active local dev server. Next can
+  // corrupt the shared webpack cache when `next build` and `next dev` write to
+  // the same directory, which previously made visual QA fail with transient
+  // `__webpack_modules__[moduleId] is not a function` errors.
+  distDir: process.env.NEXT_DIST_DIR ||
+    (process.env.NODE_ENV === 'production' ? '.next-build' : '.next'),
+  transpilePackages: ['@sabalanerp/contract-product-graph'],
+  webpack(config) {
+    // The shared package is CommonJS for the backend runtime. Point the
+    // frontend bundler at its TypeScript source so Fast Refresh never injects
+    // ESM hot-reload code into the already-compiled CommonJS artifact.
+    config.resolve.alias['@sabalanerp/contract-product-graph'] = path.resolve(
+      __dirname,
+      '../packages/contract-product-graph/src/index.ts'
+    );
+    return config;
+  },
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000'),
   },

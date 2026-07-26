@@ -7,6 +7,7 @@ import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middlewa
 
 const router = express.Router();
 const prisma = new PrismaClient();
+const LAYER_CALCULATION_UNITS = ['set', 'physicalPiece', 'meter', 'squareMeter'] as const;
 
 const handleValidationErrors = (req: Request, res: Response) => {
   const errors = validationResult(req);
@@ -113,6 +114,9 @@ router.post(
     body('pricePerLayer')
       .isFloat({ gt: 0 })
       .withMessage('قیمت نوع لایه باید بیشتر از صفر باشد'),
+    body('calculationUnit')
+      .isIn(LAYER_CALCULATION_UNITS)
+      .withMessage('واحد محاسبه نوع لایه معتبر نیست'),
     body('description').optional().isString()
   ],
   async (req: Request, res: Response): Promise<Response | void> => {
@@ -128,6 +132,7 @@ router.post(
           name: req.body.name,
           description: req.body.description || null,
           pricePerLayer: decimalFromInput(req.body.pricePerLayer),
+          calculationUnit: req.body.calculationUnit,
           isActive: true
         }
       });
@@ -158,6 +163,9 @@ router.put(
     body('pricePerLayer')
       .isFloat({ gt: 0 })
       .withMessage('قیمت نوع لایه باید بیشتر از صفر باشد'),
+    body('calculationUnit')
+      .isIn(LAYER_CALCULATION_UNITS)
+      .withMessage('واحد محاسبه نوع لایه معتبر نیست'),
     body('description').optional().isString()
   ],
   async (req: Request, res: Response): Promise<Response | void> => {
@@ -182,7 +190,8 @@ router.put(
           code: req.body.code ? String(req.body.code).trim() : existing.code,
           name: req.body.name,
           description: req.body.description || null,
-          pricePerLayer: decimalFromInput(req.body.pricePerLayer)
+          pricePerLayer: decimalFromInput(req.body.pricePerLayer),
+          calculationUnit: req.body.calculationUnit
         }
       });
 

@@ -1,4 +1,6 @@
 import type {
+  AppliedProductFinishing,
+  AppliedSubService,
   ContractProduct,
   ContractUsageType,
   Product,
@@ -7,6 +9,12 @@ import type {
   StairStepperPart,
   SmartLongitudinalCutPlan
 } from '../types/contract.types';
+import {
+  parseCanonicalDecimal,
+  parseStableIdentity,
+  type OperationEdge,
+  type ProductOperationsInput
+} from '@sabalanerp/contract-product-graph';
 import { recalculateUsedRemainingDimensions } from './dimensionUtils';
 import {
   mergeRemainingStoneCollection,
@@ -42,14 +50,223 @@ export const resolveExistingCalibrationCutEnabled = (value: boolean | null | und
   value ?? true;
 
 export const createFreshStairPartDraft = (part: StairStepperPart): StairPartDraftV2 => ({
+  layerConfigurations: [],
   lengthUnit: 'm',
+  widthUnit: 'cm',
+  widthCm: part === 'tread' ? 30 : part === 'riser' ? 17 : null,
   tools: [],
+  layerSourceKind: null,
+  layerSelectedRemainingStoneIds: [],
   finishingEnabled: false,
   calibrationCutEnabled: getFreshContractProductDefaults('stair').calibrationCutEnabled,
+  calibrationSelection: 'automatic',
   useMandatory: part === 'riser' || part === 'landing',
   mandatoryPercentage: part === 'riser' || part === 'landing' ? 20 : null,
   description: ''
 });
+
+const legacyOperationEdges = (
+  edges: AppliedSubService['edges'] | undefined
+): OperationEdge[] => {
+  if (!edges) return [];
+  const selected = (['front', 'back', 'left', 'right'] as const)
+    .filter(edge => Boolean(edges[edge]));
+  if (edges.perimeter) {
+    return ['front', 'back', 'left', 'right'];
+  }
+  return selected;
+};
+
+/**
+ * Reads historical stair add-ons through the canonical operations seam.
+ *
+ * Legacy linear tools did not always record a physical edge. Those selections
+ * are intentionally retained with no edge so the canonical validator asks for
+ * an explicit seller decision during edit instead of inventing workshop data.
+ */
+export const adaptLegacyStairOperations = ({
+  product,
+  productRowId,
+  lengthMeters,
+  widthMeters,
+  quantity
+}: {
+  product: Pick<
+    ContractProduct,
+    'appliedSubServices' | 'finishings' | 'finishingId' | 'finishingName' |
+    'finishingCode' | 'finishingCalculationBase' | 'finishingUnitPrice' |
+    'finishingPricePerSquareMeter' | 'finishingQuantity' | 'finishingSquareMeters' |
+    'finishingCost'
+  >;
+  productRowId: string;
+  lengthMeters: number;
+  widthMeters: number;
+  quantity?: number | null;
+}): ProductOperationsInput | undefined => {
+  const legacyTools = product.appliedSubServices || [];
+  const collectionFinishings = product.finishings || [];
+  const singularFinishing: AppliedProductFinishing[] =
+    collectionFinishings.length === 0 && (
+      product.finishingId ||
+      product.finishingName ||
+      product.finishingCost
+    )
+      ? [{
+          selectionId: `legacy-finishing:${product.finishingId || productRowId}`,
+          finishingId: product.finishingId || `legacy-finishing:${productRowId}`,
+          code: product.finishingCode,
+          name: product.finishingName || 'پرداخت سنگ',
+          calculationBase:
+            product.finishingCalculationBase === 'length' ? 'length' : 'squareMeters',
+          unitPrice: Number(
+            product.finishingUnitPrice ??
+            product.finishingPricePerSquareMeter ??
+            0
+          ),
+          automaticQuantity: Number(
+            product.finishingQuantity ??
+            product.finishingSquareMeters ??
+            0
+          ),
+          quantity: Number(
+            product.finishingQuantity ??
+            product.finishingSquareMeters ??
+            0
+          ),
+          quantityMode: 'manual',
+          overrideStatus: 'current',
+          cost: Number(product.finishingCost || 0)
+        }]
+      : [];
+  const legacyFinishings = collectionFinishings.length > 0
+    ? collectionFinishings
+    : singularFinishing;
+
+  if (legacyTools.length === 0 && legacyFinishings.length === 0) {
+    return undefined;
+  }
+
+  const stableProductRowId = parseStableIdentity('product-row', productRowId);
+  const groupId = parseStableIdentity(
+    'operation-group',
+    `legacy-operation-group:${stableProductRowId}`
+  );
+  const scope = quantity && quantity > 0
+    ? String(Math.trunc(quantity))
+    : String(lengthMeters);
+
+  return {
+    policyVersion: 'calculation-v1',
+    pricingPolicyVersion: 'pricing-v1',
+    roundingPolicyVersion: 'rounding-v1',
+    productRowId: stableProductRowId,
+    lengthMeters: parseCanonicalDecimal(String(lengthMeters)),
+    widthMeters: parseCanonicalDecimal(String(widthMeters)),
+    ...(quantity && quantity > 0 ? { quantity: Math.trunc(quantity) } : {}),
+    groups: [{
+      operationGroupId: groupId,
+      scope: parseCanonicalDecimal(scope)
+    }],
+    tools: legacyTools.map((tool, index) => {
+      const unit = tool.calculationBase === 'squareMeters'
+        ? 'squareMeter' as const
+        : 'meter' as const;
+      const finalQuantity = Math.max(0, Number(tool.meter || 0));
+      const edges = unit === 'meter' ? legacyOperationEdges(tool.edges) : [];
+      return {
+        toolSelectionId: parseStableIdentity(
+          'tool-selection',
+          tool.id || `legacy-tool:${stableProductRowId}:${index}`
+        ),
+        operationGroupId: groupId,
+        catalogItemId: tool.subServiceId || `legacy-tool:${index}`,
+        catalogSnapshotVersion: 'legacy-contract-snapshot-v1',
+        name:
+          tool.subService?.namePersian ||
+          tool.subService?.name ||
+          `ابزار ${index + 1}`,
+        unit,
+        rateToman: parseCanonicalDecimal(String(
+          Number(tool.subService?.pricePerMeter ?? 0)
+        )),
+        edges,
+        quantityOverride: {
+          value: parseCanonicalDecimal(String(finalQuantity)),
+          automaticQuantitySnapshot: parseCanonicalDecimal(String(finalQuantity)),
+          resolution: 'keep' as const
+        },
+        outsideCurrentCatalog: tool.subService?.isActive === false
+      };
+    }),
+    finishings: legacyFinishings
+      .filter(finishing => finishing.calculationBase !== 'count')
+      .map((finishing, index) => {
+        const finalQuantity = Math.max(0, Number(finishing.quantity || 0));
+        return {
+          finishingSelectionId: parseStableIdentity(
+            'finishing-selection',
+            finishing.selectionId ||
+              `legacy-finishing:${stableProductRowId}:${index}`
+          ),
+          operationGroupId: groupId,
+          catalogItemId:
+            finishing.finishingId || `legacy-finishing:${index}`,
+          catalogSnapshotVersion: 'legacy-contract-snapshot-v1',
+          name: finishing.name || `پرداخت ${index + 1}`,
+          unit: finishing.calculationBase === 'length'
+            ? 'meter' as const
+            : 'squareMeter' as const,
+          rateToman: parseCanonicalDecimal(String(
+            Math.max(0, Number(finishing.unitPrice || 0))
+          )),
+          incompatibleCatalogItemIds: [],
+          quantityOverride: {
+            value: parseCanonicalDecimal(String(finalQuantity)),
+            automaticQuantitySnapshot: parseCanonicalDecimal(String(finalQuantity)),
+            resolution: 'keep' as const
+          }
+        };
+      })
+  };
+};
+
+export const appendStairLayerConfiguration = (
+  draft: StairPartDraftV2,
+  configurationId: string
+): StairPartDraftV2 => {
+  const snapshot: StairPartDraftV2 = {
+    ...draft,
+    layerConfigurationDraftId:
+      draft.layerConfigurationDraftId || configurationId,
+    layerConfigurations: []
+  };
+  return {
+    ...draft,
+    layerConfigurations: [...(draft.layerConfigurations || []), snapshot],
+    layerConfigurationDraftId: undefined,
+    numberOfLayersPerStair: null,
+    layerWidthCm: null,
+    layerTypeId: null,
+    layerTypeName: null,
+    layerTypePrice: null,
+    layerEdges: undefined,
+    layerSourceKind: null,
+    layerSelectedRemainingStoneIds: [],
+    layerDescription: null,
+    layerSideOperations: {},
+    layerUseDifferentStone: false,
+    layerStoneProductId: null,
+    layerStoneProduct: null,
+    layerStoneLabel: null,
+    layerPricePerSquareMeter: null,
+    layerUseMandatory: undefined,
+    layerMandatoryPercentage: null,
+    layerShortageSource: null,
+    layerManualSourceWidthCm: null,
+    layerManualSourceLengthM: null,
+    layerManualSourceQuantity: null
+  };
+};
 
 export const getContractQuantityInputPolicy = (
   productType: ContractUsageType | null | undefined,

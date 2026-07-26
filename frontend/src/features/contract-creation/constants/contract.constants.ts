@@ -15,42 +15,6 @@ import {
   FaCubes
 } from 'react-icons/fa';
 
-// Nosing types for stair products
-export const NOSING_TYPES = [
-  {
-    id: 'bullnose',
-    name: 'لب گرد (Bullnose)',
-    nameEn: 'Bullnose',
-    description: 'لب‌پرداخت گرد پله',
-    cuttingCostPerMeter: 15000, // Mock price - will come from services
-    available: true
-  },
-  {
-    id: 'square',
-    name: 'لب صاف (Square)',
-    nameEn: 'Square',
-    description: 'لب‌پرداخت صاف پله',
-    cuttingCostPerMeter: 12000, // Mock price
-    available: true
-  },
-  {
-    id: 'rounded',
-    name: 'نیم‌گرد (Rounded)',
-    nameEn: 'Rounded',
-    description: 'لب‌پرداخت نیم‌گرد پله',
-    cuttingCostPerMeter: 14000, // Mock price
-    available: true
-  },
-  {
-    id: 'none',
-    name: 'بدون لب‌پرداخت',
-    nameEn: 'No Nosing',
-    description: 'بدون لب‌پرداخت',
-    cuttingCostPerMeter: 0,
-    available: true
-  }
-] as const;
-
 // Product type definitions
 export const PRODUCT_TYPES = [
   {

@@ -3,8 +3,12 @@
 
 import { useMemo } from 'react';
 import type { CrmCustomer, Product, ContractUsageType } from '../types/contract.types';
-import { productSupportsContractType } from '../utils/productUtils';
+import { productSupportsContractRoute } from '../utils/productUtils';
 import { normalizeDigits } from '@/lib/numberFormat';
+import {
+  rankContractCatalogProducts,
+  type SellerProductHistory
+} from '../components/steps/catalogProductRanking';
 
 const CUSTOMER_PREVIEW_COUNT = 3;
 
@@ -17,6 +21,7 @@ interface UseProductFilteringOptions {
   riserProductSearchTerm: string;
   landingProductSearchTerm: string;
   selectedProductTypeForAddition: ContractUsageType | null;
+  sellerProductHistory?: SellerProductHistory;
 }
 
 interface UseProductFilteringReturn {
@@ -54,7 +59,8 @@ export const useProductFiltering = (options: UseProductFilteringOptions): UsePro
     treadProductSearchTerm,
     riserProductSearchTerm,
     landingProductSearchTerm,
-    selectedProductTypeForAddition
+    selectedProductTypeForAddition,
+    sellerProductHistory
   } = options;
 
   // Filter customers based on search term
@@ -80,64 +86,23 @@ export const useProductFiltering = (options: UseProductFilteringOptions): UsePro
     );
   }, [customers, customerSearchTerm]);
 
-  // Filter products based on search term and selected product type
-  const filteredProducts = useMemo(() => {
-    // Require search term to show products - no preview of latest products
-    if (!productSearchTerm.trim()) {
-      return [];
-    }
-
-    const selectedType = selectedProductTypeForAddition;
-    const eligibleProducts = selectedType
-      ? products.filter(product => productSupportsContractType(product, selectedType))
-      : products;
-
-    const searchLower = normalizeSearchText(productSearchTerm).trim();
-    const searchTerms = searchLower.split(/\s+/).filter(term => term.length > 0);
-
-    return eligibleProducts.filter(product => {
-      // Create a comprehensive search string that includes all searchable fields
-      const searchableFields = [
-        product.code,
-        product.namePersian,
-        product.name,
-        product.cuttingDimensionNamePersian,
-        product.stoneTypeNamePersian,
-        product.widthName,
-        product.thicknessName,
-        product.mineNamePersian,
-        product.finishNamePersian,
-        product.colorNamePersian,
-        product.qualityNamePersian,
-        product.description,
-        product.currency,
-        // Include numeric values as strings for searching
-        product.widthValue?.toString(),
-        product.thicknessValue?.toString(),
-        product.basePrice?.toString(),
-        // Include dimension combinations
-        `${product.widthValue}×${product.thicknessValue}`,
-        `عرض ${product.widthValue}×ضخامت ${product.thicknessValue}`,
-        // Include full product name generation
-        `${product.stoneTypeNamePersian} ${product.cuttingDimensionNamePersian} عرض ${product.widthValue}×ضخامت ${product.thicknessValue}cm ${product.mineNamePersian} ${product.finishNamePersian} ${product.colorNamePersian} ${product.qualityNamePersian}`
-      ].filter(Boolean);
-
-      // Create a single searchable text
-      const searchableText = normalizeSearchText(searchableFields.join(' '));
-
-      // If only one search term, use simple includes
-      if (searchTerms.length === 1) {
-        return searchableText.includes(searchTerms[0]);
-      }
-
-      // If multiple search terms, all must be found (AND logic)
-      return searchTerms.every(term => searchableText.includes(term));
-    }).sort(compareProductsByWidthAsc);
-  }, [products, productSearchTerm, selectedProductTypeForAddition]);
+  const filteredProducts = useMemo(
+    () => rankContractCatalogProducts({
+      products,
+      query: productSearchTerm,
+      activeType: selectedProductTypeForAddition,
+      sellerHistory: sellerProductHistory
+    }).map(item => item.product),
+    [products, productSearchTerm, selectedProductTypeForAddition, sellerProductHistory]
+  );
 
   // Helper function to filter stair products
   const filterStairProducts = (searchTerm: string): Product[] => {
-    const stairEligibleProducts = products.filter(product => productSupportsContractType(product, 'stair'));
+    const stairEligibleProducts = Array.from(new Map(
+      products
+        .filter(product => productSupportsContractRoute(product, 'stair'))
+        .map(product => [product.id, product] as const)
+    ).values());
     if (!searchTerm.trim()) {
       return stairEligibleProducts.slice(-3);
     }

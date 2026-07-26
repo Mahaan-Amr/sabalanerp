@@ -38,7 +38,7 @@ api.interceptors.response.use(
 export const authAPI = {
   login: (identifier: string, password: string) =>
     api.post('/auth/login', { identifier, email: identifier, password }),
-  
+
   getMe: () => api.get('/auth/me'),
   logout: () => api.post('/auth/logout'),
   getSessions: () => api.get('/auth/sessions'),
@@ -215,10 +215,92 @@ export const salesAPI = {
     api.get('/sales/contracts', { params }),
   
   getContract: (id: string) => api.get(`/sales/contracts/${id}`),
+
+  getContractProductGraph: (id: string) =>
+    api.get(`/sales/contracts/${id}/product-graph`),
+
+  executeContractProductGraphCommand: (
+    id: string,
+    command: unknown,
+    editSession: {
+      draftId: string;
+      browserSessionId: string;
+      leaseToken: string;
+      baseRevision: number;
+    }
+  ) => api.post(`/sales/contracts/${id}/product-graph/commands`, command, {
+    headers: {
+      'x-contract-draft-id': editSession.draftId,
+      'x-contract-browser-session-id': editSession.browserSessionId,
+      'x-contract-lease-token': editSession.leaseToken,
+      'x-contract-base-revision': String(editSession.baseRevision)
+    }
+  }),
+
+  migrateLegacyContractProductGraph: (
+    id: string,
+    editSession: {
+      draftId: string;
+      browserSessionId: string;
+      leaseToken: string;
+      baseRevision: number;
+    }
+  ) => api.post(`/sales/contracts/${id}/product-graph/migrate`, {}, {
+    headers: {
+      'x-contract-draft-id': editSession.draftId,
+      'x-contract-browser-session-id': editSession.browserSessionId,
+      'x-contract-lease-token': editSession.leaseToken,
+      'x-contract-base-revision': String(editSession.baseRevision)
+    }
+  }),
   
-  createContract: (contractData: any) => api.post('/sales/contracts', contractData),
-  
-  updateContract: (id: string, contractData: any) => api.put(`/sales/contracts/${id}`, contractData),
+  createContract: (contractData: any, editSession?: {
+    draftId: string;
+    browserSessionId: string;
+    leaseToken: string;
+    baseRevision: number;
+  }) => api.post('/sales/contracts', contractData, editSession ? {
+    headers: {
+      'x-contract-draft-id': editSession.draftId,
+      'x-contract-browser-session-id': editSession.browserSessionId,
+      'x-contract-lease-token': editSession.leaseToken,
+      'x-contract-base-revision': String(editSession.baseRevision)
+    }
+  } : undefined),
+  getSellerProductHistory: () => api.get('/sales/contracts/product-history'),
+  acquireContractEditSession: (draftId: string, data: {
+    contractId?: string | null;
+    browserSessionId: string;
+    schemaVersion: number;
+    baseRevision: number;
+    takeover?: boolean;
+  }) => api.post(`/sales/contract-edit-sessions/${encodeURIComponent(draftId)}/acquire`, data),
+  checkpointContractRecovery: (draftId: string, data: {
+    browserSessionId: string;
+    leaseToken: string;
+    schemaVersion: number;
+    baseRevision: number;
+    recovery: unknown;
+  }) => api.put(`/sales/contract-edit-sessions/${encodeURIComponent(draftId)}/recovery`, data),
+  releaseContractEditSession: (draftId: string, data: {
+    browserSessionId: string;
+    leaseToken: string;
+    baseRevision: number;
+  }) => api.delete(`/sales/contract-edit-sessions/${encodeURIComponent(draftId)}`, { data }),
+
+  updateContract: (id: string, contractData: any, editSession?: {
+    draftId: string;
+    browserSessionId: string;
+    leaseToken: string;
+    baseRevision: number;
+  }) => api.put(`/sales/contracts/${id}`, contractData, editSession ? {
+    headers: {
+      'x-contract-draft-id': editSession.draftId,
+      'x-contract-browser-session-id': editSession.browserSessionId,
+      'x-contract-lease-token': editSession.leaseToken,
+      'x-contract-base-revision': String(editSession.baseRevision)
+    }
+  } : undefined),
   
   approveContract: (id: string, note?: string) => api.put(`/sales/contracts/${id}/approve`, { note }),
   

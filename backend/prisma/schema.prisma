@@ -940,6 +940,8 @@ model SalesContract {
   template                          ContractTemplate?                  @relation("SalesContractTemplate", fields: [templateId], references: [id])
   sellerAudits                      SalesContractSellerAudit[]
   reportingEvents                   SalesReportingEvent[]
+  productGraphState                 SalesContractProductGraphState?
+  productGraphAudits                SalesContractProductGraphAudit[]
 
   @@index([createdBy, creatorSequenceNumber])
   @@index([responsibleSellerId])
@@ -947,6 +949,59 @@ model SalesContract {
   @@index([realizedAt])
   @@index([lostAt])
   @@map("sales_contracts")
+}
+
+model SalesContractProductGraphState {
+  contractId       String        @id
+  schemaVersion    Int
+  revision         Int
+  graph            Json
+  policySnapshot   Json
+  inputHash        String
+  resultHash       String
+  totalAmountToman Decimal       @db.Decimal(20, 0)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  contract         SalesContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@map("sales_contract_product_graph_states")
+}
+
+model SalesContractProductGraphAudit {
+  commandId      String        @id
+  contractId     String
+  actorId        String
+  baseRevision   Int
+  resultRevision Int
+  command        Json
+  resultGraph    Json
+  inputHash      String
+  resultHash     String
+  createdAt      DateTime      @default(now())
+  contract       SalesContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@unique([contractId, resultRevision])
+  @@index([contractId, createdAt])
+  @@map("sales_contract_product_graph_audits")
+}
+
+model SalesContractEditSession {
+  id               String   @id @default(cuid())
+  draftId          String   @unique
+  contractId       String?
+  ownerUserId      String
+  browserSessionId String
+  leaseToken       String   @unique
+  schemaVersion    Int
+  baseRevision     Int
+  recovery         Json?
+  takenOverAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([contractId])
+  @@index([ownerUserId, updatedAt])
+  @@map("sales_contract_edit_sessions")
 }
 
 model SalesContractSellerAudit {
@@ -1292,6 +1347,7 @@ model Product {
   widthCode                         String
   widthValue                        Decimal                            @db.Decimal(5, 2)
   widthName                         String
+  motherLengthValue                 Decimal?                           @db.Decimal(8, 3)
   thicknessCode                     String
   thicknessValue                    Decimal                            @db.Decimal(5, 2)
   thicknessName                     String
@@ -1334,6 +1390,7 @@ model ContractItem {
   id                                String                             @id @default(cuid())
   contractId                        String
   productId                         String
+  productRowId                      String?
   productType                       String? // نوع محصول: 'longitudinal' | 'stair' | etc.
   quantity                          Decimal                            @db.Decimal(10, 2)
   unitPrice                         Decimal                            @db.Decimal(15, 2)
@@ -1355,6 +1412,7 @@ model ContractItem {
   logisticsLoadingCorrections       LogisticsLoadingCorrection[]
 
   @@map("contract_items")
+  @@unique([contractId, productRowId])
 }
 
 model Delivery {
@@ -1380,6 +1438,7 @@ model DeliveryProduct {
   id                String   @id @default(cuid())
   deliveryId        String
   productId         String
+  productRowId      String?
   quantity          Decimal  @db.Decimal(10, 2)
   deliveredQuantity Decimal? @db.Decimal(10, 2)
   notes             String?
@@ -1389,6 +1448,7 @@ model DeliveryProduct {
   product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@map("delivery_products")
+  @@index([productRowId])
 }
 
 model LogisticsDriver {
@@ -1818,6 +1878,7 @@ model LogisticsLoadingLine {
   loadingId            String
   sourceContractId     String
   sourceContractItemId String
+  productRowId         String?
   productId            String
   quantity             Decimal                      @db.Decimal(12, 3)
   unit                 String
@@ -1840,6 +1901,7 @@ model LogisticsLoadingLine {
   @@index([loadingId])
   @@index([sourceContractId])
   @@index([sourceContractItemId])
+  @@index([productRowId])
   @@index([productId])
   @@map("logistics_loading_lines")
 }
@@ -2030,6 +2092,7 @@ model LayerType {
   name          String
   description   String?
   pricePerLayer Decimal  @db.Decimal(12, 2)
+  calculationUnit String @default("set")
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

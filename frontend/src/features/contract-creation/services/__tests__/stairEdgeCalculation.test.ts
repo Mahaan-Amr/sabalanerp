@@ -2,12 +2,18 @@ import assert from 'node:assert/strict';
 import {
   computeLayerSqmV2,
   computeToolMetersForTool,
+  calculateCanonicalLayerDraft,
   calculateLayerSourcePlan,
   getLayerEdgeDemands,
   getTotalLayerLengthPerStairM
 } from '../stairCalculationService';
 import { deriveLayerEdgesFromTools } from '../../utils/stairSystemHelpers';
-import type { StairPartDraftV2, StairStepperPart, ToolSelectionV2 } from '../../types/contract.types';
+import type {
+  Product,
+  StairPartDraftV2,
+  StairStepperPart,
+  ToolSelectionV2
+} from '../../types/contract.types';
 
 const approx = (actual: number, expected: number, precision = 6) => {
   assert.equal(Number(actual.toFixed(precision)), Number(expected.toFixed(precision)));
@@ -40,6 +46,39 @@ for (const part of ['tread', 'riser', 'landing'] as StairStepperPart[]) {
     left: true,
     right: true
   })), 11);
+}
+
+{
+  const draft = stairDraft({ lengthValue: 1.5, widthCm: 40, quantity: 25 });
+  approx(
+    computeToolMetersForTool(
+      'tread',
+      draft,
+      tool({ front: true, calculationBase: 'length', coveredQuantity: 10 })
+    ),
+    15
+  );
+  approx(
+    computeToolMetersForTool(
+      'tread',
+      draft,
+      tool({ calculationBase: 'squareMeters', coveredQuantity: 10 })
+    ),
+    6
+  );
+  approx(
+    computeToolMetersForTool(
+      'tread',
+      draft,
+      tool({
+        front: true,
+        calculationBase: 'length',
+        coveredQuantity: 10,
+        manualValue: 12.5
+      })
+    ),
+    12.5
+  );
 }
 
 for (const part of ['tread', 'riser', 'landing'] as StairStepperPart[]) {
@@ -103,6 +142,57 @@ for (const part of ['tread', 'riser', 'landing'] as StairStepperPart[]) {
   assert.equal(withKerf.physicalPieceQuantity, 64);
   assert.equal(withKerf.sourceStoneQuantity, 8);
   approx(withKerf.sourceAreaSqm, 3.36);
+}
+
+{
+  const sourceProduct = {
+    id: 'layer-stone-1',
+    code: 'LAYER-1',
+    name: 'Layer stone',
+    namePersian: 'سنگ لایه',
+    currency: 'تومان',
+    isAvailable: true,
+    widthValue: 40,
+    motherLengthValue: 1.5
+  } as Product;
+  const canonicalLayer = calculateCanonicalLayerDraft({
+    part: 'tread',
+    draft: stairDraft({
+      layerConfigurationDraftId: 'layer-configuration-1',
+      numberOfLayersPerStair: 1,
+      layerWidthCm: 4,
+      layerTypeId: 'layer-type-1',
+      layerTypeName: 'دوبل',
+      layerTypePrice: 80_000,
+      layerEdges: { front: true, left: true },
+      layerSourceKind: 'newMaterial',
+      layerStoneProductId: sourceProduct.id,
+      layerStoneProduct: sourceProduct,
+      layerPricePerSquareMeter: 500_000,
+      quantity: 2,
+      lengthValue: 1.2,
+      widthCm: 30
+    }),
+    parentProductRowId: 'stair-parent-1',
+    creationOrder: 0,
+    availableInventory: [],
+    parentRemainingStoneIds: [],
+    layerUnit: 'set',
+    getCuttingTypePricePerMeter: () => 10_000
+  });
+  assert.equal(canonicalLayer.ok, true);
+  if (canonicalLayer.ok) {
+    assert.equal(canonicalLayer.result.commercialLayerSets, 2);
+    assert.equal(canonicalLayer.result.physicalStripCount, 4);
+    assert.deepEqual(
+      canonicalLayer.result.physicalStrips.map(strip => strip.side),
+      ['front', 'left']
+    );
+    assert.ok(
+      canonicalLayer.result.packingPlan.consumedSources.length <
+      canonicalLayer.result.physicalStripCount
+    );
+  }
 }
 
 console.log('stairEdgeCalculation tests passed');

@@ -1,0 +1,263 @@
+import assert from 'node:assert/strict';
+import {
+  calculateLongitudinalProduct,
+  createNewLongitudinalProductInput,
+  transitionLongitudinalQuantity,
+  type LongitudinalProductInput
+} from '../longitudinalPolicy';
+import { parseCanonicalDecimal } from '../canonicalDecimal';
+import { parseStableIdentity } from '../stableIdentity';
+
+const sourceBatchId = parseStableIdentity('source-batch', 'source-batch:longitudinal-test');
+const c = parseCanonicalDecimal;
+
+assert.deepEqual(
+  createNewLongitudinalProductInput({
+    calculationPolicyVersion: 'longitudinal-v1',
+    packingPolicyVersion: 'packing-v1',
+    pricingPolicyVersion: 'pricing-v1',
+    roundingPolicyVersion: 'half-up-toman-v1',
+    sourceBatchId,
+    motherWidthMeters: c('0.4'),
+    defaultMandatoryPercentage: c('25'),
+    sawKerfMeters: c('0.003')
+  }),
+  {
+    calculationPolicyVersion: 'longitudinal-v1',
+    packingPolicyVersion: 'packing-v1',
+    pricingPolicyVersion: 'pricing-v1',
+    roundingPolicyVersion: 'half-up-toman-v1',
+    sourceBatchId,
+    motherWidthMeters: c('0.4'),
+    widthMeters: c('0.4'),
+    lastManualField: 'width',
+    lastManualDimension: 'width',
+    lengthDisplayUnit: 'm',
+    widthDisplayUnit: 'cm',
+    mandatoryEnabled: false,
+    mandatoryPercentage: c('25'),
+    rememberedMandatoryPercentage: c('25'),
+    sawKerfEnabled: false,
+    sawKerfMeters: c('0.003'),
+    calibrationEnabled: false,
+    calibrationSelection: 'automatic'
+  }
+);
+
+const baseInput = (
+  overrides: Partial<LongitudinalProductInput> = {}
+): LongitudinalProductInput => ({
+  calculationPolicyVersion: 'longitudinal-v1',
+  packingPolicyVersion: 'packing-v1',
+  pricingPolicyVersion: 'pricing-v1',
+  roundingPolicyVersion: 'half-up-toman-v1',
+  sourceBatchId,
+  motherWidthMeters: c('0.4'),
+  lengthMeters: c('1.5'),
+  widthMeters: c('0.4'),
+  quantity: undefined,
+  requestedAreaSquareMeters: undefined,
+  lastManualField: 'length',
+  lastManualDimension: 'length',
+  lengthDisplayUnit: 'm',
+  widthDisplayUnit: 'cm',
+  baseRateToman: c('1000000'),
+  mandatoryEnabled: false,
+  mandatoryPercentage: c('25'),
+  rememberedMandatoryPercentage: c('25'),
+  sawKerfEnabled: false,
+  sawKerfMeters: c('0.003'),
+  calibrationEnabled: false,
+  calibrationSelection: 'automatic',
+  longitudinalCutRateToman: c('10000'),
+  calibrationCutRateToman: c('5000'),
+  ...overrides
+});
+
+const totalMeters = calculateLongitudinalProduct(baseInput());
+assert.equal(totalMeters.ok, true);
+if (totalMeters.ok) {
+  assert.equal(totalMeters.result.quantityMode, 'total-linear-meters');
+  assert.equal(totalMeters.result.lengthMeters, '1.5');
+  assert.equal(totalMeters.result.requestedAreaSquareMeters, '0.6');
+  assert.equal(totalMeters.result.baseAmountToman, '600000');
+}
+
+const areaFirst = calculateLongitudinalProduct(baseInput({
+  lengthMeters: undefined,
+  requestedAreaSquareMeters: c('10'),
+  lastManualField: 'area'
+}));
+assert.equal(areaFirst.ok, true);
+if (areaFirst.ok) {
+  assert.equal(areaFirst.result.lengthMeters, '25');
+  assert.equal(areaFirst.result.requestedAreaSquareMeters, '10');
+}
+
+const areaWithPieces = calculateLongitudinalProduct(baseInput({
+  lengthMeters: undefined,
+  requestedAreaSquareMeters: c('12'),
+  quantity: 20,
+  lastManualField: 'area'
+}));
+assert.equal(areaWithPieces.ok, true);
+if (areaWithPieces.ok) {
+  assert.equal(areaWithPieces.result.quantityMode, 'piece-count');
+  assert.equal(areaWithPieces.result.lengthMeters, '1.5');
+  assert.equal(areaWithPieces.result.requestedAreaSquareMeters, '12');
+}
+
+const lengthWinsAfterArea = calculateLongitudinalProduct(baseInput({
+  lengthMeters: c('30'),
+  requestedAreaSquareMeters: c('10'),
+  lastManualField: 'length'
+}));
+assert.equal(lengthWinsAfterArea.ok, true);
+if (lengthWinsAfterArea.ok) {
+  assert.equal(lengthWinsAfterArea.result.requestedAreaSquareMeters, '12');
+}
+
+const packedPieces = calculateLongitudinalProduct(baseInput({
+  widthMeters: c('0.12'),
+  quantity: 20,
+  mandatoryEnabled: true
+}));
+assert.equal(packedPieces.ok, true);
+if (packedPieces.ok) {
+  assert.equal(packedPieces.result.sourcePiecesConsumed, 7);
+  assert.equal(packedPieces.result.calibrationEnabled, false);
+  assert.equal(packedPieces.result.remainders.length, 7);
+  assert.equal(packedPieces.result.remainders[6]?.widthMeters, '0.16');
+  assert.equal(packedPieces.result.requestedAreaSquareMeters, '3.6');
+  assert.equal(packedPieces.result.mandatoryAmountToman, '900000');
+}
+
+const exactWidthUse = calculateLongitudinalProduct(baseInput({
+  widthMeters: c('0.2'),
+  quantity: 2
+}));
+assert.equal(exactWidthUse.ok, true);
+if (exactWidthUse.ok) {
+  assert.equal(exactWidthUse.result.calibrationEnabled, true);
+  assert.equal(exactWidthUse.result.remainders.length, 0);
+}
+
+const kerfPreventsFalseExactUse = calculateLongitudinalProduct(baseInput({
+  widthMeters: c('0.2'),
+  quantity: 2,
+  sawKerfEnabled: true
+}));
+assert.equal(kerfPreventsFalseExactUse.ok, true);
+if (kerfPreventsFalseExactUse.ok) {
+  assert.equal(kerfPreventsFalseExactUse.result.sourcePiecesConsumed, 2);
+  assert.equal(kerfPreventsFalseExactUse.result.calibrationEnabled, false);
+}
+
+const manualCalibrationSurvives = calculateLongitudinalProduct(baseInput({
+  widthMeters: c('0.12'),
+  quantity: 3,
+  calibrationEnabled: true,
+  calibrationSelection: 'manual'
+}));
+assert.equal(manualCalibrationSurvives.ok, true);
+if (manualCalibrationSurvives.ok) {
+  assert.equal(manualCalibrationSurvives.result.calibrationEnabled, true);
+}
+
+const invalidWidth = calculateLongitudinalProduct(baseInput({ widthMeters: c('0.41') }));
+assert.equal(invalidWidth.ok, false);
+if (!invalidWidth.ok) {
+  assert.equal(invalidWidth.conflicts[0]?.code, 'maximum-mother-width-exceeded');
+  assert.equal(invalidWidth.conflicts[0]?.field, 'widthMeters');
+}
+
+const zeroWidth = calculateLongitudinalProduct(baseInput({ widthMeters: c('0') }));
+assert.equal(zeroWidth.ok, false);
+if (!zeroWidth.ok) {
+  assert.equal(zeroWidth.conflicts[0]?.field, 'widthMeters');
+}
+
+const fullWidthCannotCalibrate = calculateLongitudinalProduct(baseInput({
+  calibrationEnabled: true,
+  calibrationSelection: 'manual'
+}));
+assert.equal(fullWidthCannotCalibrate.ok, true);
+if (fullWidthCannotCalibrate.ok) {
+  assert.equal(fullWidthCannotCalibrate.result.calibrationEnabled, false);
+}
+
+const missingPrice = calculateLongitudinalProduct(baseInput({ baseRateToman: undefined }));
+assert.equal(missingPrice.ok, false);
+if (!missingPrice.ok) {
+  assert.equal(missingPrice.conflicts[0]?.code, 'base-rate-required');
+}
+
+const paidSourceMaterial = calculateLongitudinalProduct(baseInput({
+  baseMaterialPricing: 'paid-source-zero',
+  baseRateToman: c('0')
+}));
+assert.equal(paidSourceMaterial.ok, true);
+if (paidSourceMaterial.ok) {
+  assert.equal(paidSourceMaterial.result.baseMaterialPricing, 'paid-source-zero');
+  assert.equal(paidSourceMaterial.result.baseAmountToman, '0');
+}
+
+const paidSourceCannotBeMandatory = calculateLongitudinalProduct(baseInput({
+  baseMaterialPricing: 'paid-source-zero',
+  baseRateToman: c('0'),
+  mandatoryEnabled: true
+}));
+assert.equal(paidSourceCannotBeMandatory.ok, false);
+
+const missingCutRate = calculateLongitudinalProduct(baseInput({
+  widthMeters: c('0.2'),
+  quantity: 1,
+  longitudinalCutRateToman: undefined
+}));
+assert.equal(missingCutRate.ok, false);
+if (!missingCutRate.ok) {
+  assert.equal(missingCutRate.conflicts[0]?.code, 'longitudinal-cut-rate-missing');
+}
+
+const freeInventoryCutRate = calculateLongitudinalProduct(baseInput({
+  widthMeters: c('0.2'),
+  quantity: 1,
+  longitudinalCutRateToman: c('0')
+}));
+assert.equal(freeInventoryCutRate.ok, true);
+if (freeInventoryCutRate.ok) {
+  assert.equal(freeInventoryCutRate.result.longitudinalCutAmountToman, '0');
+}
+
+assert.deepEqual(
+  transitionLongitudinalQuantity({
+    previousQuantity: undefined,
+    nextQuantity: 20,
+    mandatoryEnabled: false,
+    rememberedMandatoryPercentage: c('25')
+  }),
+  {
+    quantity: 20,
+    mandatoryEnabled: true,
+    mandatoryPercentage: c('25'),
+    rememberedMandatoryPercentage: c('25')
+  }
+);
+
+assert.deepEqual(
+  transitionLongitudinalQuantity({
+    previousQuantity: 20,
+    nextQuantity: undefined,
+    mandatoryEnabled: true,
+    mandatoryPercentage: c('25'),
+    rememberedMandatoryPercentage: c('25')
+  }),
+  {
+    quantity: undefined,
+    mandatoryEnabled: false,
+    mandatoryPercentage: c('25'),
+    rememberedMandatoryPercentage: c('25')
+  }
+);
+
+console.log('longitudinal product policy tests passed');

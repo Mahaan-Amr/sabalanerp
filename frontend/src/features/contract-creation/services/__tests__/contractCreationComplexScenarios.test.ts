@@ -3,7 +3,12 @@ import { calculateSmartLongitudinalCutPlan, calculateSlabRemainingStones, hasLon
 import { allocateRemainingStonePartitions } from '../remainingStonePartitionService';
 import { recalculateRemainingChildAddOns } from '../remainingStoneChildAddOnService';
 import { calculateSlabCut, validateCutDimensions } from '../stoneCuttingService';
-import { calculateLayerMetrics, calculateStairStoneUsage, computeTotalsV2 } from '../stairCalculationService';
+import {
+  calculateCanonicalStairDraft,
+  calculateLayerMetrics,
+  calculateStairStoneUsage,
+  computeTotalsV2
+} from '../stairCalculationService';
 import { validatePayment, validateWizardStep } from '../validationService';
 import { calculateContractTotal, calculateFinalPrice } from '../pricingService';
 import { buildSlabCutDetails, calculateSlabMetrics, handleSmartCalculation } from '../../utils/productCalculations';
@@ -54,6 +59,49 @@ import type {
 const approx = (actual: number, expected: number, precision = 6) => {
   assert.equal(Number(actual.toFixed(precision)), Number(expected.toFixed(precision)));
 };
+
+{
+  const canonicalStair = calculateCanonicalStairDraft(
+    'tread',
+    {
+      stoneProduct: {
+        id: 'stone-40',
+        motherLengthValue: 3,
+        widthValue: 40
+      } as Product,
+      lengthValue: 1.2,
+      lengthUnit: 'm',
+      standardLengthValue: 3,
+      standardLengthUnit: 'm',
+      widthCm: 20,
+      widthUnit: 'cm',
+      quantity: 4,
+      pricePerSquareMeter: 100_000,
+      useMandatory: false,
+      mandatoryPercentage: 25,
+      sawKerfEnabled: false,
+      sawKerfCm: 0.3,
+      calibrationCutEnabled: false,
+      calibrationSelection: 'automatic'
+    },
+    () => 10_000
+  );
+  assert.equal(canonicalStair.ok, true);
+  if (canonicalStair.ok) {
+    assert.equal(canonicalStair.result.packingPlan.consumedSources.length, 1);
+    assert.equal(canonicalStair.result.packingPlan.placements.length, 4);
+    assert.equal(canonicalStair.result.requestedAreaSquareMeters, '0.96');
+    assert.equal(canonicalStair.result.calibrationEnabled, true);
+    assert.equal(
+      canonicalStair.result.packingPlan.remainders.some(
+        remainder =>
+          remainder.lengthMeters === '0.6' &&
+          remainder.widthMeters === '0.4'
+      ),
+      true
+    );
+  }
+}
 
 const product = (overrides: Partial<Product> = {}): Product => ({
   id: 'stone-arsanjan-40',
@@ -519,11 +567,11 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   assert.equal(totals.piecesPerStone, 2);
   assert.equal(totals.baseStoneQuantity, 5);
   approx(totals.toolsTotal, 1_600_000);
-  approx(totals.cuttingMetersLongitudinalProduction, 12);
+  approx(totals.cuttingMetersLongitudinalProduction, 6);
   approx(totals.cuttingMetersLongitudinalCalibration, 6);
-  approx(totals.cuttingMetersLongitudinal, 18);
-  approx(totals.cuttingCost, 900_000);
-  approx(totals.partTotal, 4_900_000);
+  approx(totals.cuttingMetersLongitudinal, 12);
+  approx(totals.cuttingCost, 600_000);
+  approx(totals.partTotal, 4_600_000);
   assert.equal(layerMetrics.layersFromRemainingStones, 2);
   assert.equal(layerMetrics.layersFromNewStones, 3);
   approx(layerMetrics.squareMetersFromRemaining || 0, 0.4);
@@ -600,19 +648,21 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
     pricePerSquareMeter: 4_500_000,
     useMandatory: false,
     calibrationCutEnabled: true,
+    calibrationSelection: 'manual',
     tools: []
   }, () => 20_000);
 
   assert.equal(totals.piecesPerStone, 3);
   assert.equal(totals.baseStoneQuantity, 3);
   assert.deepEqual(totals.remainingStoneGroups, [
+    { widthCm: 25, quantity: 1 },
     { widthCm: 5, quantity: 2 },
-    { widthCm: 25, quantity: 1 }
+    { widthCm: 35, quantity: 3 }
   ]);
   approx(totals.cuttingMetersLongitudinalProduction, 5.04);
-  approx(totals.cuttingMetersLongitudinalCalibration, 2.16);
-  approx(totals.cuttingMetersLongitudinal, 7.2);
-  approx(totals.cuttingCostLongitudinal, 144_000);
+  approx(totals.cuttingMetersLongitudinalCalibration, 5.04);
+  approx(totals.cuttingMetersLongitudinal, 10.08);
+  approx(totals.cuttingCostLongitudinal, 201_600);
   approx(totals.cuttingMetersCross, 1.05);
   approx(totals.cuttingCostCross, 21_000);
 }
@@ -632,11 +682,11 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
     tools: []
   }, (code) => code === 'LONG' ? 50_000 : 25_000);
 
-  approx(totals.cuttingMetersLongitudinalProduction, 12);
+  approx(totals.cuttingMetersLongitudinalProduction, 6);
   approx(totals.cuttingMetersLongitudinalCalibration, 6);
-  approx(totals.cuttingMetersLongitudinal, 18);
-  approx(totals.cuttingCostLongitudinal, 900_000);
-  approx(totals.billableCuttingCostLongitudinal, 900_000);
+  approx(totals.cuttingMetersLongitudinal, 12);
+  approx(totals.cuttingCostLongitudinal, 600_000);
+  approx(totals.billableCuttingCostLongitudinal, 600_000);
   assert.equal(totals.shouldChargeCuttingCost, true);
 }
 

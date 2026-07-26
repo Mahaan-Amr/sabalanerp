@@ -1,11 +1,10 @@
 ﻿// useProductModal Hook
-// Manages product modal state and logic for longitudinal, slab, and stair (old flow) products
+// Manages the shared central product-modal state.
 
 import { useState, useCallback } from 'react';
 import type { Product, ContractProduct, StairSystemConfig } from '../types/contract.types';
 
 interface UseProductModalOptions {
-  useStairFlowV2?: boolean;
   onProductSelected?: (product: Product) => void;
   onProductAdded?: (product: ContractProduct) => void;
   // Optional calculation handlers for enhanced unit conversion
@@ -20,7 +19,6 @@ interface UseProductModalOptions {
 
 export const useProductModal = (options: UseProductModalOptions = {}) => {
   const { 
-    useStairFlowV2 = true, 
     onProductSelected, 
     onProductAdded,
     handleSmartCalculation,
@@ -33,7 +31,6 @@ export const useProductModal = (options: UseProductModalOptions = {}) => {
 
   // Modal visibility
   const [showProductModal, setShowProductModal] = useState(false);
-  const [showCADDesigner, setShowCADDesigner] = useState(false);
 
   // Product selection
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -104,7 +101,6 @@ export const useProductModal = (options: UseProductModalOptions = {}) => {
     setHasQuantityBeenInteracted(false);
     setTouchedFields(new Set());
     setStairSystemConfig(null);
-    setShowCADDesigner(false);
     setTreadProductSearchTerm('');
     setRiserProductSearchTerm('');
     setLandingProductSearchTerm('');
@@ -257,8 +253,6 @@ export const useProductModal = (options: UseProductModalOptions = {}) => {
     // Modal visibility
     showProductModal,
     setShowProductModal,
-    showCADDesigner,
-    setShowCADDesigner,
     
     // Product selection
     selectedProduct,
@@ -319,4 +313,3 @@ export const useProductModal = (options: UseProductModalOptions = {}) => {
     reset
   };
 };
-

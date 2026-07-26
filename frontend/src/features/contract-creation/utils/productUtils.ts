@@ -22,6 +22,66 @@ export const productSupportsContractType = (
 };
 
 /**
+ * Resolve the catalog's primary contract behavior. Availability flags describe
+ * where a product may be used and are frequently all enabled, so they cannot
+ * establish the default on their own. The coded cutting-dimension classification
+ * is the primary catalog fact; flags are only a deterministic fallback for
+ * incomplete legacy catalog rows.
+ */
+export const inferCatalogContractType = (
+  product: Product
+): Exclude<ContractUsageType, 'volumetric'> => {
+  const classification = [
+    product.cuttingDimensionNamePersian,
+    (product as Product & { cuttingDimensionName?: string }).cuttingDimensionName,
+    product.namePersian,
+    product.name
+  ].filter(Boolean).join(' ').toLocaleLowerCase('fa');
+
+  if (classification.includes('اسلب') || classification.includes('slab')) return 'slab';
+  if (
+    classification.includes('کیوبیک') ||
+    classification.includes('قطعات آماده') ||
+    classification.includes('حجمی') ||
+    classification.includes('cubic') ||
+    classification.includes('prepared') ||
+    classification.includes('cnc')
+  ) return 'prepared';
+  if (classification.includes('پله') || classification.includes('stair')) return 'stair';
+  if (classification.includes('طولی') || classification.includes('longitudinal')) return 'longitudinal';
+
+  if (product.availableInLongitudinalContracts) return 'longitudinal';
+  if (product.availableInStairContracts) return 'stair';
+  if (product.availableInSlabContracts) return 'slab';
+  if (product.availableInVolumetricContracts) return 'prepared';
+  return 'longitudinal';
+};
+
+/**
+ * Resolve eligibility for one contract-entry route without changing catalog
+ * identity. The stair route deliberately accepts every longitudinal catalog
+ * product in addition to products explicitly classified or enabled for stairs.
+ */
+export const productSupportsContractRoute = (
+  product: Product,
+  contractType?: ContractUsageType | null
+): boolean => {
+  if (!contractType) return true;
+  const normalizedType = contractType === 'volumetric'
+    ? 'prepared'
+    : contractType;
+  const catalogType = inferCatalogContractType(product);
+  if (normalizedType === 'stair') {
+    return (
+      catalogType === 'stair' ||
+      catalogType === 'longitudinal' ||
+      product.availableInStairContracts === true
+    );
+  }
+  return catalogType === normalizedType;
+};
+
+/**
  * Generate full product name (re-export from formatUtils for convenience)
  */
 export { generateFullProductName };

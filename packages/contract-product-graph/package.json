@@ -1,0 +1,30 @@
+{
+  "name": "@sabalanerp/contract-product-graph",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "tsx src/__tests__/canonicalDecimal.test.ts && tsx src/__tests__/productGraphCommand.test.ts && tsx src/__tests__/packingPricing.test.ts && tsx src/__tests__/longitudinalPolicy.test.ts && tsx src/__tests__/operationsPolicy.test.ts && tsx src/__tests__/remainderPolicy.test.ts && tsx src/__tests__/stairPolicy.test.ts && tsx src/__tests__/stairLayerPolicy.test.ts && tsx src/__tests__/slabPolicy.test.ts && tsx src/__tests__/legacyMigration.test.ts && tsx src/__tests__/projections.test.ts",
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "decimal.js": "^10.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "fast-check": "^4.3.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.2"
+  }
+}

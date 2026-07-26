@@ -5,6 +5,15 @@ import { CorrectionRequestStatus, Prisma, PrismaClient } from '@prisma/client';
 import { generateContractNumberAssignment } from './contractNumberService';
 import { buildAccountingSummaryForContracts } from './accountingService';
 import { recordRealizedAdjustment } from './salesAttributionService';
+import {
+  parseCanonicalProductGraph,
+  projectCanonicalProductGraph,
+  serializeCanonicalProductGraph
+} from '@sabalanerp/contract-product-graph';
+import {
+  buildLegacyContractMigrationPlan,
+  CURRENT_CONTRACT_PRODUCT_POLICY
+} from './contractProductGraphMigration';
 
 const prisma = new PrismaClient();
 
@@ -19,6 +28,68 @@ const getApprovedSalesCorrection = (contractId: string, tx: Prisma.TransactionCl
 
 const toJsonValue = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
+const writeCanonicalGraphSnapshot = async (
+  tx: Prisma.TransactionClient,
+  input: {
+    readonly contractId: string;
+    readonly actorId: string;
+    readonly contractData: unknown;
+    readonly totalAmount: Prisma.Decimal | number | string | null;
+    readonly revision: number;
+  }
+) => {
+  const plan = buildLegacyContractMigrationPlan({
+    id: input.contractId,
+    totalAmount: input.totalAmount,
+    contractData: input.contractData
+  }, input.revision);
+  if (!plan.ok) {
+    const detail = plan.conflicts.map(conflict => `${conflict.code}:${conflict.path.join('.')}`).join(', ');
+    throw new Error(`Canonical product graph validation failed: ${detail}`);
+  }
+  const graph = toJsonValue(JSON.parse(serializeCanonicalProductGraph(plan.graph)));
+  await tx.salesContractProductGraphState.upsert({
+    where: { contractId: input.contractId },
+    create: {
+      contractId: input.contractId,
+      schemaVersion: plan.graph.schemaVersion,
+      revision: plan.graph.revision,
+      graph,
+      policySnapshot: toJsonValue(CURRENT_CONTRACT_PRODUCT_POLICY),
+      inputHash: plan.provenanceHash,
+      resultHash: plan.provenanceHash,
+      totalAmountToman: new Prisma.Decimal(plan.reconciliation.canonicalTotalAmountToman)
+    },
+    update: {
+      schemaVersion: plan.graph.schemaVersion,
+      revision: plan.graph.revision,
+      graph,
+      policySnapshot: toJsonValue(CURRENT_CONTRACT_PRODUCT_POLICY),
+      inputHash: plan.provenanceHash,
+      resultHash: plan.provenanceHash,
+      totalAmountToman: new Prisma.Decimal(plan.reconciliation.canonicalTotalAmountToman)
+    }
+  });
+  await tx.salesContractProductGraphAudit.create({
+    data: {
+      commandId: `wizard-save:${input.contractId}:${input.revision}:${plan.provenanceHash}`,
+      contractId: input.contractId,
+      actorId: input.actorId,
+      baseRevision: Math.max(0, input.revision - 1),
+      resultRevision: input.revision,
+      command: toJsonValue({
+        kind: 'canonical-wizard-save',
+        policy: CURRENT_CONTRACT_PRODUCT_POLICY,
+        provenanceHash: plan.provenanceHash
+      }),
+      resultGraph: graph,
+      inputHash: plan.provenanceHash,
+      resultHash: plan.provenanceHash
+    }
+  });
+  return plan;
+};
+
 export interface CreateContractData {
   title: string;
   titlePersian: string;
@@ -31,6 +102,7 @@ export interface CreateContractData {
   notes?: string;
   contractData?: any;
   potentialProjectId?: string;
+  _relations?: UpdateContractData['_relations'];
 }
 
 export interface UpdateContractData {
@@ -44,6 +116,7 @@ export interface UpdateContractData {
   _relations?: {
     items?: Array<{
       productId: string;
+      productRowId?: string | null;
       productType?: string | null;
       quantity: number;
       unitPrice: number;
@@ -63,6 +136,7 @@ export interface UpdateContractData {
       notes?: string | null;
       products: Array<{
         productId: string;
+        productRowId?: string | null;
         quantity: number;
         notes?: string | null;
       }>;
@@ -175,6 +249,71 @@ export async function createContract(
             }
           }
         });
+        const relations = data._relations;
+        if (relations?.items?.length) {
+          await tx.contractItem.createMany({
+            data: relations.items.map(item => ({
+              contractId: contract.id,
+              productId: item.productId,
+              productRowId: item.productRowId || null,
+              productType: item.productType || null,
+              quantity: toDecimalNumber(item.quantity),
+              unitPrice: toDecimalNumber(item.unitPrice),
+              totalPrice: toDecimalNumber(item.totalPrice),
+              description: item.description || null,
+              isMandatory: item.isMandatory || false,
+              mandatoryPercentage: toNullableDecimalNumber(item.mandatoryPercentage),
+              originalTotalPrice: toNullableDecimalNumber(item.originalTotalPrice),
+              stairSystemId: item.stairSystemId || null,
+              stairPartType: item.stairPartType || null
+            }))
+          });
+        }
+        for (const delivery of relations?.deliveries || []) {
+          await tx.delivery.create({
+            data: {
+              contractId: contract.id,
+              deliveryDate: toNullableDate(delivery.deliveryDate) || new Date(),
+              deliveryAddress: delivery.deliveryAddress,
+              driver: delivery.driver || null,
+              vehicle: delivery.vehicle || null,
+              notes: delivery.notes || null,
+              products: {
+                create: delivery.products.map(product => ({
+                  productId: product.productId,
+                  productRowId: product.productRowId || null,
+                  quantity: toDecimalNumber(product.quantity),
+                  notes: product.notes || null
+                }))
+              }
+            }
+          });
+        }
+        for (const payment of relations?.payments || []) {
+          await tx.payment.create({
+            data: {
+              contractId: contract.id,
+              paymentMethod: payment.paymentMethod,
+              totalAmount: toDecimalNumber(payment.totalAmount),
+              currency: payment.currency || 'تومان',
+              status: payment.status || 'PENDING',
+              paymentDate: toNullableDate(payment.paymentDate),
+              checkNumber: payment.checkNumber || null,
+              checkOwnerName: payment.checkOwnerName || null,
+              handoverDate: toNullableDate(payment.handoverDate),
+              cashType: payment.cashType || null,
+              nationalCode: payment.nationalCode || null,
+              notes: payment.notes || null
+            }
+          });
+        }
+        await writeCanonicalGraphSnapshot(tx, {
+          contractId: contract.id,
+          actorId: userId,
+          contractData,
+          totalAmount: data.totalAmount ?? null,
+          revision: 1
+        });
         if (potentialProject) {
           await tx.crmPotentialProject.update({
             where: { id: potentialProject.id },
@@ -245,6 +384,10 @@ export async function updateContract(
 
   // Update contract and relation snapshots atomically.
   const updatedContract = await prisma.$transaction(async (tx) => {
+    const existingGraph = await tx.salesContractProductGraphState.findUnique({
+      where: { contractId },
+      select: { revision: true }
+    });
     if (relations) {
       await tx.deliveryProduct.deleteMany({
         where: {
@@ -265,6 +408,7 @@ export async function updateContract(
           data: relations.items.map((item) => ({
             contractId,
             productId: item.productId,
+            productRowId: item.productRowId || null,
             productType: item.productType || null,
             quantity: toDecimalNumber(item.quantity),
             unitPrice: toDecimalNumber(item.unitPrice),
@@ -291,6 +435,7 @@ export async function updateContract(
             products: {
               create: (delivery.products || []).map((product) => ({
                 productId: product.productId,
+                productRowId: product.productRowId || null,
                 quantity: toDecimalNumber(product.quantity),
                 notes: product.notes || null
               }))
@@ -360,6 +505,14 @@ export async function updateContract(
         reason: approvedSalesCorrection?.accountantNote || data.notes || 'Sales contract amount corrected'
       });
     }
+
+    await writeCanonicalGraphSnapshot(tx, {
+      contractId,
+      actorId: userId,
+      contractData: data.contractData ?? contract.contractData,
+      totalAmount: data.totalAmount ?? contract.totalAmount,
+      revision: (existingGraph?.revision ?? 0) + 1
+    });
 
     return tx.salesContract.update({
       where: { id: contractId },
@@ -461,7 +614,8 @@ export async function getContract(contractId: string) {
         include: {
           product: true
         }
-      }
+      },
+      productGraphState: true
     }
   });
 
@@ -479,6 +633,12 @@ export async function getContract(contractId: string) {
 
   return {
     ...contract,
+    productGraphProjection: contract.productGraphState
+      ? projectCanonicalProductGraph(
+          parseCanonicalProductGraph(contract.productGraphState.graph),
+          'step5'
+        )
+      : null,
     accountingEditLocked: Boolean(financiallyApprovedRecord),
     canOpenCorrectionEdit: Boolean(approvedSalesCorrection),
     activeCorrectionRequest: approvedSalesCorrection ? {

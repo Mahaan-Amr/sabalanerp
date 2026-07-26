@@ -1,6 +1,8 @@
 ﻿// Contract Creation Types
 // All TypeScript interfaces and types for contract creation feature
 
+import type { ProductOperationsInput } from '@sabalanerp/contract-product-graph';
+
 export interface CrmCustomer {
   id: string;
   firstName: string;
@@ -66,6 +68,7 @@ export interface Product {
   cuttingDimensionNamePersian: string;
   stoneTypeNamePersian: string;
   widthValue: number;
+  motherLengthValue?: number | null;
   thicknessValue: number;
   widthName: string;
   thicknessName: string;
@@ -263,6 +266,7 @@ export interface SmartLongitudinalCutPlan {
   sawKerfEnabled?: boolean;
   sawKerfCm?: number | null;
   calibrationCutEnabled?: boolean;
+  calibrationSelection?: 'automatic' | 'manual';
   productionPieces: SmartCutProductionPiece[];
   remainingStones: RemainingStone[];
   cuttingBreakdown: CuttingBreakdownEntry[];
@@ -411,6 +415,13 @@ export interface ContractProduct {
   product: Product;
   // Product type
   productType: ContractProductType; // product type
+  /** Canonical seller intent used by both the modal preview and authoritative save. */
+  longitudinalPolicyInput?: import('@sabalanerp/contract-product-graph').LongitudinalProductInput;
+  /** Canonical slab seller intent, including stable manual source rows. */
+  slabPolicyInput?: import('@sabalanerp/contract-product-graph').SlabPolicyInput;
+  /** Canonical stair-part seller intent used to reconstruct authoritative geometry. */
+  stairPartPolicyInput?: import('@sabalanerp/contract-product-graph').StairPartPolicyInput;
+  operationPolicyInput?: import('@sabalanerp/contract-product-graph').ProductOperationsInput;
   preparedKind?: PreparedProductKind | null;
   preparedUnit?: PreparedProductUnit | null;
   preparedQuantity?: number | null;
@@ -534,8 +545,6 @@ export interface ContractProduct {
   finishingSquareMeters?: number | null;
   /** Canonical collection; legacy singular finishing fields remain readable. */
   finishings?: AppliedProductFinishing[];
-  // CAD Design (for visual design storage)
-  cadDesign?: any; // Stores the CAD design data for future reference
 }
 
 export interface DeliveryProductItem {
@@ -610,6 +619,7 @@ export type ContractKind = 'standard' | 'collaboration';
 
 export interface ContractWizardData {
   contractKind?: ContractKind;
+  productGraphRevision?: number;
 
   // Step 1: Contract Date
   contractDate: string;
@@ -757,9 +767,13 @@ export type StairStepperPart = 'tread' | 'riser' | 'landing';
 export type UnitType = 'cm' | 'm';
 
 export interface ToolSelectionV2 {
+  selectionId?: string;
   toolId: string;
   name: string;
   pricePerMeter: number;
+  calculationBase?: 'length' | 'squareMeters';
+  coveredQuantity?: number | null;
+  manualValue?: number | null;
   // Stair tool edges. front/back use the part length; left/right use the part width/depth.
   front?: boolean;
   left?: boolean;
@@ -771,8 +785,17 @@ export interface ToolSelectionV2 {
 }
 
 export interface StairPartDraftV2 {
+  /** Stable identity for one independent layer configuration draft. */
+  layerConfigurationDraftId?: string;
+  /**
+   * Completed layer configurations waiting for the parent stair part to be
+   * committed. They remain draft-only and are saved atomically with the parent.
+   */
+  layerConfigurations?: StairPartDraftV2[];
+  operationPolicyInput?: ProductOperationsInput;
   stoneId?: string | null;
   stoneLabel?: string;
+  contractualTitle?: string;
   stoneProduct?: Product | null; // Full product object for ContractProduct
   pricePerSquareMeter?: number | null;
   useMandatory?: boolean;
@@ -781,6 +804,7 @@ export interface StairPartDraftV2 {
   lengthValue?: number | null;
   lengthUnit?: UnitType; // cm or m
   widthCm?: number | null;
+  widthUnit?: UnitType;
   quantity?: number | null;
   squareMeters?: number | null;
   tools?: ToolSelectionV2[];
@@ -799,6 +823,31 @@ export interface StairPartDraftV2 {
     back?: boolean;
     perimeter?: boolean;
   };
+  /**
+   * A layer configuration never consumes material implicitly. The seller must
+   * choose one of these sources before the parent stair part can be committed.
+   */
+  layerSourceKind?: 'parentMaterial' | 'contractRemainder' | 'newMaterial' | null;
+  /** Stable remainder identities selected explicitly by the seller. */
+  layerSelectedRemainingStoneIds?: string[];
+  layerDescription?: string | null;
+  /** Independent tools and finishings for each physical side demand. */
+  layerSideOperations?: Partial<Record<
+    'front' | 'back' | 'left' | 'right',
+    ProductOperationsInput
+  >>;
+  /**
+   * Seller-facing editor scope. `all` is represented canonically by one
+   * shared collection intent with independent child calculations per side.
+   */
+  layerOperationEditingScope?: 'all' | 'front' | 'back' | 'left' | 'right';
+  /** Sides explicitly detached from the shared all-strips operation row. */
+  layerDetachedOperationSides?: Array<'front' | 'back' | 'left' | 'right'>;
+  /**
+   * Removing a side with dedicated operations is reversible until the seller
+   * explicitly restores the side or deletes that side's operation snapshots.
+   */
+  layerRemovedSideConflicts?: Array<'front' | 'back' | 'left' | 'right'>;
   layerUseDifferentStone?: boolean;
   layerStoneProductId?: string | null;
   layerStoneProduct?: Product | null;
@@ -827,18 +876,21 @@ export interface StairPartDraftV2 {
   finishingQuantity?: number | null;
   finishingSearchTerm?: string;
   calibrationCutEnabled?: boolean;
+  calibrationSelection?: 'automatic' | 'manual';
   description?: string | null;
 }
 
 export interface StairDraftFieldErrors {
   thickness?: string;
   length?: string;
+  motherLength?: string;
   width?: string;
   pricePerSquareMeter?: string;
   quantity?: string;
   layerType?: string;
   layerStone?: string;
   layerStonePrice?: string;
+  layerSource?: string;
   layerMandatoryPercentage?: string;
   mandatoryPercentage?: string;
 }
@@ -848,6 +900,7 @@ export interface LayerTypeOption {
   name: string;
   description?: string;
   pricePerLayer: number;
+  calculationUnit?: 'set' | 'physicalPiece' | 'meter' | 'squareMeter';
   isActive?: boolean;
 }
 

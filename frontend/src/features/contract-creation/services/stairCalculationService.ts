@@ -27,6 +27,366 @@ import {
   calculateDefaultFinishingQuantity,
   calculateFinishingCost as calculateUnitFinishingCost
 } from '../utils/finishingUtils';
+import {
+  calculateStairLayerConfiguration,
+  calculateStairPart,
+  parseCanonicalDecimal,
+  parseStableIdentity,
+  type PaidRemainderStock,
+  type StairLayerCalculation,
+  type StairLayerCatalogUnit,
+  type StairLayerConflict,
+  type StairLayerConfigurationInput,
+  type StairLayerParentGeometry,
+  type StairPartCalculation,
+  type StairPartPolicyInput
+} from '@sabalanerp/contract-product-graph';
+
+const toCanonicalDecimal = (value: number) =>
+  parseCanonicalDecimal(String(value));
+
+export const toCanonicalLayerInventory = ({
+  stones,
+  ownerProductRowId,
+  catalogProductId
+}: {
+  stones: readonly RemainingStone[];
+  ownerProductRowId: string;
+  catalogProductId: string;
+}): PaidRemainderStock[] => stones
+  .filter(stone =>
+    stone.isAvailable !== false &&
+    Number(stone.length) > 0 &&
+    Number(stone.width) > 0 &&
+    Number(stone.quantity || 1) > 0
+  )
+  .map((stone, index) => ({
+    remainingStoneId: parseStableIdentity('remaining-stone', stone.id),
+    ownerProductRowId: parseStableIdentity('product-row', ownerProductRowId),
+    catalogProductId,
+    sourceBatchId: parseStableIdentity(
+      'source-batch',
+      stone.sourceCutId || `layer-source:${ownerProductRowId}:${stone.id}`
+    ),
+    lengthMeters: toCanonicalDecimal(Number(stone.length)),
+    widthMeters: toCanonicalDecimal(Number(stone.width) / 100),
+    quantity: Math.max(1, Math.trunc(Number(stone.quantity || 1))),
+    creationOrder: index,
+    materialPaid: true
+  }));
+
+const selectedLayerSides = (
+  draft: StairPartDraftV2
+): Array<'front' | 'back' | 'left' | 'right'> => (
+  ['front', 'back', 'left', 'right'] as const
+).filter(side => draft.layerEdges?.perimeter || draft.layerEdges?.[side]);
+
+/**
+ * Canonical layer preview/save calculation used by the live stair workflow.
+ * New material receives a bounded candidate quantity; the optimizer still
+ * consumes only its deterministic minimum and charges only consumed sources.
+ */
+export interface CanonicalLayerCalculationRequest {
+  input: StairLayerConfigurationInput;
+  parent: StairLayerParentGeometry;
+  availableInventory: readonly PaidRemainderStock[];
+}
+
+export const createCanonicalLayerCalculationRequest = ({
+  part,
+  draft,
+  parentProductRowId,
+  creationOrder,
+  availableInventory,
+  parentRemainingStoneIds,
+  layerUnit,
+  getCuttingTypePricePerMeter
+}: {
+  part: StairStepperPart;
+  draft: StairPartDraftV2;
+  parentProductRowId: string;
+  creationOrder: number;
+  availableInventory: readonly PaidRemainderStock[];
+  parentRemainingStoneIds: readonly string[];
+  layerUnit: StairLayerCatalogUnit;
+  getCuttingTypePricePerMeter: (code: string) => number | null;
+}): CanonicalLayerCalculationRequest => {
+  const layerConfigurationId = parseStableIdentity(
+    'layer-configuration',
+    draft.layerConfigurationDraftId ||
+      `layer:${parentProductRowId}:${creationOrder}`
+  );
+  const stableParentRowId = parseStableIdentity(
+    'product-row',
+    parentProductRowId
+  );
+  const sides = selectedLayerSides(draft);
+  const parentQuantity = Math.max(0, Math.trunc(Number(draft.quantity || 0)));
+  const layersPerPiece = Math.max(
+    0,
+    Math.trunc(Number(draft.numberOfLayersPerStair || 0))
+  );
+  const newStone = draft.layerStoneProduct;
+  const baseMaterialRate = Number(draft.layerPricePerSquareMeter || 0);
+  const effectiveMaterialRate = draft.layerUseMandatory
+    ? baseMaterialRate * (
+        1 + Number(draft.layerMandatoryPercentage || 0) / 100
+      )
+    : baseMaterialRate;
+  const sourceLengthMeters = Number(newStone?.motherLengthValue || 0);
+  const sourceWidthMeters = Number(newStone?.widthValue || 0) / 100;
+  const sourceBatchId = parseStableIdentity(
+    'source-batch',
+    `layer-source:${layerConfigurationId}`
+  );
+  const longitudinalRate =
+    (newStone as any)?.cuttingCostPerMeter ??
+    getCuttingTypePricePerMeter('LONG');
+  const crossRate =
+    (newStone as any)?.crossCuttingCostPerMeter ??
+    getCuttingTypePricePerMeter('CROSS');
+  const parentLengthMeters = getActualLengthMeters(draft);
+  const parentCrossDimensionMeters = Number(draft.widthCm || 0) / 100;
+  const stripWidthMeters = Number(draft.layerWidthCm || 0) / 100;
+  const kerfMeters = draft.sawKerfEnabled
+    ? Number(draft.sawKerfCm || 0.3) / 100
+    : 0;
+  const sideLength = (side: 'front' | 'back' | 'left' | 'right') =>
+    side === 'front' || side === 'back'
+      ? parentLengthMeters
+      : parentCrossDimensionMeters;
+  const stripQuantity = parentQuantity * layersPerPiece;
+  const sourceQuantityUpperBound = Math.max(
+    1,
+    sides.reduce((sum, side) => {
+      const columns = Math.max(
+        0,
+        Math.floor(
+          (sourceWidthMeters + kerfMeters) /
+          (stripWidthMeters + kerfMeters)
+        )
+      );
+      const rows = Math.max(
+        0,
+        Math.floor(
+          (sourceLengthMeters + kerfMeters) /
+          (sideLength(side) + kerfMeters)
+        )
+      );
+      const capacity = columns * rows;
+      return sum + (
+        capacity > 0
+          ? Math.ceil(stripQuantity / capacity)
+          : stripQuantity
+      );
+    }, 0)
+  );
+  const sideOperations = sides
+    .filter(side => Boolean(draft.layerSideOperations?.[side]))
+    .map(side => {
+      const stored = draft.layerSideOperations?.[side]!;
+      const isDetached =
+        draft.layerDetachedOperationSides?.includes(side) || false;
+      const hasSubset = stored.groups.some(group =>
+        Number(group.scope) < stripQuantity
+      );
+      return {
+        side,
+        operationCollectionId: parseStableIdentity(
+          'layer-operation-collection',
+          isDetached
+            ? `${layerConfigurationId}:operation:${side}`
+            : `${layerConfigurationId}:operation:all`
+        ),
+        scopeIntent: isDetached
+          ? (hasSubset ? 'side-subset' as const : 'side' as const)
+          : 'all-strips' as const,
+        operations: {
+          ...stored,
+          productRowId: stableParentRowId,
+          lengthMeters: toCanonicalDecimal(sideLength(side)),
+          widthMeters: toCanonicalDecimal(stripWidthMeters),
+          quantity: stripQuantity
+        }
+      };
+    });
+  const selectedPaidIds = draft.layerSourceKind === 'contractRemainder'
+    ? (draft.layerSelectedRemainingStoneIds || [])
+    : parentRemainingStoneIds;
+
+  return {
+    parent: {
+      lengthMeters: toCanonicalDecimal(parentLengthMeters),
+      crossDimensionMeters: toCanonicalDecimal(parentCrossDimensionMeters),
+      quantity: parentQuantity
+    },
+    availableInventory,
+    input: {
+      calculationPolicyVersion: 'stair-layer-calculation-v1',
+      packingPolicyVersion: 'rectangle-pack-v1',
+      pricingPolicyVersion: 'contract-pricing-v1',
+      roundingPolicyVersion: 'nearest-toman-v1',
+      layerConfigurationId,
+      parentProductRowId: stableParentRowId,
+      sourceBatchId,
+      creationOrder,
+      layerCatalogItemId: draft.layerTypeId || '',
+      layerCatalogSnapshotVersion: 'inventory-layer-type-v1',
+      layerTitle: draft.layerTypeName || 'لایه',
+      layerUnit,
+      layerRateToman: toCanonicalDecimal(Number(draft.layerTypePrice || 0)),
+      layersPerParentPiece: layersPerPiece,
+      widthMeters: toCanonicalDecimal(stripWidthMeters),
+      widthDisplayUnit: 'cm',
+      targetSides: sides,
+      source: draft.layerSourceKind === 'newMaterial'
+        ? {
+            kind: 'new-material',
+            catalogProductId:
+              draft.layerStoneProductId || newStone?.id || '',
+            catalogSnapshotVersion: 'inventory-product-v1',
+            materialRateToman: toCanonicalDecimal(
+              effectiveMaterialRate
+            ),
+            sourceRows: [{
+              sourceRowId: parseStableIdentity(
+                'layer-source-row',
+                `layer-source-row:${layerConfigurationId}`
+              ),
+              lengthMeters: toCanonicalDecimal(sourceLengthMeters),
+              widthMeters: toCanonicalDecimal(sourceWidthMeters),
+              quantity: sourceQuantityUpperBound
+            }]
+          }
+        : {
+            kind: 'paid-remainder',
+            selectedRemainingStoneIds: selectedPaidIds.map(id =>
+              parseStableIdentity('remaining-stone', id)
+            )
+          },
+      kerfMeters: toCanonicalDecimal(kerfMeters),
+      calibrationEnabled: Boolean(draft.calibrationCutEnabled),
+      ...(longitudinalRate === null
+        ? {}
+        : { longitudinalCutRateToman: toCanonicalDecimal(longitudinalRate) }),
+      ...(crossRate === null
+        ? {}
+        : { crossCutRateToman: toCanonicalDecimal(crossRate) }),
+      ...(longitudinalRate === null
+        ? {}
+        : { calibrationCutRateToman: toCanonicalDecimal(longitudinalRate) }),
+      sideOperations,
+      ...(draft.layerDescription
+        ? { description: draft.layerDescription }
+        : {})
+    }
+  };
+};
+
+export const calculateCanonicalLayerDraft = (
+  params: Parameters<typeof createCanonicalLayerCalculationRequest>[0]
+): StairLayerCalculation => calculateStairLayerConfiguration(
+  createCanonicalLayerCalculationRequest(params)
+);
+
+export const formatCanonicalLayerConflict = (
+  conflict: StairLayerConflict | undefined
+): string => {
+  if (!conflict) return 'محاسبات لایه نیاز به اصلاح دارد';
+  if (
+    conflict.code === 'explicit-layer-source-required' ||
+    conflict.code === 'layer-source-missing'
+  ) {
+    return 'منبع سنگ لایه را انتخاب کنید';
+  }
+  if (conflict.code === 'layer-source-insufficient') {
+    return 'منبع انتخاب‌شده برای لایه کافی نیست';
+  }
+  if (conflict.code === 'layer-rate-required') {
+    return conflict.field.includes('material')
+      ? 'قیمت سنگ را وارد کنید'
+      : 'نرخ قرارداد لایه را وارد کنید';
+  }
+  if (conflict.code === 'layer-cut-rate-missing') {
+    return conflict.field.includes('cross')
+      ? 'نرخ برش عرضی در موجودی ثبت نشده است'
+      : 'نرخ برش طولی در موجودی ثبت نشده است';
+  }
+  if (conflict.code === 'layer-operation-invalid') {
+    return 'عملیات لایه نیاز به اصلاح دارد';
+  }
+  return 'محاسبات لایه نیاز به اصلاح دارد';
+};
+
+export const createCanonicalStairDraftInput = (
+  part: StairStepperPart,
+  draft: StairPartDraftV2,
+  getCuttingTypePricePerMeter: (code: string) => number | null
+): StairPartPolicyInput => {
+  const actualLengthMeters = getActualLengthMeters(draft);
+  const motherLengthMeters = getDraftStandardLengthMeters(draft);
+  const motherWidthMeters = Number(draft.stoneProduct?.widthValue || 0) / 100;
+  const crossDimensionMeters = Number(draft.widthCm || 0) / 100;
+  const longitudinalRate = getCuttingTypePricePerMeter('LONG');
+  const crossRate = getCuttingTypePricePerMeter('CROSS');
+  const rowSeed = `${draft.stoneProduct?.id || 'unselected'}:${part}`;
+
+  return {
+    calculationPolicyVersion: 'stair-calculation-v1',
+    packingPolicyVersion: 'rectangle-pack-v1',
+    pricingPolicyVersion: 'contract-pricing-v1',
+    roundingPolicyVersion: 'nearest-toman-v1',
+    stairSystemId: parseStableIdentity('stair-system', `draft:${rowSeed}`),
+    part,
+    sourceBatchId: parseStableIdentity('source-batch', `catalog:${rowSeed}`),
+    ...(motherLengthMeters > 0
+      ? { motherLengthMeters: toCanonicalDecimal(motherLengthMeters) }
+      : {}),
+    motherLengthDisplayUnit:
+      draft.standardLengthUnit || draft.lengthUnit || 'm',
+    ...(motherWidthMeters > 0
+      ? { motherWidthMeters: toCanonicalDecimal(motherWidthMeters) }
+      : {}),
+    ...(actualLengthMeters > 0
+      ? { lengthMeters: toCanonicalDecimal(actualLengthMeters) }
+      : {}),
+    ...(crossDimensionMeters > 0
+      ? { crossDimensionMeters: toCanonicalDecimal(crossDimensionMeters) }
+      : {}),
+    lengthDisplayUnit: draft.lengthUnit || 'm',
+    crossDimensionDisplayUnit: draft.widthUnit || 'cm',
+    ...(Number.isSafeInteger(draft.quantity) && Number(draft.quantity) > 0
+      ? { quantity: Number(draft.quantity) }
+      : {}),
+    ...(Number(draft.pricePerSquareMeter) > 0
+      ? { baseRateToman: toCanonicalDecimal(Number(draft.pricePerSquareMeter)) }
+      : {}),
+    mandatoryEnabled: Boolean(draft.useMandatory),
+    mandatoryPercentage: toCanonicalDecimal(Number(draft.mandatoryPercentage || 0)),
+    rememberedMandatoryPercentage: toCanonicalDecimal(Number(draft.mandatoryPercentage || 25)),
+    sawKerfEnabled: Boolean(draft.sawKerfEnabled),
+    sawKerfMeters: toCanonicalDecimal(Number(draft.sawKerfCm || 0.3) / 100),
+    calibrationEnabled: Boolean(draft.calibrationCutEnabled),
+    calibrationSelection: draft.calibrationSelection || 'automatic',
+    ...(longitudinalRate === null
+      ? {}
+      : { longitudinalCutRateToman: toCanonicalDecimal(longitudinalRate) }),
+    ...(crossRate === null
+      ? {}
+      : { crossCutRateToman: toCanonicalDecimal(crossRate) }),
+    ...(longitudinalRate === null
+      ? {}
+      : { calibrationCutRateToman: toCanonicalDecimal(longitudinalRate) })
+  };
+};
+
+export const calculateCanonicalStairDraft = (
+  part: StairStepperPart,
+  draft: StairPartDraftV2,
+  getCuttingTypePricePerMeter: (code: string) => number | null
+): StairPartCalculation => calculateStairPart(
+  createCanonicalStairDraftInput(part, draft, getCuttingTypePricePerMeter)
+);
 
 const getRemainingStoneUsageKeys = (stone: RemainingStone): string[] => {
   const keys = [stone.id, stone.sourceCutId].filter(Boolean);
@@ -116,6 +476,13 @@ export const computeToolMetersForTool = (
   const lengthM = getActualLengthMeters(draft);
   const widthM = (draft.widthCm || 0) / 100;
   const qty = draft.quantity || 0;
+  const coveredQuantity = tool.coveredQuantity ?? qty;
+  if (tool.manualValue !== null && tool.manualValue !== undefined) {
+    return Math.max(0, tool.manualValue);
+  }
+  if (tool.calculationBase === 'squareMeters') {
+    return lengthM * widthM * coveredQuantity;
+  }
   let meters = 0;
   const t = tool;
 
@@ -128,7 +495,7 @@ export const computeToolMetersForTool = (
     if (t.right) meters += widthM;
   }
   
-  return meters * qty;
+  return meters * coveredQuantity;
 };
 
 /**
@@ -528,15 +895,16 @@ export const normalizeLayerAltStoneSettings = (draft: StairPartDraftV2): StairPa
   if (!draft.layerUseDifferentStone) {
     return {
       ...draft,
-      layerPricePerSquareMeter: draft.layerPricePerSquareMeter ?? draft.pricePerSquareMeter ?? null,
+      layerPricePerSquareMeter: null,
       layerUseMandatory: undefined,
       layerMandatoryPercentage: null
     };
   }
   const normalized = { ...draft };
-  if (!normalized.layerPricePerSquareMeter || normalized.layerPricePerSquareMeter <= 0) {
-    normalized.layerPricePerSquareMeter = draft.layerPricePerSquareMeter || draft.pricePerSquareMeter || 0;
-  }
+  normalized.layerPricePerSquareMeter =
+    normalized.layerPricePerSquareMeter && normalized.layerPricePerSquareMeter > 0
+      ? normalized.layerPricePerSquareMeter
+      : null;
   normalized.layerUseMandatory = normalized.layerUseMandatory ?? true;
   normalized.layerMandatoryPercentage = normalized.layerMandatoryPercentage ?? 20;
   return normalized;
@@ -579,6 +947,7 @@ export const computeTotalsV2 = (
   draft: StairPartDraftV2,
   getCuttingTypePricePerMeter: (code: string) => number | null
 ): {
+  canonicalCalculation: StairPartCalculation;
   sqm: number;
   toolsTotal: number;
   partTotal: number;
@@ -604,6 +973,11 @@ export const computeTotalsV2 = (
   billableCuttingCostCross: number;
   shouldChargeCuttingCost: boolean;
 } => {
+  const canonicalCalculation = calculateCanonicalStairDraft(
+    part,
+    draft,
+    getCuttingTypePricePerMeter
+  );
   // Calculate display square meters using user-entered width (for display purposes)
   const sqm = computeSqmV2(draft);
   const toolsMeters = computeToolsMetersV2(part, draft);
@@ -701,7 +1075,8 @@ export const computeTotalsV2 = (
   const shouldChargeCuttingCost = billableCuttingCost > 0;
 
   const partTotal = materialPriceWithMandatory + toolsPrice + billableCuttingCost;
-  return {
+  const legacyResult = {
+    canonicalCalculation,
     sqm,
     toolsTotal: toolsPrice,
     partTotal,
@@ -726,6 +1101,61 @@ export const computeTotalsV2 = (
     billableCuttingCostLongitudinal,
     billableCuttingCostCross,
     shouldChargeCuttingCost
+  };
+
+  if (!canonicalCalculation.ok) {
+    return legacyResult;
+  }
+
+  const canonicalResult = canonicalCalculation.result;
+  const consumedSourceCount = canonicalResult.packingPlan.consumedSources.length;
+  const canonicalRemainderGroups = canonicalResult.packingPlan.remainders.reduce<
+    Array<{ widthCm: number; quantity: number }>
+  >((groups, remainder) => {
+    const widthCm = Number(remainder.widthMeters) * 100;
+    const existing = groups.find(group => Math.abs(group.widthCm - widthCm) < 0.000001);
+    if (existing) existing.quantity += 1;
+    else groups.push({ widthCm, quantity: 1 });
+    return groups;
+  }, []);
+  const longitudinalMeters = Number(canonicalResult.packingPlan.longitudinalCutMeters);
+  const calibrationMeters = Number(canonicalResult.packingPlan.calibrationMeters);
+  const crossMeters = Number(canonicalResult.packingPlan.crossCutMeters);
+  const longitudinalCost = Number(canonicalResult.longitudinalCutAmountToman);
+  const calibrationCost = Number(canonicalResult.calibrationCutAmountToman);
+  const crossCost = Number(canonicalResult.crossCutAmountToman);
+
+  return {
+    ...legacyResult,
+    sqm: Number(canonicalResult.requestedAreaSquareMeters),
+    pricingSquareMeters: Number(canonicalResult.consumedMotherAreaSquareMeters),
+    baseStoneQuantity: consumedSourceCount,
+    piecesPerStone: consumedSourceCount > 0
+      ? Math.ceil(canonicalResult.quantity / consumedSourceCount)
+      : 0,
+    leftoverWidthCm: canonicalRemainderGroups[0]?.widthCm || 0,
+    remainingStoneQuantity: canonicalRemainderGroups.reduce(
+      (sum, group) => sum + group.quantity,
+      0
+    ),
+    remainingStoneGroups: canonicalRemainderGroups,
+    cuttingCost: longitudinalCost + calibrationCost + crossCost,
+    cuttingCostPerMeter: longitudinalMeters + calibrationMeters + crossMeters > 0
+      ? (longitudinalCost + calibrationCost + crossCost) /
+        (longitudinalMeters + calibrationMeters + crossMeters)
+      : 0,
+    cuttingCostLongitudinal: longitudinalCost + calibrationCost,
+    cuttingMetersLongitudinal: longitudinalMeters + calibrationMeters,
+    cuttingMetersLongitudinalProduction: longitudinalMeters,
+    cuttingMetersLongitudinalCalibration: calibrationMeters,
+    cuttingCostCross: crossCost,
+    cuttingMetersCross: crossMeters,
+    baseMaterialPrice: Number(canonicalResult.baseAmountToman),
+    billableCuttingCost: longitudinalCost + calibrationCost + crossCost,
+    billableCuttingCostLongitudinal: longitudinalCost + calibrationCost,
+    billableCuttingCostCross: crossCost,
+    shouldChargeCuttingCost: longitudinalCost + calibrationCost + crossCost > 0,
+    partTotal: Number(canonicalResult.totalAmountToman) + toolsPrice
   };
 };
 
@@ -845,7 +1275,7 @@ export const calculateLayerMetrics = (params: {
     const leftoverWidth = stone.width - (columnsPerStone * layerWidthCm);
     if (leftoverWidth > 0) {
       residualWidthPieces.push({
-        id: `layer_width_leftover_${stone.id}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        id: `layer_width_leftover_${stone.id}`,
         width: leftoverWidth,
         length: stoneLength,
         squareMeters: (leftoverWidth / 100) * stoneLength,
@@ -1461,5 +1891,3 @@ export const updateRemainingStoneUsage = (
   
   return updates;
 };
-
-

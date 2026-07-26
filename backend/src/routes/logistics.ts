@@ -264,6 +264,7 @@ const buildRemainingForProject = async (projectId: string) => {
         contractNumber: contract.contractNumber,
         contractStatus: contract.status,
         contractItemId: item.id,
+        productRowId: item.productRowId,
         productId: item.productId,
         productType: item.productType,
         unit,
@@ -504,6 +505,7 @@ const linePayloadToCreate = async (line: any) => {
   return {
     sourceContractId: sourceItem.contractId,
     sourceContractItemId: sourceItem.id,
+    productRowId: sourceItem.productRowId,
     productId: sourceItem.productId,
     quantity: calculated,
     unit,

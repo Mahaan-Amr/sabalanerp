@@ -10,6 +10,7 @@ export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-project-name-
 const prisma = new PrismaClient();
 
 export const salesContractPrintableInclude = {
+  productGraphState: true,
   customer: {
     include: {
       phoneNumbers: true,

@@ -9,7 +9,10 @@ ARG https_proxy
 ARG ALL_PROXY
 ARG all_proxy
 
-COPY package*.json ./
+COPY packages/contract-product-graph/package*.json /packages/contract-product-graph/
+COPY packages/contract-product-graph/tsconfig*.json /packages/contract-product-graph/
+COPY packages/contract-product-graph/src /packages/contract-product-graph/src
+COPY frontend/package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
   npm config set fetch-retries 5 \
   && npm config set fetch-retry-factor 2 \
@@ -17,10 +20,15 @@ RUN --mount=type=cache,target=/root/.npm \
   && npm config set fetch-retry-maxtimeout 120000 \
   && if [ -n "$HTTP_PROXY" ]; then npm config set proxy "$HTTP_PROXY"; fi \
   && if [ -n "$HTTPS_PROXY" ]; then npm config set https-proxy "$HTTPS_PROXY"; fi \
+  && cd /packages/contract-product-graph \
+  && npm ci --include=dev --prefer-offline --no-audit --fund=false \
+  && npm run build \
+  && npm prune --omit=dev \
+  && cd /app \
   && npm ci --include=dev --prefer-offline --no-audit --fund=false \
   && test -x ./node_modules/.bin/next
 
-COPY . .
+COPY frontend .
 
 ARG NEXT_PUBLIC_API_URL=/api
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
@@ -39,7 +47,8 @@ ENV PORT=3000
 
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/.next ./.next
+COPY --from=builder /packages/contract-product-graph /packages/contract-product-graph
+COPY --from=builder /app/.next-build ./.next-build
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/next.config.js ./next.config.js
 

@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import FormattedNumberInput from '@/components/FormattedNumberInput';
 import type {
   StairLayerCatalogUnit,
   StairLayerSide
@@ -90,22 +91,34 @@ function FlatInput({
   label,
   value,
   onChange,
-  error
+  error,
+  monetary = false
 }: {
   readonly label: string;
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly error?: string;
+  readonly monetary?: boolean;
 }) {
   return (
     <label className="block min-w-0 text-xs font-semibold text-slate-600 dark:text-slate-300">
       <span className="mb-1 block min-h-5">{label}</span>
-      <input
-        value={value}
-        onChange={event => onChange(event.target.value)}
-        aria-invalid={Boolean(error)}
-        className="h-9 w-full rounded-lg border border-slate-300 bg-transparent px-2 text-sm font-normal focus:border-teal-500 focus:outline-none dark:border-slate-700"
-      />
+      {monetary ? (
+        <FormattedNumberInput
+          value={value}
+          decimalScale={0}
+          min={0}
+          onChange={next => onChange(String(next))}
+          className="h-9 w-full rounded-lg border border-slate-300 bg-transparent px-2 text-sm font-normal focus:border-teal-500 focus:outline-none dark:border-slate-700"
+        />
+      ) : (
+        <input
+          value={value}
+          onChange={event => onChange(event.target.value)}
+          aria-invalid={Boolean(error)}
+          className="h-9 w-full rounded-lg border border-slate-300 bg-transparent px-2 text-sm font-normal focus:border-teal-500 focus:outline-none dark:border-slate-700"
+        />
+      )}
       {error && <span className="mt-1 block text-[11px] text-red-600">{error}</span>}
     </label>
   );
@@ -163,6 +176,7 @@ export function StairLayerDraftRow({
             draft.layerUnit ? UNIT_LABELS[draft.layerUnit] : '—'
           }`}
           value={draft.layerRateToman}
+          monetary
           onChange={layerRateToman => update({ layerRateToman })}
           error={errors.layerRateToman}
         />

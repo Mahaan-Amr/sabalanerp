@@ -183,6 +183,74 @@ const stairPlan = (quantity: number, kerf = '0') => calculatePackingPlan({
 }
 
 {
+  const startedAt = performance.now();
+  const paidBatchId = parseStableIdentity(
+    'source-batch',
+    'stair-layer-paid-remainders'
+  );
+  const freshBatchId = parseStableIdentity(
+    'source-batch',
+    'stair-layer-fresh-shortage'
+  );
+  const result = calculatePackingPlan({
+    policyVersion: 'packing-guillotine-v1',
+    kerfMeters: decimal('0'),
+    sources: [
+      {
+        sourceBatchId: paidBatchId,
+        lengthMeters: decimal('1.5'),
+        widthMeters: decimal('0.1'),
+        quantity: 16,
+        allocationPriority: 0
+      },
+      {
+        sourceBatchId: freshBatchId,
+        lengthMeters: decimal('1.8'),
+        widthMeters: decimal('0.4'),
+        quantity: 32,
+        allocationPriority: 1
+      }
+    ],
+    demands: [
+      {
+        demandId: 'stair-layer-front',
+        lengthMeters: decimal('1.5'),
+        widthMeters: decimal('0.05'),
+        quantity: 32
+      },
+      {
+        demandId: 'stair-layer-left',
+        lengthMeters: decimal('0.3'),
+        widthMeters: decimal('0.05'),
+        quantity: 32
+      }
+    ]
+  });
+  const elapsedMilliseconds = performance.now() - startedAt;
+  assert.equal(result.ok, true, JSON.stringify(result));
+  if (!result.ok) throw new Error('Expected paid-first stair layer packing.');
+  assert.equal(result.plan.placements.length, 64);
+  assert.equal(
+    result.plan.placements.slice(0, 32).every(
+      placement => placement.sourceBatchId === paidBatchId
+    ),
+    true,
+    'paid remainder must cover every fitting front strip before fresh stone'
+  );
+  assert.equal(
+    result.plan.placements.some(
+      placement => placement.sourceBatchId === freshBatchId
+    ),
+    true,
+    'fresh stone must cover the physical shortage'
+  );
+  assert.ok(
+    elapsedMilliseconds < 500,
+    `32-piece paid/fresh layer packing took ${elapsedMilliseconds.toFixed(0)}ms.`
+  );
+}
+
+{
   const priced = calculatePricing({
     policyVersion: 'pricing-decimal-v1',
     roundingPolicyVersion: 'toman-half-up-v1',

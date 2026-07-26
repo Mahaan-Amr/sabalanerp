@@ -12,6 +12,7 @@ import type {
 export function useStairLayerCalculationWorker(
   input: CanonicalLayerCalculationRequest | undefined
 ) {
+  const serializedInput = input ? JSON.stringify(input) : '';
   const [state, setState] = React.useState<{
     calculation: StairLayerCalculation | null;
     calculating: boolean;
@@ -24,17 +25,20 @@ export function useStairLayerCalculationWorker(
   const sequence = React.useRef(0);
 
   React.useEffect(() => {
-    if (!input) {
+    if (!serializedInput) {
       setState({ calculation: null, calculating: false, error: null });
       return;
     }
+    const currentInput = JSON.parse(
+      serializedInput
+    ) as CanonicalLayerCalculationRequest;
     const id = sequence.current + 1;
     sequence.current = id;
     setState({ calculation: null, calculating: true, error: null });
 
     if (typeof Worker === 'undefined') {
       setState({
-        calculation: calculateStairLayerConfiguration(input),
+        calculation: calculateStairLayerConfiguration(currentInput),
         calculating: false,
         error: null
       });
@@ -66,9 +70,9 @@ export function useStairLayerCalculationWorker(
       });
       worker.terminate();
     };
-    worker.postMessage({ id, input });
+    worker.postMessage({ id, input: currentInput });
     return () => worker.terminate();
-  }, [input]);
+  }, [serializedInput]);
 
   return state;
 }

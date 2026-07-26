@@ -222,6 +222,7 @@ import {
   createCanonicalLayerCalculationRequest,
   createCanonicalStairDraftInput,
   formatCanonicalLayerConflict,
+  normalizeAutomaticLayerOperationGroups,
   toCanonicalLayerInventory,
   computeTotalsV2 as computeCanonicalStairTotalsV2
 } from '@/features/contract-creation/services/stairCalculationService';
@@ -349,7 +350,7 @@ const createLayerSideOperationInput = (
   const quantity =
     Number(draft.quantity || 0) *
     Number(draft.numberOfLayersPerStair || 0);
-  return {
+  return normalizeAutomaticLayerOperationGroups({
     policyVersion: 'calculation-v1',
     pricingPolicyVersion: 'pricing-v1',
     roundingPolicyVersion: 'rounding-v1',
@@ -367,7 +368,7 @@ const createLayerSideOperationInput = (
     groups: current?.groups ?? [],
     tools: current?.tools ?? [],
     finishings: current?.finishings ?? []
-  };
+  }, quantity);
 };
 
 const cloneLayerOperationsForSide = (
@@ -5881,9 +5882,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
         {/* Product Configuration Modal */}
         {!editRecoveryBlocked && showProductModal && productConfig.productType === 'stair' && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4">
-            <div className="stair-v2-modal bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100 rounded-xl max-w-4xl w-full max-h-[90vh] flex flex-col z-[10000]">
-              <div className="stair-v2-header flex flex-shrink-0 items-center justify-between border-b border-gray-200 bg-white/95 p-4 backdrop-blur-md dark:border-gray-700 dark:bg-slate-900/95">
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/55 p-3">
+            <div className="stair-v2-modal flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 z-[10000]">
+              <div className="stair-v2-header flex min-h-14 flex-shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-950">
                 <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
                   تنظیمات محصول
                 </h3>
@@ -5897,7 +5898,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               </div>
 
               {/* Type Switcher (stair V2 modal) */}
-              <div className="stair-v2-type-selector flex-shrink-0 border-b border-gray-200 bg-white/95 px-4 py-2 backdrop-blur-md dark:border-gray-700 dark:bg-slate-900/95">
+              <div className="stair-v2-type-selector flex-shrink-0 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-800 dark:bg-slate-950">
                 {isEditMode ? (
                   <div className="flex min-h-8 items-center justify-between text-xs">
                     <span className="font-semibold text-slate-600 dark:text-slate-300">نوع محصول</span>
@@ -5919,7 +5920,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 )}
               </div>
 
-              <div className="stair-v2-body flex-1 overflow-y-auto bg-white dark:bg-slate-900">
+              <div className="stair-v2-body min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white dark:bg-slate-950">
                 <div className="p-6 space-y-6">
                   {!isEditMode && (
                     <StairQuantityModeSection
@@ -8527,9 +8528,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 </div>
                 </div>
               </div>
-              <div className="stair-v2-footer flex flex-shrink-0 items-center justify-end gap-2 border-t border-gray-200 bg-white/95 p-4 backdrop-blur-md dark:border-gray-700 dark:bg-slate-900/95">
-                <button type="button" className="px-3 py-2 rounded-md bg-gray-200 dark:bg-gray-700" onClick={() => setShowProductModal(false)}>انصراف</button>
-                <button type="button" className="min-h-11 rounded-lg border border-teal-400/60 bg-teal-500/10 px-4 py-2 text-sm font-semibold text-teal-700 transition hover:bg-teal-500/20 dark:text-teal-200" onClick={() => {
+              <div className="stair-v2-footer flex min-h-16 flex-shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-950">
+                <button type="button" className="min-h-10 rounded-lg px-4 text-sm font-semibold text-slate-600 dark:text-slate-300" onClick={() => setShowProductModal(false)}>انصراف</button>
+                <button type="button" className="min-h-10 min-w-28 rounded-lg bg-teal-600 px-4 text-sm font-bold text-white transition hover:bg-teal-500" onClick={() => {
                   const [draft] = getActiveDraft();
                   // Validate required fields
                   const fieldErrors = validateDraftRequiredFields(stairSystemV2.stairActivePart, draft, stairSystemV2.layerTypes);
@@ -10086,7 +10087,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   box-shadow: 0 24px 70px rgb(15 23 42 / 0.28);
                 }
                 .dark .stair-v2-modal {
-                  border-color: rgb(51 65 85);
+                  border-color: rgb(30 41 59);
                 }
                 .stair-v2-modal [class*="bg-gradient"] {
                   background-image: none !important;
@@ -10095,11 +10096,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 .stair-v2-type-selector,
                 .stair-v2-footer {
                   padding-inline: 1rem !important;
-                  backdrop-filter: blur(12px);
                 }
                 .stair-v2-header {
-                  min-height: 4rem;
-                  padding-block: .75rem !important;
+                  min-height: 3.5rem;
                 }
                 .stair-v2-header > div > div:first-child,
                 .stair-v2-step-indicators {
@@ -10113,6 +10112,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 .stair-v2-body > div {
                   padding: .75rem 1rem !important;
                   gap: 0 !important;
+                }
+                .dark .stair-v2-body input,
+                .dark .stair-v2-body textarea,
+                .dark .stair-v2-body select {
+                  background-color: transparent !important;
+                  border-color: rgb(51 65 85) !important;
                 }
                 .stair-v2-body [class*="shadow"] {
                   box-shadow: none !important;

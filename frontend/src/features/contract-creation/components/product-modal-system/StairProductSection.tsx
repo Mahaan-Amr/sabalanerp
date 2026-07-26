@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import FormattedNumberInput from '@/components/FormattedNumberInput';
 import {
   resolveStaircaseQuantity,
   parseCanonicalDecimal,
@@ -101,7 +102,8 @@ function CompactField({
   onChange,
   unit,
   onUnitChange,
-  error
+  error,
+  monetary = false
 }: {
   label: string;
   value: string;
@@ -109,6 +111,7 @@ function CompactField({
   unit?: CompactLengthUnit;
   onUnitChange?: (value: string, unit: CompactLengthUnit) => void;
   error?: string;
+  monetary?: boolean;
 }) {
   return (
     <label className="block min-w-0 text-xs font-semibold text-slate-600 dark:text-slate-300">
@@ -123,13 +126,23 @@ function CompactField({
           />
         )}
       </span>
-      <input
-        value={value}
-        onChange={event => onChange(event.target.value)}
-        inputMode="decimal"
-        aria-invalid={Boolean(error)}
-        className="h-9 w-full rounded-lg border border-slate-300 bg-transparent px-2 text-sm font-normal focus:border-teal-500 focus:outline-none dark:border-slate-700"
-      />
+      {monetary ? (
+        <FormattedNumberInput
+          value={value}
+          decimalScale={0}
+          min={0}
+          onChange={next => onChange(String(next))}
+          className="h-9 w-full rounded-lg border border-slate-300 bg-transparent px-2 text-sm font-normal focus:border-teal-500 focus:outline-none dark:border-slate-700"
+        />
+      ) : (
+        <input
+          value={value}
+          onChange={event => onChange(event.target.value)}
+          inputMode="decimal"
+          aria-invalid={Boolean(error)}
+          className="h-9 w-full rounded-lg border border-slate-300 bg-transparent px-2 text-sm font-normal focus:border-teal-500 focus:outline-none dark:border-slate-700"
+        />
+      )}
       {error && <span className="mt-1 block text-[11px] text-red-600">{error}</span>}
     </label>
   );
@@ -273,6 +286,7 @@ export function StairPartSubsection({
         <CompactField
           label={`فی ${partLabel(draft.part)}`}
           value={draft.baseRateToman}
+          monetary
           onChange={baseRateToman => update({ baseRateToman })}
           error={errors.baseRateToman}
         />

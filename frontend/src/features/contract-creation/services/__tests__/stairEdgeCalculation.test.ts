@@ -8,8 +8,14 @@ import {
   createCanonicalStairDraftInput,
   formatCanonicalLayerConflict,
   getLayerEdgeDemands,
-  getTotalLayerLengthPerStairM
+  getTotalLayerLengthPerStairM,
+  normalizeAutomaticLayerOperationGroups
 } from '../stairCalculationService';
+import {
+  parseCanonicalDecimal,
+  parseStableIdentity,
+  type ProductOperationsInput
+} from '@sabalanerp/contract-product-graph';
 import { deriveLayerEdgesFromTools } from '../../utils/stairSystemHelpers';
 import type {
   Product,
@@ -267,6 +273,54 @@ for (const part of ['tread', 'riser', 'landing'] as StairStepperPart[]) {
       message: 'Cross layer cutting rate is missing.'
     }),
     'نرخ برش عرضی در موجودی ثبت نشده است'
+  );
+}
+
+{
+  const emptyGroupId = parseStableIdentity(
+    'operation-group',
+    'stale-empty-layer-group'
+  );
+  const deliberateGroupId = parseStableIdentity(
+    'operation-group',
+    'deliberate-layer-group'
+  );
+  const operationInput: ProductOperationsInput = {
+    policyVersion: 'calculation-v1',
+    pricingPolicyVersion: 'pricing-v1',
+    roundingPolicyVersion: 'rounding-v1',
+    productRowId: parseStableIdentity('product-row', 'layer-parent-row'),
+    lengthMeters: parseCanonicalDecimal('1.5'),
+    widthMeters: parseCanonicalDecimal('0.05'),
+    quantity: 22,
+    groups: [
+      { operationGroupId: emptyGroupId, scope: parseCanonicalDecimal('22') },
+      { operationGroupId: deliberateGroupId, scope: parseCanonicalDecimal('10') }
+    ],
+    tools: [{
+      toolSelectionId: parseStableIdentity(
+        'tool-selection',
+        'deliberate-layer-tool'
+      ),
+      operationGroupId: deliberateGroupId,
+      catalogItemId: 'tool-1',
+      catalogSnapshotVersion: 'tool-v1',
+      name: 'Tool',
+      unit: 'meter',
+      rateToman: parseCanonicalDecimal('0'),
+      edges: ['front']
+    }],
+    finishings: []
+  };
+  const normalized = normalizeAutomaticLayerOperationGroups(operationInput, 32);
+  assert.equal(normalized.quantity, 32);
+  assert.deepEqual(
+    normalized.groups.map(group => [
+      group.operationGroupId,
+      group.scope
+    ]),
+    [[deliberateGroupId, '10']],
+    'empty stale scope must disappear while deliberate operation scope remains'
   );
 }
 

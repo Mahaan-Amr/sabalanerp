@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import FormattedNumberInput from '@/components/FormattedNumberInput';
 import {
   calculateSlab,
   parseCanonicalDecimal,
@@ -43,7 +44,8 @@ function SlabField({
   onUnitChange,
   onChange,
   error,
-  inputMode = 'decimal'
+  inputMode = 'decimal',
+  monetary = false
 }: {
   id: string;
   label: string;
@@ -53,6 +55,7 @@ function SlabField({
   onChange: (value: string) => void;
   error?: string;
   inputMode?: 'decimal' | 'numeric';
+  monetary?: boolean;
 }) {
   const [draft, setDraft] = React.useState(value);
   const editingRef = React.useRef(false);
@@ -77,25 +80,46 @@ function SlabField({
           />
         )}
       </div>
-      <input
-        id={id}
-        inputMode={inputMode}
-        value={draft}
-        onFocus={() => {
-          editingRef.current = true;
-        }}
-        onChange={event => {
-          setDraft(event.target.value);
-          onChange(event.target.value);
-        }}
-        onBlur={() => {
-          editingRef.current = false;
-          setDraft(value);
-        }}
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? `${id}-error` : undefined}
-        className={fieldClass}
-      />
+      {monetary ? (
+        <FormattedNumberInput
+          id={id}
+          value={draft}
+          decimalScale={0}
+          min={0}
+          onFocus={() => {
+            editingRef.current = true;
+          }}
+          onBlur={() => {
+            editingRef.current = false;
+          }}
+          onChange={next => {
+            const canonical = String(next);
+            setDraft(canonical);
+            onChange(canonical);
+          }}
+          className={fieldClass}
+        />
+      ) : (
+        <input
+          id={id}
+          inputMode={inputMode}
+          value={draft}
+          onFocus={() => {
+            editingRef.current = true;
+          }}
+          onChange={event => {
+            setDraft(event.target.value);
+            onChange(event.target.value);
+          }}
+          onBlur={() => {
+            editingRef.current = false;
+            setDraft(value);
+          }}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? `${id}-error` : undefined}
+          className={fieldClass}
+        />
+      )}
       <div id={`${id}-error`} className={errorClass}>{error ?? ''}</div>
     </div>
   );
@@ -296,6 +320,7 @@ export function SlabProductSection({
         id="slab-base-rate"
         label="فی سنگ مادر مصرفی"
         value={input.baseMaterialRateToman ?? ''}
+        monetary
         onChange={value => safeCommit(() =>
           onChange(commitSlabDecimal(input, 'baseMaterialRateToman', value))
         )}
@@ -364,6 +389,7 @@ export function SlabProductSection({
               id="slab-square-meter-cut-rate"
               label="نرخ برش"
               value={input.squareMeterCutRateToman ?? ''}
+              monetary
               onChange={value => safeCommit(() =>
                 onChange(commitSlabDecimal(input, 'squareMeterCutRateToman', value))
               )}

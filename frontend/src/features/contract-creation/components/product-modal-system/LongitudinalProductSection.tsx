@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import FormattedNumberInput from '@/components/FormattedNumberInput';
 import {
   calculateLongitudinalProduct,
   parseCanonicalDecimal,
@@ -42,7 +43,8 @@ function CompactDecimalField({
   onUnitChange,
   onValueChange,
   error,
-  inputMode = 'decimal'
+  inputMode = 'decimal',
+  monetary = false
 }: {
   id: string;
   label: string;
@@ -52,6 +54,7 @@ function CompactDecimalField({
   onValueChange: (value: string) => void;
   error?: string;
   inputMode?: 'decimal' | 'numeric';
+  monetary?: boolean;
 }) {
   const [draft, setDraft] = React.useState(value);
   const editingRef = React.useRef(false);
@@ -76,26 +79,47 @@ function CompactDecimalField({
           />
         )}
       </div>
-      <input
-        id={id}
-        inputMode={inputMode}
-        value={draft}
-        onFocus={() => {
-          editingRef.current = true;
-        }}
-        onChange={event => {
-          const next = event.target.value;
-          setDraft(next);
-          onValueChange(next);
-        }}
-        onBlur={() => {
-          editingRef.current = false;
-          setDraft(value);
-        }}
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? `${id}-error` : undefined}
-        className={fieldClass}
-      />
+      {monetary ? (
+        <FormattedNumberInput
+          id={id}
+          value={draft}
+          decimalScale={0}
+          min={0}
+          onFocus={() => {
+            editingRef.current = true;
+          }}
+          onBlur={() => {
+            editingRef.current = false;
+          }}
+          onChange={next => {
+            const canonical = String(next);
+            setDraft(canonical);
+            onValueChange(canonical);
+          }}
+          className={fieldClass}
+        />
+      ) : (
+        <input
+          id={id}
+          inputMode={inputMode}
+          value={draft}
+          onFocus={() => {
+            editingRef.current = true;
+          }}
+          onChange={event => {
+            const next = event.target.value;
+            setDraft(next);
+            onValueChange(next);
+          }}
+          onBlur={() => {
+            editingRef.current = false;
+            setDraft(value);
+          }}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? `${id}-error` : undefined}
+          className={fieldClass}
+        />
+      )}
       <div id={`${id}-error`} className={errorClass}>{error ?? ''}</div>
     </div>
   );
@@ -260,6 +284,7 @@ export function LongitudinalProductSection({
         id="longitudinal-base-rate"
         label="فی هر مترمربع (تومان)"
         value={input.baseRateToman ?? ''}
+        monetary
         onValueChange={value => commitDecimal('baseRateToman', value, input.lastManualField)}
         error={conflictFor('baseRateToman')}
       />

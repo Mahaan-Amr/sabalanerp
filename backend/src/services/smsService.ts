@@ -24,7 +24,7 @@ interface SmsTemplateParameter {
 
 export const buildHiringOfferTemplateParameters = (code: string): SmsTemplateParameter[] => {
   if (!/^\d{6}$/.test(code)) throw new Error('Hiring offer access code must contain exactly six digits.');
-  return [{ name: 'Code', value: code }];
+  return [{ name: 'CODE', value: code }];
 };
 
 function maskPhoneNumber(phoneNumber: string): string {

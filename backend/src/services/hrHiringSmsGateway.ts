@@ -80,7 +80,11 @@ class HrHiringSmsGateway {
       phoneNumber: params.phoneNumber,
       kind: "offer",
       code: params.code,
-      text: "پیشنهاد همکاری شما آماده بررسی است. به صفحه درخواست استخدام وارد شوید.",
+      text: `سامانه منابع انسانی سبلان
+
+پیشنهاد همکاری شما آماده بررسی است.
+
+لطفاً به sabalanerp.com/apply وارد شوید، با شماره همراه و کد ${params.code} ورود کنید و پیشنهاد همکاری را بررسی و اعلام تصمیم نمایید.`,
       sentAt: new Date().toISOString(),
     });
     if (this.testMode === "failure") {

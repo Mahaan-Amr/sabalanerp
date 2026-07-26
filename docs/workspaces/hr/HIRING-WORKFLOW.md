@@ -62,6 +62,16 @@ sabalanerp.com/apply
 سبلان ERP
 ```
 
+قالب `SMS_IR_HIRING_OFFER_TEMPLATE_ID` فقط پارامتر case-sensitive با نام `CODE` دارد و متن آن باید دقیقاً این باشد:
+
+```text
+سامانه منابع انسانی سبلان
+
+پیشنهاد همکاری شما آماده بررسی است.
+
+لطفاً به sabalanerp.com/apply وارد شوید، با شماره همراه و کد #CODE# ورود کنید و پیشنهاد همکاری را بررسی و اعلام تصمیم نمایید.
+```
+
 در production، `PUBLIC_APP_URL` باید یک مبدأ HTTPS معتبر، `SMS_IR_API_KEY` موجود، `SMS_IR_ENVIRONMENT=production` و `SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS=Code` باشد. `SMS_IR_HIRING_INVITATION_TEMPLATE_ID` باید شناسه عددی قالب اختصاصی و متفاوت از قالب OTP عمومی باشد؛ برنامه در نبود یا ناسازگاری این تنظیمات اجرا نمی‌شود.
 
 شماره همراه نرمال‌شده‌ای که SMS را دریافت کرده و OTP یک جفت Application-specific می‌سازند. برای چند Application باز روی یک موبایل، کدهای فعال متفاوت صادر می‌شوند و صفحه عمومی هرگز Applicationهای دیگر را فهرست نمی‌کند. کد تا هفت روز روی دستگاه‌های مختلف قابل استفاده است؛ نشست فقط در browser session جاری باقی می‌ماند و از انقضای دعوت فراتر نمی‌رود. بستن Application، صدور دعوت جدید یا خروج امن نشست را بی‌اعتبار می‌کند.

@@ -17,8 +17,16 @@ const run = async () => {
   const message = gateway.snapshot().messages[0];
   assert.equal(message.kind, "offer");
   assert.equal(message.code, "123456");
+  assert.equal(
+    message.text,
+    `سامانه منابع انسانی سبلان
+
+پیشنهاد همکاری شما آماده بررسی است.
+
+لطفاً به sabalanerp.com/apply وارد شوید، با شماره همراه و کد 123456 ورود کنید و پیشنهاد همکاری را بررسی و اعلام تصمیم نمایید.`,
+  );
   assert.deepEqual(buildHiringOfferTemplateParameters("123456"), [
-    { name: "Code", value: "123456" },
+    { name: "CODE", value: "123456" },
   ]);
   assert.throws(() => buildHiringOfferTemplateParameters(""), /six digits/);
 

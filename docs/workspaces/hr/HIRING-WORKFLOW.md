@@ -62,7 +62,20 @@ sabalanerp.com/apply
 سبلان ERP
 ```
 
-قالب `SMS_IR_HIRING_OFFER_TEMPLATE_ID` فقط پارامتر case-sensitive با نام `CODE` دارد و متن آن باید دقیقاً این باشد:
+قالب `SMS_IR_HIRING_CORRECTION_TEMPLATE_ID` با شناسه `763918` فقط پارامترهای case-sensitive با نام‌های `Details` و `Code` دارد و متن آن باید دقیقاً این باشد:
+
+```text
+سامانه منابع انسانی سبلان
+
+درخواست استخدام شما نیازمند اصلاح است:
+#Details#
+
+#Code#
+
+لطفاً به sabalanerp.com/apply وارد شوید، موارد اعلام‌شده را اصلاح کنید و فرم را دوباره ارسال نمایید.
+```
+
+قالب `SMS_IR_HIRING_OFFER_TEMPLATE_ID` با شناسه `894291` فقط پارامتر case-sensitive با نام `CODE` دارد و متن آن باید دقیقاً این باشد:
 
 ```text
 سامانه منابع انسانی سبلان

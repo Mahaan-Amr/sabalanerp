@@ -62,11 +62,11 @@ class SmsService {
       10
     );
     this.hiringCorrectionTemplateId = parseInt(
-      process.env.SMS_IR_HIRING_CORRECTION_TEMPLATE_ID || '0',
+      process.env.SMS_IR_HIRING_CORRECTION_TEMPLATE_ID || '763918',
       10
     );
     this.hiringOfferTemplateId = parseInt(
-      process.env.SMS_IR_HIRING_OFFER_TEMPLATE_ID || '0',
+      process.env.SMS_IR_HIRING_OFFER_TEMPLATE_ID || '894291',
       10
     );
     this.environment = process.env.SMS_IR_ENVIRONMENT || 'sandbox';

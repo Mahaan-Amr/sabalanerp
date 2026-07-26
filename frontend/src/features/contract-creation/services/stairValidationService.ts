@@ -205,8 +205,10 @@ export const validateDraftRequiredFields = (
   const hasLayerConfiguration =
     Boolean(draft.numberOfLayersPerStair && draft.numberOfLayersPerStair > 0);
 
-  if (hasLayerConfiguration && layerTypes.length > 0 && !draft.layerTypeId) {
+  if (hasLayerConfiguration && !draft.layerTypeId) {
     errors.layerType = 'انتخاب نوع لایه الزامی است';
+  } else if (hasLayerConfiguration && !(Number(draft.layerTypePrice) > 0)) {
+    errors.layerType = 'نرخ قراردادی نوع لایه باید بیشتر از صفر باشد';
   }
 
   if (hasLayerConfiguration && !draft.layerSourceKind) {

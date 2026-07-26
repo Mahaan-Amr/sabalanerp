@@ -3516,6 +3516,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               layerTypeId: layerProduct.layerTypeId ?? layerTypeMeta?.id ?? null,
               layerTypeName: layerProduct.layerTypeName ?? layerTypeMeta?.name ?? null,
               layerTypePrice: layerProduct.layerTypePrice ?? layerTypeMeta?.pricePerLayer ?? null,
+              layerTypeCalculationUnit:
+                layerInfo?.calculationUnit ??
+                layerTypeMeta?.calculationUnit ??
+                null,
               layerSourceKind: layerInfo?.sourceKind ||
                 (layerProduct.layerUseDifferentStone || layerAltStoneMeta
                   ? 'newMaterial'
@@ -6948,14 +6952,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               onChange={(value) => {
                                 // 🎯 Ensure integer value and validate
                                 const intValue = value ? Math.floor(value) : null;
-                                const requiresLayerType = stairSystemV2.layerTypes.length > 0;
                                 if (intValue && intValue > 0) {
                                   let updatedDraft: StairPartDraftV2 = { ...draft, numberOfLayersPerStair: intValue };
                                   if (!hasLayerEdgeSelection(updatedDraft.layerEdges)) {
                                     updatedDraft = deriveLayerEdgesFromTools(updatedDraft, stairSystemV2.stairActivePart);
                                   }
                                   setDraft(updatedDraft);
-                                  if (requiresLayerType && !draft.layerTypeId) {
+                                  if (!draft.layerTypeId) {
                                     stairSystemV2.setStairDraftErrors(prev => ({
                                       ...prev,
                                       [stairSystemV2.stairActivePart]: {
@@ -7044,15 +7047,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 />
                               </div>
 
-                              {stairSystemV2.layerTypes.length > 0 && (
-                                <div>
+                              <div>
                                   <label className="mb-2 block text-xs font-medium text-gray-700 dark:text-gray-300">
                                     نوع لایه
                                   </label>
                                   <select
                                     className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-gray-800 outline-none focus:border-teal-500 dark:border-gray-600 dark:text-white"
                                     value={draft.layerTypeId || ''}
-                                    disabled={stairSystemV2.isLoadingLayerTypes}
+                                    disabled={stairSystemV2.layerTypesStatus !== 'ready'}
                                     aria-label="انتخاب نوع لایه"
                                     onChange={(e) => {
                                       const selectedId = e.target.value;
@@ -7061,7 +7063,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           ...draft,
                                           layerTypeId: null,
                                           layerTypeName: null,
-                                          layerTypePrice: null
+                                          layerTypePrice: null,
+                                          layerTypeCalculationUnit: null
                                         });
                                         if ((draft.numberOfLayersPerStair || 0) > 0) {
                                           stairSystemV2.setStairDraftErrors(prev => ({
@@ -7081,22 +7084,48 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           ...draft,
                                           layerTypeId: selected.id,
                                           layerTypeName: selected.name,
-                                          layerTypePrice: null
+                                          layerTypePrice: null,
+                                          layerTypeCalculationUnit: selected.calculationUnit || 'set'
                                         });
                                       }
                                     }}
                                   >
                                     <option value="">انتخاب نوع لایه...</option>
+                                    {draft.layerTypeId &&
+                                      !stairSystemV2.layerTypes.some(option => option.id === draft.layerTypeId) && (
+                                        <option value={draft.layerTypeId}>
+                                          {draft.layerTypeName || 'نوع لایه ثبت‌شده'}
+                                          {stairSystemV2.layerTypesStatus === 'ready' ||
+                                          stairSystemV2.layerTypesStatus === 'empty'
+                                            ? ' — غیرفعال در کاتالوگ فعلی'
+                                            : ' — اطلاعات ذخیره‌شده'}
+                                        </option>
+                                      )}
                                     {stairSystemV2.layerTypes.map((option: LayerTypeOption) => (
                                       <option key={option.id} value={option.id}>
                                         {option.name}
                                       </option>
                                     ))}
                                   </select>
-                                  {stairSystemV2.layerTypesError && (
+                                  {stairSystemV2.layerTypesStatus === 'loading' && (
+                                    <p className="mt-1 text-xs text-slate-500">در حال دریافت انواع لایه…</p>
+                                  )}
+                                  {stairSystemV2.layerTypesStatus === 'empty' && (
                                     <p className="mt-1 text-xs text-red-500 dark:text-red-400">
-                                      {stairSystemV2.layerTypesError}
+                                      هیچ نوع لایه فعالی ثبت نشده است؛ با مدیر انبار تماس بگیرید
                                     </p>
+                                  )}
+                                  {stairSystemV2.layerTypesStatus === 'error' && (
+                                    <div className="mt-1 flex items-center gap-2 text-xs text-red-500 dark:text-red-400">
+                                      <span>{stairSystemV2.layerTypesError}</span>
+                                      <button
+                                        type="button"
+                                        className="font-semibold text-teal-600 hover:underline dark:text-teal-400"
+                                        onClick={() => void stairSystemV2.reloadLayerTypes()}
+                                      >
+                                        تلاش مجدد
+                                      </button>
+                                    </div>
                                   )}
                                   {stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart]?.layerType && (
                                     <p className="mt-1 text-xs text-red-500">
@@ -7121,27 +7150,29 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           }
                                         }}
                                         min={0}
+                                        disabled={!stairSystemV2.layerTypes.some(
+                                          option => option.id === draft.layerTypeId
+                                        )}
                                         className="mt-1 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm focus:border-orange-500 focus:outline-none dark:border-gray-600"
                                       />
                                       <span className="mt-1 block text-[11px] text-gray-500">
-                                        {stairSystemV2.layerTypes.find(
+                                        {(stairSystemV2.layerTypes.find(
                                           option => option.id === draft.layerTypeId
-                                        )?.calculationUnit === 'physicalPiece'
+                                        )?.calculationUnit || draft.layerTypeCalculationUnit) === 'physicalPiece'
                                           ? 'هر قطعه فیزیکی'
-                                          : stairSystemV2.layerTypes.find(
+                                          : (stairSystemV2.layerTypes.find(
                                               option => option.id === draft.layerTypeId
-                                            )?.calculationUnit === 'meter'
+                                            )?.calculationUnit || draft.layerTypeCalculationUnit) === 'meter'
                                             ? 'متر طول'
-                                            : stairSystemV2.layerTypes.find(
+                                            : (stairSystemV2.layerTypes.find(
                                                 option => option.id === draft.layerTypeId
-                                              )?.calculationUnit === 'squareMeter'
+                                              )?.calculationUnit || draft.layerTypeCalculationUnit) === 'squareMeter'
                                               ? 'مترمربع'
                                               : 'هر مجموعه'}
                                       </span>
                                     </label>
                                   )}
                                 </div>
-                              )}
 
                               <div className="md:col-span-2 border-t border-slate-200 pt-3 dark:border-slate-700">
                                 <div className="mb-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
@@ -7828,7 +7859,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               </label>
 
                               {draft.numberOfLayersPerStair && draft.layerWidthCm && draft.pricePerSquareMeter && draft.quantity &&
-                               (stairSystemV2.layerTypes.length === 0 || draft.layerTypeId) &&
+                               draft.layerTypeId && Number(draft.layerTypePrice) > 0 &&
                                draft.layerEdges && (draft.layerEdges.front || draft.layerEdges.left || draft.layerEdges.right || draft.layerEdges.back || draft.layerEdges.perimeter) && (() => {
                                 // 🎯 Use computeLayerSqmV2 for consistent calculation (accounts for overlap)
                                 const totalLayers = draft.quantity * draft.numberOfLayersPerStair;
@@ -7937,7 +7968,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 const totalLayerLengthM = totalLayerLengthPerStairM * draft.quantity;
                                 const layerCalculationUnit = stairSystemV2.layerTypes.find(
                                   option => option.id === draft.layerTypeId
-                                )?.calculationUnit || 'set';
+                                )?.calculationUnit || draft.layerTypeCalculationUnit || 'set';
                                 const previewParentRowId =
                                   draft.operationPolicyInput?.productRowId ||
                                   `stair-layer-preview:${draft.stoneId || 'main'}:${stairSystemV2.stairActivePart}`;
@@ -9082,7 +9113,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       const layerUnit =
                         stairSystemV2.layerTypes.find(
                           option => option.id === layerDraft.layerTypeId
-                        )?.calculationUnit || 'set';
+                        )?.calculationUnit || layerDraft.layerTypeCalculationUnit || 'set';
                       const preflight = calculateCanonicalLayerDraft({
                         part: stairSystemV2.stairActivePart,
                         draft: layerDraft,
@@ -9319,7 +9350,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       const totalLayerLengthM = totalLayerLengthPerStairM * draft.quantity;
                       const layerCalculationUnit = stairSystemV2.layerTypes.find(
                         option => option.id === draft.layerTypeId
-                      )?.calculationUnit || 'set';
+                      )?.calculationUnit || draft.layerTypeCalculationUnit || 'set';
                       const canonicalInventoryBefore =
                         canonicalLayerReplayInventory;
                       const canonicalLayerParameters = {

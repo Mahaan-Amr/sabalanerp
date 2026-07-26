@@ -13,7 +13,9 @@ import type {
 import { validateDraftNumericFields, validateDraftRequiredFields, clearDraftFieldError as clearDraftFieldErrorUtil } from '../services/stairValidationService';
 import { generateFullProductName } from '../utils/productUtils';
 import { createFreshStairPartDraft } from '../utils/productConfigurationController';
-import { servicesAPI, dashboardAPI } from '@/lib/api';
+import { servicesAPI } from '@/lib/api';
+
+export type LayerTypesStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
 
 interface UseStairSystemV2Options {
   onError?: (error: string) => void;
@@ -78,9 +80,7 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
   const [layerTypes, setLayerTypes] = useState<LayerTypeOption[]>([]);
   const [isLoadingLayerTypes, setIsLoadingLayerTypes] = useState(false);
   const [layerTypesError, setLayerTypesError] = useState<string | null>(null);
-  
-  // Track if layer types have been loaded to prevent duplicate calls
-  const hasLoadedLayerTypesRef = useRef(false);
+  const [layerTypesStatus, setLayerTypesStatus] = useState<LayerTypesStatus>('idle');
 
   // Use refs to store drafts for stable callback references
   const draftTreadRef = useRef(draftTread);
@@ -204,68 +204,38 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
     return validateDraftRequiredFields(part, draft, layerTypes);
   }, [layerTypes]);
 
-  // Load layer types - only once on mount
-  useEffect(() => {
-    // Prevent duplicate calls
-    if (hasLoadedLayerTypesRef.current) {
-      return;
-    }
-    hasLoadedLayerTypesRef.current = true;
-
-    const fetchLayerTypes = async () => {
-      setIsLoadingLayerTypes(true);
-      setLayerTypesError(null);
-      try {
-        const profileResponse = await dashboardAPI.getProfile();
-        const features: string[] = (profileResponse?.data?.data?.permissions?.features || []).map(
-          (item: any) => item.feature
-        );
-        const canLoadLayerTypes = [
-          'inventory_layer_types_view',
-          'inventory_layer_types_edit',
-          'inventory_layer_types_create'
-        ].some((feature) => features.includes(feature));
-
-        if (!canLoadLayerTypes) {
-          setLayerTypes([]);
-          setLayerTypesError(null);
-          return;
-        }
-
-        const response = await servicesAPI.getLayerTypes({ isActive: true });
-        if (response?.data?.success) {
-          const options: LayerTypeOption[] = (response.data.data || [])
-            .map((item: any): LayerTypeOption => ({
-              id: item.id,
-              name: item.name,
-              description: item.description,
-              pricePerLayer: Number(item.pricePerLayer) || 0,
-              calculationUnit: item.calculationUnit || 'set',
-              isActive: item.isActive !== false
-            }))
-            .filter((option: LayerTypeOption) => option.isActive !== false);
-          setLayerTypes(options);
-          setLayerTypesError(null);
-        }
-      } catch (error: any) {
-        if (error?.response?.status === 403) {
-          // Missing permission: keep layer types empty and avoid noisy global errors.
-          setLayerTypes([]);
-          setLayerTypesError(null);
-          return;
-        }
-        console.error('Error loading layer types:', error);
-        setLayerTypesError('Error loading layer types');
-        if (onErrorRef.current) {
-          onErrorRef.current('Error loading layer types');
-        }
-      } finally {
-        setIsLoadingLayerTypes(false);
+  const loadLayerTypes = useCallback(async () => {
+    setIsLoadingLayerTypes(true);
+    setLayerTypesStatus('loading');
+    setLayerTypesError(null);
+    try {
+      const response = await servicesAPI.getContractLayerTypes();
+      if (!response?.data?.success) {
+        throw new Error('Contract layer type catalog returned an unsuccessful response');
       }
-    };
+      const options: LayerTypeOption[] = (response.data.data || [])
+        .map((item: any): LayerTypeOption => ({
+          id: item.id,
+          name: item.name,
+          pricePerLayer: 0,
+          calculationUnit: item.calculationUnit || 'set',
+          isActive: item.isActive !== false
+        }))
+        .filter((option: LayerTypeOption) => option.isActive !== false);
+      setLayerTypes(options);
+      setLayerTypesStatus(options.length > 0 ? 'ready' : 'empty');
+    } catch (error) {
+      console.error('Error loading contract layer types:', error);
+      setLayerTypesError('دریافت انواع لایه ناموفق بود');
+      setLayerTypesStatus('error');
+    } finally {
+      setIsLoadingLayerTypes(false);
+    }
+  }, []);
 
-    fetchLayerTypes();
-  }, []); // Empty dependency array - only run once on mount
+  useEffect(() => {
+    void loadLayerTypes();
+  }, [loadLayerTypes]);
 
   // Sync thickness from product
   useEffect(() => {
@@ -378,6 +348,8 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
     layerTypes,
     isLoadingLayerTypes,
     layerTypesError,
+    layerTypesStatus,
+    reloadLayerTypes: loadLayerTypes,
     
     // Helpers
     getDraftByPart,

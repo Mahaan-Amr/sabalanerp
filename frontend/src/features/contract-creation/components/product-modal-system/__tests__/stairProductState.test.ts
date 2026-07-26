@@ -218,4 +218,42 @@ assert.equal(
   'عملیات سمت حذف‌شده را تعیین تکلیف کنید'
 );
 
+const missingLayerCatalogSelection = validateDraftRequiredFields('tread', {
+  ...freshDraft,
+  numberOfLayersPerStair: 1,
+  layerWidthCm: 5,
+  layerTypeId: null,
+  layerTypePrice: null,
+  layerSourceKind: 'parentMaterial'
+}, []);
+assert.equal(
+  missingLayerCatalogSelection.layerType,
+  'انتخاب نوع لایه الزامی است'
+);
+
+const historicalInactiveLayerType = validateDraftRequiredFields('tread', {
+  ...freshDraft,
+  numberOfLayersPerStair: 1,
+  layerWidthCm: 5,
+  layerTypeId: 'historical-inactive-layer',
+  layerTypeName: 'لایه تاریخی',
+  layerTypePrice: 80000,
+  layerSourceKind: 'parentMaterial'
+}, []);
+assert.equal(historicalInactiveLayerType.layerType, undefined);
+
+const missingHistoricalLayerRate = validateDraftRequiredFields('tread', {
+  ...freshDraft,
+  numberOfLayersPerStair: 1,
+  layerWidthCm: 5,
+  layerTypeId: 'historical-inactive-layer',
+  layerTypeName: 'لایه تاریخی',
+  layerTypePrice: null,
+  layerSourceKind: 'parentMaterial'
+}, []);
+assert.equal(
+  missingHistoricalLayerRate.layerType,
+  'نرخ قراردادی نوع لایه باید بیشتر از صفر باشد'
+);
+
 console.log('stair product state tests passed');

@@ -30,6 +30,37 @@ const decimalFromInput = (value: any): Prisma.Decimal => {
 };
 
 router.get(
+  '/contract-catalog',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW),
+  async (_req: Request, res: Response): Promise<Response | void> => {
+    try {
+      const layerTypes = await prisma.layerType.findMany({
+        where: { isActive: true },
+        select: {
+          id: true,
+          name: true,
+          calculationUnit: true,
+          isActive: true
+        },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }]
+      });
+
+      return res.json({
+        success: true,
+        data: layerTypes
+      });
+    } catch (error) {
+      console.error('Error fetching contract layer type catalog:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'خطا در دریافت کاتالوگ انواع لایه قرارداد'
+      });
+    }
+  }
+);
+
+router.get(
   '/',
   protect,
   requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.VIEW),

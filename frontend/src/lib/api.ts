@@ -1043,6 +1043,7 @@ export const servicesAPI = {
 
   // Layer types
   getLayerTypes: (params?: any) => api.get('/layer-types', { params }),
+  getContractLayerTypes: () => api.get('/layer-types/contract-catalog'),
   getLayerType: (id: string) => api.get(`/layer-types/${id}`),
   createLayerType: (data: any) => api.post('/layer-types', data),
   updateLayerType: (id: string, data: any) => api.put(`/layer-types/${id}`, data),

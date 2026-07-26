@@ -277,6 +277,17 @@ for (const part of ['tread', 'riser', 'landing'] as StairStepperPart[]) {
 }
 
 {
+  assert.equal(
+    formatCanonicalLayerConflict({
+      code: 'invalid-layer-input',
+      field: 'layer',
+      message: 'layerCatalogItemId must be a normalized non-empty string.'
+    }),
+    'نوع لایه را انتخاب کنید'
+  );
+}
+
+{
   const emptyGroupId = parseStableIdentity(
     'operation-group',
     'stale-empty-layer-group'

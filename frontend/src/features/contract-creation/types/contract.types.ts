@@ -454,6 +454,7 @@ export interface ContractProduct {
   layerTypeId?: string | null;
   layerTypeName?: string | null;
   layerTypePrice?: number | null;
+  layerTypeCalculationUnit?: 'set' | 'physicalPiece' | 'meter' | 'squareMeter' | null;
   layerUseDifferentStone?: boolean;
   layerStoneProductId?: string | null;
   layerStoneName?: string | null;
@@ -825,6 +826,7 @@ export interface StairPartDraftV2 {
   layerTypeId?: string | null;
   layerTypeName?: string | null;
   layerTypePrice?: number | null;
+  layerTypeCalculationUnit?: 'set' | 'physicalPiece' | 'meter' | 'squareMeter' | null;
   // Layer edges - which sides of the stair need layers
   layerEdges?: {
     front?: boolean;

@@ -378,6 +378,15 @@ export const formatCanonicalLayerConflict = (
     return 'یک منبع سنگ در این لایه بیش از یک‌بار انتخاب شده است';
   }
   if (conflict.code === 'invalid-layer-input') {
+    if (conflict.message.includes('layerCatalogItemId')) {
+      return 'نوع لایه را انتخاب کنید';
+    }
+    if (conflict.message.includes('layerTitle')) {
+      return 'عنوان نوع لایه معتبر نیست';
+    }
+    if (conflict.message.includes('layerRate')) {
+      return 'نرخ قراردادی نوع لایه معتبر نیست';
+    }
     return `مقدار واردشده برای لایه معتبر نیست (${conflict.field})`;
   }
   return conflict.message || 'محاسبات لایه نیاز به اصلاح دارد';

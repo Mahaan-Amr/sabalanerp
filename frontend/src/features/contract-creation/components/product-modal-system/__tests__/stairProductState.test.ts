@@ -16,6 +16,7 @@ import {
   createFreshStairPartDraft
 } from '../../../utils/productConfigurationController';
 import {
+  applyInventoryLayerTypeSelection,
   createCanonicalStairDraftInput
 } from '../../../services/stairCalculationService';
 import {
@@ -217,5 +218,55 @@ assert.equal(
   unresolvedRemovedLayerSide.layerSource,
   'عملیات سمت حذف‌شده را تعیین تکلیف کنید'
 );
+
+const missingLayerCatalogSelection = validateDraftRequiredFields('tread', {
+  ...freshDraft,
+  numberOfLayersPerStair: 1,
+  layerWidthCm: 5,
+  layerTypeId: null,
+  layerTypePrice: null,
+  layerSourceKind: 'parentMaterial'
+}, []);
+assert.equal(
+  missingLayerCatalogSelection.layerType,
+  'انتخاب نوع لایه الزامی است'
+);
+
+const historicalInactiveLayerType = validateDraftRequiredFields('tread', {
+  ...freshDraft,
+  numberOfLayersPerStair: 1,
+  layerWidthCm: 5,
+  layerTypeId: 'historical-inactive-layer',
+  layerTypeName: 'لایه تاریخی',
+  layerTypePrice: 80000,
+  layerSourceKind: 'parentMaterial'
+}, []);
+assert.equal(historicalInactiveLayerType.layerType, undefined);
+
+const missingHistoricalLayerRate = validateDraftRequiredFields('tread', {
+  ...freshDraft,
+  numberOfLayersPerStair: 1,
+  layerWidthCm: 5,
+  layerTypeId: 'historical-inactive-layer',
+  layerTypeName: 'لایه تاریخی',
+  layerTypePrice: null,
+  layerSourceKind: 'parentMaterial'
+}, []);
+assert.equal(
+  missingHistoricalLayerRate.layerType,
+  'قیمت نوع لایه در انبار معتبر نیست'
+);
+
+const selectedInventoryLayer = applyInventoryLayerTypeSelection(freshDraft, {
+  id: 'inventory-double-layer',
+  name: 'لایه دوبل',
+  pricePerLayer: 125000,
+  calculationUnit: 'physicalPiece',
+  isActive: true
+});
+assert.equal(selectedInventoryLayer.layerTypeId, 'inventory-double-layer');
+assert.equal(selectedInventoryLayer.layerTypeName, 'لایه دوبل');
+assert.equal(selectedInventoryLayer.layerTypePrice, 125000);
+assert.equal(selectedInventoryLayer.layerTypeCalculationUnit, 'physicalPiece');
 
 console.log('stair product state tests passed');

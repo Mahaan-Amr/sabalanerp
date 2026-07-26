@@ -90,14 +90,14 @@ export default function PersonnelPage() {
   };
 
   const toggleActive = async (person: SecurityPersonnel) => {
-    const accepted = await askSecurityAction({ title: person.isActive ? 'غیرفعال‌کردن دسترسی عملیاتی' : 'فعال‌کردن دسترسی عملیاتی', description: person.isActive ? 'این نیرو از عملیات جدید حراست خارج می‌شود؛ سوابق او حفظ خواهد شد.' : 'این نیرو دوباره برای عملیات مجاز حراست فعال می‌شود.' });
+    const accepted = await askSecurityAction({ title: person.isActive ? 'غیرفعال‌کردن دسترسی عملیاتی' : 'فعال‌کردن دسترسی عملیاتی', description: person.isActive ? 'این نیرو از عملیات جدید گارد خارج می‌شود؛ سوابق او حفظ خواهد شد.' : 'این نیرو دوباره برای عملیات مجاز گارد فعال می‌شود.' });
     if (!accepted) return;
     try { await securityAPI.updatePersonnelStatus(person.id, !person.isActive); await load(); }
     catch (requestError: any) { notifySecurity(requestError.response?.data?.error || 'تغییر وضعیت نیرو ناموفق بود.', 'error'); }
   };
 
   return (
-    <ErpWorkspacePage title="کارکنان حراست" primaryAction={{ label: 'افزودن نیرو', icon: FaPlus, onClick: () => setShowAssignForm(true), variant: 'solid' }} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: load }]}>
+    <ErpWorkspacePage title="کارکنان گارد" primaryAction={{ label: 'افزودن نیرو', icon: FaPlus, onClick: () => setShowAssignForm(true), variant: 'solid' }} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: load }]}>
       {loading && personnel.length === 0 ? <ErpSkeleton lines={6} /> : error && personnel.length === 0 ? <ErpInlineState kind="error" title={error} action={{ label: 'تلاش مجدد', onClick: load }} /> : <>
         {error && <ErpInlineState kind="stale" title="آخرین به‌روزرسانی ناموفق بود؛ فهرست قبلی نمایش داده می‌شود." action={{ label: 'تلاش مجدد', onClick: load }} />}
         <ErpSection>
@@ -119,7 +119,7 @@ export default function PersonnelPage() {
         </ErpSection>
       </>}
 
-      <ErpSheet open={showAssignForm} onClose={() => setShowAssignForm(false)} title="افزودن نیروی حراست">
+      <ErpSheet open={showAssignForm} onClose={() => setShowAssignForm(false)} title="افزودن نیروی گارد">
         <form onSubmit={assign} className="space-y-4">
           <label className="block"><span className="mb-2 block text-sm font-semibold">کاربر</span><select value={assignFormData.userId} onChange={(event) => setAssignFormData({ ...assignFormData, userId: event.target.value })} className={inputClass} required><option value="">انتخاب کاربر واجد شرایط</option>{users.map((user) => <option key={user.id} value={user.id}>{user.firstName} {user.lastName} ({user.department?.namePersian || user.role})</option>)}</select>{users.length === 0 && <p className="mt-2 text-xs text-slate-500">کاربر واجد شرایطی برای افزودن وجود ندارد.</p>}</label>
           <label className="block"><span className="mb-2 block text-sm font-semibold">سمت</span><input value={assignFormData.position} onChange={(event) => setAssignFormData({ ...assignFormData, position: event.target.value })} className={inputClass} required /></label>

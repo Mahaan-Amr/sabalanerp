@@ -94,7 +94,7 @@ const securityQuickAccess = [
   { id: 'exceptions', title: 'استثناها و مأموریت‌ها', href: '/dashboard/security/exceptions', managerOnly: false },
   { id: 'shifts', title: 'شیفت‌ها', href: '/dashboard/security/shifts', managerOnly: false },
   { id: 'reports', title: 'گزارش‌ها', href: '/dashboard/security/reports', managerOnly: true },
-  { id: 'personnel', title: 'کارکنان حراست', href: '/dashboard/security/personnel', managerOnly: true },
+  { id: 'personnel', title: 'کارکنان گارد', href: '/dashboard/security/personnel', managerOnly: true },
 ] as const;
 
 export const buildSecurityQuickAccess = (isManager: boolean, canOpenShiftReport = isManager) => securityQuickAccess

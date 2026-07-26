@@ -469,6 +469,8 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
             allocationOrder: nextAllocationOrder + index,
             allocatedQuantity: row.quantity,
             generatedRemainingStoneIds: remainingAreas.map(area => area.id),
+            sourceGroupKey:
+              selectedRemainingStone.inventoryGroupSelection?.groupKey,
             physicalPieces: physicalPieces.map(piece => ({
               width: piece.width,
               length: piece.length,
@@ -503,7 +505,15 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     const replay = replayRemainingStoneAllocations({
       products: productsForReplay,
       sourceRowId: sourceProductRowId,
-      sourceInventory
+      sourceInventory,
+      inventoryExpectations: selectedRemainingStone.inventoryGroupSelection
+        ? [{
+            groupKey: selectedRemainingStone.inventoryGroupSelection.groupKey,
+            expectedQuantity:
+              selectedRemainingStone.inventoryGroupSelection.expectedQuantity,
+            beforeChildRowId: childRowIds[0]
+          }]
+        : []
     });
 
     if (!replay.ok) {

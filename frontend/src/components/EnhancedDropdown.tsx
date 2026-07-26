@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { FaChevronDown, FaSearch, FaCheck } from 'react-icons/fa';
 
@@ -45,6 +45,7 @@ export default function EnhancedDropdown({
   loading = false
 }: EnhancedDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const listboxId = useId();
   const [searchTerm, setSearchTerm] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [portalPosition, setPortalPosition] = useState({
@@ -231,7 +232,7 @@ export default function EnhancedDropdown({
   const renderOptions = () => {
     if (loading) {
       return (
-        <div className="p-4 text-center text-secondary">
+        <div className="p-4 text-center text-sm text-slate-500 dark:text-slate-400">
           <div className="animate-spin w-6 h-6 border-2 border-teal-500 border-t-transparent rounded-full mx-auto mb-2" />
           Loading...
         </div>
@@ -239,7 +240,7 @@ export default function EnhancedDropdown({
     }
 
     if (filteredOptions.length === 0) {
-      return <div className="p-4 text-center text-secondary">{noOptionsText}</div>;
+      return <div className="p-4 text-center text-sm text-slate-500 dark:text-slate-400">{noOptionsText}</div>;
     }
 
     return (
@@ -251,12 +252,14 @@ export default function EnhancedDropdown({
               optionRefs.current[index] = el;
             }}
             onClick={() => !option.disabled && handleOptionSelect(option.value)}
-            className={`px-4 py-3 cursor-pointer transition-colors flex items-center justify-between ${
+            role="option"
+            aria-selected={value === option.value}
+            className={`flex min-h-10 cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
               option.disabled
-                ? 'text-secondary opacity-60 cursor-not-allowed'
+                ? 'cursor-not-allowed text-slate-400 opacity-60 dark:text-slate-500'
                 : highlightedIndex === index
-                ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300'
-                : 'text-primary hover:bg-slate-100 dark:hover:bg-white/10'
+                ? 'bg-teal-50 text-teal-800 dark:bg-teal-950/60 dark:text-teal-200'
+                : 'text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800'
             }`}
           >
             <span>{option.label}</span>
@@ -266,7 +269,7 @@ export default function EnhancedDropdown({
 
         {Object.entries(groupedOptions.groups).map(([groupName, groupOptions]) => (
           <div key={groupName}>
-            <div className="px-4 py-2 text-xs text-secondary bg-slate-50 border-b border-slate-200 dark:bg-white/5 dark:border-white/10">{groupName}</div>
+            <div className="px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400">{groupName}</div>
             {groupOptions.map((option, index) => {
               const globalIndex =
                 groupedOptions.ungrouped.length +
@@ -282,12 +285,14 @@ export default function EnhancedDropdown({
                     optionRefs.current[globalIndex] = el;
                   }}
                   onClick={() => !option.disabled && handleOptionSelect(option.value)}
-                  className={`px-4 py-3 cursor-pointer transition-colors flex items-center justify-between ${
+                  role="option"
+                  aria-selected={value === option.value}
+                  className={`flex min-h-10 cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
                     option.disabled
-                      ? 'text-secondary opacity-60 cursor-not-allowed'
+                      ? 'cursor-not-allowed text-slate-400 opacity-60 dark:text-slate-500'
                       : highlightedIndex === globalIndex
-                      ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300'
-                      : 'text-primary hover:bg-slate-100 dark:hover:bg-white/10'
+                      ? 'bg-teal-50 text-teal-800 dark:bg-teal-950/60 dark:text-teal-200'
+                      : 'text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800'
                   }`}
                 >
                   <span>{option.label}</span>
@@ -313,7 +318,7 @@ export default function EnhancedDropdown({
   return (
     <div className={`relative ${className}`}>
       {label && (
-        <label className="block text-sm font-medium text-gray-300 mb-2">
+        <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
           {label}
           {required && <span className="text-red-400 mr-1">*</span>}
         </label>
@@ -321,19 +326,24 @@ export default function EnhancedDropdown({
 
       <div
         ref={dropdownRef}
-        className={`glass-liquid-input flex items-center justify-between cursor-pointer transition-all duration-200 ${
-          disabled ? 'opacity-50 cursor-not-allowed' : 'hover:border-teal-400/50'
-        } ${error ? 'border-red-500' : ''} ${isOpen ? 'border-teal-500 ring-2 ring-teal-500/20' : ''}`}
+        className={`flex min-h-10 cursor-pointer items-center justify-between rounded-lg border bg-white px-3 text-sm outline-none transition dark:bg-slate-950 ${
+          disabled
+            ? 'cursor-not-allowed border-slate-200 opacity-55 dark:border-slate-800'
+            : 'border-slate-300 hover:border-teal-500 dark:border-slate-700'
+        } ${error ? 'border-red-500 dark:border-red-500' : ''} ${
+          isOpen ? 'border-teal-500 ring-2 ring-teal-500/15' : ''
+        }`}
         onClick={() => !disabled && setIsOpen((prev) => !prev)}
         onKeyDown={handleKeyDown}
         tabIndex={disabled ? -1 : 0}
         role="combobox"
         aria-expanded={isOpen}
+        aria-controls={listboxId}
         aria-haspopup="listbox"
         aria-label={label || placeholder}
       >
         <div className="flex items-center space-x-2 space-x-reverse flex-1 min-w-0">
-          <span className={`truncate ${displayValue ? 'text-primary' : 'text-secondary'}`}>
+          <span className={`truncate ${displayValue ? 'text-slate-900 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500'}`}>
             {displayValue || placeholder}
           </span>
         </div>
@@ -342,24 +352,26 @@ export default function EnhancedDropdown({
           {clearable && value && (
             <button
               onClick={handleClear}
-              className="text-secondary hover:text-red-500 transition-colors p-1"
+              className="p-1 text-slate-400 transition-colors hover:text-red-500"
               type="button"
             >
               ×
             </button>
           )}
-          <FaChevronDown className={`text-secondary transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+          <FaChevronDown className={`text-xs text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
         </div>
       </div>
 
-      {error && <p className="text-red-400 text-sm mt-1">{error}</p>}
+      {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
 
       {isOpen &&
         typeof window !== 'undefined' &&
         createPortal(
           <div
             ref={portalRef}
-            className="enhanced-dropdown-portal fixed glass-liquid-card shadow-2xl border border-slate-200 dark:border-white/20 z-[99999] overflow-hidden"
+            id={listboxId}
+            role="listbox"
+            className="enhanced-dropdown-portal fixed z-[99999] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-2xl dark:border-slate-700 dark:bg-slate-950"
             style={{
               top: `${portalPosition.top}px`,
               left: `${portalPosition.left}px`,
@@ -369,23 +381,23 @@ export default function EnhancedDropdown({
             }}
           >
             {searchable && (
-              <div className="p-3 border-b border-slate-200 dark:border-white/10">
+              <div className="border-b border-slate-200 p-2 dark:border-slate-800">
                 <div className="relative">
-                  <FaSearch className="absolute right-3 top-1/2 transform -translate-y-1/2 text-secondary text-sm" />
+                  <FaSearch className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400" />
                   <input
                     ref={searchRef}
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder="Search..."
-                    className="w-full pr-10 pl-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-primary placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-teal-500 dark:bg-white/10 dark:border-white/20 text-sm"
+                    className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-3 pr-10 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/15 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   />
                 </div>
               </div>
             )}
 
             <div
-              className="overflow-y-auto overscroll-contain"
+              className="space-y-0.5 overflow-y-auto overscroll-contain"
               style={{ maxHeight: `${portalPosition.optionsMaxHeight}px` }}
               onWheelCapture={(e) => e.stopPropagation()}
             >

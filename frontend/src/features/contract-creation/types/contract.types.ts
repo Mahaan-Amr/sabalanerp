@@ -125,12 +125,20 @@ export interface RemainingStone {
   cuttingCostPerMeter?: number; // cutting cost per meter
   cutType?: 'longitudinal' | 'cross' | null; // ?? ??
   quantity?: number; // quantity
+  /** Number of FIFO physical units already consumed from a batched record. */
+  physicalUnitOffset?: number;
   physicalPieces?: Array<{
     width: number;
     length: number;
     quantity: number;
     squareMeters: number;
   }>;
+  /** Ephemeral seller selection snapshot for a grouped inventory row. */
+  inventoryGroupSelection?: {
+    groupKey: string;
+    expectedQuantity: number;
+    requestedQuantity: number;
+  };
 }
 
 export interface SlabStandardDimensionEntry {
@@ -454,6 +462,7 @@ export interface ContractProduct {
   layerTypeId?: string | null;
   layerTypeName?: string | null;
   layerTypePrice?: number | null;
+  layerTypeCalculationUnit?: 'set' | 'physicalPiece' | 'meter' | 'squareMeter' | null;
   layerUseDifferentStone?: boolean;
   layerStoneProductId?: string | null;
   layerStoneName?: string | null;
@@ -825,6 +834,7 @@ export interface StairPartDraftV2 {
   layerTypeId?: string | null;
   layerTypeName?: string | null;
   layerTypePrice?: number | null;
+  layerTypeCalculationUnit?: 'set' | 'physicalPiece' | 'meter' | 'squareMeter' | null;
   // Layer edges - which sides of the stair need layers
   layerEdges?: {
     front?: boolean;

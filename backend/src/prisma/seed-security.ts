@@ -47,11 +47,13 @@ async function seedSecurityData() {
       // Assign admin as security supervisor for day shift
       await prisma.securityPersonnel.upsert({
         where: { userId: adminUser.id },
-        update: {},
+        update: {
+          position: 'سرپرست گارد'
+        },
         create: {
           userId: adminUser.id,
           shiftId: dayShift.id,
-          position: 'سرپرست حراست',
+          position: 'سرپرست گارد',
           isActive: true
         }
       });

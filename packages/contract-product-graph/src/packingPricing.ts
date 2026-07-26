@@ -372,6 +372,136 @@ const searchBestPackingState = ({
   return bestState;
 };
 
+/*
+ * Mixed paid/fresh stair-layer sources have a strict commercial order: use
+ * already-paid material whenever it can satisfy the next physical piece, then
+ * use fresh material only for the shortage. Running the exhaustive optimizer
+ * across dozens of equivalent remainder pieces creates factorial branches
+ * without changing that commercial answer. This deterministic fast path keeps
+ * the exact solver as a fallback when its first-fit guillotine placements
+ * cannot complete the request.
+ */
+const calculatePriorityFirstFitState = ({
+  sources,
+  pieces,
+  kerf
+}: {
+  sources: SourcePiece[];
+  pieces: DemandPiece[];
+  kerf: Decimal;
+}): SearchState | undefined => {
+  if (new Set(sources.map(source => source.allocationPriority)).size < 2) {
+    return undefined;
+  }
+
+  let state: SearchState = {
+    sources: sources.map(source => ({
+      ...source,
+      free: source.free.map(rect => ({ ...rect }))
+    })),
+    placements: [],
+    cuts: [],
+    cutTotal: d('0')
+  };
+
+  for (const piece of pieces) {
+    const candidates: Array<{
+      sourceIndex: number;
+      rectIndex: number;
+      splitOrder: 'width-first' | 'length-first';
+      split: NonNullable<ReturnType<typeof splitRect>>;
+      priority: number;
+      cutMeters: Decimal;
+      remainderArea: Decimal;
+      signature: string;
+    }> = [];
+
+    state.sources.forEach((source, sourceIndex) => {
+      source.free.forEach((rect, rectIndex) => {
+        (['width-first', 'length-first'] as const).forEach(splitOrder => {
+          const split = splitRect(rect, piece, kerf, splitOrder);
+          if (!split) return;
+          candidates.push({
+            sourceIndex,
+            rectIndex,
+            splitOrder,
+            split,
+            priority: source.allocationPriority,
+            cutMeters: split.cuts.reduce(
+              (sum, cut) => sum.plus(cut.meters),
+              d('0')
+            ),
+            remainderArea: split.free.reduce(
+              (sum, freeRect) =>
+                sum.plus(freeRect.length.times(freeRect.width)),
+              d('0')
+            ),
+            signature: `${
+              String(sourceIndex).padStart(8, '0')
+            }:${String(rectIndex).padStart(8, '0')}:${splitOrder}`
+          });
+        });
+      });
+    });
+
+    candidates.sort((left, right) =>
+      left.priority - right.priority ||
+      left.cutMeters.comparedTo(right.cutMeters) ||
+      left.remainderArea.comparedTo(right.remainderArea) ||
+      left.signature.localeCompare(right.signature)
+    );
+    const selected = candidates[0];
+    if (!selected) return undefined;
+
+    const source = state.sources[selected.sourceIndex];
+    const rect = source.free[selected.rectIndex];
+    const nextSource: SourcePiece = {
+      ...source,
+      used: true,
+      cutCount: source.cutCount + selected.split.cuts.length,
+      free: [
+        ...source.free.slice(0, selected.rectIndex),
+        ...source.free.slice(selected.rectIndex + 1),
+        ...selected.split.free
+      ].sort(rectOrder)
+    };
+    const placement: PackedPlacement = {
+      demandId: piece.id,
+      demandOrdinal: piece.ordinal,
+      sourceBatchId: source.batchId,
+      sourceOrdinal: source.ordinal,
+      xMeters: canonical(rect.x),
+      yMeters: canonical(rect.y),
+      lengthMeters: canonical(piece.length),
+      widthMeters: canonical(piece.width)
+    };
+    const cuts = selected.split.cuts.map((cut, cutIndex): PhysicalCut => {
+      const sequence = source.cutCount + cutIndex + 1;
+      return {
+        cutId: `${source.batchId}:${source.ordinal}:cut:${sequence}`,
+        sequence,
+        axis: cut.axis,
+        sourceBatchId: source.batchId,
+        sourceOrdinal: source.ordinal,
+        positionMeters: canonical(cut.position),
+        spanStartMeters: canonical(cut.spanStart),
+        meters: canonical(cut.meters),
+        kerfMeters: canonical(kerf)
+      };
+    });
+    state = {
+      sources: state.sources.map((item, index) =>
+        index === selected.sourceIndex ? nextSource : item
+      ),
+      placements: [...state.placements, placement],
+      cuts: [...state.cuts, ...cuts],
+      cutTotal: state.cutTotal.plus(selected.cutMeters)
+    };
+  }
+
+  return state;
+};
+
 const uniformAxisCapacity = (
   sourceSize: Decimal,
   pieceSize: Decimal,
@@ -741,6 +871,7 @@ export const calculatePackingPlan = (request: PackingRequest): PackingResult => 
 
     const bestState =
       calculateUniformGridState({ sources, pieces, kerf }) ??
+      calculatePriorityFirstFitState({ sources, pieces, kerf }) ??
       searchBestPackingState({ sources, pieces, kerf });
     if (!bestState) return {
       ok: false,

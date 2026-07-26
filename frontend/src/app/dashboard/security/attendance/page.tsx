@@ -411,8 +411,8 @@ export default function AttendancePage() {
         {filteredRecords.length === 0 && rosterScopeEmpty ? (
           <ErpEmptyState
             icon={FaUsers}
-            title="فهرست حضور و غیاب حراست هنوز تنظیم نشده است"
-            description="مدیر حراست باید افراد قابل محاسبه در حضور و غیاب را از تنظیمات حراست انتخاب کند."
+            title="فهرست حضور و غیاب گارد هنوز تنظیم نشده است"
+            description="مدیر گارد باید افراد قابل محاسبه در حضور و غیاب را از تنظیمات گارد انتخاب کند."
           />
         ) : filteredRecords.length === 0 ? (
           <ErpEmptyState icon={FaUsers} title="رکوردی برای نمایش وجود ندارد" description="فیلترها را تغییر دهید یا تاریخ دیگری انتخاب کنید." />

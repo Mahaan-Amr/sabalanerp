@@ -42,7 +42,7 @@ type CoverageKind = 'PLANNED' | 'REPLACEMENT' | 'TEMPORARY';
 
 const personnelSummary = (personnel: SecurityPersonnelLike) => ({
   id: personnel.id,
-  name: `${personnel.user?.firstName || ''} ${personnel.user?.lastName || ''}`.trim() || personnel.user?.username || 'نیروی حراست',
+  name: `${personnel.user?.firstName || ''} ${personnel.user?.lastName || ''}`.trim() || personnel.user?.username || 'نیروی گارد',
   position: personnel.position || null,
 });
 

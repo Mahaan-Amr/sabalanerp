@@ -33,6 +33,7 @@ import {
   parseCanonicalDecimal,
   parseStableIdentity,
   type PaidRemainderStock,
+  type ProductOperationsInput,
   type StairLayerCalculation,
   type StairLayerCatalogUnit,
   type StairLayerConflict,
@@ -80,6 +81,26 @@ const selectedLayerSides = (
 ): Array<'front' | 'back' | 'left' | 'right'> => (
   ['front', 'back', 'left', 'right'] as const
 ).filter(side => draft.layerEdges?.perimeter || draft.layerEdges?.[side]);
+
+export const normalizeAutomaticLayerOperationGroups = (
+  input: ProductOperationsInput,
+  authoritativeQuantity: number
+): ProductOperationsInput => {
+  const referencedGroupIds = new Set([
+    ...input.tools.map(tool => String(tool.operationGroupId)),
+    ...input.finishings.map(finishing => String(finishing.operationGroupId))
+  ]);
+  return {
+    ...input,
+    ...(Number.isSafeInteger(authoritativeQuantity) &&
+    authoritativeQuantity > 0
+      ? { quantity: authoritativeQuantity }
+      : {}),
+    groups: input.groups.filter(group =>
+      referencedGroupIds.has(String(group.operationGroupId))
+    )
+  };
+};
 
 /**
  * Canonical layer preview/save calculation used by the live stair workflow.
@@ -201,7 +222,10 @@ export const createCanonicalLayerCalculationRequest = ({
   const sideOperations = sides
     .filter(side => Boolean(draft.layerSideOperations?.[side]))
     .map(side => {
-      const stored = draft.layerSideOperations?.[side]!;
+      const stored = normalizeAutomaticLayerOperationGroups(
+        draft.layerSideOperations?.[side]!,
+        stripQuantity
+      );
       const isDetached =
         draft.layerDetachedOperationSides?.includes(side) || false;
       const hasSubset = stored.groups.some(group =>
@@ -316,6 +340,17 @@ export const calculateCanonicalLayerDraft = (
   createCanonicalLayerCalculationRequest(params)
 );
 
+export const applyInventoryLayerTypeSelection = (
+  draft: StairPartDraftV2,
+  selected: LayerTypeOption
+): StairPartDraftV2 => ({
+  ...draft,
+  layerTypeId: selected.id,
+  layerTypeName: selected.name,
+  layerTypePrice: selected.pricePerLayer,
+  layerTypeCalculationUnit: selected.calculationUnit || 'set'
+});
+
 export const formatCanonicalLayerConflict = (
   conflict: StairLayerConflict | undefined
 ): string => {
@@ -332,7 +367,7 @@ export const formatCanonicalLayerConflict = (
   if (conflict.code === 'layer-rate-required') {
     return conflict.field.includes('material')
       ? 'قیمت سنگ را وارد کنید'
-      : 'نرخ قرارداد لایه را وارد کنید';
+      : 'قیمت نوع لایه در انبار معتبر نیست';
   }
   if (conflict.code === 'layer-cut-rate-missing') {
     return conflict.field.includes('cross')
@@ -340,9 +375,32 @@ export const formatCanonicalLayerConflict = (
       : 'نرخ برش طولی در موجودی ثبت نشده است';
   }
   if (conflict.code === 'layer-operation-invalid') {
-    return 'عملیات لایه نیاز به اصلاح دارد';
+    return conflict.field.includes('groups')
+      ? 'تعداد قطعات گروه عملیات لایه با تعداد فعلی هماهنگ نیست'
+      : 'عملیات سمت انتخاب‌شده لایه معتبر نیست';
   }
-  return 'محاسبات لایه نیاز به اصلاح دارد';
+  if (conflict.code === 'layer-parent-mismatch') {
+    return 'ابعاد یا تعداد عملیات لایه با محصول مادر هماهنگ نیست';
+  }
+  if (conflict.code === 'duplicate-layer-side') {
+    return 'هر سمت لایه فقط یک‌بار قابل انتخاب است';
+  }
+  if (conflict.code === 'duplicate-layer-source') {
+    return 'یک منبع سنگ در این لایه بیش از یک‌بار انتخاب شده است';
+  }
+  if (conflict.code === 'invalid-layer-input') {
+    if (conflict.message.includes('layerCatalogItemId')) {
+      return 'نوع لایه را انتخاب کنید';
+    }
+    if (conflict.message.includes('layerTitle')) {
+      return 'عنوان نوع لایه معتبر نیست';
+    }
+    if (conflict.message.includes('layerRate')) {
+      return 'قیمت نوع لایه در انبار معتبر نیست';
+    }
+    return `مقدار واردشده برای لایه معتبر نیست (${conflict.field})`;
+  }
+  return conflict.message || 'محاسبات لایه نیاز به اصلاح دارد';
 };
 
 export const createCanonicalStairDraftInput = (

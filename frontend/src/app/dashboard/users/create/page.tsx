@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -66,7 +66,7 @@ const WORKSPACE_LABELS = {
   hr: 'منابع انسانی',
   accounting: 'حسابداری',
   inventory: 'انبار',
-  security: 'حراست',
+  security: 'گارد',
   bi: 'هوش تجاری',
   logistics: 'لجستیک'
 };
@@ -170,8 +170,8 @@ const PERMISSION_PRESETS: Array<{
   },
   {
     id: 'security_staff',
-    label: 'حراست',
-    description: 'دسترسی کاری به حراست',
+    label: 'گارد',
+    description: 'دسترسی کاری به گارد',
     recommendedRole: 'USER',
     permissions: [
       { workspace: WORKSPACES.SECURITY, permissionLevel: WORKSPACE_PERMISSIONS.EDIT }

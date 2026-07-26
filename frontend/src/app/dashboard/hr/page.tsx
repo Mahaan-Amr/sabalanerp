@@ -22,7 +22,7 @@ export default function HrDashboardPage() {
   return <ErpPage
     eyebrow="منابع انسانی · فاز ۱"
     title="داشبورد منابع انسانی"
-    description="نمای واحد ساختار سازمانی، ظرفیت جایگاه‌ها و پایه استخدام؛ بدون هم‌پوشانی با حراست یا دسترسی سامانه."
+    description="نمای واحد ساختار سازمانی، ظرفیت جایگاه‌ها و پایه استخدام؛ بدون هم‌پوشانی با گارد یا دسترسی سامانه."
     actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: load, tone: 'neutral' }]}
     metrics={[
       { label: 'پرسنل ثبت‌شده', value: Number(metrics.personnel || 0).toLocaleString('fa-IR'), icon: FaUsers, tone: 'primary' },

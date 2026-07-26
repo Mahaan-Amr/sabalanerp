@@ -15,6 +15,7 @@ interface FormattedNumberInputProps {
   id?: string;
   name?: string;
   onFocus?: () => void;
+  onBlur?: () => void;
   formatWhileTyping?: boolean;
   decimalScale?: number;
 }
@@ -31,6 +32,7 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
   id,
   name,
   onFocus,
+  onBlur,
   formatWhileTyping = true,
   decimalScale = 4
 }) => {
@@ -83,7 +85,7 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
 
   const handleFocus = () => {
     setIsFocused(true);
-    setDisplayValue(value?.toString() || '');
+    setDisplayValue(formatNumberForScale(value));
     onFocus?.();
   };
 
@@ -94,12 +96,14 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
     if (!rawValue) {
       setDisplayValue('');
       onChange(min ?? 0);
+      onBlur?.();
       return;
     }
 
     const roundedValue = roundToScale(clamp(parseFormattedNumber(rawValue)));
     setDisplayValue(formatNumberForScale(roundedValue));
     onChange(roundedValue);
+    onBlur?.();
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {

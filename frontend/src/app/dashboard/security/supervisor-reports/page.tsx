@@ -196,7 +196,7 @@ export default function SecuritySupervisorReportsPage() {
       )}
 
       {!session ? (
-        <ErpEmptyState icon={FaClock} title="شیفت فعال برای شما پیدا نشد" description={personnel ? 'برای ثبت گزارش، ابتدا شیفت برنامه‌ریزی‌شده خود را شروع کنید.' : 'کاربر فعلی جزو نفرات حراست نیست.'} />
+        <ErpEmptyState icon={FaClock} title="شیفت فعال برای شما پیدا نشد" description={personnel ? 'برای ثبت گزارش، ابتدا شیفت برنامه‌ریزی‌شده خود را شروع کنید.' : 'کاربر فعلی جزو نفرات گارد نیست.'} />
       ) : (
         <>
           {!readOnly && <ErpSheet open={entrySheetOpen} onClose={() => setEntrySheetOpen(false)} title="ثبت گزارش لحظه‌ای">

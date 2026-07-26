@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { formatPrice } from '@/lib/numberFormat';
 import type {
   StairLayerCatalogUnit,
   StairLayerSide
@@ -158,14 +159,19 @@ export function StairLayerDraftRow({
             </span>
           )}
         </div>
-        <FlatInput
-          label={`نرخ قرارداد · ${
-            draft.layerUnit ? UNIT_LABELS[draft.layerUnit] : '—'
-          }`}
-          value={draft.layerRateToman}
-          onChange={layerRateToman => update({ layerRateToman })}
-          error={errors.layerRateToman}
-        />
+        <div className="min-w-0 border-y border-slate-200 py-2 text-xs dark:border-slate-800">
+          <span className="block text-slate-500 dark:text-slate-400">
+            قیمت نوع لایه · {draft.layerUnit ? UNIT_LABELS[draft.layerUnit] : '—'}
+          </span>
+          <strong className="mt-1 block text-sm text-slate-900 dark:text-slate-100">
+            {formatPrice(Number(draft.layerRateToman) || 0)}
+          </strong>
+          {errors.layerRateToman && (
+            <span className="mt-1 block text-[11px] text-red-600">
+              {errors.layerRateToman}
+            </span>
+          )}
+        </div>
         <FlatInput
           label="تعداد لایه برای هر پله"
           value={draft.layersPerParentPiece}

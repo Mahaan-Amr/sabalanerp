@@ -11,7 +11,7 @@ async function main() {
   const departments = [
     {
       name: 'Security',
-      namePersian: 'حراست',
+      namePersian: 'گارد',
       description: 'Security and administration department'
     },
     {
@@ -55,7 +55,10 @@ async function main() {
   for (const dept of departments) {
     await prisma.department.upsert({
       where: { name: dept.name },
-      update: {},
+      update: {
+        namePersian: dept.namePersian,
+        description: dept.description
+      },
       create: dept
     });
   }

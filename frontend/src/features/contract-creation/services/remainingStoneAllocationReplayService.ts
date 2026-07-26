@@ -1,7 +1,12 @@
 import type { ContractProduct, RemainingStone, StonePartition } from '../types/contract.types';
 import { recalculateUsedRemainingDimensions } from '../utils/dimensionUtils';
 import { ensureContractProductRowIds } from '../utils/contractProductIdentity';
-import { mergeRemainingStoneCollection, normalizeRemainingStoneCollection } from '../utils/remainingStoneGuards';
+import {
+  getRemainingStoneInventoryGroupKey,
+  groupRemainingStoneInventory,
+  mergeRemainingStoneCollection,
+  normalizeRemainingStoneCollection
+} from '../utils/remainingStoneGuards';
 import { allocateRemainingStonePartitions } from './remainingStonePartitionService';
 import { recalculateRemainingChildAddOns } from './remainingStoneChildAddOnService';
 import { calculateSlabRemainingStones, calculateSmartLongitudinalCutPlan } from './remainingStoneService';
@@ -24,6 +29,11 @@ interface ReplayOptions {
   products: ContractProduct[];
   sourceRowId: string;
   sourceInventory?: RemainingStone[];
+  inventoryExpectations?: Array<{
+    groupKey: string;
+    expectedQuantity: number;
+    beforeChildRowId: string;
+  }>;
 }
 
 const getAllocationId = (product: ContractProduct): string =>
@@ -115,13 +125,92 @@ const replaceAllocatedStock = (
   ]);
 };
 
+interface PhysicalStockUnit {
+  stone: RemainingStone;
+  physicalId: string;
+}
+
+const expandPhysicalStockUnits = (
+  stones: RemainingStone[]
+): PhysicalStockUnit[] => stones.flatMap((stone) => {
+  const quantity = Math.max(1, Math.trunc(Number(stone.quantity || 1)));
+  const offset = Math.max(0, Math.trunc(Number(stone.physicalUnitOffset || 0)));
+  return Array.from({ length: quantity }, (_, index) => ({
+    stone,
+    physicalId:
+      quantity === 1 && offset === 0
+        ? stone.id
+        : `${stone.id}:unit:${offset + index + 1}`
+  }));
+});
+
+const replaceAllocatedStockGroup = (
+  inventory: RemainingStone[],
+  groupKey: string,
+  allocation: ReturnType<typeof allocateRemainingStonePartitions>
+): {
+  inventory: RemainingStone[];
+  consumedSourceStoneIds: string[];
+  generatedRemainingStoneIds: string[];
+} => {
+  const groupStones = inventory.filter(
+    stone => getRemainingStoneInventoryGroupKey(stone) === groupKey
+  );
+  const physicalUnits = expandPhysicalStockUnits(groupStones);
+  const consumedUnits = physicalUnits.slice(0, allocation.consumedSourcePieces);
+  const consumedByStoneId = new Map<string, number>();
+  consumedUnits.forEach(({ stone }) => {
+    consumedByStoneId.set(stone.id, (consumedByStoneId.get(stone.id) || 0) + 1);
+  });
+
+  const retainedInventory = inventory.flatMap((stone) => {
+    if (getRemainingStoneInventoryGroupKey(stone) !== groupKey) return [stone];
+    const consumed = consumedByStoneId.get(stone.id) || 0;
+    const quantity = Math.max(1, Math.trunc(Number(stone.quantity || 1)));
+    const retainedQuantity = quantity - consumed;
+    if (retainedQuantity <= 0) return [];
+    return [{
+      ...stone,
+      quantity: retainedQuantity,
+      physicalUnitOffset:
+        Math.max(0, Math.trunc(Number(stone.physicalUnitOffset || 0))) +
+        consumed,
+      squareMeters: (stone.width * stone.length * retainedQuantity) / 100
+    }];
+  });
+
+  const remainderSequenceBySource = new Map<string, number>();
+  const generated = allocation.remainingAreas.map((area) => {
+    const sheetIndex = allocation.remainingAreaSheetIndexes.get(area.id) ?? 0;
+    const sourceUnit = consumedUnits[sheetIndex];
+    const sourceId = sourceUnit?.physicalId || consumedUnits[0]?.physicalId || area.id;
+    const sequence = (remainderSequenceBySource.get(sourceId) || 0) + 1;
+    remainderSequenceBySource.set(sourceId, sequence);
+    return {
+      ...area,
+      id: `${sourceId}:secondary:${sequence}`,
+      sourceCutId: sourceUnit?.stone.sourceCutId || area.sourceCutId
+    };
+  });
+
+  return {
+    inventory: normalizeRemainingStoneCollection([
+      ...retainedInventory,
+      ...generated
+    ]),
+    consumedSourceStoneIds: consumedUnits.map(unit => unit.physicalId),
+    generatedRemainingStoneIds: generated.map(stone => stone.id)
+  };
+};
+
 const getChildOperationTotal = (child: ContractProduct, cuttingCost: number): number =>
   cuttingCost + Number(child.totalSubServiceCost || 0) + Number(child.finishingCost || 0);
 
 export const replayRemainingStoneAllocations = ({
   products,
   sourceRowId,
-  sourceInventory
+  sourceInventory,
+  inventoryExpectations = []
 }: ReplayOptions): RemainingStoneReplayResult => {
   const normalizedProducts = ensureContractProductRowIds(products);
   const sourceIndex = normalizedProducts.findIndex((product) => product.rowId === sourceRowId);
@@ -153,6 +242,25 @@ export const replayRemainingStoneAllocations = ({
   const updatedChildren = new Map<number, ContractProduct>();
 
   childEntries.forEach(({ product: child, index: childIndex }, replayIndex) => {
+    if (conflicts.length > 0) return;
+    const expectation = inventoryExpectations.find(
+      candidate => candidate.beforeChildRowId === child.rowId
+    );
+    if (expectation) {
+      const actualQuantity =
+        groupRemainingStoneInventory(availableInventory)
+          .find(group => group.key === expectation.groupKey)?.quantity || 0;
+      if (actualQuantity !== expectation.expectedQuantity) {
+        conflicts.push({
+          childRowId: child.rowId || '',
+          childLabel: 'گروه باقی‌مانده',
+          allocationId: expectation.groupKey,
+          reason:
+            `موجودی این گروه از ${expectation.expectedQuantity} به ${actualQuantity} قطعه تغییر کرده است؛ تعداد را دوباره تأیید کنید.`
+        });
+        return;
+      }
+    }
     const addOnResult = recalculateRemainingChildAddOns(child);
     if (!addOnResult.ok) {
       conflicts.push({
@@ -167,9 +275,39 @@ export const replayRemainingStoneAllocations = ({
     const row = allocationRow(recalculatedChild);
     let successfulAllocation: ReturnType<typeof allocateRemainingStonePartitions> | null = null;
     let successfulStockIndex = -1;
+    let successfulGroupKey: string | null = null;
     let lastReason = 'ابعاد یا تعداد این محصول در باقی‌مانده جدید جا نمی‌شود.';
 
-    for (let stockIndex = 0; stockIndex < availableInventory.length; stockIndex += 1) {
+    const requestedGroupKey = recalculatedChild.meta?.remainingSource?.sourceGroupKey;
+    if (requestedGroupKey) {
+      const group = groupRemainingStoneInventory(availableInventory)
+        .find(candidate => candidate.key === requestedGroupKey);
+      if (group) {
+        const aggregateStock: RemainingStone = {
+          ...group.stones[0],
+          quantity: group.quantity,
+          squareMeters: group.totalSquareMeters
+        };
+        const attempt = allocateRemainingStonePartitions([row], aggregateStock, {
+          sawKerfEnabled: !!recalculatedChild.sawKerfEnabled,
+          sawKerfCm: recalculatedChild.sawKerfCm
+        });
+        if (attempt.rowErrors.size === 0) {
+          successfulAllocation = attempt;
+          successfulGroupKey = requestedGroupKey;
+        } else {
+          lastReason = attempt.rowErrors.get(row.id) || attempt.summaryError || lastReason;
+        }
+      }
+    }
+
+    for (
+      let stockIndex = 0;
+      !requestedGroupKey &&
+      !successfulAllocation &&
+      stockIndex < availableInventory.length;
+      stockIndex += 1
+    ) {
       const attempt = allocateRemainingStonePartitions([row], availableInventory[stockIndex], {
         sawKerfEnabled: !!recalculatedChild.sawKerfEnabled,
         sawKerfCm: recalculatedChild.sawKerfCm
@@ -203,7 +341,25 @@ export const replayRemainingStoneAllocations = ({
     });
     const cuttingCost = cuttingBreakdown.reduce((total, entry) => total + entry.cost, 0);
     const allocationOrder = getAllocationOrder(recalculatedChild, replayIndex);
-    const generatedRemainingStoneIds = successfulAllocation.remainingAreas.map((area) => area.id);
+    let generatedRemainingStoneIds =
+      successfulAllocation.remainingAreas.map((area) => area.id);
+    let consumedSourceStoneIds = [stock.id];
+    if (successfulGroupKey) {
+      const replacement = replaceAllocatedStockGroup(
+        availableInventory,
+        successfulGroupKey,
+        successfulAllocation
+      );
+      availableInventory = replacement.inventory;
+      consumedSourceStoneIds = replacement.consumedSourceStoneIds;
+      generatedRemainingStoneIds = replacement.generatedRemainingStoneIds;
+    } else {
+      availableInventory = replaceAllocatedStock(
+        availableInventory,
+        successfulStockIndex,
+        successfulAllocation
+      );
+    }
 
     usedRemainingStones.push({
       id: `used-${row.id}`,
@@ -252,6 +408,8 @@ export const replayRemainingStoneAllocations = ({
           allocationOrder,
           allocatedQuantity: row.quantity,
           generatedRemainingStoneIds,
+          sourceGroupKey: successfulGroupKey || undefined,
+          consumedSourceStoneIds,
           physicalPieces
         },
         pricing: {
@@ -269,7 +427,6 @@ export const replayRemainingStoneAllocations = ({
       }
     });
 
-    availableInventory = replaceAllocatedStock(availableInventory, successfulStockIndex, successfulAllocation);
   });
 
   if (conflicts.length > 0) {

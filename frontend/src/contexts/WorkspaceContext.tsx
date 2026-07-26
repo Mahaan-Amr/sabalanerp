@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
@@ -107,7 +107,7 @@ export const WORKSPACE_CONFIG: Record<WORKSPACES, WorkspaceInfo> = {
   [WORKSPACES.SECURITY]: {
     id: WORKSPACES.SECURITY,
     name: 'Security',
-    namePersian: 'حراست',
+    namePersian: 'گارد',
     description: 'مدیریت تردد و امنیت',
     icon: 'FaShieldAlt',
     color: 'red',

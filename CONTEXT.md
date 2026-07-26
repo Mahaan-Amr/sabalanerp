@@ -347,7 +347,7 @@ _Avoid_: asking for edges on a square-meter tool, guessing a default edge for a 
 
 **تعداد قطعات تحت ابزار و گروه عملیات**:
 The contract product quantity remains the commercial stone quantity, while each selected ابزار independently records the physical share receiving that operation. With a positive product quantity, coverage and non-overlapping operation groups use physical piece count. A new tool defaults to all pieces and shows `روی همه … قطعه`; `تغییر تعداد` opens only a small inline count editor. Without product quantity, coverage and groups use the order's total linear length instead, defaulting to `روی همه …m`; `تغییر مقدار تحت عملیات` edits that covered length without inventing pieces. For example a quantity-less `25m × 40cm` order may own `گروه ۱ — ۱۰m: جلو نیم‌لول` and `گروه ۲ — ۱۵m: جلو قاشقی`. Length-based tools derive from group length and selected edges, while square-meter tools derive from group length × finished width, such as `10m × 0.4m = 4m²`.
-Coverage is distinct from `تغییر مقدار`, which overrides the final geometry-derived tool quantity rather than the group's physical scope. Every physical piece or linear portion belongs to exactly one group; multiple tools on the same subset live inside that one group. Any currently unallocated scope forms an automatic internal group such as `۵ قطعه بدون ابزار` or `۵m بدون ابزار`, visible only in the compact tool summary and workshop output, requiring no seller action or warning. It recalculates immediately and disappears at zero. Assignments above the product quantity or total length preserve the entered value, block save only at that inline scope field, and report the remaining allocatable scope. Group UI stays absent when the complete order shares one operation set. Contract and workshop outputs state the coverage basis and grouped operations so production can distinguish the subsets.
+Coverage is distinct from `تغییر مقدار`, which overrides the final geometry-derived tool quantity rather than the group's physical scope. Every physical piece or linear portion belongs to exactly one group; multiple tools on the same subset live inside that one group. Any currently unallocated scope forms an automatic internal group such as `۵ قطعه بدون ابزار` or `۵m بدون ابزار`, visible only in the compact tool summary and workshop output, requiring no seller action or warning. It recalculates immediately and disappears at zero. An empty stored group with no tool, finishing, or manual override has no deliberate commercial meaning and follows the current authoritative product quantity automatically; changing quantity must never leave its stale scope behind. A group containing any real operation or override preserves its explicit scope, and an incompatible quantity change blocks save only at that specific inline scope field. Assignments above the product quantity or total length preserve the entered value and report the remaining allocatable scope. Group UI stays absent when the complete order shares one operation set. Contract and workshop outputs state the coverage basis and grouped operations so production can distinguish the subsets.
 _Avoid_: duplicating the stone product or material price to express operation variants, inventing a piece count for a quantity-less order, treating final tool meterage as group coverage, allowing coverage beyond the order, assuming independently entered tool scopes describe the same physical subset, overlapping physical membership between groups, forcing the seller to create or confirm a no-tool group, warning merely because some scope needs no tool, or showing operation-group controls for the ordinary all-order case
 
 **تبدیل مبنای گروه‌های ابزار**:
@@ -431,8 +431,8 @@ Layer pieces explicitly allocated from parent or paid remainder add no second ma
 _Avoid_: auto-selecting the parent catalog stone, auto-seeding a catalog price, allowing non-positive new-material price, transferring price to a replacement stone, charging only finished output area, double-charging paid remainder, discarding positive new-stone remainder, mixing operation charges into material price, or hiding requested/consumed/paid-remainder quantities
 
 **نرخ نوع لایه پله**:
-Layer type is selected from inventory and carries one inventory-owned calculation unit that sales cannot change. Its inventory rate is not copied into the contract. A new layer-type selection starts with a short blank seller-editable contractual rate; amount is the catalog-unit quantity × that manual rate. The rate must be strictly positive: blank, zero, or negative blocks only that inline field with `نرخ را وارد کنید`. It is snapshotted only on the layer selection and never mutates inventory. Edit preserves it and explicit layer duplication copies it into the new draft, while changing layer type clears it rather than transferring it. The unit renders as compact plain text beside the rate, never a disabled selector. A differently priced unit requires a correctly defined inventory layer type rather than per-contract unit mutation.
-_Avoid_: auto-seeding layer-type rate from inventory, accepting a blank/non-positive layer-type rate, treating zero as a free valid layer type, preventing contractual rate negotiation, letting sales change the calculation unit, mutating inventory from a contract, transferring rate to a different layer type, losing the saved rate on edit, or rendering the unit as a disabled form control
+Layer type is selected from inventory and carries one inventory-owned calculation unit and active price that sales cannot change. Every sales user has default read-only access to the active layer-type contract catalog—stable identity, display name, price, calculation unit, and active status—without receiving inventory-management access. A genuinely empty active catalog renders the local blocking state `هیچ نوع لایه فعالی ثبت نشده است؛ با مدیر انبار تماس بگیرید`; a network or server failure renders `دریافت انواع لایه ناموفق بود` with local `تلاش مجدد`. Both preserve the layer draft and block its atomic save without creating an anonymous or zero-rate layer. Selecting a layer type copies its current positive inventory price and calculation unit into the contract layer snapshot; amount is the catalog-unit quantity × that snapshotted price. Sales sees the price as read-only and cannot negotiate or override it. Edit and explicit layer duplication preserve the saved snapshot, while changing layer type replaces both price and unit from the newly selected active inventory item. If that saved catalog item later becomes inactive or unavailable, edit still renders its saved name, unit, and price with `غیرفعال در کاتالوگ فعلی`; unrelated edits preserve and may resave that historical snapshot. The unit and formatted price render as compact plain facts, never editable or disabled form controls.
+_Avoid_: requiring an inventory-management permission merely to configure a sales layer, exposing inactive or administrative catalog fields to sales, collapsing empty, forbidden, and failed catalog states into one silent empty list, discarding the draft on catalog failure, creating an anonymous or zero-rate layer, dropping or blocking a saved inactive historical type, silently replacing it with an active type, repricing a historical snapshot merely because the catalog changed, letting sales enter or override the layer-type price or calculation unit, mutating inventory from a contract, transferring a stale rate to a different layer type, losing the saved price on edit, or rendering read-only price/unit as disabled inputs
 
 **طول منبع لایه پله**:
 The charged and packed length of stone supplying stair layers. Automatically procured new stone uses the catalog standard/source length, while parent or remaining stone uses its exact saved available length and manually selected warehouse stone uses the explicitly entered available length; finished layer-piece lengths remain based on the stair's actual geometry.
@@ -448,7 +448,7 @@ Duplicating a stair parent never creates a row immediately; it opens a new draft
 _Avoid_: linking a layer by stair type or position, partially saving a parent edit, leaving orphan layers, deleting attached layers on first click or through a browser alert, losing restored remainder after deletion, deleting sibling stair parts, partially committing a failed rebuild, changing finalized history outside edit, creating a duplicate immediately, defaulting duplication to include layers, copying source allocations or downstream state, reusing parent/layer/operation identities, or partially creating a duplicate with an invalid layer source
 
 **ویرایش inline لایه پله**:
-Layers are configured inside the flat subsection of their exact کف، خیز, or پاگرد parent, never in a modal, page, or separate wizard step. Empty state is only `لایه‌ای تعریف نشده` with `افزودن لایه`, which appends a new draft configuration rather than replacing an existing one. A parent may own any number of independent layer configurations and the same target side may appear in multiple configurations without name-inferred compatibility or duplicate restrictions. Each configuration independently owns stable identity, layer type and positive manual rate, layers per parent piece, width/display unit, target sides, explicit material source, packing/allocations, cuts, tools/finishings, and description. Identical-looking configurations are never silently merged.
+Layers are configured inside the flat subsection of their exact کف، خیز, or پاگرد parent, never in a modal, page, or separate wizard step. Empty state is only `لایه‌ای تعریف نشده` with `افزودن لایه`, which appends a new draft configuration rather than replacing an existing one. A parent may own any number of independent layer configurations and the same target side may appear in multiple configurations without name-inferred compatibility or duplicate restrictions. Each configuration independently owns stable identity, layer type with its inventory price/unit snapshot, layers per parent piece, width/display unit, target sides, explicit material source, packing/allocations, cuts, tools/finishings, and description. Identical-looking configurations are never silently merged.
 All changes remain in the parent's draft and mutate no `wizardData.products` entry before one atomic parent-and-layers save; any layer failure rejects the whole save, and close/cancel discards every unsaved layer edit. Allocations replay in stable layer-creation order. When configurations explicitly share a remainder source, earlier allocations consume first and a later shortage never falls through to another source. Deleting one configuration restores its allocation and replays later configurations without changing their commercial settings. Editing a stair row loads only that exact parent and its attached layers, not sibling stair parts. Contract and workshop outputs nest every configuration separately beneath the parent. Shared tool/finishing modules are reused and no relationship or calculation targets `productIndex`.
 _Avoid_: opening a nested layer modal, replacing a prior layer when adding another, limiting one configuration per side, merging duplicate-looking configurations, changing allocation order, silently moving a short later layer to another source, mutating saved products while editing a layer draft, committing parent and layers separately, loading unrelated stair siblings, duplicating operation modules, or identifying the parent/child by array position
 
@@ -461,7 +461,7 @@ A product-configuration change is complete only when one canonical recalculation
 _Avoid_: accepting a UI-only correction, partially saving a graph mutation, duplicating formulas across consumers, treating passing legacy tests as sufficient evidence, or releasing without deterministic complex-scenario and rendered-output verification
 
 **ساختار canonical پنجره تنظیمات محصول**:
-Every product family uses one central modal shell with sticky header/body/footer and this stable order: header with close and internal back only for source/remainder subviews; compact new-row product-type selector or plain saved edit value; one catalog-fact line; editable contractual title; flat contract remainders only where physically applicable; type-specific core dimensions/quantity/area/sources/base price; shared auto-growing description; compact editable direct settings such as حکمی، خوراک اره، and calibration; shared inline tools; shared inline stone finishing on the same operation groups; dependent structures such as stair layers inside their exact parent; always-visible flat calculation summary; and one sticky cancel/back plus primary add/save action with pending protection. Non-applicable sections are omitted rather than disabled. Exact-sized skeletons prevent order/layout shift. Validation focuses and scrolls to the local field while respecting reduced motion. Scroll position persists only within the current open session. No type module may open a nested modal.
+Every product family uses one central modal shell with the same overlay, width, radius, border, shadow, light/dark surface tokens, spacing, sticky header/body/footer, and teal interaction accent, plus this stable order: header with close and internal back only for source/remainder subviews; compact new-row product-type selector or plain saved edit value; one catalog-fact line; editable contractual title; flat contract remainders only where physically applicable; type-specific core dimensions/quantity/area/sources/base price; shared auto-growing description; compact editable direct settings such as حکمی، خوراک اره، and calibration; shared inline tools; shared inline stone finishing on the same operation groups; dependent structures such as stair layers inside their exact parent; always-visible flat calculation summary; and one sticky cancel/back plus primary add/save action with pending protection. Product-family color may not redefine the shell or its dark surface. Non-applicable sections are omitted rather than disabled. Exact-sized skeletons prevent order/layout shift. Validation focuses and scrolls to the local field while respecting reduced motion. Scroll position persists only within the current open session. No type module may open a nested modal.
 _Avoid_: family-specific modal shells, moving sections after network completion, disabled informational controls, duplicated catalog/title cards, hidden calculation details, non-sticky actions in a long form, global validation alerts, restoring stale scroll across separate opens, or introducing overlays for internal subflows
 
 **فهرست یکپارچه انتخاب محصول**:
@@ -489,7 +489,7 @@ Step 5 is complete only when its canonical saved graph contains at least one val
 _Avoid_: counting an unsaved modal draft as a contract product, requiring a child to masquerade as top-level content, discarding drafts on navigation, repricing valid snapshots merely to advance, blocking on unrelated network failures, reporting only a global error, or losing Step 5 working context on return
 
 **دقت عددی و گردکردن قرارداد**:
-Every numeric input accepts Persian, Arabic, and Latin digits plus their decimal marks; `,` and `٬` grouping separators are ignored during parsing. The seller's text is not rewritten while typing, and normalization occurs only after the edit boundary. All canonical geometry, unit conversion, kerf, area, cutting, tool, and finishing calculations use decimal arithmetic rather than binary floating point and retain full intermediate precision. `cm / m` conversion is exact, including `0.3cm = 0.003m`. Display may remove insignificant trailing zeros, but display rounding never becomes a pricing input. Physical piece counts are positive integers wherever the domain means discrete pieces. Prices and rates are stored in toman. Each independent billable material, cut, tool, or finishing line is rounded once to the nearest toman after its final exact calculation; product total is the sum of those canonical rounded lines, and contract total is the sum of canonical saved product/service totals. Modal, Step 5, PDF, accounting, workshop-facing monetary output, and every other consumer render those same saved facts rather than recomputing formulas. Rounding mode and calculation-policy version are snapshotted for historical reproducibility.
+Every numeric input accepts Persian, Arabic, and Latin digits plus their decimal marks; `,` and `٬` grouping separators are ignored during parsing. Geometry, quantities, and percentages preserve the seller's in-progress text and normalize only at the edit boundary. Every monetary input across every product family displays live Latin three-digit grouping while typing (for example `1,000,000`) through the shared monetary input, while its canonical draft and persisted value remain a separator-free decimal. All canonical geometry, unit conversion, kerf, area, cutting, tool, and finishing calculations use decimal arithmetic rather than binary floating point and retain full intermediate precision. `cm / m` conversion is exact, including `0.3cm = 0.003m`. Display may remove insignificant trailing zeros, but display rounding never becomes a pricing input. Physical piece counts are positive integers wherever the domain means discrete pieces. Prices and rates are stored in toman. Each independent billable material, cut, tool, or finishing line is rounded once to the nearest toman after its final exact calculation; product total is the sum of those canonical rounded lines, and contract total is the sum of canonical saved product/service totals. Modal, Step 5, PDF, accounting, workshop-facing monetary output, and every other consumer render those same saved facts rather than recomputing formulas. Rounding mode and calculation-policy version are snapshotted for historical reproducibility.
 _Avoid_: rewriting text mid-keystroke, rejecting Persian/Arabic numerals, binary-float geometry, rounding converted dimensions or intermediate areas, pricing from displayed area, rounding the total through a second independent path, recomputing totals in output components, or applying a future rounding rule to finalized history
 
 **موتور مشترک قطعی محاسبات محصول**:
@@ -612,7 +612,7 @@ The stair catalog filter is the identity-deduplicated union of products explicit
 _Avoid_: duplicating inventory rows, showing one catalog identity twice in the stair results, opening longitudinal configuration from the stair route, inferring contract type from the edited contractual title, or removing the product from its normal longitudinal route.
 
 **عملیات نوارهای فیزیکی لایه پله**:
-Each stair-layer configuration independently owns its tools and stone-finishing selections over the physical strips of its selected sides. An operation may cover all strips, one selected side, or an explicit subset count from one side. Stable operation groups are side-specific because front, back, left, and right strips can have different physical lengths. The common `all strips` path remains one compact seller-facing operation row with one stable parent identity, while canonical data creates a stable child scope for every selected side. The row shows a compact per-side quantity breakdown and a total; its final amount is the sum of independently auditable side amounts under one snapshotted rate. Editing or deleting the parent selection atomically affects its child scopes. Customizing one side detaches that scope into an independent visible operation without mutating the other sides. Linear-tool edge selection initially applies to all child scopes and may later diverge through the same side-detachment behavior. Square-meter operations and all finishing use the same parent/child scope model without edges. Linear tools use actual strip length multiplied by covered strip count. Square-meter tools and finishing use actual strip length multiplied by layer width and covered strip count. Linear finishing uses actual strip length and has no edge selector. Multiple tools and finishing operations may coexist on one strip; an uncovered strip is a valid no-operation group shown only in the calculation summary and workshop projection. Inventory rates are snapshotted independently from the layer type's manual contractual rate. Geometry or source changes recalculate automatic quantities without deleting operation, group, or edge intent; stale manual overrides use the shared inline conflict-resolution flow.
+Each stair-layer configuration independently owns its tools and stone-finishing selections over the physical strips of its selected sides. An operation may cover all strips, one selected side, or an explicit subset count from one side. Stable operation groups are side-specific because front, back, left, and right strips can have different physical lengths. The common `all strips` path remains one compact seller-facing operation row with one stable parent identity, while canonical data creates a stable child scope for every selected side. The row shows a compact per-side quantity breakdown and a total; its final amount is the sum of independently auditable side amounts under one snapshotted rate. Editing or deleting the parent selection atomically affects its child scopes. Customizing one side detaches that scope into an independent visible operation without mutating the other sides. Linear-tool edge selection initially applies to all child scopes and may later diverge through the same side-detachment behavior. Square-meter operations and all finishing use the same parent/child scope model without edges. Linear tools use actual strip length multiplied by covered strip count. Square-meter tools and finishing use actual strip length multiplied by layer width and covered strip count. Linear finishing uses actual strip length and has no edge selector. Multiple tools and finishing operations may coexist on one strip; an uncovered strip is a valid no-operation group shown only in the calculation summary and workshop projection. Inventory operation rates are snapshotted independently from the layer type's inventory-owned price snapshot. Geometry or source changes recalculate automatic quantities without deleting operation, group, or edge intent; stale manual overrides use the shared inline conflict-resolution flow.
 _Avoid_: showing one normal row per side before the seller asks for side-specific behavior, sharing layer operations with the stair parent or sibling layers, calculating physical operations from commercial layer-set count, averaging or collapsing sides with different strip lengths into one ambiguous quantity, adding edge selection to finishing, or silently discarding selections after geometry changes.
 
 **حذف سمت دارای عملیات لایه**:
@@ -694,7 +694,7 @@ When a stair part is shortened from a standard/source length to the actual reque
 _Avoid_: calculating the leftover-length piece only at the requested stair width, or merging width-side leftovers from the actual-length section with the full-width leftover-length section
 
 **مصرف باقی‌مانده برای سنگ لایه**:
-When سنگ لایه uses سنگ اصلی, compatible remaining pieces from the same stair part are consumed before charging any additional سنگ اصلی. Only the layer demand that cannot be supplied from those remaining pieces should count as new main-stone material. The layer summary shows the physical quantity and cost split between already-paid remainder and newly charged main stone; insufficient remainder never rejects the complete layer while compatible fresh main stone can satisfy the shortage. Already-paid remainder contributes zero additional material cost, but every new physical longitudinal or cross cut needed to turn it into layers remains independently calculated and chargeable at its registered directional rate. Fresh main stone used for the shortage adds both its material charge and the cutting charges required by its own packing plan.
+When سنگ لایه uses سنگ اصلی, compatible remaining pieces from the same stair part are consumed before charging any additional سنگ اصلی. Only the layer demand that cannot be supplied from those remaining pieces should count as new main-stone material. Allocation applies that commercial priority deterministically and must not run a combined paid/fresh search whose equivalent permutations can delay or change the answer; an exact solver remains the fallback only when the deterministic priority pass cannot satisfy the geometry. The layer summary shows the physical quantity and cost split between already-paid remainder and newly charged main stone; insufficient remainder never rejects the complete layer while compatible fresh main stone can satisfy the shortage. Already-paid remainder contributes zero additional material cost, but every new physical longitudinal or cross cut needed to turn it into layers remains independently calculated and chargeable at its registered directional rate. Fresh main stone used for the shortage adds both its material charge and the cutting charges required by its own packing plan.
 _Avoid_: charging all same-stone لایه as fresh stone while usable same-part remaining pieces exist, treating paid material as free processing, hiding the paid-versus-new material split, or rejecting the layer merely because paid remainder covers only part of its demand
 
 **تعداد پارتیشن باقی‌مانده**:
@@ -730,9 +730,9 @@ When a child product reduces both the width and length of its selected remaining
 _Avoid_: recording only one axis, collapsing both axes into an ambiguous "both" label, or charging a combined amount without preserving its physical breakdown
 
 **گروه هندسی موجودی باقی‌مانده**:
-Identical remaining-stone pieces are presented as one inventory group that states dimensions and area per piece, available piece count, and total group area. Allocations consume one or more physical pieces from that group rather than treating the combined area as one rectangle.
-The seller enters only the desired child product; the allocator deterministically consumes the minimum number of source pieces needed by the real packing plan, taking equal pieces in stable creation order. Unconsumed complete pieces stay in the group, and every positive secondary remnant from consumed pieces is immediately regrouped by its new geometry and made available for another allocation. The live calculation summary shows consumed source count, finished child pieces, complete pieces left, and secondary-remnant groups.
-_Avoid_: displaying total group area beside single-piece dimensions without quantity, calling an inventory group one stone, asking the seller for a separate source-piece count, consuming more source pieces than required, hiding how many pieces an allocation consumes, discarding secondary remnants, or leaving the remaining inventory stale after an allocation
+Identical remaining-stone pieces are presented as one inventory group that states dimensions and area per piece, available piece count, and total group area. The seller may enter an integer desired child quantity from `1` through the group's currently displayed availability; that quantity initializes the child configuration and constrains its preview rather than combining the group into one rectangle.
+The allocator deterministically consumes the minimum number of physical source pieces needed by the real packing plan, taking equal pieces in stable creation order (oldest first). Unconsumed complete pieces stay in the group, and every positive secondary remnant from consumed pieces is immediately regrouped by its new geometry and made available for another allocation. Physical identities and source lineage remain individually auditable behind an expandable group detail. The complete allocation is atomic: if any piece fails, nothing changes. Before commit, the displayed group quantity is compared with current inventory; a changed quantity rejects the stale action with both old and current counts instead of silently allocating fewer pieces. The live calculation summary shows consumed source count, finished child pieces, complete pieces left, and secondary-remnant groups.
+_Avoid_: displaying total group area beside single-piece dimensions without quantity, calling an inventory group one stone, forcing one allocation per visible row, asking the seller to select physical identities individually, consuming equal pieces in unstable order, silently accepting stale availability, partially committing a multi-piece allocation, consuming more source pieces than required, hiding how many pieces an allocation consumes, discarding secondary remnants, or leaving the remaining inventory stale after an allocation
 
 **پیش‌نمایش هندسی تخصیص باقی‌مانده**:
 Before a remaining-stone allocation is committed, its preview shows the finished child pieces, consumed source-piece count, every resulting secondary-remnant geometry, and saw-kerf consumption when enabled. Consumed and remaining area totals support this physical preview but never replace it.
@@ -1183,7 +1183,7 @@ _Avoid_: forcing logistics users to know the project name when the operational c
 **شروع پیش‌نویس بارگیری**:
 A draft بارگیری starts when logistics selects the customer project, so the in-progress shipment can be resumed before rows, driver, or vehicle details are complete.
 Customer search before project selection is only navigation/filtering and does not start a draft.
-The new-loading wizard sequence is مشتری، پروژه، قراردادها، راننده، مقدار، بازبینی so حراست can authorize driver entry after cargo identity is known but before final loaded quantities are entered.
+The new-loading wizard sequence is مشتری، پروژه، قراردادها، راننده، مقدار، بازبینی so گارد can authorize driver entry after cargo identity is known but before final loaded quantities are entered.
 _Avoid_: treating بارگیری creation as only the final submit action, or keeping meaningful loading progress as a browser-only form
 
 **ادامه پیش‌نویس بارگیری**:
@@ -1239,14 +1239,14 @@ After project selection starts or resumes a draft, wizard changes are saved on s
 _Avoid_: reducing remaining from draft loading entries, deleting cancelled logistics history, or using draft CRUD semantics for finalized loading records
 
 **انتخاب راننده بارگیری**:
-حراست sends a physically present queued driver into the loading area through ورود برای بارگیری, making that queue turn visible to Logistics as an available loading driver. Logistics may then select one or more available loading drivers for a draft بارگیری; selecting a driver reserves that queue turn for the draft.
+گارد sends a physically present queued driver into the loading area through ورود برای بارگیری, making that queue turn visible to Logistics as an available loading driver. Logistics may then select one or more available loading drivers for a draft بارگیری; selecting a driver reserves that queue turn for the draft.
 At least one available loading driver must be selected before Logistics can continue to مقدار or finalize the loading.
 While the loading remains a draft, Logistics may return to the راننده step to add or remove selected drivers. Added drivers become رزرو شده, removed drivers return to وارد محوطه بارگیری, and finalized driver evidence is locked.
 Logistics does not see available loading drivers as a queue-ranked list; it chooses based on operational suitability such as driver identity, plate, and vehicle type. Drivers reserved for another draft remain visible but disabled with the reserved loading number.
-_Avoid_: showing every registry-active driver to logistics, letting logistics select drivers who are still merely waiting in the حراست queue, requiring a system request from Logistics before حراست can send drivers into loading, or letting logistics manage the registry or queue from بارگیری
+_Avoid_: showing every registry-active driver to logistics, letting logistics select drivers who are still merely waiting in the گارد queue, requiring a system request from Logistics before گارد can send drivers into loading, or letting logistics manage the registry or queue from بارگیری
 
 **راننده آماده بارگیری**:
-A driver queue turn that حراست has moved from در انتظار to وارد محوطه بارگیری. The driver is physically allowed toward loading and is visible to Logistics, but is not attached to a specific بارگیری until Logistics selects it.
+A driver queue turn that گارد has moved from در انتظار to وارد محوطه بارگیری. The driver is physically allowed toward loading and is visible to Logistics, but is not attached to a specific بارگیری until Logistics selects it.
 _Avoid_: treating وارد محوطه بارگیری as a reservation for a particular loading draft, or treating every waiting queued driver as available to Logistics
 
 **قفل بارگیری نهایی‌شده**:
@@ -1262,43 +1262,43 @@ Correction records follow the same unit, remaining, and tolerance rules as norma
 _Avoid_: using corrections to bypass loading tolerance or unit compatibility rules
 
 **راننده بارگیری**:
-Logistics selects the driver and vehicle for بارگیری only from queue turns that حراست has already moved into وارد محوطه بارگیری, while every بارگیری still saves its own driver and vehicle snapshot for historical accuracy.
+Logistics selects the driver and vehicle for بارگیری only from queue turns that گارد has already moved into وارد محوطه بارگیری, while every بارگیری still saves its own driver and vehicle snapshot for historical accuracy.
 One بارگیری may include multiple driver/vehicle queue turns when one delivery needs more than one vehicle. Loading quantities are allocated per selected driver, and the loading's product-row totals are derived from the sum of those driver allocations.
 _Avoid_: letting logistics own the reusable driver registry, making old loading documents depend on the current editable driver profile, treating gate approval as approval of loading quantities, or recording multi-driver loading quantities without preserving which driver carried which allocation
 
 **راننده در نهایی‌سازی بارگیری**:
 A draft بارگیری may exist without driver information, but finalization requires a complete driver and vehicle snapshot.
-If an older draft contains manually entered driver or vehicle data, that data may remain as draft history, but finalization requires reselecting an active حراست-owned driver/vehicle pair so the final snapshot comes from the registry.
+If an older draft contains manually entered driver or vehicle data, that data may remain as draft history, but finalization requires reselecting an active گارد-owned driver/vehicle pair so the final snapshot comes from the registry.
 _Avoid_: blocking early loading preparation only because the truck is not known yet, finalizing shipment evidence without driver details, or treating legacy manual draft data as an acceptable final driver selection
 
 **ثبت راننده و خودرو**:
-A حراست-owned registry of reusable fixed driver/vehicle pairs that may be activated or deactivated for operational use. A complete pair requires the driver's first name, last name, mobile, national code, home address, relative's mobile, vehicle plate and type, plus at least one categorized photo each of the driver's license, vehicle card, and driver; every category may contain additional photos without a count limit.
+A گارد-owned registry of reusable fixed driver/vehicle pairs that may be activated or deactivated for operational use. A complete pair requires the driver's first name, last name, mobile, national code, home address, relative's mobile, vehicle plate and type, plus at least one categorized photo each of the driver's license, vehicle card, and driver; every category may contain additional photos without a count limit.
 An active registry pair has valid credentials and may join the driver queue, but registry activation alone does not make it selectable by Logistics.
 A never-used pair may be permanently deleted; once referenced by an operational record it may only be deactivated, and its historical snapshots remain unchanged by later registry edits.
 _Avoid_: رجیستر راننده و خودرو, treating registry activation as current physical presence, splitting the reusable registry into independent driver and vehicle lifecycles, allowing incomplete pairs into operational use, duplicating reusable driver/vehicle records inside logistics, keeping logistics create/edit/delete controls for the registry, hard-deleting a used pair, or changing historical shipment snapshots when the registry changes
 
 **صف نوبت‌دهی رانندگان**:
-A حراست-owned time-ordered queue of registry-active driver/vehicle pairs that are physically present and waiting for loading. Queue presence makes a pair selectable by Logistics, while entry time determines display priority rather than restricting selection because a product may require a specific driver or vehicle.
-Queue priority is shown in حراست's waiting queue, not as ordering guidance in Logistics. Drivers returned from وارد محوطه بارگیری back to در انتظار appear first to preserve their turn rights.
+A گارد-owned time-ordered queue of registry-active driver/vehicle pairs that are physically present and waiting for loading. Queue presence makes a pair selectable by Logistics, while entry time determines display priority rather than restricting selection because a product may require a specific driver or vehicle.
+Queue priority is shown in گارد's waiting queue, not as ordering guidance in Logistics. Drivers returned from وارد محوطه بارگیری back to در انتظار appear first to preserve their turn rights.
 _Avoid_: راننده فعال for a merely present driver, treating FIFO as a hard selection rule, manually reordering entry priority, or exposing absent registry drivers to Logistics
 
 **نوبت راننده**:
-One historical occurrence of a registry-active driver/vehicle pair joining the queue. Its statuses are در انتظار, وارد محوطه بارگیری, رزرو شده, اعزام شده, and خارج از صف; حراست moves a waiting turn into the loading area through ورود برای بارگیری, Logistics may reserve an available loading turn for a draft بارگیری, releasing a loading reservation returns the same turn to وارد محوطه بارگیری, and an explicit حراست removal ends it as خارج از صف.
+One historical occurrence of a registry-active driver/vehicle pair joining the queue. Its statuses are در انتظار, وارد محوطه بارگیری, رزرو شده, اعزام شده, and خارج از صف; گارد moves a waiting turn into the loading area through ورود برای بارگیری, Logistics may reserve an available loading turn for a draft بارگیری, releasing a loading reservation returns the same turn to وارد محوطه بارگیری, and an explicit گارد removal ends it as خارج از صف.
 The same pair cannot hold two current turns, but may receive a new turn after dispatch or after leaving and physically returning.
-حراست may also return a driver from وارد محوطه بارگیری back to در انتظار when the driver should no longer be in the loading area; that turn keeps priority rights and appears first among waiting turns. This rollback requires a short reason, with preset choices for common reasons such as بارگیری آماده نبود, اشتباه در ورود, تغییر برنامه بارگیری, and راننده موقتاً برگشت به صف.
-حراست cannot return a رزرو شده turn directly to در انتظار; Logistics must first release it from the draft so it returns to وارد محوطه بارگیری.
+گارد may also return a driver from وارد محوطه بارگیری back to در انتظار when the driver should no longer be in the loading area; that turn keeps priority rights and appears first among waiting turns. This rollback requires a short reason, with preset choices for common reasons such as بارگیری آماده نبود, اشتباه در ورود, تغییر برنامه بارگیری, and راننده موقتاً برگشت به صف.
+گارد cannot return a رزرو شده turn directly to در انتظار; Logistics must first release it from the draft so it returns to وارد محوطه بارگیری.
 _Avoid_: calling reservation release a cancellation, overwriting an earlier turn when a driver returns, allowing one turn to be reserved by multiple loadings, returning a Logistics-released loading driver all the way to در انتظار, or losing original queue priority when a draft releases its reservation
 
-**خودرویی حراست**:
-The حراست vehicle area is a workflow hub whose ordered operational tabs are تردد خودرو, تراکنش خروجی, تراکنش ورودی, نوبت‌دهی رانندگان, and ثبت راننده و خودرو, while shared counters may remain on a dashboard.
+**خودرویی گارد**:
+The گارد vehicle area is a workflow hub whose ordered operational tabs are تردد خودرو, تراکنش خروجی, تراکنش ورودی, نوبت‌دهی رانندگان, and ثبت راننده و خودرو, while shared counters may remain on a dashboard.
 _Avoid_: combining reusable registry maintenance, gate movement history, inbound loaded-vehicle work, and outbound sales exit recording into one large data-entry page
 
 **تردد خودرو**:
-A حراست-owned gate movement record for a vehicle entering or leaving the facility, including its exact gate time and movement purpose.
+A گارد-owned gate movement record for a vehicle entering or leaving the facility, including its exact gate time and movement purpose.
 _Avoid_: treating تردد خودرو as the same document as بارگیری, or using gate movement approval to validate contract rows or loaded quantities
 
 **تردد متفرقه**:
-A one-time حراست gate movement for a driver/vehicle that should be recorded for entry or exit history without becoming an active reusable driver/vehicle pair for logistics.
+A one-time گارد gate movement for a driver/vehicle that should be recorded for entry or exit history without becoming an active reusable driver/vehicle pair for logistics.
 _Avoid_: cluttering the reusable driver/vehicle registry with every one-time supplier, customer, or visitor movement
 
 **خروج با سواری شخصی مشتری**:
@@ -1306,15 +1306,15 @@ A lightweight outbound sales movement where the customer takes goods with a pers
 _Avoid_: forcing customer personal vehicles into the reusable logistics driver/vehicle registry, or requiring freight settlement fields for a customer pickup
 
 **زمان خروج فروش**:
-The official outbound sales exit time is the حراست-recorded gate time when the vehicle physically leaves. It is separate from the logistics بارگیری finalization time.
+The official outbound sales exit time is the گارد-recorded gate time when the vehicle physically leaves. It is separate from the logistics بارگیری finalization time.
 _Avoid_: treating logistics finalization time as proof of physical gate exit
 
 **وضعیت خروج فروش**:
-An outbound sales movement is آماده خروج after logistics finalizes بارگیری, خارج شد after حراست records the physical gate exit time, and لغو خروج when the gate movement is voided because it was created by mistake or the vehicle did not leave.
-_Avoid_: adding an approved-for-loading status that makes حراست responsible for logistics loading correctness
+An outbound sales movement is آماده خروج after logistics finalizes بارگیری, خارج شد after گارد records the physical gate exit time, and لغو خروج when the gate movement is voided because it was created by mistake or the vehicle did not leave.
+_Avoid_: adding an approved-for-loading status that makes گارد responsible for logistics loading correctness
 
 **ورود خودروی پر**:
-A حراست inbound loaded-vehicle movement whose purpose is one of خرید بیرونی, برگشت از فروش, or امانی.
+A گارد inbound loaded-vehicle movement whose purpose is one of خرید بیرونی, برگشت از فروش, or امانی.
 _Avoid_: recording inbound loaded cargo without a movement purpose, or mixing inbound loaded-vehicle purposes with outbound sales loading
 
 **وضعیت ورود خودروی پر**:
@@ -1326,15 +1326,15 @@ Trip-specific settlement information captured on an inbound loaded-vehicle movem
 _Avoid_: storing trip-specific settlement truth only on the reusable driver/vehicle registry, or making settlement history depend on later registry edits
 
 **پیوست تردد**:
-A categorized photo or file attached to a حراست gate movement, such as vehicle/plate, driver/document, بارنامه, purchase invoice, cargo, or other evidence.
+A categorized photo or file attached to a گارد gate movement, such as vehicle/plate, driver/document, بارنامه, purchase invoice, cargo, or other evidence.
 _Avoid_: storing gate photos as uncategorized blobs that cannot later be filtered or audited by evidence type
 
-**گزارش شیفت حراست**:
+**گزارش شیفت گارد**:
 An append-only operational log for one planned security shift, made of immutable گزارش لحظه‌ای rows and گشت‌زنی sessions. Ending a shift remains a deliberate closure action, but the main shift content lives in timestamped log entries rather than one free-text summary form.
 New entries and patrols are recorded only against the currently active planned shift session for the authenticated security user; manager reconstruction may repair the session boundary but does not backfill log entries or patrols.
 _Avoid_: گزارش سرپرست, deleting log rows, forcing duplicate final-summary text when the log already records the shift, or hiding patrol sessions inside unstructured notes
 
-**اصلاح حسابرسی‌شده جلسه شیفت حراست**:
+**اصلاح حسابرسی‌شده جلسه شیفت گارد**:
 A manager correction of a recorded shift start or finish, or reconstruction of either missing boundary, using asserted actual times and a mandatory reason while preserving every original recorded timestamp or the fact that no click occurred. Operational views and reports use the corrected effective times but mark them visibly as manager-corrected, while audit history permanently retains the original evidence, correcting manager, correction time, and reason.
 Corrected times may fall outside the planned slot but cannot be in the future, must form a valid start-before-finish interval, must contain every retained patrol and shift-timeline event, and cannot overlap another shift session for the same guard. Unusual deviation from the planned slot requires an explicit warning and confirmation while the mandatory reason remains the accountable explanation.
 It is distinct from اصلاح زمان حضور: physical arrival and operational shift-session boundaries are corrected through separate audited actions and never silently update one another.
@@ -1342,34 +1342,34 @@ Authorization belongs to users with management permission for the Security works
 اصلاح‌شده توسط مدیر is audit provenance rather than a replacement lifecycle: reconstructing only the start of a currently ongoing shift leaves it فعال with the correction marker, while a fully reconstructed past shift is پایان‌یافته with that marker.
 _Avoid_: silently editing shift timestamps, disguising a missed action as a guard click, losing the original recorded time, hiding correction provenance in reports, creating unaudited historical shift sessions, placing evidence outside the corrected session, accepting contradictory guard-session overlaps, coupling shift correction to physical-arrival correction, granting correction authority to unrelated managers, or treating correction provenance as a mutually exclusive shift status
 
-**بستن اجباری شیفت حراست**:
+**بستن اجباری شیفت گارد**:
 A Security manager closure of an active shift at the current authoritative server time when the guard cannot complete the ordinary closure. It is displayed as بسته‌شده توسط مدیر and remains distinct from asserting or correcting a historical operational finish time.
 _Avoid_: using force-close to manufacture an earlier finish, labeling a historical correction as a current forced closure, or hiding the accountable manager and reason
 
-**پایان واقعی شیفت حراست**:
+**پایان واقعی شیفت گارد**:
 The authoritative server timestamp captured when the guard submits the final ثبت پایان شیفت confirmation after providing the closure summary. Opening or later cancelling the closure dialog does not end the shift.
 _Avoid_: treating the first dialog-opening click as completion, using an untrusted browser clock as the authoritative time, or presenting time spent completing the closure confirmation as server delay
 
-**زمان ثبت عملیات شیفت حراست**:
+**زمان ثبت عملیات شیفت گارد**:
 The single unrounded server timestamp captured immediately when the confirmed shift-start or shift-finish request reaches its handler and then reused for persistence and response. The interface reflects the successful value immediately and prevents duplicate submission; minute-level divergence after server receipt is a defect, while untrusted browser time is never substituted for network transit before receipt.
 _Avoid_: capturing a later timestamp after database checks, snapping an actual action to the planned slot, rounding the persisted time, trusting the client clock as authority, or leaving the user waiting for periodic refresh after success
 
-**افراد مرتبط در گزارش لحظه‌ای حراست**:
+**افراد مرتبط در گزارش لحظه‌ای گارد**:
 The reporter of a گزارش لحظه‌ای is always the authenticated security user who owns the active shift session, but the related people attached to the report are active organizational personnel. New report participants should support پرسنل سازمانی, including people without a system login, while old user-based participants remain visible for historical compatibility.
 _Avoid_: limiting related people to users with login accounts, changing the report author into a personnel record, or losing old user-based participant history during migration.
 
-**نوع گزارش لحظه‌ای حراست**:
+**نوع گزارش لحظه‌ای گارد**:
 A manager-defined active/inactive category for shift log rows, with name, optional description, and display order. It classifies a mandatory timestamped گزارش لحظه‌ای description without adding severity or workflow behavior yet.
-Report types are managed in تنظیمات حراست, a workspace-local manager/admin page for حراست-owned settings.
+Report types are managed in تنظیمات گارد, a workspace-local manager/admin page for گارد-owned settings.
 When a report type is selected in the create form, its configured description appears as helper text below the dropdown. Shift log lists, history, and detailed PDFs show the report type name and configured type description separately from the guard-written event description; empty type descriptions are omitted.
 _Avoid_: hard-coded report type dropdowns, optional row descriptions, treating type configuration as patrol workflow rules, or merging the configured type description with the actual event description.
 
-**دسته‌بندی گزارش لحظه‌ای حراست**:
+**دسته‌بندی گزارش لحظه‌ای گارد**:
 A manager-defined parent grouping for instant report types. It helps guards first choose the operational area of the event before selecting the specific نوع گزارش لحظه‌ای.
 Categories have manager-controlled name, optional description, display order, and active/inactive state; inactive categories are hidden from new guard report entry while historical reports remain readable.
 _Avoid_: using دسته‌بندی as the final report type, making it free text during report entry, deleting categories to hide old history, or mixing it with severity/approval state
 
-**نوع گزارش لحظه‌ای حراست - دسته‌بندی‌شده**:
+**نوع گزارش لحظه‌ای گارد - دسته‌بندی‌شده**:
 A manager-defined active/inactive type inside one دسته‌بندی گزارش لحظه‌ای, with name, optional description, and display order. Existing uncategorized types should be migrated into a default عمومی category until managers reorganize them.
 If the parent category is inactive, its types are hidden from new گزارش لحظه‌ای creation even when the type itself is active; managers can still see and edit them in settings, and historical reports keep showing both category and type.
 Managers may move a type between categories; historical report rows follow the current type/category configuration in this pass rather than snapshotting old category names.
@@ -1383,29 +1383,29 @@ _Avoid_: submitting a stale type from a previous category, showing all types in 
 A server-generated sequence number scoped to one planned security shift. Each shift starts at row 1 and guards never manually enter or edit the row number.
 _Avoid_: global report numbering, client-generated row numbers, or reusing a voided row number for a later entry
 
-**ابطال گزارش لحظه‌ای حراست**:
-A visible audit state for a mistaken shift log row, requiring a reason, the voiding user, and the exact void timestamp. Any حراست user with edit access may void any row, and voided rows remain in the normal shift log clearly marked باطل شده.
+**ابطال گزارش لحظه‌ای گارد**:
+A visible audit state for a mistaken shift log row, requiring a reason, the voiding user, and the exact void timestamp. Any گارد user with edit access may void any row, and voided rows remain in the normal shift log clearly marked باطل شده.
 _Avoid_: deleting shift log rows, hiding voided rows by default, or voiding without a reason
 
-**گشت‌زنی حراست**:
+**گشت‌زنی گارد**:
 A timestamped patrol session inside a security shift. It starts with one click and a server timestamp, ends with a required description and server timestamp, may happen multiple times in one shift, and one user cannot have overlapping active patrol sessions.
 Shift closure is blocked while any patrol session in that shift is still active.
 _Avoid_: requiring patrol notes before the patrol happens, storing patrols as free-text shift notes, allowing accidental overlapping active patrols for the same user, or auto-ending patrols during shift closure
 
-**رویدادهای خط زمانی گشت‌زنی حراست**:
+**رویدادهای خط زمانی گشت‌زنی گارد**:
 The two linked chronological events that expose one patrol inside its shift timeline: a start event at the exact patrol start and a finish event at the exact patrol end. The finish event identifies the guard and includes duration and the required completion description so reports recorded during the patrol remain correctly ordered between the two events.
 The same combined chronology appears in the guard's active timeline, the manager's live read-only timeline, completed shift details, report preview, and PDF; active patrol controls remain separate from the recorded evidence.
 _Avoid_: collapsing a patrol into one ambiguously placed range card, duplicating the patrol as an unlinked pair, hiding intervening shift reports, or letting live, completed, preview, and exported timelines disagree
 
-**گزارش‌های حراست**:
-A manager-focused reporting workspace with exactly two report products: گزارش شیفت‌ها and گزارش حضور و غیاب حراست. It is separate from the active گزارش شیفت حراست workflow: managers search completed shifts directly, preview the selected evidence, and generate a scoped PDF instead of first choosing an analytical date range or report format.
+**گزارش‌های گارد**:
+A manager-focused reporting workspace with exactly two report products: گزارش شیفت‌ها and گزارش حضور و غیاب گارد. It is separate from the active گزارش شیفت گارد workflow: managers search completed shifts directly, preview the selected evidence, and generate a scoped PDF instead of first choosing an analytical date range or report format.
 _Avoid_: mock analytics, decorative KPI collections, performance-report mode as a competing third product, requiring a date range before a manager can find a completed shift, or showing labels that do not match the exported evidence
 
-**شیفت قبل حراست**:
+**شیفت قبل گارد**:
 The finished security shift session with the most recent actual `endedAt`, whether normally closed or force-closed by a manager. It is based on actual completion order rather than the previous planned rota slot.
 _Avoid_: selecting the prior scheduled slot when another session finished later, or excluding force-closed sessions from the latest completed shift
 
-**دسته‌بندی پوشش شیفت‌های حراست**:
+**دسته‌بندی پوشش شیفت‌های گارد**:
 The shift-coverage list has two operational categories: جاری و در انتظار contains the active shift first followed by upcoming waiting shifts nearest-first, including unresolved exceptional states that still require action; پایان‌یافته contains normally completed and manager-closed shifts ordered by actual finish time newest-first.
 Each row links truthfully to its available evidence: a waiting slot opens planned-shift details, an active session opens its live shift report, and a finished session opens its completed shift report.
 _Avoid_: mixing completed history into live coverage work, ordering waiting shifts farthest-first, ordering completed shifts by planned slot time, hiding unresolved coverage states in history, or presenting an empty waiting slot as an existing shift report
@@ -1416,45 +1416,45 @@ _Avoid_: leaving an ended untouched slot as ordinary در انتظار, silently
 
 **گزارش شیفت‌ها**:
 The manager-only completed-shift report product. It lists completed shifts newest-first, supports direct search by shift identity, guard, Jalali date, or operational state, and allows one or several shifts to be selected, previewed with their complete read-only timelines, and exported as one scoped PDF. Date range is an optional advanced filter rather than the required entry point.
-_Avoid_: limiting reporting to only شیفت قبل حراست, immediately downloading before preview, requiring a date range for ordinary retrieval, exporting active shifts, or flattening evidence from different shifts into an unscoped feed
+_Avoid_: limiting reporting to only شیفت قبل گارد, immediately downloading before preview, requiring a date range for ordinary retrieval, exporting active shifts, or flattening evidence from different shifts into an unscoped feed
 
-**بخش‌های مبتنی بر شواهد در PDF تفصیلی حراست**:
+**بخش‌های مبتنی بر شواهد در PDF تفصیلی گارد**:
 Both the latest-shift PDF and personnel-performance PDF omit empty per-shift patrol, attendance, closure-summary, participant, and image sections, while retaining sections with real recorded activity. The standalone date-range attendance PDF keeps its consistent analytical structure because zero attendance values are meaningful data there.
 _Avoid_: printing placeholder operational sections in detailed PDFs, or removing meaningful zero-valued rows from the aggregate attendance report
 
-**عملکرد نیروهای حراست**:
+**عملکرد نیروهای گارد**:
 The manager-only reporting view of assigned Security personnel over a selected date range, covering their planned duties, attendance, sessions, coverage exceptions, patrols, and timestamped shift-log activity. It is separate from company-wide attendance reporting.
 _Avoid_: treating all employees as Security personnel, or reducing guard performance to only a company attendance percentage
 
-**شواهد عملیاتی نیروی حراست**:
+**شواهد عملیاتی نیروی گارد**:
 The timestamped shift-log descriptions, patrol completion notes, and shift closure summaries for a Security guard within a selected report date range. Managers may inspect them after narrowing the report; they are not default dashboard content.
 _Avoid_: exposing operational narratives without report context, or replacing evidence with counts alone
 
-**فیلتر زمینه‌مند گزارش‌های حراست**:
+**فیلتر زمینه‌مند گزارش‌های گارد**:
 A report filter set whose controls follow the selected reporting scope: quick or custom Jalali date range and common identity filters, with attendance filters for employee reporting and operational-status/activity filters for Security-personnel performance.
 _Avoid_: one static filter form that exposes irrelevant controls, or losing the selected filters when the report scope changes
 
-**دسترسی گزارش عملکرد نیروهای حراست**:
+**دسترسی گزارش عملکرد نیروهای گارد**:
 Manager-level Security workspace access to the detailed performance view, its operational narratives, and the latest-completed-shift PDF. This access is distinct from ordinary guard self-service and aggregate report viewing.
 _Avoid_: protecting detailed personnel performance only by hidden interface controls, exposing guard narratives to generic workspace viewers, or allowing report-page visibility alone to authorize detailed PDF downloads
 
-**خروجی عملکرد نیروهای حراست**:
+**خروجی عملکرد نیروهای گارد**:
 The manager-only performance PDF may include detailed operational evidence from finished security shifts in the selected date range: shift date/time and status, planned/replacement/temporary coverage person, attendance and delay, closure summary, instant report rows with report type names and descriptions, and patrol sessions. Active shifts are excluded. Both CLOSED and FORCE_CLOSED sessions count as finished, with force-closed shifts clearly labeled.
 _Avoid_: exporting active shifts, hiding force-closed status, or exposing detailed operational narratives outside the manager/admin performance export.
 
-**تصاویر گزارش لحظه‌ای در خروجی حراست**:
+**تصاویر گزارش لحظه‌ای در خروجی گارد**:
 Images are printed directly beneath their own instant-report row with preserved aspect ratio, up to two images per row, natural continuation across rows or pages, and a caption containing the report row number and original filename. Voided-report images follow the same layout while retaining the report's voided context.
 _Avoid_: separating images from their report, stretching or cropping evidence, mixing images from different rows, or omitting identifying captions
 
-**حضور و غیاب در خروجی شیفت حراست**:
+**حضور و غیاب در خروجی شیفت گارد**:
 Each completed shift in a latest-shift or personnel-performance PDF has a separate attendance section for the guard who actually worked and any recorded replacement or temporary coverage, including recorded arrival, delay, and corrections. Off-duty A/B/C guards are not shown as absent, while the standalone attendance PDF remains the date-range attendance export.
 _Avoid_: treating off-duty primary guards as absent, merging attendance into unrelated shift metadata, or replacing the standalone attendance report with shift-specific attendance
 
-**تاریخچه تفصیلی شیفت نیروی حراست**:
+**تاریخچه تفصیلی شیفت نیروی گارد**:
 A manager/admin-only dedicated page for chronological review of one Security guard's shifts in the selected range. Each expandable shift keeps scheduled and actual coverage, attendance and session timing, exceptions, patrols, closure data, and the complete instant-report audit trail together.
 _Avoid_: flattening evidence from different shifts into one unscoped activity feed, showing detailed history to ordinary guards, or losing the report date context when navigating to the history
 
-**گزارش لحظه‌ای باطل‌شده حراست**:
+**گزارش لحظه‌ای باطل‌شده گارد**:
 An instant report that remains visible in the shift audit trail and PDF exports with a clear voided state, void time, void reason, and any attached images. It is historical evidence rather than active shift content and does not count toward active-work summary totals.
 _Avoid_: deleting voided reports or their images, counting them as active work, or presenting them as active without their void context
 
@@ -1462,8 +1462,8 @@ _Avoid_: deleting voided reports or their images, counting them as active work, 
 The detailed shift-history page defaults to the selected guard's entire record, including inactive/former Security personnel, and orders shifts newest first. A date range is an optional narrowing filter; each shift begins with a compact status and timing header, while its complete audit evidence is revealed in an expandable section.
 _Avoid_: inheriting an arbitrary reporting date as a required history boundary, omitting former personnel, loading every shift's full narrative by default, or making a manager search through an unstructured event stream
 
-**داده واقعی حراست**:
-Core حراست surfaces use persisted operational data or an honest empty state when no records exist. Missing core sources should be backed by explicit API contracts, while non-core admin-wide security audit widgets stay empty or hidden until a real audit-log model exists.
+**داده واقعی گارد**:
+Core گارد surfaces use persisted operational data or an honest empty state when no records exist. Missing core sources should be backed by explicit API contracts, while non-core admin-wide security audit widgets stay empty or hidden until a real audit-log model exists.
 _Avoid_: simulated counts, delayed fake loading, hard-coded sample users, or admin security metrics that imply audit coverage the system does not actually record
 
 **پروفایل شخصی کاربر**:
@@ -1477,7 +1477,7 @@ _Avoid_: presenting امور شخص as a workspace, confusing it with پرسنل
 **درخواست مرخصی کاربر**:
 A personal leave request submitted by an authenticated user from امور شخص, using the same business concept as the existing exception-request workflow so approvals, rejections, attendance effects, and security shift coverage can share one leave truth. V1 requests require leave type, start date, end date, and reason; description is optional. Pending requests may be cancelled by the requester, approved by a global admin or global manager, or rejected with a required reason. Global admins and global managers may also create a leave request for a specific user when needed; manager-created requests are approved immediately by default and keep creator, target user, approval, and reason audit fields visible.
 Leave requests are not hard-deleted in normal V1 use. Users may edit or cancel their own pending requests, admins and global managers may edit pending requests, and approved requests may be cancelled by admins or global managers only with a required reason.
-_Avoid_: creating a separate leave-request object that competes with existing exception requests, making personal leave submission depend on membership in the حراست workspace, treating workspace managers as approvers by default, requiring manager-created requests to go through a pointless self-approval step, hard-deleting leave history, or rejecting/cancelling a leave request without a visible reason.
+_Avoid_: creating a separate leave-request object that competes with existing exception requests, making personal leave submission depend on membership in the گارد workspace, treating workspace managers as approvers by default, requiring manager-created requests to go through a pointless self-approval step, hard-deleting leave history, or rejecting/cancelling a leave request without a visible reason.
 
 **نوع مرخصی کاربر**:
 The user-facing leave classification for درخواست مرخصی کاربر: استحقاقی, استعلاجی, استعلاجی سازمانی, or بدون حقوق. مرخصی روزانه is the default request shape, not a separate user-facing leave type.
@@ -1488,8 +1488,8 @@ A real person who belongs to a Sabalan department and may appear in operational 
 _Avoid_: treating every personnel record as a login account, hiding non-user personnel from operational attendance, or using system permissions as proof that a person belongs to the workforce
 
 **مدیریت پرسنل**:
-An Admin-owned company workforce registry for creating and maintaining organizational personnel independently of login access. Operational workspaces such as حراست consume this registry but do not own the company-wide personnel list.
-_Avoid_: hiding company personnel management inside حراست, duplicating the workforce list per workspace, or mixing personnel registry work with user permission management
+An Admin-owned company workforce registry for creating and maintaining organizational personnel independently of login access. Operational workspaces such as گارد consume this registry but do not own the company-wide personnel list.
+_Avoid_: hiding company personnel management inside گارد, duplicating the workforce list per workspace, or mixing personnel registry work with user permission management
 
 **اطلاعات پایه پرسنل سازمانی**:
 The first personnel registry records only first name, last name, related department, and active/inactive state. Phone, email, national code, payroll data, and identity documents are outside the first version unless a later workflow explicitly needs them.
@@ -1519,39 +1519,39 @@ _Avoid_: using user accounts as the workforce roster, creating login access just
 Creating a system user should default to creating or linking the corresponding organizational personnel from the user's name and department, while also allowing admins to attach the user to an existing personnel record. One personnel record may be linked to at most one system user.
 _Avoid_: creating duplicate personnel when a matching same-department person already exists, forcing a login account for existing non-user personnel, or allowing multiple users to represent the same personnel record
 
-**برنامه من حراست**:
+**برنامه من گارد**:
 The month-selectable personal view of a security user's published shift duties: planned assignment, replacement duty, and temporary coverage. It spans past, current, and future Jalali months, while full rota and coverage visibility remains manager-only.
 _Avoid_: using a static date input, showing a guard the entire team's rota, or omitting temporary coverage from the user's own schedule
 
-**بازخورد عملیاتی حراست**:
+**بازخورد عملیاتی گارد**:
 The workspace feedback pattern: inline validation for field-level corrections, non-blocking in-app notices for routine outcomes, and explicit in-app confirmation or reason dialogs for destructive or audited actions.
 _Avoid_: native browser alerts or prompts, generic errors detached from their operation, or confirmations for harmless navigation
 
-**داشبورد حراست**:
-A shared operational-awareness surface for users of the حراست workspace. Permitted users receive today's attendance conditions and navigation, while active-shift identity and live reports are visible only to the active guard and security managers/admins; managers/admins remain read-only on the dashboard and complete shift-report view.
+**داشبورد گارد**:
+A shared operational-awareness surface for users of the گارد workspace. Permitted users receive today's attendance conditions and navigation, while active-shift identity and live reports are visible only to the active guard and security managers/admins; managers/admins remain read-only on the dashboard and complete shift-report view.
 _Avoid_: treating the entire dashboard as manager-only, duplicating attendance or shift-report operations on it, exposing another guard's active-shift identity or records to ordinary read-only users, or preventing managers/admins from observing the active shift
 
-**وضعیت امروز حراست**:
+**وضعیت امروز گارد**:
 The dashboard's calendar-day attendance summary for today's roster, limited to غایب، تأخیر، مأموریت، and مرخصی. These are independent operational conditions rather than parts of one total: غایب and تأخیر use the derived attendance classification, while مأموریت and مرخصی count approved authorizations overlapping today, so one person may contribute to more than one value. The summary is independent of the active security shift, whose live-report timeline may cross midnight.
 _Avoid_: including total or present personnel, adding a dashboard date picker, redefining the summary around the active shift session, forcing the four values to be mutually exclusive, or filtering مأموریت and مرخصی only by the primary attendance status
 
-**طراحی عملیاتی موبایل حراست**:
-Every حراست route follows one minimal mobile-first RTL interaction language with compact Persian headings, teal primary actions, neutral surfaces, semantic labelled states, structured mobile lists, focused forms, independent data states, and purposeful motion. Desktop may retain compact semantic tables where row comparison matters, while mobile exposes essential row identity and state first and places secondary detail behind expansion without ordinary horizontal scrolling.
+**طراحی عملیاتی موبایل گارد**:
+Every گارد route follows one minimal mobile-first RTL interaction language with compact Persian headings, teal primary actions, neutral surfaces, semantic labelled states, structured mobile lists, focused forms, independent data states, and purposeful motion. Desktop may retain compact semantic tables where row comparison matters, while mobile exposes essential row identity and state first and places secondary detail behind expansion without ordinary horizontal scrolling.
 _Avoid_: treating manager/config/report pages as a lower-quality responsive afterthought, reviving the older red/rose security theme, table-only mobile views, cramped side-by-side fields that break Persian labels, card-inside-card decoration, or using color without a Persian state label
 
-**خروجی گزارش‌های حراست**:
+**خروجی گزارش‌های گارد**:
 A PDF rendition of the exact shift and personnel scope that an authorized manager has selected and previewed. Its minimal identity contains the concise Persian report title, selected scope, essential timestamps and states, useful evidence rows or timeline, generation timestamp, and page numbering; decorative charts, helper text, controls, repeated metadata, empty columns, empty sections, and oversized branding are omitted.
 _Avoid_: ambiguous PDF buttons, downloading before preview, ignoring the selected scope, exporting sensitive operational data outside authorization, or filling the document with interface copy and decorative summaries
 
-**دو نوع خروجی گزارش حراست**:
-Security reporting has two distinct export families. گزارش شیفت‌ها exports complete read-only evidence for one or several selected completed shifts. گزارش حضور و غیاب حراست exports attendance for one or several selected shifts and either all, one, or several selected personnel within that scope.
+**دو نوع خروجی گزارش گارد**:
+Security reporting has two distinct export families. گزارش شیفت‌ها exports complete read-only evidence for one or several selected completed shifts. گزارش حضور و غیاب گارد exports attendance for one or several selected shifts and either all, one, or several selected personnel within that scope.
 _Avoid_: a generic performance-report mode, one ambiguous PDF action that changes meaning, or applying a personnel filter to hide unrelated rows from a shift's canonical operational timeline
 
-**صادرکننده گزارش حراست**:
-A security manager, admin, or explicitly authorized report viewer who may preview and generate گزارش شیفت‌ها and گزارش حضور و غیاب حراست within their authorized scope. A regular guard may operate their own active گزارش شیفت حراست but cannot gain report export access merely by working a shift.
+**صادرکننده گزارش گارد**:
+A security manager, admin, or explicitly authorized report viewer who may preview and generate گزارش شیفت‌ها and گزارش حضور و غیاب گارد within their authorized scope. A regular guard may operate their own active گزارش شیفت گارد but cannot gain report export access merely by working a shift.
 _Avoid_: granting personnel attendance export to every user who can work a security shift, or relying only on hidden front-end buttons to protect report data
 
-**محتوای خروجی گزارش حراست**:
+**محتوای خروجی گزارش گارد**:
 The attendance export contains the selected shift identities and personnel scope, generation time, a concise useful summary, and the applicable attendance facts for each selected person and shift, including state, expected time, actual movements, and authorized mission or leave context when relevant. The shift export keeps each selected shift's complete timeline and audit context together.
 _Avoid_: a report with no scope identity, omitting selected absent personnel, treating mission or leave as fabricated physical presence, mixing different shifts into an unscoped activity feed, or printing fields with no value or decision relevance
 
@@ -1561,64 +1561,64 @@ Each calendar entry has a date, holiday flag, title, description, event type, an
 One date may have multiple active entries, and the date is considered a holiday if at least one active entry for that date is marked as a holiday.
 _Avoid_: hidden side effects on operational workflows, treating admin calendar events as shift reports, recurring rules, half-day schedules, or scattering company holiday definitions across workspaces
 
-**چرخه شیفت حراست**:
+**چرخه شیفت گارد**:
 A continuous three-person rotation in A→B→C order using fixed 12-hour slots that start at 07:00 and 19:00. Each person works one slot and then rests for two slots before their next planned slot.
 _Avoid_: asking managers to manually tune shift duration for the normal annual plan, assigning each person permanently to day or night, scheduling overlapping base slots, or changing a started plan's timing
 
-**برنامه سالانه شیفت حراست**:
+**برنامه سالانه شیفت گارد**:
 A generated schedule with a date range and exactly three ordered primary guards. The normal annual plan uses fixed 07:00/19:00 shift boundaries and 12-hour slots; managers define the A/B/C order and generation dates, not the slot duration. Publishing a plan is an operational activation event: if the published schedule contains the current time, the current slot's assigned guard becomes the active shift worker immediately and their attendance is recorded with the server timestamp. If a plan is published mid-slot, the slot keeps its scheduled 07:00/19:00 boundary while the session start and attendance time remain the real publish timestamp. Mid-year primary changes create a future plan revision, while other eligible security personnel remain substitutes outside the base cycle. Draft plans may be deleted by a manager before publication, but published plans are retained as operational history and should be replaced, superseded, or explicitly cancelled rather than physically deleted.
 _Avoid_: exposing normal annual-plan timing as free-form manager inputs, publishing a current schedule that still waits for manual shift start, rewriting started slots, placing one person in multiple primary positions, or silently inserting substitutes into the A→B→C rotation
 
-**جمعیت عملیاتی جاری حراست**:
+**جمعیت عملیاتی جاری گارد**:
 The three A/B/C primary guards in the current published annual shift plan are the people shown in shift-specific dashboards, performance reports, filters, and PDFs. During a gap with no plan covering the current time, the latest non-superseded published plan remains authoritative; with no published plan history the population is intentionally empty and managers are guided to publish one. Substitutes appear only in the historical shifts they actually covered; workspace access alone never makes an admin, manager, or developer part of this population, and historical records retain their original people.
 _Avoid_: using this population for company personnel attendance, deriving reportable guards from workspace access, falling back to all users when no current slot exists, showing substitutes as current primary guards, or rewriting historical shift participants when the current A/B/C plan changes
 
-**نامزد پیکربندی نیروی حراست**:
+**نامزد پیکربندی نیروی گارد**:
 An otherwise eligible person outside the current A/B/C population may appear only in manager-only shift-plan creation, replacement, or temporary-coverage controls so future assignments remain possible. The candidate does not enter normal operational reports or people lists unless they actually cover a historical shift or become a published A/B/C guard.
 _Avoid_: exposing configuration candidates in normal dashboards and reports, or making future A/B/C and replacement assignment impossible by hiding candidates from managers
 
-**جایگزینی شیفت حراست**:
+**جایگزینی شیفت گارد**:
 A slot-specific exception that preserves the annual A→B→C baseline while assigning another eligible security user as the actual worker for an absent planned guard. Later planned assignments do not shift, and rest or overlap conflicts require a manager override reason.
 _Avoid_: regenerating the rotation after leave, transferring ownership of later slots to the substitute, or hiding rest violations created by coverage
 
-**نیروی مؤثر شیفت فعال حراست**:
+**نیروی مؤثر شیفت فعال گارد**:
 The person actually responsible for the current active shift session, whether they are the originally planned guard, a replacement, or temporary coverage. Authorized active-shift awareness identifies this person first and retains the planned-versus-coverage relationship as secondary context.
 _Avoid_: presenting the originally planned guard as currently on duty when someone else is operating the session, or flattening replacement and temporary coverage into an unexplained name
 
-**تحویل شیفت حراست**:
+**تحویل شیفت گارد**:
 The controlled boundary where the outgoing guard submits the shift report and ends the active session before the incoming assigned guard starts the next one. The first active session of a newly published current plan may be opened by publication itself; later boundaries are not auto-started in the first version and still require deliberate closure/start handling. A manager may force-close an unclosable session only with an audited reason.
 _Avoid_: starting overlapping active shift sessions, closing a normal shift without its report, or silently correcting a forgotten shift end
 
-**عدم حضور احتمالی شیفت حراست**:
+**عدم حضور احتمالی شیفت گارد**:
 A coverage alert when the assigned or replacement guard has not registered arrival after the plan's lateness threshold. It remains visible for manager review until the slot is covered, corrected, force-closed, or completed.
 _Avoid_: treating this as final absence before manager action, hiding the alert because the person later arrived, or using color without a Persian label
 
-**نفرات حراست**:
-The حراست people area covers employee attendance, shifts, exceptions, missions, and security personnel workflows. Drivers are not managed here; they belong to خودرویی because their operational role is tied to vehicle movement.
+**نفرات گارد**:
+The گارد people area covers employee attendance, shifts, exceptions, missions, and security personnel workflows. Drivers are not managed here; they belong to خودرویی because their operational role is tied to vehicle movement.
 _Avoid_: mixing driver/vehicle registry work into personnel attendance workflows
 
-**کاربر واجد شرایط حراست**:
-An active system user linked to organizational personnel who already has a security workspace permission or security role and can therefore be assigned into نفرات حراست. General active personnel are visible in attendance workflows but are not selectable for security shift plans, patrol ownership, shift logs, or replacement coverage unless they have linked user access to حراست.
+**کاربر واجد شرایط گارد**:
+An active system user linked to organizational personnel who already has a security workspace permission or security role and can therefore be assigned into نفرات گارد. General active personnel are visible in attendance workflows but are not selectable for security shift plans, patrol ownership, shift logs, or replacement coverage unless they have linked user access to گارد.
 _Avoid_: offering every active personnel record in security personnel assignment, assigning non-login personnel to authenticated shift work, or using placeholder sample users when no eligible user exists
 
-**فهرست حضور و غیاب حراست**:
-A date-effective roster of active company personnel whose ورود و خروج is managed by حراست. Managers may add or remove personnel with immediate effect for today, while each historical date, attendance report, and attendance PDF/Excel uses the roster membership effective on that date.
+**فهرست حضور و غیاب گارد**:
+A date-effective roster of active company personnel whose ورود و خروج is managed by گارد. Managers may add or remove personnel with immediate effect for today, while each historical date, attendance report, and attendance PDF/Excel uses the roster membership effective on that date.
 _Avoid_: deriving company attendance from the A/B/C shift plan or workspace access, automatically including every active person after the initial roster setup, or applying today's roster retroactively to historical attendance
 
-**فهرست خالی حضور و غیاب حراست**:
-An empty attendance population means no personnel are members of فهرست حضور و غیاب حراست for the selected date. Attendance pages and metrics show no people and guide managers to configure the roster instead of falling back to A/B/C guards, all active personnel, or access-bearing users.
+**فهرست خالی حضور و غیاب گارد**:
+An empty attendance population means no personnel are members of فهرست حضور و غیاب گارد for the selected date. Attendance pages and metrics show no people and guide managers to configure the roster instead of falling back to A/B/C guards, all active personnel, or access-bearing users.
 _Avoid_: calculating attendance from an unconfigured population, silently loading another population, or treating an empty roster as a missing shift plan
 
-**ثبت ورود تکراری در حضور و غیاب حراست**:
-When حراست records ورود for a person and that same person already has an entry time for the selected attendance date, the operation should behave as a successful idempotent action and return the existing attendance truth to the operator. The visible daily list should then show the existing حاضر record instead of leaving the person as غایب.
+**ثبت ورود تکراری در حضور و غیاب گارد**:
+When گارد records ورود for a person and that same person already has an entry time for the selected attendance date, the operation should behave as a successful idempotent action and return the existing attendance truth to the operator. The visible daily list should then show the existing حاضر record instead of leaving the person as غایب.
 _Avoid_: showing English duplicate errors to operators, treating a successful earlier ورود as a failed action, or displaying غایب for a person whose same-day ورود already exists
 
-**زمان ثبت حضور و غیاب حراست**:
-ورود and خروج actions in حراست default to the current time, but the operator may change the time before submitting when the event was forgotten or recorded late. If the submitted time differs from the default current time, a short reason is required and should remain visible as attendance context.
+**زمان ثبت حضور و غیاب گارد**:
+ورود and خروج actions in گارد default to the current time, but the operator may change the time before submitting when the event was forgotten or recorded late. If the submitted time differs from the default current time, a short reason is required and should remain visible as attendance context.
 _Avoid_: forcing a separate manual-entry mode, blocking forgotten attendance correction, or allowing silent backdated times without a reason
 
 **حضور باز روز قبل**:
-If a person has an older attendance record with ورود and no خروج, حراست must close that previous record with an explicit خروج time and reason before registering a new ورود for a later date. The system should surface this open previous attendance state instead of silently creating a new day entry or auto-filling the old exit.
+If a person has an older attendance record with ورود and no خروج, گارد must close that previous record with an explicit خروج time and reason before registering a new ورود for a later date. The system should surface this open previous attendance state instead of silently creating a new day entry or auto-filling the old exit.
 _Avoid_: overwriting yesterday's record with today's action, creating automatic خروج without operator confirmation, or allowing overlapping open attendance records for the same person
 
 **ساعت کاری پرسنل**:
@@ -1645,7 +1645,7 @@ _Avoid_: splitting one overnight presence into unrelated daily records, assignin
 The default minimal Security PDF for attendance exceptions, containing only person-days that are absent, late, or have overtime. Its summary contains only غایب and تأخیر cards, and its detail columns are پرسنل، وضعیت، ورود، خروج، تأخیر، اضافه‌کار, and یادداشت; department, recorded shift, and signature columns are omitted. A single-day report identifies that one Jalali date rather than presenting it as a same-date range and omits the redundant date column; an explicitly selected multi-day filter remains a range and restores a compact date column so repeated personnel rows remain distinguishable. Ordinary on-time attendance without overtime is omitted, while richer attendance and performance outputs remain separate available reports.
 _Avoid_: filling the default operational PDF with ordinary attendance rows, displaying redundant one-day ranges, retaining nonessential detailed columns or metric cards, or removing the existing detailed outputs when introducing the minimal report
 
-**تاریخ عملیاتی حراست**:
+**تاریخ عملیاتی گارد**:
 The Jalali calendar day explicitly selected for Security attendance, roster, and reporting work. The same selected day must survive frontend, API, persistence, and output boundaries regardless of browser or server timezone.
 _Avoid_: allowing UTC conversion to move a selected Security day backward or forward, or applying different date semantics to screen data and exported reports
 
@@ -2382,7 +2382,7 @@ _Avoid_: presenting raw IDs as the primary identity, disguising manual attributi
 Authentication views show the recorded IP address and may derive only an approximate country and city from a locally maintained IP database, clearly labeled as approximate. They never request browser GPS permission or send login IP addresses to a third-party geolocation service. Private addresses display as `Internal network`, and users viewing their own sessions receive the same IP and approximate-location context available to administrators.
 _Avoid_: presenting IP geolocation as precise physical location, transmitting authentication metadata to an external lookup service, or hiding session network context from the account owner
 
-**گزارش لحظه‌ای دسته‌محور حراست**:
+**گزارش لحظه‌ای دسته‌محور گارد**:
 An immutable timestamped Security shift-log observation whose category is always recorded directly and whose report type is present only when that category uses report types. Category and type names are preserved as they were at recording time. Description is optional, but every report must contain at least one meaningful detail through description, an image, or related personnel when that field is enabled.
 _Avoid_: manufacturing a “without type” type, changing old classifications when settings change, or accepting an empty category-only row
 
@@ -2398,11 +2398,11 @@ _Avoid_: limiting a person to one entry and exit per day, hard-coding a lunch br
 The personnel-day view derived from all physical intervals: first entry, final exit, total completed physical presence, total time outside between intervals, and whether the latest interval remains open. First entry determines lateness and final exit determines scheduled overtime, while detailed UI and outputs retain every movement.
 _Avoid_: reporting only one arbitrary interval, counting a gap as presence, finalizing totals while an interval is open, or letting PDF and Excel disagree with the daily view
 
-**استثنای حضور و غیاب حراست**:
+**استثنای حضور و غیاب گارد**:
 A Security-created operational authority that excuses expected attendance for a full day or a precise hourly window. In the current phase any authorized Security user may create and manage it. New items are pending; only approved items affect attendance. Pending items may be edited or deleted, while decided or attendance-linked history is cancelled or corrected through reasoned audit actions rather than overwritten.
 _Avoid_: calling it a personnel request, fabricating physical movements on approval, hard-deleting decided history, or letting pending/rejected/cancelled items change attendance
 
-**ماموریت پرسنل در حراست**:
+**ماموریت پرسنل در گارد**:
 A Security-created precise time window of authorized work away from the premises. Only an approved mission contributes accounted work; it never pretends that the person was physically present, and actual entry/exit intervals remain visible alongside it. In the current phase any authorized Security user may create and manage missions.
 _Avoid_: converting mission time into fake attendance movements, hiding real presence, double-counting overlapping mission and presence, or treating an unapproved mission as worked time
 

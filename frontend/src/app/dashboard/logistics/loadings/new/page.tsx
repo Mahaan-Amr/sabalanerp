@@ -871,7 +871,7 @@ export default function NewLoadingPage() {
   );
 
   const renderDriverStep = () => (
-    <ErpSection title="انتخاب رانندگان آماده بارگیری" description="فقط رانندگانی نمایش داده می‌شوند که حراست با «ورود برای بارگیری» وارد محوطه بارگیری کرده است. می‌توانید چند راننده انتخاب کنید.">
+    <ErpSection title="انتخاب رانندگان آماده بارگیری" description="فقط رانندگانی نمایش داده می‌شوند که گارد با «ورود برای بارگیری» وارد محوطه بارگیری کرده است. می‌توانید چند راننده انتخاب کنید.">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
         <input
           className={inputClass}
@@ -908,7 +908,7 @@ export default function NewLoadingPage() {
             </button>
           );
         })}
-        {!filteredDrivers.length && <ErpEmptyState icon={FaUsers} title="راننده آماده بارگیری وجود ندارد" description="حراست باید از نوبت‌دهی روی «ورود برای بارگیری» کلیک کند." />}
+        {!filteredDrivers.length && <ErpEmptyState icon={FaUsers} title="راننده آماده بارگیری وجود ندارد" description="گارد باید از نوبت‌دهی روی «ورود برای بارگیری» کلیک کند." />}
       </div>
       {selectedDrivers.length > 0 && (
         <ErpCard className="mt-4 p-4" tone="info">

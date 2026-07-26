@@ -194,7 +194,7 @@ export function ErpCurrentShiftPanel({
           <span data-erp-on-dark="secondary" className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-white/10 text-teal-100"><FaShieldAlt className="h-4 w-4" /></span>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 id={titleId} data-erp-on-dark="primary" className="text-sm font-bold">شیفت جاری حراست</h2>
+              <h2 id={titleId} data-erp-on-dark="primary" className="text-sm font-bold">شیفت جاری گارد</h2>
               <span data-erp-on-dark={badgeContrast} className={cx('rounded-full px-2.5 py-1 text-[11px] font-bold', badgeClass)}>{badge}</span>
               {overdue && <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-200"><FaExclamationTriangle className="h-3 w-3" /> شروع شیفت به تأخیر افتاده است</span>}
             </div>

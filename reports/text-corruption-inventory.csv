@@ -1,2 +1,3 @@
 file,line,class,confidence,token
-
+frontend/src/app/dashboard/inventory/services/page.tsx,1093,question-marks,0.65,"{(finishing.unitPrice ?? finishing.pricePerSquareMeter).toLocaleString('fa-IR')} تومان"
+frontend/src/app/dashboard/inventory/services/stone-finishings/edit/[id]/page.tsx,40,question-marks,0.65,"pricePerSquareMeter: (data.unitPrice ?? data.pricePerSquareMeter)?.toString() || '',"

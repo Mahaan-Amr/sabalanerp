@@ -18,7 +18,7 @@
     "test:hr-offer-decision": "tsx src/services/__tests__/hrOfferDecision.test.ts",
     "test:hr-offer-sms": "tsx src/services/__tests__/hrHiringOfferSms.test.ts",
     "test:hr-candidate-assessment": "tsx src/services/__tests__/hrCandidateAssessment.test.ts",
-    "test:hr-hiring-lifecycle": "tsx src/services/__tests__/hrHiringLifecycle.test.ts && tsx src/services/__tests__/hrEmploymentContract.test.ts && tsx src/services/__tests__/hrInsuranceEnrollment.test.ts && tsx src/services/__tests__/hrPayrollParticipation.test.ts",
+    "test:hr-hiring-lifecycle": "tsx src/services/__tests__/hrHiringLifecycle.test.ts && tsx src/services/__tests__/hrEmploymentContract.test.ts && tsx src/services/__tests__/hrInsuranceEnrollment.test.ts && tsx src/services/__tests__/hrPayrollParticipation.test.ts && tsx src/services/__tests__/hrHiringDocumentIndex.test.ts",
     "test:user-deletion-policy": "tsx src/services/__tests__/userDeletionPolicy.test.ts",
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",

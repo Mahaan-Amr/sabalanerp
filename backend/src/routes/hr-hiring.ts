@@ -46,6 +46,7 @@ import {
 } from '../services/hrEmploymentContract';
 import { normalizeInsuranceEnrollmentCommand } from '../services/hrInsuranceEnrollment';
 import { normalizePayrollParticipationCommand } from '../services/hrPayrollParticipation';
+import { buildHiringDocumentIndex } from '../services/hrHiringDocumentIndex';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -820,6 +821,7 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   const data: any = row;
   data.lifecycle = projectHiringLifecycle(row, authorities);
   data.taskCapabilities = projectHiringTaskCapabilities(row, authorities);
+  data.documentIndex = buildHiringDocumentIndex(row, authorities);
   if (!canSeeDecisionDetails) {
     data.hiringDecisions = data.hiringDecisions.map(({ kind, outcome, version, decidedAt }: any) => ({ kind, outcome, version, decidedAt }));
     data.preIdentityChecklistItems = data.preIdentityChecklistItems.map(({ id, title, status, dueAt, managementResolution }: any) => ({ id, title, status, dueAt, managementResolution }));
@@ -1183,6 +1185,7 @@ router.get('/applications/:id/documents/:documentId/download', requireAuthority(
   const document = await prisma.hrHiringDocument.findFirst({ where: { id: req.params.documentId, applicationId: req.params.id } });
   if (!document) return res.status(404).json({ success: false, error: 'سند پیدا نشد.' });
   await audit(req.params.id, 'IDENTITY_DOCUMENT_DOWNLOADED', req, { documentId: document.id });
+  await audit(req.params.id, 'SENSITIVE_RECRUITMENT_EVIDENCE_ACCESSED', req, { evidenceType: 'IDENTITY', evidenceId: document.id, action: 'DOWNLOAD' });
   res.download(safeHiringStoragePath(document.storageName), document.originalName);
 }));
 
@@ -1849,6 +1852,7 @@ router.get('/applications/:id/assessments/:assessmentId/download', requireAuthor
   const row = await prisma.hrCandidateAssessment.findFirst({ where: { id: req.params.assessmentId, applicationId: req.params.id } });
   if (!row?.storageName || !row.originalName) return res.status(404).json({ success: false, error: 'فایل ارزیابی پیدا نشد.' });
   await audit(req.params.id, 'CANDIDATE_ASSESSMENT_DOWNLOADED', req, { assessmentId: row.id });
+  await audit(req.params.id, 'SENSITIVE_RECRUITMENT_EVIDENCE_ACCESSED', req, { evidenceType: 'ASSESSMENT', evidenceId: row.id, action: 'DOWNLOAD' });
   res.download(safeHiringStoragePath(row.storageName), row.originalName);
 }));
 
@@ -1909,6 +1913,7 @@ router.get('/applications/:id/collateral/:itemId/download', requireAuthority('FI
   const row = await prisma.hrCollateralItem.findFirst({ where: { id: req.params.itemId, applicationId: req.params.id } });
   if (!row?.storageName || !row.originalName) return res.status(404).json({ success: false, error: 'فایل وثیقه پیدا نشد.' });
   await audit(req.params.id, 'COLLATERAL_DOCUMENT_DOWNLOADED', req, { itemId: row.id });
+  await audit(req.params.id, 'SENSITIVE_RECRUITMENT_EVIDENCE_ACCESSED', req, { evidenceType: 'COLLATERAL', evidenceId: row.id, action: 'DOWNLOAD' });
   res.download(safeHiringStoragePath(row.storageName), row.originalName);
 }));
 
@@ -2101,6 +2106,7 @@ router.get('/applications/:id/contracts/:contractId/download', requireAuthority(
   const row = await prisma.hrEmploymentContractDocument.findFirst({ where: { id: req.params.contractId, applicationId: req.params.id } });
   if (!row) return res.status(404).json({ success: false, error: 'قرارداد پیدا نشد.' });
   await audit(req.params.id, 'SIGNED_CONTRACT_DOWNLOADED', req, { contractId: row.id });
+  await audit(req.params.id, 'SENSITIVE_RECRUITMENT_EVIDENCE_ACCESSED', req, { evidenceType: 'CONTRACT', evidenceId: row.id, action: 'DOWNLOAD' });
   res.download(safeHiringStoragePath(row.storageName), row.originalName);
 }));
 

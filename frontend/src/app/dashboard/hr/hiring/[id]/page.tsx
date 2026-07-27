@@ -401,6 +401,17 @@ export default function HiringCasePage() {
       setError(hiringError(e));
     }
   };
+  const downloadIndexedEvidence = (item: any) => {
+    const request =
+      item.downloadKind === "DOCUMENT"
+        ? () => hiringAPI.downloadDocument(id, item.id)
+        : item.downloadKind === "ASSESSMENT"
+          ? () => hiringAPI.downloadAssessment(id, item.id)
+          : item.downloadKind === "CONTRACT"
+            ? () => hiringAPI.downloadContract(id, item.id)
+            : () => hiringAPI.downloadCollateral(id, item.id);
+    return download(request, item.originalName || item.title);
+  };
   return (
     <ErpPage
       eyebrow="منابع انسانی · پرونده استخدام"
@@ -463,6 +474,45 @@ export default function HiringCasePage() {
             </ErpCard>
           </ErpSection>
         )}
+      {(data.documentIndex || []).length > 0 && (
+        <ErpSection
+          title="فهرست اسناد و فایل‌های پرونده"
+          description="دسترسی هر فایل بر اساس مسئولیت سازمانی شما کنترل و ثبت می‌شود."
+        >
+          <div className="space-y-2">
+            {data.documentIndex.map((item: any) => (
+              <ErpCard
+                key={`${item.category}-${item.id}-${item.version}`}
+                className="flex flex-wrap items-center justify-between gap-3 p-4"
+              >
+                <div>
+                  <p className="font-bold">{item.title}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {item.safeOwner} · نسخه {item.version} · {hrDisplayLabel(item.reviewStatus)}
+                  </p>
+                  {!item.restricted && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      {item.originalName || "بدون فایل پیوست"} · {dateTimeFa(item.date)}
+                    </p>
+                  )}
+                </div>
+                {item.canOpen ? (
+                  <button
+                    className="rounded-lg border px-3 py-2 text-sm"
+                    onClick={() => downloadIndexedEvidence(item)}
+                  >
+                    دریافت فایل
+                  </button>
+                ) : (
+                  <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs dark:bg-slate-800">
+                    جزئیات برای نقش شما محدود است
+                  </span>
+                )}
+              </ErpCard>
+            ))}
+          </div>
+        </ErpSection>
+      )}
       {selectedLifecyclePhase === "PRE_IDENTITY" &&
         (canHrSensitive || canCompanyManager) && (
           <PreIdentitySection

@@ -720,7 +720,9 @@ const activationGate = (source: HiringLifecycleSource): Gate => {
     insuranceEnrollment: source.insuranceEnrollment,
   });
   const blockers = readiness.blockers.map((item) => {
-    const task = source.onboardingTasks?.find((candidate) => candidate.id === item.id);
+    const task = source.onboardingTasks?.find(
+      (candidate) => `ONBOARDING_TASK:${candidate.id || candidate.title}` === item.id,
+    );
     return blocker(item.id, item.message, task?.ownerAuthority || "HR_MANAGER");
   });
   if (source.employmentRelationship?.status === "ENDED") blockers.push(blocker("EMPLOYMENT_ENDED", "رابطه استخدامی پایان یافته است.", "HR_MANAGER"));

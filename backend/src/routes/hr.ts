@@ -347,11 +347,26 @@ router.get('/personnel', viewAccess, async (req, res) => {
       prisma.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { authority: true } })
     ]);
     const authorities = new Set(authorityRows.map((row) => row.authority));
+    const now = new Date();
+    const isEffective = (from: Date, to: Date | null) => from <= now && (!to || to >= now);
     const data = rows.map((person) => {
-      const relationship = person.hrEmploymentRelationships[0];
-      const primary = relationship?.assignments.find((assignment) => assignment.type === 'PRIMARY' && !assignment.effectiveTo);
+      const relationship = person.hrEmploymentRelationships.find((candidate) =>
+        ['PLANNED', 'ACTIVE', 'SUSPENDED'].includes(candidate.status) &&
+        isEffective(candidate.effectiveFrom, candidate.effectiveTo)
+      );
+      const primary = relationship?.assignments.find((assignment) =>
+        assignment.type === 'PRIMARY' && isEffective(assignment.effectiveFrom, assignment.effectiveTo)
+      );
       const change = person.workScheduleChanges[0];
-      const isResponsibleSupervisor = primary?.responsibleSupervisorAssignment?.employmentRelationship.personnel.user?.id === actorId(req);
+      const supervisorAssignment = primary?.responsibleSupervisorAssignment;
+      const supervisorRelationship = supervisorAssignment?.employmentRelationship;
+      const isResponsibleSupervisor = Boolean(
+        supervisorAssignment && supervisorRelationship &&
+        isEffective(supervisorAssignment.effectiveFrom, supervisorAssignment.effectiveTo) &&
+        ['ACTIVE', 'SUSPENDED'].includes(supervisorRelationship.status) &&
+        isEffective(supervisorRelationship.effectiveFrom, supervisorRelationship.effectiveTo) &&
+        supervisorRelationship.personnel.user?.id === actorId(req)
+      );
       const separateReviewer = change?.preparedBy !== actorId(req);
       const canSeeChangeDetails = Boolean(isResponsibleSupervisor) || authorities.has('HR_PROCESSOR') || authorities.has('HR_MANAGER');
       return {

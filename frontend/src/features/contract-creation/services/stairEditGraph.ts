@@ -12,6 +12,23 @@ export const isStairMainProduct = (
   !isStairLayerProduct(product)
 );
 
+export const resolveStairParentIndex = (
+  products: ContractProduct[],
+  product: ContractProduct,
+  productIndex: number
+): number => {
+  if (!isStairLayerProduct(product)) return productIndex;
+  if (product.parentProductRowId) {
+    return products.findIndex(candidate =>
+      isStairMainProduct(candidate) &&
+      candidate.rowId === product.parentProductRowId
+    );
+  }
+  return typeof product.parentProductIndex === 'number'
+    ? product.parentProductIndex
+    : -1;
+};
+
 export type AttachedStairLayerResolution =
   | {
       status: 'resolved';
@@ -34,28 +51,31 @@ export const resolveAttachedStairLayers = (
     return { status: 'resolved', indices: [] };
   }
 
-  const layerRows = products
+  const allLayerRows = products
     .map((product, index) => ({ product, index }))
-    .filter(({ product }) =>
-      isStairLayerProduct(product) &&
-      product.stairSystemId === parent.stairSystemId &&
-      (product.meta as any)?.layerInfo?.parentPartType ===
-        parent.stairPartType
-    );
+    .filter(({ product }) => isStairLayerProduct(product));
 
-  const stableMatches = layerRows.filter(({ product }) =>
+  // Stable identity is authoritative even when redundant historical metadata
+  // (system/part/index) is stale.
+  const stableMatches = allLayerRows.filter(({ product }) =>
     Boolean(
       parent.rowId &&
       product.parentProductRowId === parent.rowId
     )
   );
 
-  const legacyIndexMatches = layerRows.filter(({ product }) =>
+  const legacyLayerRows = allLayerRows.filter(({ product }) =>
+    !product.parentProductRowId &&
+    product.stairSystemId === parent.stairSystemId &&
+    (product.meta as any)?.layerInfo?.parentPartType === parent.stairPartType
+  );
+
+  const legacyIndexMatches = legacyLayerRows.filter(({ product }) =>
     !product.parentProductRowId &&
     product.parentProductIndex === parentIndex
   );
 
-  const unresolvedLegacyLayers = layerRows.filter(({ product }) =>
+  const unresolvedLegacyLayers = legacyLayerRows.filter(({ product }) =>
     !product.parentProductRowId &&
     typeof product.parentProductIndex !== 'number'
   );

@@ -130,13 +130,15 @@ import {
   clearDraftFieldError
 } from '@/features/contract-creation/services/stairValidationService';
 import {
+  executeStairCreateTransaction,
   hasMeaningfulStairDraft,
   reportStairTransactionDiagnostic,
   shouldConfirmStairDraftDiscard
 } from '@/features/contract-creation/services/stairConfigurationTransaction';
 import {
   getStairRowWithAttachedLayers as resolveStairRowWithAttachedLayers,
-  resolveAttachedStairLayers
+  resolveAttachedStairLayers,
+  resolveStairParentIndex
 } from '@/features/contract-creation/services/stairEditGraph';
 import {
   calculateLongitudinalMaterialPricing,
@@ -2264,21 +2266,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const closeProductModal = productModal.closeModal;
   const returnToProductModalAfterRemainderRef = useRef(false);
   const requestedStairFooterActionRef = useRef<'stage' | 'finish'>('stage');
-  const finishAfterSuccessfulStageRef = useRef(false);
   const commitStagedStairSessionRef = useRef(false);
   const stairStageButtonRef = useRef<HTMLButtonElement | null>(null);
   const stairFinishButtonRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => {
-    if (
-      !finishAfterSuccessfulStageRef.current ||
-      stairSystemV2.stairSessionItems.length === 0
-    ) {
-      return;
-    }
-    commitStagedStairSessionRef.current = true;
-    finishAfterSuccessfulStageRef.current = false;
-    stairFinishButtonRef.current?.click();
-  }, [stairSystemV2.stairSessionItems]);
   const hasQuantityBeenInteracted = productModal.hasQuantityBeenInteracted;
   const setHasQuantityBeenInteracted = productModal.setHasQuantityBeenInteracted;
   const treadProductSearchTerm = productModal.treadProductSearchTerm;
@@ -3339,14 +3329,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
       // Check if using new V2 flow
 
-        const clickedParentIndex = isStairLayerProduct(product)
-          ? wizardData.products.findIndex((candidate, candidateIndex) =>
-              isStairMainProduct(candidate) && (
-                (!!product.parentProductRowId && candidate.rowId === product.parentProductRowId) ||
-                candidateIndex === product.parentProductIndex
-              )
-            )
-          : index;
+        const clickedParentIndex = resolveStairParentIndex(
+          wizardData.products,
+          product,
+          index
+        );
         const safeParentIndex = clickedParentIndex >= 0 ? clickedParentIndex : index;
         const parentProduct = wizardData.products[safeParentIndex] || product;
         const clickedPartType: StairStepperPart =
@@ -3998,14 +3985,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
     const duplicateProducts = source.productType === 'stair' && source.stairSystemId
       ? (() => {
-          const parentIndex = isStairLayerProduct(source)
-            ? productsWithRowIds.findIndex((candidate, candidateIndex) =>
-                isStairMainProduct(candidate) && (
-                  (!!source.parentProductRowId && candidate.rowId === source.parentProductRowId) ||
-                  candidateIndex === source.parentProductIndex
-                )
-              )
-            : index;
+          const parentIndex = resolveStairParentIndex(
+            productsWithRowIds,
+            source,
+            index
+          );
           if (parentIndex < 0) return [];
           const scopedProducts = getStairRowWithAttachedLayers(productsWithRowIds, parentIndex);
           if (!window.confirm('این پله همراه با لایه‌های وابسته، با شناسه‌های جدید و محاسبه مستقل تکثیر می‌شود. ادامه می‌دهید؟')) {
@@ -5834,7 +5818,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     });
     setStairDiscardConfirmationVisible(false);
     requestedStairFooterActionRef.current = 'stage';
-    finishAfterSuccessfulStageRef.current = false;
     commitStagedStairSessionRef.current = false;
     setIsEditMode(false);
     setEditingProductIndex(null);
@@ -8684,6 +8667,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   const fieldErrors = validateDraftRequiredFields(stairSystemV2.stairActivePart, draft, stairSystemV2.layerTypes);
                   const hasErrors = Object.values(fieldErrors).some(Boolean);
                    if (hasErrors) {
+                    const firstInvalidField = Object.entries(fieldErrors)
+                      .find(([, value]) => Boolean(value))?.[0];
                     stairSystemV2.setStairDraftErrors(prev => ({
                       ...prev,
                       [stairSystemV2.stairActivePart]: {
@@ -8705,6 +8690,18 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       action: isEditMode
                         ? 'edit-save'
                         : requestedFooterAction
+                    });
+                    requestAnimationFrame(() => {
+                      const exactField = firstInvalidField
+                        ? document.querySelector<HTMLElement>(
+                            `[name="${firstInvalidField}"], [data-field="${firstInvalidField}"]`
+                          )
+                        : null;
+                      (
+                        exactField ||
+                        document.querySelector<HTMLElement>('[aria-invalid="true"]') ||
+                        document.querySelector<HTMLElement>('[data-stair-active-part]')
+                      )?.focus();
                     });
                     return;
                   }
@@ -9377,6 +9374,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
                   // Prepare all updates in a single transaction
                   let stairSessionCommitSucceeded = true;
+                  let builtSessionItems = stairSystemV2.stairSessionItems;
                   flushSync(() => stairSystemV2.setStairSessionItems(prev => {
                     const shouldReplaceActivePartInSession = isEditMode && editingProductIndex !== null;
                     const baseItems = shouldReplaceActivePartInSession
@@ -10182,20 +10180,26 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       return baseItems;
                     }
 
+                    builtSessionItems = updatedItems;
                     return updatedItems;
                   }));
                   if (!stairSessionCommitSucceeded) {
                     return;
                   }
                   if (requestedFooterAction === 'finish') {
-                    commitStagedStairSessionRef.current = true;
-                    finishAfterSuccessfulStageRef.current = true;
-                    window.setTimeout(() => {
-                      if (!stairFinishButtonRef.current) return;
+                    const transaction = executeStairCreateTransaction({
+                      action: 'finish',
+                      stagedItems: builtSessionItems,
+                      activeDraftMeaningful: false,
+                      buildActiveDraft: () => ({
+                        ok: true,
+                        sessionItems: builtSessionItems
+                      })
+                    });
+                    if (transaction.status === 'committed') {
                       commitStagedStairSessionRef.current = true;
-                      finishAfterSuccessfulStageRef.current = false;
                       stairFinishButtonRef.current?.click();
-                    }, 0);
+                    }
                   }
 
                   // Reset fields for quick next entry (keep unit toggle)
@@ -10210,7 +10214,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   stairSystemV2.setToolsDropdownOpen(false);
                   setErrors({});
                   } catch {
-                    finishAfterSuccessfulStageRef.current = false;
                     commitStagedStairSessionRef.current = false;
                     setErrors({
                       products:

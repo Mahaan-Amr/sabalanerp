@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { ContractProduct } from '../../types/contract.types';
-import { resolveAttachedStairLayers } from '../stairEditGraph';
+import {
+  resolveAttachedStairLayers,
+  resolveStairParentIndex
+} from '../stairEditGraph';
 
 const main = (
   rowId: string,
@@ -60,6 +63,23 @@ test('stable parent identity wins over a contradictory array index', () => {
     status: 'resolved',
     indices: []
   });
+  assert.deepEqual(resolveAttachedStairLayers(rows, 1), {
+    status: 'resolved',
+    indices: [2]
+  });
+  assert.equal(resolveStairParentIndex(rows, rows[2]!, 2), 1);
+});
+
+test('stable parent identity survives stale redundant layer metadata', () => {
+  const staleLayer = layer({
+    rowId: 'layer-b',
+    parentProductRowId: 'parent-b',
+    parentProductIndex: 0
+  });
+  staleLayer.stairSystemId = 'historical-system';
+  (staleLayer.meta as any).layerInfo.parentPartType = 'riser';
+  const rows = [main('parent-a'), main('parent-b'), staleLayer];
+
   assert.deepEqual(resolveAttachedStairLayers(rows, 1), {
     status: 'resolved',
     indices: [2]

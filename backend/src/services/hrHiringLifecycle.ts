@@ -1,3 +1,5 @@
+import { paperContractReviewState } from "./hrEmploymentContract";
+
 export const HIRING_LIFECYCLE_PHASES = [
   { id: "APPLICATION", number: 1, title: "تشکیل پرونده و فرم متقاضی" },
   { id: "PRE_IDENTITY", number: 2, title: "بررسی‌های پیش از احراز هویت" },
@@ -100,6 +102,9 @@ interface CollateralLike {
   status: string;
 }
 interface ContractLike {
+  uploadedBy?: string;
+  submittedAt?: Date | string | null;
+  returnedAt?: Date | string | null;
   approvedAt?: Date | string | null;
 }
 interface OnboardingTaskLike {
@@ -176,6 +181,15 @@ export const projectHiringTaskCapabilities = (
     blockingTasks.some((task) => !isCompleteTask(task.status));
   const employmentActive = source.employmentRelationship?.status === "ACTIVE";
   const contractVisible = visibleTo("FINANCE_RECORDER", "FINANCE_MANAGER");
+  const latestContract = source.contracts?.[0];
+  const contractReviewState = latestContract
+    ? paperContractReviewState({
+        uploadedBy: latestContract.uploadedBy || "unknown",
+        submittedAt: latestContract.submittedAt,
+        returnedAt: latestContract.returnedAt,
+        approvedAt: latestContract.approvedAt,
+      })
+    : "DRAFT";
   const insuranceVisible = visibleTo("HR_PROCESSOR");
   const payrollVisible = visibleTo("HR_PAYROLL_MANAGER");
   const activationVisible = visibleTo("HR_MANAGER");
@@ -189,8 +203,14 @@ export const projectHiringTaskCapabilities = (
       detailVisible: contractVisible,
       actionIds: contractVisible
         ? [
-            ...(authorities.has("FINANCE_RECORDER") ? ["RECORD_CONTRACT"] : []),
-            ...(authorities.has("FINANCE_MANAGER") && source.contracts?.length
+            ...(authorities.has("FINANCE_RECORDER")
+              ? contractReviewState === "DRAFT" && latestContract
+                ? ["SUBMIT_CONTRACT"]
+                : contractReviewState === "RETURNED" || !latestContract
+                  ? ["RECORD_CONTRACT"]
+                  : []
+              : []),
+            ...(authorities.has("FINANCE_MANAGER") && contractReviewState === "SUBMITTED"
               ? ["REVIEW_CONTRACT"]
               : []),
           ]
@@ -582,7 +602,28 @@ const onboardingGate = (source: HiringLifecycleSource): Gate => {
     "بارگذاری قرارداد امضاشده",
     "FINANCE_RECORDER",
   );
-  if (source.contracts?.[0] && !contractApproved)
+  const latestContract = source.contracts?.[0];
+  const contractState = latestContract
+    ? paperContractReviewState({
+        uploadedBy: latestContract.uploadedBy || "unknown",
+        submittedAt: latestContract.submittedAt,
+        returnedAt: latestContract.returnedAt,
+        approvedAt: latestContract.approvedAt,
+      })
+    : null;
+  if (contractState === "DRAFT")
+    nextAction = action(
+      "SUBMIT_CONTRACT",
+      "ارسال قرارداد امضاشده برای بررسی",
+      "FINANCE_RECORDER",
+    );
+  else if (contractState === "RETURNED")
+    nextAction = action(
+      "UPLOAD_CONTRACT",
+      "ثبت نسخه اصلاح‌شده قرارداد امضاشده",
+      "FINANCE_RECORDER",
+    );
+  else if (contractState === "SUBMITTED")
     nextAction = action(
       "APPROVE_CONTRACT",
       "تأیید قرارداد امضاشده",

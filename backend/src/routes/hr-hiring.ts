@@ -39,6 +39,11 @@ import {
   normalizePersianFullName,
   validateOfflineOfferDecision
 } from '../services/hrOfferDecision';
+import {
+  assertPaperContractDraft,
+  assertPaperContractReviewable,
+  paperContractReviewState
+} from '../services/hrEmploymentContract';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -859,7 +864,23 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
     );
   }
   data.contracts = canSeeFinanceSensitive
-    ? data.contracts.map(({ storageName: _storageName, sha256: _sha256, ...contract }: any) => contract)
+    ? data.contracts.map(({ storageName: _storageName, sha256: _sha256, ...contract }: any, index: number) => {
+        const reviewState = paperContractReviewState(contract);
+        return {
+          ...contract,
+          reviewState,
+          canSubmit:
+            index === 0 &&
+            authorities.has('FINANCE_RECORDER') &&
+            contract.uploadedBy === actorId(req) &&
+            reviewState === 'DRAFT',
+          canReview:
+            index === 0 &&
+            authorities.has('FINANCE_MANAGER') &&
+            contract.uploadedBy !== actorId(req) &&
+            reviewState === 'SUBMITTED'
+        };
+      })
     : [];
   if (!authorities.has('HR_PAYROLL_MANAGER')) data.payrollParticipation = null;
   data.onboardingTasks = data.onboardingTasks.map((task: any) => {
@@ -1995,29 +2016,57 @@ router.post('/applications/:id/contracts', requireAuthority('FINANCE_RECORDER'),
   try {
     const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id } });
     if (!application.convertedAt) throw new Error('قرارداد پس از تبدیل به پرسنل برنامه‌ریزی‌شده ثبت می‌شود.');
-    if (!String(req.body.contractNumber || '').trim()) throw new Error('شماره قرارداد الزامی است.');
     const effectiveFrom = parseDate(req.body.effectiveFrom, 'تاریخ شروع قرارداد');
-    const effectiveTo = req.body.effectiveTo ? parseDate(req.body.effectiveTo, 'تاریخ پایان قرارداد') : null;
-    if (effectiveTo && effectiveTo < effectiveFrom) throw new Error('تاریخ پایان قرارداد نمی‌تواند پیش از شروع باشد.');
+    const effectiveTo = parseDate(req.body.effectiveTo, 'تاریخ پایان قرارداد');
+    assertPaperContractDraft({
+      contractNumber: String(req.body.contractNumber || ''),
+      effectiveFrom,
+      effectiveTo,
+      hasFile: Boolean(req.file)
+    });
     validateHiringFileSignature(req.file.path, req.file.mimetype);
     const scanStatus = await scanHiringFile(req.file.path); const digest = await sha256File(req.file.path);
-    const aggregate = await prisma.hrEmploymentContractDocument.aggregate({ where: { applicationId: req.params.id }, _max: { version: true } });
-    const row = await prisma.hrEmploymentContractDocument.create({ data: {
-      applicationId: req.params.id, version: (aggregate._max.version || 0) + 1, contractNumber: req.body.contractNumber,
-      effectiveFrom, effectiveTo,
-      storageName: req.file.filename, originalName: req.file.originalname, mimeType: req.file.mimetype, size: req.file.size,
-      sha256: digest, malwareScanStatus: scanStatus, uploadedBy: actorId(req), note: req.body.note || null
-    }});
-    await prisma.hrJobApplication.update({ where: { id: req.params.id }, data: { contractClearance: 'IN_PROGRESS' } });
+    const row = await prisma.$transaction(async (tx) => {
+      const aggregate = await tx.hrEmploymentContractDocument.aggregate({ where: { applicationId: req.params.id }, _max: { version: true } });
+      const created = await tx.hrEmploymentContractDocument.create({ data: {
+        applicationId: req.params.id, version: (aggregate._max.version || 0) + 1, contractNumber: String(req.body.contractNumber).trim(),
+        effectiveFrom, effectiveTo,
+        storageName: req.file!.filename, originalName: req.file!.originalname, mimeType: req.file!.mimetype, size: req.file!.size,
+        sha256: digest, malwareScanStatus: scanStatus, uploadedBy: actorId(req), note: req.body.note || null
+      }});
+      await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { contractClearance: 'IN_PROGRESS' } });
+      await tx.hrOnboardingTask.updateMany({
+        where: { applicationId: req.params.id, title: 'تأیید قرارداد امضاشده' },
+        data: { status: 'PENDING', completedBy: null, completedAt: null }
+      });
+      return created;
+    });
+    await audit(req.params.id, 'SIGNED_CONTRACT_VERSION_RECORDED', req, { contractId: row.id, version: row.version });
     res.status(201).json({ success: true, data: row });
   } catch (error) { removeHiringFile(req.file.path); throw error; }
+}));
+
+router.post('/applications/:id/contracts/:contractId/submit', requireAuthority('FINANCE_RECORDER'), asyncHandler(async (req: AuthRequest, res: Response) => {
+  const contract = await prisma.hrEmploymentContractDocument.findFirstOrThrow({ where: { id: req.params.contractId, applicationId: req.params.id } });
+  const latest = await prisma.hrEmploymentContractDocument.findFirst({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' }, select: { id: true } });
+  if (latest?.id !== contract.id) throw new Error('فقط آخرین نسخه قرارداد قابل ارسال است.');
+  if (contract.uploadedBy !== actorId(req)) throw new Error('فقط ثبت‌کننده این نسخه می‌تواند آن را برای بررسی ارسال کند.');
+  if (contract.returnedAt) throw new Error('برای قرارداد بازگردانده‌شده نسخه اصلاح‌شده ثبت کنید.');
+  if (contract.approvedAt) throw new Error('این قرارداد قبلاً تأیید شده است.');
+  if (contract.submittedAt) throw new Error('این قرارداد قبلاً برای بررسی ارسال شده است.');
+  const row = await prisma.hrEmploymentContractDocument.update({
+    where: { id: contract.id },
+    data: { submittedBy: actorId(req), submittedAt: new Date() }
+  });
+  await audit(req.params.id, 'SIGNED_CONTRACT_SUBMITTED', req, { contractId: row.id, version: row.version });
+  res.json({ success: true, data: row });
 }));
 
 router.post('/applications/:id/contracts/:contractId/approve', requireAuthority('FINANCE_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const contract = await prisma.hrEmploymentContractDocument.findUniqueOrThrow({ where: { id: req.params.contractId } });
   const latest = await prisma.hrEmploymentContractDocument.findFirst({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' }, select: { id: true } });
-  if (latest?.id !== contract.id) throw new Error('فقط آخرین نسخه قرارداد قابل تأیید است.');
-  if (contract.applicationId !== req.params.id || contract.uploadedBy === actorId(req)) throw new Error('مدیر مالی بارگذار نمی‌تواند همان قرارداد را تأیید کند.');
+  if (contract.applicationId !== req.params.id) throw new Error('قرارداد متعلق به این پرونده نیست.');
+  assertPaperContractReviewable(contract, { actorId: actorId(req), isLatest: latest?.id === contract.id });
   await prisma.$transaction([
     prisma.hrEmploymentContractDocument.update({ where: { id: contract.id }, data: { approvedBy: actorId(req), approvedAt: new Date() } }),
     prisma.hrJobApplication.update({ where: { id: req.params.id }, data: { contractClearance: 'APPROVED' } }),
@@ -2025,6 +2074,25 @@ router.post('/applications/:id/contracts/:contractId/approve', requireAuthority(
   ]);
   await audit(req.params.id, 'SIGNED_CONTRACT_APPROVED', req, { contractId: contract.id });
   res.json({ success: true });
+}));
+
+router.post('/applications/:id/contracts/:contractId/return', requireAuthority('FINANCE_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
+  const reason = String(req.body.reason || '').trim();
+  if (!reason) throw new Error('دلیل بازگرداندن قرارداد الزامی است.');
+  const contract = await prisma.hrEmploymentContractDocument.findUniqueOrThrow({ where: { id: req.params.contractId } });
+  const latest = await prisma.hrEmploymentContractDocument.findFirst({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' }, select: { id: true } });
+  if (contract.applicationId !== req.params.id) throw new Error('قرارداد متعلق به این پرونده نیست.');
+  assertPaperContractReviewable(contract, { actorId: actorId(req), isLatest: latest?.id === contract.id });
+  const row = await prisma.$transaction(async (tx) => {
+    const returned = await tx.hrEmploymentContractDocument.update({
+      where: { id: contract.id },
+      data: { returnedBy: actorId(req), returnedAt: new Date(), returnReason: reason }
+    });
+    await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { contractClearance: 'REJECTED' } });
+    return returned;
+  });
+  await audit(req.params.id, 'SIGNED_CONTRACT_RETURNED', req, { contractId: row.id, version: row.version, reason });
+  res.json({ success: true, data: row });
 }));
 
 router.get('/applications/:id/contracts/:contractId/download', requireAuthority('FINANCE_RECORDER', 'FINANCE_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {

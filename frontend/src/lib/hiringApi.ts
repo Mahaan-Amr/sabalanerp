@@ -154,6 +154,12 @@ export const hiringAPI = {
     }),
   approveContract: (id: string, contractId: string) =>
     internal.post(`/applications/${id}/contracts/${contractId}/approve`),
+  submitContract: (id: string, contractId: string) =>
+    internal.post(`/applications/${id}/contracts/${contractId}/submit`),
+  returnContract: (id: string, contractId: string, reason: string) =>
+    internal.post(`/applications/${id}/contracts/${contractId}/return`, {
+      reason,
+    }),
   setPayroll: (id: string, data: any) =>
     internal.post(`/applications/${id}/payroll-participation`, data),
   setInsurance: (id: string, data: any) =>

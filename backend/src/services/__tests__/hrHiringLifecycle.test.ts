@@ -459,4 +459,83 @@ const base = (
   assert.ok(genericViewer.every((task) => task.actionIds.length === 0));
 }
 
+{
+  const onboardingSource = base({
+    formRevisions: [submitted],
+    identityClearance: "APPROVED",
+    assessmentCompletedAt: new Date(),
+    assessmentDecision: "APPROVED",
+    compensationClearance: "APPROVED",
+    compensationSnapshots: [
+      {
+        proposedBy: "hiring-manager",
+        preparedAt: new Date(),
+        hrApprovedAt: new Date(),
+        financeApprovedAt: new Date(),
+        candidateAcceptedAt: new Date(),
+      },
+    ],
+    collateralClearance: "APPROVED",
+    collateralItems: [{ required: true, status: "VERIFIED" }],
+    convertedAt: new Date(),
+    employmentRelationship: { status: "PLANNED" },
+    contractClearance: "IN_PROGRESS",
+    contracts: [{ uploadedBy: "recorder-1", approvedAt: null }],
+  });
+  const recorder = projectHiringLifecycle(onboardingSource, ["FINANCE_RECORDER"]);
+  assert.equal(recorder.phases[6].primaryAction?.id, "SUBMIT_CONTRACT");
+
+  const submittedSource = base({
+    ...onboardingSource,
+    contracts: [
+      {
+        uploadedBy: "recorder-1",
+        submittedAt: new Date(),
+        approvedAt: null,
+      },
+    ],
+  });
+  const manager = projectHiringLifecycle(submittedSource, ["FINANCE_MANAGER"]);
+  assert.equal(manager.phases[6].primaryAction?.id, "APPROVE_CONTRACT");
+
+  const returned = projectHiringLifecycle(
+    base({
+      ...submittedSource,
+      contractClearance: "REJECTED",
+      contracts: [
+        {
+          uploadedBy: "recorder-1",
+          submittedAt: new Date(),
+          returnedAt: new Date(),
+          approvedAt: null,
+        },
+      ],
+    }),
+    ["FINANCE_RECORDER"],
+  );
+  assert.deepEqual(
+    projectHiringTaskCapabilities(
+      base({
+        ...submittedSource,
+        contractClearance: "REJECTED",
+        contracts: [
+          {
+            uploadedBy: "recorder-1",
+            submittedAt: new Date(),
+            returnedAt: new Date(),
+            approvedAt: null,
+          },
+        ],
+      }),
+      ["FINANCE_RECORDER"],
+    ).find((task) => task.id === "SIGNED_CONTRACT")?.actionIds,
+    ["RECORD_CONTRACT"],
+  );
+  assert.ok(
+    returned.phases[6].blockers.some(
+      (item) => item.code === "CONTRACT_REJECTED",
+    ),
+  );
+}
+
 console.log("HR hiring lifecycle tests passed.");

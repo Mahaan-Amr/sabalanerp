@@ -194,6 +194,7 @@ export default function HiringCasePage() {
     effectiveTo: "",
     file: null,
   });
+  const [contractReturnReason, setContractReturnReason] = useState("");
   const [insurance, setInsurance] = useState({
     status: "NOT_STARTED",
     effectiveDate: "",
@@ -1888,17 +1889,18 @@ export default function HiringCasePage() {
               <div className="grid gap-3 md:grid-cols-4">
                 {hasAuthority("FINANCE_RECORDER") && (
                   <>
-                    <input
-                      className={field}
-                      placeholder="شماره قرارداد"
-                      value={contract.contractNumber}
-                      onChange={(e) =>
-                        setContract({
-                          ...contract,
-                          contractNumber: e.target.value,
-                        })
-                      }
-                    />
+                    <HrField label="شماره قرارداد" required>
+                      <input
+                        className={field}
+                        value={contract.contractNumber}
+                        onChange={(e) =>
+                          setContract({
+                            ...contract,
+                            contractNumber: e.target.value,
+                          })
+                        }
+                      />
+                    </HrField>
                     <HrField label="تاریخ شروع اعتبار قرارداد" required>
                       <HrPersianCalendar
                         value={contract.effectiveFrom}
@@ -1921,34 +1923,99 @@ export default function HiringCasePage() {
                         }
                       />
                     </HrField>
-                    <input
-                      type="file"
-                      className={field}
-                      onChange={(e) =>
-                        setContract({ ...contract, file: e.target.files?.[0] })
-                      }
-                    />
+                    <HrField label="اسکن قرارداد امضاشده" required>
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        className={field}
+                        onChange={(e) =>
+                          setContract({ ...contract, file: e.target.files?.[0] })
+                        }
+                      />
+                    </HrField>
                     <ErpButton
-                      label="بارگذاری توسط امور مالی"
+                      label="ثبت نسخه قرارداد"
                       disabled={
-                        busy || !contract.file || !contract.contractNumber
+                        busy ||
+                        !contract.file ||
+                        !contract.contractNumber ||
+                        !contract.effectiveFrom ||
+                        !contract.effectiveTo
                       }
                       onClick={uploadContract}
                     />
+                    {latestContract?.canSubmit && (
+                      <ErpButton
+                        label="ارسال برای بررسی مدیر مالی"
+                        disabled={busy}
+                        onClick={() =>
+                          run(
+                            () => hiringAPI.submitContract(id, latestContract.id),
+                            "قرارداد برای بررسی مدیر مالی ارسال شد.",
+                          )
+                        }
+                        tone="success"
+                      />
+                    )}
                   </>
                 )}
-                {hasAuthority("FINANCE_MANAGER") && (
-                  <ErpButton
-                    label="تأیید مدیر مالی"
-                    disabled={busy || !latestContract}
-                    onClick={() =>
-                      run(
-                        () => hiringAPI.approveContract(id, latestContract.id),
-                        "قرارداد تأیید شد.",
-                      )
-                    }
-                    tone="success"
-                  />
+                {hasAuthority("FINANCE_MANAGER") && latestContract?.canReview && (
+                  <div className="space-y-2 md:col-span-2">
+                    <div className="flex flex-wrap gap-2">
+                      <ErpButton
+                        label="تأیید قرارداد"
+                        disabled={busy}
+                        onClick={() =>
+                          run(
+                            () => hiringAPI.approveContract(id, latestContract.id),
+                            "قرارداد تأیید شد.",
+                          )
+                        }
+                        tone="success"
+                      />
+                    </div>
+                    <HrField label="دلیل بازگرداندن قرارداد">
+                      <textarea
+                        className={field}
+                        value={contractReturnReason}
+                        onChange={(event) => setContractReturnReason(event.target.value)}
+                      />
+                    </HrField>
+                    <ErpButton
+                      label="بازگرداندن برای اصلاح"
+                      disabled={busy || !contractReturnReason.trim()}
+                      onClick={() =>
+                        run(
+                          () =>
+                            hiringAPI.returnContract(
+                              id,
+                              latestContract.id,
+                              contractReturnReason.trim(),
+                            ),
+                          "قرارداد برای اصلاح بازگردانده شد.",
+                        )
+                      }
+                      tone="danger"
+                    />
+                  </div>
+                )}
+                {latestContract && (
+                  <ErpCard className="p-3 text-sm md:col-span-2">
+                    <p className="font-bold">وضعیت آخرین نسخه</p>
+                    <p className="mt-1">
+                      {{
+                        DRAFT: "ثبت‌شده؛ در انتظار ارسال",
+                        SUBMITTED: "ارسال‌شده؛ در انتظار بررسی مدیر مالی",
+                        RETURNED: "برای اصلاح بازگردانده شده",
+                        APPROVED: "تأییدشده",
+                      }[latestContract.reviewState as string] || latestContract.reviewState}
+                    </p>
+                    {latestContract.returnReason && (
+                      <p className="mt-2 text-rose-700">
+                        دلیل بازگشت: {latestContract.returnReason}
+                      </p>
+                    )}
+                  </ErpCard>
                 )}
                 {latestContract?.originalName && (
                   <button

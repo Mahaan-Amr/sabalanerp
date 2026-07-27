@@ -3769,6 +3769,11 @@ model HrEmploymentContractDocument {
   sha256            String
   malwareScanStatus String
   uploadedBy        String
+  submittedBy       String?
+  submittedAt       DateTime?
+  returnedBy        String?
+  returnedAt        DateTime?
+  returnReason      String?
   approvedBy        String?
   approvedAt        DateTime?
   note              String?
@@ -3777,6 +3782,7 @@ model HrEmploymentContractDocument {
 
   @@unique([applicationId, version])
   @@index([applicationId, createdAt])
+  @@index([applicationId, submittedAt])
   @@map("hr_employment_contract_documents")
 }
 

@@ -6182,6 +6182,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             </label>
                             <div className="relative">
                               <input
+                                name="stone"
                                 className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-gray-800 transition-all focus:border-teal-500 focus:outline-none dark:border-gray-600 dark:text-white"
                                 value={stairSystemV2.stoneSearchTerm}
                                 onChange={(e) => stairSystemV2.setStoneSearchTerm(e.target.value)}
@@ -7133,6 +7134,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   </label>
                                   <EnhancedDropdown
                                     className="w-full"
+                                    label="نوع لایه"
                                     value={draft.layerTypeId || ''}
                                     disabled={stairSystemV2.layerTypesStatus !== 'ready'}
                                     placeholder="انتخاب نوع لایه…"
@@ -7365,6 +7367,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                         {!draft.layerStoneProduct ? (
                                           <>
                                             <input
+                                              name="layerStone"
                                               className="w-full rounded-lg bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
                                               value={stairSystemV2.layerStoneSearchTerm}
                                               onChange={(e) => stairSystemV2.setLayerStoneSearchTerm(e.target.value)}
@@ -7472,6 +7475,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           قیمت هر متر مربع سنگ لایه (تومان)
                                         </label>
                                         <FormattedNumberInput
+                                          name="layerStonePrice"
                                           value={draft.layerPricePerSquareMeter ?? null}
                                           onChange={(value) => {
                                             const updatedDraft = {
@@ -8696,8 +8700,16 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         : requestedFooterAction
                     });
                     requestAnimationFrame(() => {
+                      const focusSelectorByField: Record<string, string> = {
+                        thickness: '[name="stone"]',
+                        layerType: '[role="combobox"][aria-label="نوع لایه"]',
+                        layerSource: '[role="radiogroup"][aria-label="منبع سنگ لایه"] button',
+                        layerStone: '[name="layerStone"]',
+                        layerStonePrice: '[name="layerStonePrice"]'
+                      };
                       const exactField = firstInvalidField
                         ? document.querySelector<HTMLElement>(
+                            focusSelectorByField[firstInvalidField] ||
                             `[name="${firstInvalidField}"], [data-field="${firstInvalidField}"]`
                           )
                         : null;

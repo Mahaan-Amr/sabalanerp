@@ -1,5 +1,4 @@
 'use client';
-
 import { useCallback, useEffect, useState } from 'react';
 import { FaEye, FaFileInvoice, FaSync, FaTrashAlt } from 'react-icons/fa';
 import { ErpEmptyState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
@@ -82,9 +81,9 @@ export default function AccountingInvoiceCandidatesPage() {
       priority: 'primary',
       cell: (row) => (
         <div>
-          <p className="font-semibold text-slate-950 dark:text-white">{row.id}</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">قرارداد: {row.contract?.contractNumber || row.contractId || '—'}</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{row.contract?.customer?.displayName || 'مشتری ثبت نشده'}</p>
+          <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{row.id}</p>
+          <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">قرارداد: {row.contract?.contractNumber || row.contractId || '—'}</p>
+          <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{row.contract?.customer?.displayName || 'مشتری ثبت نشده'}</p>
         </div>
       ),
     },

@@ -1,5 +1,4 @@
 'use client';
-
 import { useCallback, useEffect, useState } from 'react';
 import { FaChartLine, FaSync, FaUserClock } from 'react-icons/fa';
 import { ErpEmptyState, ErpListPage, ErpPagination, type ErpColumn } from '@/components/erp';
@@ -42,8 +41,8 @@ export default function AccountingPerformancePage() {
       priority: 'primary',
       cell: (row) => (
         <div>
-          <p className="font-semibold text-slate-950 dark:text-white">{row.accountant?.displayName || 'کاربر حسابداری'}</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{row.accountant?.username || row.accountant?.id}</p>
+          <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{row.accountant?.displayName || 'کاربر حسابداری'}</p>
+          <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{row.accountant?.username || row.accountant?.id}</p>
         </div>
       ),
     },
@@ -73,7 +72,7 @@ export default function AccountingPerformancePage() {
       footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={loadRows} itemLabel="حسابدار" />}
       emptyState={<ErpEmptyState icon={FaUserClock} title="داده عملکردی وجود ندارد" description="پس از ثبت اقدام‌های حسابداری، عملکرد حسابداران در این صفحه نمایش داده می‌شود." />}
     >
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+      <div className="rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-4 text-sm leading-6 text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">
         این گزارش زمان حضور کاربر در مرورگر را اندازه نمی‌گیرد؛ معیارها از رکوردهای حسابداری و سوابق عملیات محاسبه می‌شوند.
       </div>
     </ErpListPage>

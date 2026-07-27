@@ -107,6 +107,23 @@ const inventoryLogisticsSources = [
   ].map((path) => [path, read(`frontend/src/app/dashboard/logistics/${path}`)]),
   ['CatalogImagePicker.tsx', read('frontend/src/components/CatalogImagePicker.tsx')]
 ];
+const accountingSources = [
+  ...[
+    'page.tsx',
+    'audit/page.tsx',
+    'contracts/page.tsx',
+    'contracts/[contractId]/page.tsx',
+    'correction-requests/page.tsx',
+    'invoice-candidates/page.tsx',
+    'payments/page.tsx',
+    'performance/page.tsx',
+    'receivables/page.tsx',
+    'settings/page.tsx',
+    'tax/page.tsx'
+  ].map((path) => [path, read(`frontend/src/app/dashboard/accounting/${path}`)]),
+  ['AccountingActionModal.tsx', read('frontend/src/features/accounting/AccountingActionModal.tsx')],
+  ['accountingUi.tsx', read('frontend/src/features/accounting/accountingUi.tsx')]
+];
 const guardAttendanceSource = read('frontend/src/app/dashboard/security/attendance/page.tsx');
 const guardVehiclesSource = read('frontend/src/app/dashboard/security/vehicles/page.tsx');
 const guardPageSources = [
@@ -396,6 +413,18 @@ test('Inventory catalogs and Logistics operations consume canonical semantic con
   const rawControl = /<(?:button|input|select|textarea)\b/;
 
   for (const [path, source] of inventoryLogisticsSources) {
+    assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
+    assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
+    assert.doesNotMatch(source, /<div\b[^>]*\bonClick=/, `${path} must not use inaccessible clickable containers`);
+  }
+});
+
+test('Accounting entry, review, and oversight surfaces use canonical semantic controls', () => {
+  const hardcodedPalette =
+    /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|fuchsia|gray|green|indigo|lime|neutral|orange|pink|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
+  const rawControl = /<(?:button|input|select|textarea)\b/;
+
+  for (const [path, source] of accountingSources) {
     assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
     assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
     assert.doesNotMatch(source, /<div\b[^>]*\bonClick=/, `${path} must not use inaccessible clickable containers`);

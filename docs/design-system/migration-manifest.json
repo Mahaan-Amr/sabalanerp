@@ -74,6 +74,12 @@
       "reason": "Loading planning, detail, and dispatch surfaces use the shared responsive foundation without changing quantities, permissions, or lifecycle transitions."
     },
     {
+      "pattern": "frontend/src/app/dashboard/accounting/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Accounting work queues, financial records, tax, corrections, audit, and oversight use canonical semantic controls while preserving financial rules and audit meaning."
+    },
+    {
       "pattern": "frontend/src/app/**/page.tsx",
       "status": "legacy",
       "acceptanceStatus": "not-started",
@@ -154,6 +160,16 @@
         "frontend/src/app/dashboard/inventory/**",
         "frontend/src/app/dashboard/logistics/**",
         "frontend/src/components/CatalogImagePicker.tsx"
+      ]
+    },
+    {
+      "id": "accounting-workspace",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Accounting review and entry surfaces share consistent information hierarchy and consequential-action controls without changing calculations, permissions, or history.",
+      "files": [
+        "frontend/src/app/dashboard/accounting/**",
+        "frontend/src/features/accounting/**"
       ]
     }
   ],

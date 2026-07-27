@@ -1,5 +1,4 @@
 'use client';
-
 import { useCallback, useEffect, useState } from 'react';
 import { FaBalanceScale, FaCheck, FaSync, FaTimes } from 'react-icons/fa';
 import { ErpEmptyState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
@@ -73,7 +72,7 @@ export default function AccountingTaxPage() {
   };
 
   const columns: ErpColumn<any>[] = [
-    { id: 'tax', header: 'پرونده مالیاتی', priority: 'primary', cell: (row) => <div><p className="font-semibold">{taxStatusLabels[row.submissionStatus] || row.submissionStatus}</p><p className="mt-1 text-xs text-slate-500">{row.contract?.contractNumber || row.contractId || '—'} · {row.contract?.customer?.displayName || 'مشتری ثبت نشده'}</p></div> },
+    { id: 'tax', header: 'پرونده مالیاتی', priority: 'primary', cell: (row) => <div><p className="font-semibold">{taxStatusLabels[row.submissionStatus] || row.submissionStatus}</p><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{row.contract?.contractNumber || row.contractId || '—'} · {row.contract?.customer?.displayName || 'مشتری ثبت نشده'}</p></div> },
     { id: 'taxable', header: 'مشمول مالیات', mobileLabel: 'مشمول مالیات', priority: 'secondary', align: 'end', cell: (row) => money(row.taxableAmount) },
     { id: 'vat', header: 'ارزش افزوده', mobileLabel: 'ارزش افزوده', priority: 'secondary', align: 'end', cell: (row) => money(row.vatAmount) },
     { id: 'missing', header: 'کسری اطلاعات', mobileLabel: 'کسری اطلاعات', priority: 'meta', cell: (row) => row.missingFields?.length ? row.missingFields.join('، ') : '—' },

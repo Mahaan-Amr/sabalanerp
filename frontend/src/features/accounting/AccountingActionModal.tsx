@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
 import { FaTimes } from 'react-icons/fa';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
@@ -95,26 +95,26 @@ export default function AccountingActionModal({
   };
 
   const fieldClass = (invalid: boolean) =>
-    `min-h-11 w-full rounded-lg border bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:bg-slate-900 dark:text-white dark:focus:border-teal-500 ${
-      invalid ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
+    `min-h-11 w-full rounded-lg border bg-[var(--sds-surface-subtle)] px-3 py-2 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] ${
+      invalid ? 'border-[var(--sds-danger-border)] dark:border-[var(--sds-danger-border)]' : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]'
     }`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true">
-      <div className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-raised)] p-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-xl rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-5 shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-bold text-slate-950 dark:text-white">{title}</h2>
-            {description && <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">{description}</p>}
+            <h2 className="text-lg font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{title}</h2>
+            {description && <p className="mt-1 text-sm leading-6 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{description}</p>}
           </div>
-          <button
+          <ErpPressable
             type="button"
             onClick={onClose}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--sds-border-default)] text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:text-[var(--sds-text-muted)] dark:hover:bg-[var(--sds-surface-raised)]"
             aria-label="بستن"
           >
             <FaTimes className="h-4 w-4" />
-          </button>
+          </ErpPressable>
         </div>
 
         <div className="mt-5 space-y-4">
@@ -123,12 +123,12 @@ export default function AccountingActionModal({
             const value = values[field.id] ?? '';
             return (
               <label key={field.id} className="block">
-                <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                   {field.label}
-                  {field.required && <span className="text-red-500"> *</span>}
+                  {field.required && <span className="text-[var(--sds-danger)]"> *</span>}
                 </span>
                 {field.type === 'textarea' ? (
-                  <textarea
+                  <ErpTextarea
                     value={String(value)}
                     onBlur={() => setTouched((current) => ({ ...current, [field.id]: true }))}
                     onChange={(event) => setValue(field.id, event.target.value)}
@@ -159,7 +159,7 @@ export default function AccountingActionModal({
                     error={invalid ? 'این فیلد الزامی است.' : undefined}
                   />
                 ) : (
-                  <input
+                  <ErpInput
                     value={String(value)}
                     onBlur={() => setTouched((current) => ({ ...current, [field.id]: true }))}
                     onChange={(event) => setValue(field.id, event.target.value)}
@@ -167,13 +167,13 @@ export default function AccountingActionModal({
                     className={fieldClass(invalid)}
                   />
                 )}
-                {invalid && <p className="mt-1 text-xs text-red-600 dark:text-red-300">این فیلد الزامی است.</p>}
+                {invalid && <p className="mt-1 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">این فیلد الزامی است.</p>}
               </label>
             );
           })}
         </div>
 
-        {error && <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">{error}</p>}
+        {error && <p className="mt-4 rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] px-3 py-2 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">{error}</p>}
 
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <ErpButton label="انصراف" tone="neutral" variant="outline" onClick={onClose} disabled={busy} />

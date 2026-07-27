@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpPressable } from '@/components/erp';
 import { useCallback, useEffect, useState } from 'react';
 import {
   FaCheckCircle,
@@ -284,9 +284,9 @@ export default function AccountingContractsPage() {
       priority: 'primary',
       cell: (contract) => (
         <div className="min-w-0">
-          <p className="font-semibold text-slate-950 dark:text-white">{contract.contractNumber}</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{contract.titlePersian}</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{contract.customer.displayName}</p>
+          <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{contract.contractNumber}</p>
+          <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{contract.titlePersian}</p>
+          <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{contract.customer.displayName}</p>
         </div>
       ),
     },
@@ -334,7 +334,7 @@ export default function AccountingContractsPage() {
       align: 'end',
       priority: 'secondary',
       cell: (contract) => (
-        <span className="font-semibold text-[#074747] dark:text-teal-200">{money(contract.accounting.remainingAmount)}</span>
+        <span className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{money(contract.accounting.remainingAmount)}</span>
       ),
     },
   ];
@@ -437,43 +437,43 @@ export default function AccountingContractsPage() {
       }
     >
       {actionError && !flagTarget && !correctionTarget && !approvalTarget && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+        <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] px-4 py-3 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
           {actionError}
         </div>
       )}
       <ErpSection>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">از تاریخ</span>
+            <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">از تاریخ</span>
             <PersianCalendarComponent value={dateFrom} onChange={setDateFrom} placeholder="از تاریخ" />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">تا تاریخ</span>
+            <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">تا تاریخ</span>
             <PersianCalendarComponent value={dateTo} onChange={setDateTo} placeholder="تا تاریخ" />
           </label>
         </div>
       </ErpSection>
 
       {approvalTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-raised)] p-4">
+          <div className="w-full max-w-2xl rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-5 shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs font-semibold text-teal-600 dark:text-teal-300">تایید مالی</p>
-                <h2 className="mt-1 text-lg font-bold text-slate-950 dark:text-white">
+                <p className="text-xs font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">تایید مالی</p>
+                <h2 className="mt-1 text-lg font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                   {approvalTarget.contract.contractNumber}
                 </h2>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                   {approvalTarget.contract.customer.displayName}
                 </p>
               </div>
-              <button
+              <ErpPressable
                 type="button"
                 onClick={() => setApprovalTarget(null)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                className="rounded-lg border border-[var(--sds-border-default)] px-3 py-2 text-sm text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:text-[var(--sds-text-primary)] dark:hover:bg-[var(--sds-surface-raised)]"
               >
                 بستن
-              </button>
+              </ErpPressable>
             </div>
             <FinancialInvoiceApprovalForm
               invoice={approvalTarget.invoice}

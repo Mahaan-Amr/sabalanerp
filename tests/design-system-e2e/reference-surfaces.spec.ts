@@ -455,6 +455,46 @@ test('Inventory and Logistics routes share focused responsive canonical surfaces
   }
 });
 
+test('Accounting routes share focused responsive canonical surfaces', async ({ page }) => {
+  test.setTimeout(150_000);
+  await login(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const routes = [
+    '/dashboard/accounting',
+    '/dashboard/accounting/contracts',
+    '/dashboard/accounting/invoice-candidates',
+    '/dashboard/accounting/receivables',
+    '/dashboard/accounting/payments',
+    '/dashboard/accounting/tax',
+    '/dashboard/accounting/correction-requests',
+    '/dashboard/accounting/audit',
+    '/dashboard/accounting/performance',
+    '/dashboard/accounting/settings'
+  ];
+
+  for (const route of routes) {
+    await page.goto(route);
+    const workspace = page.locator('main.sds-workspace');
+    await expect(workspace).toBeVisible();
+    expect(await workspace.evaluate((element) =>
+      Array.from(element.querySelectorAll('input, select, textarea'))
+        .every((field) => (
+          field.getAttribute('type') === 'hidden'
+          || field.classList.contains('sds-field')
+          || field.getAttribute('type') === 'checkbox'
+          || field.getAttribute('type') === 'radio'
+          || field.getAttribute('type') === 'range'
+          || (field.getAttribute('type') === 'file' && field.classList.contains('sds-file-input'))
+        ))
+    )).toBe(true);
+    expect(await workspace.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
+    })).toBe(true);
+  }
+});
+
 test('Guard attendance and vehicle operations use canonical fields and responsive surfaces', async ({ page }) => {
   await login(page);
 

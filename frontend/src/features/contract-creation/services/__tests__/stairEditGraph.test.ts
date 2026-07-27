@@ -97,6 +97,13 @@ test('an unambiguous legacy layer can be adapted from its exact legacy index', (
     indices: [1],
     historicalAdaptationRequired: true
   });
+  assert.equal(resolveStairParentIndex(rows, rows[1]!, 1), 0);
+});
+
+test('legacy parent index cannot target a layer or unrelated row', () => {
+  const legacyLayer = layer({ rowId: 'legacy-layer', parentProductIndex: 1 });
+  const rows = [main('parent-a'), legacyLayer];
+  assert.equal(resolveStairParentIndex(rows, legacyLayer, 1), -1);
 });
 
 test('a historical layer with multiple same-part parent candidates is blocked rather than guessed', () => {

@@ -24,7 +24,12 @@ export const resolveStairParentIndex = (
       candidate.rowId === product.parentProductRowId
     );
   }
-  return typeof product.parentProductIndex === 'number'
+  if (typeof product.parentProductIndex !== 'number') return -1;
+  const legacyParent = products[product.parentProductIndex];
+  return isStairMainProduct(legacyParent) &&
+    legacyParent.stairSystemId === product.stairSystemId &&
+    legacyParent.stairPartType ===
+      (product.meta as any)?.layerInfo?.parentPartType
     ? product.parentProductIndex
     : -1;
 };

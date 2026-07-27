@@ -6234,6 +6234,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               />
                             </label>
                             <FormattedNumberInput
+                                name="length"
                                 value={draft.lengthValue ?? null}
                             onChange={(value) => {
                               const normalizedValue = value && value > 0 ? value : null;
@@ -6369,6 +6370,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               />
                             </label>
                             <FormattedNumberInput
+                              name="width"
                               value={draft.widthCm === null || draft.widthCm === undefined
                                 ? null
                                 : (draft.widthUnit || 'cm') === 'm'
@@ -6412,6 +6414,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               تعداد
                             </label>
                             <FormattedNumberInput
+                              name="quantity"
                               value={draft.quantity ?? null}
                             onChange={(value) => {
                               if (
@@ -6516,6 +6519,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   : 'فی پاگرد'}
                             </label>
                             <FormattedNumberInput
+                              name="pricePerSquareMeter"
                               value={draft.pricePerSquareMeter ?? null}
                             onChange={(value) => {
                               const updatedDraft = { ...draft, pricePerSquareMeter: value && value > 0 ? value : null };
@@ -10200,6 +10204,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       commitStagedStairSessionRef.current = true;
                       stairFinishButtonRef.current?.click();
                     }
+                    // The nested commit handler owns success reset/close and
+                    // preserves both the draft and its error on failure.
+                    return;
                   }
 
                   // Reset fields for quick next entry (keep unit toggle)

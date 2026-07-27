@@ -40,6 +40,12 @@ test('Guard renders through the semantic interface in both themes and mobile wid
   expect(dark.panel).not.toBe(light.panel);
 
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'بازکردن منوی اصلی' }).click();
+  await expect(page.locator('[data-dashboard-overlay]')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'بستن منوی اصلی' }).last()).toBeVisible();
+  await expect(page.locator('button[aria-haspopup="listbox"]')).toBeVisible();
+  await page.getByRole('button', { name: 'بستن منوی اصلی' }).last().click();
+  await expect(page.locator('[data-dashboard-overlay]')).toHaveCount(0);
   const workspaceFits = await page.locator('main.sds-workspace').evaluate((element) => {
     const rect = element.getBoundingClientRect();
     return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;

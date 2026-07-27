@@ -16,6 +16,18 @@
   ],
   "surfaces": [
     {
+      "id": "application-shell",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "The shared authenticated shell, workspace switching, permission-aware navigation, theme, and account actions use the Sabalan Design System while legacy page content remains supported.",
+      "files": [
+        "frontend/src/app/dashboard/layout.tsx",
+        "frontend/src/components/WorkspaceNavigation.tsx",
+        "frontend/src/components/WorkspaceSwitcher.tsx",
+        "frontend/src/components/ThemeToggle.tsx"
+      ]
+    },
+    {
       "id": "contract-product-selection",
       "status": "reference",
       "acceptanceStatus": "accepted-reference",

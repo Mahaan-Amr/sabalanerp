@@ -32,6 +32,12 @@ const focusedProductOverlaySources = [
   read(`frontend/src/features/contract-creation/components/modals/${path}`)
 ]);
 const layoutSource = read('frontend/src/app/layout.tsx');
+const dashboardShellSources = [
+  ['dashboard/layout.tsx', read('frontend/src/app/dashboard/layout.tsx')],
+  ['WorkspaceNavigation.tsx', read('frontend/src/components/WorkspaceNavigation.tsx')],
+  ['WorkspaceSwitcher.tsx', read('frontend/src/components/WorkspaceSwitcher.tsx')],
+  ['ThemeToggle.tsx', read('frontend/src/components/ThemeToggle.tsx')]
+];
 const guardAttendanceSource = read('frontend/src/app/dashboard/security/attendance/page.tsx');
 const guardVehiclesSource = read('frontend/src/app/dashboard/security/vehicles/page.tsx');
 const guardPageSources = [
@@ -224,6 +230,26 @@ test('focused Product Selection workflows use one semantic dialog and control in
   assert.match(shell, /event\.key === 'Tab'/);
   assert.match(shell, /previouslyFocused\?\.focus\(\)/);
   assert.match(shell, /useReducedMotion\(\)/);
+});
+
+test('the application shell preserves shared behavior through canonical accessible surfaces', () => {
+  const hardcodedPalette =
+    /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|gray|green|indigo|neutral|orange|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
+  const rawControl = /<(?:button|input|select|textarea)\b/;
+  const inaccessibleClickTarget = /<(?:div|span|li)\b[^>]*\bonClick\s*=/;
+
+  for (const [path, source] of dashboardShellSources) {
+    assert.match(source, /from '@\/components\/erp'/, `${path} must cross the canonical seam`);
+    assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
+    assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
+    assert.doesNotMatch(source, inaccessibleClickTarget, `${path} must use semantic controls`);
+    assert.doesNotMatch(source, /glass-liquid-/, `${path} must not expose the legacy glass layer`);
+  }
+  const shell = dashboardShellSources[0][1];
+  assert.match(shell, /mustChangePassword/);
+  assert.match(shell, /authAPI\.logout/);
+  assert.match(shell, /aria-label="بازکردن منوی اصلی"/);
+  assert.match(shell, /event\.key === 'Escape'/);
 });
 
 test('Guard daily operations do not reimplement palette or native-control presentation', () => {

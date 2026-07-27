@@ -1,22 +1,26 @@
-﻿'use client';
+'use client';
 
-import React, { useState } from 'react';
-import { 
-  FaFileContract, 
-  FaUsers, 
-  FaUserTie, 
-  FaCalculator, 
-  FaWarehouse, 
-  FaShieldAlt,
+import React from 'react';
+import {
+  FaCalculator,
+  FaChartPie,
   FaChevronDown,
   FaChevronUp,
+  FaFileContract,
   FaHome,
-  FaChartPie,
-  FaTruck
+  FaShieldAlt,
+  FaTruck,
+  FaUserTie,
+  FaUsers,
+  FaWarehouse
 } from 'react-icons/fa';
-import { useWorkspace, WORKSPACES, WORKSPACE_CONFIG } from '@/contexts/WorkspaceContext';
+import { ErpBadge, ErpPressable } from '@/components/erp';
+import {
+  useWorkspace,
+  WORKSPACE_CONFIG,
+  type WORKSPACES
+} from '@/contexts/WorkspaceContext';
 
-// Icon mapping
 const iconMap = {
   FaFileContract,
   FaUsers,
@@ -35,238 +39,179 @@ interface WorkspaceSwitcherProps {
   variant?: 'dropdown' | 'grid' | 'sidebar';
 }
 
-export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({ 
-  className = '', 
+const permissionPresentation = {
+  view: { text: 'مشاهده', tone: 'info' as const },
+  edit: { text: 'ویرایش', tone: 'success' as const },
+  admin: { text: 'مدیر', tone: 'purple' as const }
+};
+
+export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
+  className = '',
   showLabel = true,
   compact = false,
   variant = 'dropdown'
 }) => {
-  const { 
-    currentWorkspace, 
-    accessibleWorkspaces, 
+  const {
+    currentWorkspace,
+    accessibleWorkspaces,
     setCurrentWorkspace,
-    getWorkspacePermission 
+    getWorkspacePermission
   } = useWorkspace();
-  
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = React.useState(false);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
 
-  const getCurrentWorkspaceInfo = () => {
-    if (!currentWorkspace) {
-      return {
-        name: 'Main Dashboard',
-        namePersian: 'داشبورد اصلی',
-        icon: FaHome,
-        color: 'gray'
-      };
-    }
-    
-    const config = WORKSPACE_CONFIG[currentWorkspace];
-    return {
-      ...config,
-      icon: iconMap[config.icon as keyof typeof iconMap] || FaFileContract
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
     };
-  };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isOpen]);
 
-  const getPermissionBadge = (workspace: WORKSPACES) => {
+  const permissionBadge = (workspace: WORKSPACES) => {
     const permission = getWorkspacePermission(workspace);
     if (!permission) return null;
+    const presentation = permissionPresentation[permission];
+    return <ErpBadge tone={presentation.tone}>{presentation.text}</ErpBadge>;
+  };
 
-    const badges = {
-      view: { text: 'مشاهده', color: 'bg-blue-500/20 text-blue-400' },
-      edit: { text: 'ویرایش', color: 'bg-green-500/20 text-green-400' },
-      admin: { text: 'مدیر', color: 'bg-purple-500/20 text-purple-400' }
-    };
+  const selectWorkspace = (workspace: WORKSPACES | null) => {
+    setCurrentWorkspace(workspace);
+    setIsOpen(false);
+    triggerRef.current?.focus();
+  };
 
-    const badge = badges[permission];
+  const currentInfo = currentWorkspace
+    ? WORKSPACE_CONFIG[currentWorkspace]
+    : {
+        namePersian: 'داشبورد اصلی',
+        description: 'نمای کلی سیستم',
+        icon: 'FaHome'
+      };
+  const CurrentIcon = currentWorkspace
+    ? iconMap[currentInfo.icon as keyof typeof iconMap] || FaFileContract
+    : FaHome;
+
+  const choices = [
+    {
+      id: null,
+      namePersian: 'داشبورد اصلی',
+      description: 'نمای کلی سیستم',
+      icon: FaHome
+    },
+    ...accessibleWorkspaces.map(workspace => ({
+      ...workspace,
+      icon: iconMap[workspace.icon as keyof typeof iconMap] || FaFileContract
+    }))
+  ];
+
+  const choice = (
+    workspace: (typeof choices)[number],
+    layout: 'card' | 'row'
+  ) => {
+    const Icon = workspace.icon;
+    const active = currentWorkspace === workspace.id;
     return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${badge.color}`}>
-        {badge.text}
-      </span>
+      <ErpPressable
+        key={workspace.id ?? 'main'}
+        type="button"
+        aria-pressed={active}
+        tone={active ? 'primary' : 'neutral'}
+        variant={active ? 'soft' : 'ghost'}
+        onClick={() => selectWorkspace(workspace.id)}
+        className={
+          layout === 'card'
+            ? 'min-h-28 w-full justify-start p-4 text-right'
+            : 'w-full justify-start gap-3 px-3 py-2 text-right'
+        }
+      >
+        <span className="sds-tone-primary sds-tone-surface inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--sds-radius-control)]">
+          <Icon className="h-5 w-5" aria-hidden="true" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <strong className="sds-text-primary block truncate text-sm">
+            {workspace.namePersian}
+          </strong>
+          {(layout === 'card' || !compact) && (
+            <span className="sds-text-muted mt-1 block truncate text-xs">
+              {workspace.description}
+            </span>
+          )}
+        </span>
+        {workspace.id && permissionBadge(workspace.id)}
+      </ErpPressable>
     );
   };
 
-  const handleWorkspaceSelect = (workspace: WORKSPACES) => {
-    setCurrentWorkspace(workspace);
-    setIsOpen(false);
-  };
-
-  const handleMainDashboard = () => {
-    setCurrentWorkspace(null);
-    setIsOpen(false);
-  };
-
-  const currentInfo = getCurrentWorkspaceInfo();
-  const CurrentIcon = currentInfo.icon;
-
   if (variant === 'grid') {
     return (
-      <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 ${className}`}>
-        {/* Main Dashboard */}
-        <div
-          onClick={handleMainDashboard}
-          className={`glass-liquid-card p-6 cursor-pointer transition-all duration-200 hover:bg-white/10 ${
-            !currentWorkspace ? 'ring-2 ring-teal-500/50' : ''
-          }`}
-        >
-          <div className="flex items-center gap-4">
-            <div className="glass-liquid-card p-3">
-              <FaHome className="h-6 w-6 text-slate-700 dark:text-slate-300" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-slate-950 dark:text-white">داشبورد اصلی</h3>
-              <p className="text-sm text-slate-900 dark:text-slate-300">نمای کلی سیستم</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Workspace Cards */}
-        {accessibleWorkspaces.map((workspace) => {
-          const Icon = iconMap[workspace.icon as keyof typeof iconMap] || FaFileContract;
-          const isActive = currentWorkspace === workspace.id;
-          
-          return (
-            <div
-              key={workspace.id}
-              onClick={() => handleWorkspaceSelect(workspace.id)}
-              className={`glass-liquid-card p-6 cursor-pointer transition-all duration-200 hover:bg-white/10 ${
-                isActive ? `ring-2 ring-${workspace.color}-500/50` : ''
-              }`}
-            >
-              <div className="flex items-center gap-4">
-                <div className={`glass-liquid-card p-3`}>
-                  <Icon className={`h-6 w-6 text-${workspace.color}-400`} />
-                </div>
-                <div className="flex-1">
-                  <h3 className="font-semibold text-slate-950 dark:text-white">{workspace.namePersian}</h3>
-                  <p className="text-sm text-slate-900 dark:text-slate-300">{workspace.description}</p>
-                  <div className="mt-2">
-                    {getPermissionBadge(workspace.id)}
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
+      <div className={`grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 ${className}`}>
+        {choices.map(workspace => choice(workspace, 'card'))}
       </div>
     );
   }
 
   if (variant === 'sidebar') {
     return (
-      <div className={`space-y-2 ${className}`}>
-        {/* Main Dashboard */}
-        <div
-          onClick={handleMainDashboard}
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-all duration-200 ${
-            !currentWorkspace 
-              ? 'bg-teal-500/20 text-teal-400 border border-teal-500/30' 
-              : 'text-slate-950 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white'
-          }`}
-        >
-          <FaHome className="h-5 w-5" />
-          <span>داشبورد اصلی</span>
-        </div>
-
-        {/* Workspace Items */}
-        {accessibleWorkspaces.map((workspace) => {
-          const Icon = iconMap[workspace.icon as keyof typeof iconMap] || FaFileContract;
-          const isActive = currentWorkspace === workspace.id;
-          
-          return (
-            <div
-              key={workspace.id}
-              onClick={() => handleWorkspaceSelect(workspace.id)}
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-all duration-200 ${
-                isActive 
-                  ? `bg-${workspace.color}-500/20 text-${workspace.color}-400 border border-${workspace.color}-500/30` 
-                  : 'text-slate-950 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white'
-              }`}
-            >
-              <Icon className="h-5 w-5" />
-              <span className="flex-1">{workspace.namePersian}</span>
-              {getPermissionBadge(workspace.id)}
-            </div>
-          );
-        })}
+      <div className={`space-y-1 ${className}`}>
+        {choices.map(workspace => choice(workspace, 'row'))}
       </div>
     );
   }
 
-  // Default dropdown variant
   return (
     <div className={`relative ${className}`}>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className={`glass-liquid-btn flex w-full items-center justify-between gap-3 ${compact ? 'px-3 py-2 text-sm' : 'px-4 py-3'}`}
+      <ErpPressable
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen(open => !open)}
+        className={`w-full justify-between gap-3 ${compact ? 'px-3 py-2 text-sm' : 'px-4 py-3'}`}
       >
-        <div className="flex items-center gap-3">
-          <div className={`glass-liquid-card ${compact ? 'p-1.5' : 'p-2'}`}>
-            <CurrentIcon className={`h-5 w-5 text-${currentInfo.color}-400`} />
-          </div>
+        <span className="flex min-w-0 items-center gap-3">
+          <span className="sds-tone-primary sds-tone-surface inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--sds-radius-control)]">
+            <CurrentIcon className="h-5 w-5" aria-hidden="true" />
+          </span>
           {showLabel && (
-            <div className="text-right">
-              <p className="font-medium text-slate-950 dark:text-white">{currentInfo.namePersian}</p>
-              {!compact && <p className="text-sm text-slate-900 dark:text-slate-300">فضای کاری فعال</p>}
-            </div>
+            <span className="min-w-0 text-right">
+              <strong className="sds-text-primary block truncate text-sm">
+                {currentInfo.namePersian}
+              </strong>
+              {!compact && (
+                <span className="sds-text-muted block truncate text-xs">
+                  فضای کاری فعال
+                </span>
+              )}
+            </span>
           )}
-        </div>
-        {isOpen ? <FaChevronUp className="h-4 w-4" /> : <FaChevronDown className="h-4 w-4" />}
-      </button>
+        </span>
+        {isOpen
+          ? <FaChevronUp className="h-4 w-4" aria-hidden="true" />
+          : <FaChevronDown className="h-4 w-4" aria-hidden="true" />}
+      </ErpPressable>
 
       {isOpen && (
         <>
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 z-10" 
+          <ErpPressable
+            type="button"
+            aria-label="بستن فهرست فضاهای کاری"
             onClick={() => setIsOpen(false)}
+            className="fixed inset-0 z-10 min-h-0 rounded-none bg-transparent p-0"
           />
-          
-          {/* Dropdown */}
-          <div className="absolute top-full left-0 right-0 mt-2 glass-liquid-card p-2 z-20 max-h-96 overflow-y-auto">
-            {/* Main Dashboard */}
-            <div
-              onClick={handleMainDashboard}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 cursor-pointer transition-all duration-200 ${
-                !currentWorkspace 
-                  ? 'bg-teal-500/20 text-teal-400' 
-                  : 'text-slate-950 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white'
-              }`}
-            >
-              <FaHome className="h-5 w-5" />
-              <div className="flex-1">
-                <p className="font-medium">داشبورد اصلی</p>
-                {!compact && <p className="text-sm opacity-75">نمای کلی سیستم</p>}
-              </div>
-            </div>
-
-            {/* Workspace Items */}
-            {accessibleWorkspaces.map((workspace) => {
-              const Icon = iconMap[workspace.icon as keyof typeof iconMap] || FaFileContract;
-              const isActive = currentWorkspace === workspace.id;
-              
-              return (
-                <div
-                  key={workspace.id}
-                  onClick={() => handleWorkspaceSelect(workspace.id)}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2 cursor-pointer transition-all duration-200 ${
-                    isActive 
-                      ? `bg-${workspace.color}-500/20 text-${workspace.color}-400` 
-                      : 'text-slate-950 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white'
-                  }`}
-                >
-                  <Icon className="h-5 w-5" />
-                  <div className="flex-1">
-                    <p className="font-medium">{workspace.namePersian}</p>
-                    {!compact && <p className="text-sm opacity-75">{workspace.description}</p>}
-                  </div>
-                  {getPermissionBadge(workspace.id)}
-                </div>
-              );
-            })}
+          <div
+            role="listbox"
+            aria-label="فضای کاری"
+            className="sds-workspace-surface absolute inset-x-0 top-full z-20 mt-2 max-h-96 space-y-1 overflow-y-auto p-2 shadow-[var(--sds-shadow-raised)]"
+          >
+            {choices.map(workspace => choice(workspace, 'row'))}
           </div>
         </>
       )}
     </div>
   );
 };
-

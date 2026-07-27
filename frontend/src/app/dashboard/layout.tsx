@@ -15,7 +15,6 @@ import {
   FaBars,
   FaTimes,
   FaUser,
-  FaBell,
   FaFileAlt,
   FaPercent,
   FaShieldAlt
@@ -26,6 +25,7 @@ import { WorkspaceNavigation } from '@/components/WorkspaceNavigation';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import { authAPI, dashboardAPI } from '@/lib/api';
 import { SecurityNoticeHost } from '@/components/SecurityNoticeHost';
+import { ErpPressable } from '@/components/erp';
 
 interface User {
   id: string;
@@ -93,14 +93,22 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         left: Math.max(margin, Math.min(rect.left, window.innerWidth - menuWidth - margin)),
       });
     };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setProfileDropdownOpen(false);
+        profileButtonRef.current?.focus();
+      }
+    };
 
     updatePosition();
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
+    document.addEventListener('keydown', closeOnEscape);
 
     return () => {
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
+      document.removeEventListener('keydown', closeOnEscape);
     };
   }, [profileDropdownOpen]);
 
@@ -236,8 +244,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-[#074747] dark:border-teal-300"></div>
+      <div className="flex min-h-screen items-center justify-center bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)]">
+        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-[var(--sds-accent)] motion-reduce:animate-none"></div>
       </div>
     );
   }
@@ -247,56 +255,60 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }
 
   return (
-    <div className="dashboard-shell min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+    <div className="dashboard-shell min-h-screen bg-[var(--sds-surface-canvas)] text-[var(--sds-text-primary)]">
       <SecurityNoticeHost />
       {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
-        <div 
+        <ErpPressable
+          type="button"
+          aria-label="بستن منوی اصلی"
           data-dashboard-overlay
-          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+          className="fixed inset-0 z-40 min-h-0 rounded-none bg-[var(--sds-surface-overlay)] p-0 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
       {/* Sidebar */}
-      <div data-dashboard-sidebar className={`fixed inset-y-0 right-0 z-50 w-[min(86vw,320px)] transform overflow-y-auto border-l border-slate-200 bg-white/95 shadow-xl backdrop-blur-xl transition-transform duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-950/95 lg:overflow-hidden ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'} lg:translate-x-0 ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-64'}`}>
+      <div data-dashboard-sidebar className={`fixed inset-y-0 right-0 z-50 w-[min(86vw,320px)] transform overflow-y-auto border-l border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-xl backdrop-blur-xl transition-transform duration-300 ease-in-out dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)] lg:overflow-hidden ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'} lg:translate-x-0 ${sidebarCollapsed ? 'lg:w-20' : 'lg:w-64'}`}>
         <div className="flex min-h-full flex-col lg:h-full">
           {/* Sidebar Header */}
-          <div className={`flex items-center border-b border-slate-200 p-4 dark:border-slate-800 lg:p-6 ${sidebarCollapsed ? 'lg:justify-center lg:p-4' : 'justify-between'}`}>
+          <div className={`flex items-center border-b border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-subtle)] lg:p-6 ${sidebarCollapsed ? 'lg:justify-center lg:p-4' : 'justify-between'}`}>
             <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-3'}`}>
-              <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-lg border border-[#074747]/20 bg-white shadow-sm dark:border-teal-800 dark:bg-slate-900">
+              <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-lg border border-[var(--sds-accent)] bg-[var(--sds-surface-raised)] shadow-sm dark:border-[var(--sds-accent)] dark:bg-[var(--sds-surface-subtle)]">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/brand/logo-project.png" alt="Sabalan ERP" className="h-full w-full object-cover" />
               </div>
               {!sidebarCollapsed && (
-                <h1 className="text-xl font-bold text-slate-950 dark:text-white">Sabalan ERP</h1>
+                <h1 className="text-xl font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">Sabalan ERP</h1>
               )}
             </div>
-            <button
+            <ErpPressable
+              type="button"
+              aria-label="بستن منوی اصلی"
               onClick={() => setSidebarOpen(false)}
-              className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white lg:hidden"
+              className="text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-inverse)] lg:hidden"
             >
               <FaTimes />
-            </button>
+            </ErpPressable>
           </div>
 
           {/* User Info */}
           {!sidebarCollapsed && (
-            <div className="border-b border-slate-200 p-4 dark:border-slate-800 lg:p-5">
+            <div className="border-b border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-subtle)] lg:p-5">
               <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-slate-100 p-2.5 text-[#074747] dark:bg-slate-900 dark:text-teal-200">
+                <div className="rounded-lg bg-[var(--sds-surface-subtle)] p-2.5 text-[var(--sds-accent)]">
                   <FaUser className="h-5 w-5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="truncate text-sm font-semibold text-slate-950 dark:text-white">
+                  <p className="truncate text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
                     {user.firstName} {user.lastName}
                   </p>
-                  <p className="truncate text-xs text-slate-400 dark:text-slate-500">
+                  <p className="truncate text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                     {user.department?.namePersian || 'بدون دپارتمان'} · @{user.username}
                   </p>
                 </div>
                 {user.role === 'ADMIN' && (
-                  <span className="rounded-full bg-[#074747]/10 px-2 py-1 text-xs font-semibold text-[#074747] dark:bg-teal-900/30 dark:text-teal-200">
+                  <span className="rounded-full bg-[var(--sds-accent-soft)] px-2 py-1 text-xs font-semibold text-[var(--sds-accent-on-soft)]">
                     مدیر
                   </span>
                 )}
@@ -306,7 +318,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
           {/* Workspace Switcher */}
           {!sidebarCollapsed && (
-            <div className="border-b border-slate-200 p-4 dark:border-slate-800 lg:p-5">
+            <div className="border-b border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-subtle)] lg:p-5">
               <WorkspaceSwitcher variant="dropdown" compact />
             </div>
           )}
@@ -321,14 +333,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
 
           {/* Sidebar Footer */}
-          <div className={`${sidebarCollapsed ? 'p-4' : 'space-y-3 p-4 lg:p-5'} border-t border-slate-200 dark:border-slate-800`}>
+          <div className={`${sidebarCollapsed ? 'p-4' : 'space-y-3 p-4 lg:p-5'} border-t border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]`}>
             <div className={`flex ${sidebarCollapsed ? 'flex-col items-center gap-2' : 'items-center justify-between gap-3'}`}>
-              {!sidebarCollapsed && <span className="text-sm text-slate-500 dark:text-slate-400">حالت نمایش</span>}
+              {!sidebarCollapsed && <span className="text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">حالت نمایش</span>}
               <ThemeToggle />
             </div>
-            <button
+            <ErpPressable
+              type="button"
               onClick={handleLogout}
-              className={`flex items-center text-slate-600 transition-all duration-200 hover:bg-red-50 hover:text-red-600 dark:text-slate-300 dark:hover:bg-red-500/20 dark:hover:text-red-300 ${
+              tone="danger"
+              className={`flex items-center text-[var(--sds-text-secondary)] transition-all duration-200 hover:bg-[var(--sds-danger-surface)] hover:text-[var(--sds-danger)] dark:text-[var(--sds-text-secondary)] dark:hover:bg-[var(--sds-danger-surface)] dark:hover:text-[var(--sds-danger)] ${
                 sidebarCollapsed
                   ? 'justify-center w-12 h-12 rounded-full mx-auto'
                   : 'gap-3 w-full px-4 py-3 rounded-lg'
@@ -336,7 +350,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             >
               <FaSignOutAlt className="h-5 w-5" />
               {!sidebarCollapsed && <span>خروج</span>}
-            </button>
+            </ErpPressable>
           </div>
         </div>
       </div>
@@ -344,23 +358,25 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Main Content */}
       <div data-dashboard-content className={`transition-all duration-300 ${sidebarCollapsed ? 'lg:mr-20' : 'lg:mr-64'}`}>
         {/* Top Bar */}
-        <header data-dashboard-topbar className="border-b border-slate-200 bg-white/85 p-4 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/70">
+        <header data-dashboard-topbar className="border-b border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-4 backdrop-blur-xl dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)]">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <button
+              <ErpPressable
+                type="button"
+                aria-label="بازکردن منوی اصلی"
                 onClick={() => setSidebarOpen(true)}
-                className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white lg:hidden"
+                className="text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-inverse)] lg:hidden"
               >
                 <FaBars className="h-6 w-6" />
-              </button>
+              </ErpPressable>
               <div>
-                <h1 className="text-xl font-bold text-slate-950 dark:text-white sm:text-2xl">
+                <h1 className="text-xl font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] sm:text-2xl">
                   {currentWorkspace ? 
                     accessibleWorkspaces.find(w => w.id === currentWorkspace)?.namePersian || 'داشبورد اصلی' :
                     'داشبورد اصلی'
                   }
                 </h1>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
+                <p className="text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                   {currentWorkspace ? 
                     accessibleWorkspaces.find(w => w.id === currentWorkspace)?.description || '' :
                     'خوش آمدید ' + user.firstName + ' ' + user.lastName
@@ -370,17 +386,18 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
             
             <div className="flex items-center gap-4">
-              <button className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:text-[#074747] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                <FaBell className="h-5 w-5" />
-              </button>
               <div className="relative profile-dropdown-container">
-                <button 
+                <ErpPressable
+                  type="button"
                   ref={profileButtonRef}
+                  aria-label="حساب کاربری"
+                  aria-haspopup="menu"
+                  aria-expanded={profileDropdownOpen}
                   onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-[#074747] transition hover:bg-[#074747]/10 dark:border-slate-700 dark:bg-slate-900 dark:text-teal-200"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-accent)] transition hover:bg-[var(--sds-accent-soft)]"
                 >
                   <FaUser className="h-5 w-5" />
-                </button>
+                </ErpPressable>
               </div>
             </div>
           </div>
@@ -393,29 +410,35 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       </div>
       {profileDropdownOpen && createPortal(
         <div
-          className="profile-dropdown-container fixed z-[100000] w-48 rounded-lg border border-slate-200 bg-white p-2 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+          role="menu"
+          aria-label="حساب کاربری"
+          className="profile-dropdown-container fixed z-[100000] w-48 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-2 shadow-2xl dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)]"
           style={{ top: profileDropdownPosition.top, left: profileDropdownPosition.left }}
         >
           <div className="py-2">
-            <div className="border-b border-slate-200 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-300">
+            <div className="border-b border-[var(--sds-border-default)] px-3 py-2 text-sm text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-subtle)] dark:text-[var(--sds-text-secondary)]">
               <p className="font-medium">{user.firstName} {user.lastName}</p>
-              <p className="text-xs text-slate-500">@{user.username}</p>
+              <p className="text-xs text-[var(--sds-text-muted)]">@{user.username}</p>
             </div>
             <Link
               href="/dashboard/personal"
+              role="menuitem"
               onClick={() => setProfileDropdownOpen(false)}
-              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-slate-600 transition-colors hover:bg-[#074747]/10 hover:text-[#074747] dark:text-slate-300 dark:hover:bg-teal-500/20 dark:hover:text-teal-200"
+              className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-[var(--sds-text-secondary)] transition-colors hover:bg-[var(--sds-accent-soft)] hover:text-[var(--sds-accent)]"
             >
               <FaUser className="h-4 w-4" />
               امور شخص
             </Link>
-            <button
+            <ErpPressable
+              type="button"
+              role="menuitem"
               onClick={handleLogout}
-              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-slate-600 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-slate-300 dark:hover:bg-red-500/20 dark:hover:text-red-300"
+              tone="danger"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-[var(--sds-text-secondary)] transition-colors hover:bg-[var(--sds-danger-surface)] hover:text-[var(--sds-danger)] dark:text-[var(--sds-text-secondary)] dark:hover:bg-[var(--sds-danger-surface)] dark:hover:text-[var(--sds-danger)]"
             >
               <FaSignOutAlt className="h-4 w-4" />
               خروج
-            </button>
+            </ErpPressable>
           </div>
         </div>,
         document.body

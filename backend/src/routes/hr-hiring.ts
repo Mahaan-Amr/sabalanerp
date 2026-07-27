@@ -47,6 +47,7 @@ import {
 import { normalizeInsuranceEnrollmentCommand } from '../services/hrInsuranceEnrollment';
 import { normalizePayrollParticipationCommand } from '../services/hrPayrollParticipation';
 import { buildHiringDocumentIndex } from '../services/hrHiringDocumentIndex';
+import { buildEmploymentActivationReadiness } from '../services/hrEmploymentActivation';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -822,6 +823,9 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   data.lifecycle = projectHiringLifecycle(row, authorities);
   data.taskCapabilities = projectHiringTaskCapabilities(row, authorities);
   data.documentIndex = buildHiringDocumentIndex(row, authorities);
+  data.activationReadiness = authorities.has('HR_MANAGER')
+    ? buildEmploymentActivationReadiness(row)
+    : null;
   if (!canSeeDecisionDetails) {
     data.hiringDecisions = data.hiringDecisions.map(({ kind, outcome, version, decidedAt }: any) => ({ kind, outcome, version, decidedAt }));
     data.preIdentityChecklistItems = data.preIdentityChecklistItems.map(({ id, title, status, dueAt, managementResolution }: any) => ({ id, title, status, dueAt, managementResolution }));
@@ -2209,7 +2213,7 @@ router.post('/applications/:id/activate', requireAuthority('HR_MANAGER'), asyncH
   await prisma.$transaction([
     prisma.hrEmploymentRelationship.update({ where: { id: application.employmentRelationship.id }, data: { status: 'ACTIVE' } }),
     prisma.personnel.update({ where: { id: application.employmentRelationship.personnelId }, data: { isActive: true } }),
-    prisma.hrJobApplication.update({ where: { id: application.id }, data: { activatedAt: new Date() } })
+    prisma.hrJobApplication.update({ where: { id: application.id }, data: { activatedAt: new Date(), activatedBy: actorId(req) } })
   ]);
   await audit(application.id, 'EMPLOYMENT_ACTIVATED', req);
   res.json({ success: true });

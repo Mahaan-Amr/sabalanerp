@@ -2078,13 +2078,10 @@ export default function HiringCasePage() {
             </ErpSection>
           </>
         )}
-      {selectedLifecyclePhase &&
-        ["ONBOARDING", "ACTIVATION"].includes(selectedLifecyclePhase) &&
-        (canViewInsuranceTask ||
-          canViewPayrollTask ||
-          canViewActivationTask) && (
+      {selectedLifecyclePhase === "ONBOARDING" &&
+        (canViewInsuranceTask || canViewPayrollTask) && (
           <>
-            <ErpSection title="بیمه، حقوق و فعال‌سازی">
+            <ErpSection title="بیمه و حقوق">
               <div className="grid gap-3 xl:grid-cols-3">
                 {canViewInsuranceTask && (
                   <ErpCard className="space-y-2 p-4">
@@ -2277,25 +2274,49 @@ export default function HiringCasePage() {
                     />
                   </ErpCard>
                 )}
-                {canViewActivationTask && (
-                  <ErpCard className="p-4">
-                    <p className="text-sm">
-                      فعال‌سازی فقط پس از رسیدن تاریخ شروع و تکمیل همه
-                      مسدودکننده‌ها ممکن است.
-                    </p>
-                    <ErpButton
-                      className="mt-4"
-                      label="تأیید و فعال‌سازی مدیر منابع انسانی"
-                      onClick={() =>
-                        run(() => hiringAPI.activate(id), "استخدام فعال شد.")
-                      }
-                      tone="success"
-                    />
-                  </ErpCard>
-                )}
               </div>
             </ErpSection>
           </>
+        )}
+      {selectedLifecyclePhase === "ACTIVATION" &&
+        canViewActivationTask &&
+        data.activationReadiness && (
+          <ErpSection
+            title="آمادگی فعال‌سازی رابطه استخدامی"
+            description="این تصمیم رابطه استخدامی را از «برنامه‌ریزی‌شده» به «فعال» تغییر می‌دهد."
+          >
+            <ErpCard className="space-y-3 p-4">
+              <div className="grid gap-2 text-sm md:grid-cols-4">
+                <p>شروع برنامه‌ریزی‌شده: {fromIsoDate(data.activationReadiness.plannedStartDate) || "—"}</p>
+                <p>قرارداد: {hrDisplayLabel(data.activationReadiness.paperContractClearance)}</p>
+                <p>حقوق و دستمزد: {data.activationReadiness.payrollConfigured ? "تنظیم‌شده" : "تنظیم‌نشده"}</p>
+                <p>
+                  بیمه (غیرمسدودکننده): {hrDisplayLabel(data.activationReadiness.insurance.status)}
+                </p>
+              </div>
+              {data.activationReadiness.blockers.length > 0 && (
+                <ul className="space-y-1 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+                  {data.activationReadiness.blockers.map((blocker: any) => (
+                    <li key={blocker.id}>• {blocker.message}</li>
+                  ))}
+                </ul>
+              )}
+              {data.activationReadiness.activatedAt ? (
+                <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">
+                  فعال‌سازی توسط {data.activationReadiness.activatedBy || "مدیر منابع انسانی"} در {dateTimeFa(data.activationReadiness.activatedAt)} انجام شد.
+                </p>
+              ) : (
+                <ErpButton
+                  label="تأیید نهایی و فعال‌سازی رابطه استخدامی"
+                  disabled={!data.activationReadiness.ready}
+                  onClick={() =>
+                    run(() => hiringAPI.activate(id), "استخدام فعال شد.")
+                  }
+                  tone="success"
+                />
+              )}
+            </ErpCard>
+          </ErpSection>
         )}
       {selectedLifecyclePhase &&
         [

@@ -44,6 +44,24 @@
       "reason": "CRM customer registry, potential-project, follow-up, and contract-handoff workflows passed canonical control, responsive, accessibility, theme, and production-build gates."
     },
     {
+      "pattern": "frontend/src/app/dashboard/sales/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Sales contract management, product catalog, product authoring, and reporting use the shared semantic foundation while preserving permissions, calculations, exports, and persisted meaning."
+    },
+    {
+      "pattern": "frontend/src/app/dashboard/contracts/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Legacy-compatible contract routes resolve to accepted Sales workspace surfaces."
+    },
+    {
+      "pattern": "frontend/src/app/dashboard/contract-templates/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Interactive contract-template management uses canonical controls and semantic surfaces; generated document design remains separately scoped."
+    },
+    {
       "pattern": "frontend/src/app/**/page.tsx",
       "status": "legacy",
       "acceptanceStatus": "not-started",
@@ -100,6 +118,19 @@
         "frontend/src/app/dashboard/crm/page.tsx",
         "frontend/src/app/dashboard/crm/follow-ups/**",
         "frontend/src/app/dashboard/crm/potential-projects/**"
+      ]
+    },
+    {
+      "id": "sales-workspace",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Contract lists and details, product management, operational reporting, and interactive template authoring share canonical responsive controls without changing sales-domain behavior.",
+      "files": [
+        "frontend/src/app/dashboard/sales/**",
+        "frontend/src/app/dashboard/contracts/**",
+        "frontend/src/app/dashboard/contract-templates/**",
+        "frontend/src/components/ProductImportExportModal.tsx",
+        "frontend/src/components/reporting/SalesReportingDashboard.tsx"
       ]
     }
   ],

@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpPressable } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FaCheck,
@@ -354,14 +354,14 @@ export default function ContractsPage() {
         const StatusIcon = getStatusIcon(contract.status);
         return (
           <div className="flex items-start gap-3">
-            <span className="mt-0.5 inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-[#074747]/10 text-[#074747] dark:bg-teal-900/30 dark:text-teal-100">
+            <span className="mt-0.5 inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--sds-accent)]/10 text-[var(--sds-accent)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
               <StatusIcon className="h-4 w-4" />
             </span>
             <div className="min-w-0">
-              <p className="break-words font-semibold text-slate-950 dark:text-white">
+              <p className="break-words font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                 {sanitizeUiTextWithCandidates([contract.titlePersian, contract.title, contract.contractNumber], 'قرارداد فروش')}
               </p>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                 عمومی: {sanitizeUiText(contract.contractNumber, '—')}
                 {contract.creatorSequenceNumber != null ? ` | داخلی من: ${contract.creatorSequenceNumber}` : ''}
               </p>
@@ -377,9 +377,9 @@ export default function ContractsPage() {
       priority: 'secondary',
       cell: (contract) => (
         <div>
-          <p className="font-medium text-slate-800 dark:text-slate-100">{getCustomerName(contract)}</p>
+          <p className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{getCustomerName(contract)}</p>
           {sanitizeUiText(contract.customer.companyName, '') && (
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{sanitizeUiText(contract.customer.companyName, '')}</p>
+            <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{sanitizeUiText(contract.customer.companyName, '')}</p>
           )}
         </div>
       ),
@@ -391,7 +391,7 @@ export default function ContractsPage() {
       priority: 'secondary',
       align: 'end',
       cell: (contract) => (
-        <span className="font-semibold text-[#074747] dark:text-teal-200">
+        <span className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
           {formatCurrency(contract.totalAmount, sanitizeUiText(contract.currency, 'تومان'))}
         </span>
       ),
@@ -429,7 +429,7 @@ export default function ContractsPage() {
               label={sourceStatusLabels[accounting.sourceStatus] || accounting.sourceStatus}
             />
             {accounting.openCorrections > 0 && (
-              <span className="text-xs text-slate-500 dark:text-slate-400">
+              <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                 {accounting.openCorrections > 0 ? `${accounting.openCorrections.toLocaleString('fa-IR')} اصلاحیه` : ''}
               </span>
             )}
@@ -543,15 +543,15 @@ export default function ContractsPage() {
       footer={
         filteredContracts.length > 0 ? (
           <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
-            <p className="text-sm text-slate-500 dark:text-slate-400">
+            <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
               {contracts.length.toLocaleString('fa-IR')} از {pagination.total.toLocaleString('fa-IR')} قرارداد نمایش داده شده است
             </p>
             {hasMoreContracts && (
-              <button
+              <ErpPressable
                 type="button"
                 onClick={handleLoadMore}
                 disabled={loadingMore}
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[#074747]/25 bg-white px-4 py-2 text-sm font-semibold text-[#074747] transition hover:bg-[#074747]/5 disabled:cursor-not-allowed disabled:opacity-60 dark:border-teal-700 dark:bg-slate-900 dark:text-teal-200 dark:hover:bg-teal-950/40"
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[var(--sds-accent)]/25 bg-[var(--sds-surface-raised)] px-4 py-2 text-sm font-semibold text-[var(--sds-accent)] transition hover:bg-[var(--sds-accent)]/5 disabled:cursor-not-allowed disabled:opacity-60 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-accent)] dark:hover:bg-[var(--sds-accent-surface)]"
               >
                 {loadingMore ? (
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -559,7 +559,7 @@ export default function ContractsPage() {
                   <FaChevronDown className="h-4 w-4" />
                 )}
                 نمایش قراردادهای بیشتر
-              </button>
+              </ErpPressable>
             )}
           </div>
         ) : null

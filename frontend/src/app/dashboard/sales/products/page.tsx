@@ -1,5 +1,4 @@
 'use client';
-
 import React, { useEffect, useState } from 'react';
 import { FaBoxes, FaEye, FaEyeSlash, FaFileExcel, FaPlus, FaToggleOff, FaToggleOn, FaTrash } from 'react-icons/fa';
 import { Product } from '@/types/product';
@@ -184,8 +183,8 @@ export default function ProductsPage() {
             priority: 'primary',
             cell: (product) => (
               <div className="min-w-0">
-                <p className="font-semibold text-slate-900 dark:text-white">{product.namePersian}</p>
-                <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-slate-400">{generateFullProductName(product)}</p>
+                <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{product.namePersian}</p>
+                <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{generateFullProductName(product)}</p>
               </div>
             ),
           },
@@ -253,13 +252,13 @@ export default function ProductsPage() {
       </ErpListPage>
 
       {deleteConfirm.show && deleteConfirm.product && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-overlay)] p-4">
           <ErpCard className="w-full max-w-md p-6">
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">تایید حذف محصول</h3>
-            <p className="mt-4 text-sm leading-6 text-slate-600 dark:text-slate-300">
-              آیا مطمئن هستید که می‌خواهید محصول <span className="font-semibold text-slate-900 dark:text-white">{deleteConfirm.product.namePersian}</span> را حذف کنید؟
+            <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">تایید حذف محصول</h3>
+            <p className="mt-4 text-sm leading-6 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+              آیا مطمئن هستید که می‌خواهید محصول <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{deleteConfirm.product.namePersian}</span> را حذف کنید؟
             </p>
-            <p className="mt-3 text-sm text-amber-600 dark:text-amber-300">
+            <p className="mt-3 text-sm text-[var(--sds-warning)] dark:text-[var(--sds-warning)]">
               این عمل قابل بازگشت نیست و اگر محصول در قراردادها استفاده شده باشد، حذف آن امکان‌پذیر نخواهد بود.
             </p>
             <div className="mt-6 flex flex-wrap justify-end gap-2">

@@ -1,9 +1,9 @@
-﻿'use client';
-
+'use client';
+import { ErpInput, ErpPressable } from '@/components/erp';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  FaCheck, 
+import {
+  FaCheck,
   FaTimes,
   FaCut,
   FaGem,
@@ -170,77 +170,78 @@ const SearchableDropdown = ({
 }: SearchableDropdownProps) => (
   <div className="space-y-4">
     <div>
-      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+      <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
         {label} *
       </label>
 
       <div className="relative mb-4">
         <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-          <FaSearch className="h-5 w-5 text-gray-400" />
+          <FaSearch className="h-5 w-5 text-[var(--sds-text-muted)]" />
         </div>
-        <input
+        <ErpInput
           type="text"
           placeholder={placeholder}
           value={searchTerm}
           onChange={(e) => onSearchChange(type, e.target.value)}
-          className="w-full pr-10 pl-4 py-3 border border-slate-200 dark:border-slate-600 rounded-lg bg-white/50 dark:bg-slate-700/50 text-slate-800 dark:text-slate-200 placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+          className="w-full pr-10 pl-4 py-3 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] dark:placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent"
         />
       </div>
 
-      <div className="max-h-60 overflow-y-auto border border-slate-200 dark:border-slate-600 rounded-lg bg-white/50 dark:bg-slate-700/50">
+      <div className="max-h-60 overflow-y-auto border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)]">
         {filteredData.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-slate-500 dark:text-slate-400">
+            <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
               {searchTerm ? 'هیچ آیتمی با این جستجو یافت نشد' : 'هیچ آیتمی موجود نیست'}
             </p>
           </div>
         ) : (
           filteredData.map((item) => (
-            <div
+            <ErpPressable
+              type="button"
               key={item.id}
               onClick={() => onSelect(type, item)}
-              className={`p-4 border-b border-slate-200 dark:border-slate-600 cursor-pointer transition-all ${
+              className={`block w-full p-4 text-right border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] cursor-pointer transition-all ${
                 selectedItem?.id === item.id
-                  ? 'bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800'
-                  : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                  ? 'bg-[var(--sds-accent-surface)] dark:bg-[var(--sds-accent-surface)] border-[var(--sds-border-strong)] dark:border-[var(--sds-border-strong)]'
+                  : 'hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-raised)]'
               }`}
             >
               <div className="flex justify-between items-start">
                 <div>
-                  <h4 className="font-medium text-slate-800 dark:text-slate-200">
+                  <h4 className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                     {item.namePersian}
                   </h4>
-                  <p className="text-sm text-slate-600 dark:text-slate-300">
+                  <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                     کد: {item.code}
                     {item.value && item.unit && ` ⬢ ${item.value} ${item.unit}`}
                   </p>
                   {item.description && (
-                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                    <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mt-1">
                       {item.description}
                     </p>
                   )}
                 </div>
                 {selectedItem?.id === item.id && (
-                  <FaCheck className="text-teal-500" />
+                  <FaCheck className="text-[var(--sds-accent)]" />
                 )}
               </div>
-            </div>
+            </ErpPressable>
           ))
         )}
       </div>
 
-      {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
+      {error && <p className="text-[var(--sds-danger)] text-sm mt-1">{error}</p>}
     </div>
 
     {selectedItem && (
-      <div className="p-4 bg-teal-50 dark:bg-teal-900/20 rounded-lg border border-teal-200 dark:border-teal-800">
-        <h4 className="font-medium text-teal-800 dark:text-teal-200 mb-2">انتخاب شده:</h4>
-        <p className="text-teal-700 dark:text-teal-300">
+      <div className="p-4 bg-[var(--sds-accent-surface)] dark:bg-[var(--sds-accent-surface)] rounded-lg border border-[var(--sds-border-strong)] dark:border-[var(--sds-border-strong)]">
+        <h4 className="font-medium text-[var(--sds-accent)] dark:text-[var(--sds-accent)] mb-2">انتخاب شده:</h4>
+        <p className="text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
           <strong>{selectedItem.namePersian}</strong> ({selectedItem.code})
           {selectedItem.value && selectedItem.unit && ` - ${selectedItem.value} ${selectedItem.unit}`}
         </p>
         {selectedItem.description && (
-          <p className="text-sm text-teal-600 dark:text-teal-400 mt-1">
+          <p className="text-sm text-[var(--sds-accent)] dark:text-[var(--sds-accent)] mt-1">
             {selectedItem.description}
           </p>
         )}
@@ -253,31 +254,31 @@ interface StoneProductWizardData {
   // Step 1: Cut Type
   cutTypeId: string;
   cutType: MasterDataItem | null;
-  
+
   // Step 2: Stone Material
   stoneMaterialId: string;
   stoneMaterial: MasterDataItem | null;
-  
+
   // Step 3: Cut Width
   cutWidthId: string;
   cutWidth: MasterDataItem | null;
-  
+
   // Step 4: Thickness
   thicknessId: string;
   thickness: MasterDataItem | null;
-  
+
   // Step 5: Mine or Stone Name
   mineId: string;
   mine: MasterDataItem | null;
-  
+
   // Step 6: Finish Type
   finishTypeId: string;
   finishType: MasterDataItem | null;
-  
+
   // Step 7: Properties or Color
   colorId: string;
   color: MasterDataItem | null;
-  
+
   // Contract visibility
   contractVisibility: Record<ContractVisibilityOption, boolean>;
   motherLengthValue: string;
@@ -288,7 +289,7 @@ export default function CreateStoneProductWizard() {
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  
+
   // Master data state
   const [masterData, setMasterData] = useState({
     cutTypes: [] as MasterDataItem[],
@@ -345,7 +346,7 @@ export default function CreateStoneProductWizard() {
   const loadMasterData = async () => {
     try {
       setLoading(true);
-      
+
       // Load all master data in parallel
       const [
         cutTypesResponse,
@@ -433,9 +434,9 @@ export default function CreateStoneProductWizard() {
   const getFilteredData = (type: keyof typeof masterData, searchTerm: string) => {
     const data = masterData[type];
     if (!searchTerm.trim()) return data;
-    
+
     const searchLower = searchTerm.toLowerCase();
-    return data.filter(item => 
+    return data.filter(item =>
       item.namePersian.toLowerCase().includes(searchLower) ||
       item.code.toLowerCase().includes(searchLower) ||
       (item.name && item.name.toLowerCase().includes(searchLower)) ||
@@ -445,7 +446,7 @@ export default function CreateStoneProductWizard() {
 
   const validateCurrentStep = (): boolean => {
     const newErrors: Record<string, string> = {};
-    
+
     switch (currentStep) {
       case 1:
         if (!wizardData.cutTypeId) {
@@ -493,7 +494,7 @@ export default function CreateStoneProductWizard() {
         }
         break;
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -560,10 +561,10 @@ export default function CreateStoneProductWizard() {
 
     try {
       setLoading(true);
-      
+
       const finalCode = generateFinalCode();
       const canonicalProductName = generateCanonicalProductName();
-      
+
       const productData = {
         code: finalCode,
         name: canonicalProductName,
@@ -608,7 +609,7 @@ export default function CreateStoneProductWizard() {
 
       console.log('Sending product data:', JSON.stringify(productData, null, 2));
       const response = await salesAPI.createProduct(productData);
-      
+
       if (response.data.success) {
         setModalMessage('محصول با موفقیت ایجاد شد!');
         setShowSuccessModal(true);
@@ -618,7 +619,7 @@ export default function CreateStoneProductWizard() {
           const urlParams = new URLSearchParams(window.location.search);
           const returnTo = urlParams.get('returnTo');
           const step = urlParams.get('step');
-          
+
           if (returnTo === 'contract' && step) {
             // Redirect back to contract wizard
             router.push(`/dashboard/sales/contracts/create?returnTo=contract&step=${step}`);
@@ -634,7 +635,7 @@ export default function CreateStoneProductWizard() {
       }
     } catch (error: any) {
       console.error('Error creating product:', error);
-      
+
       // Show detailed error message from backend
       if (error.response?.data?.details) {
         const errorDetails = error.response.data.details;
@@ -776,35 +777,35 @@ export default function CreateStoneProductWizard() {
             />
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
+              <label className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)]">
                 طول مادر (متر)
               </label>
-              <input
+              <ErpInput
                 value={wizardData.motherLengthValue}
                 onChange={(event) => updateWizardData('motherLengthValue', event.target.value)}
                 inputMode="decimal"
-                className="h-10 w-full rounded-lg border border-slate-300 bg-transparent px-3 text-sm outline-none focus:border-teal-500 dark:border-slate-700"
+                className="h-10 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 text-sm outline-none focus:border-[var(--sds-border-strong)] dark:border-[var(--sds-border-strong)]"
               />
               {errors.motherLengthValue && (
-                <p className="mt-1 text-sm text-red-500">{errors.motherLengthValue}</p>
+                <p className="mt-1 text-sm text-[var(--sds-danger)]">{errors.motherLengthValue}</p>
               )}
             </div>
-            
+
             {/* Final Code Preview */}
-            <div className="bg-teal-50 dark:bg-teal-900/20 p-4 rounded-lg border border-teal-200 dark:border-teal-800">
-              <label className="block text-sm font-medium text-teal-800 dark:text-teal-200 mb-2">
+            <div className="bg-[var(--sds-accent-surface)] dark:bg-[var(--sds-accent-surface)] p-4 rounded-lg border border-[var(--sds-border-strong)] dark:border-[var(--sds-border-strong)]">
+              <label className="block text-sm font-medium text-[var(--sds-accent)] dark:text-[var(--sds-accent)] mb-2">
                 کد نهایی محصول:
               </label>
-              <div className="font-mono text-lg text-teal-900 dark:text-teal-100 bg-white dark:bg-slate-800 p-3 rounded border">
+              <div className="font-mono text-lg text-[var(--sds-accent)] dark:text-[var(--sds-accent)] bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] p-3 rounded border">
                 {generateFinalCode()}
               </div>
             </div>
 
-            <div className="p-4 bg-white/80 dark:bg-slate-800/80 rounded-lg border border-slate-200 dark:border-slate-700">
-              <label className="block text-sm font-medium text-slate-800 dark:text-slate-200 mb-3">
+            <div className="p-4 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+              <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-3">
                 قراردادهای موجود
               </label>
-              <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+              <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mb-4">
                 مشخص کنید این محصول در کدام فرایندهای ایجاد قرارداد نمایش داده شود.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -815,26 +816,26 @@ export default function CreateStoneProductWizard() {
                       key={option.id}
                       className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
                         checked
-                          ? 'border-teal-400 bg-teal-50 dark:bg-teal-900/20'
-                          : 'border-slate-200 dark:border-slate-700 hover:border-teal-200'
+                          ? 'border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] dark:bg-[var(--sds-accent-surface)]'
+                          : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] hover:border-[var(--sds-border-strong)]'
                       }`}
                     >
-                      <input
+                      <ErpInput
                         type="checkbox"
-                        className="mt-1 h-4 w-4 text-teal-600 rounded border-slate-300 focus:ring-teal-500"
+                        className="mt-1 h-4 w-4 text-[var(--sds-accent)] rounded border-[var(--sds-border-default)] focus:ring-[var(--sds-focus-ring)]"
                         checked={checked}
                         onChange={() => toggleContractVisibility(option.id)}
                       />
                       <div>
-                        <p className="font-medium text-slate-800 dark:text-slate-200">{option.label}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">{option.description}</p>
+                        <p className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{option.label}</p>
+                        <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{option.description}</p>
                       </div>
                     </label>
                   );
                 })}
               </div>
               {errors.contractVisibility && (
-                <p className="text-red-500 text-sm mt-2">{errors.contractVisibility}</p>
+                <p className="text-[var(--sds-danger)] text-sm mt-2">{errors.contractVisibility}</p>
               )}
             </div>
           </div>
@@ -846,17 +847,17 @@ export default function CreateStoneProductWizard() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-6">
+    <main className="sds-workspace min-h-screen">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200">
+              <h1 className="text-3xl font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                 ایجاد محصول سنگ
               </h1>
-              <p className="text-slate-600 dark:text-slate-400 mt-2">
-                ایجاد محصول جدید با استفاده از جادوگر 7 مرحله‌ای
+              <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mt-2">
+                مشخصات و ساختار محصول را تکمیل کنید.
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -865,10 +866,10 @@ export default function CreateStoneProductWizard() {
                 const urlParams = new URLSearchParams(window.location.search);
                 const returnTo = urlParams.get('returnTo');
                 const step = urlParams.get('step');
-                
+
                 if (returnTo === 'contract' && step) {
                   return (
-                    <button
+                    <ErpPressable type="submit"
                       onClick={() => {
                         // Restore contract wizard state from localStorage
                         const savedState = localStorage.getItem('contractWizardState');
@@ -881,23 +882,23 @@ export default function CreateStoneProductWizard() {
                           router.push('/dashboard/sales/contracts/create');
                         }
                       }}
-                      className="flex items-center gap-2 px-4 py-2 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200 transition-colors bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800"
+                      className="flex items-center gap-2 px-4 py-2 text-[var(--sds-danger)] dark:text-[var(--sds-danger)] hover:text-[var(--sds-danger)] dark:hover:text-[var(--sds-danger)] transition-colors bg-[var(--sds-danger-surface)] dark:bg-[var(--sds-danger-surface)] rounded-lg border border-[var(--sds-danger-border)] dark:border-[var(--sds-danger-border)]"
                     >
                       <FaTimes className="text-lg" />
                       لغو و بازگشت به قرارداد
-                    </button>
+                    </ErpPressable>
                   );
                 }
                 return null;
               })()}
-              
-              <button
+
+              <ErpPressable type="submit"
                 onClick={() => router.push('/dashboard/sales/products')}
-                className="flex items-center gap-2 px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
               >
                 <FaTimes className="text-lg" />
                 لغو
-              </button>
+              </ErpPressable>
             </div>
           </div>
         </div>
@@ -909,25 +910,25 @@ export default function CreateStoneProductWizard() {
               const isActive = currentStep === step.id;
               const isCompleted = currentStep > step.id;
               const Icon = step.icon;
-              
+
               return (
                 <div key={step.id} className="flex flex-col items-center">
                   <div className={`
                     w-12 h-12 rounded-full flex items-center justify-center mb-2 transition-all duration-200
-                    ${isActive 
-                      ? 'bg-teal-500 text-white shadow-lg' 
-                      : isCompleted 
-                        ? 'bg-green-500 text-white' 
-                        : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                    ${isActive
+                      ? 'bg-[var(--sds-accent)] text-[var(--sds-text-inverse)] shadow-lg'
+                      : isCompleted
+                        ? 'bg-[var(--sds-success)] text-[var(--sds-text-inverse)]'
+                        : 'bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]'
                     }
                   `}>
                     {isCompleted ? <FaCheck className="text-lg" /> : <Icon className="text-lg" />}
                   </div>
                   <div className="text-center">
-                    <p className={`text-sm font-medium ${isActive ? 'text-teal-600 dark:text-teal-400' : 'text-slate-600 dark:text-slate-400'}`}>
+                    <p className={`text-sm font-medium ${isActive ? 'text-[var(--sds-accent)] dark:text-[var(--sds-accent)]' : 'text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]'}`}>
                       {step.title}
                     </p>
-                    <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">
+                    <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mt-1">
                       مرحله {step.id}
                     </p>
                   </div>
@@ -938,15 +939,15 @@ export default function CreateStoneProductWizard() {
         </div>
 
         {/* Step Content */}
-        <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-8 border border-white/20 dark:border-slate-700/50">
+        <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-2xl p-8 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
           <div className="text-center mb-8">
             <div className="flex items-center justify-center gap-3 mb-4">
-              {React.createElement(WIZARD_STEPS[currentStep - 1].icon, { className: "text-2xl text-teal-500" })}
-              <h2 className="text-2xl font-semibold text-slate-800 dark:text-slate-200">
+              {React.createElement(WIZARD_STEPS[currentStep - 1].icon, { className: "text-2xl text-[var(--sds-accent)]" })}
+              <h2 className="text-2xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                 {WIZARD_STEPS[currentStep - 1].title}
               </h2>
             </div>
-            <p className="text-slate-600 dark:text-slate-400">
+            <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
               {WIZARD_STEPS[currentStep - 1].description}
             </p>
           </div>
@@ -995,6 +996,6 @@ export default function CreateStoneProductWizard() {
         details={modalDetails}
         buttonText="باشه"
       />
-    </div>
+    </main>
   );
 }

@@ -1,5 +1,4 @@
 'use client';
-
 import Link from 'next/link';
 import {
   FaBox,
@@ -75,14 +74,14 @@ export default function SalesWorkspacePage() {
               <ErpCard interactive tone={action.tone} className="h-full p-4">
                 <div className="flex h-full flex-col gap-4">
                   <div className="flex items-start justify-between gap-3">
-                    <span className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-white text-[#074747] shadow-sm ring-1 ring-slate-200 dark:bg-slate-950 dark:text-teal-100 dark:ring-slate-700">
+                    <span className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-[var(--sds-surface-raised)] text-[var(--sds-accent)] shadow-sm ring-1 ring-[var(--sds-focus-ring)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-accent)] dark:ring-[var(--sds-focus-ring)]">
                       <Icon className="h-5 w-5" />
                     </span>
                     <ErpBadge tone={action.tone}>{action.badge}</ErpBadge>
                   </div>
                   <div className="mt-auto">
-                    <h2 className="text-base font-semibold text-slate-950 dark:text-white">{action.title}</h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{action.description}</p>
+                    <h2 className="text-base font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{action.title}</h2>
+                    <p className="mt-2 text-sm leading-6 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{action.description}</p>
                   </div>
                 </div>
               </ErpCard>

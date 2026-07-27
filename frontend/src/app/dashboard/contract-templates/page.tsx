@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useMemo, useState } from 'react';
 import { FaCopy, FaEdit, FaEye, FaFileContract, FaPlus, FaTrash } from 'react-icons/fa';
 import { ErpActionGrid, ErpBadge, ErpEmptyState, ErpListPage, ErpLoading, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
@@ -122,9 +121,9 @@ export default function ContractTemplatesPage() {
       priority: 'primary',
       cell: (template) => (
         <div>
-          <p className="font-semibold text-slate-900 dark:text-white">{template.namePersian}</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{template.name}</p>
-          {template.description && <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-slate-400">{template.description}</p>}
+          <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{template.namePersian}</p>
+          <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{template.name}</p>
+          {template.description && <p className="mt-2 line-clamp-2 text-xs leading-5 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{template.description}</p>}
         </div>
       ),
     },

@@ -1,12 +1,12 @@
-﻿'use client';
-
+'use client';
+import { ErpInput, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { 
-  FaArrowRight, 
-  FaSave, 
-  FaEye, 
+import {
+  FaArrowRight,
+  FaSave,
+  FaEye,
   FaFileContract,
   FaPlus,
   FaTrash,
@@ -200,16 +200,16 @@ export default function CreateContractTemplatePage() {
   ];
 
   return (
-    <div className="space-y-6">
+    <main className="sds-workspace space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">ایجاد قالب قرارداد جدید</h1>
-          <p className="text-gray-300 mt-1">قالب جدید برای قراردادهای فروش</p>
+          <h1 className="text-2xl font-bold text-[var(--sds-text-primary)]">ایجاد قالب قرارداد جدید</h1>
+          <p className="text-[var(--sds-text-muted)] mt-1">قالب جدید برای قراردادهای فروش</p>
         </div>
-        <Link 
+        <Link
           href="/dashboard/contract-templates"
-          className="glass-liquid-btn px-6 py-3 flex items-center gap-2"
+          className="sds-action px-6 py-3 flex items-center gap-2"
         >
           <FaArrowRight className="h-5 w-5" />
           <span>بازگشت</span>
@@ -218,31 +218,31 @@ export default function CreateContractTemplatePage() {
 
       {/* Error Display */}
       {errors.general && (
-        <div className="glass-liquid-card p-4 bg-red-500/10 border border-red-500/20">
-          <p className="text-red-400">{errors.general}</p>
+        <div className="sds-workspace-surface p-4 bg-[var(--sds-danger-surface)] border border-[var(--sds-danger-border)]">
+          <p className="text-[var(--sds-danger)]">{errors.general}</p>
         </div>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Tab Navigation */}
-        <div className="glass-liquid-card p-2">
+        <div className="sds-workspace-surface p-2">
           <div className="flex flex-wrap gap-2">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               return (
-                <button
+                <ErpPressable
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id as any)}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 ${
                     activeTab === tab.id
-                      ? 'glass-liquid-btn-primary'
-                      : 'glass-liquid-btn'
+                      ? 'sds-action sds-tone-primary sds-action-solid'
+                      : 'sds-action'
                   }`}
                 >
                   <Icon className="h-4 w-4" />
                   <span>{tab.label}</span>
-                </button>
+                </ErpPressable>
               );
             })}
           </div>
@@ -250,53 +250,53 @@ export default function CreateContractTemplatePage() {
 
         {/* Basic Information Tab */}
         {activeTab === 'basic' && (
-          <div className="glass-liquid-card p-6 space-y-6">
-            <h2 className="text-xl font-semibold text-white mb-4">اطلاعات پایه</h2>
-            
+          <div className="sds-workspace-surface p-6 space-y-6">
+            <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات پایه</h2>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-white font-medium mb-2">نام قالب (انگلیسی)</label>
-                <input
+                <label className="block text-[var(--sds-text-primary)] font-medium mb-2">نام قالب (انگلیسی)</label>
+                <ErpInput
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="glass-liquid-input w-full"
+                  className="sds-field w-full"
                   placeholder="Sales Contract Template"
                 />
-                {errors.name && <p className="text-red-400 text-sm mt-1">{errors.name}</p>}
+                {errors.name && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.name}</p>}
               </div>
 
               <div>
-                <label className="block text-white font-medium mb-2">نام قالب (فارسی)</label>
-                <input
+                <label className="block text-[var(--sds-text-primary)] font-medium mb-2">نام قالب (فارسی)</label>
+                <ErpInput
                   type="text"
                   value={formData.namePersian}
                   onChange={(e) => setFormData({ ...formData, namePersian: e.target.value })}
-                  className="glass-liquid-input w-full"
+                  className="sds-field w-full"
                   placeholder="قالب قرارداد فروش"
                 />
-                {errors.namePersian && <p className="text-red-400 text-sm mt-1">{errors.namePersian}</p>}
+                {errors.namePersian && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.namePersian}</p>}
               </div>
 
               <div>
-                <label className="block text-white font-medium mb-2">دسته‌بندی</label>
-                <select
+                <label className="block text-[var(--sds-text-primary)] font-medium mb-2">دسته‌بندی</label>
+                <ErpSelect
                   value={formData.category}
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  className="glass-liquid-input w-full"
+                  className="sds-field w-full"
                 >
                   {categories.map(cat => (
                     <option key={cat.value} value={cat.value}>{cat.label}</option>
                   ))}
-                </select>
+                </ErpSelect>
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-white font-medium mb-2">توضیحات</label>
-                <textarea
+                <label className="block text-[var(--sds-text-primary)] font-medium mb-2">توضیحات</label>
+                <ErpTextarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="glass-liquid-input w-full h-24"
+                  className="sds-field w-full h-24"
                   placeholder="توضیحات کوتاه درباره قالب..."
                 />
               </div>
@@ -306,23 +306,23 @@ export default function CreateContractTemplatePage() {
 
         {/* Content Tab */}
         {activeTab === 'content' && (
-          <div className="glass-liquid-card p-6 space-y-6">
-            <h2 className="text-xl font-semibold text-white mb-4">محتوای قالب</h2>
-            
+          <div className="sds-workspace-surface p-6 space-y-6">
+            <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-4">محتوای قالب</h2>
+
             <div>
-              <label className="block text-white font-medium mb-2">محتوای HTML قالب</label>
-              <textarea
+              <label className="block text-[var(--sds-text-primary)] font-medium mb-2">محتوای HTML قالب</label>
+              <ErpTextarea
                 value={formData.content}
                 onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                className="glass-liquid-input w-full h-96 font-mono text-sm"
+                className="sds-field w-full h-96 font-mono text-sm"
                 placeholder="محتوای HTML قالب با متغیرهای {{variableName}}..."
               />
-              {errors.content && <p className="text-red-400 text-sm mt-1">{errors.content}</p>}
+              {errors.content && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.content}</p>}
             </div>
 
-            <div className="bg-gray-800/50 p-4 rounded-lg">
-              <h3 className="text-white font-medium mb-2">راهنمای متغیرها:</h3>
-              <ul className="text-gray-300 text-sm space-y-1">
+            <div className="bg-[var(--sds-surface-raised)] p-4 rounded-lg">
+              <h3 className="text-[var(--sds-text-primary)] font-medium mb-2">راهنمای متغیرها:</h3>
+              <ul className="text-[var(--sds-text-muted)] text-sm space-y-1">
                 <li>• از {'{{variableName}}'} برای متغیرها استفاده کنید</li>
                 <li>• از {'{{tableRows}}'} برای ردیف‌های جدول استفاده کنید</li>
                 <li>• از CSS inline برای استایل‌دهی استفاده کنید</li>
@@ -334,60 +334,60 @@ export default function CreateContractTemplatePage() {
 
         {/* Variables Tab */}
         {activeTab === 'variables' && (
-          <div className="glass-liquid-card p-6 space-y-6">
-            <h2 className="text-xl font-semibold text-white mb-4">متغیرهای قالب</h2>
-            
+          <div className="sds-workspace-surface p-6 space-y-6">
+            <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-4">متغیرهای قالب</h2>
+
             {/* Add New Variable */}
-            <div className="glass-liquid-card p-4">
-              <h3 className="text-white font-medium mb-4">افزودن متغیر جدید</h3>
+            <div className="sds-workspace-surface p-4">
+              <h3 className="text-[var(--sds-text-primary)] font-medium mb-4">افزودن متغیر جدید</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
-                  <label className="block text-white text-sm mb-1">کلید متغیر</label>
-                  <input
+                  <label className="block text-[var(--sds-text-primary)] text-sm mb-1">کلید متغیر</label>
+                  <ErpInput
                     type="text"
                     value={newVariable.key}
                     onChange={(e) => setNewVariable({ ...newVariable, key: e.target.value })}
-                    className="glass-liquid-input w-full"
+                    className="sds-field w-full"
                     placeholder="buyerName"
                   />
                 </div>
                 <div>
-                  <label className="block text-white text-sm mb-1">برچسب</label>
-                  <input
+                  <label className="block text-[var(--sds-text-primary)] text-sm mb-1">برچسب</label>
+                  <ErpInput
                     type="text"
                     value={newVariable.label}
                     onChange={(e) => setNewVariable({ ...newVariable, label: e.target.value })}
-                    className="glass-liquid-input w-full"
+                    className="sds-field w-full"
                     placeholder="نام خریدار"
                   />
                 </div>
                 <div>
-                  <label className="block text-white text-sm mb-1">نوع</label>
-                  <select
+                  <label className="block text-[var(--sds-text-primary)] text-sm mb-1">نوع</label>
+                  <ErpSelect
                     value={newVariable.type}
                     onChange={(e) => setNewVariable({ ...newVariable, type: e.target.value as any })}
-                    className="glass-liquid-input w-full"
+                    className="sds-field w-full"
                   >
                     {variableTypes.map(type => (
                       <option key={type.value} value={type.value}>{type.label}</option>
                     ))}
-                  </select>
+                  </ErpSelect>
                 </div>
                 <div className="flex items-end">
-                  <button
+                  <ErpPressable
                     type="button"
                     onClick={addVariable}
-                    className="glass-liquid-btn-primary px-4 py-2 w-full flex items-center justify-center gap-2"
+                    className="sds-action sds-tone-primary sds-action-solid px-4 py-2 w-full flex items-center justify-center gap-2"
                   >
                     <FaPlus className="h-4 w-4" />
                     <span>افزودن</span>
-                  </button>
+                  </ErpPressable>
                 </div>
               </div>
-              
+
               <div className="flex items-center gap-4 mt-4">
-                <label className="flex items-center gap-2 text-white text-sm">
-                  <input
+                <label className="flex items-center gap-2 text-[var(--sds-text-primary)] text-sm">
+                  <ErpInput
                     type="checkbox"
                     checked={newVariable.required}
                     onChange={(e) => setNewVariable({ ...newVariable, required: e.target.checked })}
@@ -395,8 +395,8 @@ export default function CreateContractTemplatePage() {
                   />
                   الزامی
                 </label>
-                <label className="flex items-center gap-2 text-white text-sm">
-                  <input
+                <label className="flex items-center gap-2 text-[var(--sds-text-primary)] text-sm">
+                  <ErpInput
                     type="checkbox"
                     checked={newVariable.autoGenerated}
                     onChange={(e) => setNewVariable({ ...newVariable, autoGenerated: e.target.checked })}
@@ -404,8 +404,8 @@ export default function CreateContractTemplatePage() {
                   />
                   تولید خودکار
                 </label>
-                <label className="flex items-center gap-2 text-white text-sm">
-                  <input
+                <label className="flex items-center gap-2 text-[var(--sds-text-primary)] text-sm">
+                  <ErpInput
                     type="checkbox"
                     checked={newVariable.calculated}
                     onChange={(e) => setNewVariable({ ...newVariable, calculated: e.target.checked })}
@@ -414,36 +414,36 @@ export default function CreateContractTemplatePage() {
                   محاسبه‌شده
                 </label>
               </div>
-              
-              {errors.variable && <p className="text-red-400 text-sm mt-2">{errors.variable}</p>}
+
+              {errors.variable && <p className="text-[var(--sds-danger)] text-sm mt-2">{errors.variable}</p>}
             </div>
 
             {/* Existing Variables */}
             <div>
-              <h3 className="text-white font-medium mb-4">متغیرهای موجود</h3>
+              <h3 className="text-[var(--sds-text-primary)] font-medium mb-4">متغیرهای موجود</h3>
               {Object.keys(formData.variables).length === 0 ? (
-                <p className="text-gray-400 text-center py-8">هنوز متغیری اضافه نشده است</p>
+                <p className="text-[var(--sds-text-muted)] text-center py-8">هنوز متغیری اضافه نشده است</p>
               ) : (
                 <div className="space-y-2">
                   {Object.entries(formData.variables).map(([key, variable]) => (
-                    <div key={key} className="flex items-center justify-between p-3 bg-white/5 rounded-lg">
+                    <div key={key} className="flex items-center justify-between p-3 bg-[var(--sds-surface-raised)] rounded-lg">
                       <div className="flex items-center gap-4">
                         <div>
-                          <span className="text-white font-medium">{variable.label}</span>
-                          <span className="text-gray-400 text-sm mr-2">({key})</span>
+                          <span className="text-[var(--sds-text-primary)] font-medium">{variable.label}</span>
+                          <span className="text-[var(--sds-text-muted)] text-sm mr-2">({key})</span>
                         </div>
-                        <span className="text-gray-500 text-sm">{variableTypes.find(t => t.value === variable.type)?.label}</span>
-                        {variable.required && <span className="text-red-400 text-xs">الزامی</span>}
-                        {variable.autoGenerated && <span className="text-blue-400 text-xs">خودکار</span>}
-                        {variable.calculated && <span className="text-green-400 text-xs">محاسبه‌شده</span>}
+                        <span className="text-[var(--sds-text-secondary)] text-sm">{variableTypes.find(t => t.value === variable.type)?.label}</span>
+                        {variable.required && <span className="text-[var(--sds-danger)] text-xs">الزامی</span>}
+                        {variable.autoGenerated && <span className="text-[var(--sds-info)] text-xs">خودکار</span>}
+                        {variable.calculated && <span className="text-[var(--sds-success)] text-xs">محاسبه‌شده</span>}
                       </div>
-                      <button
+                      <ErpPressable
                         type="button"
                         onClick={() => removeVariable(key)}
-                        className="text-red-400 hover:text-red-300 p-1"
+                        className="text-[var(--sds-danger)] hover:text-[var(--sds-danger)] p-1"
                       >
                         <FaTrash className="h-4 w-4" />
-                      </button>
+                      </ErpPressable>
                     </div>
                   ))}
                 </div>
@@ -454,15 +454,15 @@ export default function CreateContractTemplatePage() {
 
         {/* Structure Tab */}
         {activeTab === 'structure' && (
-          <div className="glass-liquid-card p-6 space-y-6">
-            <h2 className="text-xl font-semibold text-white mb-4">ساختار قالب</h2>
-            
+          <div className="sds-workspace-surface p-6 space-y-6">
+            <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-4">ساختار قالب</h2>
+
             <div>
-              <label className="block text-white font-medium mb-2">بخش‌های قالب</label>
+              <label className="block text-[var(--sds-text-primary)] font-medium mb-2">بخش‌های قالب</label>
               <div className="flex flex-wrap gap-2">
                 {['header', 'table', 'footer'].map(section => (
-                  <label key={section} className="flex items-center gap-2 text-white text-sm">
-                    <input
+                  <label key={section} className="flex items-center gap-2 text-[var(--sds-text-primary)] text-sm">
+                    <ErpInput
                       type="checkbox"
                       checked={formData.structure.sections?.includes(section) || false}
                       onChange={(e) => {
@@ -484,15 +484,15 @@ export default function CreateContractTemplatePage() {
             </div>
 
             <div>
-              <label className="block text-white font-medium mb-2">حداکثر ردیف جدول</label>
-              <input
+              <label className="block text-[var(--sds-text-primary)] font-medium mb-2">حداکثر ردیف جدول</label>
+              <ErpInput
                 type="number"
                 value={formData.structure.tableConfig?.maxRows || 9}
                 onChange={(e) => updateStructure('tableConfig', {
                   ...formData.structure.tableConfig,
                   maxRows: parseInt(e.target.value)
                 })}
-                className="glass-liquid-input w-32"
+                className="sds-field w-32"
                 min="1"
                 max="20"
               />
@@ -502,48 +502,48 @@ export default function CreateContractTemplatePage() {
 
         {/* Calculations Tab */}
         {activeTab === 'calculations' && (
-          <div className="glass-liquid-card p-6 space-y-6">
-            <h2 className="text-xl font-semibold text-white mb-4">فرمول‌های محاسباتی</h2>
-            
+          <div className="sds-workspace-surface p-6 space-y-6">
+            <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-4">فرمول‌های محاسباتی</h2>
+
             <div>
-              <label className="block text-white font-medium mb-2">فرمول‌های محاسباتی</label>
+              <label className="block text-[var(--sds-text-primary)] font-medium mb-2">فرمول‌های محاسباتی</label>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-white text-sm mb-1">محاسبه متر مربع</label>
-                  <input
+                  <label className="block text-[var(--sds-text-primary)] text-sm mb-1">محاسبه متر مربع</label>
+                  <ErpInput
                     type="text"
                     value={formData.calculations.formulas?.squareMeter || ''}
                     onChange={(e) => updateCalculations('formulas', {
                       ...formData.calculations.formulas,
                       squareMeter: e.target.value
                     })}
-                    className="glass-liquid-input w-full"
+                    className="sds-field w-full"
                     placeholder="length * width"
                   />
                 </div>
                 <div>
-                  <label className="block text-white text-sm mb-1">محاسبه قیمت کل</label>
-                  <input
+                  <label className="block text-[var(--sds-text-primary)] text-sm mb-1">محاسبه قیمت کل</label>
+                  <ErpInput
                     type="text"
                     value={formData.calculations.formulas?.totalPrice || ''}
                     onChange={(e) => updateCalculations('formulas', {
                       ...formData.calculations.formulas,
                       totalPrice: e.target.value
                     })}
-                    className="glass-liquid-input w-full"
+                    className="sds-field w-full"
                     placeholder="squareMeter * unitPrice"
                   />
                 </div>
                 <div>
-                  <label className="block text-white text-sm mb-1">محاسبه مجموع کل</label>
-                  <input
+                  <label className="block text-[var(--sds-text-primary)] text-sm mb-1">محاسبه مجموع کل</label>
+                  <ErpInput
                     type="text"
                     value={formData.calculations.formulas?.totalAmount || ''}
                     onChange={(e) => updateCalculations('formulas', {
                       ...formData.calculations.formulas,
                       totalAmount: e.target.value
                     })}
-                    className="glass-liquid-input w-full"
+                    className="sds-field w-full"
                     placeholder="SUM(totalPrice)"
                   />
                 </div>
@@ -551,8 +551,8 @@ export default function CreateContractTemplatePage() {
             </div>
 
             <div>
-              <label className="flex items-center gap-2 text-white">
-                <input
+              <label className="flex items-center gap-2 text-[var(--sds-text-primary)]">
+                <ErpInput
                   type="checkbox"
                   checked={formData.calculations.persianNumberConversion || false}
                   onChange={(e) => updateCalculations('persianNumberConversion', e.target.checked)}
@@ -566,20 +566,20 @@ export default function CreateContractTemplatePage() {
 
         {/* Submit Button */}
         <div className="flex items-center justify-end gap-4">
-          <Link 
+          <Link
             href="/dashboard/contract-templates"
-            className="glass-liquid-btn px-6 py-3"
+            className="sds-action px-6 py-3"
           >
             انصراف
           </Link>
-          <button
+          <ErpPressable
             type="submit"
             disabled={loading}
-            className="glass-liquid-btn-primary px-8 py-3 flex items-center gap-2 disabled:opacity-50"
+            className="sds-action sds-tone-primary sds-action-solid px-8 py-3 flex items-center gap-2 disabled:opacity-50"
           >
             {loading ? (
               <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--sds-border-default)]"></div>
                 <span>در حال ایجاد...</span>
               </>
             ) : (
@@ -588,9 +588,9 @@ export default function CreateContractTemplatePage() {
                 <span>ایجاد قالب</span>
               </>
             )}
-          </button>
+          </ErpPressable>
         </div>
       </form>
-    </div>
+    </main>
   );
 }

@@ -71,6 +71,19 @@ const crmSources = [
   'potential-projects/create/page.tsx',
   'potential-projects/[id]/page.tsx'
 ].map((path) => [path, read(`frontend/src/app/dashboard/crm/${path}`)]);
+const salesSources = [
+  ['sales/page.tsx', read('frontend/src/app/dashboard/sales/page.tsx')],
+  ['sales/contracts/page.tsx', read('frontend/src/app/dashboard/sales/contracts/page.tsx')],
+  ['sales/contracts/[id]/page.tsx', read('frontend/src/app/dashboard/sales/contracts/[id]/page.tsx')],
+  ['sales/products/page.tsx', read('frontend/src/app/dashboard/sales/products/page.tsx')],
+  ['sales/products/create/page.tsx', read('frontend/src/app/dashboard/sales/products/create/page.tsx')],
+  ['sales/products/[id]/page.tsx', read('frontend/src/app/dashboard/sales/products/[id]/page.tsx')],
+  ['sales/reports/page.tsx', read('frontend/src/app/dashboard/sales/reports/page.tsx')],
+  ['contract-templates/page.tsx', read('frontend/src/app/dashboard/contract-templates/page.tsx')],
+  ['contract-templates/create/page.tsx', read('frontend/src/app/dashboard/contract-templates/create/page.tsx')],
+  ['ProductImportExportModal.tsx', read('frontend/src/components/ProductImportExportModal.tsx')],
+  ['SalesReportingDashboard.tsx', read('frontend/src/components/reporting/SalesReportingDashboard.tsx')]
+];
 const guardAttendanceSource = read('frontend/src/app/dashboard/security/attendance/page.tsx');
 const guardVehiclesSource = read('frontend/src/app/dashboard/security/vehicles/page.tsx');
 const guardPageSources = [
@@ -339,6 +352,18 @@ test('CRM registry and pipeline routes use canonical controls without tutorial c
     assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
     assert.doesNotMatch(source, inaccessibleClickTarget, `${path} must use semantic controls`);
     assert.doesNotMatch(source, /glass-liquid|CrmGuide|data-crm-guide/, `${path} must omit legacy tutorials`);
+  }
+});
+
+test('Sales management and interactive template surfaces use the shared semantic interface', () => {
+  const hardcodedPalette =
+    /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|fuchsia|gray|green|indigo|lime|neutral|orange|pink|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
+  const rawControl = /<(?:button|input|select|textarea)\b/;
+
+  for (const [path, source] of salesSources) {
+    assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
+    assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
+    assert.doesNotMatch(source, /<div\b[^>]*\bonClick=/, `${path} must not use inaccessible clickable containers`);
   }
 });
 

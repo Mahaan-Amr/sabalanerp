@@ -101,6 +101,36 @@ const child = (rowId: string, sourceRowId: string, order: number): ContractProdu
 });
 
 {
+  const parent = source('source-with-canonical-layer', [stock(9, 0.4)]);
+  const canonicalLayer = {
+    ...child('canonical-layer-row', parent.rowId as string, 0),
+    width: 5,
+    diameterOrWidth: 5,
+    length: 0.91,
+    squareMeters: 0.0455,
+    meta: {
+      isLayer: true,
+      layerInfo: {
+        parentProductRowId: parent.rowId
+      }
+    }
+  };
+
+  const result = replayRemainingStoneAllocations({
+    products: [parent, canonicalLayer],
+    sourceRowId: parent.rowId as string
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.products.length, 2);
+  assert.deepEqual(
+    getAvailableRemainingStoneInventory(result.products[0]),
+    getAvailableRemainingStoneInventory(parent)
+  );
+  assert.equal(result.products[1]?.rowId, canonicalLayer.rowId);
+}
+
+{
   const parent = source('source-secondary-remnants', [stock(14, 0.8)]);
   const allocatedChild = child('child-two-axis-cut', parent.rowId as string, 0);
   allocatedChild.width = 7;

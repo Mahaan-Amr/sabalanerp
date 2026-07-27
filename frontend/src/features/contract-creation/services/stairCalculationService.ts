@@ -54,27 +54,36 @@ export const toCanonicalLayerInventory = ({
   stones: readonly RemainingStone[];
   ownerProductRowId: string;
   catalogProductId: string;
-}): PaidRemainderStock[] => stones
-  .filter(stone =>
-    stone.isAvailable !== false &&
-    Number(stone.length) > 0 &&
-    Number(stone.width) > 0 &&
-    Number(stone.quantity || 1) > 0
-  )
-  .map((stone, index) => ({
-    remainingStoneId: parseStableIdentity('remaining-stone', stone.id),
-    ownerProductRowId: parseStableIdentity('product-row', ownerProductRowId),
-    catalogProductId,
-    sourceBatchId: parseStableIdentity(
-      'source-batch',
-      stone.sourceCutId || `layer-source:${ownerProductRowId}:${stone.id}`
-    ),
-    lengthMeters: toCanonicalDecimal(Number(stone.length)),
-    widthMeters: toCanonicalDecimal(Number(stone.width) / 100),
-    quantity: Math.max(1, Math.trunc(Number(stone.quantity || 1))),
-    creationOrder: index,
-    materialPaid: true
-  }));
+}): PaidRemainderStock[] => {
+  const seenRemainingStoneIds = new Set<string>();
+  return stones
+  .filter(stone => {
+    const isEligible =
+      stone.isAvailable !== false &&
+      Number(stone.length) > 0 &&
+      Number(stone.width) > 0 &&
+      Number(stone.quantity || 1) > 0 &&
+      !seenRemainingStoneIds.has(stone.id);
+    if (isEligible) seenRemainingStoneIds.add(stone.id);
+    return isEligible;
+  })
+  .map((stone, index) => {
+    return {
+      remainingStoneId: parseStableIdentity('remaining-stone', stone.id),
+      ownerProductRowId: parseStableIdentity('product-row', ownerProductRowId),
+      catalogProductId,
+      sourceBatchId: parseStableIdentity(
+        'source-batch',
+        stone.sourceCutId || `layer-source:${ownerProductRowId}:${stone.id}`
+      ),
+      lengthMeters: toCanonicalDecimal(Number(stone.length)),
+      widthMeters: toCanonicalDecimal(Number(stone.width) / 100),
+      quantity: Math.max(1, Math.trunc(Number(stone.quantity || 1))),
+      creationOrder: index,
+      materialPaid: true
+    };
+  });
+};
 
 const selectedLayerSides = (
   draft: StairPartDraftV2
@@ -398,7 +407,7 @@ export const formatCanonicalLayerConflict = (
     if (conflict.message.includes('layerRate')) {
       return 'قیمت نوع لایه در انبار معتبر نیست';
     }
-    return `مقدار واردشده برای لایه معتبر نیست (${conflict.field})`;
+    return `مقدار واردشده برای لایه معتبر نیست (کد: STAIR_LAYER_INPUT_INVALID، فیلد: ${conflict.field}) — ${conflict.message}`;
   }
   return conflict.message || 'محاسبات لایه نیاز به اصلاح دارد';
 };

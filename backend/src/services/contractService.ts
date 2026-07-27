@@ -17,6 +17,8 @@ import {
 
 const prisma = new PrismaClient();
 
+// Contract writes intentionally reload the built canonical graph package so
+// validation and financial reconciliation use the same policy implementation.
 const getApprovedSalesCorrection = (contractId: string, tx: Prisma.TransactionClient | PrismaClient = prisma) =>
   tx.accountingCorrectionRequest.findFirst({
     where: {
@@ -44,7 +46,9 @@ const writeCanonicalGraphSnapshot = async (
     contractData: input.contractData
   }, input.revision);
   if (!plan.ok) {
-    const detail = plan.conflicts.map(conflict => `${conflict.code}:${conflict.path.join('.')}`).join(', ');
+    const detail = plan.conflicts.map(conflict =>
+      `${conflict.code}:${conflict.path.join('.')}:${conflict.message}`
+    ).join(', ');
     throw new Error(`Canonical product graph validation failed: ${detail}`);
   }
   const graph = toJsonValue(JSON.parse(serializeCanonicalProductGraph(plan.graph)));

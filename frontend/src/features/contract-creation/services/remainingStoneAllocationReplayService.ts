@@ -234,7 +234,10 @@ export const replayRemainingStoneAllocations = ({
   const conflicts: RemainingStoneReplayConflict[] = [];
   const childEntries = normalizedProducts
     .map((product, index) => ({ product, index }))
-    .filter(({ product }) => product.parentProductRowId === sourceRowId)
+    .filter(({ product }) =>
+      product.parentProductRowId === sourceRowId &&
+      !Boolean((product.meta as { isLayer?: boolean } | undefined)?.isLayer)
+    )
     .sort((left, right) => {
       const orderDifference = getAllocationOrder(left.product, left.index) - getAllocationOrder(right.product, right.index);
       return orderDifference || left.index - right.index;

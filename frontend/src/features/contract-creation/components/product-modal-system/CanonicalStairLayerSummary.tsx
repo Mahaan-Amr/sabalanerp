@@ -10,6 +10,9 @@ import {
 import {
   useStairLayerCalculationWorker
 } from '../../hooks/useStairLayerCalculationWorker';
+import {
+  getPersianOperationEdgeLabel
+} from '../../services/operationCollectionPresentation';
 import { ReservedRowsSkeleton } from './productModalPrimitives';
 
 const number = (value: string | number) =>
@@ -53,7 +56,7 @@ export function CanonicalStairLayerSummary({
             <span>قطعات تولید</span>
             <strong>
               {calculation.result.physicalStrips.map(strip =>
-                `${strip.side} ${number(strip.quantity)} × ${number(strip.lengthMeters)}m`
+                `${getPersianOperationEdgeLabel(strip.side)} ${number(strip.quantity)} × ${number(strip.lengthMeters)}m`
               ).join(' · ')}
             </strong>
           </div>

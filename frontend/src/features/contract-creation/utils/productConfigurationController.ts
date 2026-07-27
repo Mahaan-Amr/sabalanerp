@@ -234,16 +234,15 @@ export const appendStairLayerConfiguration = (
   draft: StairPartDraftV2,
   configurationId: string
 ): StairPartDraftV2 => {
-  const snapshot: StairPartDraftV2 = {
-    ...draft,
-    layerConfigurationDraftId:
-      draft.layerConfigurationDraftId || configurationId,
-    layerConfigurations: []
-  };
+  const configurations = materializeStairLayerConfigurations(
+    draft,
+    configurationId
+  );
   return {
     ...draft,
-    layerConfigurations: [...(draft.layerConfigurations || []), snapshot],
+    layerConfigurations: configurations,
     layerConfigurationDraftId: undefined,
+    activeLayerConfigurationDraftId: undefined,
     numberOfLayersPerStair: null,
     layerWidthCm: null,
     layerTypeId: null,
@@ -265,6 +264,107 @@ export const appendStairLayerConfiguration = (
     layerManualSourceWidthCm: null,
     layerManualSourceLengthM: null,
     layerManualSourceQuantity: null
+  };
+};
+
+const hasActiveLayerValues = (draft: StairPartDraftV2): boolean =>
+  Number(draft.numberOfLayersPerStair || 0) > 0;
+
+const toLayerConfigurationSnapshot = (
+  draft: StairPartDraftV2,
+  configurationId: string
+): StairPartDraftV2 => ({
+  ...draft,
+  layerConfigurationDraftId: configurationId,
+  activeLayerConfigurationDraftId: undefined,
+  layerConfigurations: []
+});
+
+export const materializeStairLayerConfigurations = (
+  draft: StairPartDraftV2,
+  fallbackConfigurationId?: string
+): StairPartDraftV2[] => {
+  const configurations = [...(draft.layerConfigurations || [])];
+  if (!hasActiveLayerValues(draft)) return configurations;
+
+  const activeId =
+    draft.activeLayerConfigurationDraftId ||
+    draft.layerConfigurationDraftId ||
+    fallbackConfigurationId;
+  if (!activeId) return configurations;
+
+  const snapshot = toLayerConfigurationSnapshot(draft, activeId);
+  const activeIndex = configurations.findIndex(
+    configuration =>
+      configuration.layerConfigurationDraftId === activeId
+  );
+  if (activeIndex >= 0) {
+    configurations[activeIndex] = snapshot;
+  } else {
+    configurations.push(snapshot);
+  }
+  return configurations;
+};
+
+export const selectStairLayerConfiguration = (
+  draft: StairPartDraftV2,
+  configurationId: string
+): StairPartDraftV2 => {
+  const configurations = materializeStairLayerConfigurations(draft);
+  const selected = configurations.find(
+    configuration =>
+      configuration.layerConfigurationDraftId === configurationId
+  );
+  if (!selected) return draft;
+  return {
+    ...selected,
+    layerConfigurations: configurations,
+    layerConfigurationDraftId: configurationId,
+    activeLayerConfigurationDraftId: configurationId
+  };
+};
+
+export const removeStairLayerConfiguration = (
+  draft: StairPartDraftV2,
+  configurationId: string
+): StairPartDraftV2 => {
+  const configurations = materializeStairLayerConfigurations(draft)
+    .filter(configuration =>
+      configuration.layerConfigurationDraftId !== configurationId
+    );
+  if (
+    draft.activeLayerConfigurationDraftId !== configurationId
+  ) {
+    return {
+      ...draft,
+      layerConfigurations: configurations
+    };
+  }
+  const next = configurations[0];
+  if (next?.layerConfigurationDraftId) {
+    return selectStairLayerConfiguration({
+      ...draft,
+      activeLayerConfigurationDraftId: undefined,
+      layerConfigurationDraftId: undefined,
+      numberOfLayersPerStair: null,
+      layerConfigurations: configurations
+    }, next.layerConfigurationDraftId);
+  }
+  return {
+    ...draft,
+    layerConfigurations: [],
+    layerConfigurationDraftId: undefined,
+    activeLayerConfigurationDraftId: undefined,
+    numberOfLayersPerStair: null,
+    layerWidthCm: null,
+    layerTypeId: null,
+    layerTypeName: null,
+    layerTypePrice: null,
+    layerEdges: undefined,
+    layerSourceKind: null,
+    layerSelectedRemainingStoneIds: [],
+    layerDescription: null,
+    layerSideOperations: {}
   };
 };
 

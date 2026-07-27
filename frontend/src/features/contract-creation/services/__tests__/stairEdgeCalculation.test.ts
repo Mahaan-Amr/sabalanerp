@@ -9,7 +9,8 @@ import {
   formatCanonicalLayerConflict,
   getLayerEdgeDemands,
   getTotalLayerLengthPerStairM,
-  normalizeAutomaticLayerOperationGroups
+  normalizeAutomaticLayerOperationGroups,
+  toCanonicalLayerInventory
 } from '../stairCalculationService';
 import {
   parseCanonicalDecimal,
@@ -42,6 +43,35 @@ const tool = (edges: Partial<ToolSelectionV2>): ToolSelectionV2 => ({
   pricePerMeter: 35_000,
   ...edges
 });
+
+{
+  const inventory = toCanonicalLayerInventory({
+    stones: [
+      {
+        id: 'physical-remainder-1',
+        length: 1,
+        width: 40,
+        squareMeters: 0.4,
+        quantity: 1,
+        isAvailable: true,
+        sourceCutId: 'source-cut-1'
+      },
+      {
+        id: 'physical-remainder-1',
+        length: 1,
+        width: 40,
+        squareMeters: 0.4,
+        quantity: 1,
+        isAvailable: true,
+        sourceCutId: 'source-cut-1'
+      }
+    ],
+    ownerProductRowId: 'parent-product-row',
+    catalogProductId: 'catalog-product'
+  });
+  assert.equal(inventory.length, 1);
+  assert.equal(inventory[0]?.remainingStoneId, 'physical-remainder-1');
+}
 
 for (const part of ['tread', 'riser', 'landing'] as StairStepperPart[]) {
   approx(computeToolMetersForTool(part, stairDraft(), tool({ front: true })), 4.8);

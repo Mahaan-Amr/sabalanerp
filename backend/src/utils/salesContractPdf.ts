@@ -6,7 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import { generatePdfFromHtml } from './pdf';
 import { ContractCustomPrintOptions, ContractPrintVariant, renderContractHtml, renderContractPdfHeaderTemplate } from './printTemplate';
 
-export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-project-name-v19-2026-07-18';
+export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-operation-lookups-v20-2026-07-27';
 const prisma = new PrismaClient();
 
 export const salesContractPrintableInclude = {
@@ -242,11 +242,47 @@ export const generateSalesContractPdf = async (
         select: { id: true, code: true }
       })).map((finishing) => [finishing.id, finishing.code]))
     : {};
+  const subServiceIds = new Set<string>();
+  if (Array.isArray(contractData?.products)) {
+    contractData.products.forEach((product: any) => {
+      (Array.isArray(product?.appliedSubServices) ? product.appliedSubServices : [])
+        .forEach((service: any) => {
+          const id = String(service?.subServiceId || service?.subService?.id || '').trim();
+          if (id && !service?.subService?.namePersian && !service?.subService?.name) {
+            subServiceIds.add(id);
+          }
+        });
+    });
+  }
+  const subServiceById = subServiceIds.size > 0
+    ? Object.fromEntries((await prisma.subService.findMany({
+        where: { id: { in: Array.from(subServiceIds) } },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          namePersian: true,
+          pricePerMeter: true,
+          calculationBase: true
+        }
+      })).map((service) => [service.id, {
+        code: service.code,
+        name: service.namePersian || service.name || service.code,
+        pricePerMeter: Number(service.pricePerMeter),
+        calculationBase: service.calculationBase
+      }]))
+    : {};
 
   const html = renderContractHtml({
     ...contract,
     contractData: contract.contractData
-  }, { reservePdfHeaderSpace: usesCustomerFacingHeader, variant, customPrint, finishingCodeById });
+  }, {
+    reservePdfHeaderSpace: usesCustomerFacingHeader,
+    variant,
+    customPrint,
+    finishingCodeById,
+    subServiceById
+  });
 
   return generatePdfFromHtml({
     htmlContent: html,

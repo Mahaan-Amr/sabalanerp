@@ -19,10 +19,13 @@ import {
   createFreshStairPartDraft,
   getFreshContractProductDefaults,
   getContractQuantityInputPolicy,
+  materializeStairLayerConfigurations,
   mergeEditedRemainingStoneState,
+  removeStairLayerConfiguration,
   resolveExistingCalibrationCutEnabled,
   resolveLongitudinalQuantityOptimizationFailure,
-  resolveLongitudinalWidth
+  resolveLongitudinalWidth,
+  selectStairLayerConfiguration
 } from '../../utils/productConfigurationController';
 import { calculateProductOperations } from '@sabalanerp/contract-product-graph';
 import { calculateSmartLongitudinalCutPlan } from '../remainingStoneService';
@@ -305,6 +308,55 @@ assert.equal(createFreshStairPartDraft('landing').widthCm, null);
   assert.equal(appended.numberOfLayersPerStair, null);
   assert.equal(appended.layerSourceKind, null);
   assert.deepEqual(appended.layerSelectedRemainingStoneIds, []);
+}
+{
+  const firstLayer = {
+    ...createFreshStairPartDraft('tread'),
+    layerConfigurationDraftId: 'layer-1',
+    numberOfLayersPerStair: 1,
+    layerWidthCm: 4,
+    layerTypeId: 'double'
+  };
+  const secondLayer = {
+    ...createFreshStairPartDraft('tread'),
+    layerConfigurationDraftId: 'layer-2',
+    numberOfLayersPerStair: 2,
+    layerWidthCm: 5,
+    layerTypeId: 'triple'
+  };
+  const selected = selectStairLayerConfiguration({
+    ...createFreshStairPartDraft('tread'),
+    layerConfigurations: [firstLayer, secondLayer]
+  }, 'layer-1');
+  assert.equal(selected.activeLayerConfigurationDraftId, 'layer-1');
+  assert.equal(selected.numberOfLayersPerStair, 1);
+  assert.deepEqual(
+    selected.layerConfigurations?.map(layer => layer.layerConfigurationDraftId),
+    ['layer-1', 'layer-2']
+  );
+
+  const materialized = materializeStairLayerConfigurations({
+    ...selected,
+    numberOfLayersPerStair: 3
+  });
+  assert.equal(materialized.length, 2);
+  assert.equal(materialized[0].numberOfLayersPerStair, 3);
+  assert.equal(materialized[1].numberOfLayersPerStair, 2);
+
+  const afterRemoval = removeStairLayerConfiguration(
+    selected,
+    'layer-1'
+  );
+  assert.equal(
+    afterRemoval.activeLayerConfigurationDraftId,
+    'layer-2'
+  );
+  assert.deepEqual(
+    afterRemoval.layerConfigurations?.map(
+      layer => layer.layerConfigurationDraftId
+    ),
+    ['layer-2']
+  );
 }
 assert.equal(resolveExistingCalibrationCutEnabled(undefined), true);
 assert.equal(resolveExistingCalibrationCutEnabled(true), true);

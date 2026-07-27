@@ -59,6 +59,18 @@ const dashboardShellSources = [
 const sharedFieldSources = [
   ['FormattedNumberInput.tsx', read('frontend/src/components/FormattedNumberInput.tsx')]
 ];
+const crmSources = [
+  'page.tsx',
+  'customers/page.tsx',
+  'customers/create/page.tsx',
+  'customers/[id]/page.tsx',
+  'customers/[id]/edit/page.tsx',
+  'follow-ups/page.tsx',
+  'follow-ups/create/page.tsx',
+  'potential-projects/page.tsx',
+  'potential-projects/create/page.tsx',
+  'potential-projects/[id]/page.tsx'
+].map((path) => [path, read(`frontend/src/app/dashboard/crm/${path}`)]);
 const guardAttendanceSource = read('frontend/src/app/dashboard/security/attendance/page.tsx');
 const guardVehiclesSource = read('frontend/src/app/dashboard/security/vehicles/page.tsx');
 const guardPageSources = [
@@ -312,6 +324,21 @@ test('shared formatted numeric entry consumes the canonical field primitive', ()
     assert.match(source, /from '@\/components\/erp'/, `${path} must cross the canonical seam`);
     assert.match(source, /<ErpInput/);
     assert.doesNotMatch(source, /<input\b/);
+  }
+});
+
+test('CRM registry and pipeline routes use canonical controls without tutorial clutter', () => {
+  const hardcodedPalette =
+    /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|fuchsia|gray|green|indigo|lime|neutral|orange|pink|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
+  const rawControl = /<(?:button|input|select|textarea)\b/;
+  const inaccessibleClickTarget = /<(?:div|span|li)\b[^>]*\bonClick\s*=/;
+
+  for (const [path, source] of crmSources) {
+    assert.match(source, /from '@\/components\/erp'/, `${path} must cross the canonical seam`);
+    assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
+    assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
+    assert.doesNotMatch(source, inaccessibleClickTarget, `${path} must use semantic controls`);
+    assert.doesNotMatch(source, /glass-liquid|CrmGuide|data-crm-guide/, `${path} must omit legacy tutorials`);
   }
 });
 

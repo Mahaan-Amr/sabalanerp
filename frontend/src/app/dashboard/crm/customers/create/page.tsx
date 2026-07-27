@@ -1,14 +1,13 @@
-﻿'use client';
-
-import { useState, useEffect } from 'react';
+'use client';
+import { ErpInput, ErpPressable } from '@/components/erp';import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { 
-  FaArrowRight, 
-  FaSave, 
-  FaPlus, 
-  FaTrash, 
-  FaPhone, 
+import {
+  FaArrowRight,
+  FaSave,
+  FaPlus,
+  FaTrash,
+  FaPhone,
   FaMapMarkerAlt,
   FaUser,
   FaBuilding,
@@ -77,12 +76,12 @@ interface CustomerFormData {
   lastName: string;
   customerType: 'Individual' | 'Company' | 'Government' | 'Collaborative';
   status: 'Active' | 'Inactive' | 'Prospect' | 'Lead';
-  
+
   // Contact Information (Step 2)
   phoneNumber1: string;
   phoneNumber2: string;
   nationalCode: string;
-  
+
   // Additional Information (Step 2.2 - Collapsible)
   companyName: string;
   brandName: string;
@@ -96,21 +95,21 @@ interface CustomerFormData {
   referrerFirstName: string;
   referrerLastName: string;
   referrerPhoneNumber: string;
-  
+
   // Project Information (Step 3)
   projectName: string;
   projectAddress: string;
   projectCity: string;
   projectType: string;
-  
+
   // Project Manager Information (Step 3.2 - Collapsible)
   projectManagerName: string;
   projectManagerNumber: string;
-  
+
   // Security & Access Control
   isBlacklisted: boolean;
   isLocked: boolean;
-  
+
   // Related Data
   projectAddresses: ProjectAddress[];
   phoneNumbers: PhoneNumber[];
@@ -157,12 +156,12 @@ export default function CreateCustomerPage() {
     lastName: '',
     customerType: 'Individual',
     status: 'Active',
-    
+
     // Contact Information (Step 2)
     phoneNumber1: '',
     phoneNumber2: '',
     nationalCode: '',
-    
+
     // Additional Information (Step 2.2 - Collapsible)
     companyName: '',
     brandName: '',
@@ -176,21 +175,21 @@ export default function CreateCustomerPage() {
     referrerFirstName: '',
     referrerLastName: '',
     referrerPhoneNumber: '',
-    
+
     // Project Information (Step 3)
     projectName: '',
     projectAddress: '',
     projectCity: '',
     projectType: '',
-    
+
     // Project Manager Information (Step 3.2 - Collapsible)
     projectManagerName: '',
     projectManagerNumber: '',
-    
+
     // Security & Access Control
     isBlacklisted: false,
     isLocked: false,
-    
+
     // Related Data
     projectAddresses: [],
     phoneNumbers: []
@@ -237,7 +236,7 @@ export default function CreateCustomerPage() {
       if (duplicateCustomers.length > 0) {
         newErrors.phoneNumber1 = 'مشتری با این شماره تماس قبلا ثبت شده است.';
       }
-      
+
       // Optional fields with validation if provided
       if (formData.nationalCode && formData.nationalCode.length !== 10) {
         newErrors.nationalCode = 'کد ملی باید 10 رقم باشد';
@@ -250,7 +249,7 @@ export default function CreateCustomerPage() {
       // Only these 2 fields are required in project step
       if (!formData.projectName.trim()) newErrors.projectName = 'نام پروژه الزامی است';
       if (!formData.projectAddress.trim()) newErrors.projectAddress = 'آدرس پروژه الزامی است';
-      
+
       // Project type is now optional - no validation needed
       const projectManagerNumberError = validateOptionalIranianMobile(formData.projectManagerNumber);
       if (projectManagerNumberError) newErrors.projectManagerNumber = projectManagerNumberError;
@@ -350,7 +349,7 @@ export default function CreateCustomerPage() {
   const updateProjectAddress = (index: number, field: keyof ProjectAddress, value: string) => {
     setFormData(prev => ({
       ...prev,
-      projectAddresses: prev.projectAddresses.map((addr, i) => 
+      projectAddresses: prev.projectAddresses.map((addr, i) =>
         i === index ? { ...addr, [field]: value } : addr
       )
     }));
@@ -479,7 +478,7 @@ export default function CreateCustomerPage() {
       const phoneNumber2 = normalizeIranianMobile(formData.phoneNumber2);
       const projectManagerNumber = normalizeIranianMobile(formData.projectManagerNumber);
       const referrerPhoneNumber = normalizeIranianMobile(formData.referrerPhoneNumber);
-      
+
       // Prepare data for API
       const customerData = {
         // Basic Information
@@ -487,14 +486,14 @@ export default function CreateCustomerPage() {
         lastName: formData.lastName.trim(),
         customerType: formData.customerType,
         status: formData.status,
-        
+
         // Contact Information
         nationalCode: formData.nationalCode.trim() || null,
         homeAddress: formData.homeAddress.trim() || null,
         homeNumber: normalizePhoneDigits(formData.homeNumber) || null,
         workAddress: formData.workAddress.trim() || null,
         workNumber: normalizePhoneDigits(formData.workNumber) || null,
-        
+
         // Additional Information
         companyName: formData.companyName.trim() || null,
         brandName: formData.brandName.trim() || null,
@@ -504,15 +503,15 @@ export default function CreateCustomerPage() {
         referrerFirstName: formData.referrerFirstName.trim() || null,
         referrerLastName: formData.referrerLastName.trim() || null,
         referrerPhoneNumber: referrerPhoneNumber || null,
-        
+
         // Project Management
         projectManagerName: formData.projectManagerName.trim() || null,
         projectManagerNumber: projectManagerNumber || null,
-        
+
         // Security & Access Control
         isBlacklisted: false,
         isLocked: false,
-        
+
         // Create projectAddresses array from individual project fields
         projectAddresses: formData.projectName.trim() && formData.projectAddress.trim() ? [{
           address: formData.projectAddress.trim(),
@@ -523,7 +522,7 @@ export default function CreateCustomerPage() {
           projectManagerName: formData.projectManagerName.trim() || null,
           projectManagerNumber: projectManagerNumber || null
         }] : [],
-        
+
         // Create phoneNumbers array from individual phone fields
         phoneNumbers: [
           ...(phoneNumber1 ? [{ number: phoneNumber1, type: 'mobile', isPrimary: true }] : []),
@@ -533,13 +532,13 @@ export default function CreateCustomerPage() {
 
       console.log('Sending customer data:', JSON.stringify(customerData, null, 2));
       const response = await crmAPI.createCustomer(customerData);
-      
+
       if (response.data.success) {
         // Check if we should return to contract wizard
         const urlParams = new URLSearchParams(window.location.search);
         const returnTo = urlParams.get('returnTo');
         const step = urlParams.get('step');
-        
+
         if (returnTo === 'contract' && step) {
           // Redirect back to contract wizard
           router.push(getContractReturnUrl(step));
@@ -584,76 +583,76 @@ export default function CreateCustomerPage() {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <h3 className="text-xl font-semibold text-white mb-4">نوع مشتری را انتخاب کنید</h3>
-              <p className="text-gray-300 mb-8">در این مرحله نوع مشتری را مشخص کنید تا فرم مناسب نمایش داده شود.</p>
+              <h3 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-4">نوع مشتری را انتخاب کنید</h3>
+              <p className="text-[var(--sds-text-muted)] mb-8">در این مرحله نوع مشتری را مشخص کنید تا فرم مناسب نمایش داده شود.</p>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-              <button
+              <ErpPressable
                 type="button"
                 onClick={() => handleInputChange('customerType', 'Individual')}
                 className={`p-6 rounded-lg border-2 transition-all duration-200 ${
                   formData.customerType === 'Individual'
-                    ? 'border-teal-500 bg-teal-500/20 text-white'
-                    : 'border-white/20 bg-white/5 text-white hover:border-white/40 hover:bg-white/10'
+                    ? 'border-[var(--sds-border-strong)] bg-[var(--sds-accent)] text-[var(--sds-text-inverse)]'
+                    : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] hover:border-[var(--sds-border-default)] hover:bg-[var(--sds-surface-raised)]'
                 }`}
               >
                 <div className="text-center">
                   <FaUser className="mx-auto text-3xl mb-4" />
                   <h4 className="text-lg font-semibold mb-2">حقیقی</h4>
-                  <p className="text-sm text-gray-300">مشتری شخصی و فردی</p>
+                  <p className="text-sm text-[var(--sds-text-muted)]">مشتری شخصی و فردی</p>
                 </div>
-              </button>
+              </ErpPressable>
 
-              <button
+              <ErpPressable
                 type="button"
                 onClick={() => handleInputChange('customerType', 'Company')}
                 className={`p-6 rounded-lg border-2 transition-all duration-200 ${
                   formData.customerType === 'Company'
-                    ? 'border-teal-500 bg-teal-500/20 text-white'
-                    : 'border-white/20 bg-white/5 text-white hover:border-white/40 hover:bg-white/10'
+                    ? 'border-[var(--sds-border-strong)] bg-[var(--sds-accent)] text-[var(--sds-text-inverse)]'
+                    : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] hover:border-[var(--sds-border-default)] hover:bg-[var(--sds-surface-raised)]'
                 }`}
               >
                 <div className="text-center">
                   <FaBuilding className="mx-auto text-3xl mb-4" />
                   <h4 className="text-lg font-semibold mb-2">حقوقی</h4>
-                  <p className="text-sm text-gray-300">مشتری شرکتی یا سازمانی</p>
+                  <p className="text-sm text-[var(--sds-text-muted)]">مشتری شرکتی یا سازمانی</p>
                 </div>
-              </button>
+              </ErpPressable>
 
-              <button
+              <ErpPressable
                 type="button"
                 onClick={() => handleInputChange('customerType', 'Government')}
                 className={`p-6 rounded-lg border-2 transition-all duration-200 ${
                   formData.customerType === 'Government'
-                    ? 'border-teal-500 bg-teal-500/20 text-white'
-                    : 'border-white/20 bg-white/5 text-white hover:border-white/40 hover:bg-white/10'
+                    ? 'border-[var(--sds-border-strong)] bg-[var(--sds-accent)] text-[var(--sds-text-inverse)]'
+                    : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] hover:border-[var(--sds-border-default)] hover:bg-[var(--sds-surface-raised)]'
                 }`}
               >
                 <div className="text-center">
                   <FaBuilding className="mx-auto text-3xl mb-4" />
                   <h4 className="text-lg font-semibold mb-2">دولتی</h4>
-                  <p className="text-sm text-gray-300">مشتری دولتی یا عمومی</p>
+                  <p className="text-sm text-[var(--sds-text-muted)]">مشتری دولتی یا عمومی</p>
                 </div>
-              </button>
+              </ErpPressable>
 
-              <button
+              <ErpPressable
                 type="button"
                 onClick={() => handleInputChange('customerType', 'Collaborative')}
                 className={`p-6 rounded-lg border-2 transition-all duration-200 ${
                   formData.customerType === 'Collaborative'
-                    ? 'border-teal-500 bg-teal-500/20 text-white'
-                    : 'border-white/20 bg-white/5 text-white hover:border-white/40 hover:bg-white/10'
+                    ? 'border-[var(--sds-border-strong)] bg-[var(--sds-accent)] text-[var(--sds-text-inverse)]'
+                    : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] hover:border-[var(--sds-border-default)] hover:bg-[var(--sds-surface-raised)]'
                 }`}
               >
                 <div className="text-center">
                   <FaUser className="mx-auto text-3xl mb-4" />
                   <h4 className="text-lg font-semibold mb-2">همکاری</h4>
-                  <p className="text-sm text-gray-300">فرد یا گروه همکار بدون پروژه</p>
+                  <p className="text-sm text-[var(--sds-text-muted)]">فرد یا گروه همکار بدون پروژه</p>
                 </div>
-              </button>
+              </ErpPressable>
             </div>
-            
+
           </div>
         );
 
@@ -663,163 +662,163 @@ export default function CreateCustomerPage() {
             {/* Basic Information Fields */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">نام *</label>
-                <input
+                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام *</label>
+                <ErpInput
                   type="text"
                   value={formData.firstName}
                   onChange={(e) => handleInputChange('firstName', e.target.value)}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="نام"
                 />
-                {errors.firstName && <p className="text-red-400 text-sm mt-1">{errors.firstName}</p>}
+                {errors.firstName && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.firstName}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">نام خانوادگی *</label>
-                <input
+                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام خانوادگی *</label>
+                <ErpInput
                   type="text"
                   value={formData.lastName}
                   onChange={(e) => handleInputChange('lastName', e.target.value)}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="نام خانوادگی"
                 />
-                {errors.lastName && <p className="text-red-400 text-sm mt-1">{errors.lastName}</p>}
+                {errors.lastName && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.lastName}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">شماره تماس اول *</label>
-                <input
+                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس اول *</label>
+                <ErpInput
                   type="text"
                   value={formData.phoneNumber1}
                   onChange={(e) => handleInputChange('phoneNumber1', e.target.value)}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="شماره تماس اول"
                 />
-                {errors.phoneNumber1 && <p className="text-red-400 text-sm mt-1">{errors.phoneNumber1}</p>}
+                {errors.phoneNumber1 && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.phoneNumber1}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">شماره تماس دوم</label>
-                <input
+                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس دوم</label>
+                <ErpInput
                   type="text"
                   value={formData.phoneNumber2}
                   onChange={(e) => handleInputChange('phoneNumber2', e.target.value)}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="شماره تماس دوم"
                 />
                 <InlineFieldError message={errors.phoneNumber2} />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">کد ملی</label>
-                <input
+                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">کد ملی</label>
+                <ErpInput
                   type="text"
                   value={formData.nationalCode}
                   onChange={(e) => handleInputChange('nationalCode', e.target.value)}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="کد ملی (10 رقم)"
                   maxLength={10}
                 />
-                {errors.nationalCode && <p className="text-red-400 text-sm mt-1">{errors.nationalCode}</p>}
+                {errors.nationalCode && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.nationalCode}</p>}
               </div>
             </div>
 
             {/* Collapsible Additional Information Section */}
             <div className="mt-8">
-              <button
+              <ErpPressable
                 type="button"
                 onClick={() => setShowAdditionalInfo(!showAdditionalInfo)}
-                className="w-full flex items-center justify-between p-4 bg-white/5 border border-white/20 rounded-lg text-white hover:bg-white/10 transition-colors"
+                className="w-full flex items-center justify-between p-4 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] hover:bg-[var(--sds-surface-raised)] transition-colors"
               >
                 <span className="text-lg font-medium">اطلاعات تکمیلی</span>
                 <span className={`transform transition-transform ${showAdditionalInfo ? 'rotate-180' : ''}`}>
                   <FaArrowRight className="h-4 w-4" />
                 </span>
-              </button>
+              </ErpPressable>
 
               {showAdditionalInfo && (
-                <div className="mt-4 p-6 bg-white/5 border border-white/20 rounded-lg">
+                <div className="mt-4 p-6 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">نام شرکت / سازمان</label>
-                      <input
+                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام شرکت / سازمان</label>
+                      <ErpInput
                         type="text"
                         value={formData.companyName}
                         onChange={(e) => handleInputChange('companyName', e.target.value)}
-                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="نام شرکت / سازمان"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">نام برند</label>
-                      <input
+                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام برند</label>
+                      <ErpInput
                         type="text"
                         value={formData.brandName}
                         onChange={(e) => handleInputChange('brandName', e.target.value)}
-                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="نام برند"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">آدرس منزل</label>
-                      <input
+                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">آدرس منزل</label>
+                      <ErpInput
                         type="text"
                         value={formData.homeAddress}
                         onChange={(e) => handleInputChange('homeAddress', e.target.value)}
-                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="آدرس منزل"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">شماره منزل</label>
-                      <input
+                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره منزل</label>
+                      <ErpInput
                         type="text"
                         value={formData.homeNumber}
                         onChange={(e) => handleInputChange('homeNumber', e.target.value)}
-                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شماره منزل"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">آدرس محل کار</label>
-                      <input
+                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">آدرس محل کار</label>
+                      <ErpInput
                         type="text"
                         value={formData.workAddress}
                         onChange={(e) => handleInputChange('workAddress', e.target.value)}
-                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="آدرس محل کار"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">شماره محل کار</label>
-                      <input
+                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره محل کار</label>
+                      <ErpInput
                         type="text"
                         value={formData.workNumber}
                         onChange={(e) => handleInputChange('workNumber', e.target.value)}
-                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شماره محل کار"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">شماره واتساپ</label>
-                      <input
+                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره واتساپ</label>
+                      <ErpInput
                         type="text"
                         value={formData.whatsappNumber}
                         onChange={(e) => handleInputChange('whatsappNumber', e.target.value)}
-                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شماره واتساپ"
                       />
                       <InlineFieldError message={errors.whatsappNumber} />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">تاریخ تولد</label>
+                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">تاریخ تولد</label>
                       <PersianCalendarComponent
                         value={formData.birthDate}
                         onChange={(date: string) => handleInputChange('birthDate', date)}
@@ -832,45 +831,45 @@ export default function CreateCustomerPage() {
                     </div>
 
                     <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-300 mb-2">شغل اصلی</label>
-                      <input
+                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شغل اصلی</label>
+                      <ErpInput
                         type="text"
                         value={formData.mainJob}
                         onChange={(e) => handleInputChange('mainJob', e.target.value)}
-                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شغل اصلی"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">نام معرف</label>
-                      <input
+                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام معرف</label>
+                      <ErpInput
                         type="text"
                         value={formData.referrerFirstName}
                         onChange={(e) => handleInputChange('referrerFirstName', e.target.value)}
-                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="نام معرف"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">نام خانوادگی معرف</label>
-                      <input
+                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام خانوادگی معرف</label>
+                      <ErpInput
                         type="text"
                         value={formData.referrerLastName}
                         onChange={(e) => handleInputChange('referrerLastName', e.target.value)}
-                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="نام خانوادگی معرف"
                       />
                     </div>
 
                     <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-300 mb-2">شماره تماس معرف</label>
-                      <input
+                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس معرف</label>
+                      <ErpInput
                         type="text"
                         value={formData.referrerPhoneNumber}
                         onChange={(e) => handleInputChange('referrerPhoneNumber', e.target.value)}
-                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شماره تماس معرف"
                       />
                       <InlineFieldError message={errors.referrerPhoneNumber} />
@@ -889,36 +888,36 @@ export default function CreateCustomerPage() {
             {/* Project Information Fields */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">نام پروژه *</label>
-                <input
+                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام پروژه *</label>
+                <ErpInput
                   type="text"
                   value={formData.projectName}
                   onChange={(e) => handleInputChange('projectName', e.target.value)}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="نام پروژه"
                 />
-                {errors.projectName && <p className="text-red-400 text-sm mt-1">{errors.projectName}</p>}
+                {errors.projectName && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.projectName}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">آدرس پروژه *</label>
-                <input
+                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">آدرس پروژه *</label>
+                <ErpInput
                   type="text"
                   value={formData.projectAddress}
                   onChange={(e) => handleInputChange('projectAddress', e.target.value)}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="آدرس پروژه"
                 />
-                {errors.projectAddress && <p className="text-red-400 text-sm mt-1">{errors.projectAddress}</p>}
+                {errors.projectAddress && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.projectAddress}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">شهر پروژه</label>
-                <input
+                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شهر پروژه</label>
+                <ErpInput
                   type="text"
                   value={formData.projectCity}
                   onChange={(e) => handleInputChange('projectCity', e.target.value)}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="شهر پروژه"
                 />
               </div>
@@ -938,38 +937,38 @@ export default function CreateCustomerPage() {
 
             {/* Collapsible Project Manager Information Section */}
             <div className="mt-8">
-              <button
+              <ErpPressable
                 type="button"
                 onClick={() => setShowAdditionalInfo(!showAdditionalInfo)}
-                className="w-full flex items-center justify-between p-4 bg-white/5 border border-white/20 rounded-lg text-white hover:bg-white/10 transition-colors"
+                className="w-full flex items-center justify-between p-4 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] hover:bg-[var(--sds-surface-raised)] transition-colors"
               >
                 <span className="text-lg font-medium">مدیر پروژه</span>
                 <span className={`transform transition-transform ${showAdditionalInfo ? 'rotate-180' : ''}`}>
                   <FaArrowRight className="h-4 w-4" />
                 </span>
-              </button>
+              </ErpPressable>
 
               {showAdditionalInfo && (
-                <div className="mt-4 p-6 bg-white/5 border border-white/20 rounded-lg">
+                <div className="mt-4 p-6 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">نام مدیر پروژه</label>
-                      <input
+                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام مدیر پروژه</label>
+                      <ErpInput
                         type="text"
                         value={formData.projectManagerName}
                         onChange={(e) => handleInputChange('projectManagerName', e.target.value)}
-                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="نام مدیر پروژه"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">شماره تماس مدیر پروژه</label>
-                      <input
+                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس مدیر پروژه</label>
+                      <ErpInput
                         type="text"
                         value={formData.projectManagerNumber}
                         onChange={(e) => handleInputChange('projectManagerNumber', e.target.value)}
-                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شماره تماس مدیر پروژه"
                       />
                       <InlineFieldError message={errors.projectManagerNumber} />
@@ -990,10 +989,10 @@ export default function CreateCustomerPage() {
   if (!crmPermissions.canCreateCustomers) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="glass-liquid-card p-6 text-center">
-          <FaExclamationTriangle className="mx-auto text-4xl text-red-400 mb-4" />
-          <h2 className="text-xl font-semibold text-white mb-2">عدم دسترسی</h2>
-          <p className="text-gray-400">شما دسترسی لازم برای ایجاد مشتری را ندارید</p>
+        <div className="sds-workspace-surface p-6 text-center">
+          <FaExclamationTriangle className="mx-auto text-4xl text-[var(--sds-danger)] mb-4" />
+          <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-2">عدم دسترسی</h2>
+          <p className="text-[var(--sds-text-muted)]">شما دسترسی لازم برای ایجاد مشتری را ندارید</p>
         </div>
       </div>
     );
@@ -1004,12 +1003,11 @@ export default function CreateCustomerPage() {
     new URLSearchParams(window.location.search).get('returnTo') === 'contract';
 
   return (
-    <div className="min-h-screen space-y-5 p-3 sm:p-6 lg:p-8">
+    <main className="sds-workspace min-h-screen space-y-5 p-3 sm:p-6 lg:p-8">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold text-white sm:text-3xl">ایجاد مشتری جدید</h1>
-          <p className="text-gray-300">مراحل ایجاد مشتری را تکمیل کنید</p>
+          <h1 className="text-2xl font-bold text-[var(--sds-text-primary)] sm:text-3xl">ایجاد مشتری جدید</h1>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {/* Cancel button - return to contract wizard */}
@@ -1017,10 +1015,10 @@ export default function CreateCustomerPage() {
             const urlParams = new URLSearchParams(window.location.search);
             const returnTo = urlParams.get('returnTo');
             const step = urlParams.get('step');
-            
+
             if (returnTo === 'contract' && step) {
               return (
-                <button
+                <ErpPressable type="submit"
                   onClick={() => {
                     // Restore contract wizard state from localStorage
                     const savedState = localStorage.getItem('contractWizardState');
@@ -1033,19 +1031,19 @@ export default function CreateCustomerPage() {
                       router.push(getContractReturnUrl(step));
                     }
                   }}
-                  className="glass-liquid-btn px-6 py-3 bg-red-500/20 hover:bg-red-500/30 border-red-500/50 text-red-300 hover:text-red-200"
+                  className="sds-action border-[var(--sds-danger-border)] bg-[var(--sds-danger)] px-6 py-3 text-[var(--sds-text-inverse)] hover:bg-[var(--sds-danger)]"
                 >
                   <FaTimes className="inline-block ml-2" />
                   بازگشت به مشتریان
-                </button>
+                </ErpPressable>
               );
             }
             return null;
           })()}
-          
-          <Link 
-            href="/dashboard/crm/customers" 
-            className="glass-liquid-btn px-6 py-3"
+
+          <Link
+            href="/dashboard/crm/customers"
+            className="sds-action px-6 py-3"
           >
             مرحله بعد
           </Link>
@@ -1053,32 +1051,32 @@ export default function CreateCustomerPage() {
       </div>
 
       {/* Progress Bar */}
-      <div className="glass-liquid-card p-6">
+      <div className="sds-workspace-surface p-6">
         <div className="flex items-center justify-between mb-4">
-          <span className="text-sm text-gray-400">مرحله {step + 1} از {steps.length}</span>
-          <span className="text-sm text-gray-400">{Math.round(((step + 1) / steps.length) * 100)}%</span>
+          <span className="text-sm text-[var(--sds-text-muted)]">مرحله {step + 1} از {steps.length}</span>
+          <span className="text-sm text-[var(--sds-text-muted)]">{Math.round(((step + 1) / steps.length) * 100)}%</span>
         </div>
-        <div className="w-full bg-white/10 rounded-full h-2">
-          <div 
-            className="bg-teal-500 h-2 rounded-full transition-all duration-300"
+        <div className="w-full bg-[var(--sds-surface-raised)] rounded-full h-2">
+          <div
+            className="bg-[var(--sds-accent)] h-2 rounded-full transition-all duration-300"
             style={{ width: `${((step + 1) / steps.length) * 100}%` }}
           ></div>
         </div>
         <div className="mt-2">
-          <h3 className="text-lg font-semibold text-white">{steps[step].label}</h3>
+          <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">{steps[step].label}</h3>
         </div>
       </div>
 
       {/* Form Content */}
-      <div className="glass-liquid-card p-6">
+      <div className="sds-workspace-surface p-6">
         {renderStepContent()}
       </div>
 
       {duplicateCustomers.length > 0 && (
-        <div className="glass-liquid-card p-6 border border-amber-500/40">
+        <div className="sds-workspace-surface p-6 border border-[var(--sds-warning-border)]">
           <div className="mb-4">
-            <h3 className="text-lg font-semibold text-white">مشتری مشابه پیدا شد</h3>
-            <p className="mt-1 text-sm text-gray-300">
+            <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">مشتری مشابه پیدا شد</h3>
+            <p className="mt-1 text-sm text-[var(--sds-text-muted)]">
               ایجاد مشتری تکراری مجاز نیست. مشتری موجود را انتخاب کنید یا اطلاعات وارد شده را اصلاح کنید.
             </p>
           </div>
@@ -1089,31 +1087,31 @@ export default function CreateCustomerPage() {
                 customer.phoneNumbers?.[0]?.number;
 
               return (
-                <div key={customer.id} className="rounded-lg border border-white/10 bg-white/5 p-4">
+                <div key={customer.id} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h4 className="font-semibold text-white">
+                      <h4 className="font-semibold text-[var(--sds-text-primary)]">
                         {customer.firstName} {customer.lastName}
                       </h4>
-                      {customer.companyName && <p className="mt-1 text-sm text-gray-300">{customer.companyName}</p>}
+                      {customer.companyName && <p className="mt-1 text-sm text-[var(--sds-text-muted)]">{customer.companyName}</p>}
                     </div>
-                    <span className="rounded-full bg-amber-500/20 px-3 py-1 text-xs font-semibold text-amber-200">
+                    <span className="rounded-full bg-[var(--sds-warning-surface)] px-3 py-1 text-xs font-semibold text-[var(--sds-warning)]">
                       تکراری
                     </span>
                   </div>
-                  <div className="mt-3 space-y-1 text-sm text-gray-300">
+                  <div className="mt-3 space-y-1 text-sm text-[var(--sds-text-muted)]">
                     {primaryPhone && <p>شماره تماس: {primaryPhone}</p>}
                     {customer.nationalCode && <p>کد ملی: {customer.nationalCode}</p>}
                     <p>مسئول فروش: {getOwnerLabel(customer)}</p>
                   </div>
                   {isReturningToContract && (
-                    <button
+                    <ErpPressable
                       type="button"
                       onClick={() => selectDuplicateForContract(customer)}
-                      className="mt-4 w-full rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-500"
+                      className="mt-4 w-full rounded-lg bg-[var(--sds-accent)] px-4 py-2 text-sm font-semibold text-[var(--sds-text-inverse)] transition hover:bg-[var(--sds-accent)]"
                     >
                       انتخاب این مشتری و ادامه قرارداد
-                    </button>
+                    </ErpPressable>
                   )}
                 </div>
               );
@@ -1124,28 +1122,28 @@ export default function CreateCustomerPage() {
 
       {/* Navigation */}
       <div className="flex items-center justify-between">
-        <button
+        <ErpPressable type="submit"
           onClick={handlePrevious}
           disabled={step === 0}
-          className="glass-liquid-btn px-6 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="sds-action px-6 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           قبلی
-        </button>
+        </ErpPressable>
 
         <div className="flex items-center gap-4">
           {errors.submit && (
-            <p className="text-red-400 text-sm">{errors.submit}</p>
+            <p className="text-[var(--sds-danger)] text-sm">{errors.submit}</p>
           )}
-          
+
           {step === steps.length - 1 ? (
-            <button
+            <ErpPressable type="submit"
               onClick={handleSubmit}
               disabled={loading}
-              className="glass-liquid-btn-primary inline-flex items-center gap-2 px-6 py-3 disabled:opacity-50"
+              className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-6 py-3 disabled:opacity-50"
             >
               {loading ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--sds-border-default)]"></div>
                   در حال ثبت...
                 </>
               ) : (
@@ -1154,18 +1152,18 @@ export default function CreateCustomerPage() {
                   ثبت مشتری
                 </>
               )}
-            </button>
+            </ErpPressable>
           ) : (
-            <button
+            <ErpPressable type="submit"
               onClick={handleNext}
-              className="glass-liquid-btn-primary inline-flex items-center gap-2 px-6 py-3"
+              className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-6 py-3"
             >
               بعدی
               <FaArrowRight className="text-lg" />
-            </button>
+            </ErpPressable>
           )}
         </div>
       </div>
-    </div>
+    </main>
   );
 }

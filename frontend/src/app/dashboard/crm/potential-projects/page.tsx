@@ -1,8 +1,7 @@
 'use client';
-
+import { ErpInput } from '@/components/erp';
 import { useEffect, useState } from 'react';
 import { FaEye, FaPlus, FaProjectDiagram } from 'react-icons/fa';
-import { CrmGuide } from '@/components/crm/CrmGuide';
 import { ErpBadge, ErpEmptyState, ErpListPage, ErpPagination, ErpSection, type ErpColumn } from '@/components/erp';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { crmAPI } from '@/lib/api';
@@ -22,23 +21,8 @@ type Project = {
   _count?: { followUpReports: number; nextActions: number };
 };
 
-const guideSteps = [
-  {
-    targetId: 'project-filters',
-    title: 'فیلتر پروژه‌ها',
-    body: 'برای پیدا کردن پروژه‌های احتمالی بر اساس وضعیت، نوع کار یا جستجوی نام مخاطب و پروژه از این بخش استفاده کنید.',
-    fields: ['جستجو', 'وضعیت', 'نوع کار/معامله'],
-  },
-  {
-    targetId: 'project-list',
-    title: 'فهرست پروژه‌های احتمالی',
-    body: 'هر ردیف یک فرصت قبل از قرارداد است. جزئیات پیگیری و اقدام‌های بعدی داخل صفحه پروژه دیده می‌شود.',
-    mistakes: ['ساخت قرارداد فروش برای پروژه‌ای که هنوز آماده قرارداد نیست'],
-  },
-];
-
-const filterInputClass = 'mt-2 min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
-const filterLabelClass = 'block text-sm font-semibold text-slate-700 dark:text-slate-200';
+const filterInputClass = 'mt-2 min-h-12 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-3 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]';
+const filterLabelClass = 'block text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]';
 
 export default function PotentialProjectsPage() {
   const [rows, setRows] = useState<Project[]>([]);
@@ -81,7 +65,7 @@ export default function PotentialProjectsPage() {
       cell: (row) => (
         <div>
           <p className="font-semibold">{row.title}</p>
-          <p className="mt-1 text-xs text-slate-500">{crmPersonName(row.customer)}</p>
+          <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{crmPersonName(row.customer)}</p>
         </div>
       ),
     },
@@ -99,7 +83,6 @@ export default function PotentialProjectsPage() {
       description="فرصت‌ها و پروژه‌هایی که هنوز به قرارداد فروش تبدیل نشده‌اند."
       actions={[
         { label: 'پروژه جدید', href: '/dashboard/crm/potential-projects/create', icon: FaPlus, tone: 'primary', variant: 'solid' },
-        { label: 'راهنما', onClick: () => {}, disabled: true, tone: 'info', variant: 'outline' },
       ]}
       metrics={[]}
       rows={rows}
@@ -110,14 +93,12 @@ export default function PotentialProjectsPage() {
       rowActions={(row) => [{ label: 'مشاهده', href: `/dashboard/crm/potential-projects/${row.id}`, icon: FaEye, tone: 'primary' }]}
       footer={<ErpPagination currentPage={pagination.page} totalPages={pagination.pages} totalItems={pagination.total} itemsPerPage={pagination.limit} onPageChange={(page) => setPagination((prev) => ({ ...prev, page }))} itemLabel="پروژه" />}
     >
-      <div className="flex justify-end">
-        <CrmGuide steps={guideSteps} />
-      </div>
+
       <ErpSection className="p-4">
-        <div data-crm-guide="project-filters" className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <label className={filterLabelClass}>
             جستجو
-            <input
+            <ErpInput
               className={filterInputClass}
               value={search}
               onChange={(event) => {
@@ -159,7 +140,7 @@ export default function PotentialProjectsPage() {
           </label>
         </div>
       </ErpSection>
-      <div data-crm-guide="project-list" />
+      <div />
     </ErpListPage>
   );
 }

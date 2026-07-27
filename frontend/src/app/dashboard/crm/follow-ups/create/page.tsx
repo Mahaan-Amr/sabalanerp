@@ -1,9 +1,8 @@
 'use client';
-
+import { ErpInput, ErpTextarea } from '@/components/erp';
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FaSave } from 'react-icons/fa';
-import { CrmGuide } from '@/components/crm/CrmGuide';
 import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import PersianCalendarComponent from '@/components/PersianCalendar';
@@ -16,23 +15,8 @@ import {
   persianNowDateTime,
 } from '@/lib/crmPipeline';
 
-const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
-const labelClass = 'block text-sm font-semibold text-slate-700 dark:text-slate-200';
-
-const guideSteps = [
-  {
-    targetId: 'followup-event',
-    title: 'گزارش اتفاقی که افتاد',
-    body: 'ابتدا نوع ارتباط، زمان، خلاصه اتفاق و نتیجه پیگیری را ثبت کنید. این بخش تاریخچه پروژه یا مخاطب را می‌سازد.',
-    fields: ['مخاطب', 'پروژه احتمالی اختیاری', 'نوع ارتباط', 'خلاصه', 'نتیجه'],
-  },
-  {
-    targetId: 'followup-next-action',
-    title: 'اقدام بعدی',
-    body: 'برای پیگیری‌های فعال، اقدام بعدی باید تاریخ، نوع ارتباط و دستور کار روشن داشته باشد. فقط وقتی ادامه‌ای وجود ندارد می‌توانید آن را غیرفعال کنید.',
-    mistakes: ['نوشتن «پیگیری شود» بدون توضیح دقیق اقدام بعدی'],
-  },
-];
+const inputClass = 'min-h-12 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-3 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]';
+const labelClass = 'block text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]';
 
 export default function CreateFollowUpPage() {
   const router = useRouter();
@@ -127,11 +111,11 @@ export default function CreateFollowUpPage() {
       backHref="/dashboard/crm/follow-ups"
       actions={[{ label: saving ? 'در حال ذخیره...' : 'ذخیره', icon: FaSave, tone: 'primary', variant: 'solid', disabled: saving, onClick: () => document.getElementById('followup-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }]}
     >
-      <div className="flex justify-end"><CrmGuide steps={guideSteps} /></div>
+
       {error && <ErpEmptyState title="خطا" description={error} />}
       <form id="followup-form" onSubmit={submit} className="space-y-5">
         <ErpSection title="گزارش پیگیری" description="ثبت کنید چه ارتباطی برقرار شد و نتیجه چه بود.">
-          <div data-crm-guide="followup-event" className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className={labelClass}>مخاطب CRM
               <EnhancedDropdown
                 className="mt-2"
@@ -171,24 +155,24 @@ export default function CreateFollowUpPage() {
               </div>
             </label>
             <label className={`${labelClass} md:col-span-2`}>خلاصه اتفاقات
-              <textarea className={`${inputClass} mt-2 min-h-28`} value={form.summary} onChange={(e) => update('summary', e.target.value)} required />
+              <ErpTextarea className={`${inputClass} mt-2 min-h-28`} value={form.summary} onChange={(e) => update('summary', e.target.value)} required />
             </label>
             <label className={`${labelClass} md:col-span-2`}>نتیجه پیگیری
-              <textarea className={`${inputClass} mt-2 min-h-24`} value={form.outcome} onChange={(e) => update('outcome', e.target.value)} required />
+              <ErpTextarea className={`${inputClass} mt-2 min-h-24`} value={form.outcome} onChange={(e) => update('outcome', e.target.value)} required />
             </label>
           </div>
         </ErpSection>
 
         <ErpSection title="اقدام بعدی" description="برای پیگیری‌های فعال، اقدام بعدی باید روشن و زمان‌دار باشد.">
-          <div data-crm-guide="followup-next-action" className="space-y-4">
-            <label className="flex items-center gap-3 text-sm font-semibold text-slate-700 dark:text-slate-200">
-              <input type="checkbox" checked={form.hasNextAction} onChange={(e) => update('hasNextAction', e.target.checked)} className="h-5 w-5 rounded border-slate-300" />
+          <div className="space-y-4">
+            <label className="flex items-center gap-3 text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
+              <ErpInput type="checkbox" checked={form.hasNextAction} onChange={(e) => update('hasNextAction', e.target.checked)} className="h-5 w-5 rounded border-[var(--sds-border-default)]" />
               این پیگیری اقدام بعدی دارد
             </label>
             {form.hasNextAction ? (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <label className={labelClass}>عنوان اقدام بعدی
-                  <input className={`${inputClass} mt-2`} value={form.nextTitle} onChange={(e) => update('nextTitle', e.target.value)} required={form.hasNextAction} />
+                  <ErpInput className={`${inputClass} mt-2`} value={form.nextTitle} onChange={(e) => update('nextTitle', e.target.value)} required={form.hasNextAction} />
                 </label>
                 <label className={labelClass}>نوع ارتباط بعدی
                   <EnhancedDropdown className="mt-2" value={form.nextCommunicationType} onChange={(value) => update('nextCommunicationType', value)} options={CRM_COMMUNICATION_TYPES.map((type) => ({ value: type, label: type }))} searchable required={form.hasNextAction} />
@@ -199,12 +183,12 @@ export default function CreateFollowUpPage() {
                   </div>
                 </label>
                 <label className={`${labelClass} md:col-span-2`}>دستور کار اقدام بعدی
-                  <textarea className={`${inputClass} mt-2 min-h-28`} value={form.nextInstructions} onChange={(e) => update('nextInstructions', e.target.value)} required={form.hasNextAction} />
+                  <ErpTextarea className={`${inputClass} mt-2 min-h-28`} value={form.nextInstructions} onChange={(e) => update('nextInstructions', e.target.value)} required={form.hasNextAction} />
                 </label>
               </div>
             ) : (
               <label className={labelClass}>دلیل نداشتن اقدام بعدی
-                <textarea className={`${inputClass} mt-2 min-h-24`} value={form.noNextActionReason} onChange={(e) => update('noNextActionReason', e.target.value)} />
+                <ErpTextarea className={`${inputClass} mt-2 min-h-24`} value={form.noNextActionReason} onChange={(e) => update('noNextActionReason', e.target.value)} />
               </label>
             )}
           </div>

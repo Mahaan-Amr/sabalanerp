@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React from 'react';
 import Link from 'next/link';
@@ -221,8 +221,18 @@ export function ErpIconButton({ label, icon: Icon, href, onClick, tone = 'neutra
 export const ErpInput = React.forwardRef<
   HTMLInputElement,
   React.InputHTMLAttributes<HTMLInputElement>
->(function ErpInput({ className, ...props }, ref) {
-  return <input ref={ref} className={cx(erpFieldClassName, className)} {...props} />;
+>(function ErpInput({ className, type, ...props }, ref) {
+  const controlClassName =
+    type === 'checkbox'
+      ? 'h-5 w-5 shrink-0 rounded border-[var(--sds-border-default)] accent-[var(--sds-accent)]'
+      : type === 'radio'
+        ? 'h-5 w-5 shrink-0 rounded-full border-[var(--sds-border-default)] accent-[var(--sds-accent)]'
+        : type === 'range'
+          ? 'h-11 w-full accent-[var(--sds-accent)]'
+          : type === 'hidden'
+            ? undefined
+            : erpFieldClassName;
+  return <input ref={ref} type={type} className={cx(controlClassName, className)} {...props} />;
 });
 
 export const ErpSelect = React.forwardRef<
@@ -390,9 +400,9 @@ export function ErpActionGrid({ items, columns = 3, compact = false }: { items: 
         const tone = item.tone || 'neutral';
         const Icon = item.icon;
         const className = cx(
-          'group flex h-full items-start gap-3 rounded-lg border bg-white p-4 text-right shadow-sm transition dark:bg-slate-900/70',
-          tone === 'neutral' ? 'border-slate-200 dark:border-slate-700' : toneClasses[tone].metric,
-          !item.disabled && 'hover:border-[#074747]/40 hover:shadow-md dark:hover:border-teal-700',
+          'group flex h-full items-start gap-3 rounded-lg border bg-[var(--sds-surface-raised)] p-4 text-right shadow-sm transition dark:bg-[var(--sds-surface-raised)]',
+          tone === 'neutral' ? 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]' : toneClasses[tone].metric,
+          !item.disabled && 'hover:border-[var(--sds-accent)]/40 hover:shadow-md dark:hover:border-[var(--sds-border-strong)]',
           item.disabled && 'cursor-not-allowed opacity-60',
           compact && 'p-3'
         );
@@ -406,11 +416,11 @@ export function ErpActionGrid({ items, columns = 3, compact = false }: { items: 
             )}
             <span className="min-w-0 flex-1">
               <span className="flex items-start justify-between gap-3">
-                <span className="text-sm font-semibold text-slate-900 dark:text-white">{item.title}</span>
+                <span className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{item.title}</span>
                 {item.badge && <span className="flex-shrink-0">{item.badge}</span>}
               </span>
-              {item.description && <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">{item.description}</span>}
-              {item.meta && <span className="mt-2 block text-xs font-medium text-[#074747] dark:text-teal-200">{item.meta}</span>}
+              {item.description && <span className="mt-1 block text-xs leading-5 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{item.description}</span>}
+              {item.meta && <span className="mt-2 block text-xs font-medium text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{item.meta}</span>}
             </span>
           </>
         );
@@ -459,9 +469,9 @@ export function ErpToolbar({ title, description, search, filters, actions = [], 
         {(title || description || actions.length > 0 || meta) && (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              {title && <h2 className="text-base font-semibold text-slate-900 dark:text-white">{title}</h2>}
-              {description && <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">{description}</p>}
-              {meta && <p className="mt-1 text-xs font-medium text-[#074747] dark:text-teal-200">{meta}</p>}
+              {title && <h2 className="text-base font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{title}</h2>}
+              {description && <p className="mt-1 text-sm leading-6 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{description}</p>}
+              {meta && <p className="mt-1 text-xs font-medium text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{meta}</p>}
             </div>
             {actions.length > 0 && (
               <div className="flex flex-wrap gap-2 sm:justify-end">
@@ -476,13 +486,13 @@ export function ErpToolbar({ title, description, search, filters, actions = [], 
               <label className="block">
                 <span className="sr-only">جستجو</span>
                 <div className="relative">
-                  <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sds-text-muted)]" />
                   <input
                     type="text"
                     value={search.value}
                     placeholder={search.placeholder}
                     onChange={(event) => search.onChange(event.target.value)}
-                    className="min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 py-3 pl-4 pr-10 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder-slate-400 dark:focus:border-teal-500 dark:focus:bg-slate-900"
+                    className="sds-field min-h-12 w-full py-3 pl-4 pr-10"
                   />
                 </div>
               </label>
@@ -528,7 +538,7 @@ export function ErpSegmentedControl<T extends string>({ options, value, onChange
 }) {
   if (!options.length) return null;
   return (
-    <div className="flex gap-1 overflow-x-auto rounded-lg border border-slate-200 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800 sm:flex-wrap">
+    <div className="flex gap-1 overflow-x-auto rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-1 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:flex-wrap">
       {options.map((option) => {
         const Icon = option.icon;
         const active = option.value === value;
@@ -541,8 +551,8 @@ export function ErpSegmentedControl<T extends string>({ options, value, onChange
             className={cx(
               'inline-flex min-h-10 flex-shrink-0 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
               active
-                ? 'bg-white text-[#074747] shadow-sm dark:bg-slate-900 dark:text-teal-200'
-                : 'text-slate-600 hover:bg-white/70 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/70 dark:hover:text-white'
+                ? 'bg-[var(--sds-surface-raised)] text-[var(--sds-accent)] shadow-sm dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-accent)]'
+                : 'text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-raised)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:bg-[var(--sds-surface-raised)] dark:hover:text-[var(--sds-text-primary)]'
             )}
           >
             {Icon && <Icon className="h-4 w-4" />}
@@ -574,7 +584,7 @@ export function ErpPagination({ currentPage, totalPages, totalItems, itemsPerPag
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       {totalItems != null && from != null && to != null && (
-        <p className="text-sm text-slate-500 dark:text-slate-400">
+        <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
           نمایش {from.toLocaleString('fa-IR')} تا {to.toLocaleString('fa-IR')} از {totalItems.toLocaleString('fa-IR')} {itemLabel}
         </p>
       )}
@@ -583,7 +593,7 @@ export function ErpPagination({ currentPage, totalPages, totalItems, itemsPerPag
           type="button"
           onClick={() => onPageChange(Math.max(currentPage - 1, 1))}
           disabled={currentPage === 1}
-          className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-[#074747]/40 hover:text-[#074747] disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+          className="min-h-10 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm font-semibold text-[var(--sds-text-primary)] transition hover:border-[var(--sds-accent)]/40 hover:text-[var(--sds-accent)] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
         >
           قبلی
         </button>
@@ -592,15 +602,15 @@ export function ErpPagination({ currentPage, totalPages, totalItems, itemsPerPag
           const needsGap = previous && page - previous > 1;
           return (
             <React.Fragment key={page}>
-              {needsGap && <span className="px-2 py-2 text-sm text-slate-400">...</span>}
+              {needsGap && <span className="px-2 py-2 text-sm text-[var(--sds-text-muted)]">...</span>}
               <button
                 type="button"
                 onClick={() => onPageChange(page)}
                 className={cx(
                   'min-h-10 min-w-10 rounded-lg border px-3 py-2 text-sm font-semibold transition',
                   page === currentPage
-                    ? 'border-[#074747] bg-[#074747] text-white'
-                    : 'border-slate-200 bg-white text-slate-700 hover:border-[#074747]/40 hover:text-[#074747] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
+                    ? 'border-[var(--sds-accent)] bg-[var(--sds-accent)] text-[var(--sds-text-inverse)]'
+                    : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] hover:border-[var(--sds-accent)]/40 hover:text-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]'
                 )}
               >
                 {page.toLocaleString('fa-IR')}
@@ -612,7 +622,7 @@ export function ErpPagination({ currentPage, totalPages, totalItems, itemsPerPag
           type="button"
           onClick={() => onPageChange(Math.min(currentPage + 1, totalPages))}
           disabled={currentPage === totalPages}
-          className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-[#074747]/40 hover:text-[#074747] disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+          className="min-h-10 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm font-semibold text-[var(--sds-text-primary)] transition hover:border-[var(--sds-accent)]/40 hover:text-[var(--sds-accent)] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
         >
           بعدی
         </button>
@@ -673,16 +683,16 @@ export function ErpPage({ eyebrow, title, description, actions = [], metrics = [
   }, [backHref, router]);
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-5">
+    <main className="sds-workspace mx-auto w-full max-w-7xl space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           {backHref && (
             <ErpIconButton label="بازگشت" onClick={handleBack} icon={FaArrowRight} tone="neutral" />
           )}
           <div className="min-w-0">
-            {eyebrow && <p className="text-xs font-semibold uppercase tracking-wide text-[#074747] dark:text-teal-200">{eyebrow}</p>}
-            <h1 className="mt-1 text-2xl font-bold text-slate-950 dark:text-white sm:text-3xl">{title}</h1>
-            {description && <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">{description}</p>}
+            {eyebrow && <p className="text-xs font-semibold uppercase tracking-wide text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{eyebrow}</p>}
+            <h1 className="mt-1 text-2xl font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] sm:text-3xl">{title}</h1>
+            {description && <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{description}</p>}
           </div>
         </div>
         {actions.length > 0 && (
@@ -693,7 +703,7 @@ export function ErpPage({ eyebrow, title, description, actions = [], metrics = [
       </div>
       <ErpMetricGrid items={metrics} />
       {children}
-    </div>
+    </main>
   );
 }
 
@@ -707,13 +717,13 @@ export function ErpFilters({ filters }: { filters: ErpFilter[] }) {
             <span className="sr-only">{filter.label}</span>
             {filter.type === 'search' ? (
               <div className="relative">
-                <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sds-text-muted)]" />
                 <input
                   type="text"
                   value={filter.value}
                   placeholder={filter.placeholder}
                   onChange={(event) => filter.onChange(event.target.value)}
-                  className="min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 py-3 pl-4 pr-10 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder-slate-400 dark:focus:border-teal-500 dark:focus:bg-slate-900"
+                  className="sds-field min-h-12 w-full py-3 pl-4 pr-10"
                 />
               </div>
             ) : (
@@ -743,14 +753,14 @@ export function ErpEmptyState({ title, description, action, icon: Icon }: {
   icon?: IconType;
 }) {
   return (
-    <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center dark:border-slate-700 dark:bg-slate-900/50">
+    <div className="rounded-lg border border-dashed border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-8 text-center dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
       {Icon && (
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-[var(--sds-surface-subtle)] text-[var(--sds-text-secondary)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-muted)]">
           <Icon className="h-5 w-5" />
         </div>
       )}
-      <p className="text-base font-semibold text-slate-800 dark:text-slate-100">{title}</p>
-      {description && <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500 dark:text-slate-400">{description}</p>}
+      <p className="text-base font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{title}</p>
+      {description && <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{description}</p>}
       {action && <div className="mt-5"><ErpButton {...action} /></div>}
     </div>
   );
@@ -759,7 +769,7 @@ export function ErpEmptyState({ title, description, action, icon: Icon }: {
 export function ErpLoading() {
   return (
     <div className="flex items-center justify-center py-12">
-      <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-[#074747] dark:border-teal-300" />
+      <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-[var(--sds-accent)] dark:border-[var(--sds-border-strong)]" />
     </div>
   );
 }
@@ -791,12 +801,12 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions
                   <div className="space-y-3">
                     {columns.filter((column) => column.priority !== 'hidden-mobile').map((column) => (
                       <div key={column.id} className={column.priority === 'primary' ? '' : 'flex items-start justify-between gap-3 text-sm'}>
-                        {column.priority !== 'primary' && <span className="text-xs text-slate-500 dark:text-slate-400">{column.mobileLabel || column.header}</span>}
-                        <div className={cx(column.priority === 'primary' ? '' : 'text-left text-slate-800 dark:text-slate-100')}>{column.cell(row)}</div>
+                        {column.priority !== 'primary' && <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{column.mobileLabel || column.header}</span>}
+                        <div className={cx(column.priority === 'primary' ? '' : 'text-left text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]')}>{column.cell(row)}</div>
                       </div>
                     ))}
                     {rowActions && (
-                      <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                      <div className="flex flex-wrap gap-2 border-t border-[var(--sds-border-default)] pt-3 dark:border-[var(--sds-border-strong)]">
                         {rowActions(row).map((action) => <ErpIconButton key={action.label} {...action} />)}
                       </div>
                     )}
@@ -807,20 +817,20 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions
             <div className="hidden overflow-x-auto lg:block">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-700">
+                  <tr className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
                     {columns.map((column) => (
-                      <th key={column.id} className={cx('px-3 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
+                      <th key={column.id} className={cx('px-3 py-3 text-right text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
                         {column.header}
                       </th>
                     ))}
-                    {rowActions && <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">عملیات</th>}
+                    {rowActions && <th className="px-3 py-3 text-left text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">عملیات</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((row) => (
-                    <tr key={rowKey(row)} className="border-b border-slate-100 transition hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/60">
+                    <tr key={rowKey(row)} className="border-b border-[var(--sds-border-default)] transition hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-surface-raised)]">
                       {columns.map((column) => (
-                        <td key={column.id} className={cx('px-3 py-4 text-slate-800 dark:text-slate-100', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
+                        <td key={column.id} className={cx('px-3 py-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
                           {column.cell(row)}
                         </td>
                       ))}
@@ -836,7 +846,7 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions
                 </tbody>
               </table>
             </div>
-            {footer && <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-800">{footer}</div>}
+            {footer && <div className="mt-4 border-t border-[var(--sds-border-default)] pt-4 dark:border-[var(--sds-border-strong)]">{footer}</div>}
           </>
         )}
       </ErpSection>
@@ -852,9 +862,9 @@ export function ErpFieldView({ label, value, hint, tone = 'neutral' }: {
 }) {
   return (
     <div className={cx('rounded-lg border p-3', toneClasses[tone].metric)}>
-      <p className="text-xs text-slate-500 dark:text-slate-400">{label}</p>
-      <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{value}</div>
-      {hint && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{hint}</p>}
+      <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{label}</p>
+      <div className="mt-1 text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{value}</div>
+      {hint && <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{hint}</p>}
     </div>
   );
 }
@@ -1012,7 +1022,7 @@ export function ErpActionMenu({ label, actions }: { label: string; actions: ErpA
       </button>
       <AnimatePresence>
         {open && (
-          <motion.div initial={{ opacity: 0, scale: 0.97, y: -4 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97, y: -4 }} transition={{ duration: 0.16 }} className="absolute left-0 z-40 mt-2 min-w-48 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+          <motion.div initial={{ opacity: 0, scale: 0.97, y: -4 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97, y: -4 }} transition={{ duration: 0.16 }} className="absolute left-0 z-40 mt-2 min-w-48 overflow-hidden rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-1.5 shadow-xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
             {actions.map((action) => (
               <div key={action.label} onClick={() => setOpen(false)}><ErpButton {...action} variant="ghost" className="w-full justify-start border-0" /></div>
             ))}
@@ -1057,14 +1067,14 @@ export function ErpSheet({ open, onClose, title, children, footer }: WithChildre
     <AnimatePresence>
       {open && (
         <div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-stretch sm:justify-start" role="presentation">
-          <motion.button type="button" aria-label="بستن" onClick={onClose} className="absolute inset-0 bg-slate-950/45 backdrop-blur-[1px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
-          <motion.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} initial={reduceMotion ? false : { opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 24 }} transition={{ duration: reduceMotion ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }} className="relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950 sm:mr-auto sm:h-full sm:max-h-none sm:max-w-lg sm:rounded-none sm:rounded-r-3xl">
-            <header className="flex min-h-16 items-center justify-between gap-3 border-b border-slate-200 px-4 dark:border-slate-800">
-              <h2 id={titleId} className="text-base font-bold text-slate-950 dark:text-white">{title}</h2>
-              <button ref={closeButtonRef} type="button" onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-slate-500 outline-none transition hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-[#074747] dark:hover:bg-slate-800" aria-label="بستن"><FaTimes /></button>
+          <motion.button type="button" aria-label="بستن" onClick={onClose} className="absolute inset-0 bg-[var(--sds-surface-raised)] backdrop-blur-[1px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
+          <motion.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} initial={reduceMotion ? false : { opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 24 }} transition={{ duration: reduceMotion ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }} className="relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:mr-auto sm:h-full sm:max-h-none sm:max-w-lg sm:rounded-none sm:rounded-r-3xl">
+            <header className="flex min-h-16 items-center justify-between gap-3 border-b border-[var(--sds-border-default)] px-4 dark:border-[var(--sds-border-strong)]">
+              <h2 id={titleId} className="text-base font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{title}</h2>
+              <button ref={closeButtonRef} type="button" onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-[var(--sds-text-secondary)] outline-none transition hover:bg-[var(--sds-surface-subtle)] focus-visible:ring-2 focus-visible:ring-[var(--sds-accent)] dark:hover:bg-[var(--sds-surface-raised)]" aria-label="بستن"><FaTimes /></button>
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
-            {footer && <footer className="border-t border-slate-200 p-4 dark:border-slate-800">{footer}</footer>}
+            {footer && <footer className="border-t border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-strong)]">{footer}</footer>}
           </motion.div>
         </div>
       )}

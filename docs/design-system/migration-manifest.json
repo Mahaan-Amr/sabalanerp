@@ -38,6 +38,12 @@
       "reason": "The legacy-compatible contract edit alias resolves to the accepted shared wizard."
     },
     {
+      "pattern": "frontend/src/app/dashboard/crm/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "CRM customer registry, potential-project, follow-up, and contract-handoff workflows passed canonical control, responsive, accessibility, theme, and production-build gates."
+    },
+    {
       "pattern": "frontend/src/app/**/page.tsx",
       "status": "legacy",
       "acceptanceStatus": "not-started",
@@ -74,6 +80,26 @@
         "frontend/src/features/contract-creation/components/product-modal-system/**",
         "frontend/src/features/contract-creation/components/shared/**",
         "frontend/src/features/contract-creation/components/steps/**"
+      ]
+    },
+    {
+      "id": "crm-customer-registry",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Customer discovery, details, creation, editing, contacts, project context, and duplicate handling use canonical interfaces without the redundant tutorial overlay.",
+      "files": [
+        "frontend/src/app/dashboard/crm/customers/**"
+      ]
+    },
+    {
+      "id": "crm-pipeline",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "CRM overview, potential projects, follow-ups, filtering, lifecycle state, and contract handoff use canonical interfaces while retaining existing domain behavior.",
+      "files": [
+        "frontend/src/app/dashboard/crm/page.tsx",
+        "frontend/src/app/dashboard/crm/follow-ups/**",
+        "frontend/src/app/dashboard/crm/potential-projects/**"
       ]
     }
   ],

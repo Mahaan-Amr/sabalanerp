@@ -1,8 +1,6 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { FaPlus, FaTasks } from 'react-icons/fa';
-import { CrmGuide } from '@/components/crm/CrmGuide';
 import { ErpBadge, ErpEmptyState, ErpListPage, ErpPagination, type ErpColumn } from '@/components/erp';
 import { crmAPI } from '@/lib/api';
 import { crmPersonName, crmUserName } from '@/lib/crmPipeline';
@@ -20,15 +18,6 @@ type FollowUp = {
   outcome: string;
   nextAction?: any;
 };
-
-const guideSteps = [
-  {
-    targetId: 'followup-list',
-    title: 'گزارش‌های پیگیری',
-    body: 'این فهرست تاریخچه تماس‌ها، جلسات و بازدیدهای ثبت‌شده را نشان می‌دهد. گزارش‌های پروژه‌ای فقط برای افراد مجاز نمایش داده می‌شوند.',
-    fields: ['نوع ارتباط', 'نوع کار/معامله', 'نتیجه', 'اقدام بعدی'],
-  },
-];
 
 export default function FollowUpsPage() {
   const [rows, setRows] = useState<FollowUp[]>([]);
@@ -60,7 +49,7 @@ export default function FollowUpsPage() {
       cell: (row) => (
         <div>
           <p className="font-semibold">{row.summary}</p>
-          <p className="mt-1 text-xs text-slate-500">{row.potentialProject?.title || crmPersonName(row.customer)}</p>
+          <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{row.potentialProject?.title || crmPersonName(row.customer)}</p>
         </div>
       ),
     },
@@ -83,8 +72,8 @@ export default function FollowUpsPage() {
       emptyState={<ErpEmptyState icon={FaTasks} title="گزارش پیگیری ثبت نشده است" action={{ label: 'ثبت گزارش', href: '/dashboard/crm/follow-ups/create', icon: FaPlus, tone: 'primary', variant: 'solid' }} />}
       footer={<ErpPagination currentPage={pagination.page} totalPages={pagination.pages} totalItems={pagination.total} itemsPerPage={pagination.limit} onPageChange={(page) => setPagination((prev) => ({ ...prev, page }))} itemLabel="گزارش" />}
     >
-      <div className="flex justify-end"><CrmGuide steps={guideSteps} /></div>
-      <div data-crm-guide="followup-list" />
+
+      <div />
     </ErpListPage>
   );
 }

@@ -100,3 +100,54 @@ test('Product Selection restores into the shared interface without changing pers
   });
   expect(productStepFits).toBe(true);
 });
+
+test('Guard attendance and vehicle operations use canonical fields and responsive surfaces', async ({ page }) => {
+  await login(page);
+
+  await page.goto('/dashboard/security/attendance');
+  const attendance = page.locator('main.sds-workspace');
+  await expect(attendance.getByRole('heading', { name: 'حضور و غیاب', exact: true })).toBeVisible();
+  const attendanceFields = await attendance.evaluate((element) => {
+    const fields = Array.from(element.querySelectorAll('input:not([type="checkbox"]), select, textarea'));
+    return {
+      count: fields.length,
+      canonical: fields.every((field) => field.classList.contains('sds-field'))
+    };
+  });
+  expect(attendanceFields.count).toBeGreaterThan(0);
+  expect(attendanceFields.canonical).toBe(true);
+  const attendanceSearch = attendance.getByRole('textbox', { name: 'جستجو در حضور و غیاب' });
+  await attendanceSearch.focus();
+  await expect(attendanceSearch).toBeFocused();
+  expect(await attendance.evaluate((element) => getComputedStyle(element).direction)).toBe('rtl');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const attendanceFits = await attendance.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
+  });
+  expect(attendanceFits).toBe(true);
+
+  await page.goto('/dashboard/security/vehicles');
+  const vehicles = page.locator('main.sds-workspace');
+  await expect(vehicles.getByRole('heading', { name: 'تردد خودروها', exact: true })).toBeVisible();
+
+  await vehicles.getByRole('button', { name: 'رانندگان و خودروها', exact: true }).click();
+  await expect(vehicles.getByRole('heading', { name: 'ثبت راننده و خودرو', exact: true })).toBeVisible();
+  const vehicleFields = await vehicles.evaluate((element) => {
+    const fields = Array.from(element.querySelectorAll('input:not([type="checkbox"]), select, textarea'));
+    return {
+      count: fields.length,
+      canonical: fields.every((field) => field.classList.contains('sds-field'))
+    };
+  });
+  expect(vehicleFields.count).toBeGreaterThan(0);
+  expect(vehicleFields.canonical).toBe(true);
+  await expect(vehicles.getByRole('checkbox', { name: 'پلاک ویژه' })).toBeVisible();
+
+  const vehiclesFit = await vehicles.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
+  });
+  expect(vehiclesFit).toBe(true);
+});

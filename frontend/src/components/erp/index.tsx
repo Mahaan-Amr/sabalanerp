@@ -92,6 +92,9 @@ type WithChildren = {
 
 const cx = (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(' ');
 
+export const erpFieldClassName = 'sds-field w-full px-4 py-3 text-sm';
+export const erpFieldLabelClassName = 'sds-text-secondary mb-2 block text-sm font-medium';
+
 const toneClasses: Record<ErpTone, { badge: string; metric: string; icon: string; buttonSoft: string }> = {
   primary: {
     badge: 'sds-tone-primary sds-tone-surface',
@@ -211,6 +214,71 @@ export function ErpIconButton({ label, icon: Icon, href, onClick, tone = 'neutra
   return (
     <button type="button" onClick={onClick} disabled={disabled} className={className} aria-label={label} title={title || label}>
       {content}
+    </button>
+  );
+}
+
+export const ErpInput = React.forwardRef<
+  HTMLInputElement,
+  React.InputHTMLAttributes<HTMLInputElement>
+>(function ErpInput({ className, ...props }, ref) {
+  return <input ref={ref} className={cx(erpFieldClassName, className)} {...props} />;
+});
+
+export const ErpSelect = React.forwardRef<
+  HTMLSelectElement,
+  React.SelectHTMLAttributes<HTMLSelectElement>
+>(function ErpSelect({ className, children, ...props }, ref) {
+  return (
+    <select ref={ref} className={cx(erpFieldClassName, className)} {...props}>
+      {children}
+    </select>
+  );
+});
+
+export const ErpTextarea = React.forwardRef<
+  HTMLTextAreaElement,
+  React.TextareaHTMLAttributes<HTMLTextAreaElement>
+>(function ErpTextarea({ className, ...props }, ref) {
+  return <textarea ref={ref} className={cx(erpFieldClassName, 'min-h-24 resize-y', className)} {...props} />;
+});
+
+export function ErpCheckbox({
+  label,
+  className,
+  ...props
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> & {
+  label: React.ReactNode;
+}) {
+  return (
+    <label className={cx('sds-text-secondary inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm', className)}>
+      <input
+        {...props}
+        type="checkbox"
+        className="h-5 w-5 rounded border-[var(--sds-border-default)] accent-[var(--sds-accent)]"
+      />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+export function ErpPressable({
+  children,
+  className,
+  tone = 'neutral',
+  variant = 'ghost',
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  tone?: ErpTone;
+  variant?: ErpAction['variant'];
+}) {
+  return (
+    <button
+      {...props}
+      type={props.type || 'button'}
+      className={cx('sds-action', buttonClasses(tone, variant), className)}
+    >
+      {children}
     </button>
   );
 }

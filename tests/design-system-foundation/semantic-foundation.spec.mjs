@@ -11,6 +11,8 @@ const productSelectionSource = read(
   'frontend/src/features/contract-creation/components/steps/Step5ProductSelection.tsx'
 );
 const layoutSource = read('frontend/src/app/layout.tsx');
+const guardAttendanceSource = read('frontend/src/app/dashboard/security/attendance/page.tsx');
+const guardVehiclesSource = read('frontend/src/app/dashboard/security/vehicles/page.tsx');
 
 const variablesIn = (source) =>
   new Set(Array.from(source.matchAll(/--(sds-[\w-]+)\s*:/g), (match) => match[1]));
@@ -140,4 +142,23 @@ test('Guard and Product Selection both cross the shared interface seam', () => {
   assert.match(productSelectionSource, /<ErpInlineState kind="error"/);
   assert.match(productSelectionSource, /<ErpButton/);
   assert.match(layoutSource, /design-system-tokens\.css/);
+});
+
+test('Guard daily operations do not reimplement palette or native-control presentation', () => {
+  const hardcodedPalette =
+    /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|gray|green|indigo|neutral|orange|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
+  const rawControl = /<(?:button|input|select|textarea)\b/;
+
+  for (const [name, source] of [
+    ['Guard attendance', guardAttendanceSource],
+    ['Guard vehicles', guardVehiclesSource]
+  ]) {
+    assert.doesNotMatch(source, hardcodedPalette, `${name} must use semantic meanings`);
+    assert.doesNotMatch(source, rawControl, `${name} must consume canonical controls`);
+    assert.match(source, /ErpWorkspacePage/);
+    assert.match(source, /erpFieldLabelClassName/);
+    assert.match(source, /ErpSkeleton/, `${name} must retain a loading state`);
+    assert.match(source, /ErpInlineState/, `${name} must retain an error state`);
+    assert.match(source, /ErpEmptyState/, `${name} must retain an empty state`);
+  }
 });

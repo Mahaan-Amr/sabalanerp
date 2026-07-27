@@ -2,8 +2,26 @@ import { paperContractReviewState } from './hrEmploymentContract';
 
 type Authority = string;
 
+const labels: Record<string, string> = {
+  BIRTH_CERTIFICATE_ALL_PAGES: 'تمام صفحات شناسنامه',
+  BIRTH_CERTIFICATE_EXPLANATIONS: 'صفحه توضیحات شناسنامه',
+  NATIONAL_ID_FRONT: 'روی کارت ملی',
+  NATIONAL_ID_BACK: 'پشت کارت ملی',
+  MILITARY: 'مدرک وضعیت نظام وظیفه',
+  EDUCATION: 'مدرک تحصیلی',
+  PHOTO: 'عکس پرسنلی',
+  ORIGINAL: 'اصل', COPY: 'رونوشت', FRONT: 'رو', BACK: 'پشت',
+  PROMISSORY_NOTE: 'سفته', CHEQUE: 'چک', GUARANTEE: 'ضمانت‌نامه', UNDERTAKING: 'تعهدنامه', OTHER: 'سایر',
+};
+const assessmentLabels: Record<string, string> = {
+  DISC: 'DISC (ارزیابی الگوی رفتاری دیسک)',
+  BIG_FIVE: 'BIG FIVE (ارزیابی پنج عامل بزرگ شخصیت)',
+  EQ: 'EQ (ارزیابی هوش هیجانی)',
+  OTHER: 'سایر ارزیابی‌ها',
+};
+const label = (value?: string | null) => value ? labels[value] || 'سایر' : '';
 const identityTitle = (row: any) =>
-  [row.category, row.side].filter(Boolean).join(' - ');
+  [label(row.category), label(row.side)].filter(Boolean).join(' - ');
 
 const restricted = (entry: any) => ({
   id: entry.id,
@@ -49,7 +67,7 @@ export const buildHiringDocumentIndex = (
     const companySafe = row.assessmentType !== 'OTHER';
     const canOpenAssessment = canHr || (canCompanyManagement && companySafe);
     const entry = {
-      id: row.id, title: `ارزیابی ${row.assessmentType}`, category: 'ASSESSMENT', version: row.version,
+      id: row.id, title: assessmentLabels[row.assessmentType] || 'سایر ارزیابی‌ها', category: 'ASSESSMENT', version: row.version,
       uploader: row.recordedBy, date: row.recordedAt, reviewStatus: row.status,
       safeOwner: 'منابع انسانی', originalName: row.originalName,
       downloadKind: 'ASSESSMENT', canOpen: canOpenAssessment && Boolean(row.originalName), restricted: !canOpenAssessment,
@@ -69,7 +87,7 @@ export const buildHiringDocumentIndex = (
   for (const row of application.collateralItems || []) {
     if (row.originalName) {
       const entry = {
-        id: row.id, title: `مدرک وثیقه ${row.type}`, category: 'FINANCE_COLLATERAL', version: row.version,
+        id: row.id, title: `مدرک وثیقه ${label(row.type)}`, category: 'FINANCE_COLLATERAL', version: row.version,
         uploader: row.recordedBy, date: row.createdAt, reviewStatus: row.status,
         safeOwner: 'امور مالی', originalName: row.originalName,
         downloadKind: 'COLLATERAL', canOpen: canFinance, restricted: !canFinance,
@@ -78,7 +96,7 @@ export const buildHiringDocumentIndex = (
     }
     if (row.returnEvidenceOriginalName) {
       const returnEntry = {
-        id: row.id, title: `مدرک بازگشت وثیقه ${row.type}`, category: 'FINANCE_COLLATERAL_RETURN', version: row.version,
+        id: row.id, title: `مدرک بازگشت وثیقه ${label(row.type)}`, category: 'FINANCE_COLLATERAL_RETURN', version: row.version,
         uploader: row.returnedBy, date: row.returnedAt, reviewStatus: row.returnConfirmedAt ? 'APPROVED' : 'SUBMITTED',
         safeOwner: 'امور مالی', originalName: row.returnEvidenceOriginalName,
         downloadKind: 'COLLATERAL_RETURN', canOpen: canFinance, restricted: !canFinance,

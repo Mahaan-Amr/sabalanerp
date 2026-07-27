@@ -115,3 +115,74 @@ test.describe('HR browser scope', () => {
     await context.close();
   });
 });
+
+test.describe('browser-visible cross-role workflow controls', () => {
+  test.skip(
+    !env('HR_E2E_APPLICATION_ID') ||
+      !env('HR_E2E_FINANCE_RECORDER_STORAGE') ||
+      !env('HR_E2E_FINANCE_MANAGER_STORAGE') ||
+      !env('HR_E2E_HR_PROCESSOR_STORAGE') ||
+      !env('HR_E2E_PAYROLL_MANAGER_STORAGE') ||
+      !env('HR_E2E_HR_MANAGER_STORAGE') ||
+      !env('HR_E2E_SUPERVISOR_STORAGE') ||
+      !env('HR_E2E_PERSONNEL_ID'),
+    'Set role storage states and seeded HR records for browser journeys.',
+  );
+
+  test('paper-contract controls transfer from recorder to manager', async ({ browser }) => {
+    const recorder = await browser.newContext({ storageState: env('HR_E2E_FINANCE_RECORDER_STORAGE') });
+    const recorderPage = await recorder.newPage();
+    await recorderPage.goto(`/dashboard/hr/hiring/${env('HR_E2E_APPLICATION_ID')}?phase=ONBOARDING`);
+    await expect(recorderPage.getByRole('button', { name: /ثبت نسخه قرارداد|ارسال برای بررسی مدیر مالی/ })).toBeVisible();
+    await recorder.close();
+
+    const manager = await browser.newContext({ storageState: env('HR_E2E_FINANCE_MANAGER_STORAGE') });
+    const managerPage = await manager.newPage();
+    await managerPage.goto(`/dashboard/hr/hiring/${env('HR_E2E_APPLICATION_ID')}?phase=ONBOARDING`);
+    await expect(managerPage.getByRole('button', { name: /تأیید قرارداد|بازگرداندن برای اصلاح/ })).toBeVisible();
+    await expect(managerPage.getByRole('button', { name: 'ثبت نسخه قرارداد' })).toHaveCount(0);
+    await manager.close();
+  });
+
+  test('insurance, payroll, and activation controls are isolated by role', async ({ browser }) => {
+    const processor = await browser.newContext({ storageState: env('HR_E2E_HR_PROCESSOR_STORAGE') });
+    const processorPage = await processor.newPage();
+    await processorPage.goto(`/dashboard/hr/hiring/${env('HR_E2E_APPLICATION_ID')}?phase=ONBOARDING`);
+    await expect(processorPage.getByRole('button', { name: 'ذخیره وضعیت بیمه' })).toBeVisible();
+    await expect(processorPage.getByRole('button', { name: 'تنظیم مشارکت حقوق و دستمزد' })).toHaveCount(0);
+    await processor.close();
+
+    const payroll = await browser.newContext({ storageState: env('HR_E2E_PAYROLL_MANAGER_STORAGE') });
+    const payrollPage = await payroll.newPage();
+    await payrollPage.goto(`/dashboard/hr/hiring/${env('HR_E2E_APPLICATION_ID')}?phase=ONBOARDING`);
+    await expect(payrollPage.getByRole('button', { name: 'تنظیم مشارکت حقوق و دستمزد' })).toBeVisible();
+    await payroll.close();
+
+    const manager = await browser.newContext({ storageState: env('HR_E2E_HR_MANAGER_STORAGE') });
+    const managerPage = await manager.newPage();
+    await managerPage.goto(`/dashboard/hr/hiring/${env('HR_E2E_APPLICATION_ID')}?phase=ACTIVATION`);
+    await expect(managerPage.getByText('آمادگی فعال‌سازی رابطه استخدامی')).toBeVisible();
+    await expect(managerPage.getByRole('button', { name: 'ذخیره وضعیت بیمه' })).toHaveCount(0);
+    await manager.close();
+  });
+
+  test('schedule journey exposes only the projected action for each actor', async ({ browser }) => {
+    const supervisor = await browser.newContext({ storageState: env('HR_E2E_SUPERVISOR_STORAGE') });
+    const supervisorPage = await supervisor.newPage();
+    await supervisorPage.goto(`/dashboard/hr/personnel?focus=${env('HR_E2E_PERSONNEL_ID')}`);
+    await expect(supervisorPage.getByRole('button', { name: 'ثبت پیشنهاد توسط سرپرست مسئول' })).toBeVisible();
+    await supervisor.close();
+
+    const processor = await browser.newContext({ storageState: env('HR_E2E_HR_PROCESSOR_STORAGE') });
+    const processorPage = await processor.newPage();
+    await processorPage.goto(`/dashboard/hr/personnel?focus=${env('HR_E2E_PERSONNEL_ID')}`);
+    await expect(processorPage.getByRole('button', { name: /ذخیره پیش‌نویس|ارسال برای تأیید/ })).toBeVisible();
+    await processor.close();
+
+    const manager = await browser.newContext({ storageState: env('HR_E2E_HR_MANAGER_STORAGE') });
+    const managerPage = await manager.newPage();
+    await managerPage.goto(`/dashboard/hr/personnel?focus=${env('HR_E2E_PERSONNEL_ID')}`);
+    await expect(managerPage.getByRole('button', { name: /تأیید و ایجاد نسخه اجرایی|بازگرداندن/ })).toBeVisible();
+    await manager.close();
+  });
+});

@@ -485,13 +485,18 @@ export default function HiringCasePage() {
             </ErpCard>
           </ErpSection>
         )}
-      {(data.documentIndex || []).length > 0 && (
+      {(canHrSensitive || canCompanyManager || canFinance) && (
         <ErpSection
           title="فهرست اسناد و فایل‌های پرونده"
           description="دسترسی هر فایل بر اساس مسئولیت سازمانی شما کنترل و ثبت می‌شود."
         >
           <div className="space-y-2">
-            {data.documentIndex.map((item: any) => (
+            {(data.documentIndex || []).length === 0 && (
+              <ErpCard className="p-4 text-sm text-slate-500">
+                هنوز سند یا فایل قابل نمایش برای این پرونده ثبت نشده است.
+              </ErpCard>
+            )}
+            {(data.documentIndex || []).map((item: any) => (
               <ErpCard
                 key={`${item.category}-${item.id}-${item.version}`}
                 className="flex flex-wrap items-center justify-between gap-3 p-4"

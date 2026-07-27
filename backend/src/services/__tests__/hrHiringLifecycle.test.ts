@@ -461,8 +461,8 @@ const base = (
       }),
       ["HR_PROCESSOR"],
       "processor-1",
-    ).find((task) => task.id === "INSURANCE")?.status,
-    "OVERDUE",
+    ).find((task) => task.id === "INSURANCE")?.overdue,
+    true,
   );
   assert.equal(
     hrProcessor.find((task) => task.id === "SIGNED_CONTRACT")?.detailVisible,

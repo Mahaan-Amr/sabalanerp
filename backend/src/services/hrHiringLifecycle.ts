@@ -165,6 +165,7 @@ export interface HiringTaskCapability {
   ownerAuthorities: string[];
   detailVisible: boolean;
   actionIds: string[];
+  overdue?: boolean;
 }
 
 export const projectHiringTaskCapabilities = (
@@ -234,9 +235,8 @@ export const projectHiringTaskCapabilities = (
     {
       id: "INSURANCE",
       title: "پیگیری ثبت بیمه",
-      status: insuranceOverdue
-        ? "OVERDUE"
-        : source.insuranceEnrollment?.status || "NOT_STARTED",
+      status: source.insuranceEnrollment?.status || "NOT_STARTED",
+      overdue: insuranceOverdue,
       ownerAuthorities: ["HR_PROCESSOR"],
       detailVisible: insuranceVisible,
       actionIds: insuranceVisible ? ["UPDATE_INSURANCE"] : [],

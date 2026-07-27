@@ -39,6 +39,17 @@
       ],
       "reason": "Canonical ERP modules implement semantic interfaces and accessible native behavior for feature consumers.",
       "owner": "Sabalan Design System"
+    },
+    {
+      "id": "theme-token-adapter",
+      "files": [
+        "frontend/src/styles/design-system-tokens.css"
+      ],
+      "allowedCategories": [
+        "hardcoded-semantic-color"
+      ],
+      "reason": "The dedicated adapter defines raw palette values behind the shared semantic token interface.",
+      "owner": "Sabalan Design System"
     }
   ],
   "exceptions": []

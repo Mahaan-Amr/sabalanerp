@@ -40,6 +40,8 @@
     "design-system:baseline": "node scripts/design-system-adoption.mjs baseline",
     "design-system:check": "node scripts/design-system-adoption.mjs check --changed",
     "test:design-system-adoption": "node --test tests/design-system-adoption/design-system-adoption.spec.mjs",
+    "test:design-system-foundation": "node --test tests/design-system-foundation/semantic-foundation.spec.mjs",
+    "test:design-system:e2e": "node scripts/run-design-system-e2e.mjs",
     "test:hr-hiring:e2e": "node scripts/run-hr-hiring-e2e.mjs",
     "test:hr-hiring:e2e:docker": "docker compose -f docker-compose.e2e.yml up -d --wait && npm run test:hr-hiring:e2e:ci",
     "test:hr-hiring:e2e:ci": "playwright test --config=playwright.hr-hiring.config.ts",

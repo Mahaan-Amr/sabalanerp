@@ -1,4 +1,5 @@
 ﻿import type { Metadata } from 'next'
+import '../styles/design-system-tokens.css'
 import './globals.css'
 import { ThemeProvider } from '@/contexts/ThemeContext'
 import { WorkspaceProvider } from '@/contexts/WorkspaceContext'

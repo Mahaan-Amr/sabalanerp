@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ErpButton, ErpInlineState } from '@/components/erp';
 import { resolveBackendAssetUrl } from '@/lib/api';
 import {
   formatDisplayNumber,
@@ -479,25 +480,19 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   };
 
   return (
-    <div className="space-y-5">
-      <header>
-        <h3 className="text-xl font-semibold text-slate-900 dark:text-white">انتخاب محصولات</h3>
-      </header>
-
+    <div className="sds-workspace space-y-5">
       {errors.products && (
-        <div className="border-b border-red-300 pb-2 text-sm text-red-700 dark:border-red-800 dark:text-red-300">
-          {errors.products}
-        </div>
+        <ErpInlineState kind="error" title={errors.products} />
       )}
 
-      <section className="border-y border-slate-200 py-3 dark:border-slate-700" aria-label="کاتالوگ محصولات">
+      <section className="sds-workspace-surface p-4" aria-label="کاتالوگ محصولات">
         <div className="flex gap-1 overflow-x-auto pb-3" role="tablist" aria-label="نوع محصول">
           <button
             type="button"
             role="tab"
             aria-selected={!catalog.activeType}
             onClick={() => catalog.selectType(null)}
-            className={`rounded-md px-3 py-1.5 text-xs ${!catalog.activeType ? 'bg-teal-600 text-white' : 'text-slate-600 dark:text-slate-300'}`}
+            className={`sds-action min-h-9 px-3 py-1.5 text-xs ${!catalog.activeType ? 'sds-tone-primary sds-action-solid' : 'sds-action-ghost'}`}
           >
             همه
           </button>
@@ -508,14 +503,14 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
               role="tab"
               aria-selected={catalog.activeType === type.id}
               onClick={() => catalog.selectType(type.id)}
-              className={`rounded-md px-3 py-1.5 text-xs ${catalog.activeType === type.id ? 'bg-teal-600 text-white' : 'text-slate-600 dark:text-slate-300'}`}
+              className={`sds-action min-h-9 px-3 py-1.5 text-xs ${catalog.activeType === type.id ? 'sds-tone-primary sds-action-solid' : 'sds-action-ghost'}`}
             >
               {TYPE_LABELS[type.id] ?? type.name}
             </button>
           ))}
         </div>
 
-        <label htmlFor="contract-product-search" className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-200">
+        <label htmlFor="contract-product-search" className="sds-text-secondary mb-1 block text-xs font-medium">
           جستجوی محصول
         </label>
         <input
@@ -538,7 +533,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
               selectHighlighted();
             }
           }}
-          className="w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700"
+          className="sds-field w-full px-3 py-2 text-sm"
           aria-controls="contract-product-results"
           aria-activedescendant={highlightedIndex === null ? undefined : `contract-product-result-${highlightedIndex}`}
         />
@@ -546,10 +541,10 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
         <div
           id="contract-product-results"
           role="listbox"
-          className="mt-2 max-h-80 overflow-y-auto border-t border-slate-200 dark:border-slate-700"
+          className="sds-divider mt-2 max-h-80 overflow-y-auto border-t"
         >
           {catalog.products.length === 0 ? (
-            <div className="py-4 text-sm text-slate-500">محصولی پیدا نشد</div>
+            <div className="sds-text-muted py-4 text-sm">محصولی پیدا نشد</div>
           ) : catalog.products.map((product, index) => {
             const highlighted = highlightedIndex === index;
             return (
@@ -562,27 +557,27 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                 aria-selected={highlighted}
                 onMouseEnter={() => setHighlightedIndex(index)}
                 onClick={() => catalog.selectProduct(product)}
-                className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-slate-100 px-1 py-2.5 text-right last:border-b-0 dark:border-slate-800 ${highlighted ? 'bg-teal-50 dark:bg-teal-950/30' : ''}`}
+                className={`sds-divider grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b px-2 py-2.5 text-right last:border-b-0 ${highlighted ? 'bg-[var(--sds-accent-soft)]' : ''}`}
               >
                 <span className="min-w-0">
-                  <strong className="block truncate text-sm text-slate-900 dark:text-white">
+                  <strong className="sds-text-primary block truncate text-sm">
                     {product.namePersian || product.name}
                   </strong>
-                  <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">
+                  <span className="sds-text-muted mt-0.5 block truncate text-xs">
                     {getProductFacts(product)} · {inferCatalogTypeLabel(product, catalog.activeType)}
                   </span>
                 </span>
-                <span className="text-xs font-medium text-teal-700 dark:text-teal-300">انتخاب</span>
+                <span className="text-xs font-medium text-[var(--sds-accent)]">انتخاب</span>
               </button>
             );
           })}
         </div>
       </section>
 
-      <section aria-label="محصولات قرارداد">
-        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-2 dark:border-slate-700">
-          <h4 className="text-sm font-semibold text-slate-900 dark:text-white">محصولات قرارداد</h4>
-          <div className="flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-300">
+      <section className="sds-workspace-surface p-4" aria-label="محصولات قرارداد">
+        <div className="sds-divider flex flex-wrap items-end justify-between gap-3 border-b pb-2">
+          <h4 className="sds-text-primary text-sm font-semibold">محصولات قرارداد</h4>
+          <div className="sds-text-secondary flex flex-wrap gap-3 text-xs">
             <span>{formatPrice(cart.summary.totalPrice, 'تومان')}</span>
             <span>{formatSquareMeters(cart.summary.totalSquareMeters)}</span>
             <span>{formatQuantity(cart.summary.totalQuantity)} قطعه</span>
@@ -590,7 +585,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
         </div>
 
         {projectedRows.length === 0 ? (
-          <div className="py-5 text-sm text-slate-500">هنوز محصولی اضافه نشده است</div>
+          <div className="sds-text-muted py-5 text-sm">هنوز محصولی اضافه نشده است</div>
         ) : projectedRows.map(({ product, children }) => (
           <React.Fragment key={product.rowId || product.productId}>
             <ContractRow
@@ -619,16 +614,14 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
         ))}
       </section>
 
-      <section className="border-t border-slate-200 pt-3 dark:border-slate-700" aria-label="خدمات مستقل">
+      <section className="sds-workspace-surface p-4" aria-label="خدمات مستقل">
         <div className="flex items-center justify-between gap-3">
-          <h4 className="text-sm font-semibold text-slate-900 dark:text-white">خدمات مستقل</h4>
-          <button
-            type="button"
+          <h4 className="sds-text-primary text-sm font-semibold">خدمات مستقل</h4>
+          <ErpButton
+            label={showServiceCatalog ? 'بستن' : 'افزودن خدمت'}
             onClick={() => setShowServiceCatalog(value => !value)}
-            className="text-xs font-medium text-teal-700 dark:text-teal-300"
-          >
-            {showServiceCatalog ? 'بستن' : 'افزودن خدمت'}
-          </button>
+            variant="ghost"
+          />
         </div>
 
         {showServiceCatalog && (
@@ -651,7 +644,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                 type="search"
                 value={services.query}
                 onChange={event => services.setQuery(event.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-slate-700"
+                className="sds-field mt-1 w-full px-3 py-2 text-sm"
               />
             </label>
             <div className="mt-2 max-h-48 overflow-y-auto">
@@ -688,13 +681,11 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
         ))}
       </section>
 
-      <button
-        type="button"
+      <ErpButton
+        label="محصول در کاتالوگ نیست؟ ایجاد محصول"
         onClick={catalog.createProduct}
-        className="text-xs text-slate-500 hover:text-teal-700 dark:text-slate-400 dark:hover:text-teal-300"
-      >
-        محصول در کاتالوگ نیست؟ ایجاد محصول
-      </button>
+        variant="ghost"
+      />
     </div>
   );
 };

@@ -94,63 +94,60 @@ const cx = (...classes: Array<string | false | null | undefined>) => classes.fil
 
 const toneClasses: Record<ErpTone, { badge: string; metric: string; icon: string; buttonSoft: string }> = {
   primary: {
-    badge: 'border-[#074747]/20 bg-[#074747]/10 text-[#074747] dark:border-teal-700 dark:bg-teal-900/30 dark:text-teal-100',
-    metric: 'border-[#074747]/20 bg-[#074747]/5 dark:border-teal-800 dark:bg-teal-950/30',
-    icon: 'bg-[#074747]/10 text-[#074747] dark:bg-teal-900/40 dark:text-teal-100',
-    buttonSoft: 'border-[#074747]/20 bg-[#074747]/10 text-[#074747] hover:bg-[#074747]/15 dark:border-teal-700 dark:bg-teal-900/30 dark:text-teal-100',
+    badge: 'sds-tone-primary sds-tone-surface',
+    metric: 'sds-tone-primary sds-tone-surface',
+    icon: 'sds-tone-primary sds-tone-surface',
+    buttonSoft: 'sds-tone-primary sds-action-soft',
   },
   neutral: {
-    badge: 'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200',
-    metric: 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/70',
-    icon: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200',
-    buttonSoft: 'border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200',
+    badge: 'sds-tone-neutral sds-tone-surface',
+    metric: 'sds-tone-neutral sds-tone-surface',
+    icon: 'sds-tone-neutral sds-tone-surface',
+    buttonSoft: 'sds-tone-neutral sds-action-soft',
   },
   success: {
-    badge: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/25 dark:text-emerald-200',
-    metric: 'border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-900/20',
-    icon: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200',
-    buttonSoft: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-900/25 dark:text-emerald-200',
+    badge: 'sds-tone-success sds-tone-surface',
+    metric: 'sds-tone-success sds-tone-surface',
+    icon: 'sds-tone-success sds-tone-surface',
+    buttonSoft: 'sds-tone-success sds-action-soft',
   },
   warning: {
-    badge: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-900/25 dark:text-amber-200',
-    metric: 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20',
-    icon: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200',
-    buttonSoft: 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-900/25 dark:text-amber-200',
+    badge: 'sds-tone-warning sds-tone-surface',
+    metric: 'sds-tone-warning sds-tone-surface',
+    icon: 'sds-tone-warning sds-tone-surface',
+    buttonSoft: 'sds-tone-warning sds-action-soft',
   },
   danger: {
-    badge: 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/25 dark:text-red-200',
-    metric: 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20',
-    icon: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200',
-    buttonSoft: 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-900/25 dark:text-red-200',
+    badge: 'sds-tone-danger sds-tone-surface',
+    metric: 'sds-tone-danger sds-tone-surface',
+    icon: 'sds-tone-danger sds-tone-surface',
+    buttonSoft: 'sds-tone-danger sds-action-soft',
   },
   info: {
-    badge: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-900/25 dark:text-blue-200',
-    metric: 'border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20',
-    icon: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200',
-    buttonSoft: 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/25 dark:text-blue-200',
+    badge: 'sds-tone-info sds-tone-surface',
+    metric: 'sds-tone-info sds-tone-surface',
+    icon: 'sds-tone-info sds-tone-surface',
+    buttonSoft: 'sds-tone-info sds-action-soft',
   },
   purple: {
-    badge: 'border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-800 dark:bg-purple-900/25 dark:text-purple-200',
-    metric: 'border-purple-200 bg-purple-50 dark:border-purple-800 dark:bg-purple-900/20',
-    icon: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-200',
-    buttonSoft: 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 dark:border-purple-800 dark:bg-purple-900/25 dark:text-purple-200',
+    badge: 'sds-tone-purple sds-tone-surface',
+    metric: 'sds-tone-purple sds-tone-surface',
+    icon: 'sds-tone-purple sds-tone-surface',
+    buttonSoft: 'sds-tone-purple sds-action-soft',
   },
 };
 
 const buttonClasses = (tone: ErpTone, variant: ErpAction['variant']) => {
   if (variant === 'solid') {
-    if (tone === 'primary') return 'border-[#074747] bg-[#074747] text-white hover:bg-[#0b5c5c]';
-    if (tone === 'danger') return 'border-red-600 bg-red-600 text-white hover:bg-red-700';
-    if (tone === 'success') return 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700';
-    return 'border-slate-800 bg-slate-800 text-white hover:bg-slate-900 dark:border-slate-200 dark:bg-slate-100 dark:text-slate-950';
+    return `sds-tone-${tone} sds-action-solid`;
   }
 
   if (variant === 'outline') {
-    return 'border-slate-200 bg-white text-slate-700 hover:border-[#074747]/40 hover:text-[#074747] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-teal-600';
+    return `sds-tone-${tone} sds-action-outline`;
   }
 
   if (variant === 'ghost') {
-    return 'border-transparent bg-transparent text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800';
+    return `sds-tone-${tone} sds-action-ghost`;
   }
 
   return toneClasses[tone].buttonSoft;
@@ -168,7 +165,7 @@ export function ErpButton({
   className: extraClassName,
 }: ErpAction) {
   const className = cx(
-    'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+    'sds-action inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50',
     buttonClasses(tone, variant),
     extraClassName
   );
@@ -197,7 +194,7 @@ export function ErpButton({
 
 export function ErpIconButton({ label, icon: Icon, href, onClick, tone = 'neutral', disabled, title }: ErpAction) {
   const className = cx(
-    'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+    'sds-action inline-flex h-11 w-11 flex-shrink-0 items-center justify-center text-sm disabled:cursor-not-allowed disabled:opacity-50',
     buttonClasses(tone, 'ghost')
   );
 
@@ -219,7 +216,7 @@ export function ErpIconButton({ label, icon: Icon, href, onClick, tone = 'neutra
 }
 
 export function ErpBadge({ children, tone = 'neutral', variant = 'soft' }: WithChildren & { tone?: ErpTone; variant?: 'soft' | 'outline' | 'solid' }) {
-  const solid = tone === 'primary' ? 'border-[#074747] bg-[#074747] text-white' : 'border-slate-700 bg-slate-800 text-white';
+  const solid = `sds-tone-${tone} sds-action-solid`;
   return (
     <span className={cx('inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold', variant === 'solid' ? solid : toneClasses[tone].badge)}>
       {children}
@@ -231,9 +228,9 @@ export function ErpCard({ children, className, tone = 'neutral', interactive = f
   return (
     <div
       className={cx(
-        'rounded-lg border bg-white shadow-sm dark:bg-slate-900/70',
-        tone === 'neutral' ? 'border-slate-200 dark:border-slate-700' : toneClasses[tone].metric,
-        interactive && 'transition hover:border-[#074747]/40 hover:shadow-md dark:hover:border-teal-700',
+        'sds-card',
+        tone === 'neutral' ? null : toneClasses[tone].metric,
+        interactive && 'sds-card-interactive',
         className
       )}
     >
@@ -248,8 +245,8 @@ export function ErpSection({ title, description, actions, children, className }:
       {(title || description || actions?.length) && (
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            {title && <h2 className="text-base font-semibold text-slate-900 dark:text-white">{title}</h2>}
-            {description && <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">{description}</p>}
+            {title && <h2 className="sds-text-primary text-base font-semibold">{title}</h2>}
+            {description && <p className="sds-text-muted mt-1 text-sm leading-6">{description}</p>}
           </div>
           {actions?.length ? (
             <div className="flex flex-wrap gap-2">
@@ -274,9 +271,9 @@ export function ErpMetricGrid({ items }: { items: ErpMetric[] }) {
           <ErpCard key={item.label} tone={tone} className="p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-xs text-slate-500 dark:text-slate-400">{item.label}</p>
-                <p className="mt-1 truncate text-lg font-semibold text-slate-900 dark:text-white">{item.value}</p>
-                {item.hint && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.hint}</p>}
+                <p className="sds-text-muted text-xs">{item.label}</p>
+                <p className="sds-text-primary mt-1 truncate text-lg font-semibold">{item.value}</p>
+                {item.hint && <p className="sds-text-muted mt-1 text-xs">{item.hint}</p>}
               </div>
               {Icon && (
                 <span className={cx('inline-flex h-9 w-9 items-center justify-center rounded-lg', toneClasses[tone].icon)}>
@@ -835,7 +832,7 @@ export function ErpWorkspacePage({
 
   return (
     <motion.main
-      className={cx('mx-auto w-full max-w-7xl space-y-5', className)}
+      className={cx('sds-workspace mx-auto w-full max-w-7xl space-y-5', className)}
       initial={reduceMotion ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
@@ -844,8 +841,8 @@ export function ErpWorkspacePage({
         <div className="flex min-w-0 items-start gap-2.5">
           {backHref && <ErpIconButton label="بازگشت" onClick={handleBack} icon={FaArrowRight} tone="neutral" />}
           <div className="min-w-0 py-0.5">
-            <h1 className="truncate text-2xl font-black tracking-tight text-slate-950 dark:text-white">{title}</h1>
-            {context && <div className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">{context}</div>}
+            <h1 className="sds-text-primary truncate text-2xl font-black tracking-tight">{title}</h1>
+            {context && <div className="sds-text-muted mt-1 text-xs font-medium">{context}</div>}
           </div>
         </div>
         {(primaryAction || secondaryActions.length > 0) && (
@@ -876,11 +873,11 @@ export function ErpMotionSection({ children, className, delay = 0 }: WithChildre
 
 export function ErpSkeleton({ lines = 3, className, label = 'در حال بارگذاری' }: { lines?: number; className?: string; label?: string }) {
   return (
-    <div className={cx('animate-pulse space-y-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900/70', className)} role="status" aria-label={label}>
+    <div className={cx('sds-card animate-pulse space-y-3 p-4 motion-reduce:animate-none', className)} role="status" aria-label={label}>
       <span className="sr-only">{label}</span>
-      <div className="h-4 w-28 rounded-full bg-slate-200 dark:bg-slate-700" />
+      <div className="sds-skeleton h-4 w-28 rounded-full" />
       {Array.from({ length: lines }).map((_, index) => (
-        <div key={index} className={cx('h-11 rounded-xl bg-slate-100 dark:bg-slate-800', index === lines - 1 && 'w-4/5')} />
+        <div key={index} className={cx('sds-skeleton h-11 rounded-xl', index === lines - 1 && 'w-4/5')} />
       ))}
     </div>
   );
@@ -898,15 +895,15 @@ export function ErpInlineState({
   className?: string;
 }) {
   const config = {
-    empty: { Icon: FaInfoCircle, classes: 'border-slate-200 text-slate-600 dark:border-slate-800 dark:text-slate-300' },
-    success: { Icon: FaCheck, classes: 'border-emerald-200 text-emerald-700 dark:border-emerald-900 dark:text-emerald-200' },
-    error: { Icon: FaExclamationTriangle, classes: 'border-rose-200 text-rose-700 dark:border-rose-900 dark:text-rose-200' },
-    stale: { Icon: FaRedo, classes: 'border-amber-200 text-amber-700 dark:border-amber-900 dark:text-amber-200' },
-    permission: { Icon: FaInfoCircle, classes: 'border-slate-200 text-slate-600 dark:border-slate-800 dark:text-slate-300' },
+    empty: { Icon: FaInfoCircle, classes: 'sds-tone-neutral' },
+    success: { Icon: FaCheck, classes: 'sds-tone-success' },
+    error: { Icon: FaExclamationTriangle, classes: 'sds-tone-danger' },
+    stale: { Icon: FaRedo, classes: 'sds-tone-warning' },
+    permission: { Icon: FaInfoCircle, classes: 'sds-tone-neutral' },
   }[kind];
   const Icon = config.Icon;
   return (
-    <div className={cx('flex min-h-12 items-center justify-between gap-3 border-y bg-transparent px-1 py-3 text-sm', config.classes, className)} role={kind === 'error' ? 'alert' : 'status'}>
+    <div className={cx('sds-tone-surface flex min-h-12 items-center justify-between gap-3 border-y px-3 py-3 text-sm', config.classes, className)} role={kind === 'error' ? 'alert' : 'status'}>
       <span className="inline-flex items-center gap-2 font-semibold"><Icon className="h-3.5 w-3.5" aria-hidden="true" />{title}</span>
       {action && <ErpButton {...action} variant={action.variant || 'ghost'} className={cx('min-h-11', action.className)} />}
     </div>
@@ -926,7 +923,7 @@ export function ErpActionMenu({ label, actions }: { label: string; actions: ErpA
   }, [open]);
   return (
     <div ref={rootRef} className="relative">
-      <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={label} className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 outline-none transition hover:border-[#074747]/30 hover:text-[#074747] focus-visible:ring-2 focus-visible:ring-[#074747] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+      <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={label} className="sds-action sds-action-outline inline-flex h-11 w-11 items-center justify-center">
         <FaEllipsisV className="h-4 w-4" />
       </button>
       <AnimatePresence>

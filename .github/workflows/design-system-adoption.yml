@@ -7,6 +7,7 @@ on:
       - "docs/design-system/**"
       - "scripts/design-system-adoption.mjs"
       - "tests/design-system-adoption/**"
+      - "tests/design-system-foundation/**"
       - "package.json"
       - ".github/workflows/design-system-adoption.yml"
   workflow_dispatch:
@@ -23,6 +24,7 @@ jobs:
         with:
           node-version: 20
       - run: npm run test:design-system-adoption
+      - run: npm run test:design-system-foundation
       - run: npm run design-system:report
       - if: github.event_name == 'pull_request'
         run: node scripts/design-system-adoption.mjs check --changed --base "origin/${{ github.base_ref }}"

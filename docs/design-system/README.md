@@ -4,6 +4,9 @@ The Sabalan Design System is the platform-wide visual, interaction, accessibilit
 
 This directory records migration state and freezes existing UI debt while the additive rollout proceeds.
 
+The semantic token and shared-module interface is documented in
+[`foundation.md`](foundation.md).
+
 ## Route states
 
 `migration-manifest.json` classifies every interactive route through ordered rules:

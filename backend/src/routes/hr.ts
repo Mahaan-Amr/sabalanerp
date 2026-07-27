@@ -2,8 +2,9 @@ import express, { Response } from 'express';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
-import { savePersonnelWorkSchedule } from '../utils/personnelWorkSchedule';
+import { normalizeWorkSchedule } from '../utils/personnelWorkSchedule';
 import { assertSubsequentEmploymentRelationship } from '../services/hrPersonnelBoundary';
+import { assertWorkScheduleAction } from '../services/hrWorkScheduleGovernance';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -44,6 +45,12 @@ const isValidIranianNationalCode = (value: string) => {
   return check === (remainder < 2 ? remainder : 11 - remainder);
 };
 const actorId = (req: WorkspaceRequest) => req.user!.id;
+const hasHiringAuthority = async (userId: string, authority: 'HR_PROCESSOR' | 'HR_MANAGER') => Boolean(
+  await prisma.hrHiringAuthority.findFirst({
+    where: { userId, authority, isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+    select: { id: true }
+  })
+);
 const badRequest = (res: Response, error: unknown) => res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'اطلاعات واردشده معتبر نیست.' });
 const handleError = (res: Response, error: unknown, context: string) => {
   console.error(context, error);
@@ -90,6 +97,7 @@ const personnelInclude = {
     orderBy: { effectiveFrom: 'desc' as const },
     take: 1
   },
+  workScheduleChanges: { orderBy: { createdAt: 'desc' as const }, take: 5 },
   hrEmploymentRelationships: {
     orderBy: { effectiveFrom: 'desc' as const },
     include: {
@@ -394,15 +402,105 @@ router.put('/personnel/:id', editAccess, async (req: WorkspaceRequest, res) => {
 });
 
 router.put('/personnel/:id/work-schedule', editAccess, async (req: WorkspaceRequest, res) => {
+  res.status(403).json({ success: false, error: 'تغییر مستقیم ساعت کاری مجاز نیست؛ از گردش پیشنهاد، آماده‌سازی و تأیید استفاده کنید.' });
+});
+
+router.post('/personnel/:id/work-schedule/proposals', viewAccess, async (req: WorkspaceRequest, res) => {
   try {
-    const record = await prisma.$transaction(async (tx) => {
-      const personnel = await tx.personnel.findUnique({ where: { id: req.params.id }, select: { id: true } });
-      if (!personnel) throw new Error('پرسنل پیدا نشد.');
-      await savePersonnelWorkSchedule(tx, personnel.id, req.body);
-      return tx.personnel.findUniqueOrThrow({ where: { id: personnel.id }, include: personnelInclude });
+    const now = new Date();
+    const supervisorLink = await prisma.hrEmploymentAssignment.findFirst({
+      where: {
+        employmentRelationship: { personnelId: req.params.id, status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] } },
+        effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
+        responsibleSupervisorAssignment: {
+          employmentRelationship: { personnel: { user: { id: actorId(req) } } }
+        }
+      },
+      select: { id: true }
     });
-    res.json({ success: true, data: record });
-  } catch (error) { handleError(res, error, 'Update HR personnel work schedule'); }
+    assertWorkScheduleAction('PROPOSE', { isResponsibleSupervisor: Boolean(supervisorLink) });
+    const row = await prisma.$transaction(async (tx) => {
+      const created = await tx.hrWorkScheduleChange.create({ data: {
+        personnelId: req.params.id,
+        proposalNote: textValue(req.body.proposalNote) || null,
+        proposedBy: actorId(req)
+      } });
+      await tx.hrPersonnelAudit.create({ data: { personnelId: req.params.id, actorUserId: actorId(req), eventType: 'WORK_SCHEDULE_PROPOSED', sourceCategory: 'WORK_SCHEDULE', reason: textValue(req.body.proposalNote) || 'پیشنهاد تغییر برنامه کاری', payloadJson: { changeId: created.id } } });
+      return created;
+    });
+    res.status(201).json({ success: true, data: row });
+  } catch (error) { handleError(res, error, 'Propose personnel work schedule'); }
+});
+
+router.put('/personnel/:id/work-schedule/changes/:changeId/prepare', editAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const [change, hasHrProcessor] = await Promise.all([
+      prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
+      hasHiringAuthority(actorId(req), 'HR_PROCESSOR')
+    ]);
+    assertWorkScheduleAction('PREPARE', { hasHrProcessor, status: change.status });
+    const schedule = normalizeWorkSchedule(req.body);
+    if (!schedule) throw new Error('برنامه کاری کامل الزامی است.');
+    const row = await prisma.$transaction(async (tx) => {
+      const updated = await tx.hrWorkScheduleChange.update({ where: { id: change.id }, data: {
+        status: 'DRAFT', effectiveFrom: parseDate(schedule.effectiveDate, 'تاریخ اجرا'), daysJson: schedule.days as any,
+        preparedBy: actorId(req), preparedAt: new Date(), returnedBy: null, returnedAt: null, returnReason: null
+      } });
+      await tx.hrPersonnelAudit.create({ data: { personnelId: req.params.id, actorUserId: actorId(req), eventType: 'WORK_SCHEDULE_PREPARED', sourceCategory: 'WORK_SCHEDULE', reason: 'آماده‌سازی پیش‌نویس برنامه کاری', payloadJson: { changeId: change.id, effectiveDate: schedule.effectiveDate, days: schedule.days } as any } });
+      return updated;
+    });
+    res.json({ success: true, data: row });
+  } catch (error) { handleError(res, error, 'Prepare personnel work schedule'); }
+});
+
+router.post('/personnel/:id/work-schedule/changes/:changeId/submit', editAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const [change, hasHrProcessor] = await Promise.all([
+      prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
+      hasHiringAuthority(actorId(req), 'HR_PROCESSOR')
+    ]);
+    assertWorkScheduleAction('SUBMIT', { hasHrProcessor, status: change.status, actorId: actorId(req) });
+    const row = await prisma.hrWorkScheduleChange.update({ where: { id: change.id }, data: { status: 'SUBMITTED', submittedBy: actorId(req), submittedAt: new Date() } });
+    await prisma.hrPersonnelAudit.create({ data: { personnelId: req.params.id, actorUserId: actorId(req), eventType: 'WORK_SCHEDULE_SUBMITTED', sourceCategory: 'WORK_SCHEDULE', reason: 'ارسال برنامه کاری برای تأیید', payloadJson: { changeId: change.id } } });
+    res.json({ success: true, data: row });
+  } catch (error) { handleError(res, error, 'Submit personnel work schedule'); }
+});
+
+router.post('/personnel/:id/work-schedule/changes/:changeId/return', adminAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const [change, hasHrManager] = await Promise.all([
+      prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
+      hasHiringAuthority(actorId(req), 'HR_MANAGER')
+    ]);
+    const reason = textValue(req.body.reason);
+    assertWorkScheduleAction('RETURN', { hasHrManager, status: change.status, returnReason: reason });
+    const row = await prisma.hrWorkScheduleChange.update({ where: { id: change.id }, data: { status: 'RETURNED', returnedBy: actorId(req), returnedAt: new Date(), returnReason: reason } });
+    await prisma.hrPersonnelAudit.create({ data: { personnelId: req.params.id, actorUserId: actorId(req), eventType: 'WORK_SCHEDULE_RETURNED', sourceCategory: 'WORK_SCHEDULE', reason, payloadJson: { changeId: change.id } } });
+    res.json({ success: true, data: row });
+  } catch (error) { handleError(res, error, 'Return personnel work schedule'); }
+});
+
+router.post('/personnel/:id/work-schedule/changes/:changeId/approve', adminAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const [change, hasHrManager] = await Promise.all([
+      prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
+      hasHiringAuthority(actorId(req), 'HR_MANAGER')
+    ]);
+    assertWorkScheduleAction('APPROVE', { hasHrManager, status: change.status, actorId: actorId(req), preparedBy: change.preparedBy });
+    if (!change.effectiveFrom || !Array.isArray(change.daysJson)) throw new Error('پیش‌نویس کامل برنامه کاری پیدا نشد.');
+    const row = await prisma.$transaction(async (tx) => {
+      const existing = await tx.personnelWorkSchedule.findUnique({ where: { personnelId_effectiveFrom: { personnelId: req.params.id, effectiveFrom: change.effectiveFrom! } }, select: { id: true } });
+      if (existing) throw new Error('برای این تاریخ اجرا قبلاً یک نسخه تأییدشده وجود دارد.');
+      const schedule = await tx.personnelWorkSchedule.create({ data: {
+        personnelId: req.params.id, effectiveFrom: change.effectiveFrom!,
+        days: { create: (change.daysJson as any[]).map((day) => ({ weekday: day.weekday, startTime: day.startTime, endTime: day.endTime })) }
+      } });
+      const updated = await tx.hrWorkScheduleChange.update({ where: { id: change.id }, data: { status: 'APPROVED', approvedBy: actorId(req), approvedAt: new Date(), canonicalScheduleId: schedule.id } });
+      await tx.hrPersonnelAudit.create({ data: { personnelId: req.params.id, actorUserId: actorId(req), eventType: 'WORK_SCHEDULE_APPROVED', sourceCategory: 'WORK_SCHEDULE', reason: 'تأیید نسخه برنامه کاری', payloadJson: { changeId: change.id, canonicalScheduleId: schedule.id, effectiveFrom: change.effectiveFrom!.toISOString() } } });
+      return updated;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    res.json({ success: true, data: row });
+  } catch (error) { handleError(res, error, 'Approve personnel work schedule'); }
 });
 
 router.post('/personnel/:id/relationships', editAccess, async (req: WorkspaceRequest, res) => {

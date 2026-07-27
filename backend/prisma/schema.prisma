@@ -264,6 +264,7 @@ model Personnel {
   updatedAt                           DateTime                             @updatedAt
   attendanceRecords                   AttendanceRecord[]
   workSchedules                       PersonnelWorkSchedule[]
+  workScheduleChanges                 HrWorkScheduleChange[]
   securityAttendanceRosterMemberships SecurityAttendanceRosterMembership[]
   instantReportParticipants           SecurityShiftLogParticipant[]
   exceptionRequests                   ExceptionRequest[]
@@ -321,6 +322,42 @@ model PersonnelWorkScheduleDay {
   @@unique([scheduleId, weekday])
   @@index([weekday])
   @@map("personnel_work_schedule_days")
+}
+
+enum HrWorkScheduleChangeStatus {
+  PROPOSED
+  DRAFT
+  SUBMITTED
+  RETURNED
+  APPROVED
+}
+
+model HrWorkScheduleChange {
+  id                  String                     @id @default(cuid())
+  personnelId         String
+  status              HrWorkScheduleChangeStatus @default(PROPOSED)
+  effectiveFrom       DateTime?
+  daysJson            Json?
+  proposalNote        String?
+  proposedBy          String
+  proposedAt          DateTime                   @default(now())
+  preparedBy          String?
+  preparedAt          DateTime?
+  submittedBy         String?
+  submittedAt         DateTime?
+  returnedBy          String?
+  returnedAt          DateTime?
+  returnReason        String?
+  approvedBy          String?
+  approvedAt          DateTime?
+  canonicalScheduleId String?
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+  personnel           Personnel                  @relation(fields: [personnelId], references: [id], onDelete: Cascade)
+
+  @@index([personnelId, createdAt])
+  @@index([status, submittedAt])
+  @@map("hr_work_schedule_changes")
 }
 
 model Profile {

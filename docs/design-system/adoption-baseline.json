@@ -3753,46 +3753,6 @@
         "<button": 3
       }
     },
-    "frontend/src/features/contract-creation/components/steps/Step5ProductSelection.tsx": {
-      "hardcoded-semantic-color": {
-        "border-slate-100": 2,
-        "border-slate-800": 2,
-        "border-slate-200": 8,
-        "border-slate-700": 8,
-        "text-slate-500": 6,
-        "text-red-600": 5,
-        "text-teal-700": 2,
-        "text-teal-800": 1,
-        "text-teal-300": 2,
-        "bg-slate-50/70": 1,
-        "bg-slate-900/50": 1,
-        "text-slate-800": 1,
-        "text-slate-100": 1,
-        "text-slate-400": 4,
-        "border-slate-300": 1,
-        "text-slate-900": 4,
-        "border-teal-500": 1,
-        "ring-teal-500": 1,
-        "border-slate-600": 1,
-        "bg-slate-950": 1,
-        "bg-teal-600": 1,
-        "bg-teal-700": 1,
-        "text-slate-600": 3,
-        "text-slate-300": 3,
-        "text-slate-700": 1,
-        "text-slate-200": 1,
-        "border-amber-200": 1,
-        "text-amber-800": 1,
-        "border-amber-800": 1,
-        "text-amber-200": 1,
-        "bg-white": 1,
-        "text-white": 5
-      },
-      "raw-control-risk": {
-        "<button": 18,
-        "<input": 7
-      }
-    },
     "frontend/src/features/contract-creation/components/steps/Step6DeliverySchedule.tsx": {
       "hardcoded-semantic-color": {
         "text-gray-800": 12,

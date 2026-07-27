@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ErpButton, ErpInlineState } from '@/components/erp';
+import { ErpButton, ErpInput, ErpInlineState, ErpPressable } from '@/components/erp';
 import { resolveBackendAssetUrl } from '@/lib/api';
 import {
   formatDisplayNumber,
@@ -137,26 +137,28 @@ const RowImages: React.FC<{
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 dark:border-slate-800">
+    <div className="flex flex-wrap items-center gap-2 border-t border-[var(--sds-border-subtle)] pt-2">
       {images.map((image, index) => (
         <span key={`${image}-${index}`} className="inline-flex items-center gap-1">
           <img
             src={resolveBackendAssetUrl(image)}
             alt={product.stoneName}
-            className="h-8 w-8 rounded border border-slate-200 object-cover dark:border-slate-700"
+            className="h-8 w-8 rounded border border-[var(--sds-border-default)] object-cover"
           />
-          <button
+          <ErpPressable
             type="button"
             onClick={() => onChange(images.filter((_, imageIndex) => imageIndex !== index))}
-            className="text-xs text-slate-500 hover:text-red-600"
+            tone="danger"
+            aria-label={`حذف تصویر ${index + 1}`}
+            className="px-2 text-xs"
           >
             حذف
-          </button>
+          </ErpPressable>
         </span>
       ))}
-      <label className="cursor-pointer text-xs font-medium text-teal-700 hover:text-teal-800 dark:text-teal-300">
+      <label className="sds-action sds-tone-primary sds-action-soft inline-flex min-h-11 cursor-pointer items-center px-3 text-xs font-medium focus-within:ring-2 focus-within:ring-[var(--sds-focus-ring)]">
         افزودن تصویر
-        <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={upload} />
+        <ErpInput type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={upload} />
       </label>
     </div>
   );
@@ -188,22 +190,22 @@ const RemainingInventoryGroupRow: React.FC<{
   };
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-2.5 dark:border-slate-700 dark:bg-slate-900/50">
+    <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-2.5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="font-medium text-slate-800 dark:text-slate-100">
+          <div className="font-medium sds-text-primary ">
             {formatDisplayNumber(group.quantity)} قطعه × (
             {formatDisplayNumber(group.length)}m × {formatDisplayNumber(group.width)}cm)
           </div>
-          <div className="mt-0.5 text-slate-500 dark:text-slate-400">
+          <div className="mt-0.5 sds-text-muted ">
             هر قطعه {formatSquareMeters(group.pieceSquareMeters)}
             {' · '}مجموع {formatSquareMeters(group.totalSquareMeters)}
           </div>
         </div>
         <div className="flex items-end gap-2">
-          <label className="text-[11px] text-slate-500 dark:text-slate-400">
+          <label className="text-[11px] sds-text-muted ">
             تعداد استفاده
-            <input
+            <ErpInput
               type="text"
               inputMode="numeric"
               value={formatDisplayNumber(safeQuantity)}
@@ -211,36 +213,21 @@ const RemainingInventoryGroupRow: React.FC<{
                 const next = Math.trunc(parseFormattedNumber(event.target.value));
                 setQuantity(Math.min(group.quantity, Math.max(1, next || 1)));
               }}
-              className="mt-1 block w-24 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-center text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+              className="mt-1 block w-24 px-2 text-center"
               aria-label="تعداد قطعات باقی‌مانده برای استفاده"
             />
           </label>
-          <button
+          <ErpPressable
             type="button"
             onClick={selectGroup}
-            className="rounded-md bg-teal-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-teal-700"
+            tone="primary"
+            variant="solid"
+            className="px-3 text-xs font-semibold"
           >
             استفاده
-          </button>
+          </ErpPressable>
         </div>
       </div>
-      <details className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-        <summary className="cursor-pointer select-none">جزئیات شناسه‌های فیزیکی</summary>
-        <div className="mt-1 max-h-24 overflow-y-auto font-mono" dir="ltr">
-          {group.stones.flatMap(stone =>
-            Array.from(
-              { length: Math.max(1, Math.trunc(Number(stone.quantity || 1))) },
-              (_, index) => (
-                <div key={`${stone.id}-${index}`}>
-                  {(stone.quantity && stone.quantity > 1) || stone.physicalUnitOffset
-                    ? `${stone.id}:unit:${Number(stone.physicalUnitOffset || 0) + index + 1}`
-                    : stone.id}
-                </div>
-              )
-            )
-          )}
-        </div>
-      </details>
     </div>
   );
 };
@@ -280,21 +267,21 @@ const ContractRow: React.FC<{
 
   return (
     <div
-      className={`border-b border-slate-200 py-3 last:border-b-0 dark:border-slate-700 ${depth ? 'mr-5 border-r pr-4' : ''}`}
+      className={`border-b border-[var(--sds-border-subtle)] py-3 last:border-b-0 ${depth ? 'mr-5 border-r pr-4' : ''}`}
       data-contract-row-id={rowId}
     >
       <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-            <strong className="text-sm text-slate-900 dark:text-white">{product.stoneName}</strong>
-            <span className="text-xs text-slate-500 dark:text-slate-400">{getContractRowTypeLabel(product)}</span>
+            <strong className="text-sm sds-text-primary">{product.stoneName}</strong>
+            <span className="text-xs sds-text-muted ">{getContractRowTypeLabel(product)}</span>
           </div>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs sds-text-secondary ">
             <span>{getGeometryLabel(product)}</span>
             {!isPreparedProductType(product.productType) && (
               <span>{formatSquareMeters(product.squareMeters)}</span>
             )}
-            <strong className="text-slate-900 dark:text-white">
+            <strong className="sds-text-primary">
               {formatPrice(product.totalPrice, product.currency)}
             </strong>
           </div>
@@ -303,26 +290,27 @@ const ContractRow: React.FC<{
         {confirmingDelete ? (
           <div className="flex items-center gap-2 text-xs">
             <span>حذف این محصول؟</span>
-            <button type="button" onClick={onDeleteCancel} disabled={pending}>انصراف</button>
-            <button
+            <ErpPressable type="button" onClick={onDeleteCancel} disabled={pending}>انصراف</ErpPressable>
+            <ErpPressable
               type="button"
               onClick={() => onDeleteConfirm(rowId)}
               disabled={pending}
-              className="font-semibold text-red-600 disabled:opacity-50"
+              tone="danger"
+              className="font-semibold disabled:opacity-50"
             >
               {pending ? 'در حال حذف…' : 'حذف'}
-            </button>
+            </ErpPressable>
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
-            <button type="button" onClick={() => controller.cart.editItem(rowId)} disabled={pending}>ویرایش</button>
-            <button type="button" onClick={() => controller.cart.duplicateItem(rowId)} disabled={pending}>تکثیر</button>
-            <button type="button" onClick={() => onDeleteRequest(rowId)} disabled={pending} className="text-red-600">حذف</button>
+            <ErpPressable type="button" onClick={() => controller.cart.editItem(rowId)} disabled={pending}>ویرایش</ErpPressable>
+            <ErpPressable type="button" onClick={() => controller.cart.duplicateItem(rowId)} disabled={pending}>تکثیر</ErpPressable>
+            <ErpPressable type="button" onClick={() => onDeleteRequest(rowId)} disabled={pending} tone="danger">حذف</ErpPressable>
           </div>
         )}
       </div>
 
-      <div className="mt-2 space-y-1 text-xs text-slate-600 dark:text-slate-300">
+      <div className="mt-2 space-y-1 text-xs sds-text-secondary ">
         {Boolean(product.isMandatory) && (
           <div>حکمی — {formatDisplayNumber(product.mandatoryPercentage)}٪</div>
         )}
@@ -339,7 +327,7 @@ const ContractRow: React.FC<{
         {product.description && <div>توضیحات — {product.description}</div>}
         {remainingGroups.length > 0 && (
           <div className="space-y-2">
-            <div className="font-medium text-slate-700 dark:text-slate-200">
+            <div className="font-medium sds-text-secondary ">
               باقی‌مانده — {formatDisplayNumber(remainingQuantity)} قطعه در{' '}
               {formatDisplayNumber(remainingGroups.length)} گروه هندسی
             </div>
@@ -356,15 +344,15 @@ const ContractRow: React.FC<{
       </div>
 
       {hasUnresolvedLegacyRemainingChildAddOns(product) && (
-        <div className="mt-2 border-t border-amber-200 pt-2 text-xs text-amber-800 dark:border-amber-800 dark:text-amber-200">
+        <div className="mt-2 border-t border-[var(--sds-warning)] pt-2 text-xs text-[var(--sds-warning)]">
           <p>عملیات قدیمی این باقی‌مانده نیاز به تعیین تکلیف دارد.</p>
           <div className="mt-1 flex gap-3">
-            <button type="button" onClick={() => controller.cart.resolveLegacyRemainingAddOns(rowId, 'adopt')}>
+            <ErpPressable type="button" onClick={() => controller.cart.resolveLegacyRemainingAddOns(rowId, 'adopt')}>
               پذیرش و محاسبه مجدد
-            </button>
-            <button type="button" onClick={() => controller.cart.resolveLegacyRemainingAddOns(rowId, 'remove')}>
+            </ErpPressable>
+            <ErpPressable type="button" onClick={() => controller.cart.resolveLegacyRemainingAddOns(rowId, 'remove')}>
               حذف عملیات
-            </button>
+            </ErpPressable>
           </div>
         </div>
       )}
@@ -387,11 +375,11 @@ const ServiceRow: React.FC<{
   onDeleteRequest: () => void;
   onDeleteCancel: () => void;
 }> = ({ row, controller, confirmingDelete, onDeleteRequest, onDeleteCancel }) => (
-  <div className="border-b border-slate-200 py-3 last:border-b-0 dark:border-slate-700">
+  <div className="border-b border-[var(--sds-border-subtle)] py-3 last:border-b-0">
     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
       <div>
-        <strong className="text-sm text-slate-900 dark:text-white">{row.title}</strong>
-        <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+        <strong className="text-sm sds-text-primary">{row.title}</strong>
+        <div className="mt-1 text-xs sds-text-secondary ">
           {getServiceRowSourceLabel(row.sourceType)} · {formatDisplayNumber(row.quantity)} {getServiceRowUnitLabel(row.unit)}
           {' · '}{formatPrice(row.totalPrice, row.currency)}
         </div>
@@ -399,44 +387,44 @@ const ServiceRow: React.FC<{
       {confirmingDelete ? (
         <div className="flex gap-2 text-xs">
           <span>حذف این خدمت؟</span>
-          <button type="button" onClick={onDeleteCancel}>انصراف</button>
-          <button type="button" onClick={() => controller.cart.removeServiceRow(row.id)} className="text-red-600">حذف</button>
+          <ErpPressable type="button" onClick={onDeleteCancel}>انصراف</ErpPressable>
+          <ErpPressable type="button" onClick={() => controller.cart.removeServiceRow(row.id)} tone="danger">حذف</ErpPressable>
         </div>
       ) : (
         <div className="flex gap-3 text-xs font-medium">
-          <button type="button" onClick={() => controller.cart.duplicateServiceRow(row.id)}>تکثیر</button>
-          <button type="button" onClick={onDeleteRequest} className="text-red-600">حذف</button>
+          <ErpPressable type="button" onClick={() => controller.cart.duplicateServiceRow(row.id)}>تکثیر</ErpPressable>
+          <ErpPressable type="button" onClick={onDeleteRequest} tone="danger">حذف</ErpPressable>
         </div>
       )}
     </div>
     <div className="mt-2 grid gap-2 sm:grid-cols-3">
       <label className="text-xs">
         مقدار
-        <input
+        <ErpInput
           type="text"
           inputMode="decimal"
           value={formatDisplayNumber(row.quantity)}
           onChange={event => controller.cart.updateServiceRow(row.id, { quantity: parseFormattedNumber(event.target.value) })}
-          className="mt-1 w-full rounded border border-slate-200 bg-transparent px-2 py-1.5 dark:border-slate-700"
+          className="mt-1"
         />
       </label>
       <label className="text-xs">
         نرخ
-        <input
+        <ErpInput
           type="text"
           inputMode="decimal"
           value={formatDisplayNumber(row.unitPrice)}
           onChange={event => controller.cart.updateServiceRow(row.id, { unitPrice: parseFormattedNumber(event.target.value) })}
-          className="mt-1 w-full rounded border border-slate-200 bg-transparent px-2 py-1.5 dark:border-slate-700"
+          className="mt-1"
         />
       </label>
       <label className="text-xs">
         توضیحات
-        <input
+        <ErpInput
           type="text"
           value={row.description || ''}
           onChange={event => controller.cart.updateServiceRow(row.id, { description: event.target.value })}
-          className="mt-1 w-full rounded border border-slate-200 bg-transparent px-2 py-1.5 dark:border-slate-700"
+          className="mt-1"
         />
       </label>
     </div>
@@ -487,33 +475,37 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
 
       <section className="sds-workspace-surface p-4" aria-label="کاتالوگ محصولات">
         <div className="flex gap-1 overflow-x-auto pb-3" role="tablist" aria-label="نوع محصول">
-          <button
+          <ErpPressable
             type="button"
             role="tab"
             aria-selected={!catalog.activeType}
             onClick={() => catalog.selectType(null)}
-            className={`sds-action min-h-9 px-3 py-1.5 text-xs ${!catalog.activeType ? 'sds-tone-primary sds-action-solid' : 'sds-action-ghost'}`}
+            tone={!catalog.activeType ? 'primary' : 'neutral'}
+            variant={!catalog.activeType ? 'solid' : 'ghost'}
+            className="min-h-11 px-3 text-xs"
           >
             همه
-          </button>
+          </ErpPressable>
           {catalog.typeOptions.map(type => (
-            <button
+            <ErpPressable
               key={type.id}
               type="button"
               role="tab"
               aria-selected={catalog.activeType === type.id}
               onClick={() => catalog.selectType(type.id)}
-              className={`sds-action min-h-9 px-3 py-1.5 text-xs ${catalog.activeType === type.id ? 'sds-tone-primary sds-action-solid' : 'sds-action-ghost'}`}
+              tone={catalog.activeType === type.id ? 'primary' : 'neutral'}
+              variant={catalog.activeType === type.id ? 'solid' : 'ghost'}
+              className="min-h-11 px-3 text-xs"
             >
               {TYPE_LABELS[type.id] ?? type.name}
-            </button>
+            </ErpPressable>
           ))}
         </div>
 
         <label htmlFor="contract-product-search" className="sds-text-secondary mb-1 block text-xs font-medium">
           جستجوی محصول
         </label>
-        <input
+        <ErpInput
           id="contract-product-search"
           type="search"
           value={catalog.query}
@@ -548,7 +540,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
           ) : catalog.products.map((product, index) => {
             const highlighted = highlightedIndex === index;
             return (
-              <button
+              <ErpPressable
                 key={product.id}
                 ref={highlighted ? highlightedRef : null}
                 id={`contract-product-result-${index}`}
@@ -568,7 +560,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                   </span>
                 </span>
                 <span className="text-xs font-medium text-[var(--sds-accent)]">انتخاب</span>
-              </button>
+              </ErpPressable>
             );
           })}
         </div>
@@ -625,22 +617,22 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
         </div>
 
         {showServiceCatalog && (
-          <div className="mt-3 border-y border-slate-200 py-3 dark:border-slate-700">
+          <div className="mt-3 border-y border-[var(--sds-border-subtle)] py-3">
             <div className="flex gap-3 text-xs">
               {SERVICE_SOURCE_OPTIONS.map(sourceType => (
-                <button
+                <ErpPressable
                   key={sourceType}
                   type="button"
                   onClick={() => services.setSourceType(sourceType)}
-                  className={services.sourceType === sourceType ? 'font-semibold text-teal-700 dark:text-teal-300' : ''}
+                  className={services.sourceType === sourceType ? 'font-semibold text-[var(--sds-accent)] ' : ''}
                 >
                   {getServiceRowSourceLabel(sourceType)}
-                </button>
+                </ErpPressable>
               ))}
             </div>
             <label className="mt-3 block text-xs">
               جستجوی خدمت
-              <input
+              <ErpInput
                 type="search"
                 value={services.query}
                 onChange={event => services.setQuery(event.target.value)}
@@ -649,21 +641,21 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
             </label>
             <div className="mt-2 max-h-48 overflow-y-auto">
               {services.rows.map(item => (
-                <button
+                <ErpPressable
                   key={`${services.sourceType}-${item.id}`}
                   type="button"
                   onClick={() => services.addRow(services.sourceType, item)}
-                  className="flex w-full items-center justify-between border-b border-slate-100 py-2 text-right text-xs last:border-b-0 dark:border-slate-800"
+                  className="flex w-full items-center justify-between border-b border-[var(--sds-border-subtle)] py-2 text-right text-xs last:border-b-0"
                 >
                   <span>{item.namePersian || item.name}</span>
                   <span>
                     {formatPrice(getServiceRowUnitPriceFromCatalog(services.sourceType, item), 'تومان')}
                     {' · '}افزودن
                   </span>
-                </button>
+                </ErpPressable>
               ))}
               {services.hasSearch && services.rows.length === 0 && (
-                <div className="py-3 text-xs text-slate-500">خدمتی پیدا نشد</div>
+                <div className="py-3 text-xs sds-text-muted">خدمتی پیدا نشد</div>
               )}
             </div>
           </div>
@@ -682,7 +674,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
       </section>
 
       <ErpButton
-        label="محصول در کاتالوگ نیست؟ ایجاد محصول"
+        label="ایجاد محصول جدید"
         onClick={catalog.createProduct}
         variant="ghost"
       />

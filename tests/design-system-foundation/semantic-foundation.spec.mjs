@@ -167,11 +167,23 @@ test('the canonical module hides semantic styling behind its shared interface', 
 test('Guard and Product Selection both cross the shared interface seam', () => {
   assert.match(guardSource, /from '@\/components\/erp'/);
   assert.match(guardSource, /<ErpWorkspacePage/);
-  assert.match(productSelectionSource, /import \{ ErpButton, ErpInlineState \} from '@\/components\/erp'/);
+  assert.match(productSelectionSource, /from '@\/components\/erp'/);
   assert.match(productSelectionSource, /className="sds-workspace /);
   assert.match(productSelectionSource, /<ErpInlineState kind="error"/);
   assert.match(productSelectionSource, /<ErpButton/);
   assert.match(layoutSource, /design-system-tokens\.css/);
+});
+
+test('Product Selection catalog and cart consume canonical presentation modules', () => {
+  const hardcodedPalette =
+    /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|gray|green|indigo|neutral|orange|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
+  const rawControl = /<(?:button|input|select|textarea)\b/;
+
+  assert.doesNotMatch(productSelectionSource, hardcodedPalette);
+  assert.doesNotMatch(productSelectionSource, rawControl);
+  assert.doesNotMatch(productSelectionSource, /جزئیات شناسه‌های فیزیکی/);
+  assert.match(productSelectionSource, /data-contract-row-id=\{rowId\}/);
+  assert.match(productSelectionSource, /controller\.cart\.(?:editItem|duplicateItem|removeItem)\(rowId\)/);
 });
 
 test('Guard daily operations do not reimplement palette or native-control presentation', () => {

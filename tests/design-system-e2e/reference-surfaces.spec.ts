@@ -62,8 +62,98 @@ test('Product Selection restores into the shared interface without changing pers
         projectId: '',
         project: null,
         selectedProductTypeForAddition: null,
-        products: [],
-        serviceRows: [],
+        products: [
+          {
+            rowId: 'source-row',
+            productId: 'catalog-source',
+            product: {},
+            productType: 'longitudinal',
+            stoneCode: 'S-01',
+            stoneName: 'سنگ مادر',
+            diameterOrWidth: 40,
+            length: 2,
+            width: 40,
+            quantity: 1,
+            squareMeters: 0.8,
+            pricePerSquareMeter: 100000,
+            totalPrice: 80000,
+            description: '',
+            currency: 'تومان',
+            lengthUnit: 'm',
+            widthUnit: 'cm',
+            isMandatory: false,
+            mandatoryPercentage: 25,
+            originalTotalPrice: 80000,
+            isCut: false,
+            cutType: null,
+            originalWidth: 40,
+            originalLength: 2,
+            cuttingCost: 0,
+            cuttingCostPerMeter: 0,
+            cutDescription: '',
+            remainingStones: [],
+            cutDetails: [],
+            usedRemainingStones: [],
+            totalUsedRemainingWidth: 0,
+            totalUsedRemainingLength: 0,
+            appliedSubServices: [],
+            totalSubServiceCost: 0,
+            usedLengthForSubServices: 0,
+            usedSquareMetersForSubServices: 0
+          },
+          {
+            rowId: 'child-row',
+            parentProductRowId: 'source-row',
+            productId: 'catalog-child',
+            product: {},
+            productType: 'longitudinal',
+            stoneCode: 'S-01-R',
+            stoneName: 'باقی‌مانده سنگ مادر',
+            diameterOrWidth: 20,
+            length: 1,
+            width: 20,
+            quantity: 1,
+            squareMeters: 0.2,
+            pricePerSquareMeter: 100000,
+            totalPrice: 20000,
+            description: '',
+            currency: 'تومان',
+            lengthUnit: 'm',
+            widthUnit: 'cm',
+            isMandatory: false,
+            mandatoryPercentage: 25,
+            originalTotalPrice: 20000,
+            isCut: false,
+            cutType: null,
+            originalWidth: 20,
+            originalLength: 1,
+            cuttingCost: 0,
+            cuttingCostPerMeter: 0,
+            cutDescription: '',
+            remainingStones: [],
+            cutDetails: [],
+            usedRemainingStones: [],
+            totalUsedRemainingWidth: 0,
+            totalUsedRemainingLength: 0,
+            appliedSubServices: [],
+            totalSubServiceCost: 0,
+            usedLengthForSubServices: 0,
+            usedSquareMetersForSubServices: 0
+          }
+        ],
+        serviceRows: [{
+          id: 'service-row',
+          sourceType: 'tool',
+          sourceId: 'tool-1',
+          title: 'خدمت مستقل',
+          description: '',
+          unit: 'meter',
+          quantity: 2,
+          unitPrice: 10000,
+          totalPrice: 20000,
+          currency: 'تومان',
+          images: []
+        }],
         deliveries: [],
         payment: {
           payments: [],
@@ -80,6 +170,13 @@ test('Product Selection restores into the shared interface without changing pers
   await expect(page.getByRole('region', { name: 'کاتالوگ محصولات' })).toBeVisible();
   await expect(page.locator('.sds-workspace')).toHaveCount(1);
   await expect(page.locator('.sds-workspace-surface')).toHaveCount(3);
+  await expect(page.locator('[data-contract-row-id="source-row"]')).toBeVisible();
+  await expect(page.locator('[data-contract-row-id="child-row"]')).toBeVisible();
+  await expect(page.getByText('خدمت مستقل', { exact: true })).toBeVisible();
+  expect(await page.locator('[data-contract-row-id]').evaluateAll((rows) =>
+    rows.map((row) => row.getAttribute('data-contract-row-id'))
+  )).toEqual(['source-row', 'child-row']);
+  await expect(page.getByRole('button', { name: 'تکثیر', exact: true }).first()).toHaveClass(/sds-action/);
 
   const search = page.getByRole('searchbox', { name: 'جستجوی محصول' });
   await search.focus();

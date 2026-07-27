@@ -6303,6 +6303,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 />
                               </label>
                               <FormattedNumberInput
+                                name="motherLength"
                                 value={draft.standardLengthValue ?? null}
                                 onChange={value => {
                                   const normalized =
@@ -6569,6 +6570,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               {mandatoryEnabled && (
                                 <div className="mt-3 flex items-center gap-2">
                                   <FormattedNumberInput
+                                    name="mandatoryPercentage"
                                     value={mandatoryPercentageValue}
                                     onChange={(value) => {
                                       const updatedDraft = { ...draft, mandatoryPercentage: value ?? 0 };
@@ -7539,6 +7541,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                         {draft.layerUseMandatory !== false && (
                                           <div className="mt-3 flex items-center gap-2">
                                             <FormattedNumberInput
+                                              name="layerMandatoryPercentage"
                                               value={draft.layerMandatoryPercentage ?? 20}
                                               onChange={(value) => {
                                                 const updatedDraft = { ...draft, layerMandatoryPercentage: value ?? 0 };

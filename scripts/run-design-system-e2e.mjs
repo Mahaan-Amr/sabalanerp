@@ -22,7 +22,7 @@ const postgresBin = path.join(
 const initdb = path.join(postgresBin, 'initdb.exe');
 const pgControl = path.join(postgresBin, 'pg_ctl.exe');
 const databaseUrl =
-  `postgresql://postgres@127.0.0.1:55435/${testDatabaseName}?schema=public`;
+  `postgresql://postgres@127.0.0.1:55435/${testDatabaseName}?schema=public&connection_limit=1&pool_timeout=30`;
 
 if (process.platform !== 'win32' || process.arch !== 'x64') {
   throw new Error(

@@ -543,7 +543,7 @@ export default function SecurityVehiclesPage() {
         </div>
       </ErpSection>
       )}
-      {previewUrl && <div role="dialog" aria-modal="true" aria-label="پیش‌نمایش تصویر" className="fixed inset-0 z-[100] grid place-items-center bg-[var(--sds-surface-overlay)] p-4" onClick={() => setPreviewUrl('')}><div className="relative max-h-full max-w-5xl" onClick={(event) => event.stopPropagation()}><img src={previewUrl} alt="پیش‌نمایش تصویر" className="max-h-[90vh] max-w-full rounded-xl object-contain" /><ErpPressable onClick={() => setPreviewUrl('')} tone="primary" variant="solid" className="absolute left-2 top-2 px-3 py-2 font-semibold">بستن</ErpPressable></div></div>}
+      {previewUrl && <div role="dialog" aria-modal="true" aria-label="پیش‌نمایش تصویر" className="fixed inset-0 z-[100] grid place-items-center bg-[var(--sds-surface-overlay)] p-4"><ErpPressable aria-label="بستن پیش‌نمایش" onClick={() => setPreviewUrl('')} className="absolute inset-0 h-full w-full cursor-default rounded-none bg-transparent" /><div className="relative z-10 max-h-full max-w-5xl"><img src={previewUrl} alt="پیش‌نمایش تصویر" className="max-h-[90vh] max-w-full rounded-xl object-contain" /><ErpPressable onClick={() => setPreviewUrl('')} tone="primary" variant="solid" className="absolute left-2 top-2 px-3 py-2 font-semibold">بستن</ErpPressable></div></div>}
       </>}
     </ErpWorkspacePage>
   );

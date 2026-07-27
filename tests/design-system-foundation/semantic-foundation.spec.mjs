@@ -190,6 +190,24 @@ const guardSupportingSources = [
   path,
   read(`frontend/src/components/${path}`)
 ]);
+const finalSurfaceSources = [
+  ['home/page.tsx', read('frontend/src/app/page.tsx')],
+  ['about/page.tsx', read('frontend/src/app/about/page.tsx')],
+  ['contact/page.tsx', read('frontend/src/app/contact/page.tsx')],
+  ['login/page.tsx', read('frontend/src/app/login/page.tsx')],
+  ['register/page.tsx', read('frontend/src/app/register/page.tsx')],
+  ['change-password/page.tsx', read('frontend/src/app/change-password/page.tsx')],
+  ['contracts/confirm/page.tsx', read('frontend/src/app/contracts/confirm/page.tsx')],
+  ['contracts/confirm/[token]/page.tsx', read('frontend/src/app/contracts/confirm/[token]/page.tsx')],
+  ['ConfirmationContractView.tsx', read('frontend/src/app/contracts/confirm/ConfirmationContractView.tsx')],
+  ['dashboard/page.tsx', read('frontend/src/app/dashboard/page.tsx')],
+  ['dashboard/bi/page.tsx', read('frontend/src/app/dashboard/bi/page.tsx')],
+  ['dashboard/personal/page.tsx', read('frontend/src/app/dashboard/personal/page.tsx')],
+  ['PublicHeader.tsx', read('frontend/src/components/public/PublicHeader.tsx')],
+  ['PublicFooter.tsx', read('frontend/src/components/public/PublicFooter.tsx')],
+  ['PublicMotion.tsx', read('frontend/src/components/public/PublicMotion.tsx')]
+];
+const globalStylesSource = read('frontend/src/app/globals.css');
 
 const variablesIn = (source) =>
   new Set(Array.from(source.matchAll(/--(sds-[\w-]+)\s*:/g), (match) => match[1]));
@@ -412,6 +430,26 @@ test('shared formatted numeric entry consumes the canonical field primitive', ()
     assert.match(source, /<ErpInput/);
     assert.doesNotMatch(source, /<input\b/);
   }
+});
+
+test('public, identity, confirmation, dashboard, BI, and personal surfaces finish the semantic migration', () => {
+  const hardcodedPalette =
+    /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|fuchsia|gray|green|indigo|lime|neutral|orange|pink|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
+  const rawControl = /<(?:button|input|select|textarea)\b/;
+  const inaccessibleClickTarget = /<(?:div|span|li)\b[^>]*\bonClick\s*=/;
+
+  for (const [path, source] of finalSurfaceSources) {
+    assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
+    assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
+    assert.doesNotMatch(source, inaccessibleClickTarget, `${path} must use accessible controls`);
+    assert.doesNotMatch(source, /glass-liquid-/, `${path} must not expose the retired glass layer`);
+  }
+
+  for (const path of ['page.tsx', 'about/page.tsx', 'contact/page.tsx']) {
+    const source = finalSurfaceSources.find(([candidate]) => candidate === (path === 'page.tsx' ? 'home/page.tsx' : path))[1];
+    assert.match(source, /<main className="sds-workspace"/, `${path} must expose a semantic workspace root`);
+  }
+  assert.doesNotMatch(globalStylesSource, /glass-liquid-|--erp-|--theme-/);
 });
 
 test('CRM registry and pipeline routes use canonical controls without tutorial clutter', () => {

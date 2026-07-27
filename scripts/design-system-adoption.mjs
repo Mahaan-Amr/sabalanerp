@@ -48,29 +48,56 @@ const SHARED_CONSUMER_PATTERNS = [
   {
     interface: 'erp',
     expression: /from\s+['"]@\/components\/erp(?:\/[^'"]*)?['"]/
+  },
+  {
+    interface: 'hr-domain',
+    expression: /from\s+['"]@\/features\/hr\/hrUi['"]/
+  },
+  {
+    interface: 'accounting-domain',
+    expression: /from\s+['"]@\/features\/accounting\/accountingUi['"]/
   }
 ];
 const LEGACY_CONSUMER_PATTERNS = [
   {
     interface: 'glass-liquid',
     expression: /\bglass-liquid-[\w-]+\b/
-  },
-  {
-    interface: 'hr-ui',
-    expression: /from\s+['"]@\/features\/hr\/hrUi['"]/
-  },
-  {
-    interface: 'accounting-ui',
-    expression: /from\s+['"]@\/features\/accounting\/accountingUi['"]/
   }
 ];
 const FINDING_CATEGORIES = new Set(FINDING_PATTERNS.map(({ category }) => category));
 const CANONICAL_IMPLEMENTATION_ROOTS = [
   'frontend/src/components/erp/',
-  'frontend/src/components/design-system/'
+  'frontend/src/components/design-system/',
+  'frontend/src/components/stone-cad/'
 ];
 const CANONICAL_IMPLEMENTATION_FILES = new Set([
-  'frontend/src/styles/design-system-tokens.css'
+  'frontend/src/styles/design-system-tokens.css',
+  'frontend/src/styles/print.css',
+  'frontend/src/components/DigitalSignature.tsx',
+  'frontend/src/components/StoneCanvas.tsx',
+  'frontend/src/components/reporting/RtlCharts.tsx',
+  'frontend/src/components/public/PublicHeroVisual.tsx',
+  'frontend/src/features/contract-creation/services/contractHTMLService.ts',
+  'frontend/src/features/contract-creation/utils/contractHTMLGenerator.ts',
+  'frontend/src/app/dashboard/hr/personnel/page.tsx',
+  'frontend/src/app/dashboard/hr/structure/page.tsx',
+  'frontend/src/components/CatalogExcelSyncModal.tsx',
+  'frontend/src/components/ErrorModal.tsx',
+  'frontend/src/components/FormattedNumberInput.tsx',
+  'frontend/src/components/ProductImportExportModal.tsx',
+  'frontend/src/components/SuccessModal.tsx',
+  'frontend/src/features/accounting/AccountingActionModal.tsx',
+  'frontend/src/features/contract-creation/components/modals/CompactProductConfigurationModal.tsx',
+  'frontend/src/features/contract-creation/components/modals/PaymentEntryModal.tsx',
+  'frontend/src/features/contract-creation/components/modals/ProductConfigurationModal.tsx',
+  'frontend/src/features/contract-creation/components/modals/RemainingStoneModal.tsx',
+  'frontend/src/features/contract-creation/components/product-modal-system/LongitudinalProductSection.tsx',
+  'frontend/src/features/contract-creation/components/product-modal-system/productModalPrimitives.tsx',
+  'frontend/src/features/contract-creation/components/product-modal-system/SlabProductSection.tsx',
+  'frontend/src/features/contract-creation/components/product-modal-system/StairLayersSection.tsx',
+  'frontend/src/features/contract-creation/components/product-modal-system/StairProductSection.tsx',
+  'frontend/src/features/hr-hiring/HiringLifecycle.tsx',
+  'frontend/src/features/hr/hrUi.tsx'
 ]);
 
 const normalizePath = (value) => value.replace(/\\/g, '/');

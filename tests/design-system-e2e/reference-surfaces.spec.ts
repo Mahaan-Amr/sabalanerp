@@ -549,16 +549,20 @@ test('Guard attendance and vehicle operations use canonical fields and responsiv
   await page.goto('/dashboard/security/attendance');
   const attendance = page.locator('main.sds-workspace');
   await expect(attendance.getByRole('heading', { name: 'حضور و غیاب', exact: true })).toBeVisible();
+  const attendanceSearch = attendance.getByRole('textbox', { name: 'جستجو در حضور و غیاب' });
+  await expect(attendanceSearch).toBeVisible();
   const attendanceFields = await attendance.evaluate((element) => {
     const fields = Array.from(element.querySelectorAll('input:not([type="checkbox"]), select, textarea'));
     return {
       count: fields.length,
-      canonical: fields.every((field) => field.classList.contains('sds-field'))
+      canonical: fields.every((field) => (
+        field.classList.contains('sds-field')
+        || (field.getAttribute('type') === 'file' && field.classList.contains('sds-file-input'))
+      ))
     };
   });
   expect(attendanceFields.count).toBeGreaterThan(0);
   expect(attendanceFields.canonical).toBe(true);
-  const attendanceSearch = attendance.getByRole('textbox', { name: 'جستجو در حضور و غیاب' });
   await attendanceSearch.focus();
   await expect(attendanceSearch).toBeFocused();
   expect(await attendance.evaluate((element) => getComputedStyle(element).direction)).toBe('rtl');
@@ -580,7 +584,10 @@ test('Guard attendance and vehicle operations use canonical fields and responsiv
     const fields = Array.from(element.querySelectorAll('input:not([type="checkbox"]), select, textarea'));
     return {
       count: fields.length,
-      canonical: fields.every((field) => field.classList.contains('sds-field'))
+      canonical: fields.every((field) => (
+        field.classList.contains('sds-field')
+        || (field.getAttribute('type') === 'file' && field.classList.contains('sds-file-input'))
+      ))
     };
   });
   expect(vehicleFields.count).toBeGreaterThan(0);
@@ -651,4 +658,61 @@ test('Guard exception dialog uses canonical dropdown and calendar interactions',
   const calendar = page.getByRole('dialog', { name: 'انتخاب تاریخ شمسی' });
   await expect(calendar).toBeVisible();
   await expect(calendar.getByRole('gridcell').first()).toHaveClass(/sds-action/);
+});
+
+test('public, identity, and confirmation routes share the responsive semantic foundation', async ({ page }) => {
+  const routes = [
+    '/',
+    '/about',
+    '/contact',
+    '/login',
+    '/register',
+    '/change-password',
+    '/contracts/confirm'
+  ];
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const route of routes) {
+    await page.goto(route);
+    const workspace = page.locator('main.sds-workspace');
+    await expect(workspace).toBeVisible();
+    expect(await workspace.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
+    })).toBe(true);
+    expect(await workspace.evaluate((element) =>
+      Array.from(element.querySelectorAll('input, select, textarea'))
+        .every((field) => (
+          field.getAttribute('type') === 'hidden'
+          || field.classList.contains('sds-field')
+          || field.getAttribute('type') === 'checkbox'
+          || field.getAttribute('type') === 'radio'
+        ))
+    )).toBe(true);
+  }
+});
+
+test('dashboard overview, BI, and personal workflows use one responsive semantic frame', async ({ page }) => {
+  await login(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  for (const route of ['/dashboard', '/dashboard/bi', '/dashboard/personal']) {
+    await page.goto(route);
+    const workspace = page.locator('main.sds-workspace');
+    await expect(workspace).toBeVisible();
+    expect(await workspace.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
+    })).toBe(true);
+    expect(await workspace.evaluate((element) =>
+      Array.from(element.querySelectorAll('input, select, textarea'))
+        .every((field) => (
+          field.getAttribute('type') === 'hidden'
+          || field.classList.contains('sds-field')
+          || field.getAttribute('type') === 'checkbox'
+          || field.getAttribute('type') === 'radio'
+          || field.getAttribute('type') === 'range'
+        ))
+    )).toBe(true);
+  }
 });

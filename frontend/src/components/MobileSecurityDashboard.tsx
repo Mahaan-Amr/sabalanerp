@@ -1,10 +1,10 @@
 'use client';
-
+import { ErpPressable } from '@/components/erp';
 import { useState, useEffect } from 'react';
-import { 
-  FaUserCheck, 
-  FaUserTimes, 
-  FaClock, 
+import {
+  FaUserCheck,
+  FaUserTimes,
+  FaClock,
   FaExclamationTriangle,
   FaSignature,
   FaMobile,
@@ -53,7 +53,7 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
     // Online/Offline status
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
-    
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
@@ -77,7 +77,7 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
     try {
       setLoading(true);
       setError(null);
-      
+
       const response = await securityAPI.getDailyAttendance();
       if (response.data.success) {
         setAttendanceRecords(response.data.data.records || []);
@@ -108,11 +108,11 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'PRESENT': return <FaUserCheck className="text-green-500" />;
-      case 'ABSENT': return <FaUserTimes className="text-red-500" />;
-      case 'LATE': return <FaClock className="text-yellow-500" />;
-      case 'MISSION': return <FaExclamationTriangle className="text-blue-500" />;
-      default: return <FaClock className="text-gray-500" />;
+      case 'PRESENT': return <FaUserCheck className="text-[var(--sds-success)]" />;
+      case 'ABSENT': return <FaUserTimes className="text-[var(--sds-danger)]" />;
+      case 'LATE': return <FaClock className="text-[var(--sds-warning)]" />;
+      case 'MISSION': return <FaExclamationTriangle className="text-[var(--sds-info)]" />;
+      default: return <FaClock className="text-[var(--sds-text-secondary)]" />;
     }
   };
 
@@ -130,59 +130,59 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
   };
 
   const getBatteryIcon = () => {
-    if (batteryLevel === null) return <FaBatteryFull className="text-gray-400" />;
-    if (batteryLevel > 60) return <FaBatteryFull className="text-green-500" />;
-    if (batteryLevel > 30) return <FaBatteryHalf className="text-yellow-500" />;
-    return <FaBatteryEmpty className="text-red-500" />;
+    if (batteryLevel === null) return <FaBatteryFull className="text-[var(--sds-text-muted)]" />;
+    if (batteryLevel > 60) return <FaBatteryFull className="text-[var(--sds-success)]" />;
+    if (batteryLevel > 30) return <FaBatteryHalf className="text-[var(--sds-warning)]" />;
+    return <FaBatteryEmpty className="text-[var(--sds-danger)]" />;
   };
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center min-h-screen">
-        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-teal-500"></div>
-      </div>
+      <main className="sds-workspace flex justify-center items-center min-h-screen">
+        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-[var(--sds-border-strong)]"></div>
+      </main>
     );
   }
 
   if (error) {
     return (
-      <div className="text-center text-red-500 text-lg p-4">
+      <div className="text-center text-[var(--sds-danger)] text-lg p-4">
         <p>{error}</p>
-        <button onClick={fetchAttendanceRecords} className="glass-liquid-btn mt-4">
+        <ErpPressable type="submit" onClick={fetchAttendanceRecords} className="sds-action mt-4">
           تلاش مجدد
-        </button>
+        </ErpPressable>
       </div>
     );
   }
 
   return (
-    <div className={`min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 ${className}`}>
+    <div className={`min-h-screen bg-gradient-to-br from-[var(--sds-surface-raised)] via-[var(--sds-surface-raised)] to-[var(--sds-surface-raised)] ${className}`}>
       {/* Mobile Header */}
-      <div className="glass-liquid-card mx-2 mt-2 p-4">
+      <div className="sds-workspace-surface mx-2 mt-2 p-4">
         <div className="flex justify-between items-center">
           <div className="flex items-center space-x-2 space-x-reverse">
-            <FaMobile className="h-6 w-6 text-teal-400" />
+            <FaMobile className="h-6 w-6 text-[var(--sds-accent)]" />
             <h1 className="text-lg font-bold text-primary">گزارش روزانه</h1>
           </div>
-          
+
           <div className="flex items-center space-x-3 space-x-reverse">
             {/* Connection Status */}
             {isOnline ? (
-              <FaWifi className="h-4 w-4 text-green-500" title="آنلاین" />
+              <FaWifi className="h-4 w-4 text-[var(--sds-success)]" title="آنلاین" />
             ) : (
-              <FaExclamationTriangle className="h-4 w-4 text-red-500" title="خطا" />
+              <FaExclamationTriangle className="h-4 w-4 text-[var(--sds-danger)]" title="خطا" />
             )}
-            
+
             {/* Battery Level */}
             <div className="flex items-center space-x-1 space-x-reverse">
               {getBatteryIcon()}
               {batteryLevel !== null && (
-                <span className="text-xs text-gray-400">{batteryLevel}%</span>
+                <span className="text-xs text-[var(--sds-text-muted)]">{batteryLevel}%</span>
               )}
             </div>
           </div>
         </div>
-        
+
         <div className="mt-2 text-center">
           <span className="text-sm text-secondary">
             {PersianCalendar.formatForDisplay(PersianCalendar.now())}
@@ -192,7 +192,7 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
 
       {/* Quick Actions */}
       <div className="mx-2 mt-4 grid grid-cols-2 gap-3">
-        <button
+        <ErpPressable type="submit"
           onClick={() => {
             // Quick check-in action
             const record = attendanceRecords.find(r => !r.entryTime);
@@ -203,13 +203,13 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
               notifySecurity('رکوردی برای ثبت خروج انتخاب نشده است', 'error');
             }
           }}
-          className="glass-liquid-btn-primary p-4 text-center"
+          className="sds-action sds-tone-primary sds-action-solid p-4 text-center"
         >
           <FaUserCheck className="h-6 w-6 mx-auto mb-2" />
           <span className="text-sm">ثبت ورود</span>
-        </button>
-        
-        <button
+        </ErpPressable>
+
+        <ErpPressable type="submit"
           onClick={() => {
             // Quick check-out action
             const record = attendanceRecords.find(r => r.entryTime && !r.exitTime);
@@ -220,25 +220,25 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
               notifySecurity('رکوردی برای ثبت امضا انتخاب نشده است', 'error');
             }
           }}
-          className="glass-liquid-btn p-4 text-center"
+          className="sds-action p-4 text-center"
         >
           <FaUserTimes className="h-6 w-6 mx-auto mb-2" />
           <span className="text-sm">ثبت خروج</span>
-        </button>
+        </ErpPressable>
       </div>
 
       {/* Attendance Records */}
       <div className="mx-2 mt-4">
         <h2 className="text-lg font-bold text-primary mb-3">ورود و خروج امروز</h2>
-        
+
         <div className="space-y-2">
           {attendanceRecords.length === 0 ? (
-            <div className="glass-liquid-card p-6 text-center">
+            <div className="sds-workspace-surface p-6 text-center">
               <p className="text-secondary">برای این تاریخ هیچ رکوردی ثبت نشده است</p>
             </div>
           ) : (
             attendanceRecords.map((record) => (
-              <div key={record.id} className="glass-liquid-card p-4">
+              <div key={record.id} className="sds-workspace-surface p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3 space-x-reverse">
                     {getStatusIcon(record.status)}
@@ -251,7 +251,7 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
                       </div>
                     </div>
                   </div>
-                  
+
                   <div className="flex items-center space-x-2 space-x-reverse">
                     {record.digitalSignature ? (
                       <SignatureDisplay
@@ -260,21 +260,21 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
                         timestamp={PersianCalendar.formatForDisplay(record.createdAt)}
                       />
                     ) : (
-                      <button
+                      <ErpPressable type="submit"
                         onClick={() => {
                           setSelectedRecord(record);
                           setShowSignatureModal(true);
                         }}
-                        className="text-teal-400 hover:text-teal-300 p-2"
+                        className="text-[var(--sds-accent)] hover:text-[var(--sds-accent)] p-2"
                         title="ثبت امضا"
                       >
                         <FaSignature className="h-4 w-4" />
-                      </button>
+                      </ErpPressable>
                     )}
                   </div>
                 </div>
-                
-                <div className="mt-2 text-xs text-gray-400">
+
+                <div className="mt-2 text-xs text-[var(--sds-text-muted)]">
                   {record.entryTime && `خروج: ${record.entryTime}`}
                   {record.exitTime && ` | خروج: ${record.exitTime}`}
                 </div>
@@ -286,7 +286,7 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
 
       {/* Signature Modal */}
       {showSignatureModal && selectedRecord && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-[var(--sds-surface-overlay)] flex items-center justify-center z-50 p-4">
           <div className="w-full max-w-md">
             <DigitalSignature
               onSave={handleSignatureSave}
@@ -303,10 +303,10 @@ export default function MobileSecurityDashboard({ className = '' }: MobileSecuri
 
       {/* Offline Notice */}
       {!isOnline && (
-        <div className="fixed bottom-4 left-4 right-4 glass-liquid-card p-3 bg-yellow-500/20 border border-yellow-500/50">
+        <div className="fixed bottom-4 left-4 right-4 sds-workspace-surface p-3 bg-[var(--sds-warning-surface)] border border-[var(--sds-warning-border)]">
           <div className="flex items-center space-x-2 space-x-reverse">
-            <FaExclamationTriangle className="h-4 w-4 text-yellow-500" />
-            <span className="text-sm text-yellow-500">
+            <FaExclamationTriangle className="h-4 w-4 text-[var(--sds-warning)]" />
+            <span className="text-sm text-[var(--sds-warning)]">
               نسخه موبایل - ورود و خروج سریع گارد
             </span>
           </div>

@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
 import { FaCalendarAlt, FaCheck, FaDesktop, FaEdit, FaPlus, FaShieldAlt, FaTimes, FaUser, FaUserClock } from 'react-icons/fa';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
@@ -10,8 +10,8 @@ import { PersianCalendar } from '@/lib/persian-calendar';
 
 const leaveTypes = ['استحقاقی', 'استعلاجی', 'استعلاجی سازمانی', 'بدون حقوق'];
 const emptyForm = { id: '', employeeId: '', leaveType: 'استحقاقی', startDate: PersianCalendar.now(), endDate: PersianCalendar.now(), reason: '', description: '' };
-const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
-const labelClass = 'mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200';
+const inputClass = 'min-h-12 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-3 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]';
+const labelClass = 'mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]';
 
 const toIso = (value: string) => PersianCalendar.toGregorian(value).toISOString();
 const toJalali = (value: string) => value ? PersianCalendar.toPersian(value) : '';
@@ -190,11 +190,11 @@ export default function PersonalPage() {
       ]}
       actions={[{ label: 'به‌روزرسانی', onClick: loadData, icon: FaCalendarAlt, tone: 'neutral' }]}
     >
-      {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{message}</div>}
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
+      {message && <div className="rounded-lg border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 text-sm font-semibold text-[var(--sds-success)]">{message}</div>}
+      {error && <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm font-semibold text-[var(--sds-danger)]">{error}</div>}
 
       <ErpSection title="دستگاه‌ها و نشست‌های فعال" description="هر ردیف یک نشست مرورگر است؛ نام سخت‌افزار از مرورگر قابل تشخیص قطعی نیست.">
-        {securityNotifications.filter((item) => !item.readAt).map((item) => <div key={item.id} className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        {securityNotifications.filter((item) => !item.readAt).map((item) => <div key={item.id} className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-3 text-sm text-[var(--sds-warning)]">
           <span><FaShieldAlt className="ml-2 inline" />{item.title}: {item.message}</span>
           <div className="flex gap-2">{item.type === 'NEW_BROWSER_LOGIN' && item.referenceId && <ErpButton label="این من نبودم" tone="danger" variant="outline" onClick={async () => { await authAPI.revokeSession(item.referenceId); await authAPI.markSecurityNotificationRead(item.id); const change = window.confirm('نشست لغو شد. آیا مایلید اکنون رمز عبور خود را نیز تغییر دهید؟'); if (change) window.location.href = '/change-password'; else await loadData(); }} />}<ErpButton label="خواندم" tone="warning" variant="outline" onClick={async () => { await authAPI.markSecurityNotificationRead(item.id); await loadData(); }} /></div>
         </div>)}
@@ -203,8 +203,8 @@ export default function PersonalPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="font-semibold"><FaDesktop className="ml-2 inline" />{session.browser || 'مرورگر نامشخص'} · {session.operatingSystem || 'سیستم نامشخص'}</p>
-                <p className="mt-2 text-xs text-slate-500" dir="ltr">{session.ipAddress || '—'} · {session.approximateLocation || 'مکان تقریبی نامشخص'}</p>
-                <p className="mt-1 text-xs text-slate-500">آخرین فعالیت: {new Date(session.lastActivityAt).toLocaleString('fa-IR')}</p>
+                <p className="mt-2 text-xs text-[var(--sds-text-secondary)]" dir="ltr">{session.ipAddress || '—'} · {session.approximateLocation || 'مکان تقریبی نامشخص'}</p>
+                <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">آخرین فعالیت: {new Date(session.lastActivityAt).toLocaleString('fa-IR')}</p>
                 <div className="mt-2 flex gap-2">{session.isCurrent && <ErpBadge tone="success">نشست فعلی</ErpBadge>}{session.isNewBrowser && <ErpBadge tone="warning">مرورگر جدید</ErpBadge>}</div>
               </div>
               <ErpButton label={session.isCurrent ? 'خروج' : 'قطع دسترسی'} tone="danger" variant="outline" onClick={() => revokeSession(session)} />
@@ -236,11 +236,11 @@ export default function PersonalPage() {
           </label>
           <label className="block lg:col-span-2">
             <span className={labelClass}>دلیل</span>
-            <textarea className={`${inputClass} min-h-24`} value={form.reason} onChange={(event) => setForm((old) => ({ ...old, reason: event.target.value }))} />
+            <ErpTextarea className={`${inputClass} min-h-24`} value={form.reason} onChange={(event) => setForm((old) => ({ ...old, reason: event.target.value }))} />
           </label>
           <label className="block lg:col-span-2">
             <span className={labelClass}>توضیحات</span>
-            <textarea className={`${inputClass} min-h-20`} value={form.description} onChange={(event) => setForm((old) => ({ ...old, description: event.target.value }))} />
+            <ErpTextarea className={`${inputClass} min-h-20`} value={form.description} onChange={(event) => setForm((old) => ({ ...old, description: event.target.value }))} />
           </label>
         </div>
         <div className="mt-4 flex flex-wrap justify-end gap-2">
@@ -262,17 +262,17 @@ export default function PersonalPage() {
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold text-slate-900 dark:text-white">{request.leaveType || 'مرخصی'}</span>
+                        <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{request.leaveType || 'مرخصی'}</span>
                         <ErpBadge tone={statusTone[request.status] || 'neutral'}>{statusLabel[request.status] || request.status}</ErpBadge>
                       </div>
-                      <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                      <p className="mt-2 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                         <FaUser className="ml-1 inline h-3 w-3" />
                         {userName(request.employee)} | {PersianCalendar.formatForDisplay(request.startDate)} تا {PersianCalendar.formatForDisplay(request.endDate || request.startDate)}
                       </p>
-                      <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{request.reason}</p>
-                      {request.description && <p className="mt-1 text-sm leading-6 text-slate-500">{request.description}</p>}
-                      {request.rejectionReason && <p className="mt-2 text-sm text-red-600">دلیل رد: {request.rejectionReason}</p>}
-                      {request.cancellationReason && <p className="mt-2 text-sm text-slate-500">دلیل لغو: {request.cancellationReason}</p>}
+                      <p className="mt-2 text-sm leading-6 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{request.reason}</p>
+                      {request.description && <p className="mt-1 text-sm leading-6 text-[var(--sds-text-secondary)]">{request.description}</p>}
+                      {request.rejectionReason && <p className="mt-2 text-sm text-[var(--sds-danger)]">دلیل رد: {request.rejectionReason}</p>}
+                      {request.cancellationReason && <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">دلیل لغو: {request.cancellationReason}</p>}
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {canEdit && <ErpButton label="ویرایش" icon={FaEdit} onClick={() => edit(request)} variant="outline" tone="neutral" disabled={saving} />}

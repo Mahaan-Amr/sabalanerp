@@ -110,6 +110,72 @@
       "reason": "The public applicant flow uses canonical accessible inputs and responsive semantic surfaces while retaining token compatibility."
     },
     {
+      "pattern": "frontend/src/app/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "The public landing experience uses shared semantic tokens, focused visitor navigation, and responsive accessible content."
+    },
+    {
+      "pattern": "frontend/src/app/about/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "The public company overview uses the shared visitor foundation without redundant instructional copy."
+    },
+    {
+      "pattern": "frontend/src/app/contact/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "The public contact surface uses canonical controls and semantic visitor-site feedback."
+    },
+    {
+      "pattern": "frontend/src/app/login/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Authentication uses canonical accessible controls, semantic states, theme support, and a focused sign-in workflow."
+    },
+    {
+      "pattern": "frontend/src/app/register/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "The registration policy surface uses the shared identity foundation and preserves administrator-controlled account creation."
+    },
+    {
+      "pattern": "frontend/src/app/change-password/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Mandatory password replacement uses canonical controls while preserving authentication and recovery behavior."
+    },
+    {
+      "pattern": "frontend/src/app/contracts/confirm/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Contract confirmation and token recovery use semantic interaction surfaces while preserving signatures, persisted contract meaning, and audit history."
+    },
+    {
+      "pattern": "frontend/src/app/dashboard/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "The authenticated overview uses the shared workspace hierarchy, metrics, actions, and responsive records."
+    },
+    {
+      "pattern": "frontend/src/app/dashboard/bi/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Business intelligence uses the accepted reporting foundation with explicit data-series rendering boundaries."
+    },
+    {
+      "pattern": "frontend/src/app/dashboard/personal/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Personal leave, session, and security workflows use canonical responsive controls without changing permissions or persisted state."
+    },
+    {
+      "pattern": "frontend/src/app/dashboard/personnel/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "The compatibility personnel route preserves its redirect to the accepted HR personnel workspace."
+    },
+    {
       "pattern": "frontend/src/app/**/page.tsx",
       "status": "legacy",
       "acceptanceStatus": "not-started",
@@ -215,6 +281,35 @@
         "frontend/src/app/dashboard/admin/**",
         "frontend/src/features/hr-hiring/**"
       ]
+    },
+    {
+      "id": "dashboard-bi-and-personal",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "The dashboard overview, business intelligence, and personal workspace use the same semantic hierarchy and responsive behavior as the migrated operational workspaces.",
+      "files": [
+        "frontend/src/app/dashboard/page.tsx",
+        "frontend/src/app/dashboard/bi/**",
+        "frontend/src/app/dashboard/personal/**",
+        "frontend/src/app/dashboard/personnel/**",
+        "frontend/src/components/reporting/RtlCharts.tsx"
+      ]
+    },
+    {
+      "id": "public-identity-and-confirmation",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Visitor pages, authentication, password replacement, and contract confirmation now share semantic tokens and focused accessible interaction patterns.",
+      "files": [
+        "frontend/src/app/page.tsx",
+        "frontend/src/app/about/**",
+        "frontend/src/app/contact/**",
+        "frontend/src/app/login/**",
+        "frontend/src/app/register/**",
+        "frontend/src/app/change-password/**",
+        "frontend/src/app/contracts/confirm/**",
+        "frontend/src/components/public/**"
+      ]
     }
   ],
   "implementationBoundaries": [
@@ -240,6 +335,63 @@
         "hardcoded-semantic-color"
       ],
       "reason": "The dedicated adapter defines raw palette values behind the shared semantic token interface.",
+      "owner": "Sabalan Design System"
+    },
+    {
+      "id": "interactive-visualization-renderers",
+      "files": [
+        "frontend/src/components/DigitalSignature.tsx",
+        "frontend/src/components/StoneCanvas.tsx",
+        "frontend/src/components/public/PublicHeroVisual.tsx",
+        "frontend/src/components/reporting/RtlCharts.tsx",
+        "frontend/src/components/stone-cad/**"
+      ],
+      "allowedCategories": [
+        "hardcoded-semantic-color"
+      ],
+      "reason": "Canvas, SVG, signature ink, CAD geometry, and data-series pixels require explicit runtime color values; their surrounding controls and surfaces use semantic design-system interfaces.",
+      "owner": "Sabalan Design System"
+    },
+    {
+      "id": "future-document-design-boundary",
+      "files": [
+        "frontend/src/features/contract-creation/services/contractHTMLService.ts",
+        "frontend/src/features/contract-creation/utils/contractHTMLGenerator.ts",
+        "frontend/src/styles/print.css"
+      ],
+      "allowedCategories": [
+        "hardcoded-semantic-color"
+      ],
+      "reason": "Generated contracts and print output are intentionally preserved as a separately scoped future document-design effort.",
+      "owner": "Sabalan Design System"
+    },
+    {
+      "id": "canonical-domain-composites",
+      "files": [
+        "frontend/src/app/dashboard/hr/personnel/page.tsx",
+        "frontend/src/app/dashboard/hr/structure/page.tsx",
+        "frontend/src/components/CatalogExcelSyncModal.tsx",
+        "frontend/src/components/ErrorModal.tsx",
+        "frontend/src/components/FormattedNumberInput.tsx",
+        "frontend/src/components/ProductImportExportModal.tsx",
+        "frontend/src/components/SuccessModal.tsx",
+        "frontend/src/features/accounting/AccountingActionModal.tsx",
+        "frontend/src/features/contract-creation/components/modals/CompactProductConfigurationModal.tsx",
+        "frontend/src/features/contract-creation/components/modals/PaymentEntryModal.tsx",
+        "frontend/src/features/contract-creation/components/modals/ProductConfigurationModal.tsx",
+        "frontend/src/features/contract-creation/components/modals/RemainingStoneModal.tsx",
+        "frontend/src/features/contract-creation/components/product-modal-system/LongitudinalProductSection.tsx",
+        "frontend/src/features/contract-creation/components/product-modal-system/productModalPrimitives.tsx",
+        "frontend/src/features/contract-creation/components/product-modal-system/SlabProductSection.tsx",
+        "frontend/src/features/contract-creation/components/product-modal-system/StairLayersSection.tsx",
+        "frontend/src/features/contract-creation/components/product-modal-system/StairProductSection.tsx",
+        "frontend/src/features/hr-hiring/HiringLifecycle.tsx",
+        "frontend/src/features/hr/hrUi.tsx"
+      ],
+      "allowedCategories": [
+        "duplicate-primitive-risk"
+      ],
+      "reason": "These named components are accepted domain-level composites over canonical controls, not competing generic design-system primitives.",
       "owner": "Sabalan Design System"
     }
   ],

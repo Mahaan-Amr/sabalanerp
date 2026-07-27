@@ -1,18 +1,18 @@
 import type { ReactNode } from 'react';
 import moment from 'moment-jalaali';
 
-export const fieldClass = 'w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[#0b6662] focus:ring-2 focus:ring-[#0b6662]/15 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100';
+export const fieldClass = 'w-full rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2.5 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]';
 
 export function HrField({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: ReactNode }) {
-  return <label className="block space-y-1.5 text-sm font-medium text-slate-700 dark:text-slate-200">
-    <span>{label}{required && <span className="mr-1 text-red-500">*</span>}</span>
+  return <label className="block space-y-1.5 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
+    <span>{label}{required && <span className="mr-1 text-[var(--sds-danger)]">*</span>}</span>
     {children}
-    {hint && <span className="block text-xs font-normal text-slate-500 dark:text-slate-400">{hint}</span>}
+    {hint && <span className="block text-xs font-normal text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{hint}</span>}
   </label>;
 }
 
 export function HrMessage({ tone = 'danger', children }: { tone?: 'danger' | 'success' | 'warning'; children: ReactNode }) {
-  const classes = tone === 'success' ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200' : tone === 'warning' ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200' : 'border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200';
+  const classes = tone === 'success' ? 'border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]' : tone === 'warning' ? 'border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]' : 'border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]';
   return <div className={`rounded-xl border px-4 py-3 text-sm ${classes}`}>{children}</div>;
 }
 

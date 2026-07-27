@@ -57,10 +57,10 @@ export default function EnhancedDropdown({
     optionsMaxHeight: 0
   });
 
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLButtonElement>(null);
   const portalRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const optionRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const filteredOptions = useMemo(() => {
     if (!searchable || !searchTerm.trim()) {
@@ -247,15 +247,17 @@ export default function EnhancedDropdown({
     return (
       <div>
         {groupedOptions.ungrouped.map((option, index) => (
-          <div
+          <ErpPressable
             key={option.value}
             ref={(el) => {
               optionRefs.current[index] = el;
             }}
             onClick={() => !option.disabled && handleOptionSelect(option.value)}
+            disabled={option.disabled}
+            tabIndex={-1}
             role="option"
             aria-selected={value === option.value}
-            className={`flex min-h-10 cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
+            className={`flex min-h-10 w-full cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
               option.disabled
                 ? 'cursor-not-allowed sds-text-muted opacity-60 '
                 : highlightedIndex === index
@@ -265,7 +267,7 @@ export default function EnhancedDropdown({
           >
             <span>{option.label}</span>
             {value === option.value && <FaCheck className="text-[var(--sds-accent)] text-sm" />}
-          </div>
+          </ErpPressable>
         ))}
 
         {Object.entries(groupedOptions.groups).map(([groupName, groupOptions]) => (
@@ -280,15 +282,17 @@ export default function EnhancedDropdown({
                 index;
 
               return (
-                <div
+                <ErpPressable
                   key={option.value}
                   ref={(el) => {
                     optionRefs.current[globalIndex] = el;
                   }}
                   onClick={() => !option.disabled && handleOptionSelect(option.value)}
+                  disabled={option.disabled}
+                  tabIndex={-1}
                   role="option"
                   aria-selected={value === option.value}
-                  className={`flex min-h-10 cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
+                  className={`flex min-h-10 w-full cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
                     option.disabled
                       ? 'cursor-not-allowed sds-text-muted opacity-60 '
                       : highlightedIndex === globalIndex
@@ -298,7 +302,7 @@ export default function EnhancedDropdown({
                 >
                   <span>{option.label}</span>
                   {value === option.value && <FaCheck className="text-[var(--sds-accent)] text-sm" />}
-                </div>
+                </ErpPressable>
               );
             })}
           </div>
@@ -325,9 +329,9 @@ export default function EnhancedDropdown({
         </label>
       )}
 
-      <div
+      <ErpPressable
         ref={dropdownRef}
-        className={`sds-field flex min-h-11 cursor-pointer items-center justify-between px-3 ${
+        className={`sds-field flex min-h-11 w-full cursor-pointer items-center justify-between px-3 ${
           disabled
             ? 'cursor-not-allowed opacity-55'
             : 'hover:border-[var(--sds-accent)]'
@@ -336,7 +340,7 @@ export default function EnhancedDropdown({
         }`}
         onClick={() => !disabled && setIsOpen((prev) => !prev)}
         onKeyDown={handleKeyDown}
-        tabIndex={disabled ? -1 : 0}
+        disabled={disabled}
         role="combobox"
         aria-expanded={isOpen}
         aria-controls={listboxId}
@@ -349,20 +353,20 @@ export default function EnhancedDropdown({
           </span>
         </div>
 
-        <div className="flex items-center space-x-2 space-x-reverse">
-          {clearable && value && (
-            <ErpPressable
-              onClick={handleClear}
-              aria-label="پاک‌کردن انتخاب"
-              className="h-11 w-11 p-0 sds-text-muted hover:text-[var(--sds-danger)]"
-              type="button"
-            >
-              ×
-            </ErpPressable>
-          )}
+        <div className={`flex items-center space-x-2 space-x-reverse ${clearable && value ? 'ml-10' : ''}`}>
           <FaChevronDown className={`text-xs sds-text-muted transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
         </div>
-      </div>
+      </ErpPressable>
+      {clearable && value && (
+        <ErpPressable
+          onClick={handleClear}
+          aria-label="پاک‌کردن انتخاب"
+          className="absolute left-8 top-0 z-10 h-11 w-11 p-0 sds-text-muted hover:text-[var(--sds-danger)]"
+          type="button"
+        >
+          ×
+        </ErpPressable>
+      )}
 
       {error && <p className="mt-1 text-xs text-[var(--sds-danger)]">{error}</p>}
 

@@ -213,8 +213,9 @@ test('repository manifest classifies every current interactive route', () => {
   );
   assert.equal(
     report.routes.find(({ route }) => route === '/login')?.status,
-    'legacy'
+    'migrated'
   );
+  assert.deepEqual(report.routes.filter(({ status }) => status === 'legacy'), []);
   const contractCreationSurface = report.surfaces.find(({ id }) => id === 'contract-creation');
   assert.equal(contractCreationSurface?.status, 'migrated');
   assert.equal(contractCreationSurface?.acceptanceStatus, 'accepted');
@@ -228,11 +229,13 @@ test('repository manifest classifies every current interactive route', () => {
       ({ file }) => file === 'frontend/src/app/dashboard/security/page.tsx'
     )
   );
-  assert.ok(
+  assert.equal(
     report.consumerInventory.legacy.some(
       ({ interface: interfaceName }) => interfaceName === 'glass-liquid'
-    )
+    ),
+    false
   );
+  assert.deepEqual(report.debtSummary, {});
 });
 
 test('check discovers changed adoption files from git when files are not supplied', () => {

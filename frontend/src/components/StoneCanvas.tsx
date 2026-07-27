@@ -1,5 +1,5 @@
-﻿'use client';
-
+'use client';
+import { ErpPressable } from '@/components/erp';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { formatDisplayNumber } from '@/lib/numberFormat';
 import {
@@ -62,34 +62,34 @@ interface StoneCanvasProps {
   originalWidth: number | string; // عرض اصلی (in cm) - can be string from database
   lengthUnit: 'cm' | 'm';
   widthUnit: 'cm' | 'm';
-  
+
   // Used portions (for remaining stone usage)
   usedLength?: number; // طول استفاده شده (in meters) - from totalUsedRemainingLength
   usedWidth?: number; // عرض استفاده شده (in cm) - from totalUsedRemainingWidth
-  
+
   // Product dimensions (for calculating initial cut visualization)
   productLength?: number; // طول محصول (in meters) - for calculating initial cut
   productWidth?: number; // عرض محصول (in cm) - for calculating initial cut
   productLengthUnit?: 'cm' | 'm'; // واحد طول محصول
   productWidthUnit?: 'cm' | 'm'; // واحد عرض محصول
   isCut?: boolean; // آیا سنگ برش خورده است - if true, show initial cut visualization
-  
+
   // Remaining pieces
   remainingStones?: RemainingStone[];
   usedRemainingStones?: RemainingStone[]; // Used pieces (partitions) - for drawing used overlays
-  
+
   // Sub-service usage (Phase 3)
   usedLengthForSubServices?: number; // طول استفاده شده برای ابزار (in meters)
   usedSquareMetersForSubServices?: number; // متر مربع استفاده شده برای ابزار
   appliedSubServices?: AppliedSubService[]; // ابزارهای اعمال شده برای نمایش overlay
-  
+
   // Interaction callbacks
   onPieceClick?: (piece: RemainingStone) => void;
   interactive?: boolean; // Enable click/hover interactions
-  
+
   // Layer information (for enhanced labeling)
   isLayerFromRemaining?: boolean; // Whether this layer is cut from remaining stones
-  
+
   // Styling
   className?: string;
   width?: number | string; // Canvas width (default: responsive)
@@ -127,12 +127,12 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
   const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number } | null>(null);
   const clickableAreasRef = useRef<ClickableArea[]>([]); // Store all clickable areas for hit detection
   const debugLogged = useRef(false);
-  
+
   // === Phase 3, Task 3: Animation state ===
   const [animationProgress, setAnimationProgress] = useState(1); // 0 to 1 for fade-in/out
   const animationStartTimeRef = useRef<number | null>(null);
   const previousRemainingCountRef = useRef<number>(0);
-  
+
   // === Phase 4: Mobile & Accessibility state ===
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [focusedPieceIndex, setFocusedPieceIndex] = useState<number | null>(null); // For keyboard navigation
@@ -142,17 +142,17 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
   // Handle string values by parsing to number
   const originalLengthNum = typeof originalLength === 'string' ? parseFloat(originalLength) || 0 : (originalLength || 0);
   const originalWidthNum = typeof originalWidth === 'string' ? parseFloat(originalWidth) || 0 : (originalWidth || 0);
-  
+
   const originalLengthInMeters = lengthToMeters(originalLengthNum, lengthUnit);
   const originalWidthInCm = widthToCm(originalWidthNum, widthUnit);
-  
+
   // Calculate initial cut dimensions if product is cut
   // For initial cuts, used area = product dimensions
   const productLengthNum = productLength || 0;
   const productWidthNum = productWidth || 0;
   const productLengthInMeters = productLengthNum > 0 ? lengthToMeters(productLengthNum, productLengthUnit) : 0;
   const productWidthInCm = productWidthNum > 0 ? widthToCm(productWidthNum, productWidthUnit) : 0;
-  
+
   // If product is cut, calculate initial used area from product dimensions
   // Otherwise, use provided usedLength/usedWidth (for remaining stone usage)
   // ðŸŽ¯ FIX: For products with explicit remainingStones positions (e.g., layers),
@@ -161,11 +161,11 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
   const hasExplicitRemainingPositions = remainingStones && remainingStones.some(rs => rs.position);
   const initialCutLength = (isCut && !hasExplicitRemainingPositions && productLengthInMeters > 0) ? productLengthInMeters : 0;
   const initialCutWidth = (isCut && !hasExplicitRemainingPositions && productWidthInCm > 0 && originalWidthInCm > productWidthInCm) ? productWidthInCm : 0;
-  
+
   // Total used area = initial cut + remaining stone usage
   // ðŸŽ¯ FIX: For products with explicit positions, usedWidth/usedLength already include everything
   // So we should use them directly without adding initialCutWidth/initialCutLength
-  const totalUsedLengthInMeters = hasExplicitRemainingPositions 
+  const totalUsedLengthInMeters = hasExplicitRemainingPositions
     ? (usedLength || 0) // For layers, usedLength already represents the used area
     : (initialCutLength + (usedLength || 0));
   const totalUsedWidthInCm = hasExplicitRemainingPositions
@@ -178,10 +178,10 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
   // don't calculate remainingWidth from usedWidth to avoid conflicts
   // The remainingStones array already contains the correctly positioned pieces
   // (hasExplicitRemainingPositions is already declared above)
-  const remainingWidthInCm = hasExplicitRemainingPositions 
+  const remainingWidthInCm = hasExplicitRemainingPositions
     ? 0 // Don't create primaryRemainingPiece when we have explicit positions
     : Math.max(0, originalWidthInCm - totalUsedWidthInCm);
-  
+
   // Calculate primary remaining piece from initial cut (if cut was made)
   // This is the piece that remains after cutting from the original stone
   // For longitudinal cuts: remaining piece is (remainingWidth × fullLength) positioned next to the used piece
@@ -201,39 +201,39 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
   const resizeCanvas = useCallback(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
-    
+
     if (!container || !canvas) return;
 
     // Get container dimensions
     const containerRect = container.getBoundingClientRect();
     const containerWidth = containerRect.width;
-    
+
     // Calculate canvas dimensions
     // Default width: 280px or container width (whichever is smaller)
     const defaultWidth = typeof width === 'number' ? width : (typeof width === 'string' ? parseInt(width) : 280);
     const canvasWidth = Math.min(defaultWidth, containerWidth - 32); // 32px for padding
-    
+
     // Height based on aspect ratio of original stone or default
     const defaultHeight = typeof height === 'number' ? height : (typeof height === 'string' ? parseInt(height) : 140);
-    
+
     // Use calculated aspect ratio if available, otherwise use default
     const aspectRatio = stoneAspectRatio > 0 ? stoneAspectRatio : (defaultHeight / canvasWidth);
-    
+
     // Calculate height maintaining aspect ratio
     const calculatedHeight = canvasWidth / aspectRatio;
     const canvasHeight = Math.max(defaultHeight, calculatedHeight);
 
     // Handle high-DPI displays
     const dpr = window.devicePixelRatio || 1;
-    
+
     // Set display size (CSS pixels)
     canvas.style.width = `${canvasWidth}px`;
     canvas.style.height = `${canvasHeight}px`;
-    
+
     // Set actual size (device pixels)
     canvas.width = canvasWidth * dpr;
     canvas.height = canvasHeight * dpr;
-    
+
     // Scale context to account for device pixel ratio
     const ctx = canvas.getContext('2d');
     if (ctx) {
@@ -253,11 +253,11 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     };
 
     window.addEventListener('resize', handleResize);
-    
+
     // Use ResizeObserver for container size changes
     const container = containerRef.current;
     let resizeObserver: ResizeObserver | null = null;
-    
+
     if (container && window.ResizeObserver) {
       resizeObserver = new ResizeObserver(() => {
         resizeCanvas();
@@ -321,7 +321,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     const patternColor = isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)';
     ctx.strokeStyle = patternColor;
     ctx.lineWidth = 1;
-    
+
     switch (patternType) {
       case 'vertical':
         // Vertical lines
@@ -334,7 +334,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           ctx.stroke();
         }
         break;
-        
+
       case 'horizontal':
         // Horizontal lines
         ctx.setLineDash([]);
@@ -346,7 +346,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           ctx.stroke();
         }
         break;
-        
+
       case 'diagonal':
         // Diagonal lines (top-left to bottom-right)
         ctx.setLineDash([]);
@@ -358,7 +358,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           ctx.stroke();
         }
         break;
-        
+
       case 'cross':
         // Cross hatch (both diagonal directions)
         ctx.setLineDash([]);
@@ -378,7 +378,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           ctx.stroke();
         }
         break;
-        
+
       case 'dots':
         // Dot pattern
         ctx.fillStyle = patternColor;
@@ -391,7 +391,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           }
         }
         break;
-        
+
       case 'grid':
         // Grid pattern (both vertical and horizontal)
         ctx.setLineDash([]);
@@ -411,7 +411,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           ctx.stroke();
         }
         break;
-        
+
       default:
         // Default: diagonal
         ctx.setLineDash([]);
@@ -423,7 +423,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           ctx.stroke();
         }
     }
-    
+
     ctx.restore();
   };
 
@@ -457,7 +457,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     const dpr = window.devicePixelRatio || 1;
     const bufferWidth = canvas.width;
     const bufferHeight = canvas.height;
-    
+
     // CSS display size (for drawing calculations)
     const { width: canvasWidth, height: canvasHeight } = canvasSize;
     const padding = 20; // Padding from edges in pixels
@@ -529,7 +529,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           hasPosition: !!rs.position
         })) || []
       });
-      
+
       // Additional debug for rendering
       console.log('ðŸŽ¨ Rendering Debug:', {
         'originalRect calculated?': originalLengthInMeters > 0 && originalWidthInCm > 0,
@@ -566,7 +566,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     );
 
     // === Phase 1, Task 4: Draw Background (Original Stone Outline) ===
-    
+
     // Draw background rectangle with glass morphism effect
     // Create gradient for subtle depth
     const gradient = ctx.createLinearGradient(
@@ -575,7 +575,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       originalRect.x + originalRect.width,
       originalRect.y + originalRect.height
     );
-    
+
     if (isDarkMode) {
       // Dark mode: more visible gradient from slate-600 to slate-700
       gradient.addColorStop(0, '#475569'); // slate-600 (brighter)
@@ -585,17 +585,17 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       gradient.addColorStop(0, '#e2e8f0'); // slate-200
       gradient.addColorStop(1, '#cbd5e1'); // slate-300
     }
-    
+
     // Fill the original stone rectangle
     ctx.fillStyle = gradient;
     ctx.fillRect(originalRect.x, originalRect.y, originalRect.width, originalRect.height);
-    
+
     // Draw outline/border with more visible color
     const borderColor = isDarkMode ? '#64748b' : '#94a3b8'; // slate-500 : slate-400 (more visible)
     ctx.strokeStyle = borderColor;
     ctx.lineWidth = 2.5; // Slightly thicker for better visibility
     ctx.strokeRect(originalRect.x, originalRect.y, originalRect.width, originalRect.height);
-    
+
     // Add subtle inner shadow effect (by drawing a slightly inset rectangle with opacity)
     ctx.save();
     ctx.globalAlpha = 0.1;
@@ -610,32 +610,32 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     ctx.restore();
 
     // === Phase 1, Task 5: Draw Used Areas with Color Coding ===
-    
+
     // CRITICAL: Partitions are stored in usedRemainingStones, not remainingStones!
     // Identify partitions that should be shown as "used" overlays
     // Partitions are usedRemainingStones with position field and id starting with 'partition_remaining_'
-    const partitionUsedAreas = (usedRemainingStones || []).filter(rs => 
+    const partitionUsedAreas = (usedRemainingStones || []).filter(rs =>
       rs.position && rs.id.startsWith('partition_remaining_')
     );
-    
+
     // All remainingStones are actual remaining pieces (gaps), no need to filter
     const actualRemainingStones = remainingStones || [];
-    
+
     // Draw partition used areas first (these are positioned within the primary remaining area)
     if (partitionUsedAreas.length > 0) {
       ctx.save();
       ctx.beginPath();
       ctx.rect(originalRect.x, originalRect.y, originalRect.width, originalRect.height);
       ctx.clip();
-      
-      const usedColor = isDarkMode 
+
+      const usedColor = isDarkMode
         ? 'rgba(239, 68, 68, 0.4)' // red-500 with 40% opacity (dark mode)
         : 'rgba(249, 115, 22, 0.35)'; // orange-500 with 35% opacity (light mode)
-      
-      const usedBorderColor = isDarkMode 
+
+      const usedBorderColor = isDarkMode
         ? 'rgba(239, 68, 68, 0.6)' // red-500 with 60% opacity (dark mode)
         : 'rgba(249, 115, 22, 0.5)'; // orange-500 with 50% opacity (light mode)
-      
+
       // Color palette for partitions - highly distinguishable colors for better UX
       // Using distinct hues with good contrast: Red, Blue, Green, Yellow, Purple, Cyan, Magenta, Orange
       const partitionColors = isDarkMode ? [
@@ -665,14 +665,14 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         { fill: 'rgba(217, 119, 6, 0.4)', border: 'rgba(217, 119, 6, 0.65)', hatch: 'rgba(217, 119, 6, 0.3)' }, // Amber - #D97706
         { fill: 'rgba(2, 132, 199, 0.4)', border: 'rgba(2, 132, 199, 0.65)', hatch: 'rgba(2, 132, 199, 0.3)' }, // Sky Blue - #0284C7
       ];
-      
+
       partitionUsedAreas.forEach((partition, index) => {
         if (!partition.position) return;
-        
+
         // Get unique color for this partition (cycle through palette)
         const colorIndex = index % partitionColors.length;
         const partitionColor = partitionColors[colorIndex];
-        
+
         // Calculate partition position relative to original stone
         // For partitions from primary remaining, position is relative to where primary remaining starts
         // Primary remaining starts at (initialCutWidth, 0) in the original stone coordinate system
@@ -680,7 +680,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         const partitionStartWidth = initialCutWidth + partition.position.startWidth; // Offset by primary remaining position
         const partitionLength = partition.length > 100 ? partition.length / 100 : partition.length; // Convert to meters if needed
         const partitionWidth = partition.width;
-        
+
         const partitionRect: CanvasRect = realToCanvasRect(
           partitionStartLength,
           partitionLength,
@@ -692,7 +692,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           canvasHeight,
           padding
         );
-        
+
         // Clamp to original bounds
         const clampedX = Math.max(partitionRect.x, originalRect.x);
         const clampedY = Math.max(partitionRect.y, originalRect.y);
@@ -704,27 +704,27 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           partitionRect.y + partitionRect.height - clampedY,
           originalRect.y + originalRect.height - clampedY
         );
-        
+
         if (clampedWidth > 0 && clampedHeight > 0) {
           // Draw used overlay for partition with unique color
           ctx.fillStyle = partitionColor.fill;
           ctx.fillRect(clampedX, clampedY, clampedWidth, clampedHeight);
-          
+
           // Draw border with unique color
           ctx.strokeStyle = partitionColor.border;
           ctx.lineWidth = 1.5;
           ctx.strokeRect(clampedX, clampedY, clampedWidth, clampedHeight);
-          
+
           // Draw diagonal hatch pattern with unique color
           ctx.save();
           ctx.strokeStyle = partitionColor.hatch;
           ctx.lineWidth = 1;
           ctx.setLineDash([3, 3]);
-          
+
           const lineSpacing = 8;
           const maxDim = Math.max(clampedWidth, clampedHeight);
           const numLines = Math.ceil(maxDim / lineSpacing) + 2;
-          
+
           for (let i = -1; i <= numLines; i++) {
             const offset = i * lineSpacing;
             ctx.beginPath();
@@ -748,14 +748,14 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           ctx.restore();
         }
       });
-      
+
       ctx.restore();
     }
-    
+
     // Draw main used area (initial cut) if there's something used
     // ðŸŽ¯ Store used area end position for precise remaining stone positioning
     let usedAreaEndY: number | null = null;
-    
+
     // ðŸŽ¯ FIX: For layers, we need to ensure used area is drawn correctly
     // Even if usedLength is 0, we should still draw if usedWidth > 0
     // For layers, usedLength represents the full length across which the layer width is cut
@@ -763,13 +763,13 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       // Clamp used dimensions to not exceed original dimensions
       const clampedUsedLength = Math.min(totalUsedLengthInMeters, originalLengthInMeters);
       const clampedUsedWidth = Math.min(totalUsedWidthInCm, originalWidthInCm);
-      
+
       // ðŸŽ¯ FIX: For layers (hasExplicitRemainingPositions), if usedLength is 0 but usedWidth > 0,
       // use the full original length to draw the used area correctly
       const lengthToUse = (hasExplicitRemainingPositions && clampedUsedLength === 0 && clampedUsedWidth > 0)
         ? originalLengthInMeters // Use full length for layers
         : clampedUsedLength;
-      
+
       // Calculate used area rectangle
       // Used area starts at (0, 0) and extends to (lengthToUse, clampedUsedWidth)
       const usedRect: CanvasRect = realToCanvasRect(
@@ -798,10 +798,10 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           usedRect.y + usedRect.height - clampedY,
           originalRect.y + originalRect.height - clampedY
         );
-        
+
         // ðŸŽ¯ Store the end Y position of used area for precise remaining stone positioning
         usedAreaEndY = clampedY + clampedHeight;
-        
+
         // Skip if clamped dimensions are invalid
         if (clampedWidth <= 0 || clampedHeight <= 0) {
           // ðŸŽ¯ FIX: Even if used area can't be drawn, calculate usedAreaEndY for remaining stone positioning
@@ -813,7 +813,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           }
           return;
         }
-        
+
         // Debug: Log used rect dimensions
         if (!debugLogged.current) {
           console.log('ðŸ“Š Used Area Rect:', {
@@ -825,48 +825,48 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
             'Will draw?': clampedWidth > 0 && clampedHeight > 0
           });
         }
-        
+
         // Save context before clipping
         ctx.save();
-        
+
         // Clip drawing to original stone bounds
         ctx.beginPath();
         ctx.rect(originalRect.x, originalRect.y, originalRect.width, originalRect.height);
         ctx.clip();
-        
+
         // Draw used area with semi-transparent overlay
         // Use orange/red color to indicate "used" status
-        const usedColor = isDarkMode 
+        const usedColor = isDarkMode
           ? 'rgba(239, 68, 68, 0.4)' // red-500 with 40% opacity (dark mode)
           : 'rgba(249, 115, 22, 0.35)'; // orange-500 with 35% opacity (light mode)
-        
+
         ctx.fillStyle = usedColor;
         ctx.fillRect(clampedX, clampedY, clampedWidth, clampedHeight);
-        
+
         // Draw border around used area for better visibility
-        const usedBorderColor = isDarkMode 
+        const usedBorderColor = isDarkMode
           ? 'rgba(239, 68, 68, 0.6)' // red-500 with 60% opacity (dark mode)
           : 'rgba(249, 115, 22, 0.5)'; // orange-500 with 50% opacity (light mode)
-        
+
         ctx.strokeStyle = usedBorderColor;
         ctx.lineWidth = 1.5;
         ctx.strokeRect(clampedX, clampedY, clampedWidth, clampedHeight);
-        
+
         // Add diagonal hatch pattern to indicate "used" status
         // Save context for hatch pattern (already clipped to original stone bounds)
         ctx.save();
-        
-        ctx.strokeStyle = isDarkMode 
+
+        ctx.strokeStyle = isDarkMode
           ? 'rgba(239, 68, 68, 0.3)' // red-500 with 30% opacity (dark mode)
           : 'rgba(249, 115, 22, 0.25)'; // orange-500 with 25% opacity (light mode)
         ctx.lineWidth = 1;
         ctx.setLineDash([3, 3]); // Dashed lines for subtle pattern
-        
+
         // Draw diagonal lines from top-left to bottom-right across the rectangle
         const lineSpacing = 8; // pixels between lines
         const maxDim = Math.max(clampedWidth, clampedHeight);
         const numLines = Math.ceil(maxDim / lineSpacing) + 2;
-        
+
         // Draw lines diagonally across the rectangle, ensuring they stay within bounds
         for (let i = -1; i <= numLines; i++) {
           const offset = i * lineSpacing;
@@ -898,43 +898,43 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
             }
           }
         }
-        
+
         ctx.restore(); // Restore line dash styles (keep original stone clipping)
         ctx.restore(); // Restore original stone clipping
-        
+
         // === Phase 3, Task 2: Draw Sub-Service Overlays on Used Area ===
         // Sub-services overlay on the used area to show where they've been applied
         if (appliedSubServices && appliedSubServices.length > 0) {
           ctx.save();
-          
+
           // Clip to used area bounds
           ctx.beginPath();
           ctx.rect(clampedX, clampedY, clampedWidth, clampedHeight);
           ctx.clip();
-          
+
           // Calculate sub-service overlay areas
           // For length-based sub-services: overlay along the length dimension sequentially
           // For square-meter-based sub-services: overlay proportionally based on square meters
-          
+
           let accumulatedLength = 0; // Track accumulated length for length-based sub-services
           let accumulatedSquareMeters = 0; // Track accumulated square meters for square-meter-based sub-services
-          
+
           appliedSubServices.forEach((applied, index) => {
             if (applied.meter <= 0) return;
-            
+
             let overlayRect: CanvasRect;
             let overlayX: number, overlayY: number, overlayWidthPx: number, overlayHeightPx: number;
-            
+
             if (applied.calculationBase === 'length') {
               // Length-based: overlay along the length (X-axis) sequentially
               const overlayLength = Math.min(applied.meter, clampedUsedLength - accumulatedLength);
               if (overlayLength <= 0) {
                 return;
               }
-              
+
               const startLength = accumulatedLength;
               const overlayWidth = clampedUsedWidth; // Full width of used area
-              
+
               overlayRect = realToCanvasRect(
                 startLength, // start position along length
                 overlayLength, // length of overlay
@@ -946,86 +946,86 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
                 canvasHeight,
                 padding
               );
-              
+
               // Map to used area coordinates (clampedX, clampedY)
               const normalizedStart = startLength / clampedUsedLength;
               const normalizedLength = overlayLength / clampedUsedLength;
-              
+
               overlayX = clampedX + (normalizedStart * clampedWidth);
               overlayY = clampedY;
               overlayWidthPx = normalizedLength * clampedWidth;
               overlayHeightPx = clampedHeight;
-              
+
               accumulatedLength += overlayLength;
             } else {
               // Square-meter-based: overlay proportionally based on square meters used
               const totalSquareMeters = clampedUsedLength * (clampedUsedWidth / 100); // Convert to square meters
               const overlaySquareMeters = Math.min(applied.meter, totalSquareMeters - accumulatedSquareMeters);
-              
+
               if (overlaySquareMeters <= 0 || totalSquareMeters <= 0) {
                 return;
               }
-              
+
               // Calculate proportional area (as a rectangle along the length)
               const normalizedSquareMetersStart = accumulatedSquareMeters / totalSquareMeters;
               const normalizedSquareMetersLength = overlaySquareMeters / totalSquareMeters;
-              
+
               overlayX = clampedX + (normalizedSquareMetersStart * clampedWidth);
               overlayY = clampedY;
               overlayWidthPx = normalizedSquareMetersLength * clampedWidth;
               overlayHeightPx = clampedHeight;
-              
+
               accumulatedSquareMeters += overlaySquareMeters;
             }
-            
+
             if (overlayWidthPx > 0 && overlayHeightPx > 0) {
               // Different patterns for different sub-service types
               const patternColor = getSubServicePatternColor(index, isDarkMode);
               const borderColor = getSubServiceBorderColor(index, isDarkMode);
-              
+
               // Draw semi-transparent overlay
               ctx.fillStyle = patternColor.fill;
               ctx.fillRect(overlayX, overlayY, overlayWidthPx, overlayHeightPx);
-              
+
               // Draw pattern based on sub-service index
               drawSubServicePattern(ctx, overlayX, overlayY, overlayWidthPx, overlayHeightPx, index, patternColor.pattern, isDarkMode);
-              
+
               // Draw border
               ctx.strokeStyle = borderColor;
               ctx.lineWidth = 1.5;
               ctx.strokeRect(overlayX, overlayY, overlayWidthPx, overlayHeightPx);
             }
           });
-          
+
           ctx.restore(); // Restore clipping
         }
       }
     }
 
     // === Phase 1, Task 6: Draw Remaining Pieces with Distinct Colors ===
-    
+
     // === Phase 2: Reset clickable areas at the start of each render ===
     clickableAreasRef.current = [];
-    
+
     // Combine primary remaining piece (from initial cut) with remaining stones from array
     const allRemainingPieces: RemainingStone[] = [];
-    
+
     // Check if any partitions were created from primary remaining
     // If so, hide the primary remaining piece since it's been "used" to create partitions
     const hasPartitionsFromPrimary = partitionUsedAreas.length > 0;
-    
+
     // ðŸŽ¯ FIX: Check if we have remaining stones with explicit positions (e.g., from layers)
     // If so, don't create primaryRemainingPiece to avoid duplication
     // Remaining stones with positions are explicitly calculated and positioned
     const hasRemainingStonesWithPositions = actualRemainingStones && actualRemainingStones.some(rs => rs.position);
-    
+
     // Add primary remaining piece only if:
     // 1. It hasn't been used for partitions
     // 2. We don't have remaining stones with explicit positions (to avoid duplication)
     if (primaryRemainingPiece && primaryRemainingPiece.isAvailable && !hasPartitionsFromPrimary && !hasRemainingStonesWithPositions) {
       allRemainingPieces.push(primaryRemainingPiece);
     }
-    
+
     // Add actual remaining stones from array (excluding partition pieces which are shown as used)
     if (actualRemainingStones && actualRemainingStones.length > 0) {
       console.log('ðŸŽ¨ Canvas: Adding remaining stones to canvas:', {
@@ -1045,7 +1045,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       });
       allRemainingPieces.push(...actualRemainingStones);
     }
-    
+
     console.log('ðŸŽ¨ Canvas: Total remaining pieces to render:', {
       primaryRemaining: primaryRemainingPiece ? 1 : 0,
       partitionUsedAreas: partitionUsedAreas.length,
@@ -1058,7 +1058,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         hasPosition: !!p.position
       }))
     });
-    
+
     // Draw each remaining stone piece with distinct colors
     if (allRemainingPieces.length > 0) {
       // Color palette for remaining stones (different shades of green/blue/teal)
@@ -1078,7 +1078,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         'rgba(236, 72, 153, 0.4)',  // pink-500 (light mode)
         'rgba(251, 146, 60, 0.4)',  // orange-500 (light mode)
       ];
-      
+
       const remainingBorderColors = isDarkMode ? [
         'rgba(34, 197, 94, 0.7)',   // green-500 (dark mode)
         'rgba(59, 130, 246, 0.7)',  // blue-500 (dark mode)
@@ -1106,7 +1106,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         let remainingStartLength: number;
         let remainingStartWidth: number;
         let stoneLengthInMeters: number;
-        
+
         if (remainingStone.id === 'primary-remaining') {
           // Primary remaining piece: positioned next to the cut piece (same start position for length, after used width)
           remainingStartLength = 0; // Same length start as used piece
@@ -1125,7 +1125,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           // Convert length from cm to meters if needed (remaining stones store length in cm when from old system)
           // For partitions, length is already in meters
           stoneLengthInMeters = remainingStone.length > 100 ? remainingStone.length / 100 : remainingStone.length;
-          
+
           // ðŸŽ¯ FIX: For layers, if startLength is 0, use the full used length (which is the original length)
           // This ensures the remaining stone spans the full length after the used width
           if (hasExplicitRemainingPositions && remainingStartLength === 0 && totalUsedLengthInMeters > 0) {
@@ -1133,22 +1133,22 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
             // The length of the remaining stone should span the full original length
             stoneLengthInMeters = Math.max(stoneLengthInMeters, originalLengthInMeters);
           }
-          
+
           // ðŸŽ¯ FIX: For layers, ensure remaining stone is positioned correctly relative to used area
           // Calculate the exact width that should remain after the used area
           let remainingStoneWidth = remainingStone.width;
-          
+
           // For layers with explicit positions, validate that remaining stone fits correctly
           if (hasExplicitRemainingPositions) {
             // Calculate what the remaining width should be based on original and used
             const expectedRemainingWidth = originalWidthInCm - totalUsedWidthInCm;
-            
+
             // Ensure remaining stone starts exactly where used area ends
             remainingStartWidth = totalUsedWidthInCm;
-            
+
             // Use the calculated remaining width (should match remainingStone.width, but use calculated for precision)
             remainingStoneWidth = Math.max(0, expectedRemainingWidth);
-            
+
             // Validate: remainingStartWidth + remainingStoneWidth should equal originalWidthInCm
             const totalCalculated = remainingStartWidth + remainingStoneWidth;
             if (Math.abs(totalCalculated - originalWidthInCm) > 0.01) {
@@ -1162,7 +1162,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
               remainingStoneWidth = Math.max(0, originalWidthInCm - remainingStartWidth);
             }
           }
-          
+
           // Store adjusted width for use in rectangle calculation
           (remainingStone as any).__adjustedWidth = remainingStoneWidth;
           (remainingStone as any).__adjustedStartWidth = remainingStartWidth;
@@ -1173,11 +1173,11 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           // Convert length from cm to meters if needed (remaining stones store length in cm)
           stoneLengthInMeters = remainingStone.length > 100 ? remainingStone.length / 100 : remainingStone.length;
         }
-        
+
         // Calculate remaining stone rectangle using coordinate utilities
         // ðŸŽ¯ FIX: Use adjusted width and start position if available (for layers with position validation)
-        const widthToUse = (remainingStone as any).__adjustedWidth !== undefined 
-          ? (remainingStone as any).__adjustedWidth 
+        const widthToUse = (remainingStone as any).__adjustedWidth !== undefined
+          ? (remainingStone as any).__adjustedWidth
           : remainingStone.width;
         const startWidthToUse = (remainingStone as any).__adjustedStartWidth !== undefined
           ? (remainingStone as any).__adjustedStartWidth
@@ -1208,14 +1208,14 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
               'Will draw?': remainingRect.width > 0 && remainingRect.height > 0
             });
           }
-          
+
           // Check if the remaining rectangle intersects with the original stone rectangle
-          const intersectsOriginal = 
+          const intersectsOriginal =
             remainingRect.x < originalRect.x + originalRect.width &&
             remainingRect.x + remainingRect.width > originalRect.x &&
             remainingRect.y < originalRect.y + originalRect.height &&
             remainingRect.y + remainingRect.height > originalRect.y;
-          
+
           if (!intersectsOriginal) {
             // Skip if completely outside original stone bounds
             return;
@@ -1233,7 +1233,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
             // Calculate what the height should be based on the remaining stone width
             const expectedHeight = (widthToUse / originalWidthInCm) * originalRect.height;
             let clampedHeight = Math.min(expectedHeight, maxAvailableHeight);
-            
+
             // ðŸŽ¯ FIX: If calculated height is invalid, recalculate from usedWidth directly
             if (clampedHeight <= 0 && totalUsedWidthInCm > 0) {
               // Calculate used area height in pixels
@@ -1246,16 +1246,16 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
               const remainingHeightInPixels = remainingWidthRatio * originalRect.height;
               clampedHeight = Math.min(remainingHeightInPixels, originalRect.y + originalRect.height - clampedY);
             }
-            
+
             if (clampedHeight <= 0) {
               return; // Skip if no space available
             }
-            
+
             const clampedWidth = Math.min(
               remainingRect.x + remainingRect.width - clampedX,
               originalRect.x + originalRect.width - clampedX
             );
-            
+
             // Use the precise clamped values for drawing
             const clickableArea: ClickableArea = {
               x: clampedX,
@@ -1270,41 +1270,41 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
                 height: clampedHeight
               }
             };
-            
+
             clickableAreasRef.current.push(clickableArea);
-            
+
             // Get color and draw (reuse existing drawing logic below)
             const colorIndex = index % remainingColors.length;
             const remainingColor = remainingColors[colorIndex];
             const remainingBorderColor = remainingBorderColors[colorIndex];
-            
+
             const isHovered = hoveredArea && hoveredArea.remainingStone.id === remainingStone.id;
-            const isFocused = focusedPieceIndex !== null && 
+            const isFocused = focusedPieceIndex !== null &&
               clickableAreasRef.current.length > focusedPieceIndex &&
               clickableAreasRef.current[focusedPieceIndex]?.remainingStone.id === remainingStone.id;
             const isHighlighted = isHovered || isFocused;
-            
+
             const displayColor = isHighlighted ? (isDarkMode ? 'rgba(34, 197, 94, 0.7)' : 'rgba(34, 197, 94, 0.6)') : remainingColor;
             const displayBorderColor = isHighlighted ? (isDarkMode ? 'rgba(34, 197, 94, 0.9)' : 'rgba(34, 197, 94, 0.8)') : remainingBorderColor;
             const displayBorderWidth = isHighlighted ? 3 : 2;
-            
+
             ctx.save();
             ctx.globalAlpha = animationProgress;
-            
+
             ctx.fillStyle = displayColor;
             ctx.fillRect(clampedX, clampedY, clampedWidth, clampedHeight);
-            
+
             ctx.strokeStyle = displayBorderColor;
             ctx.lineWidth = displayBorderWidth;
             ctx.strokeRect(clampedX, clampedY, clampedWidth, clampedHeight);
-            
+
             if (isHighlighted) {
               ctx.shadowColor = isDarkMode ? 'rgba(34, 197, 94, 0.5)' : 'rgba(34, 197, 94, 0.4)';
               ctx.shadowBlur = 8;
               ctx.strokeStyle = displayBorderColor;
               ctx.lineWidth = displayBorderWidth;
               ctx.strokeRect(clampedX, clampedY, clampedWidth, clampedHeight);
-              
+
               if (isFocused) {
                 ctx.save();
                 ctx.setLineDash([4, 4]);
@@ -1314,9 +1314,9 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
                 ctx.restore();
               }
             }
-            
+
             ctx.restore();
-            
+
             // Add dot pattern
             ctx.save();
             ctx.globalAlpha = 0.3 * animationProgress;
@@ -1330,22 +1330,22 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
               }
             }
             ctx.restore();
-            
+
             // Draw label if large enough
             if (clampedWidth > 40 && clampedHeight > 40) {
-              const lengthDisplay = remainingStone.id === 'primary-remaining' 
+              const lengthDisplay = remainingStone.id === 'primary-remaining'
                 ? `${formatDisplayNumber(stoneLengthInMeters)}m`
                 : `${formatDisplayNumber(remainingStone.length)}cm`;
               const widthDisplay = `${formatDisplayNumber(widthToUse)}cm`;
               const remainingLabel = `باقی‌مانده ${index + 1}: ${lengthDisplay} × ${widthDisplay}`;
               const labelFontSize = Math.min(10, Math.min(clampedWidth, clampedHeight) / 12);
-              
+
               if (labelFontSize >= 8) {
                 const labelX = clampedX + clampedWidth / 2;
                 const labelY = clampedY + clampedHeight / 2;
                 const labelBgColor = remainingColors[colorIndex];
                 const labelTextColor = '#ffffff';
-                
+
                 drawLabelWithBackground(
                   remainingLabel,
                   labelX,
@@ -1358,13 +1358,13 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
                 );
               }
             }
-            
+
             return; // Skip standard drawing logic for layers
           } else {
             // Standard clamping for non-layer products
             clampedY = Math.max(remainingRect.y, originalRect.y);
           }
-          
+
           const clampedWidth = Math.min(
             remainingRect.x + remainingRect.width - clampedX,
             originalRect.x + originalRect.width - clampedX
@@ -1395,25 +1395,25 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
               height: clampedHeight
             }
           };
-          
+
           clickableAreasRef.current.push(clickableArea);
 
           // Get color for this remaining piece (cycle through palette)
           const colorIndex = index % remainingColors.length;
           const remainingColor = remainingColors[colorIndex];
           const remainingBorderColor = remainingBorderColors[colorIndex];
-          
+
           // === Phase 2: Highlight hovered/focused area ===
           const isHovered = hoveredArea && hoveredArea.remainingStone.id === remainingStone.id;
-          const isFocused = focusedPieceIndex !== null && 
+          const isFocused = focusedPieceIndex !== null &&
             clickableAreasRef.current.length > focusedPieceIndex &&
             clickableAreasRef.current[focusedPieceIndex]?.remainingStone.id === remainingStone.id;
           const isHighlighted = isHovered || isFocused;
-          
+
           const displayColor = isHighlighted ? (isDarkMode ? 'rgba(34, 197, 94, 0.7)' : 'rgba(34, 197, 94, 0.6)') : remainingColor;
           const displayBorderColor = isHighlighted ? (isDarkMode ? 'rgba(34, 197, 94, 0.9)' : 'rgba(34, 197, 94, 0.8)') : remainingBorderColor;
           const displayBorderWidth = isHighlighted ? 3 : 2;
-          
+
           // === Phase 3, Task 3: Apply fade-in animation ===
           // Apply animation progress to opacity for smooth fade-in
           ctx.save();
@@ -1422,12 +1422,12 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           // Draw remaining stone rectangle with distinct color (highlighted if hovered)
           ctx.fillStyle = displayColor;
           ctx.fillRect(clampedX, clampedY, clampedWidth, clampedHeight);
-          
+
           // Draw border around remaining piece (thicker if hovered)
           ctx.strokeStyle = displayBorderColor;
           ctx.lineWidth = displayBorderWidth;
           ctx.strokeRect(clampedX, clampedY, clampedWidth, clampedHeight);
-          
+
           // If hovered or focused, add a subtle glow effect
           if (isHighlighted) {
             ctx.shadowColor = isDarkMode ? 'rgba(34, 197, 94, 0.5)' : 'rgba(34, 197, 94, 0.4)';
@@ -1435,7 +1435,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
             ctx.strokeStyle = displayBorderColor;
             ctx.lineWidth = displayBorderWidth;
             ctx.strokeRect(clampedX, clampedY, clampedWidth, clampedHeight);
-            
+
             // === Phase 4, Task 2: Add focus indicator for keyboard navigation ===
             if (isFocused) {
               // Draw a dashed border to indicate keyboard focus
@@ -1447,15 +1447,15 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
               ctx.restore();
             }
           }
-          
+
           ctx.restore(); // Restore alpha
-          
+
           // Add subtle pattern to distinguish from used areas
           // Use a dot pattern or grid pattern
           ctx.save();
           ctx.globalAlpha = 0.3 * animationProgress; // Apply animation to pattern too
           ctx.fillStyle = remainingBorderColor;
-          
+
           // Draw a subtle dot grid pattern
           const dotSpacing = 4;
           for (let y = clampedY + dotSpacing; y < clampedY + clampedHeight; y += dotSpacing * 2) {
@@ -1465,14 +1465,14 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
               ctx.fill();
             }
           }
-          
+
           ctx.restore();
         }
       });
     }
 
     // === Phase 1, Task 7: Add Labels and Dimension Text Overlay ===
-    
+
     // Helper function to draw text with background for better readability
     const drawLabelWithBackground = (
       text: string,
@@ -1485,18 +1485,18 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       textBaseline: 'top' | 'middle' | 'bottom' = 'middle'
     ) => {
       ctx.save();
-      
+
       // Set font and text properties
       ctx.font = `${fontSize}px system-ui, -apple-system, sans-serif`;
       ctx.textAlign = textAlign;
       ctx.textBaseline = textBaseline;
-      
+
       // Measure text
       const metrics = ctx.measureText(text);
       const textWidth = metrics.width;
       const textHeight = fontSize;
       const padding = 4;
-      
+
       // Calculate background rectangle position based on alignment
       let bgX = x;
       if (textAlign === 'center') {
@@ -1506,7 +1506,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       } else {
         bgX = x - padding;
       }
-      
+
       let bgY = y;
       if (textBaseline === 'middle') {
         bgY = y - textHeight / 2 - padding;
@@ -1515,7 +1515,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       } else {
         bgY = y - padding;
       }
-      
+
       // Draw background rectangle
       ctx.fillStyle = bgColor;
       ctx.fillRect(
@@ -1524,17 +1524,17 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         textWidth + padding * 2,
         textHeight + padding * 2
       );
-      
+
       // Draw text
       ctx.fillStyle = textColor;
       ctx.fillText(text, x, y);
-      
+
       ctx.restore();
     };
-    
+
     // Determine minimum size for displaying labels (only show if section is large enough)
     const minSizeForLabel = 40; // pixels
-    
+
     // 1. Label for original stone (if large enough and no cut, or show as border label when cut)
     // When there's a cut, don't show the original stone label in the center (it's confusing)
     // Instead, show it as a subtle border label if space allows
@@ -1542,13 +1542,13 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     if (!isCut && originalRect.width > minSizeForLabel && originalRect.height > minSizeForLabel) {
       const originalLabel = `${formatDisplayNumber(originalLengthInMeters)}m × ${formatDisplayNumber(originalWidthInCm)}cm`;
       const labelFontSize = Math.min(11, Math.min(originalRect.width, originalRect.height) / 10);
-      
+
       if (labelFontSize >= 8) { // Only draw if font size is readable
         const labelX = originalRect.x + originalRect.width / 2;
         const labelY = originalRect.y + originalRect.height / 2;
         const labelBgColor = isDarkMode ? 'rgba(30, 41, 59, 0.85)' : 'rgba(248, 250, 252, 0.85)'; // slate-800/50 (with transparency)
         const labelTextColor = isDarkMode ? '#e2e8f0' : '#1e293b'; // slate-200 : slate-800
-        
+
         drawLabelWithBackground(
           originalLabel,
           labelX,
@@ -1565,7 +1565,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       // Convention: Always display dimensions as length × width
       // ðŸŽ¯ ENHANCEMENT: Add "(از باقی‌مانده)" suffix for layers cut from remaining stones
       const baseLabel = `اصلی: ${formatDisplayNumber(originalLengthInMeters)}m × ${formatDisplayNumber(originalWidthInCm)}cm`;
-      const originalLabel = isLayerFromRemaining 
+      const originalLabel = isLayerFromRemaining
         ? `${baseLabel} (از باقی‌مانده)`
         : baseLabel;
       const labelFontSize = 9;
@@ -1573,7 +1573,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       const labelY = originalRect.y + 15;
       const labelBgColor = isDarkMode ? 'rgba(30, 41, 59, 0.7)' : 'rgba(248, 250, 252, 0.7)';
       const labelTextColor = isDarkMode ? '#cbd5e1' : '#475569';
-      
+
       drawLabelWithBackground(
         originalLabel,
         labelX,
@@ -1585,7 +1585,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         'top'
       );
     }
-    
+
     // 2. Label for used area (if large enough)
     if (totalUsedLengthInMeters > 0 || totalUsedWidthInCm > 0) {
       const clampedUsedLength = Math.min(totalUsedLengthInMeters, originalLengthInMeters);
@@ -1601,7 +1601,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         canvasHeight,
         padding
       );
-      
+
       // Recalculate usedRect for label positioning (same as drawing section)
       const usedRectForLabel: CanvasRect = realToCanvasRect(
         0,
@@ -1614,7 +1614,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         canvasHeight,
         padding
       );
-      
+
       // Clamp used rectangle to original stone bounds (same as drawing section)
       const clampedXForLabel = Math.max(usedRectForLabel.x, originalRect.x);
       const clampedYForLabel = Math.max(usedRectForLabel.y, originalRect.y);
@@ -1626,18 +1626,18 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         usedRectForLabel.y + usedRectForLabel.height - clampedYForLabel,
         originalRect.y + originalRect.height - clampedYForLabel
       );
-      
+
       if (clampedWidthForLabel > minSizeForLabel && clampedHeightForLabel > minSizeForLabel) {
         // Convention: Always display dimensions as length × width
         const usedLabel = `استفاده شده: ${formatDisplayNumber(clampedUsedLength)}m × ${formatDisplayNumber(clampedUsedWidth)}cm`;
         const labelFontSize = Math.min(10, Math.min(clampedWidthForLabel, clampedHeightForLabel) / 12);
-        
+
         if (labelFontSize >= 8) {
           const labelX = clampedXForLabel + clampedWidthForLabel / 2;
           const labelY = clampedYForLabel + clampedHeightForLabel / 2;
           const labelBgColor = isDarkMode ? 'rgba(239, 68, 68, 0.85)' : 'rgba(249, 115, 22, 0.85)'; // red/orange with transparency
           const labelTextColor = '#ffffff'; // white text for contrast
-          
+
           drawLabelWithBackground(
             usedLabel,
             labelX,
@@ -1651,7 +1651,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         }
       }
     }
-    
+
     // 3. Labels for remaining pieces (if large enough)
     // Use the same allRemainingPieces array we created earlier
     if (allRemainingPieces && allRemainingPieces.length > 0) {
@@ -1659,12 +1659,12 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
         if (!remainingStone.isAvailable || remainingStone.length <= 0 || remainingStone.width <= 0) {
           return;
         }
-        
+
         // Calculate position same as in drawing section
         let remainingStartLength: number;
         let remainingStartWidth: number;
         let stoneLengthInMeters: number;
-        
+
         if (remainingStone.id === 'primary-remaining') {
           remainingStartLength = 0;
           remainingStartWidth = initialCutWidth;
@@ -1680,7 +1680,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           remainingStartWidth = totalUsedWidthInCm;
           stoneLengthInMeters = remainingStone.length > 100 ? remainingStone.length / 100 : remainingStone.length;
         }
-        
+
         const remainingRect: CanvasRect = realToCanvasRect(
           remainingStartLength,
           stoneLengthInMeters,
@@ -1692,7 +1692,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           canvasHeight,
           padding
         );
-        
+
         // Use clamped coordinates if we calculated them earlier
         if (remainingRect.width > 0 && remainingRect.height > 0) {
           const clampedX = Math.max(remainingRect.x, originalRect.x);
@@ -1705,21 +1705,21 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
             remainingRect.y + remainingRect.height - clampedY,
             originalRect.y + originalRect.height - clampedY
           );
-          
+
           if (clampedWidth > minSizeForLabel && clampedHeight > minSizeForLabel) {
             // Format remaining stone dimensions based on type
             // Convention: Always display dimensions as length × width
-            const lengthDisplay = remainingStone.id === 'primary-remaining' 
+            const lengthDisplay = remainingStone.id === 'primary-remaining'
               ? `${formatDisplayNumber(stoneLengthInMeters)}m`
               : `${formatDisplayNumber(remainingStone.length)}cm`;
             const widthDisplay = `${formatDisplayNumber(remainingStone.width)}cm`;
             const remainingLabel = `باقی‌مانده ${index + 1}: ${lengthDisplay} × ${widthDisplay}`;
             const labelFontSize = Math.min(10, Math.min(clampedWidth, clampedHeight) / 12);
-            
+
             if (labelFontSize >= 8) {
               const labelX = clampedX + clampedWidth / 2;
               const labelY = clampedY + clampedHeight / 2;
-              
+
               // Get matching color for this remaining piece
               const remainingColors = isDarkMode ? [
                 'rgba(34, 197, 94, 0.85)',   // green-500
@@ -1736,11 +1736,11 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
                 'rgba(236, 72, 153, 0.85)',  // pink-500
                 'rgba(251, 146, 60, 0.85)',  // orange-500
               ];
-              
+
               const colorIndex = index % remainingColors.length;
               const labelBgColor = remainingColors[colorIndex];
               const labelTextColor = '#ffffff'; // white text for contrast
-              
+
               drawLabelWithBackground(
                 remainingLabel,
                 labelX,
@@ -1764,23 +1764,23 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
   useEffect(() => {
     const hasPrimaryRemaining = isCut && initialCutWidth > 0 && remainingWidthInCm > 0;
     const currentRemainingCount = (remainingStones?.length || 0) + (hasPrimaryRemaining ? 1 : 0);
-    
+
     if (currentRemainingCount !== previousRemainingCountRef.current && currentRemainingCount > previousRemainingCountRef.current) {
       // New remaining piece added - trigger fade-in animation
       animationStartTimeRef.current = performance.now();
       setAnimationProgress(0);
-      
+
       const animate = (currentTime: number) => {
         if (!animationStartTimeRef.current) return;
-        
+
         const elapsed = currentTime - animationStartTimeRef.current;
         const duration = 500; // 500ms animation duration
         const progress = Math.min(elapsed / duration, 1);
-        
+
         // Ease-out cubic function for smooth animation
         const easedProgress = 1 - Math.pow(1 - progress, 3);
         setAnimationProgress(easedProgress);
-        
+
         if (progress < 1) {
           requestAnimationFrame(animate);
         } else {
@@ -1788,14 +1788,14 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           animationStartTimeRef.current = null;
         }
       };
-      
+
       requestAnimationFrame(animate);
     } else if (currentRemainingCount <= previousRemainingCountRef.current) {
       // Piece removed or count decreased - reset animation
       setAnimationProgress(1);
       animationStartTimeRef.current = null;
     }
-    
+
     previousRemainingCountRef.current = currentRemainingCount;
   }, [remainingStones, isCut, initialCutWidth, remainingWidthInCm]);
 
@@ -1822,7 +1822,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     if (Date.now() - lastTouchTimeRef.current < 300) {
       return; // Ignore mouse events shortly after touch events
     }
-    
+
     if (!interactive || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
@@ -1833,7 +1833,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
 
     // Find which area is being hovered
     const clickedArea = getClickedArea(canvasX, canvasY);
-    
+
     if (clickedArea) {
       setHoveredArea(clickedArea);
       // Set tooltip position relative to page
@@ -1857,7 +1857,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     if (Date.now() - lastTouchTimeRef.current < 300) {
       return;
     }
-    
+
     if (!interactive || !onPieceClick || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
@@ -1868,7 +1868,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
 
     // Find which area was clicked
     const clickedArea = getClickedArea(canvasX, canvasY);
-    
+
     if (clickedArea && clickedArea.remainingStone.isAvailable) {
       // Call the callback with the clicked remaining stone
       onPieceClick(clickedArea.remainingStone);
@@ -1878,23 +1878,23 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
   // === Phase 4, Task 1: Touch event handlers ===
   const handleTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
     if (!interactive || !canvasRef.current) return;
-    
+
     lastTouchTimeRef.current = Date.now();
-    
+
     // Prevent default touch behaviors (scroll, zoom, etc.)
     e.preventDefault();
-    
+
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     const touch = e.touches[0]; // Get first touch point
-    
+
     // Get canvas coordinates in CSS pixels
     const canvasX = touch.clientX - rect.left;
     const canvasY = touch.clientY - rect.top;
-    
+
     // Find which area is being touched (similar to hover)
     const clickedArea = getClickedArea(canvasX, canvasY);
-    
+
     if (clickedArea) {
       setHoveredArea(clickedArea);
       // Set tooltip position relative to page
@@ -1910,20 +1910,20 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
 
   const handleTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
     if (!interactive || !canvasRef.current) return;
-    
+
     // Prevent default touch behaviors
     e.preventDefault();
-    
+
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     const touch = e.touches[0];
-    
+
     const canvasX = touch.clientX - rect.left;
     const canvasY = touch.clientY - rect.top;
-    
+
     // Update hover area as finger moves
     const clickedArea = getClickedArea(canvasX, canvasY);
-    
+
     if (clickedArea) {
       setHoveredArea(clickedArea);
       setTooltipPosition({
@@ -1938,28 +1938,28 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
 
   const handleTouchEnd = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
     if (!interactive || !onPieceClick || !canvasRef.current) return;
-    
+
     // Prevent default touch behaviors
     e.preventDefault();
-    
+
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    
+
     // Use the last touch point (if available) or changed touches
     const touch = e.changedTouches[0] || (e.touches.length > 0 ? e.touches[0] : null);
     if (!touch) return;
-    
+
     const canvasX = touch.clientX - rect.left;
     const canvasY = touch.clientY - rect.top;
-    
+
     // Find which area was touched
     const clickedArea = getClickedArea(canvasX, canvasY);
-    
+
     if (clickedArea && clickedArea.remainingStone.isAvailable) {
       // Call the callback with the clicked remaining stone
       onPieceClick(clickedArea.remainingStone);
     }
-    
+
     // Clear hover state after a short delay to allow tooltip to be visible
     setTimeout(() => {
       setHoveredArea(null);
@@ -1976,16 +1976,16 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
   // === Phase 4, Task 2: Keyboard navigation ===
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
     if (!interactive || !canvasRef.current) return;
-    
+
     const areas = clickableAreasRef.current.filter(area => area.remainingStone.isAvailable);
     if (areas.length === 0) return;
-    
-    const currentIndex = focusedPieceIndex !== null && focusedPieceIndex < areas.length 
-      ? focusedPieceIndex 
+
+    const currentIndex = focusedPieceIndex !== null && focusedPieceIndex < areas.length
+      ? focusedPieceIndex
       : -1;
-    
+
     let newIndex = currentIndex;
-    
+
     switch (e.key) {
       case 'ArrowRight':
       case 'ArrowDown':
@@ -2003,7 +2003,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           });
         }
         break;
-        
+
       case 'ArrowLeft':
       case 'ArrowUp':
         // Navigate to previous piece
@@ -2019,7 +2019,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           });
         }
         break;
-        
+
       case 'Enter':
       case ' ':
         // Select focused piece
@@ -2028,7 +2028,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           onPieceClick(areas[currentIndex].remainingStone);
         }
         break;
-        
+
       case 'Escape':
         // Clear focus
         e.preventDefault();
@@ -2051,25 +2051,25 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
     const remainingCount = (remainingStones?.length || 0) + (hasPrimaryRemaining ? 1 : 0);
     const usedArea = totalUsedLengthInMeters > 0 || totalUsedWidthInCm > 0;
     const subServicesCount = appliedSubServices?.length || 0;
-    
+
     let description = `سنگ اصلی: ${formatDisplayNumber(originalLengthNum)}${lengthUnit} در ${formatDisplayNumber(originalWidthNum)}${widthUnit}`;
-    
+
     if (usedArea) {
       description += `. منطقه استفاده شده نشان داده شده است`;
     }
-    
+
     if (remainingCount > 0) {
       description += `. ${remainingCount} قطعه باقی‌مانده موجود است`;
     }
-    
+
     if (subServicesCount > 0) {
       description += `. ${subServicesCount} ابزار اعمال شده است`;
     }
-    
+
     if (interactive && remainingCount > 0) {
       description += `. برای انتخاب قطعه باقی‌مانده، از فلش‌های صفحه کلید استفاده کنید یا کلیک کنید`;
     }
-    
+
     return description;
   }, [originalLengthNum, originalWidthNum, lengthUnit, widthUnit, isCut, initialCutWidth, remainingWidthInCm, remainingStones, totalUsedLengthInMeters, totalUsedWidthInCm, appliedSubServices, interactive]);
 
@@ -2077,13 +2077,13 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
   useEffect(() => {
     if (focusedPieceIndex !== null && clickableAreasRef.current[focusedPieceIndex]) {
       const piece = clickableAreasRef.current[focusedPieceIndex].remainingStone;
-      const lengthDisplay = piece.id === 'primary-remaining' 
+      const lengthDisplay = piece.id === 'primary-remaining'
         ? `${formatDisplayNumber(piece.length)}m`
         : `${formatDisplayNumber(piece.length / 100)}m`;
-      
+
       // Announce to screen readers
       const announcement = `قطعه باقی‌مانده انتخاب شده: طول ${lengthDisplay}، عرض ${formatDisplayNumber(piece.width)}cm، متر مربع ${formatDisplayNumber(piece.squareMeters)}`;
-      
+
       // Create a temporary aria-live region for announcement
       const liveRegion = document.createElement('div');
       liveRegion.setAttribute('role', 'status');
@@ -2092,7 +2092,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
       liveRegion.style.cssText = 'position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border-width: 0;';
       liveRegion.textContent = announcement;
       document.body.appendChild(liveRegion);
-      
+
       // Remove after announcement
       setTimeout(() => {
         document.body.removeChild(liveRegion);
@@ -2101,15 +2101,15 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
   }, [focusedPieceIndex]);
 
   return (
-    <div 
+    <div
       ref={containerRef}
       className={`w-full ${className}`}
     >
       {/* === Phase 4, Task 4: Collapsible header === */}
       <div className="flex items-center justify-between mb-2">
-        <button
+        <ErpPressable type="submit"
           onClick={() => setIsCollapsed(!isCollapsed)}
-          className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+          className="flex items-center gap-2 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
           aria-expanded={!isCollapsed}
           aria-label={isCollapsed ? 'باز کردن نمایش بصری سنگ' : 'بستن نمایش بصری سنگ'}
         >
@@ -2122,22 +2122,22 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
-        </button>
-        
+        </ErpPressable>
+
         {/* === Phase 4, Task 4: Summary when collapsed === */}
         {isCollapsed && (
-          <div className="text-xs text-slate-500 dark:text-slate-400">
+          <div className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
             {(() => {
               const hasPrimaryRemaining = isCut && initialCutWidth > 0 && remainingWidthInCm > 0;
               const remainingCount = (remainingStones?.length || 0) + (hasPrimaryRemaining ? 1 : 0);
-              return remainingCount > 0 
+              return remainingCount > 0
                 ? `${remainingCount} قطعه باقی‌مانده`
                 : 'هیچ قطعه باقی‌مانده‌ای وجود ندارد';
             })()}
           </div>
         )}
       </div>
-      
+
       {/* === Phase 4, Task 4: Collapsible content === */}
       <div
         className={`transition-all duration-300 ease-in-out overflow-hidden ${
@@ -2155,7 +2155,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           onTouchCancel={handleTouchCancel}
           onKeyDown={handleKeyDown}
           tabIndex={interactive ? 0 : -1}
-          className="block w-full border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          className="block w-full border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:ring-offset-2"
           style={{
             cursor: interactive && hoveredArea ? 'pointer' : 'default',
             touchAction: 'none' // === Phase 4, Task 1: Prevent default touch behaviors ===
@@ -2164,10 +2164,10 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           aria-label={accessibleDescription}
           aria-describedby="stone-canvas-description"
         />
-        
+
         {/* === Phase 4, Task 3: Hidden description for screen readers === */}
-        <div 
-          id="stone-canvas-description" 
+        <div
+          id="stone-canvas-description"
           className="absolute w-px h-px -m-px overflow-hidden"
           style={{ clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', borderWidth: 0 }}
           aria-hidden="true"
@@ -2175,11 +2175,11 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           {accessibleDescription}
         </div>
       </div>
-      
+
       {/* === Phase 2: Tooltip === */}
       {interactive && tooltipPosition && hoveredArea && (
         <div
-          className="fixed z-50 px-3 py-2 bg-slate-800 dark:bg-slate-900 text-white text-xs rounded-lg shadow-lg pointer-events-none"
+          className="fixed z-50 px-3 py-2 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] text-xs rounded-lg shadow-lg pointer-events-none"
           style={{
             left: `${tooltipPosition.x}px`,
             top: `${tooltipPosition.y}px`,
@@ -2190,23 +2190,23 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
           <div>طول: {formatDisplayNumber(hoveredArea.remainingStone.id === 'primary-remaining' ? hoveredArea.remainingStone.length : hoveredArea.remainingStone.length / 100)}m</div>
           <div>عرض: {formatDisplayNumber(hoveredArea.remainingStone.width)}cm</div>
           <div>متر مربع: {formatDisplayNumber(hoveredArea.remainingStone.squareMeters)}</div>
-          <div className="mt-1 pt-1 border-t border-slate-700 text-slate-300">
+          <div className="mt-1 pt-1 border-t border-[var(--sds-border-strong)] text-[var(--sds-text-muted)]">
             کلیک کنید برای استفاده
           </div>
         </div>
       )}
-      
+
       {/* === Phase 3, Task 2: Sub-Service Legend === */}
       {appliedSubServices && appliedSubServices.length > 0 && (
-        <div className="mt-2 p-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
-          <div className="text-xs font-medium text-slate-700 dark:text-slate-300 mb-2">
+        <div className="mt-2 p-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+          <div className="text-xs font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
             راهنمای ابزارها:
           </div>
           <div className="grid grid-cols-2 gap-2">
             {appliedSubServices.map((applied, index) => {
               const patternColor = getSubServicePatternColor(index, window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
               const borderColor = getSubServiceBorderColor(index, window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-              
+
               return (
                 <div key={applied.id} className="flex items-center gap-2 text-xs">
                   <div
@@ -2255,7 +2255,7 @@ const StoneCanvas: React.FC<StoneCanvasProps> = ({
                       <rect width="16" height="16" fill={`url(#pattern-${index})`} />
                     </svg>
                   </div>
-                  <span className="text-slate-600 dark:text-slate-400 truncate">
+                  <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] truncate">
                     {applied.subService.namePersian}
                   </span>
                 </div>

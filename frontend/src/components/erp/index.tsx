@@ -182,7 +182,7 @@ export function ErpButton({
 
   if (href && !disabled) {
     return (
-      <Link href={href} className={className} title={title}>
+      <Link href={href} onClick={onClick} className={className} title={title}>
         {content}
       </Link>
     );
@@ -1026,7 +1026,16 @@ export function ErpActionMenu({ label, actions }: { label: string; actions: ErpA
         {open && (
           <motion.div initial={{ opacity: 0, scale: 0.97, y: -4 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97, y: -4 }} transition={{ duration: 0.16 }} className="absolute left-0 z-40 mt-2 min-w-48 overflow-hidden rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-1.5 shadow-xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
             {actions.map((action) => (
-              <div key={action.label} onClick={() => setOpen(false)}><ErpButton {...action} variant="ghost" className="w-full justify-start border-0" /></div>
+              <ErpButton
+                {...action}
+                key={action.label}
+                onClick={() => {
+                  setOpen(false);
+                  action.onClick?.();
+                }}
+                variant="ghost"
+                className="w-full justify-start border-0"
+              />
             ))}
           </motion.div>
         )}

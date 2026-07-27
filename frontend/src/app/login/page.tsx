@@ -1,5 +1,5 @@
-﻿'use client';
-
+'use client';
+import { ErpInput, ErpPressable } from '@/components/erp';
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -23,7 +23,7 @@ export default function LoginPage() {
       ...prev,
       [name]: value
     }));
-    
+
     // Clear error when user starts typing
     if (errors[name]) {
       setErrors(prev => ({
@@ -50,7 +50,7 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!validateForm()) {
       return;
     }
@@ -70,7 +70,7 @@ export default function LoginPage() {
       console.error('Error response:', error.response?.data);
       console.error('Error status:', error.response?.status);
       console.error('Error message:', error.message);
-      
+
       if (error.response?.data?.error) {
         setErrors({ general: error.response.data.error });
       } else if (error.code === 'ECONNREFUSED' || error.message.includes('Network Error')) {
@@ -84,112 +84,112 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center p-6">
+    <main className="sds-workspace min-h-screen bg-gradient-to-br from-[var(--sds-surface-raised)] via-[var(--sds-surface-raised)] to-[var(--sds-surface-raised)] flex items-center justify-center p-6">
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center mb-4">
-            <div className="glass-liquid-card p-4">
-              <FaUser className="h-12 w-12 text-teal-400" />
+            <div className="sds-workspace-surface p-4">
+              <FaUser className="h-12 w-12 text-[var(--sds-accent)]" />
             </div>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">ورود به حساب</h1>
-          <p className="text-gray-300">برای استفاده از سامانه ERP وارد شوید</p>
+          <h1 className="text-3xl font-bold text-[var(--sds-text-primary)] mb-2">ورود به حساب</h1>
+          <p className="text-[var(--sds-text-muted)]">برای استفاده از سامانه ERP وارد شوید</p>
         </div>
 
         {/* Login Form */}
-        <div className="glass-liquid-card p-8">
+        <div className="sds-workspace-surface p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* General Error */}
             {errors.general && (
-              <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4">
-                <p className="text-red-400 text-sm">{errors.general}</p>
+              <div className="bg-[var(--sds-danger-surface)] border border-[var(--sds-danger-border)] rounded-lg p-4">
+                <p className="text-[var(--sds-danger)] text-sm">{errors.general}</p>
               </div>
             )}
 
             {/* Login Identifier Field */}
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">
                 ایمیل، نام کاربری یا شماره تماس
               </label>
               <div className="relative">
-                <FaUser className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <input
+                <FaUser className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--sds-text-muted)]" />
+                <ErpInput
                   type="text"
                   name="identifier"
                   value={formData.identifier}
                   onChange={handleInputChange}
-                  className={`glass-liquid-input w-full pr-10 ${errors.identifier ? 'border-red-500' : ''}`}
+                  className={`sds-field w-full pr-10 ${errors.identifier ? 'border-[var(--sds-danger-border)]' : ''}`}
                   placeholder="ایمیل، نام کاربری یا شماره تماس"
                   dir="ltr"
                 />
               </div>
-              {errors.identifier && <p className="text-red-400 text-sm mt-1">{errors.identifier}</p>}
+              {errors.identifier && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.identifier}</p>}
             </div>
 
             {/* Password Field */}
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">
                 رمز عبور
               </label>
               <div className="relative">
-                <FaLock className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <input
+                <FaLock className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--sds-text-muted)]" />
+                <ErpInput
                   type={showPassword ? 'text' : 'password'}
                   name="password"
                   value={formData.password}
                   onChange={handleInputChange}
-                  className={`glass-liquid-input w-full pr-10 pl-10 ${errors.password ? 'border-red-500' : ''}`}
+                  className={`sds-field w-full pr-10 pl-10 ${errors.password ? 'border-[var(--sds-danger-border)]' : ''}`}
                   placeholder="رمز عبور خود را وارد کنید"
                 />
-                <button
+                <ErpPressable
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-300"
+                  className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[var(--sds-text-muted)] hover:text-[var(--sds-text-muted)]"
                 >
                   {showPassword ? <FaEyeSlash /> : <FaEye />}
-                </button>
+                </ErpPressable>
               </div>
-              {errors.password && <p className="text-red-400 text-sm mt-1">{errors.password}</p>}
+              {errors.password && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.password}</p>}
             </div>
 
             {/* Remember Me & Forgot Password */}
             <div className="flex items-center justify-between">
               <label className="flex items-center">
-                <input
+                <ErpInput
                   type="checkbox"
-                  className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                  className="rounded border-[var(--sds-border-default)] text-[var(--sds-accent)] focus:ring-[var(--sds-focus-ring)]"
                 />
-                <span className="mr-2 text-sm text-gray-300">مرا به خاطر بسپار</span>
+                <span className="mr-2 text-sm text-[var(--sds-text-muted)]">مرا به خاطر بسپار</span>
               </label>
-              <Link href="/forgot-password" className="text-sm text-teal-400 hover:text-teal-300">
+              <Link href="/forgot-password" className="text-sm text-[var(--sds-accent)] hover:text-[var(--sds-accent)]">
                 فراموشی رمز عبور
               </Link>
             </div>
 
             {/* Submit Button */}
-            <button
+            <ErpPressable
               type="submit"
               disabled={loading}
-              className="glass-liquid-btn-primary w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
+              className="sds-action sds-tone-primary sds-action-solid w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {loading ? (
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[var(--sds-border-default)]"></div>
               ) : (
                 <>
                   <span>ورود</span>
                   <FaArrowRight />
                 </>
               )}
-            </button>
+            </ErpPressable>
           </form>
         </div>
 
         {/* Register Link */}
         <div className="text-center mt-6">
-          <p className="text-gray-300">
+          <p className="text-[var(--sds-text-muted)]">
             حساب کاربری ندارید؟{' '}
-            <span className="text-slate-400">ساخت حساب توسط مدیر سیستم انجام می‌شود</span>
+            <span className="text-[var(--sds-text-muted)]">ساخت حساب توسط مدیر سیستم انجام می‌شود</span>
           </p>
         </div>
 
@@ -198,7 +198,7 @@ export default function LoginPage() {
           <ThemeToggle />
         </div>
       </div>
-    </div>
+    </main>
   );
 }
 

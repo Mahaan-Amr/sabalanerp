@@ -16,7 +16,7 @@ export default function AboutPage() {
     <div className="public-site">
       <PublicHeader />
 
-      <main>
+      <main className="sds-workspace">
         <section className="public-section public-grid-band">
           <div className="public-container grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
             <Reveal>
@@ -42,9 +42,9 @@ export default function AboutPage() {
               return (
                 <Reveal key={item.title} delay={index * 0.05}>
                   <article className="public-card h-full p-6">
-                    <Icon className="mb-5 h-8 w-8 text-teal-700" />
-                    <h2 className="text-xl font-black text-stone-950">{item.title}</h2>
-                    <p className="mt-3 leading-8 text-stone-600">{item.text}</p>
+                    <Icon className="mb-5 h-8 w-8 text-[var(--sds-accent)]" />
+                    <h2 className="text-xl font-black text-[var(--sds-text-primary)]">{item.title}</h2>
+                    <p className="mt-3 leading-8 text-[var(--sds-text-secondary)]">{item.text}</p>
                   </article>
                 </Reveal>
               );
@@ -52,21 +52,21 @@ export default function AboutPage() {
           </div>
         </section>
 
-        <section className="public-section bg-stone-950 text-white">
+        <section className="public-section bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)]">
           <div className="public-container grid gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
             <Reveal>
-              <p className="mb-3 text-sm font-black text-teal-300">اصول طراحی</p>
+              <p className="mb-3 text-sm font-black text-[var(--sds-accent)]">اصول طراحی</p>
               <h2 className="text-3xl font-black leading-snug md:text-5xl">سامانه باید به اندازه عملیات واقعی قابل اعتماد باشد</h2>
-              <p className="mt-5 leading-9 text-stone-300">
+              <p className="mt-5 leading-9 text-[var(--sds-text-muted)]">
                 تمرکز طراحی روی زیبایی صرف نیست. هر بخش باید به تصمیم گیری، کاهش خطا و پیگیری دقیق کمک کند.
               </p>
             </Reveal>
             <div className="space-y-3">
               {principles.map((item, index) => (
                 <Reveal key={item} delay={index * 0.04}>
-                  <div className="flex items-start gap-3 rounded-lg border border-white/10 bg-white/[0.04] p-4">
-                    <FaCheckCircle className="mt-1 h-5 w-5 flex-none text-teal-300" />
-                    <p className="leading-8 text-stone-200">{item}</p>
+                  <div className="flex items-start gap-3 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)]/[0.04] p-4">
+                    <FaCheckCircle className="mt-1 h-5 w-5 flex-none text-[var(--sds-accent)]" />
+                    <p className="leading-8 text-[var(--sds-text-primary)]">{item}</p>
                   </div>
                 </Reveal>
               ))}
@@ -79,7 +79,7 @@ export default function AboutPage() {
             <Reveal>
               <div className="public-card grid gap-6 p-8 lg:grid-cols-[1fr_auto] lg:items-center">
                 <div>
-                  <h2 className="text-2xl font-black text-stone-950 md:text-4xl">برای استفاده عملیاتی وارد سامانه شوید</h2>
+                  <h2 className="text-2xl font-black text-[var(--sds-text-primary)] md:text-4xl">برای استفاده عملیاتی وارد سامانه شوید</h2>
                   <p className="public-lead mt-4">
                     دسترسی به داشبوردها و داده های سازمانی فقط برای کاربران مجاز سنگ سبلان فعال است.
                   </p>

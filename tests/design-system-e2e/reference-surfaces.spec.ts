@@ -368,6 +368,7 @@ test('CRM registry and pipeline routes share focused responsive canonical surfac
           || field.getAttribute('type') === 'checkbox'
           || field.getAttribute('type') === 'radio'
           || field.getAttribute('type') === 'range'
+          || (field.getAttribute('type') === 'file' && field.classList.contains('sds-file-input'))
         ))
     )).toBe(true);
     expect(await workspace.evaluate((element) => {
@@ -404,6 +405,47 @@ test('Sales management routes share focused responsive canonical surfaces', asyn
           || field.getAttribute('type') === 'checkbox'
           || field.getAttribute('type') === 'radio'
           || field.getAttribute('type') === 'range'
+          || (field.getAttribute('type') === 'file' && field.classList.contains('sds-file-input'))
+        ))
+    )).toBe(true);
+    expect(await workspace.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
+    })).toBe(true);
+  }
+});
+
+test('Inventory and Logistics routes share focused responsive canonical surfaces', async ({ page }) => {
+  test.setTimeout(150_000);
+  await login(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const routes = [
+    '/dashboard/inventory',
+    '/dashboard/inventory/master-data',
+    '/dashboard/inventory/services',
+    '/dashboard/inventory/services/cutting-types/create',
+    '/dashboard/inventory/services/services/create',
+    '/dashboard/inventory/services/stone-finishings/create',
+    '/dashboard/inventory/services/sub-services/create',
+    '/dashboard/logistics',
+    '/dashboard/logistics/loadings',
+    '/dashboard/logistics/loadings/new'
+  ];
+
+  for (const route of routes) {
+    await page.goto(route);
+    const workspace = page.locator('main.sds-workspace');
+    await expect(workspace).toBeVisible();
+    expect(await workspace.evaluate((element) =>
+      Array.from(element.querySelectorAll('input, select, textarea'))
+        .every((field) => (
+          field.getAttribute('type') === 'hidden'
+          || field.classList.contains('sds-field')
+          || field.getAttribute('type') === 'checkbox'
+          || field.getAttribute('type') === 'radio'
+          || field.getAttribute('type') === 'range'
+          || (field.getAttribute('type') === 'file' && field.classList.contains('sds-file-input'))
         ))
     )).toBe(true);
     expect(await workspace.evaluate((element) => {

@@ -62,6 +62,18 @@
       "reason": "Interactive contract-template management uses canonical controls and semantic surfaces; generated document design remains separately scoped."
     },
     {
+      "pattern": "frontend/src/app/dashboard/inventory/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Inventory navigation, master data, and service catalogs use canonical controls and semantic workspaces while preserving catalog identities and dependencies."
+    },
+    {
+      "pattern": "frontend/src/app/dashboard/logistics/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Loading planning, detail, and dispatch surfaces use the shared responsive foundation without changing quantities, permissions, or lifecycle transitions."
+    },
+    {
       "pattern": "frontend/src/app/**/page.tsx",
       "status": "legacy",
       "acceptanceStatus": "not-started",
@@ -131,6 +143,17 @@
         "frontend/src/app/dashboard/contract-templates/**",
         "frontend/src/components/ProductImportExportModal.tsx",
         "frontend/src/components/reporting/SalesReportingDashboard.tsx"
+      ]
+    },
+    {
+      "id": "inventory-and-logistics",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Inventory master data and service catalogs now share one visual and interaction foundation with downstream loading operations.",
+      "files": [
+        "frontend/src/app/dashboard/inventory/**",
+        "frontend/src/app/dashboard/logistics/**",
+        "frontend/src/components/CatalogImagePicker.tsx"
       ]
     }
   ],

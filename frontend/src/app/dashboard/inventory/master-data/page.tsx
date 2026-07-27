@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpSelect, ErpTextarea } from '@/components/erp';
 import React, { useEffect, useState } from 'react';
 import { FaBoxes, FaCog, FaEdit, FaEye, FaPlus, FaToggleOff, FaToggleOn, FaTrash, FaWarehouse } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpEmptyState, ErpIconButton, ErpListPage, ErpLoading, ErpQuickFilters } from '@/components/erp';
@@ -91,7 +91,7 @@ const createSections = (): MasterDataSection[] => [
   { id: 'colors', title: 'Colors', titlePersian: 'رنگ/طرح', description: 'مدیریت رنگ ها و طرح های سنگ', icon: FaCog, apiMethod: inventoryAPI.getColors, createMethod: inventoryAPI.createColor, updateMethod: inventoryAPI.updateColor, deleteMethod: inventoryAPI.deleteColor, canView: false, canCreate: false, canEdit: false, canDelete: false, fields: baseFields },
 ];
 
-const inputClass = 'min-h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
+const inputClass = 'min-h-11 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-3 py-2 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]';
 
 const MasterDataManagement: React.FC = () => {
   const [initialLoading, setInitialLoading] = useState(true);
@@ -311,8 +311,8 @@ const MasterDataManagement: React.FC = () => {
             priority: 'primary',
             cell: (item) => (
               <div>
-                <p className="font-semibold text-slate-900 dark:text-white">{item.namePersian}</p>
-                <p className="mt-1 font-mono text-xs text-slate-500 dark:text-slate-400">{item.code}</p>
+                <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{item.namePersian}</p>
+                <p className="mt-1 font-mono text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{item.code}</p>
               </div>
             ),
           },
@@ -374,24 +374,24 @@ const MasterDataManagement: React.FC = () => {
       </ErpListPage>
 
       {showCreateModal && currentSection && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-700 dark:bg-slate-900">
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-overlay)] p-4">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-6 shadow-xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
+            <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
               {editingItem ? 'ویرایش' : 'ایجاد'} {currentSection.titlePersian}
             </h3>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
               اطلاعات مورد را وارد کنید و سپس ذخیره کنید.
             </p>
 
             <div className="mt-5 space-y-4">
               {currentSection.fields.map((field) => (
                 <div key={field.key}>
-                  <label htmlFor={field.key} className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <label htmlFor={field.key} className="mb-1 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)]">
                     {field.label}
-                    {field.required && <span className="mr-1 text-red-500">*</span>}
+                    {field.required && <span className="mr-1 text-[var(--sds-danger)]">*</span>}
                   </label>
                   {field.type === 'textarea' ? (
-                    <textarea
+                    <ErpTextarea
                       id={field.key}
                       value={formData[field.key] || ''}
                       onChange={(event) => setFormData({ ...formData, [field.key]: event.target.value })}
@@ -400,7 +400,7 @@ const MasterDataManagement: React.FC = () => {
                       rows={3}
                     />
                   ) : field.type === 'select' ? (
-                    <select
+                    <ErpSelect
                       id={field.key}
                       value={formData[field.key] !== undefined ? String(formData[field.key]) : ''}
                       onChange={(event) => {
@@ -415,9 +415,9 @@ const MasterDataManagement: React.FC = () => {
                           {typeof option === 'string' ? option : option.label}
                         </option>
                       ))}
-                    </select>
+                    </ErpSelect>
                   ) : (
-                    <input
+                    <ErpInput
                       id={field.key}
                       type={field.type}
                       value={formData[field.key] || ''}
@@ -426,7 +426,7 @@ const MasterDataManagement: React.FC = () => {
                       placeholder={`${field.label} را وارد کنید`}
                     />
                   )}
-                  {formErrors[field.key] && <p className="mt-1 text-sm text-red-500">{formErrors[field.key]}</p>}
+                  {formErrors[field.key] && <p className="mt-1 text-sm text-[var(--sds-danger)]">{formErrors[field.key]}</p>}
                 </div>
               ))}
             </div>

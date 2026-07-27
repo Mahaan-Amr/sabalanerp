@@ -84,6 +84,29 @@ const salesSources = [
   ['ProductImportExportModal.tsx', read('frontend/src/components/ProductImportExportModal.tsx')],
   ['SalesReportingDashboard.tsx', read('frontend/src/components/reporting/SalesReportingDashboard.tsx')]
 ];
+const inventoryLogisticsSources = [
+  ...[
+    'page.tsx',
+    'master-data/page.tsx',
+    'services/page.tsx',
+    'services/cutting-types/create/page.tsx',
+    'services/cutting-types/edit/[id]/page.tsx',
+    'services/services/create/page.tsx',
+    'services/services/edit/[id]/page.tsx',
+    'services/stone-finishings/create/page.tsx',
+    'services/stone-finishings/edit/[id]/page.tsx',
+    'services/sub-services/create/page.tsx',
+    'services/sub-services/edit/[id]/page.tsx'
+  ].map((path) => [path, read(`frontend/src/app/dashboard/inventory/${path}`)]),
+  ...[
+    'page.tsx',
+    'loadings/page.tsx',
+    'loadings/new/page.tsx',
+    'loadings/[id]/page.tsx',
+    'logistics-ui.tsx'
+  ].map((path) => [path, read(`frontend/src/app/dashboard/logistics/${path}`)]),
+  ['CatalogImagePicker.tsx', read('frontend/src/components/CatalogImagePicker.tsx')]
+];
 const guardAttendanceSource = read('frontend/src/app/dashboard/security/attendance/page.tsx');
 const guardVehiclesSource = read('frontend/src/app/dashboard/security/vehicles/page.tsx');
 const guardPageSources = [
@@ -361,6 +384,18 @@ test('Sales management and interactive template surfaces use the shared semantic
   const rawControl = /<(?:button|input|select|textarea)\b/;
 
   for (const [path, source] of salesSources) {
+    assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
+    assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
+    assert.doesNotMatch(source, /<div\b[^>]*\bonClick=/, `${path} must not use inaccessible clickable containers`);
+  }
+});
+
+test('Inventory catalogs and Logistics operations consume canonical semantic controls', () => {
+  const hardcodedPalette =
+    /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|fuchsia|gray|green|indigo|lime|neutral|orange|pink|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
+  const rawControl = /<(?:button|input|select|textarea)\b/;
+
+  for (const [path, source] of inventoryLogisticsSources) {
     assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
     assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
     assert.doesNotMatch(source, /<div\b[^>]*\bonClick=/, `${path} must not use inaccessible clickable containers`);

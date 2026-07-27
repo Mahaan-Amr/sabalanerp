@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpSelect, ErpTextarea } from '@/components/erp';
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { FaBan, FaCheck, FaEdit, FaPlus, FaPrint, FaSync, FaTrash } from 'react-icons/fa';
@@ -92,7 +92,7 @@ export default function LoadingDetailPage() {
         { label: 'نهایی‌سازی', icon: FaCheck, onClick: () => runAction(() => logisticsAPI.finalizeLoading(loading.id)), disabled: !canFinalize, tone: 'success', variant: 'solid' },
       ]}
     >
-      {actionError && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">{actionError}</div>}
+      {actionError && <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm font-semibold text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">{actionError}</div>}
 
       <ErpTwoColumn
         main={
@@ -117,20 +117,20 @@ export default function LoadingDetailPage() {
                   <ErpCard key={line.id} className="p-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div>
-                        <p className="font-semibold text-slate-900 dark:text-white">{line.productSnapshot?.name || line.product?.namePersian || line.product?.name}</p>
-                        <p className="mt-1 text-xs text-slate-500">قرارداد {line.sourceContract?.contractNumber} · {line.sourceContractItemId}</p>
+                        <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{line.productSnapshot?.name || line.product?.namePersian || line.product?.name}</p>
+                        <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">قرارداد {line.sourceContract?.contractNumber} · {line.sourceContractItemId}</p>
                       </div>
-                      <p className="rounded-lg bg-[#074747]/10 px-3 py-2 text-sm font-semibold text-[#074747] dark:bg-teal-900/30 dark:text-teal-100">
+                      <p className="rounded-lg bg-[var(--sds-accent)]/10 px-3 py-2 text-sm font-semibold text-[var(--sds-accent)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
                         {numberFa(line.quantity)} {unitLabels[line.unit] || line.unit}
                       </p>
                     </div>
                     {(line.khatRas || line.pieceCount) && (
-                      <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+                      <p className="mt-3 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                         خط راس {numberFa(line.khatRas)} × تعداد {numberFa(line.pieceCount)} + اضافه {numberFa(line.plus)} - کسر {numberFa(line.minus)}
                       </p>
                     )}
                     {line.corrections?.length > 0 && (
-                      <div className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+                      <div className="mt-3 rounded-lg bg-[var(--sds-warning-surface)] p-3 text-xs text-[var(--sds-warning)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">
                         اصلاحات: {line.corrections.map((item: any) => `${numberFa(item.deltaQuantity)} ${unitLabels[item.unit] || item.unit}`).join('، ')}
                       </div>
                     )}
@@ -140,7 +140,7 @@ export default function LoadingDetailPage() {
             </ErpSection>
 
             <ErpSection title="برگه چاپی بارگیری" description="این بخش از داده نهایی سند ساخته می‌شود و منبع حقیقت نیست.">
-              <div className="rounded-lg border border-slate-200 bg-white p-5 text-sm leading-7 text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 print:border-black print:bg-white print:text-black">
+              <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-5 text-sm leading-7 text-[var(--sds-text-primary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] print:border-[var(--sds-border-strong)] print:bg-[var(--sds-surface-raised)] print:text-[var(--sds-text-primary)]">
                 <div className="mb-4 flex items-start justify-between gap-4 border-b pb-3">
                   <div>
                     <h2 className="text-lg font-bold">برگه بارگیری سبلان</h2>
@@ -152,7 +152,7 @@ export default function LoadingDetailPage() {
                 <p>راننده: {driverSummary} · پلاک: {plateSummary} · ماشین: {vehicleTypeSummary}</p>
                 <div className="mt-4 space-y-2">
                   {loading.lines.map((line: any, index: number) => (
-                    <div key={line.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 border-b border-slate-200 py-2">
+                    <div key={line.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 border-b border-[var(--sds-border-default)] py-2">
                       <span>{(index + 1).toLocaleString('fa-IR')}</span>
                       <span>{line.productSnapshot?.name || line.product?.namePersian || line.product?.name} · قرارداد {line.sourceContract?.contractNumber}</span>
                       <span>{numberFa(line.quantity)} {unitLabels[line.unit] || line.unit}</span>
@@ -174,7 +174,7 @@ export default function LoadingDetailPage() {
             {canCancel && (
               <ErpSection title="لغو سند">
                 <div className="space-y-3">
-                  <textarea className={`${inputClass} min-h-24`} value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="دلیل لغو" />
+                  <ErpTextarea className={`${inputClass} min-h-24`} value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="دلیل لغو" />
                   <ErpButton label="لغو بارگیری" icon={FaBan} tone="danger" onClick={() => runAction(() => logisticsAPI.cancelLoading(loading.id, cancelReason))} disabled={!cancelReason.trim()} />
                 </div>
               </ErpSection>
@@ -185,16 +185,16 @@ export default function LoadingDetailPage() {
                 <div className="space-y-3">
                   <label>
                     <span className={labelClass}>ردیف منبع</span>
-                    <select className={inputClass} value={correction.sourceContractItemId} onChange={(event) => {
+                    <ErpSelect className={inputClass} value={correction.sourceContractItemId} onChange={(event) => {
                       const line = loading.lines.find((candidate: any) => candidate.sourceContractItemId === event.target.value);
                       setCorrection((current) => ({ ...current, sourceContractItemId: event.target.value, loadingLineId: line?.id || '' }));
                     }}>
                       <option value="">انتخاب کنید</option>
                       {loading.lines.map((line: any) => <option key={line.id} value={line.sourceContractItemId}>{line.productSnapshot?.name || line.product?.namePersian} · {line.sourceContract?.contractNumber}</option>)}
-                    </select>
+                    </ErpSelect>
                   </label>
-                  <label><span className={labelClass}>دلتا مقدار</span><input className={inputClass} value={correction.deltaQuantity} onChange={(event) => setCorrection((current) => ({ ...current, deltaQuantity: event.target.value }))} placeholder="مثلا 0.25 یا -0.25" /></label>
-                  <label><span className={labelClass}>دلیل اصلاح</span><textarea className={`${inputClass} min-h-24`} value={correction.reason} onChange={(event) => setCorrection((current) => ({ ...current, reason: event.target.value }))} /></label>
+                  <label><span className={labelClass}>دلتا مقدار</span><ErpInput className={inputClass} value={correction.deltaQuantity} onChange={(event) => setCorrection((current) => ({ ...current, deltaQuantity: event.target.value }))} placeholder="مثلا 0.25 یا -0.25" /></label>
+                  <label><span className={labelClass}>دلیل اصلاح</span><ErpTextarea className={`${inputClass} min-h-24`} value={correction.reason} onChange={(event) => setCorrection((current) => ({ ...current, reason: event.target.value }))} /></label>
                   <ErpButton
                     label="ثبت اصلاح"
                     icon={FaPlus}

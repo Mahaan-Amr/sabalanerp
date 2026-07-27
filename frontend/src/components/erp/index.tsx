@@ -229,6 +229,8 @@ export const ErpInput = React.forwardRef<
         ? 'h-5 w-5 shrink-0 rounded-full border-[var(--sds-border-default)] accent-[var(--sds-accent)]'
         : type === 'range'
           ? 'h-11 w-full accent-[var(--sds-accent)]'
+          : type === 'file'
+            ? 'sds-file-input'
           : type === 'hidden'
             ? undefined
             : erpFieldClassName;

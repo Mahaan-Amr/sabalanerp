@@ -34,6 +34,8 @@
     "sync:opc-products:dry": "cd backend && npm run sync:opc-products:dry",
     "sync:opc-products:apply": "cd backend && npm run sync:opc-products:apply",
     "setup": "npm run install:all && npm run docker:up && sleep 10 && npm run db:create && npm run db:migrate && npm run db:generate",
+    "prepare": "node scripts/setup-git-hooks.mjs",
+    "setup:git-hooks": "node scripts/setup-git-hooks.mjs",
     "text:scan": "node scripts/text-corruption-inventory.mjs",
     "text:check": "npm run text:scan && node scripts/check-text-corruption.mjs",
     "design-system:report": "node scripts/design-system-adoption.mjs report",

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const cliPath = path.join(repositoryRoot, 'scripts', 'design-system-adoption.mjs');
+const readRepositoryFile = (relativePath) =>
+  readFileSync(path.join(repositoryRoot, relativePath), 'utf8');
 
 const writeFixture = (root, relativePath, content) => {
   const target = path.join(root, relativePath);
@@ -92,6 +94,24 @@ test('report classifies every interactive route through the migration manifest',
   }
 });
 
+test('repository instructions make design-system discovery and enforcement automatic', () => {
+  const agentInstructions = readRepositoryFile('AGENTS.md');
+  const catalog = readRepositoryFile('docs/design-system/catalog.md');
+  const hook = readRepositoryFile('.githooks/pre-commit');
+  const packageJson = JSON.parse(readRepositoryFile('package.json'));
+
+  assert.match(agentInstructions, /docs\/design-system\/catalog\.md/);
+  assert.match(agentInstructions, /npm run design-system:check/);
+  assert.match(agentInstructions, /permissions, calculations, persisted meaning, recovery, and audit history/);
+  assert.match(catalog, /@\/components\/erp/);
+  assert.match(catalog, /44px/);
+  assert.match(catalog, /390px/);
+  assert.match(catalog, /Generated PDFs, Excel exports, emails, and print templates/);
+  assert.match(hook, /npm run design-system:check/);
+  assert.match(hook, /npm run test:design-system-foundation/);
+  assert.equal(packageJson.scripts.prepare, 'node scripts/setup-git-hooks.mjs');
+});
+
 test('check permits baselined legacy debt and rejects a new changed-file violation', () => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'sabalan-design-system-check-'));
   const pagePath = 'frontend/src/app/legacy/page.tsx';
@@ -146,6 +166,7 @@ test('check permits baselined legacy debt and rejects a new changed-file violati
         '  return <div>',
         '    <button className="glass-liquid-btn text-[#074747]">ذخیره</button>',
         '    <button className="bg-red-600 bg-stone-950 text-white border-black/50" style={{ color: "rgb(220, 38, 38)" }}>حذف</button>',
+        '    <div onClick={() => alert("legacy")}>عملیات</div>',
         '  </div>;',
         '}',
         ''
@@ -168,6 +189,8 @@ test('check permits baselined legacy debt and rejects a new changed-file violati
     assert.match(changed.stderr, /border-black\/50/);
     assert.match(changed.stderr, /rgb\(220, 38, 38\)/);
     assert.match(changed.stderr, /raw-control-risk/);
+    assert.match(changed.stderr, /inaccessible-control-risk/);
+    assert.match(changed.stderr, /<div onClick/);
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }

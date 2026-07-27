@@ -37,6 +37,11 @@ const FINDING_PATTERNS = [
     category: 'raw-control-risk',
     expression: /<(button|input|select|textarea)\b/g,
     signature: (match) => `<${match[1]}`
+  },
+  {
+    category: 'inaccessible-control-risk',
+    expression: /<(div|span|li)\b[^>]*\bonClick\s*=/g,
+    signature: (match) => `<${match[1]} onClick`
   }
 ];
 const SHARED_CONSUMER_PATTERNS = [

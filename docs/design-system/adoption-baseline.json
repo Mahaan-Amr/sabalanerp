@@ -407,6 +407,9 @@
         "<button": 28,
         "<input": 4,
         "<select": 9
+      },
+      "inaccessible-control-risk": {
+        "<div onClick": 1
       }
     },
     "frontend/src/app/dashboard/admin/reports/page.tsx": {
@@ -1535,6 +1538,9 @@
       },
       "raw-control-risk": {
         "<button": 6
+      },
+      "inaccessible-control-risk": {
+        "<div onClick": 1
       }
     },
     "frontend/src/app/dashboard/logistics/loadings/[id]/page.tsx": {
@@ -1956,6 +1962,9 @@
       "raw-control-risk": {
         "<input": 3,
         "<button": 2
+      },
+      "inaccessible-control-risk": {
+        "<div onClick": 1
       }
     },
     "frontend/src/app/dashboard/sales/products/page.tsx": {
@@ -1969,6 +1978,11 @@
         "text-amber-300": 1,
         "text-white": 3,
         "bg-black/50": 1
+      }
+    },
+    "frontend/src/app/dashboard/security/vehicles/page.tsx": {
+      "inaccessible-control-risk": {
+        "<div onClick": 2
       }
     },
     "frontend/src/app/dashboard/users/[id]/edit/page.tsx": {
@@ -2469,6 +2483,16 @@
         "<button": 4
       }
     },
+    "frontend/src/components/EnhancedDropdown.tsx": {
+      "inaccessible-control-risk": {
+        "<div onClick": 1
+      }
+    },
+    "frontend/src/components/erp/index.tsx": {
+      "inaccessible-control-risk": {
+        "<div onClick": 1
+      }
+    },
     "frontend/src/components/ErrorModal.tsx": {
       "hardcoded-semantic-color": {
         "bg-red-500/20": 1,
@@ -2535,6 +2559,9 @@
       "raw-control-risk": {
         "<input": 1,
         "<button": 2
+      },
+      "inaccessible-control-risk": {
+        "<div onClick": 1
       }
     },
     "frontend/src/components/FormattedNumberInput.tsx": {
@@ -2675,6 +2702,9 @@
         "<select": 7,
         "<input": 7,
         "<textarea": 1
+      },
+      "inaccessible-control-risk": {
+        "<div onClick": 1
       }
     },
     "frontend/src/components/SignatureDisplay.tsx": {
@@ -3133,6 +3163,9 @@
       },
       "raw-control-risk": {
         "<button": 1
+      },
+      "inaccessible-control-risk": {
+        "<div onClick": 7
       }
     },
     "frontend/src/features/accounting/AccountingActionModal.tsx": {
@@ -3248,6 +3281,9 @@
         "<button": 3,
         "<select": 1,
         "<input": 3
+      },
+      "inaccessible-control-risk": {
+        "<div onClick": 2
       }
     },
     "frontend/src/features/contract-creation/components/modals/ProductConfigurationModal.tsx": {

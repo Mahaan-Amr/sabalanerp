@@ -6,6 +6,18 @@ This directory records migration state and freezes existing UI debt while the ad
 
 The semantic token and shared-module interface is documented in
 [`foundation.md`](foundation.md).
+The required component, interaction, accessibility, responsive, and content
+catalog is [`catalog.md`](catalog.md).
+
+## Automatic enforcement
+
+- `npm install` runs the root `prepare` script and configures `.githooks/pre-commit`.
+- The pre-commit gate checks changed files and the semantic foundation.
+- Pull requests that touch interactive code run the adoption workflow against the target-branch baseline.
+- Root `AGENTS.md` requires coding agents to discover and follow the same catalog and exception process.
+
+If hooks were installed before this system existed, run `npm run setup:git-hooks`
+once. Bypassing a local hook does not bypass pull-request enforcement.
 
 ## Route states
 

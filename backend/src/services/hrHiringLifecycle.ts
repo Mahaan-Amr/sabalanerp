@@ -142,9 +142,108 @@ export interface HiringLifecycleSource {
   employmentRelationship?: { status: string } | null;
   contractClearance?: string | null;
   contracts?: ContractLike[];
+  insuranceEnrollment?: { status: string } | null;
   payrollParticipation?: unknown | null;
   onboardingTasks?: OnboardingTaskLike[];
 }
+
+export interface HiringTaskCapability {
+  id:
+    | "SIGNED_CONTRACT"
+    | "INSURANCE"
+    | "PAYROLL_PARTICIPATION"
+    | "EMPLOYMENT_ACTIVATION"
+    | "ONBOARDING_TASK";
+  title: string;
+  status: string;
+  ownerAuthorities: string[];
+  detailVisible: boolean;
+  actionIds: string[];
+}
+
+export const projectHiringTaskCapabilities = (
+  source: HiringLifecycleSource,
+  viewerAuthorities: Iterable<string> = [],
+): HiringTaskCapability[] => {
+  const authorities = new Set(viewerAuthorities);
+  const visibleTo = (...required: string[]) =>
+    required.some((authority) => authorities.has(authority));
+  const blockingTasks =
+    source.onboardingTasks?.filter((task) => task.activationBlocker) || [];
+  const activationBlocked =
+    source.contractClearance !== "APPROVED" ||
+    !source.payrollParticipation ||
+    blockingTasks.some((task) => !isCompleteTask(task.status));
+  const employmentActive = source.employmentRelationship?.status === "ACTIVE";
+  const contractVisible = visibleTo("FINANCE_RECORDER", "FINANCE_MANAGER");
+  const insuranceVisible = visibleTo("HR_PROCESSOR");
+  const payrollVisible = visibleTo("HR_PAYROLL_MANAGER");
+  const activationVisible = visibleTo("HR_MANAGER");
+
+  const tasks: HiringTaskCapability[] = [
+    {
+      id: "SIGNED_CONTRACT",
+      title: "قرارداد کاغذی",
+      status: source.contractClearance || "NOT_STARTED",
+      ownerAuthorities: ["FINANCE_RECORDER", "FINANCE_MANAGER"],
+      detailVisible: contractVisible,
+      actionIds: contractVisible
+        ? [
+            ...(authorities.has("FINANCE_RECORDER") ? ["RECORD_CONTRACT"] : []),
+            ...(authorities.has("FINANCE_MANAGER") && source.contracts?.length
+              ? ["REVIEW_CONTRACT"]
+              : []),
+          ]
+        : [],
+    },
+    {
+      id: "INSURANCE",
+      title: "پیگیری ثبت بیمه",
+      status: source.insuranceEnrollment?.status || "NOT_STARTED",
+      ownerAuthorities: ["HR_PROCESSOR"],
+      detailVisible: insuranceVisible,
+      actionIds: insuranceVisible ? ["UPDATE_INSURANCE"] : [],
+    },
+    {
+      id: "PAYROLL_PARTICIPATION",
+      title: "تنظیم مشارکت حقوق و دستمزد",
+      status: source.payrollParticipation ? "COMPLETE" : "PENDING",
+      ownerAuthorities: ["HR_PAYROLL_MANAGER"],
+      detailVisible: payrollVisible,
+      actionIds: payrollVisible ? ["CONFIGURE_PAYROLL"] : [],
+    },
+    {
+      id: "EMPLOYMENT_ACTIVATION",
+      title: "فعال‌سازی همکاری",
+      status: employmentActive
+        ? "COMPLETE"
+        : activationBlocked
+          ? "BLOCKED"
+          : "READY",
+      ownerAuthorities: ["HR_MANAGER"],
+      detailVisible: activationVisible,
+      actionIds:
+        activationVisible && !employmentActive ? ["ACTIVATE_EMPLOYMENT"] : [],
+    },
+  ];
+
+  for (const task of source.onboardingTasks || []) {
+    const ownerAuthorities = task.ownerAuthority
+      ? [task.ownerAuthority]
+      : [];
+    const detailVisible = visibleTo(...ownerAuthorities);
+    tasks.push({
+      id: "ONBOARDING_TASK",
+      title: task.title || "وظیفه آماده‌سازی شروع همکاری",
+      status: task.status,
+      ownerAuthorities,
+      detailVisible,
+      actionIds: detailVisible ? ["UPDATE_ONBOARDING_TASK"] : [],
+    });
+  }
+
+  return tasks;
+};
 
 interface Gate {
   complete: boolean;

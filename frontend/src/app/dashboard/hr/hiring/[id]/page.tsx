@@ -19,7 +19,10 @@ import {
 } from "@/components/erp";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 import { HiringLifecycle } from "@/features/hr-hiring/HiringLifecycle";
-import { resolveSelectedHiringPhase } from "@/features/hr-hiring/hiringLifecycleViewModel";
+import {
+  hiringTaskDetailVisible,
+  resolveSelectedHiringPhase,
+} from "@/features/hr-hiring/hiringLifecycleViewModel";
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
 import PersianCalendarComponent from "@/components/PersianCalendar";
 import {
@@ -258,6 +261,22 @@ export default function HiringCasePage() {
   const canHrSensitive = hasAuthority("HR_PROCESSOR", "HR_MANAGER");
   const canCompanyManager = hasAuthority("COMPANY_MANAGER");
   const canFinance = hasAuthority("FINANCE_RECORDER", "FINANCE_MANAGER");
+  const canViewContractTask = hiringTaskDetailVisible(
+    data.taskCapabilities,
+    "SIGNED_CONTRACT",
+  );
+  const canViewInsuranceTask = hiringTaskDetailVisible(
+    data.taskCapabilities,
+    "INSURANCE",
+  );
+  const canViewPayrollTask = hiringTaskDetailVisible(
+    data.taskCapabilities,
+    "PAYROLL_PARTICIPATION",
+  );
+  const canViewActivationTask = hiringTaskDetailVisible(
+    data.taskCapabilities,
+    "EMPLOYMENT_ACTIVATION",
+  );
   const selectedLifecyclePhase = data.lifecycle
     ? resolveSelectedHiringPhase(data.lifecycle, searchParams.get("phase"))
     : null;
@@ -1845,7 +1864,7 @@ export default function HiringCasePage() {
         </ErpSection>
       )}
       {selectedLifecyclePhase === "ONBOARDING" &&
-        (canFinance || canHrSensitive) && (
+        canViewContractTask && (
           <>
             <ErpSection title="قرارداد کاغذی">
               <div className="grid gap-3 md:grid-cols-4">
@@ -1928,11 +1947,13 @@ export default function HiringCasePage() {
         )}
       {selectedLifecyclePhase &&
         ["ONBOARDING", "ACTIVATION"].includes(selectedLifecyclePhase) &&
-        hasAuthority("HR_PROCESSOR", "HR_MANAGER", "HR_PAYROLL_MANAGER") && (
+        (canViewInsuranceTask ||
+          canViewPayrollTask ||
+          canViewActivationTask) && (
           <>
             <ErpSection title="بیمه، حقوق و فعال‌سازی">
               <div className="grid gap-3 xl:grid-cols-3">
-                {hasAuthority("HR_PROCESSOR", "HR_MANAGER") && (
+                {canViewInsuranceTask && (
                   <ErpCard className="space-y-2 p-4">
                     <select
                       className={field}
@@ -1985,7 +2006,7 @@ export default function HiringCasePage() {
                     />
                   </ErpCard>
                 )}
-                {hasAuthority("HR_PAYROLL_MANAGER") && (
+                {canViewPayrollTask && (
                   <ErpCard className="space-y-2 p-4">
                     <p className="font-bold">مشارکت حقوق و دستمزد</p>
                     <PersianCalendarComponent
@@ -2007,7 +2028,7 @@ export default function HiringCasePage() {
                     />
                   </ErpCard>
                 )}
-                {hasAuthority("HR_MANAGER") && (
+                {canViewActivationTask && (
                   <ErpCard className="p-4">
                     <p className="text-sm">
                       فعال‌سازی فقط پس از رسیدن تاریخ شروع و تکمیل همه

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   buildHiringQueueItem,
+  projectHiringTaskCapabilities,
   projectHiringLifecycle,
   summarizeHiringLifecycle,
   type HiringLifecycleSource,
@@ -402,6 +403,60 @@ const base = (
   assert.equal(result.phases[1].status, "PAUSED");
   assert.equal(result.phases[1].primaryAction, null);
   assert.equal(result.phases[1].secondaryActions.length, 0);
+}
+
+{
+  const source = base({
+    convertedAt: new Date(),
+    employmentRelationship: { status: "PLANNED" },
+    contractClearance: "IN_PROGRESS",
+    contracts: [{ approvedAt: null }],
+    insuranceEnrollment: { status: "IN_PROGRESS" },
+    payrollParticipation: null,
+    onboardingTasks: [
+      {
+        title: "آموزش ایمنی",
+        status: "PENDING",
+        ownerAuthority: "HR_PROCESSOR",
+        activationBlocker: true,
+      },
+    ],
+  });
+
+  const hrManager = projectHiringTaskCapabilities(source, ["HR_MANAGER"]);
+  assert.deepEqual(
+    hrManager.map(({ id, status, detailVisible, actionIds }) => ({
+      id,
+      status,
+      detailVisible,
+      actionIds,
+    })),
+    [
+      { id: "SIGNED_CONTRACT", status: "IN_PROGRESS", detailVisible: false, actionIds: [] },
+      { id: "INSURANCE", status: "IN_PROGRESS", detailVisible: false, actionIds: [] },
+      { id: "PAYROLL_PARTICIPATION", status: "PENDING", detailVisible: false, actionIds: [] },
+      { id: "EMPLOYMENT_ACTIVATION", status: "BLOCKED", detailVisible: true, actionIds: ["ACTIVATE_EMPLOYMENT"] },
+      { id: "ONBOARDING_TASK", status: "PENDING", detailVisible: false, actionIds: [] },
+    ],
+  );
+
+  const hrProcessor = projectHiringTaskCapabilities(source, ["HR_PROCESSOR"]);
+  assert.equal(
+    hrProcessor.find((task) => task.id === "INSURANCE")?.detailVisible,
+    true,
+  );
+  assert.deepEqual(
+    hrProcessor.find((task) => task.id === "INSURANCE")?.actionIds,
+    ["UPDATE_INSURANCE"],
+  );
+  assert.equal(
+    hrProcessor.find((task) => task.id === "SIGNED_CONTRACT")?.detailVisible,
+    false,
+  );
+
+  const genericViewer = projectHiringTaskCapabilities(source, []);
+  assert.ok(genericViewer.every((task) => !task.detailVisible));
+  assert.ok(genericViewer.every((task) => task.actionIds.length === 0));
 }
 
 console.log("HR hiring lifecycle tests passed.");

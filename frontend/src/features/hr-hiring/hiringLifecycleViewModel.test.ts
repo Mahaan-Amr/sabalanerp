@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import {
+  hiringTaskCapability,
+  hiringTaskDetailVisible,
   hiringLifecycleStatusLabel,
   resolveSelectedHiringPhase,
   selectedHiringPhase,
@@ -56,5 +58,35 @@ assert.equal(
   "REVIEW_IDENTITY",
 );
 assert.equal(hiringLifecycleStatusLabel.ACTION_REQUIRED, "اقدام شما");
+
+const taskCapabilities = [
+  {
+    id: "SIGNED_CONTRACT",
+    title: "قرارداد کاغذی",
+    status: "IN_PROGRESS",
+    ownerAuthorities: ["FINANCE_RECORDER", "FINANCE_MANAGER"],
+    detailVisible: false,
+    actionIds: [],
+  },
+  {
+    id: "INSURANCE",
+    title: "پیگیری ثبت بیمه",
+    status: "IN_PROGRESS",
+    ownerAuthorities: ["HR_PROCESSOR"],
+    detailVisible: true,
+    actionIds: ["UPDATE_INSURANCE"],
+  },
+];
+
+assert.equal(
+  hiringTaskDetailVisible(taskCapabilities, "SIGNED_CONTRACT"),
+  false,
+);
+assert.equal(hiringTaskDetailVisible(taskCapabilities, "INSURANCE"), true);
+assert.equal(
+  hiringTaskCapability(taskCapabilities, "INSURANCE")?.actionIds[0],
+  "UPDATE_INSURANCE",
+);
+assert.equal(hiringTaskCapability(taskCapabilities, "UNKNOWN"), null);
 
 console.log("HR hiring lifecycle view-model tests passed.");

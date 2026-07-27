@@ -30,7 +30,7 @@ import {
   normalizeApplicantMobile,
   normalizeApplicantOtp
 } from '../services/hrCandidateAccess';
-import { buildHiringQueueItem, projectHiringLifecycle, summarizeHiringLifecycle } from '../services/hrHiringLifecycle';
+import { buildHiringQueueItem, projectHiringLifecycle, projectHiringTaskCapabilities, summarizeHiringLifecycle } from '../services/hrHiringLifecycle';
 import {
   buildCandidateCorrectionMessage,
   normalizeCandidateCorrectionRequest
@@ -812,6 +812,7 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   const canSeeCompensation = canSeeFinanceSensitive || authorities.has('HIRING_MANAGER') || authorities.has('HR_PROCESSOR') || authorities.has('HR_PAYROLL_PROCESSOR') || authorities.has('HR_PAYROLL_MANAGER') || authorities.has('HR_MANAGER');
   const data: any = row;
   data.lifecycle = projectHiringLifecycle(row, authorities);
+  data.taskCapabilities = projectHiringTaskCapabilities(row, authorities);
   if (!canSeeDecisionDetails) {
     data.hiringDecisions = data.hiringDecisions.map(({ kind, outcome, version, decidedAt }: any) => ({ kind, outcome, version, decidedAt }));
     data.preIdentityChecklistItems = data.preIdentityChecklistItems.map(({ id, title, status, dueAt, managementResolution }: any) => ({ id, title, status, dueAt, managementResolution }));
@@ -829,8 +830,8 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
     data.candidate.hasSocialSecurityHistory = null;
     data.formRevisions = [];
     data.identityChecks = [];
-    data.insuranceEnrollment = null;
   }
+  if (!authorities.has('HR_PROCESSOR')) data.insuranceEnrollment = null;
   if (canSeeFinanceSensitive) data.collateralItems = data.collateralItems.map(({ storageName: _storageName, sha256: _sha256, returnEvidenceStorageName: _returnStorage, returnEvidenceSha256: _returnSha, ...item }: any) => item);
   else data.collateralItems = data.collateralItems.map(({ id, type, required, status, coordinationReason, receivedAt, returnedAt, returnConfirmedAt }: any) => ({ id, type, required, status, coordinationReason, receivedAt, returnedAt, returnConfirmedAt }));
   if (!canSeeCompensation) data.compensationSnapshots = [];
@@ -857,7 +858,22 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
       ])
     );
   }
-  data.contracts = data.contracts.map(({ storageName: _storageName, sha256: _sha256, ...contract }: any) => contract);
+  data.contracts = canSeeFinanceSensitive
+    ? data.contracts.map(({ storageName: _storageName, sha256: _sha256, ...contract }: any) => contract)
+    : [];
+  if (!authorities.has('HR_PAYROLL_MANAGER')) data.payrollParticipation = null;
+  data.onboardingTasks = data.onboardingTasks.map((task: any) => {
+    if (task.ownerAuthority && authorities.has(task.ownerAuthority)) return task;
+    return {
+      id: task.id,
+      title: task.title,
+      status: task.status,
+      activationBlocker: task.activationBlocker,
+      ownerAuthority: task.ownerAuthority,
+      dueDate: task.dueDate,
+      completedAt: task.completedAt
+    };
+  });
   if (!authorities.has('HR_MANAGER')) data.audits = [];
   await audit(row.id, 'HIRING_CASE_VIEWED', req, undefined);
   res.json({ success: true, data });
@@ -2011,7 +2027,7 @@ router.post('/applications/:id/contracts/:contractId/approve', requireAuthority(
   res.json({ success: true });
 }));
 
-router.get('/applications/:id/contracts/:contractId/download', requireAuthority('FINANCE_RECORDER', 'FINANCE_MANAGER', 'HR_PROCESSOR', 'HR_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.get('/applications/:id/contracts/:contractId/download', requireAuthority('FINANCE_RECORDER', 'FINANCE_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const row = await prisma.hrEmploymentContractDocument.findFirst({ where: { id: req.params.contractId, applicationId: req.params.id } });
   if (!row) return res.status(404).json({ success: false, error: 'قرارداد پیدا نشد.' });
   await audit(req.params.id, 'SIGNED_CONTRACT_DOWNLOADED', req, { contractId: row.id });
@@ -2030,7 +2046,7 @@ router.post('/applications/:id/payroll-participation', requireAuthority('HR_PAYR
   res.json({ success: true, data: row });
 }));
 
-router.put('/applications/:id/insurance', requireAuthority('HR_PROCESSOR', 'HR_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.put('/applications/:id/insurance', requireAuthority('HR_PROCESSOR'), asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!['NOT_STARTED', 'IN_PROGRESS', 'ACTIVE', 'EXEMPT'].includes(req.body.status)) throw new Error('وضعیت بیمه نامعتبر است.');
   if (req.body.status === 'ACTIVE' && !req.body.effectiveDate) throw new Error('تاریخ شروع بیمه فعال الزامی است.');
   const row = await prisma.hrInsuranceEnrollment.upsert({

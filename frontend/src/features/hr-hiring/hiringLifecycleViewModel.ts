@@ -35,6 +35,25 @@ export interface HiringLifecycleProjection {
   phases: HiringLifecyclePhase[];
 }
 
+export interface HiringTaskCapability {
+  id: string;
+  title: string;
+  status: string;
+  ownerAuthorities: string[];
+  detailVisible: boolean;
+  actionIds: string[];
+}
+
+export const hiringTaskCapability = (
+  tasks: HiringTaskCapability[] | null | undefined,
+  id: string,
+) => tasks?.find((task) => task.id === id) || null;
+
+export const hiringTaskDetailVisible = (
+  tasks: HiringTaskCapability[] | null | undefined,
+  id: string,
+) => Boolean(hiringTaskCapability(tasks, id)?.detailVisible);
+
 export const hiringLifecycleStatusLabel: Record<HiringLifecycleStatus, string> =
   {
     COMPLETED: "تکمیل‌شده",

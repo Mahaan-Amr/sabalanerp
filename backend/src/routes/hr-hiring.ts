@@ -19,7 +19,7 @@ import {
   validateHiringFileSignature
 } from '../services/hrHiringFileStorage';
 import { normalizeCandidateAssessmentResult } from '../services/hrCandidateAssessment';
-import { compensationTotalRials, isValidIranianNationalCode, unresolvedActivationRequirements, validateHiringCorrection, validateHiringQuestionnaire } from '../services/hrHiringRules';
+import { compensationTotalRials, isValidIranianNationalCode, validateHiringCorrection, validateHiringQuestionnaire } from '../services/hrHiringRules';
 import {
   applicantOtpHash,
   applicantSubjectHash,
@@ -769,7 +769,7 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
       collateralItems: { select: { required: true, status: true } },
       contracts: { select: { approvedAt: true }, orderBy: { version: 'desc' }, take: 1 },
       payrollParticipation: { select: { id: true } },
-      onboardingTasks: { select: { activationBlocker: true, status: true, ownerAuthority: true, title: true } },
+      onboardingTasks: { select: { id: true, activationBlocker: true, status: true, ownerAuthority: true, title: true } },
       employmentRelationship: { include: { personnel: true } }
     },
     orderBy: { updatedAt: 'desc' }
@@ -2206,16 +2206,16 @@ router.put('/applications/:id/onboarding-tasks/:taskId', asyncHandler(async (req
 router.post('/applications/:id/activate', requireAuthority('HR_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { employmentRelationship: true, onboardingTasks: true, payrollParticipation: true } });
   if (!application.employmentRelationship || application.employmentRelationship.status !== 'PLANNED') throw new Error('رابطه استخدامی برنامه‌ریزی‌شده پیدا نشد.');
-  const unresolved = unresolvedActivationRequirements({
+  const readiness = buildEmploymentActivationReadiness({
     scheduledStartDate: application.scheduledStartDate,
     identityClearance: application.identityClearance,
     collateralClearance: application.collateralClearance,
     contractClearance: application.contractClearance,
     compensationClearance: application.compensationClearance,
-    hasPayrollParticipation: !!application.payrollParticipation,
-    tasks: application.onboardingTasks
+    payrollParticipation: application.payrollParticipation,
+    onboardingTasks: application.onboardingTasks
   });
-  if (unresolved.length) throw new Error(`پیش‌نیازهای فعال‌سازی کامل نیستند: ${unresolved.join('، ')}`);
+  if (!readiness.ready) throw new Error(`پیش‌نیازهای فعال‌سازی کامل نیستند: ${readiness.blockers.map((item) => item.message).join('، ')}`);
   await prisma.$transaction([
     prisma.hrEmploymentRelationship.update({ where: { id: application.employmentRelationship.id }, data: { status: 'ACTIVE' } }),
     prisma.personnel.update({ where: { id: application.employmentRelationship.personnelId }, data: { isActive: true } }),

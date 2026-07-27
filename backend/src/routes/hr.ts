@@ -433,10 +433,18 @@ router.post('/personnel/:id/work-schedule/proposals', viewAccess, async (req: Wo
     const now = new Date();
     const supervisorLink = await prisma.hrEmploymentAssignment.findFirst({
       where: {
-        employmentRelationship: { personnelId: req.params.id, status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] } },
+        employmentRelationship: {
+          personnelId: req.params.id, status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] },
+          effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }]
+        },
         effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
         responsibleSupervisorAssignment: {
-          employmentRelationship: { personnel: { user: { id: actorId(req) } } }
+          effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
+          employmentRelationship: {
+            status: { in: ['ACTIVE', 'SUSPENDED'] }, effectiveFrom: { lte: now },
+            OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
+            personnel: { user: { id: actorId(req) } }
+          }
         }
       },
       select: { id: true }

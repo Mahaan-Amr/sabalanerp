@@ -11,12 +11,30 @@ type ActivationInput = {
   activatedBy?: string | null;
 };
 
+const canonicalDateKey = (value: Date | string) => {
+  const parsed = value instanceof Date ? value : new Date(value);
+  return parsed.toISOString().slice(0, 10);
+};
+
+const tehranDateKey = (value: Date) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(value);
+  const part = (type: string) => parts.find((item) => item.type === type)?.value || '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+};
+
+export const plannedStartHasArrived = (
+  scheduledStartDate?: Date | string | null,
+  now = new Date()
+) => Boolean(scheduledStartDate && canonicalDateKey(scheduledStartDate) <= tehranDateKey(now));
+
 export const buildEmploymentActivationReadiness = (
   input: ActivationInput,
   now = new Date()
 ) => {
   const blockers: Array<{ id: string; message: string }> = [];
-  if (!input.scheduledStartDate || input.scheduledStartDate > now) {
+  if (!plannedStartHasArrived(input.scheduledStartDate, now)) {
     blockers.push({ id: 'PLANNED_START_NOT_REACHED', message: 'تاریخ شروع برنامه‌ریزی‌شده هنوز نرسیده است.' });
   }
   if (input.identityClearance !== 'APPROVED') blockers.push({ id: 'IDENTITY_NOT_APPROVED', message: 'تأیید هویت کامل نشده است.' });

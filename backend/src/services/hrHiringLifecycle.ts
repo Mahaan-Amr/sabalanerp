@@ -1,4 +1,5 @@
 import { paperContractReviewState } from "./hrEmploymentContract";
+import { buildEmploymentActivationReadiness } from "./hrEmploymentActivation";
 
 export const HIRING_LIFECYCLE_PHASES = [
   { id: "APPLICATION", number: 1, title: "تشکیل پرونده و فرم متقاضی" },
@@ -108,6 +109,7 @@ interface ContractLike {
   approvedAt?: Date | string | null;
 }
 interface OnboardingTaskLike {
+  id?: string;
   activationBlocker?: boolean;
   status: string;
   ownerAuthority?: string | null;
@@ -176,17 +178,20 @@ export const projectHiringTaskCapabilities = (
   const authorities = new Set(viewerAuthorities);
   const visibleTo = (...required: string[]) =>
     required.some((authority) => authorities.has(authority));
-  const blockingTasks =
-    source.onboardingTasks?.filter((task) => task.activationBlocker) || [];
-  const activationBlocked =
-    !source.scheduledStartDate ||
-    new Date(source.scheduledStartDate) > new Date() ||
-    source.identityClearance !== "APPROVED" ||
-    source.collateralClearance !== "APPROVED" ||
-    source.contractClearance !== "APPROVED" ||
-    source.compensationClearance !== "APPROVED" ||
-    !source.payrollParticipation ||
-    blockingTasks.some((task) => !isCompleteTask(task.status));
+  const activationBlocked = !buildEmploymentActivationReadiness({
+    scheduledStartDate: source.scheduledStartDate ? new Date(source.scheduledStartDate) : null,
+    identityClearance: source.identityClearance || "NOT_STARTED",
+    collateralClearance: source.collateralClearance || "NOT_STARTED",
+    contractClearance: source.contractClearance || "NOT_STARTED",
+    compensationClearance: source.compensationClearance || "NOT_STARTED",
+    payrollParticipation: source.payrollParticipation,
+    onboardingTasks: (source.onboardingTasks || []).map((task) => ({
+      ...task,
+      title: task.title || "وظیفه آماده‌سازی",
+      activationBlocker: Boolean(task.activationBlocker),
+    })),
+    insuranceEnrollment: source.insuranceEnrollment,
+  }).ready;
   const employmentActive = source.employmentRelationship?.status === "ACTIVE";
   const contractVisible = visibleTo("FINANCE_RECORDER", "FINANCE_MANAGER");
   const latestContract = source.contracts?.[0];
@@ -700,21 +705,25 @@ const onboardingGate = (source: HiringLifecycleSource, viewerUserId?: string): G
 
 const activationGate = (source: HiringLifecycleSource): Gate => {
   const complete = source.employmentRelationship?.status === "ACTIVE";
-  const blockingTasks = source.onboardingTasks?.filter(
-    (task) => task.activationBlocker && !isCompleteTask(task.status),
-  ) || [];
-  const blockers = [
-    ...(!source.scheduledStartDate || new Date(source.scheduledStartDate) > new Date()
-      ? [blocker("PLANNED_START_NOT_REACHED", "تاریخ شروع برنامه‌ریزی‌شده هنوز نرسیده است.", "HR_MANAGER")]
-      : []),
-    ...(source.identityClearance !== "APPROVED" ? [blocker("IDENTITY_NOT_APPROVED", "تأیید هویت کامل نشده است.", "HR_MANAGER")] : []),
-    ...(source.collateralClearance !== "APPROVED" ? [blocker("COLLATERAL_NOT_APPROVED", "تأیید وثیقه کامل نشده است.", "FINANCE_MANAGER")] : []),
-    ...(source.contractClearance !== "APPROVED" ? [blocker("PAPER_CONTRACT_NOT_APPROVED", "قرارداد کاغذی تأیید نشده است.", "FINANCE_MANAGER")] : []),
-    ...(source.compensationClearance !== "APPROVED" ? [blocker("COMPENSATION_NOT_APPROVED", "حقوق و مزایای نهایی تأیید نشده است.", "HR_MANAGER")] : []),
-    ...(!source.payrollParticipation ? [blocker("PAYROLL_NOT_CONFIGURED", "مشارکت حقوق و دستمزد تنظیم نشده است.", "HR_PAYROLL_MANAGER")] : []),
-    ...blockingTasks.map((task) => blocker(`ONBOARDING_TASK:${task.title}`, `وظیفه «${task.title}» تکمیل نشده است.`, task.ownerAuthority || "HR_MANAGER")),
-    ...(source.employmentRelationship?.status === "ENDED" ? [blocker("EMPLOYMENT_ENDED", "رابطه استخدامی پایان یافته است.", "HR_MANAGER")] : []),
-  ];
+  const readiness = buildEmploymentActivationReadiness({
+    scheduledStartDate: source.scheduledStartDate ? new Date(source.scheduledStartDate) : null,
+    identityClearance: source.identityClearance || "NOT_STARTED",
+    collateralClearance: source.collateralClearance || "NOT_STARTED",
+    contractClearance: source.contractClearance || "NOT_STARTED",
+    compensationClearance: source.compensationClearance || "NOT_STARTED",
+    payrollParticipation: source.payrollParticipation,
+    onboardingTasks: (source.onboardingTasks || []).map((task) => ({
+      ...task,
+      title: task.title || "وظیفه آماده‌سازی",
+      activationBlocker: Boolean(task.activationBlocker),
+    })),
+    insuranceEnrollment: source.insuranceEnrollment,
+  });
+  const blockers = readiness.blockers.map((item) => {
+    const task = source.onboardingTasks?.find((candidate) => candidate.id === item.id);
+    return blocker(item.id, item.message, task?.ownerAuthority || "HR_MANAGER");
+  });
+  if (source.employmentRelationship?.status === "ENDED") blockers.push(blocker("EMPLOYMENT_ENDED", "رابطه استخدامی پایان یافته است.", "HR_MANAGER"));
   return {
     complete,
     requiredComplete: complete ? 1 : 0,

@@ -12,11 +12,12 @@
     "test:hr-hiring-lifecycle": "npx tsx src/features/hr-hiring/hiringLifecycleViewModel.test.ts && npx tsx src/features/hr-hiring/hiringQueueViewModel.test.ts",
     "test:hr-assessment-score": "npx tsx src/features/hr-hiring/assessmentScore.test.ts",
     "test:hr-date-boundary": "npx tsx src/features/hr/hrDateBoundary.test.ts && npx tsx src/features/hr/hrCalendarScope.test.ts",
-    "test:hr-display": "npx tsx src/features/hr/hrDisplay.test.ts"
+    "test:hr-display": "npx tsx src/features/hr/hrDisplay.test.ts",
+    "test:hr-e2e": "playwright test e2e/hr-role-workflows.spec.ts"
   },
   "dependencies": {
-    "@sabalanerp/contract-product-graph": "file:../packages/contract-product-graph",
     "@react-three/fiber": "^8.18.0",
+    "@sabalanerp/contract-product-graph": "file:../packages/contract-product-graph",
     "@types/js-cookie": "^3.0.6",
     "@types/moment-jalaali": "^0.7.9",
     "@types/node": "^20",
@@ -41,6 +42,7 @@
     "typescript": "^5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "baseline-browser-mapping": "^2.9.19",
     "eslint": "^8",
     "eslint-config-next": "14.2.5",

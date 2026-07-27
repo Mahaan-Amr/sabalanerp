@@ -1,10 +1,9 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { FaFileContract } from 'react-icons/fa';
+import { ErpInlineState, ErpLoading } from '@/components/erp';
 import { dashboardAPI, salesAPI } from '@/lib/api';
 import { getContractPermissions, type User } from '@/lib/permissions';
 import type { ContractWizardData } from '@/features/contract-creation/types/contract.types';
@@ -13,11 +12,7 @@ const CreateContractWizardClient = dynamic(
   () => import('@/features/contract-creation/CreateContractWizardClient'),
   {
     ssr: false,
-    loading: () => (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center" dir="rtl">
-        <div className="text-gray-600">در حال بارگذاری...</div>
-      </div>
-    )
+    loading: () => <ErpLoading />
   }
 );
 
@@ -104,32 +99,41 @@ export default function SalesContractEditPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12" dir="rtl">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500" />
+      <div className="sds-workspace" dir="rtl">
+        <ErpLoading />
       </div>
     );
   }
 
   if (error || !contract?.contractData) {
     return (
-      <div className="text-center py-12" dir="rtl">
-        <FaFileContract className="mx-auto text-4xl text-slate-500 dark:text-slate-400 mb-4" />
-        <p className="text-slate-500 dark:text-slate-400 mb-4">{error || 'قرارداد یافت نشد'}</p>
-        <Link href={`/dashboard/sales/contracts/${contractId}`} className="glass-liquid-btn-primary">
-          مشاهده قرارداد
-        </Link>
+      <div className="sds-workspace py-8" dir="rtl">
+        <ErpInlineState
+          kind="error"
+          title={error || 'قرارداد یافت نشد'}
+          action={{
+            label: 'مشاهده قرارداد',
+            href: `/dashboard/sales/contracts/${contractId}`
+          }}
+        />
       </div>
     );
   }
 
   return (
-    <div className="space-y-4" dir="rtl">
+    <div className="sds-workspace space-y-4" dir="rtl">
       {contract.canOpenCorrectionEdit && contract.activeCorrectionRequest && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100">
-          <p className="font-semibold">اصلاح قرارداد با تایید حسابداری</p>
-          <p className="mt-2 leading-6">{contract.activeCorrectionRequest.accountantNote}</p>
-          <p className="mt-2 text-xs opacity-80">دسته اصلاح: {contract.activeCorrectionRequest.category}</p>
-        </div>
+        <ErpInlineState
+          kind="stale"
+          title={
+            <span>
+              اصلاح قرارداد با تایید حسابداری — {contract.activeCorrectionRequest.accountantNote}
+              <span className="mr-2 text-xs opacity-80">
+                دسته اصلاح: {contract.activeCorrectionRequest.category}
+              </span>
+            </span>
+          }
+        />
       )}
       <CreateContractWizardClient
         mode="edit"

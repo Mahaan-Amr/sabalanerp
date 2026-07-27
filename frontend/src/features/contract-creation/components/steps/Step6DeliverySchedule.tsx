@@ -2,6 +2,7 @@
 // Delivery schedule management
 
 import React, { useCallback, useEffect, useMemo } from 'react';
+import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
 import { FaPlus, FaTrash, FaChevronUp, FaChevronDown } from 'react-icons/fa';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
@@ -168,16 +169,16 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <h3 className="text-xl font-semibold text-gray-800 dark:text-white mb-2">
+        <h3 className="text-xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] mb-2">
           برنامه تحویل
         </h3>
-        <p className="text-gray-600 dark:text-gray-300">
+        <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
           برنامه تحویل را مشخص کنید
         </p>
       </div>
 
       {deliveryReferenceConflicts.length > 0 && (
-        <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:border-red-700 dark:bg-red-900/20 dark:text-red-200">
+        <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-4 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
           <p className="font-semibold">برنامه تحویل نیاز به بازبینی دارد</p>
           <ul className="mt-2 list-disc space-y-1 pr-5">
             {deliveryReferenceConflicts.map((conflict) => (
@@ -186,13 +187,13 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                 <p className="mt-1 text-xs">
                   شناسه کاتالوگ ذخیره‌شده: {conflict.productId || 'نامشخص'} — مقدار: {formatDisplayNumber(conflict.quantity)} {conflict.unit || ''}
                 </p>
-                <button
+                <ErpPressable
                   type="button"
                   onClick={() => handleRemoveInvalidAssignment(conflict.deliveryIndex, conflict.productItemIndex)}
-                  className="mt-2 rounded-md border border-red-400 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 dark:bg-slate-900 dark:text-red-200"
+                  className="mt-2 rounded-md border border-[var(--sds-danger-border)] bg-[var(--sds-surface-raised)] px-3 py-1.5 text-xs font-semibold text-[var(--sds-danger)] hover:bg-[var(--sds-danger-surface)] dark:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-danger)]"
                 >
                   حذف تخصیص نامعتبر
-                </button>
+                </ErpPressable>
               </li>
             ))}
           </ul>
@@ -201,54 +202,54 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
       
       <div className="max-w-4xl mx-auto">
         <div className="flex justify-between items-center mb-4">
-          <h4 className="text-lg font-medium text-gray-800 dark:text-white">
+          <h4 className="text-lg font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
             لیست تحویل‌ها
           </h4>
-          <button
+          <ErpPressable
             onClick={handleAddDelivery}
-            className="px-4 py-2 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white rounded-lg transition-all duration-200 font-medium flex items-center gap-2"
+            className="sds-tone-primary sds-action-solid flex items-center gap-2 px-4 py-2 font-medium"
           >
             <FaPlus className="w-4 h-4" />
             افزودن تحویل
-          </button>
+          </ErpPressable>
         </div>
 
         {wizardData.deliveries.length === 0 ? (
-          <div className="p-8 text-center border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
-            <p className="text-gray-500 dark:text-gray-400 mb-4">
+          <div className="p-8 text-center border-2 border-dashed border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg">
+            <p className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)] mb-4">
               هنوز برنامه تحویلی ثبت نشده است
             </p>
-            <button
+            <ErpPressable
               onClick={handleAddDelivery}
-              className="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors"
+              className="px-4 py-2 bg-[var(--sds-accent-soft)] text-[var(--sds-text-inverse)] rounded-lg hover:bg-[var(--sds-accent-soft)] transition-colors"
             >
               ایجاد برنامه تحویل
-            </button>
+            </ErpPressable>
           </div>
         ) : (
           <div className="space-y-4">
             {wizardData.deliveries.map((delivery, index) => (
               <div
                 key={index}
-                className="p-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+                className="p-6 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]"
               >
                 <div className="flex justify-between items-start mb-4">
-                  <h5 className="font-semibold text-gray-800 dark:text-white">
+                  <h5 className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
                     تحویل {index + 1}
                   </h5>
-                  <button
+                  <ErpPressable
                     onClick={() => handleRemoveDelivery(index)}
-                    className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                    className="p-2 text-[var(--sds-danger)] dark:text-[var(--sds-danger)] hover:bg-[var(--sds-danger-surface)] dark:hover:bg-[var(--sds-danger-surface)] rounded-lg transition-colors"
                     aria-label={`حذف تحویل ${index + 1}`}
                     title="حذف تحویل"
                   >
                     <FaTrash className="w-4 h-4" />
-                  </button>
+                  </ErpPressable>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
                       تاریخ تحویل
                     </label>
                     <PersianCalendarComponent
@@ -258,75 +259,75 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                       disablePastDates
                     />
                     {errors[`delivery_${index}_date`] && (
-                      <p className="text-red-500 text-xs mt-1">{errors[`delivery_${index}_date`]}</p>
+                      <p className="text-[var(--sds-danger)] text-xs mt-1">{errors[`delivery_${index}_date`]}</p>
                     )}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
                       آدرس تحویل
                     </label>
-                    <input
+                    <ErpInput
                       type="text"
                       value={delivery.deliveryAddress}
                       onChange={(e) => handleUpdateDelivery(index, { deliveryAddress: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                      className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"
                       placeholder="آدرس تحویل"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
                       نام مدیر پروژه
                     </label>
-                    <input
+                    <ErpInput
                       type="text"
                       value={delivery.projectManagerName || ''}
                       onChange={(e) => handleUpdateDelivery(index, { projectManagerName: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                      className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"
                       placeholder="نام مدیر پروژه"
                     />
                     {errors[`delivery_${index}_projectManager`] && (
-                      <p className="text-red-500 text-xs mt-1">{errors[`delivery_${index}_projectManager`]}</p>
+                      <p className="text-[var(--sds-danger)] text-xs mt-1">{errors[`delivery_${index}_projectManager`]}</p>
                     )}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
                       نام تحویل‌گیرنده
                     </label>
-                    <input
+                    <ErpInput
                       type="text"
                       value={delivery.receiverName || ''}
                       onChange={(e) => handleUpdateDelivery(index, { receiverName: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                      className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"
                       placeholder="نام تحویل‌گیرنده"
                     />
                     {errors[`delivery_${index}_receiver`] && (
-                      <p className="text-red-500 text-xs mt-1">{errors[`delivery_${index}_receiver`]}</p>
+                      <p className="text-[var(--sds-danger)] text-xs mt-1">{errors[`delivery_${index}_receiver`]}</p>
                     )}
                   </div>
                 </div>
 
                 <div className="mt-4">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
                     توضیحات (اختیاری)
                   </label>
-                  <textarea
+                  <ErpTextarea
                     value={delivery.notes || ''}
                     onChange={(e) => handleUpdateDelivery(index, { notes: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                    className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"
                     rows={3}
                     placeholder="توضیحات مربوط به این تحویل"
                   />
                 </div>
 
                 {(deliverableProductEntries.length > 0 || schedulableServiceEntries.length > 0) && (
-                  <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
-                    <h6 className="text-sm font-semibold text-gray-800 dark:text-white mb-1">
+                  <div className="mt-4 p-4 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)]">
+                    <h6 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] mb-1">
                       محصولات این تحویل
                     </h6>
-                    <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">
+                    <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mb-3">
                       مقدار تحویل هر محصول را با واحد خودش مشخص کنید. مجموع تحویل‌ها نباید از مقدار کل قرارداد بیشتر شود.
                     </p>
                     <div className="space-y-4">
@@ -344,64 +345,64 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                         return (
                           <div
                             key={product.rowId || productIndex}
-                            className="p-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800/50 space-y-2"
+                            className="p-3 rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] space-y-2"
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span className="text-sm font-medium text-gray-800 dark:text-white">
+                              <span className="text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
                                 {productLabel}
                               </span>
                               {widthSummary && (
-                                <span className="basis-full text-xs font-medium text-slate-500 dark:text-slate-400">
+                                <span className="basis-full text-xs font-medium text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                   {widthSummary}
                                 </span>
                               )}
                               <div className="flex items-center gap-1">
-                                <button
+                                <ErpPressable
                                   type="button"
                                   onClick={() => setQty(currentQty - 1)}
                                   disabled={currentQty <= 0}
-                                  className="p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-1.5 text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
                                   aria-label="کم کردن"
                                 >
                                   <FaChevronDown className="w-3.5 h-3.5" />
-                                </button>
+                                </ErpPressable>
                                 <FormattedNumberInput
                                   value={currentQty}
                                   onChange={(value) => setQty(value)}
                                   min={0}
                                   max={maxForThisDelivery}
                                   step={deliveryUnit === 'count' ? 1 : 0.01}
-                                  className="w-20 px-2 py-1.5 text-sm text-center border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                                  className="w-20 px-2 py-1.5 text-sm text-center border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"
                                 />
-                                <button
+                                <ErpPressable
                                   type="button"
                                   onClick={() => setQty(currentQty + 1)}
                                   disabled={currentQty >= maxForThisDelivery}
-                                  className="p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-1.5 text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
                                   aria-label="زیاد کردن"
                                 >
                                   <FaChevronUp className="w-3.5 h-3.5" />
-                                </button>
+                                </ErpPressable>
                               </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-3 text-xs">
-                              <span className="text-gray-500 dark:text-gray-400">
-                                کل قرارداد: <strong className="text-gray-700 dark:text-gray-300">{formatAmount(contractQty)} {getDeliveryUnitLabel(deliveryUnit)}</strong>
+                              <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
+                                کل قرارداد: <strong className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">{formatAmount(contractQty)} {getDeliveryUnitLabel(deliveryUnit)}</strong>
                               </span>
-                              <span className="text-gray-500 dark:text-gray-400">
-                                ارسال‌شده در تحویل‌های دیگر: <strong className="text-gray-700 dark:text-gray-300">{formatAmount(alreadyAssigned)} {getDeliveryUnitLabel(deliveryUnit)}</strong>
+                              <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
+                                ارسال‌شده در تحویل‌های دیگر: <strong className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">{formatAmount(alreadyAssigned)} {getDeliveryUnitLabel(deliveryUnit)}</strong>
                               </span>
-                              <span className="text-teal-600 dark:text-teal-400 font-medium">
+                              <span className="text-[var(--sds-accent)] dark:text-[var(--sds-accent)] font-medium">
                                 مانده: <strong>{formatAmount(remaining)} {getDeliveryUnitLabel(deliveryUnit)}</strong>
                               </span>
                               {remaining > 0 && currentQty < remaining && (
-                                <button
+                                <ErpPressable
                                   type="button"
                                   onClick={() => setQty(remaining)}
-                                  className="text-teal-600 dark:text-teal-400 hover:underline font-medium"
+                                  className="text-[var(--sds-accent)] dark:text-[var(--sds-accent)] hover:underline font-medium"
                                 >
                                   پر کردن ({formatAmount(remaining)})
-                                </button>
+                                </ErpPressable>
                               )}
                             </div>
                           </div>
@@ -418,59 +419,59 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                         return (
                           <div
                             key={serviceRow.id}
-                            className="p-3 rounded-lg border border-emerald-200 dark:border-emerald-700 bg-white dark:bg-gray-800/50 space-y-2"
+                            className="p-3 rounded-lg border border-[var(--sds-success-border)] dark:border-[var(--sds-success-border)] bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] space-y-2"
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span className="text-sm font-medium text-gray-800 dark:text-white">
+                              <span className="text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
                                 {serviceRow.title}
                               </span>
                               <div className="flex items-center gap-1">
-                                <button
+                                <ErpPressable
                                   type="button"
                                   onClick={() => setQty(currentQty - 1)}
                                   disabled={currentQty <= 0}
-                                  className="p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-1.5 text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
                                   aria-label="کم کردن"
                                 >
                                   <FaChevronDown className="w-3.5 h-3.5" />
-                                </button>
+                                </ErpPressable>
                                 <FormattedNumberInput
                                   value={currentQty}
                                   onChange={(value) => setQty(value)}
                                   min={0}
                                   max={maxForThisDelivery}
                                   step={serviceRow.unit === 'count' ? 1 : 0.01}
-                                  className="w-20 px-2 py-1.5 text-sm text-center border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                                  className="w-20 px-2 py-1.5 text-sm text-center border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"
                                 />
-                                <button
+                                <ErpPressable
                                   type="button"
                                   onClick={() => setQty(currentQty + 1)}
                                   disabled={currentQty >= maxForThisDelivery}
-                                  className="p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-1.5 text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
                                   aria-label="زیاد کردن"
                                 >
                                   <FaChevronUp className="w-3.5 h-3.5" />
-                                </button>
+                                </ErpPressable>
                               </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-3 text-xs">
-                              <span className="text-gray-500 dark:text-gray-400">
-                                کل قرارداد: <strong className="text-gray-700 dark:text-gray-300">{formatAmount(contractQty)} {getServiceRowUnitLabel(serviceRow.unit)}</strong>
+                              <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
+                                کل قرارداد: <strong className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">{formatAmount(contractQty)} {getServiceRowUnitLabel(serviceRow.unit)}</strong>
                               </span>
-                              <span className="text-gray-500 dark:text-gray-400">
-                                زمان‌بندی‌شده در تحویل‌های دیگر: <strong className="text-gray-700 dark:text-gray-300">{formatAmount(alreadyAssigned)} {getServiceRowUnitLabel(serviceRow.unit)}</strong>
+                              <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
+                                زمان‌بندی‌شده در تحویل‌های دیگر: <strong className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">{formatAmount(alreadyAssigned)} {getServiceRowUnitLabel(serviceRow.unit)}</strong>
                               </span>
-                              <span className="text-teal-600 dark:text-teal-400 font-medium">
+                              <span className="text-[var(--sds-accent)] dark:text-[var(--sds-accent)] font-medium">
                                 مانده: <strong>{formatAmount(remaining)} {getServiceRowUnitLabel(serviceRow.unit)}</strong>
                               </span>
                               {remaining > 0 && currentQty < remaining && (
-                                <button
+                                <ErpPressable
                                   type="button"
                                   onClick={() => setQty(remaining)}
-                                  className="text-teal-600 dark:text-teal-400 hover:underline font-medium"
+                                  className="text-[var(--sds-accent)] dark:text-[var(--sds-accent)] hover:underline font-medium"
                                 >
                                   پر کردن ({formatAmount(remaining)})
-                                </button>
+                                </ErpPressable>
                               )}
                             </div>
                           </div>
@@ -478,13 +479,13 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                       })}
                     </div>
                     {errors[`delivery_${index}_products`] && (
-                      <p className="text-red-500 text-sm mt-2">{errors[`delivery_${index}_products`]}</p>
+                      <p className="text-[var(--sds-danger)] text-sm mt-2">{errors[`delivery_${index}_products`]}</p>
                     )}
                   </div>
                 )}
 
                 {errors[`delivery_${index}_products`] && !wizardData.products.length && (
-                  <p className="text-red-500 text-sm mt-2">{errors[`delivery_${index}_products`]}</p>
+                  <p className="text-[var(--sds-danger)] text-sm mt-2">{errors[`delivery_${index}_products`]}</p>
                 )}
               </div>
             ))}
@@ -492,7 +493,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
         )}
 
         {errors.deliveries && (
-          <p className="text-red-500 text-sm mt-2">{errors.deliveries}</p>
+          <p className="text-[var(--sds-danger)] text-sm mt-2">{errors.deliveries}</p>
         )}
       </div>
     </div>

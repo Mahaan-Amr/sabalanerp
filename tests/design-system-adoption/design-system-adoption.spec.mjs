@@ -209,24 +209,19 @@ test('repository manifest classifies every current interactive route', () => {
   );
   assert.equal(
     report.routes.find(({ route }) => route === '/dashboard/sales/contracts/create')?.status,
-    'legacy'
+    'migrated'
   );
   assert.equal(
     report.routes.find(({ route }) => route === '/login')?.status,
     'legacy'
   );
-  assert.deepEqual(
-    report.surfaces.find(({ id }) => id === 'contract-product-selection'),
-    {
-      id: 'contract-product-selection',
-      status: 'reference',
-      acceptanceStatus: 'accepted-reference',
-      reason: 'Contract Product Selection is a reference inside otherwise legacy Contract Creation.',
-      files: [
-        'frontend/src/features/contract-creation/components/product-modal-system/**',
-        'frontend/src/features/contract-creation/components/steps/Step5ProductSelection.tsx'
-      ]
-    }
+  const contractCreationSurface = report.surfaces.find(({ id }) => id === 'contract-creation');
+  assert.equal(contractCreationSurface?.status, 'migrated');
+  assert.equal(contractCreationSurface?.acceptanceStatus, 'accepted');
+  assert.ok(
+    contractCreationSurface?.files.includes(
+      'frontend/src/features/contract-creation/CreateContractWizardClient.tsx'
+    )
   );
   assert.ok(
     report.consumerInventory.shared.some(

@@ -31,12 +31,33 @@ const focusedProductOverlaySources = [
   path,
   read(`frontend/src/features/contract-creation/components/modals/${path}`)
 ]);
+const contractWizardSources = [
+  ['CreateContractWizardClient.tsx', read('frontend/src/features/contract-creation/CreateContractWizardClient.tsx')],
+  ['PaymentEntryModal.tsx', read('frontend/src/features/contract-creation/components/modals/PaymentEntryModal.tsx')],
+  ['WizardNavigation.tsx', read('frontend/src/features/contract-creation/components/shared/WizardNavigation.tsx')],
+  ['WizardProgressBar.tsx', read('frontend/src/features/contract-creation/components/shared/WizardProgressBar.tsx')],
+  ...[
+    'Step1ContractDate.tsx',
+    'Step2CustomerSelection.tsx',
+    'Step3ProjectManagement.tsx',
+    'Step5ProductSelection.tsx',
+    'Step6DeliverySchedule.tsx',
+    'Step7PaymentMethod.tsx',
+    'Step8DigitalSignature.tsx'
+  ].map((path) => [
+    path,
+    read(`frontend/src/features/contract-creation/components/steps/${path}`)
+  ])
+];
 const layoutSource = read('frontend/src/app/layout.tsx');
 const dashboardShellSources = [
   ['dashboard/layout.tsx', read('frontend/src/app/dashboard/layout.tsx')],
   ['WorkspaceNavigation.tsx', read('frontend/src/components/WorkspaceNavigation.tsx')],
   ['WorkspaceSwitcher.tsx', read('frontend/src/components/WorkspaceSwitcher.tsx')],
   ['ThemeToggle.tsx', read('frontend/src/components/ThemeToggle.tsx')]
+];
+const sharedFieldSources = [
+  ['FormattedNumberInput.tsx', read('frontend/src/components/FormattedNumberInput.tsx')]
 ];
 const guardAttendanceSource = read('frontend/src/app/dashboard/security/attendance/page.tsx');
 const guardVehiclesSource = read('frontend/src/app/dashboard/security/vehicles/page.tsx');
@@ -232,6 +253,40 @@ test('focused Product Selection workflows use one semantic dialog and control in
   assert.match(shell, /useReducedMotion\(\)/);
 });
 
+test('the complete Contract Creation wizard uses the shared semantic and accessible interface', () => {
+  const hardcodedPalette =
+    /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|fuchsia|gray|green|indigo|lime|neutral|orange|pink|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
+  const rawControl = /<(?:button|input|select|textarea)\b/;
+  const inaccessibleClickTarget = /<(?:div|span|li)\b[^>]*\bonClick\s*=/;
+
+  for (const [path, source] of contractWizardSources) {
+    assert.match(source, /from '@\/components\/erp'/, `${path} must cross the canonical seam`);
+    assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
+    assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
+    assert.doesNotMatch(source, inaccessibleClickTarget, `${path} must use semantic controls`);
+    assert.doesNotMatch(source, /glass-liquid/, `${path} must not expose the legacy glass layer`);
+  }
+
+  const wizard = contractWizardSources.find(([path]) => path === 'CreateContractWizardClient.tsx')[1];
+  const paymentDialog = contractWizardSources.find(([path]) => path === 'PaymentEntryModal.tsx')[1];
+  const progress = contractWizardSources.find(([path]) => path === 'WizardProgressBar.tsx')[1];
+  const navigation = contractWizardSources.find(([path]) => path === 'WizardNavigation.tsx')[1];
+
+  assert.match(wizard, /<main className="sds-workspace/);
+  assert.match(wizard, /contractSubmission\.isSubmitting/);
+  assert.match(wizard, /editRecovery\.blocked/);
+  assert.match(wizard, /inert: ''/);
+  assert.match(wizard, /role="dialog"/);
+  assert.match(wizard, /aria-modal="true"/);
+  assert.match(wizard, /event\.key === 'Escape'/);
+  assert.match(wizard, /event\.key === 'Tab'/);
+  assert.match(wizard, /previouslyFocused\?\.focus\(\)/);
+  assert.doesNotMatch(wizard, /مراحل ایجاد قرارداد را تکمیل کنید/u);
+  assert.match(paymentDialog, /<CentralProductModalShell/);
+  assert.match(progress, /aria-current=\{isActive \? 'step' : undefined\}/);
+  assert.match(navigation, /aria-busy=\{loading\}/);
+});
+
 test('the application shell preserves shared behavior through canonical accessible surfaces', () => {
   const hardcodedPalette =
     /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|gray|green|indigo|neutral|orange|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
@@ -250,6 +305,14 @@ test('the application shell preserves shared behavior through canonical accessib
   assert.match(shell, /authAPI\.logout/);
   assert.match(shell, /aria-label="بازکردن منوی اصلی"/);
   assert.match(shell, /event\.key === 'Escape'/);
+});
+
+test('shared formatted numeric entry consumes the canonical field primitive', () => {
+  for (const [path, source] of sharedFieldSources) {
+    assert.match(source, /from '@\/components\/erp'/, `${path} must cross the canonical seam`);
+    assert.match(source, /<ErpInput/);
+    assert.doesNotMatch(source, /<input\b/);
+  }
 });
 
 test('Guard daily operations do not reimplement palette or native-control presentation', () => {

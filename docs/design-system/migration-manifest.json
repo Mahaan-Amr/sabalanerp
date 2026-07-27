@@ -8,6 +8,36 @@
       "reason": "The Guard workspace is an accepted Sabalan Design System reference implementation."
     },
     {
+      "pattern": "frontend/src/app/dashboard/sales/contracts/create/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Standard Contract Creation passed behavioral, accessibility, responsive, visual, recovery, and production-build gates."
+    },
+    {
+      "pattern": "frontend/src/app/dashboard/sales/contracts/collaboration/create/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Collaboration Contract Creation uses the accepted shared wizard with its existing domain-specific step policy."
+    },
+    {
+      "pattern": "frontend/src/app/dashboard/sales/contracts/[id]/edit/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Contract editing uses the accepted shared wizard while preserving permission, correction, lock, and recovery behavior."
+    },
+    {
+      "pattern": "frontend/src/app/dashboard/contracts/create/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "The legacy-compatible Contract Creation alias resolves to the accepted shared wizard."
+    },
+    {
+      "pattern": "frontend/src/app/dashboard/contracts/[id]/edit/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "The legacy-compatible contract edit alias resolves to the accepted shared wizard."
+    },
+    {
       "pattern": "frontend/src/app/**/page.tsx",
       "status": "legacy",
       "acceptanceStatus": "not-started",
@@ -28,13 +58,22 @@
       ]
     },
     {
-      "id": "contract-product-selection",
-      "status": "reference",
-      "acceptanceStatus": "accepted-reference",
-      "reason": "Contract Product Selection is a reference inside otherwise legacy Contract Creation.",
+      "id": "contract-creation",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "The full standard, collaboration, and edit wizard uses the Sabalan Design System while preserving product graph identity, calculations, permissions, persisted meaning, recovery, and submission behavior.",
       "files": [
+        "frontend/src/app/dashboard/contracts/create/page.tsx",
+        "frontend/src/app/dashboard/contracts/[id]/edit/page.tsx",
+        "frontend/src/app/dashboard/sales/contracts/create/page.tsx",
+        "frontend/src/app/dashboard/sales/contracts/collaboration/create/page.tsx",
+        "frontend/src/app/dashboard/sales/contracts/[id]/edit/page.tsx",
+        "frontend/src/components/FormattedNumberInput.tsx",
+        "frontend/src/features/contract-creation/CreateContractWizardClient.tsx",
+        "frontend/src/features/contract-creation/components/modals/**",
         "frontend/src/features/contract-creation/components/product-modal-system/**",
-        "frontend/src/features/contract-creation/components/steps/Step5ProductSelection.tsx"
+        "frontend/src/features/contract-creation/components/shared/**",
+        "frontend/src/features/contract-creation/components/steps/**"
       ]
     }
   ],

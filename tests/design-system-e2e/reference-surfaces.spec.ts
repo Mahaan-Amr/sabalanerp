@@ -174,8 +174,9 @@ test('Product Selection restores into the shared interface without changing pers
 
   await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=4');
   await expect(page.getByRole('region', { name: 'کاتالوگ محصولات' })).toBeVisible();
-  await expect(page.locator('.sds-workspace')).toHaveCount(1);
-  await expect(page.locator('.sds-workspace-surface')).toHaveCount(3);
+  await expect(page.locator('main.sds-workspace')).toHaveCount(1);
+  expect(await page.locator('main.sds-workspace .sds-workspace-surface').count())
+    .toBeGreaterThanOrEqual(3);
   await expect(page.locator('[data-contract-row-id="source-row"]')).toBeVisible();
   await expect(page.locator('[data-contract-row-id="child-row"]')).toBeVisible();
   await expect(page.getByText('خدمت مستقل', { exact: true })).toBeVisible();
@@ -197,11 +198,146 @@ test('Product Selection restores into the shared interface without changing pers
   expect(focusStyle.outlineColor).not.toBe('');
 
   await page.setViewportSize({ width: 390, height: 844 });
-  const productStepFits = await page.locator('.sds-workspace').evaluate((element) => {
+  const productStepFits = await page.locator('main.sds-workspace').evaluate((element) => {
     const rect = element.getBoundingClientRect();
     return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
   });
   expect(productStepFits).toBe(true);
+});
+
+test('Contract Creation keeps early and consequential steps accessible and responsive', async ({ page }) => {
+  await login(page);
+  await page.evaluate(() => localStorage.removeItem('contractWizardState'));
+  await page.goto('/dashboard/sales/contracts/create');
+
+  const earlyWorkspace = page.locator('main.sds-workspace');
+  await expect(earlyWorkspace).toBeVisible();
+  await expect(earlyWorkspace.locator('nav[aria-label]')).toBeVisible();
+  await expect(earlyWorkspace.locator('button[aria-current="step"]')).toHaveCount(1);
+  expect(await earlyWorkspace.evaluate((element) =>
+    Array.from(element.querySelectorAll('input:not([type="checkbox"]), select, textarea'))
+      .every((field) => field.classList.contains('sds-field'))
+  )).toBe(true);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await earlyWorkspace.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
+  })).toBe(true);
+
+  await page.evaluate(() => {
+    localStorage.setItem('contractWizardState', JSON.stringify({
+      currentStep: 7,
+      wizardData: {
+        contractKind: 'standard',
+        contractDate: '1405/05/05',
+        contractNumber: '',
+        creatorSequenceNumber: null,
+        customerId: '',
+        customer: null,
+        projectId: '',
+        project: null,
+        selectedProductTypeForAddition: null,
+        products: [],
+        serviceRows: [],
+        deliveries: [],
+        payment: {
+          payments: [],
+          currency: 'ØªÙˆÙ…Ø§Ù†',
+          totalContractAmount: 0
+        },
+        discount: null,
+        signature: null
+      }
+    }));
+  });
+  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=7');
+
+  const consequentialWorkspace = page.locator('main.sds-workspace');
+  await expect(consequentialWorkspace.locator('button[aria-current="step"]')).toHaveCount(1);
+  const consequentialFields = consequentialWorkspace.locator(
+    'input:not([type="checkbox"]), select, textarea'
+  );
+  expect(await consequentialFields.count()).toBeGreaterThan(0);
+  expect(await consequentialFields.evaluateAll((fields) =>
+    fields.every((field) => field.classList.contains('sds-field'))
+  )).toBe(true);
+  expect(await consequentialWorkspace.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
+  })).toBe(true);
+});
+
+test('Contract submission preserves input across an invalid response and succeeds on retry', async ({ page }) => {
+  let submissionAttempts = 0;
+  await page.route('**/sales/contracts', async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.continue();
+      return;
+    }
+    submissionAttempts += 1;
+    if (submissionAttempts === 1) {
+      await route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: false, error: 'E2E_VALIDATION_RETRY' })
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        data: {
+          id: 'e2e-contract',
+          contractNumber: 'E2E-1001',
+          creatorSequenceNumber: 1001,
+          status: 'DRAFT'
+        }
+      })
+    });
+  });
+
+  await login(page);
+  await page.evaluate(() => {
+    localStorage.setItem('contractWizardState', JSON.stringify({
+      currentStep: 8,
+      wizardData: {
+        contractKind: 'standard',
+        contractDate: '1405/05/05',
+        contractNumber: 'E2E-DRAFT',
+        creatorSequenceNumber: null,
+        customerId: '',
+        customer: null,
+        projectId: '',
+        project: null,
+        selectedProductTypeForAddition: null,
+        products: [],
+        serviceRows: [],
+        deliveries: [],
+        payment: {
+          payments: [],
+          currency: 'تومان',
+          totalContractAmount: 0
+        },
+        discount: null,
+        signature: null
+      }
+    }));
+  });
+  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=8');
+
+  const submit = page.getByRole('button', { name: 'ثبت قرارداد', exact: true });
+  await expect(submit).toBeEnabled({ timeout: 15_000 });
+  await submit.click();
+  await expect(page.getByText('E2E_VALIDATION_RETRY', { exact: true })).toBeVisible();
+  await expect(submit).toBeEnabled();
+
+  await submit.click();
+  await expect(page.getByRole('button', { name: 'اتمام و بازگشت به قراردادها', exact: true }))
+    .toBeVisible();
+  expect(submissionAttempts).toBe(2);
 });
 
 test('Guard attendance and vehicle operations use canonical fields and responsive surfaces', async ({ page }) => {

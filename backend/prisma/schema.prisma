@@ -3155,6 +3155,11 @@ enum HrInsuranceEnrollmentStatus {
   EXEMPT
 }
 
+enum HrInsuranceRegistrationPath {
+  COMPANY
+  INDEPENDENT_REQUEST
+}
+
 enum HrOnboardingTaskStatus {
   PENDING
   IN_PROGRESS
@@ -3787,16 +3792,19 @@ model HrEmploymentContractDocument {
 }
 
 model HrInsuranceEnrollment {
-  id            String                      @id @default(cuid())
-  applicationId String                      @unique
-  status        HrInsuranceEnrollmentStatus @default(NOT_STARTED)
-  effectiveDate DateTime?
-  dueDate       DateTime?
-  note          String?
-  updatedBy     String
-  createdAt     DateTime                    @default(now())
-  updatedAt     DateTime                    @updatedAt
-  application   HrJobApplication            @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  id                  String                      @id @default(cuid())
+  applicationId       String                      @unique
+  registrationPath    HrInsuranceRegistrationPath @default(COMPANY)
+  status              HrInsuranceEnrollmentStatus @default(NOT_STARTED)
+  effectiveDate       DateTime?
+  dueDate             DateTime?
+  communicationMethod String?
+  communicatedAt      DateTime?
+  note                String?
+  updatedBy           String
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+  application         HrJobApplication            @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
   @@index([status, dueDate])
   @@map("hr_insurance_enrollments")

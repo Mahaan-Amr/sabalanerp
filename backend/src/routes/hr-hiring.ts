@@ -44,6 +44,7 @@ import {
   assertPaperContractReviewable,
   paperContractReviewState
 } from '../services/hrEmploymentContract';
+import { normalizeInsuranceEnrollmentCommand } from '../services/hrInsuranceEnrollment';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -2115,14 +2116,46 @@ router.post('/applications/:id/payroll-participation', requireAuthority('HR_PAYR
 }));
 
 router.put('/applications/:id/insurance', requireAuthority('HR_PROCESSOR'), asyncHandler(async (req: AuthRequest, res: Response) => {
-  if (!['NOT_STARTED', 'IN_PROGRESS', 'ACTIVE', 'EXEMPT'].includes(req.body.status)) throw new Error('وضعیت بیمه نامعتبر است.');
-  if (req.body.status === 'ACTIVE' && !req.body.effectiveDate) throw new Error('تاریخ شروع بیمه فعال الزامی است.');
+  const command = normalizeInsuranceEnrollmentCommand(req.body);
+  const effectiveDate = command.effectiveDate ? parseDate(command.effectiveDate, 'تاریخ شروع پوشش بیمه') : null;
+  const dueDate = command.dueDate ? parseDate(command.dueDate, 'مهلت پیگیری بیمه') : null;
+  const communicatedAt = command.communicatedAt ? parseDate(command.communicatedAt, 'زمان اعلام درخواست ثبت مستقل') : null;
   const row = await prisma.hrInsuranceEnrollment.upsert({
     where: { applicationId: req.params.id },
-    create: { applicationId: req.params.id, status: req.body.status, effectiveDate: req.body.effectiveDate ? parseDate(req.body.effectiveDate, 'تاریخ بیمه') : null, dueDate: req.body.dueDate ? parseDate(req.body.dueDate, 'مهلت بیمه') : null, note: req.body.note || null, updatedBy: actorId(req) },
-    update: { status: req.body.status, effectiveDate: req.body.effectiveDate ? parseDate(req.body.effectiveDate, 'تاریخ بیمه') : null, dueDate: req.body.dueDate ? parseDate(req.body.dueDate, 'مهلت بیمه') : null, note: req.body.note || null, updatedBy: actorId(req) }
+    create: {
+      applicationId: req.params.id,
+      registrationPath: command.registrationPath as any,
+      status: command.status as any,
+      effectiveDate,
+      dueDate,
+      communicationMethod: command.communicationMethod,
+      communicatedAt,
+      note: command.note,
+      updatedBy: actorId(req)
+    },
+    update: {
+      registrationPath: command.registrationPath as any,
+      status: command.status as any,
+      effectiveDate,
+      dueDate,
+      communicationMethod: command.communicationMethod,
+      communicatedAt,
+      note: command.note,
+      updatedBy: actorId(req)
+    }
   });
-  if (['ACTIVE', 'EXEMPT'].includes(row.status)) await prisma.hrOnboardingTask.updateMany({ where: { applicationId: req.params.id, title: 'پیگیری ثبت بیمه' }, data: { status: 'COMPLETE', completedBy: actorId(req), completedAt: new Date() } });
+  const resolved = ['ACTIVE', 'EXEMPT'].includes(row.status);
+  await prisma.hrOnboardingTask.updateMany({
+    where: { applicationId: req.params.id, title: 'پیگیری ثبت بیمه' },
+    data: resolved
+      ? { status: 'COMPLETE', completedBy: actorId(req), completedAt: new Date() }
+      : { status: 'PENDING', completedBy: null, completedAt: null }
+  });
+  await audit(req.params.id, 'INSURANCE_ENROLLMENT_UPDATED', req, {
+    registrationPath: row.registrationPath,
+    status: row.status,
+    communicatedAt: row.communicatedAt
+  });
   res.json({ success: true, data: row });
 }));
 

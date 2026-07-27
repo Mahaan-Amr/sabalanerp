@@ -41,6 +41,13 @@ export const fromIsoDate = (value?: string | null) => {
   const parsed = moment(String(value).slice(0, 10), 'YYYY-MM-DD', true);
   return parsed.isValid() ? parsed.format('jYYYY/jMM/jDD') : String(value);
 };
+export const fromIsoDateTime = (value?: string | null) => {
+  if (!value) return '';
+  const parsed = moment(value);
+  return parsed.isValid()
+    ? parsed.utcOffset(3 * 60 + 30).format('jYYYY/jMM/jDD HH:mm')
+    : String(value);
+};
 export const toIsoDateTime = (value: string) => {
   if (!value) return '';
   const parsed = moment(latinDigits(value), 'jYYYY/jMM/jDD HH:mm', true);

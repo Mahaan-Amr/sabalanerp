@@ -23,11 +23,13 @@ import {
   hiringTaskDetailVisible,
   resolveSelectedHiringPhase,
 } from "@/features/hr-hiring/hiringLifecycleViewModel";
+import { insuranceSubmissionBlocker } from "@/features/hr-hiring/insuranceViewModel";
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
 import {
   dateTimeFa,
   fromIsoDate,
+  fromIsoDateTime,
   HrField,
   toIsoDate,
   toIsoDateTime,
@@ -196,9 +198,12 @@ export default function HiringCasePage() {
   });
   const [contractReturnReason, setContractReturnReason] = useState("");
   const [insurance, setInsurance] = useState({
+    registrationPath: "COMPANY",
     status: "NOT_STARTED",
     effectiveDate: "",
     dueDate: "",
+    communicationMethod: "PHONE",
+    communicatedAt: "",
     note: "",
   });
   const [payrollDate, setPayrollDate] = useState("");
@@ -219,6 +224,9 @@ export default function HiringCasePage() {
           ),
           dueDate: fromIsoDate(
             result.data.data.insuranceEnrollment.dueDate,
+          ),
+          communicatedAt: fromIsoDateTime(
+            result.data.data.insuranceEnrollment.communicatedAt,
           ),
         });
     } catch (e) {
@@ -2044,44 +2052,97 @@ export default function HiringCasePage() {
               <div className="grid gap-3 xl:grid-cols-3">
                 {canViewInsuranceTask && (
                   <ErpCard className="space-y-2 p-4">
-                    <select
-                      className={field}
-                      value={insurance.status}
-                      onChange={(e) =>
-                        setInsurance({ ...insurance, status: e.target.value })
-                      }
-                    >
-                      <option value="NOT_STARTED">شروع نشده</option>
-                      <option value="IN_PROGRESS">در حال پیگیری</option>
-                      <option value="ACTIVE">فعال</option>
-                      <option value="EXEMPT">معاف/غیرقابل اعمال</option>
-                    </select>
-                    <HrField
-                      label="تاریخ شروع پوشش بیمه"
-                      required={insurance.status === "ACTIVE"}
-                      hint={insurance.status === "ACTIVE" ? undefined : "اختیاری تا زمان فعال‌شدن بیمه"}
-                    >
-                      <HrPersianCalendar
-                        value={insurance.effectiveDate}
-                        onChange={(effectiveDate) =>
+                    <HrField label="روش ثبت بیمه" required>
+                      <select
+                        className={field}
+                        value={insurance.registrationPath}
+                        onChange={(e) =>
                           setInsurance({
                             ...insurance,
-                            effectiveDate,
+                            registrationPath: e.target.value,
                           })
                         }
-                      />
+                      >
+                        <option value="COMPANY">ثبت بیمه توسط شرکت</option>
+                        <option value="INDEPENDENT_REQUEST">
+                          درخواست ثبت مستقل توسط شخص
+                        </option>
+                      </select>
                     </HrField>
-                    <HrField
-                      label="مهلت پیگیری ثبت بیمه"
-                      hint="اختیاری و غیرمسدودکننده فعال‌سازی همکاری"
-                    >
-                      <HrPersianCalendar
-                        value={insurance.dueDate}
-                        onChange={(dueDate) =>
-                          setInsurance({ ...insurance, dueDate })
-                        }
-                      />
-                    </HrField>
+                    {insurance.registrationPath === "COMPANY" ? (
+                      <>
+                        <HrField label="وضعیت عملیاتی بیمه" required>
+                          <select
+                            className={field}
+                            value={insurance.status}
+                            onChange={(e) =>
+                              setInsurance({ ...insurance, status: e.target.value })
+                            }
+                          >
+                            <option value="NOT_STARTED">شروع نشده</option>
+                            <option value="IN_PROGRESS">در حال پیگیری</option>
+                            <option value="ACTIVE">فعال</option>
+                            <option value="EXEMPT">معاف/غیرقابل اعمال</option>
+                          </select>
+                        </HrField>
+                        <HrField
+                          label="تاریخ شروع پوشش بیمه"
+                          required={insurance.status === "ACTIVE"}
+                          hint={insurance.status === "ACTIVE" ? undefined : "اختیاری تا زمان فعال‌شدن بیمه"}
+                        >
+                          <HrPersianCalendar
+                            value={insurance.effectiveDate}
+                            onChange={(effectiveDate) =>
+                              setInsurance({ ...insurance, effectiveDate })
+                            }
+                          />
+                        </HrField>
+                        <HrField
+                          label="مهلت پیگیری ثبت بیمه"
+                          hint="اختیاری و غیرمسدودکننده فعال‌سازی همکاری"
+                        >
+                          <HrPersianCalendar
+                            value={insurance.dueDate}
+                            onChange={(dueDate) =>
+                              setInsurance({ ...insurance, dueDate })
+                            }
+                          />
+                        </HrField>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs text-slate-600 dark:text-slate-300">
+                          با ثبت این انتخاب، پیگیری شرکت خاتمه می‌یابد و مدرک یا
+                          تاریخ فعال‌سازی بعدی از شخص درخواست نمی‌شود.
+                        </p>
+                        <HrField label="روش اعلام درخواست شخص" required>
+                          <select
+                            className={field}
+                            value={insurance.communicationMethod}
+                            onChange={(e) =>
+                              setInsurance({
+                                ...insurance,
+                                communicationMethod: e.target.value,
+                              })
+                            }
+                          >
+                            <option value="PHONE">تماس تلفنی</option>
+                            <option value="IN_PERSON">حضوری</option>
+                            <option value="MESSAGE">پیام</option>
+                            <option value="EMAIL">ایمیل</option>
+                          </select>
+                        </HrField>
+                        <HrField label="زمان اعلام درخواست شخص" required>
+                          <HrPersianCalendar
+                            showTime
+                            value={insurance.communicatedAt}
+                            onChange={(communicatedAt) =>
+                              setInsurance({ ...insurance, communicatedAt })
+                            }
+                          />
+                        </HrField>
+                      </>
+                    )}
                     <textarea
                       className={field}
                       placeholder="یادداشت"
@@ -2092,6 +2153,7 @@ export default function HiringCasePage() {
                     />
                     <ErpButton
                       label="ذخیره وضعیت بیمه"
+                      disabled={Boolean(insuranceSubmissionBlocker(insurance))}
                       onClick={() =>
                         run(
                           () =>
@@ -2099,6 +2161,9 @@ export default function HiringCasePage() {
                               ...insurance,
                               effectiveDate: toIsoDate(insurance.effectiveDate),
                               dueDate: toIsoDate(insurance.dueDate),
+                              communicatedAt: toIsoDateTime(
+                                insurance.communicatedAt,
+                              ),
                             }),
                           "بیمه به‌روزرسانی شد.",
                         )

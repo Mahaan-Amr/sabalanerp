@@ -80,6 +80,36 @@
       "reason": "Accounting work queues, financial records, tax, corrections, audit, and oversight use canonical semantic controls while preserving financial rules and audit meaning."
     },
     {
+      "pattern": "frontend/src/app/dashboard/hr/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "HR structure, personnel, migration, hiring queues, lifecycle, authorities, and collateral configuration use the shared semantic foundation."
+    },
+    {
+      "pattern": "frontend/src/app/dashboard/users/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "User registry, creation, details, editing, and permission handoff use canonical controls and responsive workspaces."
+    },
+    {
+      "pattern": "frontend/src/app/dashboard/departments/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Department registry and creation use canonical controls while preserving organizational relationships."
+    },
+    {
+      "pattern": "frontend/src/app/dashboard/admin/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Administrative permissions, security, reporting, calendar, discount, and settings surfaces use the shared semantic foundation."
+    },
+    {
+      "pattern": "frontend/src/app/apply/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "The public applicant flow uses canonical accessible inputs and responsive semantic surfaces while retaining token compatibility."
+    },
+    {
       "pattern": "frontend/src/app/**/page.tsx",
       "status": "legacy",
       "acceptanceStatus": "not-started",
@@ -170,6 +200,20 @@
       "files": [
         "frontend/src/app/dashboard/accounting/**",
         "frontend/src/features/accounting/**"
+      ]
+    },
+    {
+      "id": "people-and-administration",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Applicant intake, Hiring, HR, Users, Departments, Permissions, and Admin now share one focused interaction and visual foundation.",
+      "files": [
+        "frontend/src/app/apply/**",
+        "frontend/src/app/dashboard/hr/**",
+        "frontend/src/app/dashboard/users/**",
+        "frontend/src/app/dashboard/departments/**",
+        "frontend/src/app/dashboard/admin/**",
+        "frontend/src/features/hr-hiring/**"
       ]
     }
   ],

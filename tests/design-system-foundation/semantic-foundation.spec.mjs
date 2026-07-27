@@ -124,6 +124,40 @@ const accountingSources = [
   ['AccountingActionModal.tsx', read('frontend/src/features/accounting/AccountingActionModal.tsx')],
   ['accountingUi.tsx', read('frontend/src/features/accounting/accountingUi.tsx')]
 ];
+const peopleAdministrationSources = [
+  ...[
+    'page.tsx',
+    'hiring/page.tsx',
+    'hiring/[id]/page.tsx',
+    'hiring/authorities/page.tsx',
+    'hiring/collateral-templates/page.tsx',
+    'migration/page.tsx',
+    'personnel/page.tsx',
+    'structure/page.tsx'
+  ].map((path) => [path, read(`frontend/src/app/dashboard/hr/${path}`)]),
+  ...[
+    'page.tsx',
+    'create/page.tsx',
+    '[id]/page.tsx',
+    '[id]/edit/page.tsx',
+    '[id]/permissions/page.tsx'
+  ].map((path) => [path, read(`frontend/src/app/dashboard/users/${path}`)]),
+  ...['page.tsx', 'create/page.tsx'].map((path) => [
+    path,
+    read(`frontend/src/app/dashboard/departments/${path}`)
+  ]),
+  ...[
+    'discount-settings/page.tsx',
+    'permissions/page.tsx',
+    'reports/page.tsx',
+    'sabalan-calendar/page.tsx',
+    'security/page.tsx',
+    'settings/page.tsx'
+  ].map((path) => [path, read(`frontend/src/app/dashboard/admin/${path}`)]),
+  ['apply/page.tsx', read('frontend/src/app/apply/page.tsx')],
+  ['apply/[token]/page.tsx', read('frontend/src/app/apply/[token]/page.tsx')],
+  ['HiringLifecycle.tsx', read('frontend/src/features/hr-hiring/HiringLifecycle.tsx')]
+];
 const guardAttendanceSource = read('frontend/src/app/dashboard/security/attendance/page.tsx');
 const guardVehiclesSource = read('frontend/src/app/dashboard/security/vehicles/page.tsx');
 const guardPageSources = [
@@ -425,6 +459,18 @@ test('Accounting entry, review, and oversight surfaces use canonical semantic co
   const rawControl = /<(?:button|input|select|textarea)\b/;
 
   for (const [path, source] of accountingSources) {
+    assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
+    assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
+    assert.doesNotMatch(source, /<div\b[^>]*\bonClick=/, `${path} must not use inaccessible clickable containers`);
+  }
+});
+
+test('People, applicant, permission, and administration surfaces use canonical semantic controls', () => {
+  const hardcodedPalette =
+    /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|fuchsia|gray|green|indigo|lime|neutral|orange|pink|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
+  const rawControl = /<(?:button|input|select|textarea)\b/;
+
+  for (const [path, source] of peopleAdministrationSources) {
     assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
     assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
     assert.doesNotMatch(source, /<div\b[^>]*\bonClick=/, `${path} must not use inaccessible clickable containers`);

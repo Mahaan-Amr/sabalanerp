@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaCheck, FaTimes, FaUserEdit } from 'react-icons/fa';
@@ -175,7 +175,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
       ) : (
         <form onSubmit={handleSubmit} className="space-y-5">
           {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">
+            <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-4 text-sm font-medium text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
               {error}
             </div>
           )}
@@ -183,24 +183,24 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
           <ErpSection title="اطلاعات پایه">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <label className="block">
-                <span className="mb-2 block text-sm text-slate-600 dark:text-slate-300">نام *</span>
-                <input name="firstName" value={formData.firstName} onChange={handleInputChange} className="glass-liquid-input w-full" required />
+                <span className="mb-2 block text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نام *</span>
+                <ErpInput name="firstName" value={formData.firstName} onChange={handleInputChange} className="sds-field w-full" required />
               </label>
               <label className="block">
-                <span className="mb-2 block text-sm text-slate-600 dark:text-slate-300">نام خانوادگی *</span>
-                <input name="lastName" value={formData.lastName} onChange={handleInputChange} className="glass-liquid-input w-full" required />
+                <span className="mb-2 block text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نام خانوادگی *</span>
+                <ErpInput name="lastName" value={formData.lastName} onChange={handleInputChange} className="sds-field w-full" required />
               </label>
               <label className="block">
-                <span className="mb-2 block text-sm text-slate-600 dark:text-slate-300">ایمیل *</span>
-                <input type="email" name="email" value={formData.email} onChange={handleInputChange} className="glass-liquid-input w-full" dir="ltr" required />
+                <span className="mb-2 block text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">ایمیل *</span>
+                <ErpInput type="email" name="email" value={formData.email} onChange={handleInputChange} className="sds-field w-full" dir="ltr" required />
               </label>
               <label className="block">
-                <span className="mb-2 block text-sm text-slate-600 dark:text-slate-300">نام کاربری *</span>
-                <input name="username" value={formData.username} onChange={handleInputChange} className="glass-liquid-input w-full" dir="ltr" required />
+                <span className="mb-2 block text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نام کاربری *</span>
+                <ErpInput name="username" value={formData.username} onChange={handleInputChange} className="sds-field w-full" dir="ltr" required />
               </label>
               <label className="block">
-                <span className="mb-2 block text-sm text-slate-600 dark:text-slate-300">شماره تماس</span>
-                <input type="tel" name="phone" value={formData.phone} onChange={handleInputChange} className="glass-liquid-input w-full" dir="ltr" />
+                <span className="mb-2 block text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">شماره تماس</span>
+                <ErpInput type="tel" name="phone" value={formData.phone} onChange={handleInputChange} className="sds-field w-full" dir="ltr" />
               </label>
             </div>
           </ErpSection>
@@ -208,8 +208,8 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
           <ErpSection title="نقش و وضعیت">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <label className="block">
-                <span className="mb-2 block text-sm text-slate-600 dark:text-slate-300">نقش</span>
-                <select name="role" value={formData.role} onChange={handleInputChange} className="glass-liquid-input w-full">
+                <span className="mb-2 block text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نقش</span>
+                <ErpSelect name="role" value={formData.role} onChange={handleInputChange} className="sds-field w-full">
                   <option value="USER">کاربر</option>
                   <option value="MODERATOR">ناظر</option>
                   <option value="SALES">فروش</option>
@@ -219,36 +219,36 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
                       <option value="ADMIN">مدیر سیستم</option>
                     </>
                   )}
-                </select>
+                </ErpSelect>
               </label>
               <label className="block">
-                <span className="mb-2 block text-sm text-slate-600 dark:text-slate-300">بخش</span>
-                <select name="departmentId" value={formData.departmentId} onChange={handleInputChange} className="glass-liquid-input w-full">
+                <span className="mb-2 block text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">بخش</span>
+                <ErpSelect name="departmentId" value={formData.departmentId} onChange={handleInputChange} className="sds-field w-full">
                   <option value="">بدون بخش</option>
                   {departments.map((department) => (
                     <option key={department.id} value={department.id}>
                       {department.namePersian}
                     </option>
                   ))}
-                </select>
+                </ErpSelect>
               </label>
               <label className="flex items-center gap-2">
-                <input type="checkbox" name="isActive" checked={formData.isActive} onChange={handleInputChange} className="rounded border-slate-300 text-teal-600 focus:ring-teal-500" />
-                <span className="text-sm text-slate-600 dark:text-slate-300">کاربر فعال</span>
+                <ErpInput type="checkbox" name="isActive" checked={formData.isActive} onChange={handleInputChange} className="rounded border-[var(--sds-border-default)] text-[var(--sds-accent)] focus:ring-[var(--sds-focus-ring)]" />
+                <span className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">کاربر فعال</span>
               </label>
             </div>
           </ErpSection>
 
           <div className="flex flex-wrap justify-end gap-2">
             <ErpButton label="انصراف" href={`/dashboard/users/${params.id}`} tone="neutral" variant="outline" icon={FaTimes} />
-            <button
+            <ErpPressable
               type="submit"
               disabled={saving}
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[#074747] bg-[#074747] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#0b5c5c] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[var(--sds-accent)] bg-[var(--sds-accent)] px-3 py-2 text-sm font-semibold text-[var(--sds-text-inverse)] transition-colors hover:bg-[var(--sds-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <FaCheck className="h-4 w-4" />
               <span>{saving ? 'در حال ذخیره...' : 'ذخیره'}</span>
-            </button>
+            </ErpPressable>
           </div>
         </form>
       )}

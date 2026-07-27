@@ -1,3 +1,4 @@
+import { ErpPressable } from '@/components/erp';
 import type { ComponentType } from "react";
 import {
   FaBan,
@@ -17,19 +18,19 @@ import {
 
 const statusStyle: Record<HiringLifecycleStatus, string> = {
   COMPLETED:
-    "border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200",
+    "border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]",
   ACTION_REQUIRED:
-    "border-teal-500 bg-teal-50 text-teal-900 dark:bg-teal-950/40 dark:text-teal-100",
+    "border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] text-[var(--sds-accent)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]",
   WAITING:
-    "border-amber-400 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-100",
+    "border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] text-[var(--sds-warning)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]",
   BLOCKED:
-    "border-rose-500 bg-rose-50 text-rose-900 dark:bg-rose-950/30 dark:text-rose-100",
+    "border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]",
   PAUSED:
-    "border-violet-500 bg-violet-50 text-violet-900 dark:bg-violet-950/30 dark:text-violet-100",
+    "border-[var(--sds-info-border)] bg-[var(--sds-info-surface)] text-[var(--sds-info)] dark:bg-[var(--sds-info-surface)] dark:text-[var(--sds-info)]",
   UPCOMING:
-    "border-slate-300 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400",
+    "border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-muted)]",
   ENDED:
-    "border-slate-400 bg-slate-100 text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300",
+    "border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-muted)]",
 };
 
 const statusIcon: Record<
@@ -60,13 +61,13 @@ const PhaseButton = ({
 }) => {
   const Icon = statusIcon[phase.status];
   return (
-    <button
+    <ErpPressable
       type="button"
       aria-current={current ? "step" : undefined}
       aria-pressed={selected}
       aria-label={`مرحله ${phase.number}: ${phase.title}، ${hiringLifecycleStatusLabel[phase.status]}`}
       onClick={() => onSelect(phase.id)}
-      className={`group relative shrink-0 rounded-xl border text-right outline-none transition-[border-color,background-color,color,transform] duration-200 motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950 ${statusStyle[phase.status]} ${selected ? "ring-2 ring-emerald-500 ring-offset-2 dark:ring-offset-slate-950" : ""} ${compact ? "w-36 p-3" : "min-h-32 w-full p-3"}`}
+      className={`group relative shrink-0 rounded-xl border text-right outline-none transition-[border-color,background-color,color,transform] duration-200 motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950 ${statusStyle[phase.status]} ${selected ? "ring-2 ring-[var(--sds-focus-ring)] ring-offset-2 dark:ring-offset-slate-950" : ""} ${compact ? "w-36 p-3" : "min-h-32 w-full p-3"}`}
     >
       <span className="flex items-center justify-between gap-2">
         <span className="text-xs font-black">{phase.number}</span>
@@ -78,7 +79,7 @@ const PhaseButton = ({
       <span className="mt-2 block text-[11px] font-bold">
         {hiringLifecycleStatusLabel[phase.status]}
       </span>
-    </button>
+    </ErpPressable>
   );
 };
 
@@ -96,17 +97,17 @@ export function HiringLifecycle({
     <section
       dir="rtl"
       aria-labelledby="hiring-lifecycle-title"
-      className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/30"
+      className="rounded-2xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]"
     >
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p
             id="hiring-lifecycle-title"
-            className="text-base font-black text-slate-950 dark:text-white"
+            className="text-base font-black text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"
           >
             مسیر جذب و شروع همکاری
           </p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
             مرحله {projection.currentPhaseNumber.toLocaleString("fa-IR")} از{" "}
             {projection.totalPhases.toLocaleString("fa-IR")}
           </p>
@@ -154,35 +155,35 @@ export function HiringLifecycle({
       </div>
 
       <div
-        className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800"
+        className="mt-4 border-t border-[var(--sds-border-default)] pt-4 dark:border-[var(--sds-border-strong)]"
         aria-live="polite"
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="font-black text-slate-950 dark:text-white">
+          <h2 className="font-black text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
             {focused.title}
           </h2>
-          <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+          <span className="text-xs font-bold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
             {focused.requiredComplete.toLocaleString("fa-IR")} از{" "}
             {focused.requiredTotal.toLocaleString("fa-IR")} مورد الزامی
           </span>
         </div>
-        <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+        <p className="mt-2 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
           {focused.guidance}
         </p>
         {focused.responsibleFunction && (
-          <p className="mt-2 text-xs font-bold text-slate-500 dark:text-slate-400">
+          <p className="mt-2 text-xs font-bold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
             مسئول ادامه: {focused.responsibleFunction}
           </p>
         )}
         {focused.primaryAction && (
-          <p className="mt-3 rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-bold text-teal-900 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-100">
+          <p className="mt-3 rounded-xl border border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] px-3 py-2 text-sm font-bold text-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
             گام بعدی: {focused.primaryAction.label}
           </p>
         )}
         {focused.blockers.map((item) => (
           <p
             key={item.code}
-            className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100"
+            className="mt-2 rounded-xl border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] px-3 py-2 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]"
           >
             {item.label}
           </p>
@@ -195,7 +196,7 @@ export function HiringLifecycle({
             {focused.secondaryActions.map((item) => (
               <span
                 key={item.id}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-xs font-bold text-[var(--sds-text-primary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
               >
                 {item.label}
               </span>

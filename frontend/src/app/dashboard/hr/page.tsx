@@ -1,5 +1,4 @@
 'use client';
-
 import { useCallback, useEffect, useState } from 'react';
 import { FaBuilding, FaClipboardCheck, FaExclamationTriangle, FaSync, FaUserPlus, FaUserTie, FaUsers } from 'react-icons/fa';
 import { ErpActionGrid, ErpBadge, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
@@ -51,7 +50,7 @@ export default function HrDashboardPage() {
       <ErpSection title="نمای ظرفیت جایگاه‌ها" description="سرانه فعال، ظرفیت متعهد و جای خالی جداگانه نمایش داده می‌شوند." className="xl:col-span-2">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {(data?.positions || []).map((position: any) => <ErpCard key={position.id} className="p-4">
-            <div className="flex items-start justify-between gap-3"><div><p className="font-bold">{position.title}</p><p className="mt-1 text-xs text-slate-500">{position.code} · {position.organizationalUnit?.name}</p></div><ErpBadge tone={position.vacancy ? 'warning' : 'success'}>{position.vacancy ? `${position.vacancy.toLocaleString('fa-IR')} خالی` : 'تکمیل'}</ErpBadge></div>
+            <div className="flex items-start justify-between gap-3"><div><p className="font-bold">{position.title}</p><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{position.code} · {position.organizationalUnit?.name}</p></div><ErpBadge tone={position.vacancy ? 'warning' : 'success'}>{position.vacancy ? `${position.vacancy.toLocaleString('fa-IR')} خالی` : 'تکمیل'}</ErpBadge></div>
             <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs"><span>فعال<br/><b>{position.occupancy.active.toLocaleString('fa-IR')}</b></span><span>متعهد<br/><b>{position.occupancy.committed.toLocaleString('fa-IR')}</b></span><span>ظرفیت<br/><b>{position.capacity.toLocaleString('fa-IR')}</b></span></div>
           </ErpCard>)}
           {!data?.positions?.length && <ErpEmptyState icon={FaBuilding} title="هنوز جایگاهی تعریف نشده است" description="از ساختار سازمانی شروع کنید." />}
@@ -63,5 +62,5 @@ export default function HrDashboardPage() {
 
 function Check({ label, value, danger = false }: { label: string; value: number; danger?: boolean }) {
   const count = Number(value || 0);
-  return <div className="flex items-center justify-between rounded-xl border border-slate-200 p-3 dark:border-slate-700"><span className="flex items-center gap-2 text-sm"><FaExclamationTriangle className={danger && count ? 'text-amber-500' : 'text-slate-400'} />{label}</span><ErpBadge tone={danger && count ? 'warning' : 'neutral'}>{count.toLocaleString('fa-IR')}</ErpBadge></div>;
+  return <div className="flex items-center justify-between rounded-xl border border-[var(--sds-border-default)] p-3 dark:border-[var(--sds-border-strong)]"><span className="flex items-center gap-2 text-sm"><FaExclamationTriangle className={danger && count ? 'text-[var(--sds-warning)]' : 'text-[var(--sds-text-muted)]'} />{label}</span><ErpBadge tone={danger && count ? 'warning' : 'neutral'}>{count.toLocaleString('fa-IR')}</ErpBadge></div>;
 }

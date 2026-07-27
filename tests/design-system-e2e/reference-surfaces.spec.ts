@@ -495,6 +495,54 @@ test('Accounting routes share focused responsive canonical surfaces', async ({ p
   }
 });
 
+test('People and administration routes share focused responsive canonical surfaces', async ({ page }) => {
+  test.setTimeout(210_000);
+  await login(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const routes = [
+    '/dashboard/hr',
+    '/dashboard/hr/hiring',
+    '/dashboard/hr/hiring/authorities',
+    '/dashboard/hr/hiring/collateral-templates',
+    '/dashboard/hr/migration',
+    '/dashboard/hr/personnel',
+    '/dashboard/hr/structure',
+    '/dashboard/users',
+    '/dashboard/users/create',
+    '/dashboard/departments',
+    '/dashboard/departments/create',
+    '/dashboard/admin/permissions',
+    '/dashboard/admin/discount-settings',
+    '/dashboard/admin/reports',
+    '/dashboard/admin/sabalan-calendar',
+    '/dashboard/admin/security',
+    '/dashboard/admin/settings',
+    '/apply'
+  ];
+
+  for (const route of routes) {
+    await page.goto(route);
+    const workspace = page.locator('main.sds-workspace');
+    await expect(workspace).toBeVisible();
+    expect(await workspace.evaluate((element) =>
+      Array.from(element.querySelectorAll('input, select, textarea'))
+        .every((field) => (
+          field.getAttribute('type') === 'hidden'
+          || field.classList.contains('sds-field')
+          || field.getAttribute('type') === 'checkbox'
+          || field.getAttribute('type') === 'radio'
+          || field.getAttribute('type') === 'range'
+          || (field.getAttribute('type') === 'file' && field.classList.contains('sds-file-input'))
+        ))
+    )).toBe(true);
+    expect(await workspace.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
+    })).toBe(true);
+  }
+});
+
 test('Guard attendance and vehicle operations use canonical fields and responsive surfaces', async ({ page }) => {
   await login(page);
 

@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpSelect } from '@/components/erp';
 import { useState } from 'react';
 import { FaCog, FaInfoCircle, FaSave, FaUndo } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpPage, ErpSection } from '@/components/erp';
@@ -32,8 +32,8 @@ const defaultSettings: SystemSettings = {
   sessionTimeout: 30,
 };
 
-const inputClassName = 'min-h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
-const labelClassName = 'mb-2 block text-sm font-medium text-slate-600 dark:text-slate-300';
+const inputClassName = 'min-h-11 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-2 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]';
+const labelClassName = 'mb-2 block text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]';
 
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<SystemSettings>(defaultSettings);
@@ -68,8 +68,8 @@ export default function AdminSettingsPage() {
       ]}
     >
       {saved && (
-        <ErpSection className="border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-900/20">
-          <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-200">
+        <ErpSection className="border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)]">
+          <div className="flex items-center gap-2 text-sm font-semibold text-[var(--sds-success)] dark:text-[var(--sds-success)]">
             <FaSave className="h-4 w-4" />
             تنظیمات با موفقیت ذخیره شد
           </div>
@@ -80,15 +80,15 @@ export default function AdminSettingsPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
             <label className={labelClassName}>نام شرکت (انگلیسی)</label>
-            <input type="text" value={settings.companyName} onChange={(event) => setSettings({ ...settings, companyName: event.target.value })} className={inputClassName} />
+            <ErpInput type="text" value={settings.companyName} onChange={(event) => setSettings({ ...settings, companyName: event.target.value })} className={inputClassName} />
           </div>
           <div>
             <label className={labelClassName}>نام شرکت (فارسی)</label>
-            <input type="text" value={settings.companyNamePersian} onChange={(event) => setSettings({ ...settings, companyNamePersian: event.target.value })} className={inputClassName} />
+            <ErpInput type="text" value={settings.companyNamePersian} onChange={(event) => setSettings({ ...settings, companyNamePersian: event.target.value })} className={inputClassName} />
           </div>
           <div>
             <label className={labelClassName}>پیشوند شماره قرارداد</label>
-            <input type="text" value={settings.contractNumberPrefix} onChange={(event) => setSettings({ ...settings, contractNumberPrefix: event.target.value })} className={inputClassName} />
+            <ErpInput type="text" value={settings.contractNumberPrefix} onChange={(event) => setSettings({ ...settings, contractNumberPrefix: event.target.value })} className={inputClassName} />
           </div>
         </div>
       </ErpSection>
@@ -97,33 +97,33 @@ export default function AdminSettingsPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div>
             <label className={labelClassName}>واحد پول</label>
-            <select value={settings.defaultCurrency} onChange={(event) => setSettings({ ...settings, defaultCurrency: event.target.value })} className={inputClassName}>
+            <ErpSelect value={settings.defaultCurrency} onChange={(event) => setSettings({ ...settings, defaultCurrency: event.target.value })} className={inputClassName}>
               <option value="IRR">ریال (IRR)</option>
               <option value="USD">دلار (USD)</option>
               <option value="EUR">یورو (EUR)</option>
-            </select>
+            </ErpSelect>
           </div>
           <div>
             <label className={labelClassName}>زبان پیش‌فرض</label>
-            <select value={settings.defaultLanguage} onChange={(event) => setSettings({ ...settings, defaultLanguage: event.target.value })} className={inputClassName}>
+            <ErpSelect value={settings.defaultLanguage} onChange={(event) => setSettings({ ...settings, defaultLanguage: event.target.value })} className={inputClassName}>
               <option value="fa">فارسی</option>
               <option value="en">English</option>
-            </select>
+            </ErpSelect>
           </div>
           <div>
             <label className={labelClassName}>منطقه زمانی</label>
-            <select value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} className={inputClassName}>
+            <ErpSelect value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} className={inputClassName}>
               <option value="Asia/Tehran">تهران (UTC+3:30)</option>
               <option value="UTC">UTC</option>
               <option value="America/New_York">نیویورک (UTC-5)</option>
-            </select>
+            </ErpSelect>
           </div>
           <div>
             <label className={labelClassName}>قالب تاریخ</label>
-            <select value={settings.dateFormat} onChange={(event) => setSettings({ ...settings, dateFormat: event.target.value })} className={inputClassName}>
+            <ErpSelect value={settings.dateFormat} onChange={(event) => setSettings({ ...settings, dateFormat: event.target.value })} className={inputClassName}>
               <option value="jalali">شمسی (جلالی)</option>
               <option value="gregorian">میلادی</option>
-            </select>
+            </ErpSelect>
           </div>
         </div>
       </ErpSection>
@@ -136,20 +136,20 @@ export default function AdminSettingsPage() {
               ['smsNotifications', 'اعلان پیامکی'],
               ['autoBackup', 'پشتیبان‌گیری خودکار'],
             ].map(([key, label]) => (
-              <label key={key} className="flex min-h-12 items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              <label key={key} className="flex min-h-12 items-center justify-between rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-3 text-sm font-semibold text-[var(--sds-text-primary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]">
                 <span>{label}</span>
-                <input
+                <ErpInput
                   type="checkbox"
                   checked={Boolean(settings[key as keyof SystemSettings])}
                   onChange={(event) => setSettings({ ...settings, [key]: event.target.checked })}
-                  className="h-4 w-4 rounded border-slate-300 text-[#074747] focus:ring-[#074747]"
+                  className="h-4 w-4 rounded border-[var(--sds-border-default)] text-[var(--sds-accent)] focus:ring-[var(--sds-accent)]"
                 />
               </label>
             ))}
           </div>
           <div>
             <label className={labelClassName}>مهلت نشست کاربر (دقیقه)</label>
-            <input
+            <ErpInput
               type="number"
               min="5"
               max="480"
@@ -159,7 +159,7 @@ export default function AdminSettingsPage() {
             />
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
           <FaInfoCircle className="h-4 w-4" />
           <span>این صفحه هنوز از داده شبیه‌سازی‌شده استفاده می‌کند؛ فقط پوسته و خوانایی آن به الگوی ERP منتقل شده است.</span>
           <ErpBadge tone="warning">فرم متوسط</ErpBadge>

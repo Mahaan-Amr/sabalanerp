@@ -1,5 +1,5 @@
-﻿'use client';
-
+'use client';
+import { ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
 import React, { useState, useEffect } from 'react';
 import { FaUsers, FaCog, FaPlus, FaEdit, FaTrash, FaEye, FaCheck, FaTimes, FaLock } from 'react-icons/fa';
 import { usersAPI, permissionsAPI, authAPI, workspacePermissionsAPI } from '@/lib/api';
@@ -333,16 +333,16 @@ export default function PermissionsManagementPage() {
     try {
       // Get current user profile using the API client
       const profileResponse = await authAPI.getMe();
-      
+
       if (profileResponse.data.success) {
         setCurrentUser(profileResponse.data.data);
-        
+
         // Check if user is admin or manager
         if (!['ADMIN', 'MANAGER'].includes(profileResponse.data.data.role)) {
           router.push('/dashboard');
           return;
         }
-        
+
         // If admin/manager, fetch users, role permissions, and feature definitions
         fetchUsers(profileResponse.data.data.role);
         fetchRolePermissions(profileResponse.data.data.role);
@@ -359,7 +359,7 @@ export default function PermissionsManagementPage() {
   const fetchUsers = async (activeRole?: string) => {
     try {
       setLoading(true);
-      
+
       // Fetch users
       const usersResponse = await usersAPI.getUsers(1, 100); // Get up to 100 users
       if (usersResponse.data.success) {
@@ -370,7 +370,7 @@ export default function PermissionsManagementPage() {
         setUsers(safeUsers);
         setFilteredUsers(safeUsers);
       }
-      
+
     } catch (error) {
       console.error('Error fetching users:', error);
     } finally {
@@ -435,7 +435,7 @@ export default function PermissionsManagementPage() {
       if (userFeaturesResponse.data.success) {
         setUserWorkspacePermissions(userFeaturesResponse.data.data.workspacePermissions || []);
       }
-      
+
     } catch (error) {
       console.error('Error fetching user permissions:', error);
     }
@@ -446,7 +446,7 @@ export default function PermissionsManagementPage() {
     if (query.trim() === '') {
       setFilteredUsers(users);
     } else {
-      const filtered = users.filter(user => 
+      const filtered = users.filter(user =>
         user.firstName.toLowerCase().includes(query.toLowerCase()) ||
         user.lastName.toLowerCase().includes(query.toLowerCase()) ||
         user.email.toLowerCase().includes(query.toLowerCase()) ||
@@ -505,7 +505,7 @@ export default function PermissionsManagementPage() {
             ...(permissionData.expiresAt ? { expiresAt: permissionData.expiresAt } : { expiresAt: null })
           })
         : await permissionsAPI.createFeaturePermission(permissionData);
-      
+
       if (response.data.success) {
         setShowAddPermissionModal(false);
         setFormData({ userId: '', workspace: '', feature: '', permissionLevel: 'view', expiresAt: '' });
@@ -604,7 +604,7 @@ export default function PermissionsManagementPage() {
       return;
     }
     if (!confirm('آیا از حذف این مجوز اطمینان دارید؟')) return;
-    
+
     try {
       if (currentUser?.role === 'MANAGER' && selectedUser?.role === 'ADMIN') {
         showFeedback('مدیر فروش نمی‌تواند دسترسی مدیر سیستم را تغییر دهد');
@@ -612,7 +612,7 @@ export default function PermissionsManagementPage() {
       }
 
       const response = await permissionsAPI.deleteFeaturePermission(permission.id);
-      
+
       if (response.data.success) {
         // Refresh the user's permissions
         if (selectedUser) {
@@ -658,7 +658,7 @@ export default function PermissionsManagementPage() {
       }
 
       const response = await workspacePermissionsAPI.createUserPermission(permissionData);
-      
+
       if (response.data.success) {
         setShowWorkspacePermissionModal(false);
         setFormData({ userId: '', workspace: '', feature: '', permissionLevel: 'view', expiresAt: '' });
@@ -683,7 +683,7 @@ export default function PermissionsManagementPage() {
       return;
     }
     if (!confirm('آیا از حذف این مجوز فضای کاری اطمینان دارید؟')) return;
-    
+
     try {
       if (currentUser?.role === 'MANAGER' && selectedUser?.role === 'ADMIN') {
         showFeedback('مدیر فروش نمی‌تواند دسترسی مدیر سیستم را تغییر دهد');
@@ -691,7 +691,7 @@ export default function PermissionsManagementPage() {
       }
 
       const response = await workspacePermissionsAPI.deleteUserPermission(permission.id);
-      
+
       if (response.data.success) {
         // Refresh the user's permissions
         if (selectedUser) {
@@ -871,11 +871,11 @@ export default function PermissionsManagementPage() {
     }
     const filteredFeatures = getFilteredFeatures();
     const newSelection: {[key: string]: string} = {};
-    
+
     filteredFeatures.forEach(([key]) => {
       newSelection[key] = normalizePermissionLevelForFeature(key, permissionLevel);
     });
-    
+
     setSelectedFeatures(newSelection);
   };
 
@@ -914,13 +914,13 @@ export default function PermissionsManagementPage() {
   const getPermissionSourceColor = (source: EffectiveWorkspacePermission['source']) => {
     switch (source) {
       case 'direct':
-        return 'bg-teal-500/15 text-teal-200 border-teal-500/30';
+        return 'bg-[var(--sds-accent-surface)] text-[var(--sds-accent)] border-[var(--sds-border-strong)]';
       case 'role':
-        return 'bg-blue-500/15 text-blue-200 border-blue-500/30';
+        return 'bg-[var(--sds-info-surface)] text-[var(--sds-info)] border-[var(--sds-info-border)]';
       case 'admin':
-        return 'bg-red-500/15 text-red-200 border-red-500/30';
+        return 'bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] border-[var(--sds-danger-border)]';
       default:
-        return 'bg-gray-500/15 text-gray-200 border-gray-500/30';
+        return 'bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] border-[var(--sds-border-default)]';
     }
   };
 
@@ -967,78 +967,78 @@ export default function PermissionsManagementPage() {
 
   if (loading) {
     return (
-      <div className="mx-auto w-full max-w-7xl">
+      <main className="sds-workspace mx-auto w-full max-w-7xl">
         <div>
-          <div className="glass-liquid-card p-8 text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-400 mx-auto mb-4"></div>
-            <p className="text-gray-300">در حال بارگذاری...</p>
+          <div className="sds-workspace-surface p-8 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--sds-border-strong)] mx-auto mb-4"></div>
+            <p className="text-[var(--sds-text-muted)]">در حال بارگذاری...</p>
           </div>
         </div>
-      </div>
+      </main>
     );
   }
 
   // Check if user is not admin or manager
   if (currentUser && !['ADMIN', 'MANAGER'].includes(currentUser.role)) {
     return (
-      <div className="mx-auto w-full max-w-7xl">
+      <main className="sds-workspace mx-auto w-full max-w-7xl">
         <div>
-          <div className="glass-liquid-card p-8 text-center">
-            <FaLock className="h-16 w-16 text-red-400 mx-auto mb-4" />
-            <h1 className="text-2xl font-bold text-white mb-4">دسترسی محدود</h1>
-            <p className="text-gray-300 mb-6">
+          <div className="sds-workspace-surface p-8 text-center">
+            <FaLock className="h-16 w-16 text-[var(--sds-danger)] mx-auto mb-4" />
+            <h1 className="text-2xl font-bold text-[var(--sds-text-primary)] mb-4">دسترسی محدود</h1>
+            <p className="text-[var(--sds-text-muted)] mb-6">
               شما دسترسی لازم برای مشاهده این صفحه را ندارید. این صفحه فقط برای مدیران سیستم قابل دسترسی است.
             </p>
-            <button
+            <ErpPressable type="submit"
               onClick={() => router.push('/dashboard')}
-              className="glass-liquid-card px-6 py-3 hover:bg-teal-500/20 transition-all duration-300"
+              className="sds-workspace-surface px-6 py-3 hover:bg-[var(--sds-accent-surface)] transition-all duration-300"
             >
               بازگشت به داشبورد
-            </button>
+            </ErpPressable>
           </div>
         </div>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className="mx-auto w-full max-w-7xl">
+    <main className="sds-workspace mx-auto w-full max-w-7xl">
       <div className="space-y-6">
         {/* Header */}
-        <div className="glass-liquid-card p-6">
+        <div className="sds-workspace-surface p-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-white mb-2">مدیریت مجوزهای کاربران</h1>
-              <p className="text-gray-300">جستجو و انتخاب کاربر برای مدیریت مجوزهای دسترسی</p>
+              <h1 className="text-3xl font-bold text-[var(--sds-text-primary)] mb-2">مدیریت مجوزهای کاربران</h1>
+              <p className="text-[var(--sds-text-muted)]">جستجو و انتخاب کاربر برای مدیریت مجوزهای دسترسی</p>
             </div>
           </div>
         </div>
 
         {canManageRoleDefaults && (
-        <div className="glass-liquid-card p-2">
+        <div className="sds-workspace-surface p-2">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            <button
+            <ErpPressable
               type="button"
               onClick={() => setActivePermissionTab('users')}
               className={`px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
                 activePermissionTab === 'users'
-                  ? 'bg-teal-500/20 text-teal-100 border border-teal-500/40'
-                  : 'text-gray-300 hover:bg-gray-800/70 border border-transparent'
+                  ? 'bg-[var(--sds-accent-surface)] text-[var(--sds-accent)] border border-[var(--sds-border-strong)]'
+                  : 'text-[var(--sds-text-muted)] hover:bg-[var(--sds-surface-raised)] border border-transparent'
               }`}
             >
               استثناهای کاربر
-            </button>
-            <button
+            </ErpPressable>
+            <ErpPressable
               type="button"
               onClick={() => setActivePermissionTab('roles')}
               className={`px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
                 activePermissionTab === 'roles'
-                  ? 'bg-teal-500/20 text-teal-100 border border-teal-500/40'
-                  : 'text-gray-300 hover:bg-gray-800/70 border border-transparent'
+                  ? 'bg-[var(--sds-accent-surface)] text-[var(--sds-accent)] border border-[var(--sds-border-strong)]'
+                  : 'text-[var(--sds-text-muted)] hover:bg-[var(--sds-surface-raised)] border border-transparent'
               }`}
             >
               پیش‌فرض‌های نقش
-            </button>
+            </ErpPressable>
           </div>
         </div>
         )}
@@ -1046,78 +1046,79 @@ export default function PermissionsManagementPage() {
         {feedback && (
           <div className={`rounded-lg border p-4 ${
             feedback.type === 'success'
-              ? 'bg-green-500/10 border-green-500/30 text-green-200'
-              : 'bg-red-500/10 border-red-500/30 text-red-200'
+              ? 'bg-[var(--sds-success-surface)] border-[var(--sds-success-border)] text-[var(--sds-success)]'
+              : 'bg-[var(--sds-danger-surface)] border-[var(--sds-danger-border)] text-[var(--sds-danger)]'
           }`}>
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 {feedback.type === 'success' ? <FaCheck /> : <FaTimes />}
                 <span>{feedback.message}</span>
               </div>
-              <button
+              <ErpPressable
                 type="button"
                 onClick={() => setFeedback(null)}
                 className="text-sm opacity-80 hover:opacity-100"
               >
                 بستن
-              </button>
+              </ErpPressable>
             </div>
           </div>
         )}
 
         {/* User Search Section */}
         {activePermissionTab === 'users' && (
-        <div className="glass-liquid-card p-6 mb-6">
-          <h2 className="text-xl font-semibold text-white mb-4">جستجوی کاربر</h2>
-          
+        <div className="sds-workspace-surface p-6 mb-6">
+          <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-4">جستجوی کاربر</h2>
+
           {/* Search Input */}
           <div className="relative mb-4">
-            <input
+            <ErpInput
               type="text"
               placeholder="جستجو بر اساس نام، ایمیل یا نام کاربری..."
               value={searchQuery}
               onChange={(e) => handleUserSearch(e.target.value)}
-              className="w-full p-4 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:border-teal-500 focus:outline-none pr-12"
+              className="w-full p-4 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:border-[var(--sds-border-strong)] focus:outline-none pr-12"
             />
-            <FaUsers className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400" />
+            <FaUsers className="absolute right-4 top-1/2 transform -translate-y-1/2 text-[var(--sds-text-muted)]" />
           </div>
 
           {/* User List */}
           {filteredUsers.length > 0 && (
             <div className="max-h-60 overflow-y-auto space-y-2">
               {filteredUsers.map((user) => (
-                <div
+                <ErpPressable
+                  type="button"
                   key={user.id}
                   onClick={() => handleUserSelect(user)}
-                  className={`p-4 rounded-lg cursor-pointer transition-all duration-300 ${
+                  className={`block w-full p-4 text-right rounded-lg cursor-pointer transition-all duration-300 ${
                     selectedUser?.id === user.id
-                      ? 'bg-teal-500/20 border border-teal-500/30'
-                      : 'bg-gray-800 hover:bg-gray-700 border border-gray-600'
+                      ? 'bg-[var(--sds-accent-surface)] border border-[var(--sds-border-strong)]'
+                      : 'bg-[var(--sds-surface-raised)] hover:bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)]'
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-white font-medium">
+                      <h3 className="text-[var(--sds-text-primary)] font-medium">
                         {user.firstName} {user.lastName}
                       </h3>
-                      <p className="text-gray-400 text-sm">{user.email}</p>
-                      <p className="text-gray-500 text-xs">@{user.username} ⬢ {user.role}</p>
+                      <p className="text-[var(--sds-text-muted)] text-sm">{user.email}</p>
+                      <p className="text-[var(--sds-text-secondary)] text-xs">@{user.username} ⬢ {user.role}</p>
                     </div>
                     {selectedUser?.id === user.id && (
-                      <div className="text-teal-400">
+                      <div className="text-[var(--sds-accent)]">
                         <FaCheck className="h-5 w-5" />
                       </div>
                     )}
                   </div>
-                </div>
+                </ErpPressable>
               ))}
             </div>
           )}
 
           {filteredUsers.length === 0 && searchQuery && (
             <div className="text-center py-8">
-              <FaUsers className="h-12 w-12 text-gray-600 mx-auto mb-4" />
-              <p className="text-gray-400">هیچ کاربری یافت نشد</p>
+              <FaUsers className="h-12 w-12 text-[var(--sds-text-secondary)] mx-auto mb-4" />
+              <p className="text-[var(--sds-text-muted)]">هیچ کاربری یافت نشد</p>
             </div>
           )}
         </div>
@@ -1125,15 +1126,15 @@ export default function PermissionsManagementPage() {
 
         {/* User Permissions Section */}
         {activePermissionTab === 'users' && selectedUser && (
-          <div className="glass-liquid-card p-6">
+          <div className="sds-workspace-surface p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h2 className="text-xl font-semibold text-white mb-2">
+                <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-2">
                   مجوزهای {selectedUser.firstName} {selectedUser.lastName}
                 </h2>
-                <p className="text-gray-400">{selectedUser.email} ⬢ {selectedUser.role}</p>
+                <p className="text-[var(--sds-text-muted)]">{selectedUser.email} ⬢ {selectedUser.role}</p>
               </div>
-              <button
+              <ErpPressable type="submit"
                 onClick={() => {
                   setFormData({
                     userId: selectedUser.id,
@@ -1144,27 +1145,27 @@ export default function PermissionsManagementPage() {
                   });
                   setShowAddPermissionModal(true);
                 }}
-                className="glass-liquid-card px-4 py-2 hover:bg-teal-500/20 transition-all duration-300 flex items-center"
+                className="sds-workspace-surface px-4 py-2 hover:bg-[var(--sds-accent-surface)] transition-all duration-300 flex items-center"
               >
                 <FaPlus className="ml-2" />
                 افزودن مجوز جدید
-              </button>
+              </ErpPressable>
             </div>
 
             {/* Effective Access */}
-            <div className="mb-8 bg-gray-900/40 border border-gray-700 rounded-lg p-4">
+            <div className="mb-8 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded-lg p-4">
               <div className="flex items-center justify-between gap-4 mb-4">
                 <div>
-                  <h3 className="text-lg font-medium text-white">دسترسی موثر کاربر</h3>
-                  <p className="text-sm text-gray-400 mt-1">
+                  <h3 className="text-lg font-medium text-[var(--sds-text-primary)]">دسترسی موثر کاربر</h3>
+                  <p className="text-sm text-[var(--sds-text-muted)] mt-1">
                     نتیجه نهایی بر اساس مجوزهای مستقیم و پیش‌فرض‌های نقش
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs">
-                  <span className="px-2 py-1 rounded-full border bg-teal-500/15 text-teal-200 border-teal-500/30">
+                  <span className="px-2 py-1 rounded-full border bg-[var(--sds-accent-surface)] text-[var(--sds-accent)] border-[var(--sds-border-strong)]">
                     مستقیم: {userWorkspacePermissions.filter((permission) => permission.isActive).length}
                   </span>
-                  <span className="px-2 py-1 rounded-full border bg-blue-500/15 text-blue-200 border-blue-500/30">
+                  <span className="px-2 py-1 rounded-full border bg-[var(--sds-info-surface)] text-[var(--sds-info)] border-[var(--sds-info-border)]">
                     از نقش: {getSelectedUserRoleWorkspaceDefaults().length}
                   </span>
                 </div>
@@ -1183,15 +1184,15 @@ export default function PermissionsManagementPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-gray-400">هیچ دسترسی موثری برای این کاربر تعریف نشده است.</p>
+                <p className="text-sm text-[var(--sds-text-muted)]">هیچ دسترسی موثری برای این کاربر تعریف نشده است.</p>
               )}
             </div>
 
             {/* Workspace Permissions */}
             <div className="mb-8">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-medium text-white">دسترسی‌های مستقیم فضای کاری</h3>
-                <button
+                <h3 className="text-lg font-medium text-[var(--sds-text-primary)]">دسترسی‌های مستقیم فضای کاری</h3>
+                <ErpPressable type="submit"
                   onClick={() => {
                     setFormData({
                       userId: selectedUser.id,
@@ -1202,39 +1203,39 @@ export default function PermissionsManagementPage() {
                     });
                     setShowWorkspacePermissionModal(true);
                   }}
-                  className="glass-liquid-card px-4 py-2 hover:bg-teal-500/20 transition-all duration-300 flex items-center text-sm"
+                  className="sds-workspace-surface px-4 py-2 hover:bg-[var(--sds-accent-surface)] transition-all duration-300 flex items-center text-sm"
                 >
                   <FaPlus className="ml-2" />
                   افزودن مجوز فضای کاری
-                </button>
+                </ErpPressable>
               </div>
               {userWorkspacePermissions.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {userWorkspacePermissions.map((permission) => (
-                    <div key={permission.id} className="bg-gray-800 p-4 rounded-lg border border-gray-600">
+                    <div key={permission.id} className="bg-[var(--sds-surface-raised)] p-4 rounded-lg border border-[var(--sds-border-strong)]">
                       <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-white font-medium">
+                        <h4 className="text-[var(--sds-text-primary)] font-medium">
                           {getWorkspaceDisplayName(permission.workspace)}
                         </h4>
                         <div className="flex items-center gap-2">
                           <span className={`px-2 py-1 rounded-full text-xs ${
-                            permission.permissionLevel === 'admin' ? 'bg-red-500/20 text-red-400' :
-                            permission.permissionLevel === 'edit' ? 'bg-yellow-500/20 text-yellow-400' :
-                            'bg-green-500/20 text-green-400'
+                            permission.permissionLevel === 'admin' ? 'bg-[var(--sds-danger-surface)] text-[var(--sds-danger)]' :
+                            permission.permissionLevel === 'edit' ? 'bg-[var(--sds-warning-surface)] text-[var(--sds-warning)]' :
+                            'bg-[var(--sds-success-surface)] text-[var(--sds-success)]'
                           }`}>
                             {getPermissionDisplayName(permission.permissionLevel)}
                           </span>
-                          <button
+                          <ErpPressable type="submit"
                             onClick={() => handleDeleteWorkspacePermission(permission)}
                             disabled={!canManageDirectPermission(permission)}
-                            className="p-1 text-red-400 hover:bg-red-500/20 rounded transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="p-1 text-[var(--sds-danger)] hover:bg-[var(--sds-danger-surface)] rounded transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed"
                             title={canManageDirectPermission(permission) ? 'حذف مجوز فضای کاری' : 'فقط مدیر سیستم می‌تواند مجوز مدیریت را حذف کند'}
                           >
                             <FaTrash className="w-3 h-3" />
-                          </button>
+                          </ErpPressable>
                         </div>
                       </div>
-                      <p className="text-gray-400 text-sm">
+                      <p className="text-[var(--sds-text-muted)] text-sm">
                         دسترسی کامل به فضای کاری {getWorkspaceDisplayName(permission.workspace)}
                       </p>
                     </div>
@@ -1243,8 +1244,8 @@ export default function PermissionsManagementPage() {
               )}
               {userWorkspacePermissions.length === 0 && (
                 <div className="text-center py-8">
-                  <FaCog className="h-12 w-12 text-gray-600 mx-auto mb-3" />
-                  <p className="text-gray-400">هیچ مجوز فضای کاری تعریف نشده است</p>
+                  <FaCog className="h-12 w-12 text-[var(--sds-text-secondary)] mx-auto mb-3" />
+                  <p className="text-[var(--sds-text-muted)]">هیچ مجوز فضای کاری تعریف نشده است</p>
                 </div>
               )}
             </div>
@@ -1253,31 +1254,31 @@ export default function PermissionsManagementPage() {
             <div>
               <div className="flex items-center justify-between gap-4 mb-4">
                 <div>
-                  <h3 className="text-lg font-medium text-white">مجوزهای جزئی مستقیم</h3>
-                  <p className="text-sm text-gray-400 mt-1">
+                  <h3 className="text-lg font-medium text-[var(--sds-text-primary)]">مجوزهای جزئی مستقیم</h3>
+                  <p className="text-sm text-[var(--sds-text-muted)] mt-1">
                     بخش پیشرفته برای استثناهای ریزتر از سطح فضای کاری
                   </p>
                 </div>
-                <button
+                <ErpPressable
                   type="button"
                   onClick={() => setShowAdvancedFeaturePermissions((value) => !value)}
-                  className="glass-liquid-card px-4 py-2 hover:bg-teal-500/20 transition-all duration-300 text-sm"
+                  className="sds-workspace-surface px-4 py-2 hover:bg-[var(--sds-accent-surface)] transition-all duration-300 text-sm"
                 >
                   {showAdvancedFeaturePermissions ? 'بستن تنظیمات پیشرفته' : `نمایش تنظیمات پیشرفته (${userPermissions.length})`}
-                </button>
+                </ErpPressable>
               </div>
 
               {!showAdvancedFeaturePermissions ? (
-                <div className="bg-gray-900/40 border border-gray-700 rounded-lg p-4">
-                  <p className="text-gray-400 text-sm">
+                <div className="bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded-lg p-4">
+                  <p className="text-[var(--sds-text-muted)] text-sm">
                     مجوزهای جزئی برای استثناهای خاص نگه داشته شده‌اند. برای بیشتر کاربران، دسترسی فضای کاری کافی است.
                   </p>
                 </div>
               ) : userPermissions.length === 0 ? (
                 <div className="text-center py-12">
-                  <FaCog className="h-16 w-16 text-gray-600 mx-auto mb-4" />
-                  <p className="text-gray-400 text-lg">هیچ مجوز جزئی تعریف نشده است</p>
-                  <button
+                  <FaCog className="h-16 w-16 text-[var(--sds-text-secondary)] mx-auto mb-4" />
+                  <p className="text-[var(--sds-text-muted)] text-lg">هیچ مجوز جزئی تعریف نشده است</p>
+                  <ErpPressable type="submit"
                     onClick={() => {
                       setFormData({
                         userId: selectedUser.id,
@@ -1288,50 +1289,50 @@ export default function PermissionsManagementPage() {
                       });
                       setShowAddPermissionModal(true);
                     }}
-                    className="mt-4 glass-liquid-card px-6 py-3 hover:bg-teal-500/20 transition-all duration-300"
+                    className="mt-4 sds-workspace-surface px-6 py-3 hover:bg-[var(--sds-accent-surface)] transition-all duration-300"
                   >
                     <FaPlus className="inline-block ml-2" />
                     افزودن مجوز جدید
-                  </button>
+                  </ErpPressable>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
-                      <tr className="border-b border-gray-700">
-                        <th className="text-right py-3 px-4 text-gray-300">فضای کاری</th>
-                        <th className="text-right py-3 px-4 text-gray-300">ویژگی</th>
-                        <th className="text-right py-3 px-4 text-gray-300">سطح دسترسی</th>
-                        <th className="text-right py-3 px-4 text-gray-300">وضعیت</th>
-                        <th className="text-right py-3 px-4 text-gray-300">عملیات</th>
+                      <tr className="border-b border-[var(--sds-border-strong)]">
+                        <th className="text-right py-3 px-4 text-[var(--sds-text-muted)]">فضای کاری</th>
+                        <th className="text-right py-3 px-4 text-[var(--sds-text-muted)]">ویژگی</th>
+                        <th className="text-right py-3 px-4 text-[var(--sds-text-muted)]">سطح دسترسی</th>
+                        <th className="text-right py-3 px-4 text-[var(--sds-text-muted)]">وضعیت</th>
+                        <th className="text-right py-3 px-4 text-[var(--sds-text-muted)]">عملیات</th>
                       </tr>
                     </thead>
                     <tbody>
                       {userPermissions.map((permission) => (
-                        <tr key={permission.id} className="border-b border-gray-800 hover:bg-gray-800/50">
-                          <td className="py-3 px-4 text-gray-300">
+                        <tr key={permission.id} className="border-b border-[var(--sds-border-strong)] hover:bg-[var(--sds-surface-raised)]">
+                          <td className="py-3 px-4 text-[var(--sds-text-muted)]">
                             {getWorkspaceDisplayName(permission.workspace)}
                           </td>
-                          <td className="py-3 px-4 text-gray-300">
+                          <td className="py-3 px-4 text-[var(--sds-text-muted)]">
                             {getFeatureDisplayName(permission.feature)}
                           </td>
                           <td className="py-3 px-4">
                             <span className={`px-3 py-1 rounded-full text-sm ${
-                              permission.permissionLevel === 'admin' ? 'bg-red-500/20 text-red-400' :
-                              permission.permissionLevel === 'edit' ? 'bg-yellow-500/20 text-yellow-400' :
-                              'bg-green-500/20 text-green-400'
+                              permission.permissionLevel === 'admin' ? 'bg-[var(--sds-danger-surface)] text-[var(--sds-danger)]' :
+                              permission.permissionLevel === 'edit' ? 'bg-[var(--sds-warning-surface)] text-[var(--sds-warning)]' :
+                              'bg-[var(--sds-success-surface)] text-[var(--sds-success)]'
                             }`}>
                               {getPermissionDisplayName(permission.permissionLevel)}
                             </span>
                           </td>
                           <td className="py-3 px-4">
                             {permission.isActive ? (
-                              <span className="flex items-center text-green-400">
+                              <span className="flex items-center text-[var(--sds-success)]">
                                 <FaCheck className="ml-1" />
                                 فعال
                               </span>
                             ) : (
-                              <span className="flex items-center text-red-400">
+                              <span className="flex items-center text-[var(--sds-danger)]">
                                 <FaTimes className="ml-1" />
                                 غیرفعال
                               </span>
@@ -1339,22 +1340,22 @@ export default function PermissionsManagementPage() {
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex space-x-2 space-x-reverse">
-                              <button
+                              <ErpPressable type="submit"
                                 onClick={() => handleEditPermission(permission)}
                                 disabled={!canManageDirectPermission(permission)}
-                                className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="p-2 text-[var(--sds-info)] hover:bg-[var(--sds-info-surface)] rounded-lg transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed"
                                 title={canManageDirectPermission(permission) ? 'ویرایش' : 'فقط مدیر سیستم می‌تواند مجوز مدیریت را تغییر دهد'}
                               >
                                 <FaEdit />
-                              </button>
-                              <button
+                              </ErpPressable>
+                              <ErpPressable type="submit"
                                 onClick={() => handleDeletePermission(permission)}
                                 disabled={!canManageDirectPermission(permission)}
-                                className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="p-2 text-[var(--sds-danger)] hover:bg-[var(--sds-danger-surface)] rounded-lg transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed"
                                 title={canManageDirectPermission(permission) ? 'حذف' : 'فقط مدیر سیستم می‌تواند مجوز مدیریت را حذف کند'}
                               >
                                 <FaTrash />
-                              </button>
+                              </ErpPressable>
                             </div>
                           </td>
                         </tr>
@@ -1369,10 +1370,10 @@ export default function PermissionsManagementPage() {
 
         {/* No User Selected State */}
         {activePermissionTab === 'users' && !selectedUser && (
-          <div className="glass-liquid-card p-12 text-center">
-            <FaUsers className="h-20 w-20 text-gray-600 mx-auto mb-6" />
-            <h2 className="text-2xl font-semibold text-white mb-4">کاربری انتخاب نشده</h2>
-            <p className="text-gray-400 text-lg mb-6">
+          <div className="sds-workspace-surface p-12 text-center">
+            <FaUsers className="h-20 w-20 text-[var(--sds-text-secondary)] mx-auto mb-6" />
+            <h2 className="text-2xl font-semibold text-[var(--sds-text-primary)] mb-4">کاربری انتخاب نشده</h2>
+            <p className="text-[var(--sds-text-muted)] text-lg mb-6">
               برای مشاهده و مدیریت مجوزها ابتدا یک کاربر را از لیست بالا انتخاب کنید
             </p>
           </div>
@@ -1380,22 +1381,22 @@ export default function PermissionsManagementPage() {
 
         {/* Role Permissions */}
         {activePermissionTab === 'roles' && canManageRoleDefaults && (
-        <div className="glass-liquid-card p-6 mt-6">
+        <div className="sds-workspace-surface p-6 mt-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-white">مدیریت مجوزهای نقش</h2>
+            <h2 className="text-xl font-bold text-[var(--sds-text-primary)]">مدیریت مجوزهای نقش</h2>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Role Workspace Permissions */}
-            <div className="glass-liquid-card p-4">
-              <h3 className="text-lg font-semibold text-white mb-3">مجوزهای فضای کاری بر اساس نقش</h3>
+            <div className="sds-workspace-surface p-4">
+              <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-3">مجوزهای فضای کاری بر اساس نقش</h3>
               <div className="space-y-3">
                 <div>
-                  <label className="block text-gray-300 mb-1 text-sm">نقش</label>
-                  <select
+                  <label className="block text-[var(--sds-text-muted)] mb-1 text-sm">نقش</label>
+                  <ErpSelect
                     value={roleWorkspaceForm.role}
                     onChange={(e) => setRoleWorkspaceForm({ ...roleWorkspaceForm, role: e.target.value })}
-                    className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white text-sm"
+                    className="w-full p-2 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded text-[var(--sds-text-primary)] text-sm"
                   >
                     <option value="">انتخاب نقش</option>
                     {ROLE_OPTIONS.map(role => (
@@ -1406,74 +1407,74 @@ export default function PermissionsManagementPage() {
                         {role}
                       </option>
                     ))}
-                  </select>
+                  </ErpSelect>
                 </div>
 
                 <div>
-                  <label className="block text-gray-300 mb-1 text-sm">فضای کاری</label>
-                  <select
+                  <label className="block text-[var(--sds-text-muted)] mb-1 text-sm">فضای کاری</label>
+                  <ErpSelect
                     value={roleWorkspaceForm.workspace}
                     onChange={(e) => setRoleWorkspaceForm({ ...roleWorkspaceForm, workspace: e.target.value })}
-                    className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white text-sm"
+                    className="w-full p-2 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded text-[var(--sds-text-primary)] text-sm"
                   >
                     <option value="">انتخاب فضای کاری</option>
                     {Object.entries(WORKSPACES).map(([key, value]) => (
                       <option key={key} value={key}>{value}</option>
                     ))}
-                  </select>
+                  </ErpSelect>
                 </div>
 
                 <div>
-                  <label className="block text-gray-300 mb-1 text-sm">سطح دسترسی</label>
-                  <select
+                  <label className="block text-[var(--sds-text-muted)] mb-1 text-sm">سطح دسترسی</label>
+                  <ErpSelect
                     value={roleWorkspaceForm.permissionLevel}
                     onChange={(e) => setRoleWorkspaceForm({ ...roleWorkspaceForm, permissionLevel: e.target.value })}
-                    className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white text-sm"
+                    className="w-full p-2 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded text-[var(--sds-text-primary)] text-sm"
                   >
                     <option value="view">مشاهده</option>
                     <option value="edit">ویرایش</option>
                     <option value="admin">مدیریت</option>
-                  </select>
+                  </ErpSelect>
                 </div>
 
                 <div className="flex gap-2">
-                  <button
+                  <ErpPressable type="submit"
                     onClick={handleSaveRoleWorkspacePermission}
-                    className="flex-1 glass-liquid-card p-2 hover:bg-teal-500/20 transition-all duration-300 text-center text-sm"
+                    className="flex-1 sds-workspace-surface p-2 hover:bg-[var(--sds-accent-surface)] transition-all duration-300 text-center text-sm"
                   >
                     {roleWorkspaceForm.id ? 'به‌روزرسانی' : 'ایجاد'}
-                  </button>
-                  <button
+                  </ErpPressable>
+                  <ErpPressable type="submit"
                     onClick={() => setRoleWorkspaceForm({ id: '', role: '', workspace: '', permissionLevel: 'view', isActive: true })}
-                    className="flex-1 glass-liquid-card p-2 hover:bg-gray-700/50 transition-all duration-300 text-center text-sm"
+                    className="flex-1 sds-workspace-surface p-2 hover:bg-[var(--sds-surface-raised)] transition-all duration-300 text-center text-sm"
                   >
                     پاک کردن
-                  </button>
+                  </ErpPressable>
                 </div>
               </div>
 
               <div className="mt-4 space-y-2 max-h-48 overflow-y-auto">
                 {roleWorkspacePermissions.length === 0 && (
-                  <p className="text-xs text-gray-400">هیچ مجوزی ثبت نشده است.</p>
+                  <p className="text-xs text-[var(--sds-text-muted)]">هیچ مجوزی ثبت نشده است.</p>
                 )}
                 {roleWorkspacePermissions.map((permission: any) => (
-                  <div key={permission.id} className="flex items-center justify-between bg-gray-800/50 p-2 rounded">
-                    <div className="text-xs text-gray-300">
+                  <div key={permission.id} className="flex items-center justify-between bg-[var(--sds-surface-raised)] p-2 rounded">
+                    <div className="text-xs text-[var(--sds-text-muted)]">
                       {permission.role} / {permission.workspace} / {permission.permissionLevel}
                     </div>
                     <div className="flex gap-2">
-                      <button
+                      <ErpPressable type="submit"
                         onClick={() => handleEditRoleWorkspacePermission(permission)}
-                        className="text-xs text-teal-300 disabled:opacity-50"
+                        className="text-xs text-[var(--sds-accent)] disabled:opacity-50"
                       >
                         ویرایش
-                      </button>
-                      <button
+                      </ErpPressable>
+                      <ErpPressable type="submit"
                         onClick={() => handleDeleteRoleWorkspacePermission(permission)}
-                        className="text-xs text-red-300 disabled:opacity-50"
+                        className="text-xs text-[var(--sds-danger)] disabled:opacity-50"
                       >
                         حذف
-                      </button>
+                      </ErpPressable>
                     </div>
                   </div>
                 ))}
@@ -1481,15 +1482,15 @@ export default function PermissionsManagementPage() {
             </div>
 
             {/* Role Feature Permissions */}
-            <div className="glass-liquid-card p-4">
-              <h3 className="text-lg font-semibold text-white mb-3">مجوزهای ویژگی بر اساس نقش</h3>
+            <div className="sds-workspace-surface p-4">
+              <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-3">مجوزهای ویژگی بر اساس نقش</h3>
               <div className="space-y-3">
                 <div>
-                  <label className="block text-gray-300 mb-1 text-sm">نقش</label>
-                  <select
+                  <label className="block text-[var(--sds-text-muted)] mb-1 text-sm">نقش</label>
+                  <ErpSelect
                     value={roleFeatureForm.role}
                     onChange={(e) => setRoleFeatureForm({ ...roleFeatureForm, role: e.target.value })}
-                    className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white text-sm"
+                    className="w-full p-2 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded text-[var(--sds-text-primary)] text-sm"
                   >
                     <option value="">انتخاب نقش</option>
                     {ROLE_OPTIONS.map(role => (
@@ -1500,88 +1501,88 @@ export default function PermissionsManagementPage() {
                         {role}
                       </option>
                     ))}
-                  </select>
+                  </ErpSelect>
                 </div>
 
                 <div>
-                  <label className="block text-gray-300 mb-1 text-sm">فضای کاری</label>
-                  <select
+                  <label className="block text-[var(--sds-text-muted)] mb-1 text-sm">فضای کاری</label>
+                  <ErpSelect
                     value={roleFeatureForm.workspace}
                     onChange={(e) => setRoleFeatureForm({ ...roleFeatureForm, workspace: e.target.value, feature: '' })}
-                    className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white text-sm"
+                    className="w-full p-2 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded text-[var(--sds-text-primary)] text-sm"
                   >
                     <option value="">انتخاب فضای کاری</option>
                     {Object.entries(WORKSPACES).map(([key, value]) => (
                       <option key={key} value={key}>{value}</option>
                     ))}
-                  </select>
+                  </ErpSelect>
                 </div>
 
                 <div>
-                  <label className="block text-gray-300 mb-1 text-sm">ویژگی</label>
-                  <select
+                  <label className="block text-[var(--sds-text-muted)] mb-1 text-sm">ویژگی</label>
+                  <ErpSelect
                     value={roleFeatureForm.feature}
                     onChange={(e) => setRoleFeatureForm({ ...roleFeatureForm, feature: e.target.value })}
-                    className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white text-sm"
+                    className="w-full p-2 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded text-[var(--sds-text-primary)] text-sm"
                   >
                     <option value="">انتخاب ویژگی</option>
                     {getRoleFilteredFeatures().map(([key, value]) => (
                       <option key={key} value={key}>{value}</option>
                     ))}
-                  </select>
+                  </ErpSelect>
                 </div>
 
                 <div>
-                  <label className="block text-gray-300 mb-1 text-sm">سطح دسترسی</label>
-                  <select
+                  <label className="block text-[var(--sds-text-muted)] mb-1 text-sm">سطح دسترسی</label>
+                  <ErpSelect
                     value={roleFeatureForm.permissionLevel}
                     onChange={(e) => setRoleFeatureForm({ ...roleFeatureForm, permissionLevel: e.target.value })}
-                    className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white text-sm"
+                    className="w-full p-2 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded text-[var(--sds-text-primary)] text-sm"
                   >
                     <option value="view">مشاهده</option>
                     <option value="edit">ویرایش</option>
                     <option value="admin">مدیریت</option>
-                  </select>
+                  </ErpSelect>
                 </div>
 
                 <div className="flex gap-2">
-                  <button
+                  <ErpPressable type="submit"
                     onClick={handleSaveRoleFeaturePermission}
-                    className="flex-1 glass-liquid-card p-2 hover:bg-teal-500/20 transition-all duration-300 text-center text-sm"
+                    className="flex-1 sds-workspace-surface p-2 hover:bg-[var(--sds-accent-surface)] transition-all duration-300 text-center text-sm"
                   >
                     {roleFeatureForm.id ? 'به‌روزرسانی' : 'ایجاد'}
-                  </button>
-                  <button
+                  </ErpPressable>
+                  <ErpPressable type="submit"
                     onClick={() => setRoleFeatureForm({ id: '', role: '', workspace: '', feature: '', permissionLevel: 'view', isActive: true })}
-                    className="flex-1 glass-liquid-card p-2 hover:bg-gray-700/50 transition-all duration-300 text-center text-sm"
+                    className="flex-1 sds-workspace-surface p-2 hover:bg-[var(--sds-surface-raised)] transition-all duration-300 text-center text-sm"
                   >
                     پاک کردن
-                  </button>
+                  </ErpPressable>
                 </div>
               </div>
 
               <div className="mt-4 space-y-2 max-h-48 overflow-y-auto">
                 {roleFeaturePermissions.length === 0 && (
-                  <p className="text-xs text-gray-400">هیچ مجوزی ثبت نشده است.</p>
+                  <p className="text-xs text-[var(--sds-text-muted)]">هیچ مجوزی ثبت نشده است.</p>
                 )}
                 {roleFeaturePermissions.map((permission) => (
-                  <div key={permission.id} className="flex items-center justify-between bg-gray-800/50 p-2 rounded">
-                    <div className="text-xs text-gray-300">
+                  <div key={permission.id} className="flex items-center justify-between bg-[var(--sds-surface-raised)] p-2 rounded">
+                    <div className="text-xs text-[var(--sds-text-muted)]">
                       {permission.role} / {getWorkspaceDisplayName(permission.workspace)} / {getFeatureDisplayName(permission.feature)} / {getPermissionDisplayName(permission.permissionLevel)}
                     </div>
                     <div className="flex gap-2">
-                      <button
+                      <ErpPressable type="submit"
                         onClick={() => handleEditRoleFeaturePermission(permission)}
-                        className="text-xs text-teal-300 disabled:opacity-50"
+                        className="text-xs text-[var(--sds-accent)] disabled:opacity-50"
                       >
                         ویرایش
-                      </button>
-                      <button
+                      </ErpPressable>
+                      <ErpPressable type="submit"
                         onClick={() => handleDeleteRoleFeaturePermission(permission)}
-                        className="text-xs text-red-300 disabled:opacity-50"
+                        className="text-xs text-[var(--sds-danger)] disabled:opacity-50"
                       >
                         حذف
-                      </button>
+                      </ErpPressable>
                     </div>
                   </div>
                 ))}
@@ -1593,17 +1594,17 @@ export default function PermissionsManagementPage() {
 
         {/* Create/Edit Modal */}
         {showAddPermissionModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="glass-liquid-card p-4 w-full max-w-6xl mx-auto max-h-[90vh] overflow-y-auto">
-              <h3 className="text-lg font-semibold text-white mb-3">
+          <div className="fixed inset-0 bg-[var(--sds-surface-overlay)] flex items-center justify-center z-50 p-4">
+            <div className="sds-workspace-surface p-4 w-full max-w-6xl mx-auto max-h-[90vh] overflow-y-auto">
+              <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-3">
                 {editingPermission ? 'ویرایش مجوز' : 'ایجاد مجوز جدید'}
               </h3>
-              
+
               <div className="space-y-3">
                 {!editingPermission && (
                   <div>
-                    <label className="block text-gray-300 mb-2">کاربر</label>
-                    <div className="p-3 bg-gray-800 border border-gray-600 rounded-lg text-white">
+                    <label className="block text-[var(--sds-text-muted)] mb-2">کاربر</label>
+                    <div className="p-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded-lg text-[var(--sds-text-primary)]">
                       {selectedUser ? `${selectedUser.firstName} ${selectedUser.lastName} (${selectedUser.email})` : 'هیچ کاربری انتخاب نشده'}
                     </div>
                   </div>
@@ -1630,71 +1631,71 @@ export default function PermissionsManagementPage() {
                   <div>
                     <div className="flex justify-between items-center mb-3">
                       <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 bg-gradient-to-br from-teal-500 to-blue-500 rounded-lg flex items-center justify-center">
-                          <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div className="w-6 h-6 bg-gradient-to-br from-[var(--sds-accent)] to-[var(--sds-info)] rounded-lg flex items-center justify-center">
+                          <svg className="w-4 h-4 text-[var(--sds-text-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                           </svg>
                         </div>
                         <div>
-                          <h3 className="text-base font-semibold text-gray-200">
+                          <h3 className="text-base font-semibold text-[var(--sds-text-primary)]">
                             انتخاب ویژگی‌ها برای {getWorkspaceDisplayName(formData.workspace)}
                           </h3>
-                          <p className="text-xs text-gray-400">
+                          <p className="text-xs text-[var(--sds-text-muted)]">
                             {getFilteredFeatures().length} ویژگی موجود است
                           </p>
                         </div>
                       </div>
                       <div className="flex gap-1">
-                        <button
+                        <ErpPressable type="submit"
                           onClick={() => handleBulkFeatureSelection('view')}
-                          className="flex items-center gap-1 px-2 py-1 bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded text-xs hover:bg-blue-500/30 transition-all duration-200"
+                          className="flex items-center gap-1 px-2 py-1 bg-[var(--sds-info-surface)] text-[var(--sds-info)] border border-[var(--sds-info-border)] rounded text-xs hover:bg-[var(--sds-info-surface)] transition-all duration-200"
                         >
-                          <div className="w-1.5 h-1.5 bg-blue-400 rounded-full"></div>
+                          <div className="w-1.5 h-1.5 bg-[var(--sds-info-surface)] rounded-full"></div>
                           همه (مشاهده)
-                        </button>
-                        <button
+                        </ErpPressable>
+                        <ErpPressable type="submit"
                           onClick={() => handleBulkFeatureSelection('edit')}
-                          className="flex items-center gap-1 px-2 py-1 bg-green-500/20 text-green-300 border border-green-500/30 rounded text-xs hover:bg-green-500/30 transition-all duration-200"
+                          className="flex items-center gap-1 px-2 py-1 bg-[var(--sds-success-surface)] text-[var(--sds-success)] border border-[var(--sds-success-border)] rounded text-xs hover:bg-[var(--sds-success-surface)] transition-all duration-200"
                         >
-                          <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
+                          <div className="w-1.5 h-1.5 bg-[var(--sds-success-surface)] rounded-full"></div>
                           همه (ویرایش)
-                        </button>
-                        <button
+                        </ErpPressable>
+                        <ErpPressable type="submit"
                           onClick={clearAllSelections}
-                          className="flex items-center gap-1 px-2 py-1 bg-red-500/20 text-red-300 border border-red-500/30 rounded text-xs hover:bg-red-500/30 transition-all duration-200"
+                          className="flex items-center gap-1 px-2 py-1 bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] border border-[var(--sds-danger-border)] rounded text-xs hover:bg-[var(--sds-danger-surface)] transition-all duration-200"
                         >
-                          <div className="w-1.5 h-1.5 bg-red-400 rounded-full"></div>
+                          <div className="w-1.5 h-1.5 bg-[var(--sds-danger-surface)] rounded-full"></div>
                           پاک کردن
-                        </button>
+                        </ErpPressable>
                       </div>
                     </div>
 
-                    <div className="max-h-60 overflow-y-auto border border-gray-600 rounded-lg bg-gray-900/50 backdrop-blur-sm">
+                    <div className="max-h-60 overflow-y-auto border border-[var(--sds-border-strong)] rounded-lg bg-[var(--sds-surface-raised)] backdrop-blur-sm">
                       <table className="w-full">
-                        <thead className="bg-gradient-to-r from-gray-800 to-gray-700 sticky top-0 z-10">
+                        <thead className="bg-gradient-to-r from-[var(--sds-surface-raised)] to-[var(--sds-surface-raised)] sticky top-0 z-10">
                           <tr>
-                            <th className="p-2 text-right text-gray-200 font-semibold border-b border-gray-600 text-sm">
+                            <th className="p-2 text-right text-[var(--sds-text-primary)] font-semibold border-b border-[var(--sds-border-strong)] text-sm">
                               <div className="flex items-center gap-1">
                                 <span>ویژگی</span>
-                                <div className="w-1.5 h-1.5 bg-teal-400 rounded-full"></div>
+                                <div className="w-1.5 h-1.5 bg-[var(--sds-accent-surface)] rounded-full"></div>
                               </div>
                             </th>
-                            <th className="p-2 text-center text-gray-200 font-semibold border-b border-gray-600 text-sm">
+                            <th className="p-2 text-center text-[var(--sds-text-primary)] font-semibold border-b border-[var(--sds-border-strong)] text-sm">
                               <div className="flex items-center justify-center gap-1">
                                 <span>وضعیت فعلی</span>
-                                <div className="w-1.5 h-1.5 bg-blue-400 rounded-full"></div>
+                                <div className="w-1.5 h-1.5 bg-[var(--sds-info-surface)] rounded-full"></div>
                               </div>
                             </th>
-                            <th className="p-2 text-center text-gray-200 font-semibold border-b border-gray-600 text-sm">
+                            <th className="p-2 text-center text-[var(--sds-text-primary)] font-semibold border-b border-[var(--sds-border-strong)] text-sm">
                               <div className="flex items-center justify-center gap-1">
                                 <span>انتخاب</span>
-                                <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
+                                <div className="w-1.5 h-1.5 bg-[var(--sds-success-surface)] rounded-full"></div>
                               </div>
                             </th>
-                            <th className="p-2 text-center text-gray-200 font-semibold border-b border-gray-600 text-sm">
+                            <th className="p-2 text-center text-[var(--sds-text-primary)] font-semibold border-b border-[var(--sds-border-strong)] text-sm">
                               <div className="flex items-center justify-center gap-1">
                                 <span>سطح دسترسی</span>
-                                <div className="w-1.5 h-1.5 bg-purple-400 rounded-full"></div>
+                                <div className="w-1.5 h-1.5 bg-[var(--sds-info-surface)] rounded-full"></div>
                               </div>
                             </th>
                           </tr>
@@ -1703,21 +1704,21 @@ export default function PermissionsManagementPage() {
                           {getFilteredFeatures().map(([key, value], index) => {
                             const currentPermission = getCurrentPermission(key);
                             const isSelected = selectedFeatures[key];
-                            
+
                             return (
-                              <tr 
-                                key={key} 
+                              <tr
+                                key={key}
                                 className={`
-                                  border-b border-gray-700/50 transition-all duration-200
-                                  ${index % 2 === 0 ? 'bg-gray-800/30' : 'bg-gray-800/20'}
-                                  hover:bg-gradient-to-r hover:from-teal-500/10 hover:to-blue-500/10
-                                  ${isSelected ? 'ring-1 ring-teal-500/50 bg-teal-500/5' : ''}
+                                  border-b border-[var(--sds-border-strong)] transition-all duration-200
+                                  ${index % 2 === 0 ? 'bg-[var(--sds-surface-raised)]' : 'bg-[var(--sds-surface-raised)]'}
+                                  hover:bg-gradient-to-r hover:from-[var(--sds-accent-surface)] hover:to-[var(--sds-info-surface)]
+                                  ${isSelected ? 'ring-1 ring-[var(--sds-focus-ring)] bg-[var(--sds-accent-surface)]' : ''}
                                 `}
                               >
-                                <td className="p-2 text-gray-200 font-medium">
+                                <td className="p-2 text-[var(--sds-text-primary)] font-medium">
                                   <div className="flex items-center gap-2">
                                     <div className={`w-2 h-2 rounded-full ${
-                                      isSelected ? 'bg-teal-400' : 'bg-gray-600'
+                                      isSelected ? 'bg-[var(--sds-accent-surface)]' : 'bg-[var(--sds-surface-subtle)]'
                                     } transition-colors duration-200`}></div>
                                     <span className="text-xs">{value}</span>
                                   </div>
@@ -1726,21 +1727,21 @@ export default function PermissionsManagementPage() {
                                   {currentPermission ? (
                                     <span className={`
                                       inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
-                                      ${currentPermission.permissionLevel === 'admin' ? 'bg-red-500/20 text-red-300 border border-red-500/30' :
-                                        currentPermission.permissionLevel === 'edit' ? 'bg-green-500/20 text-green-300 border border-green-500/30' :
-                                        'bg-blue-500/20 text-blue-300 border border-blue-500/30'}
+                                      ${currentPermission.permissionLevel === 'admin' ? 'bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] border border-[var(--sds-danger-border)]' :
+                                        currentPermission.permissionLevel === 'edit' ? 'bg-[var(--sds-success-surface)] text-[var(--sds-success)] border border-[var(--sds-success-border)]' :
+                                        'bg-[var(--sds-info-surface)] text-[var(--sds-info)] border border-[var(--sds-info-border)]'}
                                     `}>
                                       <div className={`w-1.5 h-1.5 rounded-full mr-1 ${
-                                        currentPermission.permissionLevel === 'admin' ? 'bg-red-400' :
-                                        currentPermission.permissionLevel === 'edit' ? 'bg-green-400' :
-                                        'bg-blue-400'
+                                        currentPermission.permissionLevel === 'admin' ? 'bg-[var(--sds-danger-surface)]' :
+                                        currentPermission.permissionLevel === 'edit' ? 'bg-[var(--sds-success-surface)]' :
+                                        'bg-[var(--sds-info-surface)]'
                                       }`}></div>
                                       {currentPermission.permissionLevel === 'admin' ? 'مدیر' :
                                        currentPermission.permissionLevel === 'edit' ? 'ویرایش' : 'مشاهده'}
                                     </span>
                                   ) : (
-                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-600/20 text-gray-400 border border-gray-600/30">
-                                      <div className="w-1.5 h-1.5 rounded-full mr-1 bg-gray-500"></div>
+                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-[var(--sds-surface-subtle)] text-[var(--sds-text-muted)] border border-[var(--sds-border-strong)]">
+                                      <div className="w-1.5 h-1.5 rounded-full mr-1 bg-[var(--sds-surface-subtle)]"></div>
                                       بدون دسترسی
                                     </span>
                                   )}
@@ -1748,7 +1749,7 @@ export default function PermissionsManagementPage() {
                                 <td className="p-2 text-center">
                                   <div className="flex items-center justify-center">
                                     <label className="relative inline-flex items-center cursor-pointer">
-                                      <input
+                                      <ErpInput
                                         type="checkbox"
                                         checked={!!isSelected}
                                         onChange={(e) => {
@@ -1765,14 +1766,14 @@ export default function PermissionsManagementPage() {
                                       />
                                       <div className={`
                                         relative w-5 h-5 rounded border-2 transition-all duration-200
-                                        ${isSelected 
-                                          ? 'bg-teal-500 border-teal-500 shadow-md shadow-teal-500/25' 
-                                          : 'bg-gray-700 border-gray-600 hover:border-teal-400'
+                                        ${isSelected
+                                          ? 'bg-[var(--sds-accent)] border-[var(--sds-border-strong)] shadow-md shadow-[var(--sds-shadow-card)]'
+                                          : 'bg-[var(--sds-surface-raised)] border-[var(--sds-border-strong)] hover:border-[var(--sds-border-strong)]'
                                         }
                                       `}>
                                         {isSelected && (
                                           <div className="absolute inset-0 flex items-center justify-center">
-                                            <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                            <svg className="w-3 h-3 text-[var(--sds-text-primary)]" fill="currentColor" viewBox="0 0 20 20">
                                               <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                             </svg>
                                           </div>
@@ -1783,22 +1784,22 @@ export default function PermissionsManagementPage() {
                                 </td>
                                 <td className="p-2 text-center">
                                   {isSelected && (
-                                    <select
+                                    <ErpSelect
                                       value={selectedFeatures[key] || 'view'}
                                       onChange={(e) => handleFeatureSelection(key, e.target.value)}
                                       className={`
-                                        px-2 py-1 bg-gray-800 border rounded text-white text-xs
-                                        focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500/20
-                                        transition-all duration-200 hover:bg-gray-700
-                                        ${selectedFeatures[key] === 'admin' ? 'border-red-500/50 bg-red-500/5' :
-                                          selectedFeatures[key] === 'edit' ? 'border-green-500/50 bg-green-500/5' :
-                                          'border-blue-500/50 bg-blue-500/5'}
+                                        px-2 py-1 bg-[var(--sds-surface-raised)] border rounded text-[var(--sds-text-primary)] text-xs
+                                        focus:border-[var(--sds-border-strong)] focus:outline-none focus:ring-1 focus:ring-[var(--sds-focus-ring)]
+                                        transition-all duration-200 hover:bg-[var(--sds-surface-raised)]
+                                        ${selectedFeatures[key] === 'admin' ? 'border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)]' :
+                                          selectedFeatures[key] === 'edit' ? 'border-[var(--sds-success-border)] bg-[var(--sds-success-surface)]' :
+                                          'border-[var(--sds-info-border)] bg-[var(--sds-info-surface)]'}
                                       `}
                                     >
                                       {featureExceptionPermissionLevelOptions.map((option) => (
                                         <option key={option.value} value={option.value}>{option.label}</option>
                                       ))}
-                                    </select>
+                                    </ErpSelect>
                                   )}
                                 </td>
                               </tr>
@@ -1809,34 +1810,34 @@ export default function PermissionsManagementPage() {
                     </div>
 
                     {Object.keys(selectedFeatures).length > 0 && (
-                      <div className="mt-3 p-3 bg-gradient-to-r from-teal-500/10 to-blue-500/10 border border-teal-500/20 rounded-lg backdrop-blur-sm">
+                      <div className="mt-3 p-3 bg-gradient-to-r from-[var(--sds-accent-surface)] to-[var(--sds-info-surface)] border border-[var(--sds-border-strong)] rounded-lg backdrop-blur-sm">
                         <div className="flex justify-between items-center">
                           <div className="flex items-center gap-2">
-                            <div className="w-5 h-5 bg-teal-500 rounded-full flex items-center justify-center">
-                              <span className="text-white text-xs font-bold">
+                            <div className="w-5 h-5 bg-[var(--sds-accent)] rounded-full flex items-center justify-center">
+                              <span className="text-[var(--sds-text-primary)] text-xs font-bold">
                                 {Object.keys(selectedFeatures).length}
                               </span>
                             </div>
                             <div>
-                              <span className="text-gray-200 font-medium text-sm">
+                              <span className="text-[var(--sds-text-primary)] font-medium text-sm">
                                 {Object.keys(selectedFeatures).length} ویژگی انتخاب شده
                               </span>
-                              <p className="text-xs text-gray-400">
+                              <p className="text-xs text-[var(--sds-text-muted)]">
                                 آماده برای ایجاد مجوز
                               </p>
                             </div>
                           </div>
                           <div className="flex gap-2">
-                            <select
+                            <ErpSelect
                               value={bulkPermissionLevel}
                               onChange={(e) => setBulkPermissionLevel(e.target.value)}
-                              className="px-3 py-1 bg-gray-800/50 border border-gray-600 rounded text-white text-xs focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500/20 transition-all duration-200"
+                              className="px-3 py-1 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded text-[var(--sds-text-primary)] text-xs focus:border-[var(--sds-border-strong)] focus:outline-none focus:ring-1 focus:ring-[var(--sds-focus-ring)] transition-all duration-200"
                             >
                               {featureExceptionPermissionLevelOptions.map((option) => (
                                 <option key={option.value} value={option.value}>{option.label}</option>
                               ))}
-                            </select>
-                            <button
+                            </ErpSelect>
+                            <ErpPressable type="submit"
                               onClick={() => {
                                 if (bulkPermissionLevel === 'admin') {
                                   showFeedback('مجوز جزئی فقط سطح مشاهده یا ویرایش را پشتیبانی می‌کند');
@@ -1848,13 +1849,13 @@ export default function PermissionsManagementPage() {
                                 });
                                 setSelectedFeatures(newSelection);
                               }}
-                              className="flex items-center gap-1 px-3 py-1 bg-teal-500/20 text-teal-300 border border-teal-500/30 rounded text-xs hover:bg-teal-500/30 transition-all duration-200"
+                              className="flex items-center gap-1 px-3 py-1 bg-[var(--sds-accent-surface)] text-[var(--sds-accent)] border border-[var(--sds-border-strong)] rounded text-xs hover:bg-[var(--sds-accent-surface)] transition-all duration-200"
                             >
                               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                               </svg>
                               اعمال به همه
-                            </button>
+                            </ErpPressable>
                           </div>
                         </div>
                       </div>
@@ -1863,52 +1864,52 @@ export default function PermissionsManagementPage() {
                 )}
 
                 {editingPermission && (
-                  <div className="bg-gray-800/60 border border-gray-600 rounded-lg p-3 text-sm text-gray-300">
+                  <div className="bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded-lg p-3 text-sm text-[var(--sds-text-muted)]">
                     <p>ویژگی انتخاب‌شده: {getFeatureDisplayName(formData.feature)}</p>
-                    <p className="text-xs text-gray-400 mt-1">در حالت ویرایش، نوع ویژگی و فضای کاری ثابت هستند.</p>
+                    <p className="text-xs text-[var(--sds-text-muted)] mt-1">در حالت ویرایش، نوع ویژگی و فضای کاری ثابت هستند.</p>
                   </div>
                 )}
 
 
                 <div>
-                  <label className="block text-gray-300 mb-1 text-sm">تاریخ انقضا (اختیاری)</label>
-                  <input
+                  <label className="block text-[var(--sds-text-muted)] mb-1 text-sm">تاریخ انقضا (اختیاری)</label>
+                  <ErpInput
                     type="datetime-local"
                     value={formData.expiresAt}
                     onChange={(e) => setFormData({ ...formData, expiresAt: e.target.value })}
-                    className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white text-sm focus:border-teal-500 focus:outline-none"
+                    className="w-full p-2 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded text-[var(--sds-text-primary)] text-sm focus:border-[var(--sds-border-strong)] focus:outline-none"
                   />
                 </div>
               </div>
 
               <div className="flex space-x-3 space-x-reverse mt-4">
                 {Object.keys(selectedFeatures).length > 0 ? (
-                  <button
+                  <ErpPressable type="submit"
                     onClick={handleBulkCreatePermissions}
-                    className="flex-1 glass-liquid-card p-2 hover:bg-teal-500/20 transition-all duration-300 text-center text-sm"
+                    className="flex-1 sds-workspace-surface p-2 hover:bg-[var(--sds-accent-surface)] transition-all duration-300 text-center text-sm"
                   >
                     ایجاد {Object.keys(selectedFeatures).length} مجوز
-                  </button>
+                  </ErpPressable>
                 ) : (
-                  <button
+                  <ErpPressable type="submit"
                     onClick={handleCreatePermission}
-                    className="flex-1 glass-liquid-card p-2 hover:bg-teal-500/20 transition-all duration-300 text-center text-sm"
+                    className="flex-1 sds-workspace-surface p-2 hover:bg-[var(--sds-accent-surface)] transition-all duration-300 text-center text-sm"
                     disabled={!formData.feature || (currentUser?.role === 'MANAGER' && selectedUser?.role === 'ADMIN')}
                   >
                     {editingPermission ? 'ویرایش' : 'ایجاد'}
-                  </button>
+                  </ErpPressable>
                 )}
-                <button
+                <ErpPressable type="submit"
                   onClick={() => {
                     setShowAddPermissionModal(false);
                     setEditingPermission(null);
                     setFormData({ userId: '', workspace: '', feature: '', permissionLevel: 'view', expiresAt: '' });
                     clearAllSelections();
                   }}
-                  className="flex-1 glass-liquid-card p-2 hover:bg-gray-700/50 transition-all duration-300 text-center text-sm"
+                  className="flex-1 sds-workspace-surface p-2 hover:bg-[var(--sds-surface-raised)] transition-all duration-300 text-center text-sm"
                 >
                   انصراف
-                </button>
+                </ErpPressable>
               </div>
             </div>
           </div>
@@ -1916,16 +1917,16 @@ export default function PermissionsManagementPage() {
 
         {/* Workspace Permission Modal */}
         {showWorkspacePermissionModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="glass-liquid-card p-6 w-full max-w-md mx-auto">
-              <h3 className="text-lg font-semibold text-white mb-4">
+          <div className="fixed inset-0 bg-[var(--sds-surface-overlay)] flex items-center justify-center z-50 p-4">
+            <div className="sds-workspace-surface p-6 w-full max-w-md mx-auto">
+              <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">
                 ایجاد مجوز فضای کاری
               </h3>
-              
+
               <div className="space-y-4">
                 <div>
-                  <label className="block text-gray-300 mb-2">کاربر</label>
-                  <div className="p-3 bg-gray-800 border border-gray-600 rounded-lg text-white">
+                  <label className="block text-[var(--sds-text-muted)] mb-2">کاربر</label>
+                  <div className="p-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded-lg text-[var(--sds-text-primary)]">
                     {selectedUser ? `${selectedUser.firstName} ${selectedUser.lastName} (${selectedUser.email})` : 'هیچ کاربری انتخاب نشده'}
                   </div>
                 </div>
@@ -1958,37 +1959,37 @@ export default function PermissionsManagementPage() {
                 </div>
 
                 <div>
-                  <label className="block text-gray-300 mb-2">تاریخ انقضا (اختیاری)</label>
-                  <input
+                  <label className="block text-[var(--sds-text-muted)] mb-2">تاریخ انقضا (اختیاری)</label>
+                  <ErpInput
                     type="datetime-local"
                     value={formData.expiresAt}
                     onChange={(e) => setFormData({ ...formData, expiresAt: e.target.value })}
-                    className="w-full p-3 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-teal-500 focus:outline-none"
+                    className="w-full p-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-strong)] rounded-lg text-[var(--sds-text-primary)] focus:border-[var(--sds-border-strong)] focus:outline-none"
                   />
                 </div>
               </div>
 
               <div className="flex space-x-4 space-x-reverse mt-6">
-                <button
+                <ErpPressable type="submit"
                   onClick={handleCreateWorkspacePermission}
-                  className="flex-1 glass-liquid-card p-3 hover:bg-teal-500/20 transition-all duration-300 text-center"
+                  className="flex-1 sds-workspace-surface p-3 hover:bg-[var(--sds-accent-surface)] transition-all duration-300 text-center"
                 >
                   ایجاد مجوز فضای کاری
-                </button>
-                <button
+                </ErpPressable>
+                <ErpPressable type="submit"
                   onClick={() => {
                     setShowWorkspacePermissionModal(false);
                     setFormData({ userId: '', workspace: '', feature: '', permissionLevel: 'view', expiresAt: '' });
                   }}
-                  className="flex-1 glass-liquid-card p-3 hover:bg-gray-700/50 transition-all duration-300 text-center"
+                  className="flex-1 sds-workspace-surface p-3 hover:bg-[var(--sds-surface-raised)] transition-all duration-300 text-center"
                 >
                   انصراف
-                </button>
+                </ErpPressable>
               </div>
             </div>
           </div>
         )}
       </div>
-    </div>
+    </main>
   );
 }

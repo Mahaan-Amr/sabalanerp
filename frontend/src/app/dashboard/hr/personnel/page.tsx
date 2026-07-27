@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
 import { useCallback, useEffect, useState } from 'react';
 import moment from 'moment-jalaali';
 import Link from 'next/link';
@@ -128,53 +128,53 @@ export default function HrPersonnelPage() {
       {canCreateExceptionalPersonnel ? <ErpSection title="ثبت استثنایی پرسنل" description="فقط برای مهاجرت داده، اصلاح سابقه یا انتقال سازمانی؛ جذب عادی باید از پرونده متقاضی انجام شود.">
         <ErpCard className="p-4 sm:p-5">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <HrField label="نام" required><input className={fieldClass} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></HrField>
-            <HrField label="نام خانوادگی" required><input className={fieldClass} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></HrField>
-            <HrField label="کد ملی" hint="در ثبت اولیه می‌تواند خالی بماند."><input className={fieldClass} inputMode="numeric" value={form.nationalCode} onChange={(e) => setForm({ ...form, nationalCode: e.target.value })} /></HrField>
-            <HrField label="شماره پرسنلی"><input className={fieldClass} value={form.employeeNumber} onChange={(e) => setForm({ ...form, employeeNumber: e.target.value })} /></HrField>
+            <HrField label="نام" required><ErpInput className={fieldClass} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></HrField>
+            <HrField label="نام خانوادگی" required><ErpInput className={fieldClass} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></HrField>
+            <HrField label="کد ملی" hint="در ثبت اولیه می‌تواند خالی بماند."><ErpInput className={fieldClass} inputMode="numeric" value={form.nationalCode} onChange={(e) => setForm({ ...form, nationalCode: e.target.value })} /></HrField>
+            <HrField label="شماره پرسنلی"><ErpInput className={fieldClass} value={form.employeeNumber} onChange={(e) => setForm({ ...form, employeeNumber: e.target.value })} /></HrField>
             <HrField label="وضعیت شروع" required>
-              <select className={fieldClass} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+              <ErpSelect className={fieldClass} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
                 <option value="ACTIVE">فعال</option><option value="PLANNED">برنامه‌ریزی‌شده</option>
-              </select>
+              </ErpSelect>
             </HrField>
             <HrField label="تاریخ شروع" required><HrPersianCalendar value={form.effectiveFrom} onChange={(effectiveFrom) => setForm({ ...form, effectiveFrom })} /></HrField>
             <HrField label="جایگاه اصلی" required>
-              <select className={fieldClass} value={form.positionId} onChange={(e) => setForm({ ...form, positionId: e.target.value, responsibleSupervisorAssignmentId: '' })}>
+              <ErpSelect className={fieldClass} value={form.positionId} onChange={(e) => setForm({ ...form, positionId: e.target.value, responsibleSupervisorAssignmentId: '' })}>
                 <option value="">انتخاب جایگاه</option>
                 {foundation.positions.filter((item: any) => item.isActive && item.vacancy > 0).map((item: any) => <option key={item.id} value={item.id}>{item.title} · {item.vacancy.toLocaleString('fa-IR')} جای خالی</option>)}
-              </select>
+              </ErpSelect>
             </HrField>
             <HrField label="کاربر سامانه" hint="اختیاری؛ تنها برای دسترسی ERP.">
-              <select className={fieldClass} value={form.userId} onChange={(e) => setForm({ ...form, userId: e.target.value })}>
+              <ErpSelect className={fieldClass} value={form.userId} onChange={(e) => setForm({ ...form, userId: e.target.value })}>
                 <option value="">بدون حساب کاربری</option>
                 {foundation.availableUsers.map((item: any) => <option key={item.id} value={item.id}>{item.firstName} {item.lastName} · {item.username}</option>)}
-              </select>
+              </ErpSelect>
             </HrField>
             {supervisors.length > 1 && (
               <div className="md:col-span-2">
                 <HrField label="سرپرست مسئول" required hint="جایگاه سرپرست چند متصدی دارد؛ یک فرد را صریح انتخاب کنید.">
-                  <select className={fieldClass} value={form.responsibleSupervisorAssignmentId} onChange={(e) => setForm({ ...form, responsibleSupervisorAssignmentId: e.target.value })}>
+                  <ErpSelect className={fieldClass} value={form.responsibleSupervisorAssignmentId} onChange={(e) => setForm({ ...form, responsibleSupervisorAssignmentId: e.target.value })}>
                     <option value="">انتخاب سرپرست</option>
                     {supervisors.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.positionTitle}</option>)}
-                  </select>
+                  </ErpSelect>
                 </HrField>
               </div>
             )}
-            <label className="flex items-center gap-2 self-end rounded-xl border border-slate-300 px-3 py-2.5 text-sm dark:border-slate-700">
-              <input type="checkbox" checked={form.confirmDuplicate} onChange={(e) => setForm({ ...form, confirmDuplicate: e.target.checked })} />
+            <label className="flex items-center gap-2 self-end rounded-xl border border-[var(--sds-border-default)] px-3 py-2.5 text-sm dark:border-[var(--sds-border-strong)]">
+              <ErpInput type="checkbox" checked={form.confirmDuplicate} onChange={(e) => setForm({ ...form, confirmDuplicate: e.target.checked })} />
               نام‌های مشابه را بررسی کرده‌ام
             </label>
             <HrField label="منبع ثبت استثنایی" required>
-              <select className={fieldClass} value={form.sourceCategory} onChange={(e) => setForm({ ...form, sourceCategory: e.target.value })}>
+              <ErpSelect className={fieldClass} value={form.sourceCategory} onChange={(e) => setForm({ ...form, sourceCategory: e.target.value })}>
                 <option value="">انتخاب منبع</option>
                 <option value="DATA_MIGRATION">مهاجرت داده</option>
                 <option value="HISTORICAL_CORRECTION">اصلاح سابقه</option>
                 <option value="ORGANIZATIONAL_TRANSFER">انتقال سازمانی</option>
-              </select>
+              </ErpSelect>
             </HrField>
             <div className="md:col-span-2 xl:col-span-3">
               <HrField label="دلیل ثبت استثنایی" required hint="این توضیح به‌صورت دائمی در رویداد ممیزی نگهداری می‌شود.">
-                <textarea className={fieldClass} rows={2} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
+                <ErpTextarea className={fieldClass} rows={2} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
               </HrField>
             </div>
           </div>
@@ -192,13 +192,13 @@ export default function HrPersonnelPage() {
         </ErpCard>
       </ErpSection> : <ErpSection title="ایجاد پرسنل جدید" description="مسیر عادی ایجاد پرسنل از پرونده جذب و پس از تکمیل کنترل‌های استخدام انجام می‌شود.">
         <ErpCard className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <p className="text-sm text-slate-600 dark:text-slate-300">برای نیروی جدید، ابتدا پرونده متقاضی را ایجاد و چرخه جذب را کامل کنید.</p>
-          <Link className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white" href="/dashboard/hr/hiring">رفتن به جذب و پرونده‌های متقاضیان</Link>
+          <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">برای نیروی جدید، ابتدا پرونده متقاضی را ایجاد و چرخه جذب را کامل کنید.</p>
+          <Link className="rounded-xl bg-[var(--sds-success)] px-4 py-2 text-sm font-bold text-[var(--sds-text-inverse)]" href="/dashboard/hr/hiring">رفتن به جذب و پرونده‌های متقاضیان</Link>
         </ErpCard>
       </ErpSection>}
 
       <ErpSection title="فهرست پرسنل" description={`${rows.length.toLocaleString('fa-IR')} پرونده`} actions={[{ label: 'جستجو', icon: FaSearch, onClick: load, tone: 'neutral' }]}>
-        <div className="mb-4"><input className={fieldClass} placeholder="نام، کد ملی یا شماره پرسنلی" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+        <div className="mb-4"><ErpInput className={fieldClass} placeholder="نام، کد ملی یا شماره پرسنلی" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
         <div className="space-y-3">
           {rows.map((person) => (
             <PersonnelCard
@@ -222,7 +222,7 @@ function PersonnelCard(props: any) {
   const primary = relationship?.assignments?.find((item: any) => item.type === 'PRIMARY' && !item.effectiveTo);
   return (
     <ErpCard className="p-4">
-      <button type="button" className="flex w-full items-start justify-between gap-3 text-right" onClick={onToggle}>
+      <ErpPressable type="button" className="flex w-full items-start justify-between gap-3 text-right" onClick={onToggle}>
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-bold">{person.firstName} {person.lastName}</p>
@@ -231,14 +231,14 @@ function PersonnelCard(props: any) {
             </ErpBadge>
             {person.user && <ErpBadge tone={person.user.isActive ? 'primary' : 'neutral'}>ERP: {person.user.username}</ErpBadge>}
           </div>
-          <p className="mt-1 text-xs text-slate-500">{person.employeeNumber || 'بدون شماره پرسنلی'} · {primary ? `${primary.position.title} / ${primary.position.organizationalUnit.name}` : 'فاقد تخصیص اصلی جاری'}</p>
+          <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{person.employeeNumber || 'بدون شماره پرسنلی'} · {primary ? `${primary.position.title} / ${primary.position.organizationalUnit.name}` : 'فاقد تخصیص اصلی جاری'}</p>
         </div>
         {open ? <FaChevronUp /> : <FaChevronDown />}
-      </button>
-      {relationship?.hiringApplication && <Link className="mt-2 inline-block text-xs font-bold text-emerald-700 hover:underline" href={`/dashboard/hr/hiring/${relationship.hiringApplication.id}`}>ایجادشده از پرونده جذب · مشاهده پرونده</Link>}
-      {!relationship?.hiringApplication && person.hrPersonnelAudits?.[0]?.eventType === 'EXCEPTIONAL_PERSONNEL_REGISTERED' && <p className="mt-2 text-xs font-bold text-amber-700">ثبت استثنایی · {person.hrPersonnelAudits[0].reason}</p>}
+      </ErpPressable>
+      {relationship?.hiringApplication && <Link className="mt-2 inline-block text-xs font-bold text-[var(--sds-success)] hover:underline" href={`/dashboard/hr/hiring/${relationship.hiringApplication.id}`}>ایجادشده از پرونده جذب · مشاهده پرونده</Link>}
+      {!relationship?.hiringApplication && person.hrPersonnelAudits?.[0]?.eventType === 'EXCEPTIONAL_PERSONNEL_REGISTERED' && <p className="mt-2 text-xs font-bold text-[var(--sds-warning)]">ثبت استثنایی · {person.hrPersonnelAudits[0].reason}</p>}
       {open && (
-        <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-700">
+        <div className="mt-4 border-t border-[var(--sds-border-default)] pt-4 dark:border-[var(--sds-border-strong)]">
           <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
             <Info label="کد ملی" value={person.nationalCode || 'ثبت نشده'} />
             <Info label="شروع رابطه" value={dateFa(relationship?.effectiveFrom)} />
@@ -250,7 +250,7 @@ function PersonnelCard(props: any) {
             <>
               <div className="mt-4 flex flex-wrap gap-2">
                 {relationship.status === 'PLANNED' && !relationship.hiringApplication && <ErpButton label="فعال‌سازی" icon={FaPlay} tone="success" variant="soft" onClick={() => run(() => hrAPI.updateRelationshipStatus(relationship.id, { status: 'ACTIVE' }), 'رابطه استخدامی فعال شد.')} />}
-                {relationship.status === 'PLANNED' && relationship.hiringApplication && <Link className="rounded-xl bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700" href={`/dashboard/hr/hiring/${relationship.hiringApplication.id}`}>تکمیل پیش‌نیازها و فعال‌سازی در پرونده جذب</Link>}
+                {relationship.status === 'PLANNED' && relationship.hiringApplication && <Link className="rounded-xl bg-[var(--sds-success-surface)] px-3 py-2 text-sm font-bold text-[var(--sds-success)]" href={`/dashboard/hr/hiring/${relationship.hiringApplication.id}`}>تکمیل پیش‌نیازها و فعال‌سازی در پرونده جذب</Link>}
                 {relationship.status === 'ACTIVE' && <ErpButton label="تعلیق" icon={FaPause} tone="warning" variant="soft" onClick={() => run(() => hrAPI.updateRelationshipStatus(relationship.id, { status: 'SUSPENDED' }), 'رابطه استخدامی معلق شد.')} />}
                 {relationship.status === 'SUSPENDED' && <ErpButton label="بازگشت به فعال" icon={FaPlay} tone="success" variant="soft" onClick={() => run(() => hrAPI.updateRelationshipStatus(relationship.id, { status: 'ACTIVE' }), 'رابطه استخدامی دوباره فعال شد.')} />}
                 <ErpButton label="افزودن مسئولیت" icon={FaPlus} variant="soft" onClick={() => { setAssignmentRelationship(assignmentRelationship === relationship.id ? null : relationship.id); setAssignment(blankAssignment()); }} />
@@ -284,19 +284,19 @@ function PersonnelScheduleEditor({ person, saving, run }: any) {
 
   return (
     <div className="mt-4">
-      <div className="rounded-xl border border-slate-200 p-3 text-sm dark:border-slate-700">
+      <div className="rounded-xl border border-[var(--sds-border-default)] p-3 text-sm dark:border-[var(--sds-border-strong)]">
         <p className="font-bold">گردش تغییر ساعت کاری</p>
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
           سرپرست مسئول پیشنهاد می‌دهد؛ کارشناس منابع انسانی آماده و ارسال می‌کند؛ مدیر منابع انسانی دیگری تأیید می‌کند.
         </p>
         <p className="mt-2">وضعیت آخرین درخواست: {change ? hrDisplayLabel(change.status) : 'بدون درخواست باز'}</p>
-        {change?.returnReason && <p className="mt-1 text-rose-700">دلیل بازگشت: {change.returnReason}</p>}
+        {change?.returnReason && <p className="mt-1 text-[var(--sds-danger)]">دلیل بازگشت: {change.returnReason}</p>}
       </div>
       {capabilities.canPropose && (
         <div className="mt-3 space-y-3">
           <WorkScheduleEditor value={value} onChange={setValue} />
           <div className="grid gap-2 md:grid-cols-[1fr_auto]">
-            <input className={fieldClass} placeholder="دلیل پیشنهاد سرپرست مسئول" value={proposalNote} onChange={(event) => setProposalNote(event.target.value)} />
+            <ErpInput className={fieldClass} placeholder="دلیل پیشنهاد سرپرست مسئول" value={proposalNote} onChange={(event) => setProposalNote(event.target.value)} />
           <ErpButton
             label="ثبت پیشنهاد توسط سرپرست مسئول"
             disabled={saving || !proposalNote.trim() || !value.effectiveDate}
@@ -328,7 +328,7 @@ function PersonnelScheduleEditor({ person, saving, run }: any) {
       )}
       {change?.status === 'SUBMITTED' && (capabilities.canApprove || capabilities.canReturn) && (
         <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto_auto]">
-          <input className={fieldClass} placeholder="دلیل بازگرداندن برای اصلاح" value={returnReason} onChange={(event) => setReturnReason(event.target.value)} />
+          <ErpInput className={fieldClass} placeholder="دلیل بازگرداندن برای اصلاح" value={returnReason} onChange={(event) => setReturnReason(event.target.value)} />
           {capabilities.canReturn && <ErpButton
             label="بازگرداندن"
             disabled={saving || !returnReason.trim()}
@@ -363,12 +363,12 @@ function AssignmentForm({ relationship, saving, foundation, assignment, setAssig
     <ErpCard tone="primary" className="mt-4 p-4">
       <p className="mb-3 font-bold">تخصیص ثانویه یا سرپرستی موقت</p>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <HrField label="نوع" required><select className={fieldClass} value={assignment.type} onChange={(e) => setAssignment({ ...assignment, type: e.target.value })}><option value="PRIMARY">{hasCurrentPrimary ? 'انتقال/ارتقای جایگاه اصلی' : 'تخصیص اصلی'}</option><option value="SECONDARY">ثانویه (مصرف ظرفیت)</option><option value="ACTING">سرپرستی موقت (بدون مصرف ظرفیت)</option></select></HrField>
-        <HrField label="جایگاه" required><select className={fieldClass} value={assignment.positionId} onChange={(e) => setAssignment({ ...assignment, positionId: e.target.value, responsibleSupervisorAssignmentId: '' })}><option value="">انتخاب جایگاه</option>{foundation.positions.filter((item: any) => item.isActive && (assignment.type === 'ACTING' || item.vacancy > 0)).map((item: any) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></HrField>
+        <HrField label="نوع" required><ErpSelect className={fieldClass} value={assignment.type} onChange={(e) => setAssignment({ ...assignment, type: e.target.value })}><option value="PRIMARY">{hasCurrentPrimary ? 'انتقال/ارتقای جایگاه اصلی' : 'تخصیص اصلی'}</option><option value="SECONDARY">ثانویه (مصرف ظرفیت)</option><option value="ACTING">سرپرستی موقت (بدون مصرف ظرفیت)</option></ErpSelect></HrField>
+        <HrField label="جایگاه" required><ErpSelect className={fieldClass} value={assignment.positionId} onChange={(e) => setAssignment({ ...assignment, positionId: e.target.value, responsibleSupervisorAssignmentId: '' })}><option value="">انتخاب جایگاه</option>{foundation.positions.filter((item: any) => item.isActive && (assignment.type === 'ACTING' || item.vacancy > 0)).map((item: any) => <option key={item.id} value={item.id}>{item.title}</option>)}</ErpSelect></HrField>
         <HrField label="شروع" required><HrPersianCalendar value={assignment.effectiveFrom} onChange={(effectiveFrom) => setAssignment({ ...assignment, effectiveFrom })} /></HrField>
         <HrField label="پایان"><HrPersianCalendar value={assignment.effectiveTo} onChange={(effectiveTo) => setAssignment({ ...assignment, effectiveTo })} /></HrField>
-        {supervisors.length > 1 && <HrField label="سرپرست مسئول" required><select className={fieldClass} value={assignment.responsibleSupervisorAssignmentId} onChange={(e) => setAssignment({ ...assignment, responsibleSupervisorAssignmentId: e.target.value })}><option value="">انتخاب</option>{supervisors.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></HrField>}
-        <label className="flex items-center gap-2 self-end rounded-xl border border-slate-300 px-3 py-2.5 text-sm dark:border-slate-700"><input type="checkbox" checked={assignment.scheduleContributing} onChange={(e) => setAssignment({ ...assignment, scheduleContributing: e.target.checked })} />ساعات آن جزو برنامه مورد انتظار باشد</label>
+        {supervisors.length > 1 && <HrField label="سرپرست مسئول" required><ErpSelect className={fieldClass} value={assignment.responsibleSupervisorAssignmentId} onChange={(e) => setAssignment({ ...assignment, responsibleSupervisorAssignmentId: e.target.value })}><option value="">انتخاب</option>{supervisors.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</ErpSelect></HrField>}
+        <label className="flex items-center gap-2 self-end rounded-xl border border-[var(--sds-border-default)] px-3 py-2.5 text-sm dark:border-[var(--sds-border-strong)]"><ErpInput type="checkbox" checked={assignment.scheduleContributing} onChange={(e) => setAssignment({ ...assignment, scheduleContributing: e.target.checked })} />ساعات آن جزو برنامه مورد انتظار باشد</label>
       </div>
       <div className="mt-3"><ErpButton label={assignment.type === 'PRIMARY' && hasCurrentPrimary ? 'ثبت انتقال/ارتقا' : 'ثبت تخصیص'} icon={FaBriefcase} disabled={saving || !assignment.positionId || !assignment.effectiveFrom || (supervisors.length > 1 && !assignment.responsibleSupervisorAssignmentId)} onClick={() => run(saveAssignment, assignment.type === 'PRIMARY' && hasCurrentPrimary ? 'تخصیص اصلی پیشین بسته و تخصیص جدید ثبت شد.' : 'تخصیص تاریخ‌دار ثبت شد.', close)} /></div>
     </ErpCard>
@@ -378,9 +378,9 @@ function AssignmentForm({ relationship, saving, foundation, assignment, setAssig
 function AssignmentRow({ item, endDate, setEndDate, run }: any) {
   const supervisor = item.responsibleSupervisorAssignment?.employmentRelationship?.personnel;
   return (
-    <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+    <div className="rounded-xl border border-[var(--sds-border-default)] p-3 dark:border-[var(--sds-border-strong)]">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><p className="font-semibold">{item.position.title} <ErpBadge tone={item.type === 'PRIMARY' ? 'primary' : item.type === 'ACTING' ? 'warning' : 'info'}>{assignmentTypeLabel[item.type]}</ErpBadge></p><p className="mt-1 text-xs text-slate-500">{dateFa(item.effectiveFrom)} تا {dateFa(item.effectiveTo)} · سرپرست مسئول: {supervisor ? `${supervisor.firstName} ${supervisor.lastName}` : 'تعیین نشده'}</p></div>
+        <div><p className="font-semibold">{item.position.title} <ErpBadge tone={item.type === 'PRIMARY' ? 'primary' : item.type === 'ACTING' ? 'warning' : 'info'}>{assignmentTypeLabel[item.type]}</ErpBadge></p><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{dateFa(item.effectiveFrom)} تا {dateFa(item.effectiveTo)} · سرپرست مسئول: {supervisor ? `${supervisor.firstName} ${supervisor.lastName}` : 'تعیین نشده'}</p></div>
         {!item.effectiveTo && item.type !== 'PRIMARY' && <div className="flex items-end gap-2"><div className="w-40"><HrPersianCalendar value={endDate} onChange={setEndDate} placeholder="تاریخ پایان" /></div><ErpButton label="پایان تخصیص" icon={FaStop} tone="danger" variant="ghost" disabled={!endDate} onClick={() => run(() => hrAPI.endAssignment(item.id, toIsoDate(endDate)), 'تخصیص در تاریخ انتخاب‌شده پایان یافت.')} /></div>}
       </div>
     </div>
@@ -388,5 +388,5 @@ function AssignmentRow({ item, endDate, setEndDate, run }: any) {
 }
 
 function Info({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-semibold">{value}</p></div>;
+  return <div className="rounded-xl bg-[var(--sds-surface-subtle)] p-3 dark:bg-[var(--sds-surface-raised)]"><p className="text-xs text-[var(--sds-text-secondary)]">{label}</p><p className="mt-1 font-semibold">{value}</p></div>;
 }

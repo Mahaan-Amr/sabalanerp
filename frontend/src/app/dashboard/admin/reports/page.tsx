@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { FaCalendarAlt, FaChartLine, FaDownload, FaFileContract, FaFileExcel, FaFilePdf, FaUsers } from 'react-icons/fa';
 import { ErpActionGrid, ErpBadge, ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection, type ErpMetric, type ErpTone } from '@/components/erp';
@@ -93,16 +92,16 @@ export default function AdminReportsPage() {
             {reports.map((report) => {
               const Icon = getTypeIcon(report.type);
               return (
-                <div key={report.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
+                <div key={report.id} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div className="flex min-w-0 items-start gap-3">
-                      <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-[#074747]/10 text-[#074747] dark:bg-teal-900/40 dark:text-teal-100">
+                      <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--sds-accent)]/10 text-[var(--sds-accent)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
                         <Icon className="h-4 w-4" />
                       </span>
                       <div className="min-w-0">
-                        <h3 className="font-semibold text-slate-900 dark:text-white">{report.namePersian}</h3>
-                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{report.description}</p>
-                        <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
+                        <h3 className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{report.namePersian}</h3>
+                        <p className="mt-1 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{report.description}</p>
+                        <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                           <span className="inline-flex items-center gap-1"><FaCalendarAlt className="h-3 w-3" />{new Date(report.lastGenerated).toLocaleDateString('fa-IR')}</span>
                           <span>حجم: {report.size}</span>
                           <ErpBadge tone={getTypeTone(report.type)}>{report.type.toUpperCase()}</ErpBadge>

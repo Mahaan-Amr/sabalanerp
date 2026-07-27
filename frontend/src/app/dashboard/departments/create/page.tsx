@@ -1,11 +1,11 @@
-﻿'use client';
-
+'use client';
+import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { 
-  FaBuilding, 
-  FaArrowRight, 
+import {
+  FaBuilding,
+  FaArrowRight,
   FaCheck,
   FaTimes
 } from 'react-icons/fa';
@@ -15,7 +15,7 @@ export default function CreateDepartmentPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   const [formData, setFormData] = useState({
     name: '',
     namePersian: '',
@@ -49,7 +49,7 @@ export default function CreateDepartmentPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!validateForm()) {
       return;
     }
@@ -59,7 +59,7 @@ export default function CreateDepartmentPage() {
 
     try {
       const response = await departmentsAPI.createDepartment(formData);
-      
+
       if (response.data.success) {
         alert('دپارتمان با موفقیت ایجاد شد');
         router.push('/dashboard/departments');
@@ -73,12 +73,12 @@ export default function CreateDepartmentPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <main className="sds-workspace space-y-6">
       {/* Header */}
-      <div className="glass-liquid-card p-6">
+      <div className="sds-workspace-surface p-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4 space-x-reverse">
-            <FaBuilding className="h-8 w-8 text-teal-500" />
+            <FaBuilding className="h-8 w-8 text-[var(--sds-accent)]" />
             <div>
               <h1 className="text-2xl font-bold text-primary">ایجاد دپارتمان جدید</h1>
               <p className="text-secondary">تعریف دپارتمان و واحد سازمانی جدید</p>
@@ -86,7 +86,7 @@ export default function CreateDepartmentPage() {
           </div>
           <Link
             href="/dashboard/departments"
-            className="glass-liquid-btn px-6 py-2 flex items-center space-x-2 space-x-reverse"
+            className="sds-action px-6 py-2 flex items-center space-x-2 space-x-reverse"
           >
             <FaArrowRight />
             <span>بازگشت به لیست</span>
@@ -95,65 +95,65 @@ export default function CreateDepartmentPage() {
       </div>
 
       {error && (
-        <div className="glass-liquid-card p-4 bg-red-500/20 border border-red-500/30">
+        <div className="sds-workspace-surface p-4 bg-[var(--sds-danger-surface)] border border-[var(--sds-danger-border)]">
           <div className="flex items-center space-x-2 space-x-reverse">
-            <FaTimes className="text-red-500" />
-            <p className="text-red-400">{error}</p>
+            <FaTimes className="text-[var(--sds-danger)]" />
+            <p className="text-[var(--sds-danger)]">{error}</p>
           </div>
         </div>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Department Information */}
-        <div className="glass-liquid-card p-6">
+        <div className="sds-workspace-surface p-6">
           <h2 className="text-xl font-bold text-primary mb-4">اطلاعات دپارتمان</h2>
           <div className="space-y-6">
             <div>
               <label className="block text-sm text-secondary mb-2">نام انگلیسی *</label>
-              <input
+              <ErpInput
                 type="text"
                 name="name"
                 value={formData.name}
                 onChange={handleInputChange}
-                className="glass-liquid-input w-full"
+                className="sds-field w-full"
                 placeholder="Department Name"
                 required
               />
             </div>
-            
+
             <div>
               <label className="block text-sm text-secondary mb-2">نام فارسی *</label>
-              <input
+              <ErpInput
                 type="text"
                 name="namePersian"
                 value={formData.namePersian}
                 onChange={handleInputChange}
-                className="glass-liquid-input w-full"
+                className="sds-field w-full"
                 placeholder="نام دپارتمان"
                 required
               />
             </div>
-            
+
             <div>
               <label className="block text-sm text-secondary mb-2">توضیحات *</label>
-              <textarea
+              <ErpTextarea
                 name="description"
                 value={formData.description}
                 onChange={handleInputChange}
-                className="glass-liquid-input w-full h-24 resize-none"
+                className="sds-field w-full h-24 resize-none"
                 placeholder="توضیح کوتاه درباره دپارتمان..."
                 required
               />
             </div>
-            
+
             <div>
               <label className="flex items-center space-x-2 space-x-reverse">
-                <input
+                <ErpInput
                   type="checkbox"
                   name="isActive"
                   checked={formData.isActive}
                   onChange={handleInputChange}
-                  className="rounded border-slate-300 bg-white text-[#074747] focus:ring-[#074747] dark:border-slate-600 dark:bg-slate-800 dark:text-teal-400 dark:focus:ring-teal-500"
+                  className="rounded border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-accent)] focus:ring-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-accent)] dark:focus:ring-[var(--sds-focus-ring)]"
                 />
                 <span className="text-secondary">فعال باشد</span>
               </label>
@@ -162,30 +162,30 @@ export default function CreateDepartmentPage() {
         </div>
 
         {/* Submit Buttons */}
-        <div className="glass-liquid-card p-6">
+        <div className="sds-workspace-surface p-6">
           <div className="flex items-center justify-end space-x-4 space-x-reverse">
             <Link
               href="/dashboard/departments"
-              className="glass-liquid-btn px-6 py-2"
+              className="sds-action px-6 py-2"
             >
               انصراف
             </Link>
-            <button
+            <ErpPressable
               type="submit"
               disabled={loading}
-              className="glass-liquid-btn-primary px-6 py-2 flex items-center space-x-2 space-x-reverse disabled:opacity-50"
+              className="sds-action sds-tone-primary sds-action-solid px-6 py-2 flex items-center space-x-2 space-x-reverse disabled:opacity-50"
             >
               {loading ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--sds-border-default)]"></div>
               ) : (
                 <FaCheck />
               )}
               <span>{loading ? 'در حال ذخیره...' : 'ایجاد دپارتمان'}</span>
-            </button>
+            </ErpPressable>
           </div>
         </div>
       </form>
-    </div>
+    </main>
   );
 }
 

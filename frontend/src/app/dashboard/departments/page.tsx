@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useMemo, useState } from 'react';
 import { FaBuilding, FaCheck, FaDownload, FaEdit, FaEye, FaPlus, FaTimes, FaTrash, FaUsers } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpEmptyState, ErpListPage, ErpLoading, ErpSection, type ErpColumn, type ErpMetric } from '@/components/erp';
@@ -99,8 +98,8 @@ export default function DepartmentsManagementPage() {
       priority: 'primary',
       cell: (department) => (
         <div>
-          <p className="font-semibold text-slate-900 dark:text-white">{department.name}</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{department.namePersian}</p>
+          <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{department.name}</p>
+          <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{department.namePersian}</p>
         </div>
       ),
     },
@@ -109,7 +108,7 @@ export default function DepartmentsManagementPage() {
       header: 'توضیحات',
       mobileLabel: 'توضیحات',
       priority: 'secondary',
-      cell: (department) => <span className="line-clamp-2 text-sm text-slate-600 dark:text-slate-300">{department.description || 'بدون توضیح'}</span>,
+      cell: (department) => <span className="line-clamp-2 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{department.description || 'بدون توضیح'}</span>,
     },
     {
       id: 'users',
@@ -119,7 +118,7 @@ export default function DepartmentsManagementPage() {
       align: 'center',
       cell: (department) => (
         <span className="inline-flex items-center gap-2 text-sm">
-          <FaUsers className="h-4 w-4 text-slate-400" />
+          <FaUsers className="h-4 w-4 text-[var(--sds-text-muted)]" />
           {(department._count?.users || 0).toLocaleString('fa-IR')}
         </span>
       ),
@@ -201,18 +200,18 @@ export default function DepartmentsManagementPage() {
       />
 
       {showDeleteModal && departmentToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-raised)] p-4 backdrop-blur-sm">
           <ErpSection className="w-full max-w-md">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white">حذف دپارتمان</h2>
+              <h2 className="text-lg font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">حذف دپارتمان</h2>
               <ErpButton label="بستن" onClick={() => setShowDeleteModal(false)} icon={FaTimes} variant="ghost" tone="neutral" />
             </div>
-            <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
-              آیا از حذف دپارتمان <span className="font-semibold text-slate-900 dark:text-white">{departmentToDelete.namePersian}</span> مطمئن هستید؟
+            <p className="text-sm leading-6 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+              آیا از حذف دپارتمان <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{departmentToDelete.namePersian}</span> مطمئن هستید؟
               این عملیات قابل بازگشت نیست.
             </p>
             {departmentToDelete._count?.users && departmentToDelete._count.users > 0 && (
-              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800 dark:border-amber-800 dark:bg-amber-900/25 dark:text-amber-200">
+              <div className="mt-4 rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-4 text-sm leading-6 text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">
                 این دپارتمان دارای {departmentToDelete._count.users.toLocaleString('fa-IR')} کاربر است. برای حذف، ابتدا کاربران را به دپارتمان دیگری منتقل کنید.
               </div>
             )}

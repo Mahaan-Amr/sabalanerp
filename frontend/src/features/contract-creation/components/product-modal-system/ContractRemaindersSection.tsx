@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ErpPressable } from '@/components/erp';
 import type {
   PaidRemainderStock,
   StableIdentity
@@ -49,13 +50,13 @@ function FlatRemainderRows({
 }) {
   if (stocks.length === 0) {
     return (
-      <div className="min-h-9 border-y border-slate-100 py-2 dark:border-slate-800">
+      <div className="min-h-9 border-y border-[var(--sds-border-subtle)] py-2 dark:border-[var(--sds-border-subtle)]">
         باقی‌مانده‌ای وجود ندارد
       </div>
     );
   }
   return (
-    <div className="divide-y divide-slate-100 border-y border-slate-100 dark:divide-slate-800 dark:border-slate-800">
+    <div className="divide-y divide-[var(--sds-border-subtle)] border-y border-[var(--sds-border-subtle)] dark:divide-[var(--sds-border-subtle)] dark:border-[var(--sds-border-subtle)]">
       {stocks.map(stock => {
         const summary = remainderStockSummary(stock);
         const selected = selectedRemainingStoneId === stock.remainingStoneId;
@@ -65,22 +66,22 @@ function FlatRemainderRows({
             className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-2 text-xs"
           >
             <div className="min-w-0">
-              <div className="truncate font-semibold text-slate-800 dark:text-slate-100">
+              <div className="truncate font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                 {sourceTitles?.[stock.ownerProductRowId] ?? stock.catalogProductId}
               </div>
-              <div className="mt-0.5 flex flex-wrap gap-x-3 text-slate-500 dark:text-slate-400">
+              <div className="mt-0.5 flex flex-wrap gap-x-3 text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                 <span>{summary.geometry}</span>
                 <span>{summary.quantity}</span>
               </div>
             </div>
-            <button
+            <ErpPressable
               type="button"
               onClick={() => onUse(stock)}
               aria-pressed={selected}
-              className="min-h-8 px-2 text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300"
+              className="min-h-8 px-2 text-xs font-semibold text-[var(--sds-accent)] hover:underline dark:text-[var(--sds-accent)]"
             >
               {selected ? 'انتخاب‌شده' : 'استفاده'}
-            </button>
+            </ErpPressable>
           </div>
         );
       })}
@@ -151,7 +152,7 @@ export function RemainderSourceSelectionView({
         onUse={onSelect}
       />
       {shortage && (
-        <p className="mt-2 text-xs text-red-600 dark:text-red-300">{shortage}</p>
+        <p className="mt-2 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">{shortage}</p>
       )}
     </section>
   );
@@ -159,9 +160,9 @@ export function RemainderSourceSelectionView({
 
 export function RemainderMaterialSummaryRow() {
   return (
-    <div className="grid min-h-9 grid-cols-[auto_minmax(0,1fr)] items-center gap-4 border-y border-slate-100 py-2 text-xs dark:border-slate-800">
-      <span className="text-slate-500 dark:text-slate-400">سنگ</span>
-      <strong className="text-slate-800 dark:text-slate-100">
+    <div className="grid min-h-9 grid-cols-[auto_minmax(0,1fr)] items-center gap-4 border-y border-[var(--sds-border-subtle)] py-2 text-xs dark:border-[var(--sds-border-subtle)]">
+      <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">سنگ</span>
+      <strong className="text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
         ۰ تومان · محاسبه‌شده در محصول منبع
       </strong>
     </div>
@@ -184,11 +185,11 @@ export function RemainderDependencyBlock({
   const [rowErrors, setRowErrors] = React.useState<Record<string, string>>({});
   if (dependencies.length === 0) return null;
   return (
-    <section className="border-y border-slate-200 py-3 dark:border-slate-800">
-      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+    <section className="border-y border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
+      <p className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
         {sourceTitle} {dependencies.length} محصول وابسته دارد و قابل حذف نیست
       </p>
-      <div className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
+      <div className="mt-2 divide-y divide-[var(--sds-border-subtle)] dark:divide-[var(--sds-border-subtle)]">
         {dependencies.map(dependency => {
           const isConfirming = confirming === dependency.productRowId;
           const isPending = pending === dependency.productRowId;
@@ -200,10 +201,10 @@ export function RemainderDependencyBlock({
               <div className="min-w-0">
                 <span className="truncate font-semibold">{dependency.title}</span>
                 {isConfirming && dependency.hasDependentOperations && (
-                  <span className="mr-2 text-slate-500">این ردیف دارای عملیات وابسته است</span>
+                  <span className="mr-2 text-[var(--sds-text-muted)]">این ردیف دارای عملیات وابسته است</span>
                 )}
                 {rowErrors[dependency.productRowId] && (
-                  <div className="mt-1 text-red-600 dark:text-red-300">
+                  <div className="mt-1 text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">
                     {rowErrors[dependency.productRowId]}
                   </div>
                 )}
@@ -211,15 +212,15 @@ export function RemainderDependencyBlock({
               {isConfirming ? (
                 <div className="flex shrink-0 items-center gap-2">
                   <span>حذف این محصول؟</span>
-                  <button
+                  <ErpPressable
                     type="button"
                     disabled={isPending}
                     onClick={() => setConfirming(undefined)}
-                    className="font-semibold text-slate-500"
+                    className="font-semibold text-[var(--sds-text-muted)]"
                   >
                     انصراف
-                  </button>
-                  <button
+                  </ErpPressable>
+                  <ErpPressable
                     type="button"
                     disabled={isPending}
                     onClick={() => {
@@ -238,27 +239,27 @@ export function RemainderDependencyBlock({
                         })))
                         .finally(() => setPending(undefined));
                     }}
-                    className="font-semibold text-red-600 disabled:opacity-60"
+                    className="font-semibold text-[var(--sds-danger)] disabled:opacity-60"
                   >
                     {isPending ? 'در حال حذف…' : 'حذف'}
-                  </button>
+                  </ErpPressable>
                 </div>
               ) : (
                 <div className="flex shrink-0 gap-3">
-                  <button
+                  <ErpPressable
                     type="button"
                     onClick={() => onView(dependency.productRowId)}
-                    className="font-semibold text-teal-700 dark:text-teal-300"
+                    className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]"
                   >
                     مشاهده
-                  </button>
-                  <button
+                  </ErpPressable>
+                  <ErpPressable
                     type="button"
                     onClick={() => setConfirming(dependency.productRowId)}
-                    className="font-semibold text-red-600"
+                    className="font-semibold text-[var(--sds-danger)]"
                   >
                     حذف
-                  </button>
+                  </ErpPressable>
                 </div>
               )}
             </div>

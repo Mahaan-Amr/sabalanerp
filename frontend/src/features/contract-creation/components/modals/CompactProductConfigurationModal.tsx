@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ErpInput } from '@/components/erp';
 import {
   calculateLongitudinalProduct,
   calculateProductOperations,
@@ -22,6 +23,7 @@ import type {
 import { productSupportsContractType } from '../../utils/productUtils';
 import {
   AutoGrowingDescription,
+  CentralProductModalShell,
   CompactSegmentedControl,
   LongitudinalProductSection,
   OperationCollectionsSection,
@@ -625,28 +627,32 @@ export function CompactProductConfigurationModal({
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="product-modal-title"
-      className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4"
+    <CentralProductModalShell
+      open
+      title={title}
+      view="main"
+      onClose={onClose}
+      primaryLabel={isEditMode ? 'ذخیره تغییرات' : 'افزودن محصول'}
+      pendingLabel="در حال ذخیره…"
+      pending={pending}
+      onPrimary={() => {
+        if (pendingRef.current) return;
+        if (!validateDraft()) return;
+        pendingRef.current = true;
+        setPending(true);
+        try {
+          onSave();
+        } finally {
+          queueMicrotask(() => {
+            pendingRef.current = false;
+            setPending(false);
+          });
+        }
+      }}
     >
-      <div className="flex max-h-[96vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl motion-safe:animate-[fadeIn_.18s_ease-out] dark:bg-slate-950 sm:max-h-[92vh] sm:rounded-xl">
-        <header className="sticky top-0 z-10 flex min-h-16 items-center justify-between gap-4 border-b border-slate-200 bg-white/95 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
-          <h2 id="product-modal-title" className="text-lg font-bold">{title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="بستن"
-            className="min-h-9 px-2 text-sm font-semibold text-slate-500 hover:text-slate-900 dark:hover:text-white"
-          >
-            بستن
-          </button>
-        </header>
-
-        <div className="flex-1 overflow-y-auto px-4 py-3 sm:px-6">
-          <div className="flex min-h-10 items-center justify-between gap-3 border-b border-slate-200 pb-3 dark:border-slate-800">
-            <span className="text-xs font-semibold text-slate-500">نوع محصول</span>
+        <div className="px-0 py-0 sm:px-2">
+          <div className="flex min-h-10 items-center justify-between gap-3 border-b border-[var(--sds-border-default)] pb-3 border-[var(--sds-border-subtle)]">
+            <span className="text-xs font-semibold text-[var(--sds-text-muted)]">نوع محصول</span>
             {isEditMode ? (
               <strong className="text-sm">
                 {currentProductType === 'longitudinal'
@@ -688,18 +694,18 @@ export function CompactProductConfigurationModal({
             />
           ) : (
             <>
-              <div className="border-b border-slate-200 py-3 text-xs text-slate-500 dark:border-slate-800">
+              <div className="border-b border-[var(--sds-border-default)] py-3 text-xs text-[var(--sds-text-muted)] border-[var(--sds-border-subtle)]">
                 {facts}
               </div>
-              <label className="block border-b border-slate-200 py-3 text-xs font-semibold dark:border-slate-800">
+              <label className="block border-b border-[var(--sds-border-default)] py-3 text-xs font-semibold border-[var(--sds-border-subtle)]">
                 عنوان محصول
-                <input
+                <ErpInput
                   value={productConfig.stoneName || selectedProduct.namePersian || ''}
                   onChange={event => setProductConfig(previous => ({
                     ...previous,
                     stoneName: event.target.value
                   }))}
-                  className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-transparent px-3 text-sm font-normal outline-none focus:border-teal-500 dark:border-slate-700"
+                  className="mt-1 min-h-10 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 text-sm font-normal outline-none focus:border-[var(--sds-accent)] border-[var(--sds-border-default)]"
                 />
               </label>
 
@@ -725,7 +731,7 @@ export function CompactProductConfigurationModal({
                 />
               )}
 
-              <label className="block border-t border-slate-200 py-3 text-xs font-semibold dark:border-slate-800">
+              <label className="block border-t border-[var(--sds-border-default)] py-3 text-xs font-semibold border-[var(--sds-border-subtle)]">
                 توضیحات
                 <AutoGrowingDescription
                   value={productConfig.description || ''}
@@ -749,39 +755,6 @@ export function CompactProductConfigurationModal({
             </>
           )}
         </div>
-
-        <footer className="sticky bottom-0 z-10 flex min-h-16 items-center justify-between gap-3 border-t border-slate-200 bg-white/95 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={pending}
-            className="min-h-10 px-3 text-sm font-semibold text-slate-500 disabled:opacity-50"
-          >
-            انصراف
-          </button>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => {
-              if (pendingRef.current) return;
-              if (!validateDraft()) return;
-              pendingRef.current = true;
-              setPending(true);
-              try {
-                onSave();
-              } finally {
-                queueMicrotask(() => {
-                  pendingRef.current = false;
-                  setPending(false);
-                });
-              }
-            }}
-            className="min-h-10 rounded-lg bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700 disabled:opacity-60"
-          >
-            {pending ? 'در حال ذخیره…' : isEditMode ? 'ذخیره تغییرات' : 'افزودن محصول'}
-          </button>
-        </footer>
-      </div>
-    </div>
+    </CentralProductModalShell>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ErpPressable, ErpInput } from '@/components/erp';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import {
   resolveStaircaseQuantity,
@@ -114,7 +115,7 @@ function CompactField({
   monetary?: boolean;
 }) {
   return (
-    <label className="block min-w-0 text-xs font-semibold text-slate-600 dark:text-slate-300">
+    <label className="block min-w-0 text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
       <span className="mb-1 flex min-h-6 items-center justify-between gap-2">
         {label}
         {unit && onUnitChange && (
@@ -132,18 +133,18 @@ function CompactField({
           decimalScale={0}
           min={0}
           onChange={next => onChange(String(next))}
-          className="h-9 w-full rounded-lg border border-slate-300 bg-transparent px-2 text-sm font-normal focus:border-teal-500 focus:outline-none dark:border-slate-700"
+          className="h-9 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-2 text-sm font-normal focus:border-[var(--sds-accent)] focus:outline-none dark:border-[var(--sds-border-default)]"
         />
       ) : (
-        <input
+        <ErpInput
           value={value}
           onChange={event => onChange(event.target.value)}
           inputMode="decimal"
           aria-invalid={Boolean(error)}
-          className="h-9 w-full rounded-lg border border-slate-300 bg-transparent px-2 text-sm font-normal focus:border-teal-500 focus:outline-none dark:border-slate-700"
+          className="h-9 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-2 text-sm font-normal focus:border-[var(--sds-accent)] focus:outline-none dark:border-[var(--sds-border-default)]"
         />
       )}
-      {error && <span className="mt-1 block text-[11px] text-red-600">{error}</span>}
+      {error && <span className="mt-1 block text-[11px] text-[var(--sds-danger)]">{error}</span>}
     </label>
   );
 }
@@ -164,7 +165,7 @@ export function StairQuantityModeSection({
     }
   })();
   return (
-    <section className="border-b border-slate-200 py-3 dark:border-slate-800">
+    <section className="border-b border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
       <CompactSegmentedControl
         label="روش تعداد پله"
         value={mode}
@@ -217,7 +218,7 @@ export function StairQuantityModeSection({
           </>
         )}
       </div>
-      <div className="mt-2 min-h-5 text-xs text-slate-500">
+      <div className="mt-2 min-h-5 text-xs text-[var(--sds-text-muted)]">
         جمع: {total ?? '—'} پله
       </div>
     </section>
@@ -240,17 +241,17 @@ export function StairPartSubsection({
   const update = (changes: Partial<StairPartFieldDraft>) =>
     onChange({ ...draft, ...changes });
   return (
-    <section className="border-b border-slate-200 py-3 dark:border-slate-800">
+    <section className="border-b border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
       <header className="mb-3 flex min-h-7 items-center justify-between gap-3">
         <h3 className="text-sm font-bold">{partLabel(draft.part)}</h3>
         {showCopyFromTread && onCopyFromTread && (
-          <button
+          <ErpPressable
             type="button"
             onClick={onCopyFromTread}
-            className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300"
+            className="text-xs font-semibold text-[var(--sds-accent)] hover:underline dark:text-[var(--sds-accent)]"
           >
             کپی از کف پله
-          </button>
+          </ErpPressable>
         )}
       </header>
       <CompactField
@@ -291,7 +292,7 @@ export function StairPartSubsection({
           error={errors.baseRateToman}
         />
       </div>
-      <label className="mt-3 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+      <label className="mt-3 block text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
         توضیحات
         <AutoGrowingDescription
           value={draft.description}

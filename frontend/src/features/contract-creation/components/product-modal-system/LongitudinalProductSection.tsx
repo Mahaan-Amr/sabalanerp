@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ErpInput } from '@/components/erp';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import {
   calculateLongitudinalProduct,
@@ -18,8 +19,8 @@ import {
 import { convertCompactLengthUnit } from './productModalState';
 
 const fieldClass =
-  'min-h-10 w-full rounded-lg border border-slate-300 bg-transparent px-3 text-sm outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-slate-700';
-const errorClass = 'mt-1 min-h-4 text-xs text-red-600 dark:text-red-300';
+  'min-h-10 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 text-sm outline-none focus:border-[var(--sds-accent)] focus:ring-1 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-default)]';
+const errorClass = 'mt-1 min-h-4 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]';
 
 const toDisplayUnit = (
   value: CanonicalDecimal | undefined,
@@ -64,7 +65,7 @@ function CompactDecimalField({
   return (
     <div>
       <div className="mb-1 flex min-h-6 items-center justify-between gap-2">
-        <label htmlFor={id} className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+        <label htmlFor={id} className="text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
           {label}
         </label>
         {unit && onUnitChange && (
@@ -99,7 +100,7 @@ function CompactDecimalField({
           className={fieldClass}
         />
       ) : (
-        <input
+        <ErpInput
           id={id}
           inputMode={inputMode}
           value={draft}
@@ -289,7 +290,7 @@ export function LongitudinalProductSection({
         error={conflictFor('baseRateToman')}
       />
 
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-slate-200 py-2 dark:border-slate-800">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-[var(--sds-border-default)] py-2 dark:border-[var(--sds-border-subtle)]">
         <label className="inline-flex items-center gap-2 text-xs font-semibold">
           <CompactSwitch
             label="حکمی"
@@ -346,19 +347,19 @@ export function LongitudinalProductSection({
       </div>
 
       {!calculation?.ok && showValidation && conflictFor('summary') && (
-        <div tabIndex={-1} className="text-xs text-red-600 dark:text-red-300">
+        <div tabIndex={-1} className="text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">
           {conflictFor('summary')}
         </div>
       )}
 
-      <section aria-label="خلاصه محاسبه" className="border-t border-slate-200 dark:border-slate-800">
+      <section aria-label="خلاصه محاسبه" className="border-t border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
         <h3 className="py-2 text-sm font-bold">خلاصه محاسبه</h3>
         {calculating && (
           <div role="status" aria-label="در حال محاسبه" className="space-y-1.5 py-1">
             {Array.from({ length: 6 }, (_, index) => (
               <div
                 key={index}
-                className="h-9 animate-pulse rounded bg-slate-100 motion-reduce:animate-none dark:bg-slate-800"
+                className="h-9 animate-pulse rounded bg-[var(--sds-surface-subtle)] motion-reduce:animate-none dark:bg-[var(--sds-border-default)]"
               />
             ))}
           </div>
@@ -366,10 +367,10 @@ export function LongitudinalProductSection({
         {!calculating && summaryRows.map(row => (
           <div
             key={row.key}
-            className="grid min-h-9 grid-cols-[7rem_1fr] items-center gap-3 border-t border-slate-100 py-1.5 text-xs dark:border-slate-800"
+            className="grid min-h-9 grid-cols-[7rem_1fr] items-center gap-3 border-t border-[var(--sds-border-subtle)] py-1.5 text-xs dark:border-[var(--sds-border-subtle)]"
           >
-            <span className="text-slate-500">{row.label}</span>
-            <span className="font-semibold text-slate-800 dark:text-slate-100">{row.value}</span>
+            <span className="text-[var(--sds-text-muted)]">{row.label}</span>
+            <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{row.value}</span>
           </div>
         ))}
       </section>

@@ -10,6 +10,27 @@ const guardSource = read('frontend/src/app/dashboard/security/page.tsx');
 const productSelectionSource = read(
   'frontend/src/features/contract-creation/components/steps/Step5ProductSelection.tsx'
 );
+const focusedProductSources = [
+  'CanonicalStairLayerSummary.tsx',
+  'ContractRemaindersSection.tsx',
+  'LongitudinalProductSection.tsx',
+  'OperationCollectionsSection.tsx',
+  'PreparedProductSection.tsx',
+  'SlabProductSection.tsx',
+  'StairLayersSection.tsx',
+  'StairProductSection.tsx',
+  'productModalPrimitives.tsx'
+].map((path) => [
+  path,
+  read(`frontend/src/features/contract-creation/components/product-modal-system/${path}`)
+]);
+const focusedProductOverlaySources = [
+  'CompactProductConfigurationModal.tsx',
+  'RemainingStoneModal.tsx'
+].map((path) => [
+  path,
+  read(`frontend/src/features/contract-creation/components/modals/${path}`)
+]);
 const layoutSource = read('frontend/src/app/layout.tsx');
 const guardAttendanceSource = read('frontend/src/app/dashboard/security/attendance/page.tsx');
 const guardVehiclesSource = read('frontend/src/app/dashboard/security/vehicles/page.tsx');
@@ -184,6 +205,25 @@ test('Product Selection catalog and cart consume canonical presentation modules'
   assert.doesNotMatch(productSelectionSource, /جزئیات شناسه‌های فیزیکی/);
   assert.match(productSelectionSource, /data-contract-row-id=\{rowId\}/);
   assert.match(productSelectionSource, /controller\.cart\.(?:editItem|duplicateItem|removeItem)\(rowId\)/);
+});
+
+test('focused Product Selection workflows use one semantic dialog and control interface', () => {
+  const hardcodedPalette =
+    /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|gray|green|indigo|neutral|orange|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
+  const rawControl = /<(?:button|input|select|textarea)\b/;
+
+  for (const [path, source] of [...focusedProductSources, ...focusedProductOverlaySources]) {
+    assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
+    assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
+  }
+  for (const [path, source] of focusedProductOverlaySources) {
+    assert.match(source, /<CentralProductModalShell/, `${path} must share the canonical dialog`);
+  }
+  const shell = focusedProductSources.find(([path]) => path === 'productModalPrimitives.tsx')[1];
+  assert.match(shell, /event\.key === 'Escape' && !pending/);
+  assert.match(shell, /event\.key === 'Tab'/);
+  assert.match(shell, /previouslyFocused\?\.focus\(\)/);
+  assert.match(shell, /useReducedMotion\(\)/);
 });
 
 test('Guard daily operations do not reimplement palette or native-control presentation', () => {

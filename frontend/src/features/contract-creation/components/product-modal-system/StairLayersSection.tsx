@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ErpPressable, ErpInput } from '@/components/erp';
 import { formatPrice } from '@/lib/numberFormat';
 import type {
   StairLayerCatalogUnit,
@@ -99,15 +100,15 @@ function FlatInput({
   readonly error?: string;
 }) {
   return (
-    <label className="block min-w-0 text-xs font-semibold text-slate-600 dark:text-slate-300">
+    <label className="block min-w-0 text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
       <span className="mb-1 block min-h-5">{label}</span>
-      <input
+      <ErpInput
         value={value}
         onChange={event => onChange(event.target.value)}
         aria-invalid={Boolean(error)}
-        className="h-9 w-full rounded-lg border border-slate-300 bg-transparent px-2 text-sm font-normal focus:border-teal-500 focus:outline-none dark:border-slate-700"
+        className="h-9 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-2 text-sm font-normal focus:border-[var(--sds-accent)] focus:outline-none dark:border-[var(--sds-border-default)]"
       />
-      {error && <span className="mt-1 block text-[11px] text-red-600">{error}</span>}
+      {error && <span className="mt-1 block text-[11px] text-[var(--sds-danger)]">{error}</span>}
     </label>
   );
 }
@@ -136,38 +137,38 @@ export function StairLayerDraftRow({
       })
     : null;
   return (
-    <article className="border-t border-slate-200 py-3 first:border-t-0 dark:border-slate-800">
+    <article className="border-t border-[var(--sds-border-default)] py-3 first:border-t-0 dark:border-[var(--sds-border-subtle)]">
       <header className="mb-3 flex items-center justify-between gap-3">
         <strong className="text-sm">{draft.layerTitle || 'لایه جدید'}</strong>
-        <button
+        <ErpPressable
           type="button"
           onClick={onRemove}
-          className="text-xs font-semibold text-red-600 hover:underline"
+          className="text-xs font-semibold text-[var(--sds-danger)] hover:underline"
         >
           حذف
-        </button>
+        </ErpPressable>
       </header>
       <div className="grid grid-cols-2 gap-3">
-        <div className="min-w-0 text-xs text-slate-600 dark:text-slate-300">
+        <div className="min-w-0 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
           <span className="mb-1 block min-h-5 font-semibold">نوع لایه</span>
-          <span className="flex h-9 items-center text-sm text-slate-900 dark:text-slate-100">
+          <span className="flex h-9 items-center text-sm text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
             {draft.layerTitle || '—'}
           </span>
           {errors.layerTitle && (
-            <span className="mt-1 block text-[11px] text-red-600">
+            <span className="mt-1 block text-[11px] text-[var(--sds-danger)]">
               {errors.layerTitle}
             </span>
           )}
         </div>
-        <div className="min-w-0 border-y border-slate-200 py-2 text-xs dark:border-slate-800">
-          <span className="block text-slate-500 dark:text-slate-400">
+        <div className="min-w-0 border-y border-[var(--sds-border-default)] py-2 text-xs dark:border-[var(--sds-border-subtle)]">
+          <span className="block text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
             قیمت نوع لایه · {draft.layerUnit ? UNIT_LABELS[draft.layerUnit] : '—'}
           </span>
-          <strong className="mt-1 block text-sm text-slate-900 dark:text-slate-100">
+          <strong className="mt-1 block text-sm text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
             {formatPrice(Number(draft.layerRateToman) || 0)}
           </strong>
           {errors.layerRateToman && (
-            <span className="mt-1 block text-[11px] text-red-600">
+            <span className="mt-1 block text-[11px] text-[var(--sds-danger)]">
               {errors.layerRateToman}
             </span>
           )}
@@ -178,7 +179,7 @@ export function StairLayerDraftRow({
           onChange={layersPerParentPiece => update({ layersPerParentPiece })}
           error={errors.layersPerParentPiece}
         />
-        <label className="block min-w-0 text-xs font-semibold text-slate-600 dark:text-slate-300">
+        <label className="block min-w-0 text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
           <span className="mb-1 flex min-h-5 items-center justify-between gap-2">
             عرض لایه
             <CompactUnitSwitch
@@ -191,40 +192,40 @@ export function StairLayerDraftRow({
               })}
             />
           </span>
-          <input
+          <ErpInput
             value={draft.width}
             onChange={event => update({ width: event.target.value })}
             aria-invalid={Boolean(errors.width)}
-            className="h-9 w-full rounded-lg border border-slate-300 bg-transparent px-2 text-sm font-normal focus:border-teal-500 focus:outline-none dark:border-slate-700"
+            className="h-9 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-2 text-sm font-normal focus:border-[var(--sds-accent)] focus:outline-none dark:border-[var(--sds-border-default)]"
           />
           {errors.width && (
-            <span className="mt-1 block text-[11px] text-red-600">{errors.width}</span>
+            <span className="mt-1 block text-[11px] text-[var(--sds-danger)]">{errors.width}</span>
           )}
         </label>
       </div>
       <div className="mt-3">
-        <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+        <span className="mb-1 block text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
           سمت‌ها
         </span>
         <div className="flex flex-wrap gap-1">
           {(Object.keys(SIDE_LABELS) as StairLayerSide[]).map(side => (
-            <button
+            <ErpPressable
               key={side}
               type="button"
               aria-pressed={draft.targetSides.includes(side)}
               onClick={() => onChange(toggleStairLayerSide(draft, side))}
               className={`rounded-md px-2 py-1 text-xs ${
                 draft.targetSides.includes(side)
-                  ? 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-200'
-                  : 'border border-slate-300 dark:border-slate-700'
+                  ? 'bg-[var(--sds-accent-soft)] text-[var(--sds-accent-on-soft)]'
+                  : 'border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)]'
               }`}
             >
               {SIDE_LABELS[side]}
-            </button>
+            </ErpPressable>
           ))}
         </div>
         {errors.targetSides && (
-          <span className="mt-1 block text-[11px] text-red-600">
+          <span className="mt-1 block text-[11px] text-[var(--sds-danger)]">
             {errors.targetSides}
           </span>
         )}
@@ -244,10 +245,10 @@ export function StairLayerDraftRow({
           })}
         />
         {errors.source && (
-          <span className="mt-1 block text-[11px] text-red-600">{errors.source}</span>
+          <span className="mt-1 block text-[11px] text-[var(--sds-danger)]">{errors.source}</span>
         )}
       </div>
-      <label className="mt-3 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+      <label className="mt-3 block text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
         توضیحات
         <AutoGrowingDescription
           value={draft.description}
@@ -255,7 +256,7 @@ export function StairLayerDraftRow({
           className="mt-1"
         />
       </label>
-      <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-200 pt-2 text-xs dark:border-slate-800">
+      <div className="mt-3 grid grid-cols-2 gap-3 border-t border-[var(--sds-border-default)] pt-2 text-xs dark:border-[var(--sds-border-subtle)]">
         <span>لایه — {facts?.commercialLayerSets ?? '—'} مجموعه</span>
         <span>قطعات تولید — {facts?.physicalStripCount ?? '—'} نوار</span>
       </div>
@@ -280,19 +281,19 @@ export function StairLayersSection({
   readonly onRemove: (draftId: string) => void;
 }) {
   return (
-    <section className="border-b border-slate-200 py-3 dark:border-slate-800">
+    <section className="border-b border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
       <header className="flex min-h-7 items-center justify-between gap-3">
         <h3 className="text-sm font-bold">لایه‌ها</h3>
-        <button
+        <ErpPressable
           type="button"
           onClick={onAdd}
-          className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300"
+          className="text-xs font-semibold text-[var(--sds-accent)] hover:underline dark:text-[var(--sds-accent)]"
         >
           افزودن لایه
-        </button>
+        </ErpPressable>
       </header>
       {drafts.length === 0 ? (
-        <div className="py-3 text-xs text-slate-500">لایه‌ای تعریف نشده</div>
+        <div className="py-3 text-xs text-[var(--sds-text-muted)]">لایه‌ای تعریف نشده</div>
       ) : drafts.map(draft => (
         <StairLayerDraftRow
           key={draft.draftId}

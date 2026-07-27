@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { ErpPressable, ErpSkeleton, ErpTextarea } from '@/components/erp';
 import {
   convertCompactLengthUnit,
   type CompactLengthUnit,
@@ -46,7 +47,7 @@ export function CompactSegmentedControl<Value extends string>({
       role="radiogroup"
       aria-label={label}
       className={cx(
-        'inline-flex min-h-8 rounded-lg border border-slate-300 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-900',
+        'inline-flex min-h-11 rounded-[var(--sds-radius-control)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-0.5',
         className
       )}
       onKeyDown={event => {
@@ -60,7 +61,7 @@ export function CompactSegmentedControl<Value extends string>({
       }}
     >
       {options.map(option => (
-        <button
+        <ErpPressable
           key={option.value}
           type="button"
           role="radio"
@@ -68,16 +69,15 @@ export function CompactSegmentedControl<Value extends string>({
           disabled={option.disabled}
           onClick={() => onChange(option.value)}
           className={cx(
-            'min-h-7 rounded-md px-2.5 text-xs font-semibold transition-colors',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500',
+            'min-h-10 rounded-[var(--sds-radius-control)] px-2.5 text-xs font-semibold transition-colors',
             option.value === value
-              ? 'bg-teal-600 text-white shadow-sm'
-              : 'text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800',
+              ? 'sds-tone-primary sds-action-solid'
+              : 'sds-action-ghost sds-text-secondary',
             option.disabled && 'cursor-not-allowed opacity-40'
           )}
         >
           {option.label}
-        </button>
+        </ErpPressable>
       ))}
     </div>
   );
@@ -106,7 +106,7 @@ export function CompactUnitSwitch({
         unit: nextUnit,
         value: convertCompactLengthUnit(value, unit, nextUnit)
       })}
-      className="min-h-6 rounded-full border-slate-300 bg-transparent p-0 [&_button]:min-h-6 [&_button]:rounded-full [&_button]:px-1.5 [&_button]:text-[10px]"
+      className="min-h-10 rounded-full bg-transparent p-0 [&_button]:min-h-10 [&_button]:rounded-full [&_button]:px-2 [&_button]:text-[10px]"
     />
   );
 }
@@ -123,7 +123,7 @@ export function CompactSwitch({
   disabled?: boolean;
 }) {
   return (
-    <button
+    <ErpPressable
       type="button"
       role="switch"
       aria-checked={checked}
@@ -131,19 +131,18 @@ export function CompactSwitch({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cx(
-        'relative h-5 w-9 shrink-0 rounded-full transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500',
-        checked ? 'bg-teal-600' : 'bg-slate-300 dark:bg-slate-700',
+        'relative h-6 min-h-6 w-11 shrink-0 rounded-full p-0 transition-colors',
+        checked ? 'bg-[var(--sds-accent)]' : 'bg-[var(--sds-border-strong)]',
         disabled && 'cursor-not-allowed opacity-40'
       )}
     >
       <span
         className={cx(
-          'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform',
-          checked ? 'translate-x-0.5' : 'translate-x-[18px]'
+          'absolute top-0.5 h-5 w-5 rounded-full bg-[var(--sds-surface-raised)] shadow-sm transition-transform',
+          checked ? 'translate-x-0.5' : 'translate-x-[22px]'
         )}
       />
-    </button>
+    </ErpPressable>
   );
 }
 
@@ -164,7 +163,7 @@ export const AutoGrowingDescription = React.forwardRef<
     if (internalRef.current) resize(internalRef.current);
   }, [props.value, resize]);
   return (
-    <textarea
+    <ErpTextarea
       {...props}
       ref={internalRef}
       rows={1}
@@ -173,9 +172,7 @@ export const AutoGrowingDescription = React.forwardRef<
         onInput?.(event);
       }}
       className={cx(
-        'min-h-10 w-full resize-none rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm',
-        'focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500',
-        'dark:border-slate-700',
+        'min-h-11 w-full resize-none px-3 py-2 text-sm',
         className
       )}
     />
@@ -195,11 +192,9 @@ export function ReservedRowsSkeleton({
     <div role="status" aria-label={label} className="space-y-2">
       <span className="sr-only">{label}</span>
       {Array.from({ length: rows }, (_, index) => (
-        <div
-          key={index}
-          style={{ height: rowHeight }}
-          className="animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none dark:bg-slate-800"
-        />
+        <div key={index} style={{ minHeight: rowHeight }}>
+          <ErpSkeleton lines={1} className="rounded-[var(--sds-radius-control)]" />
+        </div>
       ))}
     </div>
   );
@@ -271,17 +266,17 @@ export function InlineCollectionSection({
   children?: React.ReactNode;
 }) {
   return (
-    <section className="border-t border-slate-200 py-3 dark:border-slate-800">
+    <section className="border-t border-[var(--sds-border-default)] py-3">
       <div className="flex min-h-8 items-center justify-between gap-3">
-        <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">{title}</h3>
+        <h3 className="sds-text-primary text-sm font-bold">{title}</h3>
         {actionLabel && onAction && (
-          <button type="button" onClick={onAction} className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300">
+          <ErpPressable type="button" onClick={onAction} tone="primary" variant="ghost" className="text-xs font-semibold">
             {actionLabel}
-          </button>
+          </ErpPressable>
         )}
       </div>
-      <div className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-        {children ?? <div className="min-h-9 border-y border-slate-100 py-2 dark:border-slate-800">{emptyText}</div>}
+      <div className="sds-text-secondary mt-2 text-sm">
+        {children ?? <div className="min-h-11 border-y border-[var(--sds-border-subtle)] py-2">{emptyText}</div>}
       </div>
     </section>
   );
@@ -374,7 +369,7 @@ export function CentralProductModalShell({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-3"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-overlay)] p-3"
           initial={reducedMotion ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -386,24 +381,24 @@ export function CentralProductModalShell({
             role="dialog"
             aria-modal="true"
             aria-labelledby="central-product-modal-title"
-            className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950"
+            className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-[var(--sds-radius-dialog)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-[var(--sds-shadow-raised)]"
             initial={reducedMotion ? false : { opacity: 0, y: 10, scale: 0.99 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 6, scale: 0.99 }}
             transition={{ duration: reducedMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
           >
-            <header className="sticky top-0 z-10 flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-950">
+            <header className="sticky top-0 z-10 flex min-h-14 items-center justify-between gap-3 border-b border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-4">
               <div className="flex min-w-0 items-center gap-3">
                 {view !== 'main' && onBack && (
-                  <button type="button" onClick={onBack} disabled={pending} className="text-xs font-semibold text-teal-700 dark:text-teal-300">
+                  <ErpPressable type="button" onClick={onBack} disabled={pending} tone="primary" variant="ghost" className="text-xs font-semibold">
                     بازگشت
-                  </button>
+                  </ErpPressable>
                 )}
                 <h2 id="central-product-modal-title" className="truncate text-base font-black">{title}</h2>
               </div>
-              <button type="button" onClick={onClose} disabled={pending} aria-label="بستن" className="min-h-9 px-2 text-sm text-slate-500">
+              <ErpPressable type="button" onClick={onClose} disabled={pending} aria-label="بستن" variant="ghost" className="px-2 text-sm">
                 بستن
-              </button>
+              </ErpPressable>
             </header>
             <motion.div
               key={view}
@@ -414,19 +409,21 @@ export function CentralProductModalShell({
             >
               {children}
             </motion.div>
-            <footer className="sticky bottom-0 z-10 flex min-h-16 items-center justify-end gap-2 border-t border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-950">
-              <button type="button" onClick={view === 'main' ? onClose : onBack} disabled={pending} className="min-h-10 rounded-lg px-4 text-sm font-semibold text-slate-600 dark:text-slate-300">
+            <footer className="sticky bottom-0 z-10 flex min-h-16 items-center justify-end gap-2 border-t border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-4">
+              <ErpPressable type="button" onClick={view === 'main' ? onClose : onBack} disabled={pending} variant="ghost" className="px-4 text-sm font-semibold">
                 {view === 'main' ? 'انصراف' : 'بازگشت'}
-              </button>
-              <button
+              </ErpPressable>
+              <ErpPressable
                 type="button"
                 onClick={onPrimary}
                 disabled={pending}
                 aria-busy={pending}
-                className="min-h-10 min-w-28 rounded-lg bg-teal-600 px-4 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-70"
+                tone="primary"
+                variant="solid"
+                className="min-w-28 px-4 text-sm font-bold disabled:cursor-wait disabled:opacity-70"
               >
                 {pending ? pendingLabel : primaryLabel}
-              </button>
+              </ErpPressable>
             </footer>
           </motion.section>
         </motion.div>

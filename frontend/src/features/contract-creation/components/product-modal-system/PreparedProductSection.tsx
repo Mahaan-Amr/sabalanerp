@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ErpInput } from '@/components/erp';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import type { ContractProduct, Product } from '../../types/contract.types';
 import {
@@ -20,7 +21,7 @@ import {
 } from './preparedProductState';
 
 const inputClass =
-  'min-h-10 w-full rounded-lg border border-slate-300 bg-transparent px-3 text-sm outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-slate-700';
+  'min-h-10 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 text-sm outline-none focus:border-[var(--sds-accent)] focus:ring-1 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-default)]';
 
 export function PreparedProductSection({
   product,
@@ -36,7 +37,7 @@ export function PreparedProductSection({
   const resolved = resolvePreparedProductPresentation(config, product);
   return (
     <div className="space-y-3">
-      <div className="border-y border-slate-200 py-2 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-300">
+      <div className="border-y border-[var(--sds-border-default)] py-2 text-xs text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-subtle)] dark:text-[var(--sds-text-secondary)]">
         {catalogFactLine}
       </div>
 
@@ -44,7 +45,7 @@ export function PreparedProductSection({
         <label htmlFor="prepared-title" className="mb-1 block text-xs font-semibold">
           عنوان محصول
         </label>
-        <input
+        <ErpInput
           id="prepared-title"
           value={config.stoneName || product.namePersian || ''}
           onChange={event => onChange({ ...config, stoneName: event.target.value })}
@@ -52,7 +53,7 @@ export function PreparedProductSection({
         />
       </div>
 
-      <div className="flex flex-wrap items-end justify-between gap-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-t border-[var(--sds-border-default)] pt-3 dark:border-[var(--sds-border-subtle)]">
         <div>
           <div className="mb-1 text-xs font-semibold">زیرنوع</div>
           <CompactSegmentedControl
@@ -113,10 +114,10 @@ export function PreparedProductSection({
         />
       </div>
 
-      <section aria-label="خلاصه محاسبه" className="border-t border-slate-200 dark:border-slate-800">
+      <section aria-label="خلاصه محاسبه" className="border-t border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
         <h3 className="py-2 text-sm font-bold">خلاصه محاسبه</h3>
-        <div className="grid min-h-9 grid-cols-[7rem_1fr] items-center gap-3 border-t border-slate-100 py-1.5 text-xs dark:border-slate-800">
-          <span className="text-slate-500">جمع</span>
+        <div className="grid min-h-9 grid-cols-[7rem_1fr] items-center gap-3 border-t border-[var(--sds-border-subtle)] py-1.5 text-xs dark:border-[var(--sds-border-subtle)]">
+          <span className="text-[var(--sds-text-muted)]">جمع</span>
           <span className="font-semibold">
             {resolved.quantity} × {resolved.unitPrice} = {resolved.total} تومان
           </span>

@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ErpPressable, ErpInput } from '@/components/erp';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import {
   calculateSlab,
@@ -27,8 +28,8 @@ import {
 } from './slabProductState';
 
 const fieldClass =
-  'min-h-10 w-full rounded-lg border border-slate-300 bg-transparent px-3 text-sm outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-slate-700';
-const errorClass = 'mt-1 min-h-4 text-xs text-red-600 dark:text-red-300';
+  'min-h-10 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 text-sm outline-none focus:border-[var(--sds-accent)] focus:ring-1 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-default)]';
+const errorClass = 'mt-1 min-h-4 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]';
 
 const toDisplay = (value: CanonicalDecimal | undefined, unit: 'cm' | 'm') =>
   value === undefined ? '' : convertCompactLengthUnit(value, 'm', unit);
@@ -65,7 +66,7 @@ function SlabField({
   return (
     <div>
       <div className="mb-1 flex min-h-6 items-center justify-between gap-2">
-        <label htmlFor={id} className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+        <label htmlFor={id} className="text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
           {label}
         </label>
         {unit && onUnitChange && (
@@ -100,7 +101,7 @@ function SlabField({
           className={fieldClass}
         />
       ) : (
-        <input
+        <ErpInput
           id={id}
           inputMode={inputMode}
           value={draft}
@@ -157,7 +158,7 @@ function SlabSourceRow({
     [field]: raw.trim() === '' ? parseCanonicalDecimal('0') : toMeters(raw, unit)
   }));
   return (
-    <div className="grid grid-cols-1 gap-2 border-t border-slate-100 py-2 sm:grid-cols-[1fr_1fr_7rem_auto] dark:border-slate-800">
+    <div className="grid grid-cols-1 gap-2 border-t border-[var(--sds-border-subtle)] py-2 sm:grid-cols-[1fr_1fr_7rem_auto] dark:border-[var(--sds-border-subtle)]">
       <SlabField
         id={`slab-source-${row.sourceRowId}-length`}
         label="طول"
@@ -201,13 +202,13 @@ function SlabSourceRow({
         }}
         error={error}
       />
-      <button
+      <ErpPressable
         type="button"
         onClick={onRemove}
-        className="self-center text-xs font-semibold text-red-600 hover:underline"
+        className="self-center text-xs font-semibold text-[var(--sds-danger)] hover:underline"
       >
         حذف
-      </button>
+      </ErpPressable>
       <span className="sr-only">منبع {index + 1}</span>
     </div>
   );
@@ -327,10 +328,10 @@ export function SlabProductSection({
         error={conflict('baseMaterialRateToman')}
       />
 
-      <section className="border-t border-slate-200 py-3 dark:border-slate-800">
+      <section className="border-t border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
         <div className="flex min-h-8 items-center justify-between gap-3">
           <h3 className="text-sm font-bold">اسلب‌های منبع</h3>
-          <button
+          <ErpPressable
             type="button"
             onClick={() => onChange({
               ...input,
@@ -339,13 +340,13 @@ export function SlabProductSection({
                 createSlabSourceRow({ sourceRowId: createSourceIdentity() })
               ]
             })}
-            className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300"
+            className="text-xs font-semibold text-[var(--sds-accent)] hover:underline dark:text-[var(--sds-accent)]"
           >
             افزودن منبع
-          </button>
+          </ErpPressable>
         </div>
         {input.sourceRows.length === 0 ? (
-          <div className="min-h-9 border-t border-slate-100 py-2 text-sm dark:border-slate-800">
+          <div className="min-h-9 border-t border-[var(--sds-border-subtle)] py-2 text-sm dark:border-[var(--sds-border-subtle)]">
             منبعی تعریف نشده
           </div>
         ) : input.sourceRows.map((row, index) => (
@@ -370,7 +371,7 @@ export function SlabProductSection({
         {sourceError && <div className={errorClass}>{sourceError}</div>}
       </section>
 
-      <section className="border-t border-slate-200 py-3 dark:border-slate-800">
+      <section className="border-t border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-bold">روش محاسبه برش</h3>
           <CompactSegmentedControl
@@ -399,7 +400,7 @@ export function SlabProductSection({
         )}
       </section>
 
-      <div className="flex min-h-10 items-center gap-2 border-t border-slate-200 py-2 text-xs font-semibold dark:border-slate-800">
+      <div className="flex min-h-10 items-center gap-2 border-t border-[var(--sds-border-default)] py-2 text-xs font-semibold dark:border-[var(--sds-border-subtle)]">
         <CompactSwitch
           label="خوراک اره"
           checked={Number(input.kerfMeters) > 0}
@@ -411,14 +412,14 @@ export function SlabProductSection({
         خوراک اره
       </div>
 
-      <section aria-label="خلاصه محاسبه" className="border-t border-slate-200 dark:border-slate-800">
+      <section aria-label="خلاصه محاسبه" className="border-t border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
         <h3 className="py-2 text-sm font-bold">خلاصه محاسبه</h3>
         {calculating && (
           <div role="status" aria-label="در حال محاسبه" className="space-y-1.5 py-1">
             {Array.from({ length: 6 }, (_, index) => (
               <div
                 key={index}
-                className="h-9 animate-pulse rounded bg-slate-100 motion-reduce:animate-none dark:bg-slate-800"
+                className="h-9 animate-pulse rounded bg-[var(--sds-surface-subtle)] motion-reduce:animate-none dark:bg-[var(--sds-border-default)]"
               />
             ))}
           </div>
@@ -441,9 +442,9 @@ export function SlabProductSection({
         ].map(([label, value]) => (
           <div
             key={label}
-            className="grid min-h-9 grid-cols-[8rem_1fr] items-center gap-3 border-t border-slate-100 py-1.5 text-xs dark:border-slate-800"
+            className="grid min-h-9 grid-cols-[8rem_1fr] items-center gap-3 border-t border-[var(--sds-border-subtle)] py-1.5 text-xs dark:border-[var(--sds-border-subtle)]"
           >
-            <span className="text-slate-500">{label}</span>
+            <span className="text-[var(--sds-text-muted)]">{label}</span>
             <span className="font-semibold">{value}</span>
           </div>
         ))}

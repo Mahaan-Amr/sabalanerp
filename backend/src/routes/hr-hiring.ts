@@ -45,6 +45,7 @@ import {
   paperContractReviewState
 } from '../services/hrEmploymentContract';
 import { normalizeInsuranceEnrollmentCommand } from '../services/hrInsuranceEnrollment';
+import { normalizePayrollParticipationCommand } from '../services/hrPayrollParticipation';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -1998,7 +1999,7 @@ router.post('/applications/:id/convert', requireAuthority('HR_MANAGER'), asyncHa
       organizationalUnitId: application.position.organizationalUnitId, workplaceId: application.position.workplaceId,
       costCenterId: application.position.costCenterId, responsibleSupervisorAssignmentId: req.body.responsibleSupervisorAssignmentId || null, createdBy: actorId(req)
     }});
-    await tx.hrInsuranceEnrollment.upsert({ where: { applicationId: application.id }, create: { applicationId: application.id, status: 'NOT_STARTED', dueDate: req.body.insuranceDueDate ? parseDate(req.body.insuranceDueDate, 'مهلت بیمه') : null, updatedBy: actorId(req) }, update: { dueDate: req.body.insuranceDueDate ? parseDate(req.body.insuranceDueDate, 'مهلت بیمه') : undefined, updatedBy: actorId(req) } });
+    await tx.hrInsuranceEnrollment.upsert({ where: { applicationId: application.id }, create: { applicationId: application.id, status: 'NOT_STARTED', updatedBy: actorId(req) }, update: { updatedBy: actorId(req) } });
     await tx.hrOnboardingTask.createMany({ data: [
       { applicationId: application.id, title: 'تأیید قرارداد امضاشده', ownerAuthority: 'FINANCE_MANAGER', activationBlocker: true, createdBy: actorId(req) },
       { applicationId: application.id, title: 'تنظیم مشارکت حقوق و دستمزد', ownerAuthority: 'HR_PAYROLL_MANAGER', activationBlocker: true, createdBy: actorId(req) },
@@ -2106,12 +2107,15 @@ router.get('/applications/:id/contracts/:contractId/download', requireAuthority(
 router.post('/applications/:id/payroll-participation', requireAuthority('HR_PAYROLL_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id } });
   if (!application.convertedAt) throw new Error('مشارکت حقوق پس از تبدیل به پرسنل برنامه‌ریزی‌شده تنظیم می‌شود.');
+  if (!application.scheduledStartDate) throw new Error('تاریخ شروع برنامه‌ریزی‌شده پرونده مشخص نیست.');
+  const command = normalizePayrollParticipationCommand(req.body, application.scheduledStartDate);
   const row = await prisma.hrPayrollParticipation.upsert({
     where: { applicationId: req.params.id },
-    create: { applicationId: req.params.id, effectiveFrom: parseDate(req.body.effectiveFrom, 'تاریخ شروع حقوق'), configuredBy: actorId(req) },
-    update: { effectiveFrom: parseDate(req.body.effectiveFrom, 'تاریخ شروع حقوق'), configuredBy: actorId(req), configuredAt: new Date() }
+    create: { applicationId: req.params.id, effectiveFrom: command.effectiveFrom, startMismatchReason: command.startMismatchReason, configuredBy: actorId(req) },
+    update: { effectiveFrom: command.effectiveFrom, startMismatchReason: command.startMismatchReason, configuredBy: actorId(req), configuredAt: new Date() }
   });
   await prisma.hrOnboardingTask.updateMany({ where: { applicationId: req.params.id, title: 'تنظیم مشارکت حقوق و دستمزد' }, data: { status: 'COMPLETE', completedBy: actorId(req), completedAt: new Date() } });
+  await audit(req.params.id, 'PAYROLL_PARTICIPATION_CONFIRMED', req, { effectiveFrom: command.effectiveFrom, differsFromPlannedStart: Boolean(command.startMismatchReason) });
   res.json({ success: true, data: row });
 }));
 

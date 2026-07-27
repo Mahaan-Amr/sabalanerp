@@ -3814,6 +3814,7 @@ model HrPayrollParticipation {
   id            String           @id @default(cuid())
   applicationId String           @unique
   effectiveFrom DateTime
+  startMismatchReason String?
   configuredBy  String
   configuredAt  DateTime         @default(now())
   application   HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)

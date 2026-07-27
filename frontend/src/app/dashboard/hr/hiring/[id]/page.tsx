@@ -188,7 +188,6 @@ export default function HiringCasePage() {
   });
   const [conversion, setConversion] = useState({
     scheduledStartDate: "",
-    insuranceDueDate: "",
   });
   const [contract, setContract] = useState<any>({
     contractNumber: "",
@@ -207,11 +206,22 @@ export default function HiringCasePage() {
     note: "",
   });
   const [payrollDate, setPayrollDate] = useState("");
+  const [payrollMismatchReason, setPayrollMismatchReason] = useState("");
+  const [payrollReviewConfirmed, setPayrollReviewConfirmed] = useState(false);
   const load = async () => {
     try {
       setError("");
       const result = await hiringAPI.get(id);
       setData(result.data.data);
+      setPayrollDate(
+        fromIsoDate(
+          result.data.data.payrollParticipation?.effectiveFrom ||
+            result.data.data.scheduledStartDate,
+        ),
+      );
+      setPayrollMismatchReason(
+        result.data.data.payrollParticipation?.startMismatchReason || "",
+      );
       const currentCompensation = result.data.data.compensationSnapshots?.find((snapshot: any) => !snapshot.obsoleteAt);
       if (Array.isArray(currentCompensation?.componentsJson))
         setComponents(currentCompensation.componentsJson);
@@ -265,6 +275,10 @@ export default function HiringCasePage() {
   if (!data) return <ErpLoading />;
   const form = data.formRevisions?.[0]?.dataJson || {};
   const compensation = data.compensationSnapshots?.find((snapshot: any) => !snapshot.obsoleteAt);
+  const plannedStartDate = fromIsoDate(data.scheduledStartDate);
+  const payrollDiffersFromPlanned = Boolean(
+    payrollDate && plannedStartDate && payrollDate !== plannedStartDate,
+  );
   const latestContract = data.contracts?.[0];
   const hasAuthority = (...values: string[]) =>
     values.some((value) => authorities.includes(value));
@@ -1756,31 +1770,6 @@ export default function HiringCasePage() {
                     }
                   />
                 </HrField>
-                <input
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  className={field}
-                  onChange={(e) =>
-                    setHandover({
-                      ...handover,
-                      file: e.target.files?.[0] || null,
-                    })
-                  }
-                />
-                <HrField
-                  label="مهلت پیگیری ثبت بیمه"
-                  hint="اختیاری؛ این مهلت وضعیت فعال‌سازی همکاری را مسدود نمی‌کند."
-                >
-                  <HrPersianCalendar
-                    value={conversion.insuranceDueDate}
-                    onChange={(insuranceDueDate) =>
-                      setConversion({
-                        ...conversion,
-                        insuranceDueDate,
-                      })
-                    }
-                  />
-                </HrField>
                 <ErpButton
                   label="تبدیل متقاضی به پرسنل"
                   disabled={
@@ -1793,9 +1782,6 @@ export default function HiringCasePage() {
                           ...conversion,
                           scheduledStartDate: toIsoDate(
                             conversion.scheduledStartDate,
-                          ),
-                          insuranceDueDate: toIsoDate(
-                            conversion.insuranceDueDate,
                           ),
                         }),
                       "پرسنل و رابطه استخدامی برنامه‌ریزی‌شده ساخته شد.",
@@ -2174,23 +2160,66 @@ export default function HiringCasePage() {
                 {canViewPayrollTask && (
                   <ErpCard className="space-y-2 p-4">
                     <p className="font-bold">مشارکت حقوق و دستمزد</p>
+                    <div className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800">
+                      <p>تاریخ شروع برنامه‌ریزی‌شده: {plannedStartDate || "—"}</p>
+                      <p className="mt-2 font-semibold">حقوق و مزایای تأییدشده</p>
+                      {(compensation?.componentsJson || []).map((item: any, index: number) => (
+                        <div key={`${item.label}-${index}`} className="flex justify-between gap-3">
+                          <span>{item.label}</span>
+                          <span>{Number(item.amountRials || 0).toLocaleString("fa-IR")} ریال</span>
+                        </div>
+                      ))}
+                    </div>
                     <HrField
                       label="تاریخ شروع مشارکت در حقوق و دستمزد"
                       required
+                      hint="به‌صورت پیش‌فرض برابر تاریخ شروع برنامه‌ریزی‌شده است."
                     >
                       <HrPersianCalendar
                         value={payrollDate}
                         onChange={setPayrollDate}
                       />
                     </HrField>
+                    {payrollDiffersFromPlanned && (
+                      <HrField
+                        label="دلیل تفاوت با تاریخ شروع برنامه‌ریزی‌شده"
+                        required
+                      >
+                        <textarea
+                          className={field}
+                          value={payrollMismatchReason}
+                          onChange={(event) =>
+                            setPayrollMismatchReason(event.target.value)
+                          }
+                        />
+                      </HrField>
+                    )}
+                    <label className="flex items-start gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={payrollReviewConfirmed}
+                        onChange={(event) =>
+                          setPayrollReviewConfirmed(event.target.checked)
+                        }
+                      />
+                      <span>
+                        حقوق و مزایای تأییدشده و تاریخ شروع را بررسی و تأیید کردم.
+                      </span>
+                    </label>
                     <ErpButton
                       label="تنظیم مشارکت حقوق و دستمزد"
-                      disabled={!payrollDate}
+                      disabled={
+                        !payrollDate ||
+                        !payrollReviewConfirmed ||
+                        (payrollDiffersFromPlanned && !payrollMismatchReason.trim())
+                      }
                       onClick={() =>
                         run(
                           () =>
                             hiringAPI.setPayroll(id, {
                               effectiveFrom: toIsoDate(payrollDate),
+                              startMismatchReason: payrollMismatchReason,
+                              reviewConfirmed: payrollReviewConfirmed,
                             }),
                           "مشارکت حقوق تنظیم شد.",
                         )

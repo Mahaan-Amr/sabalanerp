@@ -29,6 +29,16 @@ export const plannedStartHasArrived = (
   now = new Date()
 ) => Boolean(scheduledStartDate && canonicalDateKey(scheduledStartDate) <= tehranDateKey(now));
 
+export const dateOnlyRangeIncludes = (
+  effectiveFrom: Date | string,
+  effectiveTo: Date | string | null | undefined,
+  now = new Date()
+) => {
+  const today = tehranDateKey(now);
+  return canonicalDateKey(effectiveFrom) <= today &&
+    (!effectiveTo || canonicalDateKey(effectiveTo) >= today);
+};
+
 export const buildEmploymentActivationReadiness = (
   input: ActivationInput,
   now = new Date()

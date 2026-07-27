@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildEmploymentActivationReadiness, plannedStartHasArrived } from '../hrEmploymentActivation';
+import { buildEmploymentActivationReadiness, dateOnlyRangeIncludes, plannedStartHasArrived } from '../hrEmploymentActivation';
 
 const base = {
   scheduledStartDate: new Date('2026-07-20T00:00:00.000Z'),
@@ -16,6 +16,22 @@ assert.equal(
     new Date('2026-07-26T21:30:00.000Z'),
   ),
   true,
+);
+assert.equal(
+  dateOnlyRangeIncludes(
+    new Date('2026-07-27T00:00:00.000Z'),
+    new Date('2026-07-27T00:00:00.000Z'),
+    new Date('2026-07-26T21:30:00.000Z'),
+  ),
+  true,
+);
+assert.equal(
+  dateOnlyRangeIncludes(
+    new Date('2026-07-26T00:00:00.000Z'),
+    new Date('2026-07-26T00:00:00.000Z'),
+    new Date('2026-07-26T21:30:00.000Z'),
+  ),
+  false,
 );
 
 const ready = buildEmploymentActivationReadiness(base, new Date('2026-07-21T00:00:00.000Z'));

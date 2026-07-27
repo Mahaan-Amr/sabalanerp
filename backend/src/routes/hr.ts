@@ -5,6 +5,7 @@ import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceReq
 import { normalizeWorkSchedule } from '../utils/personnelWorkSchedule';
 import { assertSubsequentEmploymentRelationship } from '../services/hrPersonnelBoundary';
 import { assertWorkScheduleAction } from '../services/hrWorkScheduleGovernance';
+import { dateOnlyRangeIncludes } from '../services/hrEmploymentActivation';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -348,7 +349,7 @@ router.get('/personnel', viewAccess, async (req, res) => {
     ]);
     const authorities = new Set(authorityRows.map((row) => row.authority));
     const now = new Date();
-    const isEffective = (from: Date, to: Date | null) => from <= now && (!to || to >= now);
+    const isEffective = (from: Date, to: Date | null) => dateOnlyRangeIncludes(from, to, now);
     const data = rows.map((person) => {
       const relationship = person.hrEmploymentRelationships.find((candidate) =>
         ['PLANNED', 'ACTIVE', 'SUSPENDED'].includes(candidate.status) &&
@@ -446,24 +447,40 @@ router.put('/personnel/:id/work-schedule', editAccess, async (req: WorkspaceRequ
 router.post('/personnel/:id/work-schedule/proposals', viewAccess, async (req: WorkspaceRequest, res) => {
   try {
     const now = new Date();
-    const supervisorLink = await prisma.hrEmploymentAssignment.findFirst({
+    const supervisorLinks = await prisma.hrEmploymentAssignment.findMany({
       where: {
         employmentRelationship: {
-          personnelId: req.params.id, status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] },
-          effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }]
+          personnelId: req.params.id, status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] }
         },
-        effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
         responsibleSupervisorAssignment: {
-          effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
           employmentRelationship: {
-            status: { in: ['ACTIVE', 'SUSPENDED'] }, effectiveFrom: { lte: now },
-            OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
+            status: { in: ['ACTIVE', 'SUSPENDED'] },
             personnel: { user: { id: actorId(req) } }
           }
         }
       },
-      select: { id: true }
+      select: {
+        id: true, effectiveFrom: true, effectiveTo: true,
+        employmentRelationship: { select: { effectiveFrom: true, effectiveTo: true } },
+        responsibleSupervisorAssignment: {
+          select: {
+            effectiveFrom: true, effectiveTo: true,
+            employmentRelationship: { select: { effectiveFrom: true, effectiveTo: true } }
+          }
+        }
+      }
     });
+    const supervisorLink = supervisorLinks.find((link) =>
+      dateOnlyRangeIncludes(link.effectiveFrom, link.effectiveTo, now) &&
+      dateOnlyRangeIncludes(link.employmentRelationship.effectiveFrom, link.employmentRelationship.effectiveTo, now) &&
+      Boolean(link.responsibleSupervisorAssignment) &&
+      dateOnlyRangeIncludes(link.responsibleSupervisorAssignment!.effectiveFrom, link.responsibleSupervisorAssignment!.effectiveTo, now) &&
+      dateOnlyRangeIncludes(
+        link.responsibleSupervisorAssignment!.employmentRelationship.effectiveFrom,
+        link.responsibleSupervisorAssignment!.employmentRelationship.effectiveTo,
+        now
+      )
+    );
     assertWorkScheduleAction('PROPOSE', { isResponsibleSupervisor: Boolean(supervisorLink) });
     const schedule = normalizeWorkSchedule(req.body);
     const proposalNote = textValue(req.body.proposalNote);

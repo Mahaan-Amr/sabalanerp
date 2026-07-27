@@ -821,7 +821,7 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   const canSeeCompensation = canSeeFinanceSensitive || authorities.has('HIRING_MANAGER') || authorities.has('HR_PROCESSOR') || authorities.has('HR_PAYROLL_PROCESSOR') || authorities.has('HR_PAYROLL_MANAGER') || authorities.has('HR_MANAGER');
   const data: any = row;
   data.lifecycle = projectHiringLifecycle(row, authorities);
-  data.taskCapabilities = projectHiringTaskCapabilities(row, authorities);
+  data.taskCapabilities = projectHiringTaskCapabilities(row, authorities, actorId(req));
   data.documentIndex = buildHiringDocumentIndex(row, authorities);
   data.activationReadiness = authorities.has('HR_MANAGER')
     ? buildEmploymentActivationReadiness(row)
@@ -1739,6 +1739,7 @@ router.get('/applications/:id/pre-identity/items/:itemId/evidence/download', req
   const item = await prisma.hrPreIdentityChecklistItem.findFirst({ where: { id: req.params.itemId, applicationId: req.params.id } });
   if (!item?.storageName || !item.originalName) return res.status(404).json({ success: false, error: 'فایل گزارش این الزام پیدا نشد.' });
   await audit(req.params.id, 'PRE_IDENTITY_EVIDENCE_DOWNLOADED', req, { itemId: item.id });
+  await audit(req.params.id, 'SENSITIVE_RECRUITMENT_EVIDENCE_ACCESSED', req, { evidenceType: 'PRE_IDENTITY', evidenceId: item.id, action: 'DOWNLOAD' });
   res.download(safeHiringStoragePath(item.storageName), item.originalName);
 }));
 
@@ -1969,6 +1970,7 @@ router.get('/applications/:id/collateral/:itemId/return-evidence/download', requ
   const row = await prisma.hrCollateralItem.findFirst({ where: { id: req.params.itemId, applicationId: req.params.id } });
   if (!row?.returnEvidenceStorageName || !row.returnEvidenceOriginalName) return res.status(404).json({ success: false, error: 'مدرک تحویل پیدا نشد.' });
   await audit(req.params.id, 'COLLATERAL_RETURN_EVIDENCE_DOWNLOADED', req, { itemId: row.id });
+  await audit(req.params.id, 'SENSITIVE_RECRUITMENT_EVIDENCE_ACCESSED', req, { evidenceType: 'COLLATERAL_RETURN', evidenceId: row.id, action: 'DOWNLOAD' });
   res.download(safeHiringStoragePath(row.returnEvidenceStorageName), row.returnEvidenceOriginalName);
 }));
 

@@ -148,7 +148,7 @@ export interface HiringLifecycleSource {
   employmentRelationship?: { status: string } | null;
   contractClearance?: string | null;
   contracts?: ContractLike[];
-  insuranceEnrollment?: { status: string } | null;
+  insuranceEnrollment?: { status: string; registrationPath?: string; dueDate?: Date | string | null } | null;
   payrollParticipation?: unknown | null;
   onboardingTasks?: OnboardingTaskLike[];
 }
@@ -170,6 +170,7 @@ export interface HiringTaskCapability {
 export const projectHiringTaskCapabilities = (
   source: HiringLifecycleSource,
   viewerAuthorities: Iterable<string> = [],
+  viewerUserId?: string,
 ): HiringTaskCapability[] => {
   const authorities = new Set(viewerAuthorities);
   const visibleTo = (...required: string[]) =>
@@ -197,6 +198,11 @@ export const projectHiringTaskCapabilities = (
       })
     : "DRAFT";
   const insuranceVisible = visibleTo("HR_PROCESSOR");
+  const insuranceOverdue =
+    source.insuranceEnrollment?.registrationPath !== "INDEPENDENT_REQUEST" &&
+    Boolean(source.insuranceEnrollment?.dueDate) &&
+    new Date(source.insuranceEnrollment!.dueDate!) < new Date() &&
+    !["ACTIVE", "EXEMPT"].includes(source.insuranceEnrollment?.status || "");
   const payrollVisible = visibleTo("HR_PAYROLL_MANAGER");
   const activationVisible = visibleTo("HR_MANAGER");
 
@@ -216,7 +222,10 @@ export const projectHiringTaskCapabilities = (
                   ? ["RECORD_CONTRACT"]
                   : []
               : []),
-            ...(authorities.has("FINANCE_MANAGER") && contractReviewState === "SUBMITTED"
+            ...(authorities.has("FINANCE_MANAGER") &&
+            contractReviewState === "SUBMITTED" &&
+            Boolean(viewerUserId) &&
+            latestContract?.uploadedBy !== viewerUserId
               ? ["REVIEW_CONTRACT"]
               : []),
           ]
@@ -225,7 +234,9 @@ export const projectHiringTaskCapabilities = (
     {
       id: "INSURANCE",
       title: "پیگیری ثبت بیمه",
-      status: source.insuranceEnrollment?.status || "NOT_STARTED",
+      status: insuranceOverdue
+        ? "OVERDUE"
+        : source.insuranceEnrollment?.status || "NOT_STARTED",
       ownerAuthorities: ["HR_PROCESSOR"],
       detailVisible: insuranceVisible,
       actionIds: insuranceVisible ? ["UPDATE_INSURANCE"] : [],

@@ -2,6 +2,7 @@ import { expect, request, test } from '@playwright/test';
 
 const env = (name: string) => process.env[name] || '';
 const apiBase = () => `${env('HR_E2E_API_URL').replace(/\/$/, '')}/api`;
+const futureDate = () => new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
 const roleRequest = (token: string) => request.newContext({
   baseURL: apiBase(),
   extraHTTPHeaders: { Authorization: `Bearer ${token}` },
@@ -80,10 +81,10 @@ test.describe('cross-role HR operational journeys', () => {
     const supervisor = await roleRequest(env('HR_E2E_SUPERVISOR_TOKEN'));
     const processor = await roleRequest(env('HR_E2E_HR_PROCESSOR_TOKEN'));
     const manager = await roleRequest(env('HR_E2E_HR_MANAGER_TOKEN'));
-    const proposalResponse = await supervisor.post(`/hr/personnel/${personnelId}/work-schedule/proposals`, { data: { proposalNote: 'E2E schedule change' } });
+    const payload = { effectiveDate: env('HR_E2E_SCHEDULE_DATE') || futureDate(), days: [{ weekday: 0, startTime: '08:00', endTime: '17:00' }] };
+    const proposalResponse = await supervisor.post(`/hr/personnel/${personnelId}/work-schedule/proposals`, { data: { ...payload, proposalNote: 'E2E schedule change' } });
     expect(proposalResponse.ok()).toBeTruthy();
     const change = (await proposalResponse.json()).data;
-    const payload = { effectiveDate: env('HR_E2E_SCHEDULE_DATE'), days: [{ weekday: 0, startTime: '08:00', endTime: '17:00' }] };
     expect((await processor.put(`/hr/personnel/${personnelId}/work-schedule/changes/${change.id}/prepare`, { data: payload })).ok()).toBeTruthy();
     const beforeApproval = await processor.get('/hr/personnel');
     const personnelBeforeApproval = (await beforeApproval.json()).data.find((item: any) => item.id === personnelId);

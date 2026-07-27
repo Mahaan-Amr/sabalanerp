@@ -280,6 +280,12 @@ export default function HiringCasePage() {
   const payrollDiffersFromPlanned = Boolean(
     payrollDate && plannedStartDate && payrollDate !== plannedStartDate,
   );
+  const insuranceOverdue = Boolean(
+    insurance.registrationPath === "COMPANY" &&
+      insurance.dueDate &&
+      !["ACTIVE", "EXEMPT"].includes(insurance.status) &&
+      toIsoDate(insurance.dueDate) < new Date().toISOString().slice(0, 10),
+  );
   const latestContract = data.contracts?.[0];
   const hasAuthority = (...values: string[]) =>
     values.some((value) => authorities.includes(value));
@@ -412,7 +418,9 @@ export default function HiringCasePage() {
           ? () => hiringAPI.downloadAssessment(id, item.id)
           : item.downloadKind === "CONTRACT"
             ? () => hiringAPI.downloadContract(id, item.id)
-            : () => hiringAPI.downloadCollateral(id, item.id);
+            : item.downloadKind === "COLLATERAL_RETURN"
+              ? () => hiringAPI.downloadCollateralReturnEvidence(id, item.id)
+              : () => hiringAPI.downloadCollateral(id, item.id);
     return download(request, item.originalName || item.title);
   };
   return (
@@ -2087,7 +2095,12 @@ export default function HiringCasePage() {
             <ErpSection title="بیمه و حقوق">
               <div className="grid gap-3 xl:grid-cols-3">
                 {canViewInsuranceTask && (
-                  <ErpCard className="space-y-2 p-4">
+                  <ErpCard className={`space-y-2 p-4 ${insuranceOverdue ? "ring-2 ring-amber-400" : ""}`}>
+                    {insuranceOverdue && (
+                      <p className="rounded-lg bg-amber-50 p-2 text-sm font-bold text-amber-900">
+                        مهلت پیگیری ثبت بیمه توسط شرکت گذشته است.
+                      </p>
+                    )}
                     <HrField label="روش ثبت بیمه" required>
                       <select
                         className={field}

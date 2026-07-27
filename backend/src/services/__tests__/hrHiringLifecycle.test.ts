@@ -423,7 +423,7 @@ const base = (
     ],
   });
 
-  const hrManager = projectHiringTaskCapabilities(source, ["HR_MANAGER"]);
+  const hrManager = projectHiringTaskCapabilities(source, ["HR_MANAGER"], "hr-manager");
   assert.deepEqual(
     hrManager.map(({ id, status, detailVisible, actionIds }) => ({
       id,
@@ -448,6 +448,21 @@ const base = (
   assert.deepEqual(
     hrProcessor.find((task) => task.id === "INSURANCE")?.actionIds,
     ["UPDATE_INSURANCE"],
+  );
+  assert.equal(
+    projectHiringTaskCapabilities(
+      base({
+        ...source,
+        insuranceEnrollment: {
+          registrationPath: "COMPANY",
+          status: "IN_PROGRESS",
+          dueDate: new Date("2020-01-01"),
+        },
+      }),
+      ["HR_PROCESSOR"],
+      "processor-1",
+    ).find((task) => task.id === "INSURANCE")?.status,
+    "OVERDUE",
   );
   assert.equal(
     hrProcessor.find((task) => task.id === "SIGNED_CONTRACT")?.detailVisible,
@@ -497,6 +512,16 @@ const base = (
   });
   const manager = projectHiringLifecycle(submittedSource, ["FINANCE_MANAGER"]);
   assert.equal(manager.phases[6].primaryAction?.id, "APPROVE_CONTRACT");
+  assert.deepEqual(
+    projectHiringTaskCapabilities(submittedSource, ["FINANCE_MANAGER"], "recorder-1")
+      .find((task) => task.id === "SIGNED_CONTRACT")?.actionIds,
+    [],
+  );
+  assert.deepEqual(
+    projectHiringTaskCapabilities(submittedSource, ["FINANCE_MANAGER"], "manager-2")
+      .find((task) => task.id === "SIGNED_CONTRACT")?.actionIds,
+    ["REVIEW_CONTRACT"],
+  );
 
   const returned = projectHiringLifecycle(
     base({

@@ -7,7 +7,7 @@ import {
   FaBriefcase, FaChevronDown, FaChevronUp, FaPause, FaPlay,
   FaPlus, FaSearch, FaStop, FaSync, FaUserPlus, FaUsers,
 } from 'react-icons/fa';
-import PersianCalendarComponent from '@/components/PersianCalendar';
+import HrPersianCalendar from '@/features/hr/HrPersianCalendar';
 import WorkScheduleEditor, { workScheduleFromApi, workSchedulePayload, type WorkScheduleValue } from '@/components/WorkScheduleEditor';
 import {
   ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection,
@@ -136,7 +136,7 @@ export default function HrPersonnelPage() {
                 <option value="ACTIVE">فعال</option><option value="PLANNED">برنامه‌ریزی‌شده</option>
               </select>
             </HrField>
-            <HrField label="تاریخ شروع" required><PersianCalendarComponent value={form.effectiveFrom} onChange={(effectiveFrom) => setForm({ ...form, effectiveFrom })} /></HrField>
+            <HrField label="تاریخ شروع" required><HrPersianCalendar value={form.effectiveFrom} onChange={(effectiveFrom) => setForm({ ...form, effectiveFrom })} /></HrField>
             <HrField label="جایگاه اصلی" required>
               <select className={fieldClass} value={form.positionId} onChange={(e) => setForm({ ...form, positionId: e.target.value, responsibleSupervisorAssignmentId: '' })}>
                 <option value="">انتخاب جایگاه</option>
@@ -305,8 +305,8 @@ function AssignmentForm({ relationship, saving, foundation, assignment, setAssig
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <HrField label="نوع" required><select className={fieldClass} value={assignment.type} onChange={(e) => setAssignment({ ...assignment, type: e.target.value })}><option value="PRIMARY">{hasCurrentPrimary ? 'انتقال/ارتقای جایگاه اصلی' : 'تخصیص اصلی'}</option><option value="SECONDARY">ثانویه (مصرف ظرفیت)</option><option value="ACTING">سرپرستی موقت (بدون مصرف ظرفیت)</option></select></HrField>
         <HrField label="جایگاه" required><select className={fieldClass} value={assignment.positionId} onChange={(e) => setAssignment({ ...assignment, positionId: e.target.value, responsibleSupervisorAssignmentId: '' })}><option value="">انتخاب جایگاه</option>{foundation.positions.filter((item: any) => item.isActive && (assignment.type === 'ACTING' || item.vacancy > 0)).map((item: any) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></HrField>
-        <HrField label="شروع" required><PersianCalendarComponent value={assignment.effectiveFrom} onChange={(effectiveFrom) => setAssignment({ ...assignment, effectiveFrom })} /></HrField>
-        <HrField label="پایان"><PersianCalendarComponent value={assignment.effectiveTo} onChange={(effectiveTo) => setAssignment({ ...assignment, effectiveTo })} /></HrField>
+        <HrField label="شروع" required><HrPersianCalendar value={assignment.effectiveFrom} onChange={(effectiveFrom) => setAssignment({ ...assignment, effectiveFrom })} /></HrField>
+        <HrField label="پایان"><HrPersianCalendar value={assignment.effectiveTo} onChange={(effectiveTo) => setAssignment({ ...assignment, effectiveTo })} /></HrField>
         {supervisors.length > 1 && <HrField label="سرپرست مسئول" required><select className={fieldClass} value={assignment.responsibleSupervisorAssignmentId} onChange={(e) => setAssignment({ ...assignment, responsibleSupervisorAssignmentId: e.target.value })}><option value="">انتخاب</option>{supervisors.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></HrField>}
         <label className="flex items-center gap-2 self-end rounded-xl border border-slate-300 px-3 py-2.5 text-sm dark:border-slate-700"><input type="checkbox" checked={assignment.scheduleContributing} onChange={(e) => setAssignment({ ...assignment, scheduleContributing: e.target.checked })} />ساعات آن جزو برنامه مورد انتظار باشد</label>
       </div>
@@ -321,7 +321,7 @@ function AssignmentRow({ item, endDate, setEndDate, run }: any) {
     <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div><p className="font-semibold">{item.position.title} <ErpBadge tone={item.type === 'PRIMARY' ? 'primary' : item.type === 'ACTING' ? 'warning' : 'info'}>{assignmentTypeLabel[item.type]}</ErpBadge></p><p className="mt-1 text-xs text-slate-500">{dateFa(item.effectiveFrom)} تا {dateFa(item.effectiveTo)} · سرپرست مسئول: {supervisor ? `${supervisor.firstName} ${supervisor.lastName}` : 'تعیین نشده'}</p></div>
-        {!item.effectiveTo && item.type !== 'PRIMARY' && <div className="flex items-end gap-2"><div className="w-40"><PersianCalendarComponent value={endDate} onChange={setEndDate} placeholder="تاریخ پایان" /></div><ErpButton label="پایان تخصیص" icon={FaStop} tone="danger" variant="ghost" disabled={!endDate} onClick={() => run(() => hrAPI.endAssignment(item.id, toIsoDate(endDate)), 'تخصیص در تاریخ انتخاب‌شده پایان یافت.')} /></div>}
+        {!item.effectiveTo && item.type !== 'PRIMARY' && <div className="flex items-end gap-2"><div className="w-40"><HrPersianCalendar value={endDate} onChange={setEndDate} placeholder="تاریخ پایان" /></div><ErpButton label="پایان تخصیص" icon={FaStop} tone="danger" variant="ghost" disabled={!endDate} onClick={() => run(() => hrAPI.endAssignment(item.id, toIsoDate(endDate)), 'تخصیص در تاریخ انتخاب‌شده پایان یافت.')} /></div>}
       </div>
     </div>
   );

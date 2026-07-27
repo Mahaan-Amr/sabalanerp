@@ -24,10 +24,11 @@ import {
   resolveSelectedHiringPhase,
 } from "@/features/hr-hiring/hiringLifecycleViewModel";
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
-import PersianCalendarComponent from "@/components/PersianCalendar";
+import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
 import {
   dateTimeFa,
   fromIsoDate,
+  HrField,
   toIsoDate,
   toIsoDateTime,
 } from "@/features/hr/hrUi";
@@ -1348,16 +1349,18 @@ export default function HiringCasePage() {
                             <option value="VIDEO_CALL">تماس تصویری</option>
                             <option value="OTHER">روش دیگر</option>
                           </select>
-                          <PersianCalendarComponent
-                            showTime
-                            value={offlineDecision.communicatedAt}
-                            onChange={(communicatedAt) =>
-                              setOfflineDecision({
-                                ...offlineDecision,
-                                communicatedAt,
-                              })
-                            }
-                          />
+                          <HrField label="زمان اعلام تصمیم متقاضی" required>
+                            <HrPersianCalendar
+                              showTime
+                              value={offlineDecision.communicatedAt}
+                              onChange={(communicatedAt) =>
+                                setOfflineDecision({
+                                  ...offlineDecision,
+                                  communicatedAt,
+                                })
+                              }
+                            />
+                          </HrField>
                           {[
                             ["offlineReason", "دلیل استفاده از مسیر آفلاین"],
                             [
@@ -1507,15 +1510,17 @@ export default function HiringCasePage() {
                       })
                     }
                   />
-                  <PersianCalendarComponent
-                    value={collateral.receivedAt}
-                    onChange={(receivedAt) =>
-                      setCollateral({
-                        ...collateral,
-                        receivedAt,
-                      })
-                    }
-                  />
+                  <HrField label="تاریخ دریافت وثیقه" required>
+                    <HrPersianCalendar
+                      value={collateral.receivedAt}
+                      onChange={(receivedAt) =>
+                        setCollateral({
+                          ...collateral,
+                          receivedAt,
+                        })
+                      }
+                    />
+                  </HrField>
                   <input
                     type="file"
                     className={field}
@@ -1727,15 +1732,21 @@ export default function HiringCasePage() {
           <>
             <ErpSection title="تبدیل به پرسنل برنامه‌ریزی‌شده">
               <ErpCard className="grid gap-3 p-4 md:grid-cols-3">
-                <PersianCalendarComponent
-                  value={conversion.scheduledStartDate}
-                  onChange={(scheduledStartDate) =>
-                    setConversion({
-                      ...conversion,
-                      scheduledStartDate,
-                    })
-                  }
-                />
+                <HrField
+                  label="تاریخ برنامه‌ریزی‌شده شروع همکاری"
+                  required
+                  hint="این تاریخ زمان ایجاد رابطه برنامه‌ریزی‌شده است و به‌تنهایی همکاری را فعال نمی‌کند."
+                >
+                  <HrPersianCalendar
+                    value={conversion.scheduledStartDate}
+                    onChange={(scheduledStartDate) =>
+                      setConversion({
+                        ...conversion,
+                        scheduledStartDate,
+                      })
+                    }
+                  />
+                </HrField>
                 <input
                   type="file"
                   accept=".pdf,.jpg,.jpeg,.png"
@@ -1747,15 +1758,20 @@ export default function HiringCasePage() {
                     })
                   }
                 />
-                <PersianCalendarComponent
-                  value={conversion.insuranceDueDate}
-                  onChange={(insuranceDueDate) =>
-                    setConversion({
-                      ...conversion,
-                      insuranceDueDate,
-                    })
-                  }
-                />
+                <HrField
+                  label="مهلت پیگیری ثبت بیمه"
+                  hint="اختیاری؛ این مهلت وضعیت فعال‌سازی همکاری را مسدود نمی‌کند."
+                >
+                  <HrPersianCalendar
+                    value={conversion.insuranceDueDate}
+                    onChange={(insuranceDueDate) =>
+                      setConversion({
+                        ...conversion,
+                        insuranceDueDate,
+                      })
+                    }
+                  />
+                </HrField>
                 <ErpButton
                   label="تبدیل متقاضی به پرسنل"
                   disabled={
@@ -1807,10 +1823,12 @@ export default function HiringCasePage() {
                 <option value="HR_PROCESSOR">کارشناس منابع انسانی</option>
                 <option value="FINANCE_MANAGER">مدیر مالی</option>
               </select>
-              <PersianCalendarComponent
-                value={task.dueDate}
-                onChange={(dueDate) => setTask({ ...task, dueDate })}
-              />
+              <HrField label="مهلت انجام وظیفه" hint="اختیاری">
+                <HrPersianCalendar
+                  value={task.dueDate}
+                  onChange={(dueDate) => setTask({ ...task, dueDate })}
+                />
+              </HrField>
               <ErpButton
                 label="واگذاری وظیفه"
                 disabled={!task.title || !data.convertedAt}
@@ -1881,24 +1899,28 @@ export default function HiringCasePage() {
                         })
                       }
                     />
-                    <PersianCalendarComponent
-                      value={contract.effectiveFrom}
-                      onChange={(effectiveFrom) =>
-                        setContract({
-                          ...contract,
-                          effectiveFrom,
-                        })
-                      }
-                    />
-                    <PersianCalendarComponent
-                      value={contract.effectiveTo}
-                      onChange={(effectiveTo) =>
-                        setContract({
-                          ...contract,
-                          effectiveTo,
-                        })
-                      }
-                    />
+                    <HrField label="تاریخ شروع اعتبار قرارداد" required>
+                      <HrPersianCalendar
+                        value={contract.effectiveFrom}
+                        onChange={(effectiveFrom) =>
+                          setContract({
+                            ...contract,
+                            effectiveFrom,
+                          })
+                        }
+                      />
+                    </HrField>
+                    <HrField label="تاریخ پایان اعتبار قرارداد" required>
+                      <HrPersianCalendar
+                        value={contract.effectiveTo}
+                        onChange={(effectiveTo) =>
+                          setContract({
+                            ...contract,
+                            effectiveTo,
+                          })
+                        }
+                      />
+                    </HrField>
                     <input
                       type="file"
                       className={field}
@@ -1967,21 +1989,32 @@ export default function HiringCasePage() {
                       <option value="ACTIVE">فعال</option>
                       <option value="EXEMPT">معاف/غیرقابل اعمال</option>
                     </select>
-                    <PersianCalendarComponent
-                      value={insurance.effectiveDate}
-                      onChange={(effectiveDate) =>
-                        setInsurance({
-                          ...insurance,
-                          effectiveDate,
-                        })
-                      }
-                    />
-                    <PersianCalendarComponent
-                      value={insurance.dueDate}
-                      onChange={(dueDate) =>
-                        setInsurance({ ...insurance, dueDate })
-                      }
-                    />
+                    <HrField
+                      label="تاریخ شروع پوشش بیمه"
+                      required={insurance.status === "ACTIVE"}
+                      hint={insurance.status === "ACTIVE" ? undefined : "اختیاری تا زمان فعال‌شدن بیمه"}
+                    >
+                      <HrPersianCalendar
+                        value={insurance.effectiveDate}
+                        onChange={(effectiveDate) =>
+                          setInsurance({
+                            ...insurance,
+                            effectiveDate,
+                          })
+                        }
+                      />
+                    </HrField>
+                    <HrField
+                      label="مهلت پیگیری ثبت بیمه"
+                      hint="اختیاری و غیرمسدودکننده فعال‌سازی همکاری"
+                    >
+                      <HrPersianCalendar
+                        value={insurance.dueDate}
+                        onChange={(dueDate) =>
+                          setInsurance({ ...insurance, dueDate })
+                        }
+                      />
+                    </HrField>
                     <textarea
                       className={field}
                       placeholder="یادداشت"
@@ -2009,10 +2042,15 @@ export default function HiringCasePage() {
                 {canViewPayrollTask && (
                   <ErpCard className="space-y-2 p-4">
                     <p className="font-bold">مشارکت حقوق و دستمزد</p>
-                    <PersianCalendarComponent
-                      value={payrollDate}
-                      onChange={setPayrollDate}
-                    />
+                    <HrField
+                      label="تاریخ شروع مشارکت در حقوق و دستمزد"
+                      required
+                    >
+                      <HrPersianCalendar
+                        value={payrollDate}
+                        onChange={setPayrollDate}
+                      />
+                    </HrField>
                     <ErpButton
                       label="تنظیم مشارکت حقوق و دستمزد"
                       disabled={!payrollDate}

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import moment from 'moment-jalaali';
 import { FaCheckCircle, FaClipboardCheck, FaExclamationTriangle, FaPlay, FaSync, FaUsers } from 'react-icons/fa';
-import PersianCalendarComponent from '@/components/PersianCalendar';
+import HrPersianCalendar from '@/features/hr/HrPersianCalendar';
 import { ErpBadge, ErpButton, ErpCard, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
 import { hrAPI } from '@/lib/api';
 import { apiError, HrField, HrMessage, toIsoDate } from '@/features/hr/hrUi';
@@ -32,7 +32,7 @@ export default function HrMigrationPage() {
       </ErpSection>
     </div>
     <ErpSection title="اجرای کنترل‌شده" description="فقط پرسنل فعال را در تاریخ مبنا وارد رابطه استخدامی فعال می‌کند. تاریخ استخدام ناشناخته باقی می‌ماند و تخصیص اصلی باید بعداً توسط منابع انسانی تکمیل شود.">
-      <ErpCard tone="primary" className="p-4 sm:p-5"><div className="grid grid-cols-1 gap-5 xl:grid-cols-2"><div><HrField label="تاریخ مبنای مهاجرت" required hint="این تاریخ، تاریخ استخدام نیست؛ فقط مرز شروع داده معتبر در مدل جدید است."><PersianCalendarComponent value={baselineDate} onChange={setBaselineDate} /></HrField><div className="mt-4 rounded-xl border border-slate-200 p-3 text-sm dark:border-slate-700"><label className="flex items-start gap-2"><input className="mt-1" type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} /><span>پیش‌نمایش و تعارض‌ها را بررسی کرده‌ام و می‌دانم اجرای مهاجرت حذف‌کننده نیست و موارد ناشناخته را تکمیل نمی‌کند.</span></label></div><div className="mt-4"><ErpButton label="اجرای مهاجرت قابل تکرار" icon={FaPlay} disabled={applying || !baselineDate || !confirmed} onClick={apply} tone="success" /></div></div>
+      <ErpCard tone="primary" className="p-4 sm:p-5"><div className="grid grid-cols-1 gap-5 xl:grid-cols-2"><div><HrField label="تاریخ مبنای مهاجرت" required hint="این تاریخ، تاریخ استخدام نیست؛ فقط مرز شروع داده معتبر در مدل جدید است."><HrPersianCalendar value={baselineDate} onChange={setBaselineDate} /></HrField><div className="mt-4 rounded-xl border border-slate-200 p-3 text-sm dark:border-slate-700"><label className="flex items-start gap-2"><input className="mt-1" type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} /><span>پیش‌نمایش و تعارض‌ها را بررسی کرده‌ام و می‌دانم اجرای مهاجرت حذف‌کننده نیست و موارد ناشناخته را تکمیل نمی‌کند.</span></label></div><div className="mt-4"><ErpButton label="اجرای مهاجرت قابل تکرار" icon={FaPlay} disabled={applying || !baselineDate || !confirmed} onClick={apply} tone="success" /></div></div>
       <div><p className="mb-3 text-sm font-bold">دپارتمان‌هایی که منابع انسانی به‌عنوان واحد سازمانی تأیید کرده است</p><div className="max-h-72 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-3 dark:border-slate-700">{data?.departments?.map((department: any) => <label key={department.id} className="flex items-center justify-between gap-3 rounded-lg p-2 hover:bg-slate-50 dark:hover:bg-slate-900"><span><b>{department.namePersian || department.name}</b><small className="mr-2 text-slate-500">{department.name}</small></span><input type="checkbox" checked={confirmedDepartmentIds.includes(department.id)} onChange={() => toggleDepartment(department.id)} /></label>)}</div></div></div></ErpCard>
     </ErpSection>
   </ErpPage>;

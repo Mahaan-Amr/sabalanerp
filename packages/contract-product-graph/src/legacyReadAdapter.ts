@@ -2,6 +2,7 @@ import {
   normalizeLegacyJson,
   type CanonicalJsonObject
 } from './canonicalJson';
+import Decimal from 'decimal.js';
 import type {
   CalculationPolicySnapshot,
   CanonicalProductGraph,
@@ -557,6 +558,23 @@ export const readLegacyProductGraph = ({
           })));
           toolSelections.push(...operationResult.result.tools);
           finishingSelections.push(...operationResult.result.finishings);
+          const canonicalRowIndex = rows.findIndex(
+            row => row.productRowId === productRowId
+          );
+          if (canonicalRowIndex >= 0) {
+            const canonicalRow = rows[canonicalRowIndex];
+            rows[canonicalRowIndex] = {
+              ...canonicalRow,
+              commercial: {
+                ...canonicalRow.commercial,
+                totalAmountToman: parseCanonicalDecimal(
+                  new Decimal(canonicalRow.commercial.totalAmountToman ?? '0')
+                    .plus(operationResult.result.totalAmountToman ?? '0')
+                    .toFixed()
+                )
+              }
+            };
+          }
         }
       } catch (error) {
         conflicts.push({

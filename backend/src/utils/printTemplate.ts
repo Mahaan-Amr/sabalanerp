@@ -762,7 +762,15 @@ const buildSourceMaterialRows = (product: any): NormalizedSourceMaterial[] => {
 
 const normalizeProducts = (
   contract: RenderableContract,
-  lookups: { finishingCodeById?: Record<string, string> } = {}
+  lookups: {
+    finishingCodeById?: Record<string, string>;
+    subServiceById?: Record<string, {
+      code: string;
+      name: string;
+      pricePerMeter: number;
+      calculationBase: string;
+    }>;
+  } = {}
 ): NormalizedProduct[] => {
   const contractDataProducts = Array.isArray(contract.contractData?.products) ? contract.contractData.products : [];
   const relationItems = Array.isArray(contract.items) ? contract.items : [];
@@ -803,17 +811,26 @@ const normalizeProducts = (
       const services: NormalizedService[] = [];
       (product?.appliedSubServices || []).forEach((service: any) => {
         const amount = toNumber(service?.meter);
-        const rate = toNumber(service?.subService?.pricePerMeter);
+        const subServiceId = firstText(service?.subServiceId, service?.subService?.id);
+        const catalogSubService = subServiceId ? lookups.subServiceById?.[subServiceId] : undefined;
+        const calculationBase = service?.calculationBase || catalogSubService?.calculationBase;
+        const rate = toNumber(service?.subService?.pricePerMeter || catalogSubService?.pricePerMeter);
         const selectedEdgesLabel = selectedEdgeLabels(service);
-        const rateUnitLabel = service?.calculationBase === 'squareMeters' ? 'متر مربع' : 'متر طول';
+        const rateUnitLabel = calculationBase === 'squareMeters' ? 'متر مربع' : 'متر طول';
         services.push({
-          code: firstText(service?.subService?.code, service?.code, service?.sourceCode),
-          sourceId: firstText(service?.subServiceId, service?.subService?.id),
+          code: firstText(service?.subService?.code, service?.code, service?.sourceCode, catalogSubService?.code),
+          sourceId: subServiceId,
           category: selectedEdgesLabel ? 'ابزار' : 'خدمات',
-          name: service?.subService?.namePersian || service?.subService?.name || EMPTY,
+          name: firstText(
+            service?.subService?.namePersian,
+            service?.subService?.name,
+            service?.name,
+            catalogSubService?.name,
+            EMPTY
+          ),
           selectedEdgesLabel,
           amount,
-          amountLabel: `${toFaNumber(amount, 4)} ${service?.calculationBase === 'squareMeters' ? 'متر مربع' : 'متر'}`,
+          amountLabel: `${toFaNumber(amount, 4)} ${calculationBase === 'squareMeters' ? 'متر مربع' : 'متر'}`,
           rate,
           rateLabel: rate ? `${toFaNumber(rate)} تومان` : EMPTY,
           rateUnitLabel,
@@ -2026,6 +2043,12 @@ type RenderContractHtmlOptions = {
   variant?: ContractPrintVariant;
   customPrint?: ContractCustomPrintOptions;
   finishingCodeById?: Record<string, string>;
+  subServiceById?: Record<string, {
+    code: string;
+    name: string;
+    pricePerMeter: number;
+    calculationBase: string;
+  }>;
 };
 
 export function renderContractHtml(contract: RenderableContract, options: RenderContractHtmlOptions = {}): string {
@@ -2053,7 +2076,8 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   const project = contractData.project || {};
 
   const normalizedProducts = normalizeProducts(contract, {
-    finishingCodeById: options.finishingCodeById
+    finishingCodeById: options.finishingCodeById,
+    subServiceById: options.subServiceById
   });
   const normalizedStandaloneServices = normalizeStandaloneServices(contract);
   const normalizedDeliveries = normalizeDeliveries(contract, normalizedProducts, normalizedStandaloneServices);

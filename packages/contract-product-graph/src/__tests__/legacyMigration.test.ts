@@ -16,6 +16,7 @@ import {
   type StairLayerConfigurationInput
 } from '../stairLayerPolicy';
 import { materializePaidRemainderStocks } from '../remainderPolicy';
+import { calculateProductOperations } from '../operationsPolicy';
 
 const policy = {
   calculation: 'calculation-v1',
@@ -146,6 +147,66 @@ const product = {
   const stairCalculation = calculateStairPart(stairInput);
   assert.equal(stairCalculation.ok, true);
   if (!stairCalculation.ok) throw new Error('expected stair calculation');
+
+  const operationGroupId = parseStableIdentity(
+    'operation-group',
+    'stair-parent-operations'
+  );
+  const stairOperations = {
+    policyVersion: policy.calculation,
+    pricingPolicyVersion: policy.pricing,
+    roundingPolicyVersion: policy.rounding,
+    productRowId: parentRowId,
+    lengthMeters: parseCanonicalDecimal('1.2'),
+    widthMeters: parseCanonicalDecimal('0.3'),
+    quantity: 2,
+    groups: [{
+      operationGroupId,
+      scope: parseCanonicalDecimal('2')
+    }],
+    tools: [{
+      toolSelectionId: parseStableIdentity(
+        'tool-selection',
+        'stair-parent-tool'
+      ),
+      operationGroupId,
+      catalogItemId: 'tool-half-round',
+      catalogSnapshotVersion: 'tool-catalog-v1',
+      name: 'Half round',
+      unit: 'meter' as const,
+      rateToman: parseCanonicalDecimal('50000'),
+      edges: ['front' as const]
+    }],
+    finishings: []
+  };
+  const stairOperationsCalculation =
+    calculateProductOperations(stairOperations);
+  assert.equal(stairOperationsCalculation.ok, true);
+  if (!stairOperationsCalculation.ok) {
+    throw new Error('expected stair operations calculation');
+  }
+  const stairWithOperationsTotal =
+    Number(stairCalculation.result.totalAmountToman) +
+    Number(stairOperationsCalculation.result.totalAmountToman);
+  const stairWithOperationsMigration = planLegacyProductGraphMigration({
+    contractId: 'legacy-stair-with-operations',
+    revision: 0,
+    calculationPolicy: policy,
+    products: [{
+      productRowId: parentRowId,
+      productId: 'catalog-1',
+      productType: 'stair',
+      name: 'Stair tread with tool',
+      totalPrice: stairWithOperationsTotal,
+      stairPartPolicyInput: stairInput,
+      operationPolicyInput: stairOperations
+    }]
+  }, stairWithOperationsTotal);
+  assert.equal(
+    stairWithOperationsMigration.ok,
+    true,
+    JSON.stringify(stairWithOperationsMigration)
+  );
 
   const layerConfigurationId = parseStableIdentity(
     'layer-configuration',

@@ -17,6 +17,10 @@ import {
   ReservedRowsSkeleton,
   useCachedProductModalSection
 } from './productModalPrimitives';
+import {
+  buildOperationCollectionPresentation,
+  getPersianOperationEdgeLabel
+} from '../../services/operationCollectionPresentation';
 
 export interface OperationCatalogItem {
   readonly catalogItemId: string;
@@ -60,13 +64,6 @@ const ensureWholeProductGroup = (input: ProductOperationsInput) => {
     scope: wholeScope(input)
   };
   return { groups: [group], operationGroupId };
-};
-
-const edgeLabels: Record<OperationEdge, string> = {
-  front: 'جلو',
-  back: 'عقب',
-  left: 'چپ',
-  right: 'راست'
 };
 
 function CatalogResults({
@@ -153,17 +150,16 @@ export function OperationCollectionsSection({
     () => calculateProductOperations(input),
     [input]
   );
-  const calculatedTool = (id: string) => calculation.ok
-    ? calculation.result.tools.find(tool => tool.toolSelectionId === id)
-    : undefined;
-  const calculatedFinishing = (id: string) => calculation.ok
-    ? calculation.result.finishings.find(
-        finishing => finishing.finishingSelectionId === id
-      )
-    : undefined;
-  const conflictFor = (id: string) => calculation.ok
-    ? undefined
-    : calculation.conflicts.find(conflict => conflict.entityId === id);
+  const presentation = React.useMemo(
+    () => buildOperationCollectionPresentation(input),
+    [input]
+  );
+  const calculatedTool = (id: string) =>
+    presentation.toolsById.get(id);
+  const calculatedFinishing = (id: string) =>
+    presentation.finishingsById.get(id);
+  const conflictFor = (id: string) =>
+    presentation.conflictByEntityId.get(id);
   const conflictMessage = (
     conflict: ReturnType<typeof conflictFor>
   ) => {
@@ -454,7 +450,7 @@ export function OperationCollectionsSection({
                           : 'border-slate-300 dark:border-slate-700'
                       }`}
                     >
-                      {edgeLabels[edge]}
+                      {getPersianOperationEdgeLabel(edge)}
                     </button>
                   ))}
                   <button
@@ -766,6 +762,14 @@ export function OperationCollectionsSection({
         })}
       </InlineCollectionSection>
 
+      {!presentation.complete && (
+        <div
+          data-operation-total-incomplete
+          className="border-t border-amber-300 bg-amber-50 px-2 py-2 text-xs font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+        >
+          جمع عملیات ناقص است؛ خطاهای مشخص‌شده را برطرف کنید
+        </div>
+      )}
       {calculation.ok && Number(calculation.result.noOperationScope) > 0 && (
         <div className="border-t border-slate-200 py-2 text-xs dark:border-slate-800">
           بدون عملیات — {calculation.result.noOperationScope}

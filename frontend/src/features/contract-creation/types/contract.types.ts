@@ -807,6 +807,11 @@ export interface StairPartDraftV2 {
   /** Stable identity for one independent layer configuration draft. */
   layerConfigurationDraftId?: string;
   /**
+   * The layer currently shown in the inline editor. It remains present in
+   * layerConfigurations; selection is not staging or collection mutation.
+   */
+  activeLayerConfigurationDraftId?: string;
+  /**
    * Completed layer configurations waiting for the parent stair part to be
    * committed. They remain draft-only and are saved atomically with the parent.
    */

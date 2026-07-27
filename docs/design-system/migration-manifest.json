@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "pattern": "frontend/src/app/dashboard/security/**/page.tsx",
+      "status": "reference",
+      "acceptanceStatus": "accepted-reference",
+      "reason": "The Guard workspace is an accepted Sabalan Design System reference implementation."
+    },
+    {
+      "pattern": "frontend/src/app/**/page.tsx",
+      "status": "legacy",
+      "acceptanceStatus": "not-started",
+      "reason": "The route remains supported while waiting for its approved vertical migration ticket."
+    }
+  ],
+  "surfaces": [
+    {
+      "id": "contract-product-selection",
+      "status": "reference",
+      "acceptanceStatus": "accepted-reference",
+      "reason": "Contract Product Selection is a reference inside otherwise legacy Contract Creation.",
+      "files": [
+        "frontend/src/features/contract-creation/components/product-modal-system/**",
+        "frontend/src/features/contract-creation/components/steps/Step5ProductSelection.tsx"
+      ]
+    }
+  ],
+  "implementationBoundaries": [
+    {
+      "id": "canonical-erp-modules",
+      "files": [
+        "frontend/src/components/erp/**"
+      ],
+      "allowedCategories": [
+        "hardcoded-semantic-color",
+        "duplicate-primitive-risk",
+        "raw-control-risk"
+      ],
+      "reason": "Canonical ERP modules implement semantic interfaces and accessible native behavior for feature consumers.",
+      "owner": "Sabalan Design System"
+    }
+  ],
+  "exceptions": []
+}

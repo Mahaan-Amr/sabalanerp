@@ -1,0 +1,4735 @@
+{
+  "version": 1,
+  "manifestVersion": 1,
+  "generatedFrom": "current repository state",
+  "findings": {
+    "frontend/src/app/about/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-teal-700": 1,
+        "text-stone-950": 2,
+        "text-stone-600": 1,
+        "bg-stone-950": 1,
+        "text-teal-300": 2,
+        "text-stone-300": 1,
+        "text-stone-200": 1,
+        "text-white": 1,
+        "border-white/10": 1,
+        "bg-white": 1
+      }
+    },
+    "frontend/src/app/apply/page.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-300": 1,
+        "text-slate-900": 2,
+        "text-slate-500": 3,
+        "border-emerald-500": 1,
+        "ring-emerald-100": 1,
+        "border-slate-600": 2,
+        "bg-slate-900": 3,
+        "text-slate-100": 3,
+        "text-slate-400": 1,
+        "text-slate-700": 3,
+        "text-slate-200": 1,
+        "text-rose-600": 1,
+        "bg-slate-100": 2,
+        "bg-slate-950": 2,
+        "bg-rose-50": 2,
+        "text-rose-700": 3,
+        "bg-emerald-600": 3,
+        "text-emerald-300": 1,
+        "bg-slate-800": 1,
+        "bg-slate-700": 1,
+        "bg-emerald-400": 1,
+        "bg-emerald-50": 2,
+        "text-emerald-700": 1,
+        "bg-amber-50": 2,
+        "text-amber-800": 1,
+        "text-emerald-800": 1,
+        "border-amber-200": 1,
+        "text-amber-950": 1,
+        "border-rose-300": 1,
+        "bg-white": 5,
+        "text-white": 5
+      },
+      "raw-control-risk": {
+        "<input": 37,
+        "<button": 9,
+        "<textarea": 3,
+        "<select": 10
+      }
+    },
+    "frontend/src/app/change-password/page.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-slate-950": 1,
+        "text-slate-300": 2,
+        "bg-red-500/15": 1,
+        "text-red-200": 1,
+        "bg-teal-500": 1,
+        "text-slate-950": 1,
+        "border-white/10": 1,
+        "bg-white/5": 1,
+        "text-white": 1,
+        "bg-white/10": 3
+      },
+      "raw-control-risk": {
+        "<input": 3,
+        "<button": 2
+      }
+    },
+    "frontend/src/app/contact/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-teal-700": 2,
+        "text-stone-950": 5,
+        "text-stone-600": 3,
+        "bg-stone-100": 1
+      }
+    },
+    "frontend/src/app/contracts/confirm/[token]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-red-400": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 1
+      }
+    },
+    "frontend/src/app/contracts/confirm/ConfirmationContractView.tsx": {
+      "hardcoded-semantic-color": {
+        "text-red-400": 1,
+        "text-emerald-400": 1,
+        "border-emerald-500/40": 1,
+        "text-emerald-300": 1,
+        "border-white/10": 1,
+        "border-white/5": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 5,
+        "glass-liquid-input": 1,
+        "glass-liquid-btn-primary": 1,
+        "glass-liquid-btn": 1
+      },
+      "raw-control-risk": {
+        "<input": 1,
+        "<button": 2
+      }
+    },
+    "frontend/src/app/contracts/confirm/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-red-400": 1,
+        "text-emerald-400": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 1,
+        "glass-liquid-input": 2,
+        "glass-liquid-btn-primary": 1
+      },
+      "raw-control-risk": {
+        "<input": 2,
+        "<button": 1
+      }
+    },
+    "frontend/src/app/dashboard/accounting/audit/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-500": 1
+      }
+    },
+    "frontend/src/app/dashboard/accounting/contracts/[contractId]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "border-red-200": 2,
+        "bg-red-50": 2,
+        "text-red-700": 2,
+        "border-red-900/60": 2,
+        "bg-red-950/30": 2,
+        "text-red-200": 2,
+        "text-slate-700": 7,
+        "text-slate-200": 7,
+        "border-slate-200": 6,
+        "text-slate-900": 3,
+        "border-teal-500": 3,
+        "ring-teal-500/20": 3,
+        "border-slate-700": 6,
+        "bg-slate-900": 5,
+        "border-teal-300": 1,
+        "bg-teal-50/50": 1,
+        "border-teal-800": 1,
+        "bg-teal-950/20": 1,
+        "border-emerald-200": 1,
+        "bg-emerald-50": 1,
+        "text-emerald-800": 1,
+        "border-emerald-800": 1,
+        "bg-emerald-950/30": 1,
+        "text-emerald-100": 1,
+        "border-amber-200": 2,
+        "bg-amber-50": 2,
+        "text-amber-800": 2,
+        "border-amber-800": 2,
+        "bg-amber-950/30": 1,
+        "text-amber-100": 2,
+        "bg-slate-50": 1,
+        "bg-slate-900/60": 1,
+        "text-slate-500": 3,
+        "text-slate-400": 3,
+        "bg-amber-900/20": 1,
+        "bg-white": 5,
+        "text-white": 3
+      },
+      "raw-control-risk": {
+        "<select": 3,
+        "<input": 2
+      }
+    },
+    "frontend/src/app/dashboard/accounting/contracts/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 1,
+        "text-slate-950": 2,
+        "text-slate-500": 5,
+        "text-slate-400": 5,
+        "text-teal-200": 1,
+        "border-red-200": 1,
+        "bg-red-50": 1,
+        "text-red-700": 1,
+        "border-red-900/60": 1,
+        "bg-red-950/30": 1,
+        "text-red-200": 1,
+        "bg-slate-950/60": 1,
+        "border-slate-200": 2,
+        "border-slate-700": 2,
+        "bg-slate-900": 1,
+        "text-teal-600": 1,
+        "text-teal-300": 1,
+        "text-slate-600": 1,
+        "bg-slate-50": 1,
+        "text-slate-200": 1,
+        "bg-slate-800": 1,
+        "text-white": 2,
+        "bg-white": 1
+      },
+      "raw-control-risk": {
+        "<button": 1
+      }
+    },
+    "frontend/src/app/dashboard/accounting/correction-requests/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-500": 1
+      }
+    },
+    "frontend/src/app/dashboard/accounting/invoice-candidates/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-950": 1,
+        "text-slate-500": 2,
+        "text-slate-400": 2,
+        "text-white": 1
+      }
+    },
+    "frontend/src/app/dashboard/accounting/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-500": 1,
+        "text-slate-400": 1
+      }
+    },
+    "frontend/src/app/dashboard/accounting/payments/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-500": 1
+      }
+    },
+    "frontend/src/app/dashboard/accounting/performance/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-950": 1,
+        "text-slate-500": 1,
+        "text-slate-400": 1,
+        "border-amber-200": 1,
+        "bg-amber-50": 1,
+        "text-amber-800": 1,
+        "border-amber-900/60": 1,
+        "bg-amber-950/30": 1,
+        "text-amber-100": 1,
+        "text-white": 1
+      }
+    },
+    "frontend/src/app/dashboard/accounting/receivables/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 1,
+        "text-slate-500": 1,
+        "text-teal-200": 1
+      }
+    },
+    "frontend/src/app/dashboard/accounting/settings/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 3,
+        "border-slate-200": 1,
+        "bg-slate-50": 1,
+        "text-slate-900": 1,
+        "border-slate-700": 2,
+        "bg-slate-800": 1,
+        "border-teal-500": 1,
+        "bg-slate-900": 1,
+        "text-slate-700": 8,
+        "text-slate-200": 8,
+        "border-slate-300": 1,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "text-teal-200": 1,
+        "bg-white": 1,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<input": 8
+      }
+    },
+    "frontend/src/app/dashboard/accounting/tax/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-500": 1
+      }
+    },
+    "frontend/src/app/dashboard/admin/discount-settings/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 4,
+        "border-slate-200": 3,
+        "bg-slate-50": 2,
+        "text-slate-900": 1,
+        "border-slate-700": 3,
+        "bg-slate-800": 2,
+        "border-teal-500": 1,
+        "bg-slate-900": 1,
+        "text-slate-600": 2,
+        "text-slate-300": 2,
+        "border-red-200": 1,
+        "bg-red-50": 1,
+        "border-red-800": 1,
+        "bg-red-900/20": 1,
+        "text-red-700": 1,
+        "text-red-200": 1,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "border-slate-300": 1,
+        "border-slate-100": 1,
+        "border-slate-800": 1,
+        "text-slate-800": 3,
+        "text-slate-100": 3,
+        "bg-white": 1,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<input": 1
+      }
+    },
+    "frontend/src/app/dashboard/admin/permissions/page.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-teal-500/15": 2,
+        "text-teal-200": 2,
+        "border-teal-500/30": 4,
+        "bg-blue-500/15": 2,
+        "text-blue-200": 2,
+        "border-blue-500/30": 4,
+        "bg-red-500/15": 1,
+        "text-red-200": 2,
+        "border-red-500/30": 4,
+        "bg-gray-500/15": 1,
+        "text-gray-200": 8,
+        "border-gray-500/30": 1,
+        "border-teal-400": 2,
+        "text-gray-300": 26,
+        "text-red-400": 6,
+        "bg-teal-500/20": 14,
+        "text-teal-100": 2,
+        "border-teal-500/40": 2,
+        "bg-gray-800/70": 2,
+        "bg-green-500/10": 1,
+        "border-green-500/30": 3,
+        "text-green-200": 1,
+        "bg-red-500/10": 1,
+        "bg-gray-800": 15,
+        "border-gray-600": 22,
+        "border-teal-500": 6,
+        "text-gray-400": 18,
+        "bg-gray-700": 3,
+        "text-gray-500": 1,
+        "text-teal-400": 1,
+        "text-gray-600": 4,
+        "bg-gray-900/40": 2,
+        "border-gray-700": 3,
+        "bg-red-500/20": 6,
+        "bg-yellow-500/20": 2,
+        "text-yellow-400": 2,
+        "bg-green-500/20": 4,
+        "text-green-400": 3,
+        "border-gray-800": 1,
+        "bg-gray-800/50": 4,
+        "text-blue-400": 1,
+        "bg-blue-500/20": 3,
+        "bg-gray-700/50": 4,
+        "text-teal-300": 3,
+        "text-red-300": 4,
+        "from-teal-500": 1,
+        "to-blue-500": 1,
+        "text-blue-300": 2,
+        "bg-blue-500/30": 1,
+        "bg-blue-400": 3,
+        "text-green-300": 2,
+        "bg-green-500/30": 1,
+        "bg-green-400": 3,
+        "bg-red-500/30": 1,
+        "bg-red-400": 2,
+        "bg-gray-900/50": 1,
+        "from-gray-800": 1,
+        "to-gray-700": 1,
+        "bg-teal-400": 2,
+        "bg-purple-400": 1,
+        "border-gray-700/50": 1,
+        "bg-gray-800/30": 1,
+        "bg-gray-800/20": 1,
+        "from-teal-500/10": 2,
+        "to-blue-500/10": 2,
+        "ring-teal-500/50": 1,
+        "bg-teal-500/5": 1,
+        "bg-gray-600": 1,
+        "bg-gray-600/20": 1,
+        "border-gray-600/30": 1,
+        "bg-gray-500": 1,
+        "bg-teal-500": 2,
+        "shadow-teal-500/25": 1,
+        "ring-teal-500/20": 2,
+        "border-red-500/50": 1,
+        "bg-red-500/5": 1,
+        "border-green-500/50": 1,
+        "bg-green-500/5": 1,
+        "border-blue-500/50": 1,
+        "bg-blue-500/5": 1,
+        "border-teal-500/20": 1,
+        "bg-teal-500/30": 1,
+        "bg-gray-800/60": 1,
+        "text-white": 32,
+        "bg-black/50": 2
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 26
+      },
+      "raw-control-risk": {
+        "<button": 28,
+        "<input": 4,
+        "<select": 9
+      }
+    },
+    "frontend/src/app/dashboard/admin/reports/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "border-slate-200": 1,
+        "bg-slate-50": 1,
+        "border-slate-800": 1,
+        "bg-slate-800/50": 1,
+        "bg-teal-900/40": 1,
+        "text-teal-100": 1,
+        "text-slate-900": 1,
+        "text-slate-500": 2,
+        "text-slate-400": 2,
+        "text-white": 1
+      }
+    },
+    "frontend/src/app/dashboard/admin/sabalan-calendar/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "border-slate-200": 4,
+        "bg-slate-50": 4,
+        "text-slate-900": 3,
+        "border-slate-700": 3,
+        "bg-slate-800": 3,
+        "border-teal-500": 1,
+        "bg-slate-900": 1,
+        "text-slate-700": 3,
+        "text-slate-200": 3,
+        "border-emerald-200": 1,
+        "bg-emerald-50": 1,
+        "text-emerald-700": 1,
+        "border-red-200": 1,
+        "bg-red-50": 1,
+        "text-red-700": 1,
+        "border-slate-800": 1,
+        "bg-slate-800/50": 1,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "bg-white": 1,
+        "text-white": 3
+      },
+      "raw-control-risk": {
+        "<input": 4,
+        "<select": 1
+      }
+    },
+    "frontend/src/app/dashboard/admin/security/page.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-200": 1,
+        "bg-slate-50": 1,
+        "border-slate-800": 1,
+        "bg-slate-800/50": 1,
+        "text-slate-900": 1,
+        "text-slate-500": 1,
+        "text-slate-400": 1,
+        "text-white": 1
+      }
+    },
+    "frontend/src/app/dashboard/admin/settings/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 4,
+        "border-slate-200": 2,
+        "bg-slate-50": 2,
+        "text-slate-900": 1,
+        "border-slate-700": 2,
+        "bg-slate-800": 2,
+        "border-teal-500": 1,
+        "bg-slate-900": 1,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "border-emerald-200": 1,
+        "bg-emerald-50": 1,
+        "border-emerald-800": 1,
+        "bg-emerald-900/20": 1,
+        "text-emerald-700": 1,
+        "text-emerald-200": 1,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "border-slate-300": 1,
+        "text-slate-500": 1,
+        "text-slate-400": 1,
+        "bg-white": 1,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<input": 5,
+        "<select": 4
+      }
+    },
+    "frontend/src/app/dashboard/contract-templates/create/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-gray-300": 2,
+        "bg-red-500/10": 1,
+        "border-red-500/20": 1,
+        "text-red-400": 7,
+        "bg-gray-800/50": 1,
+        "text-gray-400": 2,
+        "text-gray-500": 1,
+        "text-blue-400": 1,
+        "text-green-400": 1,
+        "text-red-300": 1,
+        "text-white": 29,
+        "bg-white/5": 1,
+        "border-white": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-btn": 3,
+        "glass-liquid-card": 8,
+        "glass-liquid-btn-primary": 3,
+        "glass-liquid-input": 12
+      },
+      "raw-control-risk": {
+        "<button": 4,
+        "<input": 13,
+        "<select": 2,
+        "<textarea": 2
+      }
+    },
+    "frontend/src/app/dashboard/contract-templates/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-900": 1,
+        "text-slate-500": 2,
+        "text-slate-400": 2,
+        "text-white": 1
+      }
+    },
+    "frontend/src/app/dashboard/crm/customers/[id]/edit/page.tsx": {
+      "hardcoded-semantic-color": {
+        "ring-teal-500": 1,
+        "text-gray-300": 6,
+        "border-teal-500": 1,
+        "text-red-400": 8,
+        "text-gray-400": 4,
+        "border-red-500/40": 1,
+        "text-red-300": 5,
+        "text-teal-400": 1,
+        "text-blue-400": 1,
+        "text-orange-400": 1,
+        "text-red-200": 3,
+        "bg-red-500/20": 1,
+        "bg-orange-500/20": 1,
+        "text-orange-300": 1,
+        "bg-white/10": 3,
+        "border-white/20": 1,
+        "text-white": 10,
+        "bg-white/5": 3,
+        "border-white/10": 3
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 9,
+        "glass-liquid-btn-primary": 6,
+        "glass-liquid-btn": 2
+      },
+      "raw-control-risk": {
+        "<button": 12,
+        "<input": 31,
+        "<textarea": 2
+      }
+    },
+    "frontend/src/app/dashboard/crm/customers/[id]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-green-500/20": 3,
+        "text-green-400": 6,
+        "bg-gray-500/20": 3,
+        "text-gray-400": 37,
+        "bg-blue-500/20": 1,
+        "text-blue-400": 2,
+        "bg-yellow-500/20": 1,
+        "text-yellow-400": 1,
+        "border-teal-500": 2,
+        "text-red-400": 5,
+        "text-gray-300": 23,
+        "bg-red-500/20": 3,
+        "bg-red-500/30": 2,
+        "border-red-500/50": 1,
+        "text-red-300": 1,
+        "text-red-200": 1,
+        "bg-orange-500/20": 2,
+        "text-orange-400": 2,
+        "text-teal-400": 5,
+        "border-gray-300": 1,
+        "bg-teal-500/20": 2,
+        "text-purple-400": 2,
+        "bg-green-500/30": 2,
+        "bg-orange-500/30": 1,
+        "ring-teal-500": 14,
+        "text-teal-600": 1,
+        "text-white": 56,
+        "border-white/10": 4,
+        "bg-white/5": 1,
+        "bg-white/10": 20,
+        "bg-black/50": 2,
+        "border-white/20": 16
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 9,
+        "glass-liquid-btn-primary": 7,
+        "glass-liquid-btn": 10
+      },
+      "raw-control-risk": {
+        "<button": 16,
+        "<input": 13,
+        "<textarea": 1
+      }
+    },
+    "frontend/src/app/dashboard/crm/customers/create/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-gray-300": 31,
+        "border-teal-500": 4,
+        "bg-teal-500/20": 4,
+        "ring-teal-500": 21,
+        "text-red-400": 8,
+        "text-gray-400": 3,
+        "bg-red-500/20": 1,
+        "bg-red-500/30": 1,
+        "border-red-500/50": 1,
+        "text-red-300": 1,
+        "text-red-200": 1,
+        "bg-teal-500": 2,
+        "border-amber-500/40": 1,
+        "bg-amber-500/20": 1,
+        "text-amber-200": 1,
+        "bg-teal-600": 1,
+        "text-white": 38,
+        "border-white/20": 29,
+        "bg-white/5": 9,
+        "border-white/40": 4,
+        "bg-white/10": 28,
+        "border-white/10": 1,
+        "border-white": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 4,
+        "glass-liquid-btn": 3,
+        "glass-liquid-btn-primary": 2
+      },
+      "raw-control-risk": {
+        "<button": 11,
+        "<input": 21
+      }
+    },
+    "frontend/src/app/dashboard/crm/customers/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-900": 1,
+        "text-slate-500": 7,
+        "text-slate-400": 7,
+        "text-purple-600": 1,
+        "text-purple-300": 1,
+        "text-white": 1
+      }
+    },
+    "frontend/src/app/dashboard/crm/follow-ups/create/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "border-slate-200": 1,
+        "bg-slate-50": 1,
+        "text-slate-900": 1,
+        "border-slate-700": 1,
+        "bg-slate-800": 1,
+        "border-teal-500": 1,
+        "bg-slate-900": 1,
+        "text-slate-700": 2,
+        "text-slate-200": 2,
+        "border-slate-300": 1,
+        "bg-white": 1,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<textarea": 4,
+        "<input": 2
+      }
+    },
+    "frontend/src/app/dashboard/crm/follow-ups/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-500": 1
+      }
+    },
+    "frontend/src/app/dashboard/crm/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 3,
+        "border-slate-200": 3,
+        "bg-slate-50": 2,
+        "border-slate-800": 3,
+        "bg-slate-800/50": 2,
+        "text-slate-900": 3,
+        "text-slate-500": 4,
+        "text-slate-400": 4,
+        "text-red-700": 1,
+        "text-red-200": 1,
+        "text-teal-200": 1,
+        "bg-white": 2,
+        "text-white": 3
+      }
+    },
+    "frontend/src/app/dashboard/crm/potential-projects/[id]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "text-slate-600": 2,
+        "text-slate-300": 2,
+        "border-slate-200": 3,
+        "border-slate-800": 3,
+        "text-slate-900": 3,
+        "text-slate-500": 4,
+        "text-slate-400": 4,
+        "text-teal-200": 2,
+        "text-white": 3
+      }
+    },
+    "frontend/src/app/dashboard/crm/potential-projects/create/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "border-slate-200": 1,
+        "bg-slate-50": 1,
+        "text-slate-900": 1,
+        "border-slate-700": 1,
+        "bg-slate-800": 1,
+        "border-teal-500": 1,
+        "bg-slate-900": 1,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "bg-white": 1,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<input": 5,
+        "<textarea": 1
+      }
+    },
+    "frontend/src/app/dashboard/crm/potential-projects/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "border-slate-200": 1,
+        "bg-slate-50": 1,
+        "text-slate-900": 1,
+        "border-slate-700": 1,
+        "bg-slate-800": 1,
+        "border-teal-500": 1,
+        "bg-slate-900": 1,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "text-slate-500": 1,
+        "bg-white": 1,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<input": 1
+      }
+    },
+    "frontend/src/app/dashboard/departments/create/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "text-teal-500": 1,
+        "bg-red-500/20": 1,
+        "border-red-500/30": 1,
+        "text-red-500": 1,
+        "text-red-400": 1,
+        "border-slate-300": 1,
+        "border-slate-600": 1,
+        "bg-slate-800": 1,
+        "text-teal-400": 1,
+        "ring-teal-500": 1,
+        "bg-white": 1,
+        "border-white": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 4,
+        "glass-liquid-btn": 2,
+        "glass-liquid-input": 3,
+        "glass-liquid-btn-primary": 1
+      },
+      "raw-control-risk": {
+        "<input": 3,
+        "<textarea": 1,
+        "<button": 1
+      }
+    },
+    "frontend/src/app/dashboard/departments/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-900": 3,
+        "text-slate-500": 1,
+        "text-slate-400": 2,
+        "text-slate-600": 2,
+        "text-slate-300": 2,
+        "bg-slate-950/60": 1,
+        "border-amber-200": 1,
+        "bg-amber-50": 1,
+        "text-amber-800": 1,
+        "border-amber-800": 1,
+        "bg-amber-900/25": 1,
+        "text-amber-200": 1,
+        "text-white": 3
+      }
+    },
+    "frontend/src/app/dashboard/hr/hiring/[id]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-300": 1,
+        "border-slate-700": 1,
+        "bg-slate-900": 1,
+        "bg-rose-50": 3,
+        "text-rose-700": 5,
+        "bg-emerald-50": 2,
+        "text-emerald-700": 2,
+        "text-slate-500": 11,
+        "bg-emerald-600": 1,
+        "bg-slate-100": 4,
+        "bg-slate-800": 5,
+        "bg-slate-50": 4,
+        "text-sky-700": 2,
+        "bg-rose-950/40": 2,
+        "text-rose-200": 2,
+        "bg-emerald-100": 3,
+        "bg-rose-100": 2,
+        "border-amber-300": 2,
+        "bg-amber-50": 3,
+        "border-amber-800": 1,
+        "bg-amber-950/30": 2,
+        "text-slate-600": 3,
+        "text-slate-300": 3,
+        "text-rose-600": 1,
+        "text-rose-300": 1,
+        "text-amber-700": 3,
+        "text-emerald-300": 1,
+        "text-amber-300": 1,
+        "bg-sky-100": 1,
+        "bg-amber-100": 1,
+        "bg-violet-100": 1,
+        "ring-amber-400": 1,
+        "text-amber-900": 2,
+        "text-amber-100": 1,
+        "text-emerald-800": 1,
+        "bg-white": 1,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<button": 22,
+        "<select": 20,
+        "<input": 39,
+        "<textarea": 6
+      }
+    },
+    "frontend/src/app/dashboard/hr/hiring/authorities/page.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-300": 1,
+        "text-slate-900": 1,
+        "border-slate-700": 1,
+        "bg-slate-900": 1,
+        "text-slate-100": 1,
+        "bg-emerald-50": 1,
+        "text-emerald-700": 1,
+        "bg-emerald-950/40": 1,
+        "text-emerald-200": 1,
+        "bg-rose-50": 1,
+        "text-rose-700": 1,
+        "bg-rose-950/40": 1,
+        "text-rose-200": 1,
+        "bg-white": 1
+      },
+      "raw-control-risk": {
+        "<select": 2
+      }
+    },
+    "frontend/src/app/dashboard/hr/hiring/collateral-templates/page.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-300": 1,
+        "border-slate-700": 1,
+        "bg-slate-900": 1,
+        "bg-rose-50": 1,
+        "text-rose-700": 1,
+        "bg-white": 1
+      },
+      "raw-control-risk": {
+        "<input": 4,
+        "<select": 1,
+        "<button": 1
+      }
+    },
+    "frontend/src/app/dashboard/hr/hiring/page.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-300": 2,
+        "ring-emerald-500": 1,
+        "border-slate-700": 2,
+        "bg-slate-900": 2,
+        "bg-rose-50": 1,
+        "text-rose-700": 2,
+        "bg-rose-950/40": 1,
+        "text-rose-200": 1,
+        "bg-emerald-50": 1,
+        "text-emerald-700": 2,
+        "bg-emerald-950/40": 1,
+        "text-emerald-200": 1,
+        "bg-slate-100": 3,
+        "bg-slate-800": 2,
+        "border-slate-800": 1,
+        "text-emerald-600": 1,
+        "text-slate-500": 11,
+        "bg-emerald-100": 1,
+        "bg-rose-100": 1,
+        "text-slate-400": 1,
+        "text-slate-900": 1,
+        "bg-slate-950/50": 1,
+        "bg-slate-50": 1,
+        "bg-white": 1,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<input": 5,
+        "<select": 8,
+        "<button": 6
+      }
+    },
+    "frontend/src/app/dashboard/hr/migration/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-500": 2,
+        "border-amber-200": 1,
+        "bg-amber-50": 1,
+        "text-amber-900": 1,
+        "border-amber-900": 1,
+        "bg-amber-950/30": 1,
+        "text-amber-100": 1,
+        "border-slate-200": 4,
+        "border-slate-700": 4,
+        "bg-slate-50": 1,
+        "bg-slate-900": 1,
+        "text-amber-500": 1,
+        "text-emerald-500": 1
+      },
+      "raw-control-risk": {
+        "<input": 2
+      }
+    },
+    "frontend/src/app/dashboard/hr/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-500": 1,
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "text-amber-500": 1,
+        "text-slate-400": 1
+      }
+    },
+    "frontend/src/app/dashboard/hr/personnel/page.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-300": 2,
+        "border-slate-700": 5,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "bg-emerald-600": 1,
+        "text-slate-500": 4,
+        "text-emerald-700": 2,
+        "text-amber-700": 1,
+        "border-slate-200": 3,
+        "bg-emerald-50": 1,
+        "text-rose-700": 1,
+        "bg-slate-50": 1,
+        "bg-slate-900": 1,
+        "text-white": 1
+      },
+      "duplicate-primitive-risk": {
+        "PersonnelCard": 1
+      },
+      "raw-control-risk": {
+        "<input": 9,
+        "<select": 8,
+        "<textarea": 1,
+        "<button": 1
+      }
+    },
+    "frontend/src/app/dashboard/hr/structure/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-500": 3,
+        "text-slate-900": 1,
+        "text-white": 1
+      },
+      "duplicate-primitive-risk": {
+        "ItemCard": 1
+      },
+      "raw-control-risk": {
+        "<input": 10,
+        "<select": 7,
+        "<textarea": 2
+      }
+    },
+    "frontend/src/app/dashboard/inventory/master-data/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "border-slate-200": 2,
+        "bg-slate-50": 1,
+        "text-slate-900": 3,
+        "border-slate-700": 2,
+        "bg-slate-800": 1,
+        "border-teal-500": 1,
+        "bg-slate-900": 2,
+        "text-slate-500": 2,
+        "text-slate-400": 2,
+        "text-slate-700": 1,
+        "text-slate-300": 1,
+        "text-red-500": 2,
+        "bg-white": 2,
+        "text-white": 3,
+        "bg-black/50": 1
+      },
+      "raw-control-risk": {
+        "<textarea": 1,
+        "<select": 1,
+        "<input": 1
+      }
+    },
+    "frontend/src/app/dashboard/inventory/services/cutting-types/create/page.tsx": {
+      "hardcoded-semantic-color": {
+        "from-slate-50": 1,
+        "to-slate-100": 1,
+        "from-slate-900": 1,
+        "to-slate-800": 1,
+        "text-slate-800": 1,
+        "text-slate-200": 2,
+        "text-slate-600": 1,
+        "text-slate-400": 3,
+        "text-slate-500": 2,
+        "text-slate-700": 8,
+        "bg-slate-800/70": 1,
+        "border-slate-200/50": 1,
+        "border-slate-700/50": 1,
+        "text-slate-300": 7,
+        "ring-teal-500": 6,
+        "bg-slate-800": 5,
+        "text-slate-900": 5,
+        "border-red-500": 3,
+        "border-slate-300": 6,
+        "border-slate-600": 6,
+        "text-red-500": 3,
+        "text-teal-600": 1,
+        "bg-gray-100": 1,
+        "border-gray-300": 1,
+        "ring-teal-600": 1,
+        "bg-gray-700": 1,
+        "border-gray-600": 1,
+        "bg-red-50": 1,
+        "bg-red-900/20": 1,
+        "border-red-200": 1,
+        "border-red-800": 1,
+        "text-red-800": 1,
+        "text-red-200": 1,
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "bg-slate-50": 1,
+        "bg-slate-700": 1,
+        "bg-teal-500": 1,
+        "bg-teal-600": 1,
+        "bg-teal-300": 1,
+        "bg-white/70": 1,
+        "bg-white": 5,
+        "text-white": 6,
+        "border-white": 1
+      },
+      "raw-control-risk": {
+        "<button": 3,
+        "<input": 5,
+        "<textarea": 1
+      }
+    },
+    "frontend/src/app/dashboard/inventory/services/cutting-types/edit/[id]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "from-slate-50": 2,
+        "to-slate-100": 2,
+        "from-slate-900": 2,
+        "to-slate-800": 2,
+        "border-teal-600": 1,
+        "text-slate-800": 1,
+        "text-slate-200": 2,
+        "text-slate-600": 1,
+        "text-slate-400": 3,
+        "text-slate-500": 2,
+        "text-slate-700": 8,
+        "bg-slate-800/70": 1,
+        "border-slate-200/50": 1,
+        "border-slate-700/50": 1,
+        "text-slate-300": 7,
+        "ring-teal-500": 6,
+        "bg-slate-800": 5,
+        "text-slate-900": 5,
+        "border-red-500": 3,
+        "border-slate-300": 6,
+        "border-slate-600": 6,
+        "text-red-500": 3,
+        "text-teal-600": 1,
+        "bg-gray-100": 1,
+        "border-gray-300": 1,
+        "ring-teal-600": 1,
+        "bg-gray-700": 1,
+        "border-gray-600": 1,
+        "bg-red-50": 1,
+        "bg-red-900/20": 1,
+        "border-red-200": 1,
+        "border-red-800": 1,
+        "text-red-800": 1,
+        "text-red-200": 1,
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "bg-slate-50": 1,
+        "bg-slate-700": 1,
+        "bg-teal-500": 1,
+        "bg-teal-600": 1,
+        "bg-teal-300": 1,
+        "bg-white/70": 1,
+        "bg-white": 5,
+        "text-white": 6,
+        "border-white": 1
+      },
+      "raw-control-risk": {
+        "<button": 3,
+        "<input": 5,
+        "<textarea": 1
+      }
+    },
+    "frontend/src/app/dashboard/inventory/services/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 6,
+        "#0b5c5c": 2,
+        "border-slate-200": 9,
+        "bg-slate-50": 3,
+        "text-slate-900": 32,
+        "border-slate-700": 15,
+        "bg-slate-800": 9,
+        "border-teal-500": 1,
+        "bg-slate-900": 1,
+        "text-slate-800": 6,
+        "text-slate-200": 6,
+        "text-slate-400": 84,
+        "text-slate-500": 8,
+        "text-slate-600": 72,
+        "border-slate-100": 6,
+        "text-slate-100": 29,
+        "bg-green-100": 6,
+        "bg-green-900/30": 6,
+        "text-green-800": 6,
+        "text-green-400": 6,
+        "bg-red-100": 6,
+        "bg-red-900/30": 6,
+        "text-red-800": 6,
+        "text-red-400": 12,
+        "text-green-500": 6,
+        "text-red-500": 6,
+        "text-blue-600": 6,
+        "text-blue-400": 6,
+        "text-red-600": 6,
+        "bg-slate-900/30": 2,
+        "text-slate-700": 8,
+        "text-slate-300": 10,
+        "border-slate-300": 8,
+        "border-slate-600": 8,
+        "ring-teal-500": 8,
+        "bg-white": 9,
+        "text-white": 5
+      },
+      "raw-control-risk": {
+        "<input": 7,
+        "<button": 22,
+        "<select": 2
+      }
+    },
+    "frontend/src/app/dashboard/inventory/services/services/create/page.tsx": {
+      "hardcoded-semantic-color": {
+        "from-slate-50": 1,
+        "to-slate-100": 1,
+        "from-slate-900": 1,
+        "to-slate-800": 1,
+        "text-slate-800": 1,
+        "text-slate-200": 2,
+        "text-slate-600": 1,
+        "text-slate-400": 2,
+        "text-slate-500": 1,
+        "text-slate-700": 7,
+        "bg-slate-800/70": 1,
+        "border-slate-200/50": 1,
+        "border-slate-700/50": 1,
+        "text-slate-300": 6,
+        "ring-teal-500": 5,
+        "bg-slate-800": 4,
+        "text-slate-900": 4,
+        "border-red-500": 2,
+        "border-slate-300": 5,
+        "border-slate-600": 5,
+        "text-red-500": 2,
+        "text-teal-600": 1,
+        "bg-gray-100": 1,
+        "border-gray-300": 1,
+        "ring-teal-600": 1,
+        "bg-gray-700": 1,
+        "border-gray-600": 1,
+        "bg-red-50": 1,
+        "bg-red-900/20": 1,
+        "border-red-200": 1,
+        "border-red-800": 1,
+        "text-red-800": 1,
+        "text-red-200": 1,
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "bg-slate-50": 1,
+        "bg-slate-700": 1,
+        "bg-teal-500": 1,
+        "bg-teal-600": 1,
+        "bg-teal-300": 1,
+        "bg-white/70": 1,
+        "bg-white": 4,
+        "text-white": 5,
+        "border-white": 1
+      },
+      "raw-control-risk": {
+        "<button": 3,
+        "<input": 4,
+        "<textarea": 1
+      }
+    },
+    "frontend/src/app/dashboard/inventory/services/services/edit/[id]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "from-slate-50": 2,
+        "to-slate-100": 2,
+        "from-slate-900": 2,
+        "to-slate-800": 2,
+        "border-teal-600": 1,
+        "text-slate-800": 1,
+        "text-slate-200": 2,
+        "text-slate-600": 1,
+        "text-slate-400": 2,
+        "text-slate-500": 1,
+        "text-slate-700": 7,
+        "bg-slate-800/70": 1,
+        "border-slate-200/50": 1,
+        "border-slate-700/50": 1,
+        "text-slate-300": 6,
+        "ring-teal-500": 5,
+        "bg-slate-800": 4,
+        "text-slate-900": 4,
+        "border-red-500": 2,
+        "border-slate-300": 5,
+        "border-slate-600": 5,
+        "text-red-500": 2,
+        "text-teal-600": 1,
+        "bg-gray-100": 1,
+        "border-gray-300": 1,
+        "ring-teal-600": 1,
+        "bg-gray-700": 1,
+        "border-gray-600": 1,
+        "bg-red-50": 1,
+        "bg-red-900/20": 1,
+        "border-red-200": 1,
+        "border-red-800": 1,
+        "text-red-800": 1,
+        "text-red-200": 1,
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "bg-slate-50": 1,
+        "bg-slate-700": 1,
+        "bg-teal-500": 1,
+        "bg-teal-600": 1,
+        "bg-teal-300": 1,
+        "bg-white/70": 1,
+        "bg-white": 4,
+        "text-white": 5,
+        "border-white": 1
+      },
+      "raw-control-risk": {
+        "<button": 3,
+        "<input": 4,
+        "<textarea": 1
+      }
+    },
+    "frontend/src/app/dashboard/inventory/services/stone-finishings/create/page.tsx": {
+      "hardcoded-semantic-color": {
+        "from-slate-50": 1,
+        "to-slate-100": 1,
+        "from-slate-900": 1,
+        "to-slate-800": 1,
+        "text-slate-800": 1,
+        "text-slate-200": 2,
+        "text-slate-600": 1,
+        "text-slate-400": 3,
+        "text-slate-500": 2,
+        "text-slate-700": 9,
+        "bg-slate-800/80": 1,
+        "border-slate-200/60": 1,
+        "border-slate-700/60": 1,
+        "text-slate-300": 8,
+        "ring-teal-500": 7,
+        "bg-slate-800": 6,
+        "text-slate-900": 6,
+        "border-red-500": 3,
+        "border-slate-300": 7,
+        "border-slate-600": 7,
+        "text-red-500": 4,
+        "text-teal-600": 1,
+        "bg-gray-100": 1,
+        "border-gray-300": 1,
+        "ring-teal-600": 1,
+        "bg-gray-700": 1,
+        "border-gray-600": 1,
+        "bg-red-50": 1,
+        "bg-red-900/20": 1,
+        "border-red-200": 1,
+        "border-red-800": 1,
+        "text-red-800": 1,
+        "text-red-200": 1,
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "bg-slate-50": 1,
+        "bg-slate-700": 1,
+        "bg-teal-500": 1,
+        "bg-teal-600": 1,
+        "bg-teal-300": 1,
+        "bg-white/80": 1,
+        "bg-white": 6,
+        "text-white": 7,
+        "border-white": 1
+      },
+      "raw-control-risk": {
+        "<button": 3,
+        "<input": 5,
+        "<textarea": 1,
+        "<select": 1
+      }
+    },
+    "frontend/src/app/dashboard/inventory/services/stone-finishings/edit/[id]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-slate-50": 2,
+        "bg-slate-900": 1,
+        "border-teal-600": 1,
+        "from-slate-50": 1,
+        "to-slate-100": 1,
+        "from-slate-900": 1,
+        "to-slate-800": 1,
+        "text-slate-800": 1,
+        "text-slate-200": 2,
+        "text-slate-600": 1,
+        "text-slate-400": 3,
+        "text-slate-500": 2,
+        "text-slate-700": 9,
+        "bg-slate-800/80": 1,
+        "border-slate-200/60": 1,
+        "border-slate-700/60": 1,
+        "text-slate-300": 8,
+        "ring-teal-500": 7,
+        "bg-slate-800": 6,
+        "text-slate-900": 6,
+        "border-red-500": 3,
+        "border-slate-300": 7,
+        "border-slate-600": 7,
+        "text-red-500": 4,
+        "text-amber-600": 1,
+        "text-amber-300": 1,
+        "text-teal-600": 1,
+        "bg-gray-100": 1,
+        "border-gray-300": 1,
+        "ring-teal-600": 1,
+        "bg-gray-700": 1,
+        "border-gray-600": 1,
+        "bg-red-50": 1,
+        "bg-red-900/20": 1,
+        "border-red-200": 1,
+        "border-red-800": 1,
+        "text-red-800": 1,
+        "text-red-200": 1,
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "text-red-600": 1,
+        "text-red-700": 1,
+        "text-red-400": 1,
+        "text-red-300": 1,
+        "bg-slate-700": 1,
+        "bg-teal-500": 1,
+        "bg-teal-600": 1,
+        "bg-teal-300": 1,
+        "bg-white/80": 1,
+        "bg-white": 6,
+        "text-white": 7,
+        "border-white": 1
+      },
+      "raw-control-risk": {
+        "<button": 4,
+        "<input": 5,
+        "<textarea": 1,
+        "<select": 1
+      }
+    },
+    "frontend/src/app/dashboard/inventory/services/sub-services/create/page.tsx": {
+      "hardcoded-semantic-color": {
+        "from-slate-50": 1,
+        "to-slate-100": 1,
+        "from-slate-900": 1,
+        "to-slate-800": 1,
+        "text-slate-800": 1,
+        "text-slate-200": 2,
+        "text-slate-600": 1,
+        "text-slate-400": 4,
+        "text-slate-500": 3,
+        "text-slate-700": 9,
+        "bg-slate-800/70": 1,
+        "border-slate-200/50": 1,
+        "border-slate-700/50": 1,
+        "text-slate-300": 8,
+        "ring-teal-500": 7,
+        "bg-slate-800": 6,
+        "text-slate-900": 6,
+        "border-red-500": 3,
+        "border-slate-300": 7,
+        "border-slate-600": 7,
+        "text-red-500": 3,
+        "text-teal-600": 1,
+        "bg-gray-100": 1,
+        "border-gray-300": 1,
+        "ring-teal-600": 1,
+        "bg-gray-700": 1,
+        "border-gray-600": 1,
+        "bg-red-50": 1,
+        "bg-red-900/20": 1,
+        "border-red-200": 1,
+        "border-red-800": 1,
+        "text-red-800": 1,
+        "text-red-200": 1,
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "bg-slate-50": 1,
+        "bg-slate-700": 1,
+        "bg-teal-500": 1,
+        "bg-teal-600": 1,
+        "bg-teal-300": 1,
+        "bg-white/70": 1,
+        "bg-white": 6,
+        "text-white": 7,
+        "border-white": 1
+      },
+      "raw-control-risk": {
+        "<button": 3,
+        "<input": 5,
+        "<textarea": 1,
+        "<select": 1
+      }
+    },
+    "frontend/src/app/dashboard/inventory/services/sub-services/edit/[id]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "from-slate-50": 2,
+        "to-slate-100": 2,
+        "from-slate-900": 2,
+        "to-slate-800": 2,
+        "border-teal-600": 1,
+        "text-slate-800": 1,
+        "text-slate-200": 2,
+        "text-slate-600": 1,
+        "text-slate-400": 4,
+        "text-slate-500": 3,
+        "text-slate-700": 9,
+        "bg-slate-800/70": 1,
+        "border-slate-200/50": 1,
+        "border-slate-700/50": 1,
+        "text-slate-300": 8,
+        "ring-teal-500": 7,
+        "bg-slate-800": 6,
+        "text-slate-900": 6,
+        "border-red-500": 3,
+        "border-slate-300": 7,
+        "border-slate-600": 7,
+        "text-red-500": 3,
+        "text-teal-600": 1,
+        "bg-gray-100": 1,
+        "border-gray-300": 1,
+        "ring-teal-600": 1,
+        "bg-gray-700": 1,
+        "border-gray-600": 1,
+        "bg-red-50": 1,
+        "bg-red-900/20": 1,
+        "border-red-200": 1,
+        "border-red-800": 1,
+        "text-red-800": 1,
+        "text-red-200": 1,
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "bg-slate-50": 1,
+        "bg-slate-700": 1,
+        "bg-teal-500": 1,
+        "bg-teal-600": 1,
+        "bg-teal-300": 1,
+        "bg-white/70": 1,
+        "bg-white": 6,
+        "text-white": 7,
+        "border-white": 1
+      },
+      "raw-control-risk": {
+        "<button": 3,
+        "<input": 5,
+        "<textarea": 1,
+        "<select": 1
+      }
+    },
+    "frontend/src/app/dashboard/layout.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 10,
+        "bg-slate-50": 2,
+        "bg-slate-950": 2,
+        "border-teal-300": 1,
+        "text-slate-950": 4,
+        "border-slate-200": 10,
+        "border-slate-800": 6,
+        "bg-slate-950/95": 1,
+        "border-teal-800": 1,
+        "bg-slate-900": 5,
+        "text-slate-500": 6,
+        "text-slate-900": 2,
+        "text-slate-400": 5,
+        "bg-slate-100": 1,
+        "text-teal-200": 4,
+        "bg-teal-900/30": 1,
+        "text-slate-600": 4,
+        "bg-red-50": 2,
+        "text-red-600": 2,
+        "text-slate-300": 5,
+        "bg-red-500/20": 2,
+        "text-red-300": 2,
+        "bg-slate-950/70": 1,
+        "border-slate-700": 4,
+        "text-slate-700": 1,
+        "bg-teal-500/20": 1,
+        "text-white": 6,
+        "bg-black": 1,
+        "bg-white/95": 1,
+        "bg-white": 4,
+        "bg-white/85": 1
+      },
+      "raw-control-risk": {
+        "<button": 6
+      }
+    },
+    "frontend/src/app/dashboard/logistics/loadings/[id]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "border-red-200": 1,
+        "bg-red-50": 1,
+        "text-red-700": 1,
+        "border-red-800": 1,
+        "bg-red-900/20": 1,
+        "text-red-200": 1,
+        "text-slate-900": 2,
+        "text-slate-500": 1,
+        "bg-teal-900/30": 1,
+        "text-teal-100": 1,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "bg-amber-50": 1,
+        "text-amber-800": 1,
+        "bg-amber-900/20": 1,
+        "text-amber-100": 1,
+        "border-slate-200": 2,
+        "border-slate-700": 1,
+        "bg-slate-950": 1,
+        "text-slate-100": 1,
+        "text-white": 1,
+        "bg-white": 2,
+        "border-black": 1,
+        "text-black": 1
+      },
+      "raw-control-risk": {
+        "<textarea": 2,
+        "<select": 1,
+        "<input": 1
+      }
+    },
+    "frontend/src/app/dashboard/logistics/loadings/new/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 9,
+        "border-emerald-200": 3,
+        "bg-emerald-50": 4,
+        "text-emerald-700": 4,
+        "border-emerald-800": 3,
+        "bg-emerald-900/20": 4,
+        "text-emerald-200": 4,
+        "border-slate-200": 8,
+        "text-slate-600": 1,
+        "border-slate-700": 8,
+        "bg-slate-900": 2,
+        "text-slate-300": 1,
+        "bg-slate-900/70": 2,
+        "text-slate-900": 15,
+        "text-slate-500": 22,
+        "border-slate-100": 1,
+        "border-slate-800": 1,
+        "text-slate-400": 1,
+        "bg-slate-50": 5,
+        "bg-slate-800/70": 2,
+        "text-teal-200": 3,
+        "bg-slate-800": 3,
+        "bg-amber-50": 1,
+        "text-amber-800": 1,
+        "bg-amber-900/20": 1,
+        "text-amber-100": 1,
+        "border-red-200": 1,
+        "bg-red-50": 1,
+        "text-red-700": 1,
+        "border-red-800": 1,
+        "bg-red-900/20": 1,
+        "text-red-200": 1,
+        "bg-slate-900/95": 1,
+        "text-white": 16,
+        "bg-white": 4,
+        "bg-white/95": 1
+      },
+      "raw-control-risk": {
+        "<button": 3,
+        "<input": 12,
+        "<textarea": 1
+      }
+    },
+    "frontend/src/app/dashboard/logistics/loadings/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 6,
+        "border-emerald-200": 1,
+        "bg-emerald-50": 1,
+        "text-emerald-700": 1,
+        "border-red-200": 1,
+        "bg-red-50": 1,
+        "text-red-700": 1,
+        "bg-teal-50": 1,
+        "border-teal-500": 1,
+        "bg-teal-950/30": 1,
+        "text-teal-100": 1,
+        "border-slate-200": 2,
+        "text-slate-700": 2,
+        "border-slate-800": 1,
+        "bg-slate-900": 2,
+        "text-slate-200": 2,
+        "text-slate-500": 11,
+        "text-slate-400": 2,
+        "border-slate-700": 1,
+        "text-slate-900": 2,
+        "bg-slate-50": 1,
+        "bg-slate-900/70": 1,
+        "bg-slate-950": 1,
+        "bg-teal-950/20": 1,
+        "text-teal-200": 1,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "bg-white": 3,
+        "text-white": 2
+      },
+      "raw-control-risk": {
+        "<button": 1,
+        "<input": 3
+      }
+    },
+    "frontend/src/app/dashboard/logistics/logistics-ui.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "border-slate-200": 1,
+        "bg-slate-50": 1,
+        "text-slate-900": 1,
+        "border-slate-700": 1,
+        "bg-slate-800": 1,
+        "border-teal-500": 1,
+        "bg-slate-900": 1,
+        "text-slate-500": 1,
+        "text-slate-400": 1,
+        "bg-white": 1,
+        "text-white": 1
+      }
+    },
+    "frontend/src/app/dashboard/logistics/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 1,
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "bg-slate-900": 1,
+        "text-teal-200": 1,
+        "text-slate-500": 3,
+        "text-slate-400": 1,
+        "bg-white": 1
+      }
+    },
+    "frontend/src/app/dashboard/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 3,
+        "border-slate-200": 1,
+        "bg-slate-50": 1,
+        "border-slate-800": 1,
+        "bg-slate-800/50": 1,
+        "border-teal-700": 1,
+        "bg-slate-800": 1,
+        "bg-teal-900/40": 1,
+        "text-teal-100": 1,
+        "text-slate-900": 2,
+        "text-slate-500": 3,
+        "text-slate-400": 3,
+        "bg-white": 1,
+        "text-white": 2
+      }
+    },
+    "frontend/src/app/dashboard/personal/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "border-slate-200": 1,
+        "bg-slate-50": 1,
+        "text-slate-900": 2,
+        "border-slate-700": 1,
+        "bg-slate-800": 1,
+        "border-teal-500": 1,
+        "bg-slate-900": 1,
+        "text-slate-700": 2,
+        "text-slate-200": 2,
+        "border-emerald-200": 1,
+        "bg-emerald-50": 1,
+        "text-emerald-700": 1,
+        "border-red-200": 1,
+        "bg-red-50": 1,
+        "text-red-700": 1,
+        "border-amber-200": 1,
+        "bg-amber-50": 1,
+        "text-amber-900": 1,
+        "text-slate-500": 4,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "text-red-600": 1,
+        "bg-white": 1,
+        "text-white": 2
+      },
+      "raw-control-risk": {
+        "<textarea": 2
+      }
+    },
+    "frontend/src/app/dashboard/sales/contracts/[id]/edit/page.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-gray-50": 1,
+        "text-gray-600": 1,
+        "border-teal-500": 1,
+        "text-slate-500": 2,
+        "text-slate-400": 2,
+        "border-amber-200": 1,
+        "bg-amber-50": 1,
+        "text-amber-900": 1,
+        "border-amber-700/60": 1,
+        "bg-amber-950/30": 1,
+        "text-amber-100": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-btn-primary": 1
+      }
+    },
+    "frontend/src/app/dashboard/sales/contracts/[id]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "border-red-200": 1,
+        "bg-red-50": 1,
+        "text-red-700": 1,
+        "border-red-800": 1,
+        "bg-red-900/20": 1,
+        "text-red-200": 1,
+        "text-slate-700": 2,
+        "text-slate-200": 2,
+        "border-slate-200": 5,
+        "text-slate-900": 7,
+        "border-teal-500": 1,
+        "ring-teal-500/20": 1,
+        "border-slate-700": 7,
+        "bg-slate-900": 5,
+        "bg-slate-50": 2,
+        "bg-slate-800": 1,
+        "text-slate-500": 7,
+        "text-slate-400": 7,
+        "bg-slate-800/60": 1,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "border-teal-200": 1,
+        "bg-teal-50": 1,
+        "text-teal-800": 1,
+        "border-teal-800": 1,
+        "bg-teal-900/20": 1,
+        "text-teal-200": 1,
+        "border-emerald-200": 3,
+        "bg-emerald-50/60": 1,
+        "border-emerald-800": 3,
+        "bg-emerald-900/10": 1,
+        "text-emerald-700": 1,
+        "text-emerald-200": 1,
+        "border-slate-300": 2,
+        "bg-teal-800": 1,
+        "border-amber-500": 1,
+        "bg-amber-50": 1,
+        "text-amber-900": 1,
+        "bg-teal-900/30": 1,
+        "text-teal-100": 1,
+        "bg-white": 5,
+        "text-white": 8
+      },
+      "raw-control-risk": {
+        "<select": 2,
+        "<textarea": 1,
+        "<button": 2
+      }
+    },
+    "frontend/src/app/dashboard/sales/contracts/collaboration/create/page.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-gray-50": 1,
+        "text-gray-600": 1
+      }
+    },
+    "frontend/src/app/dashboard/sales/contracts/create/page.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-gray-50": 1,
+        "text-gray-600": 1
+      }
+    },
+    "frontend/src/app/dashboard/sales/contracts/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 6,
+        "bg-teal-900/30": 1,
+        "text-teal-100": 1,
+        "text-slate-950": 1,
+        "text-slate-500": 4,
+        "text-slate-400": 4,
+        "text-slate-800": 1,
+        "text-slate-100": 1,
+        "text-teal-200": 2,
+        "border-teal-700": 1,
+        "bg-slate-900": 1,
+        "bg-teal-950/40": 1,
+        "text-white": 1,
+        "bg-white": 1
+      },
+      "raw-control-risk": {
+        "<button": 1
+      }
+    },
+    "frontend/src/app/dashboard/sales/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 1,
+        "ring-slate-200": 1,
+        "bg-slate-950": 1,
+        "text-teal-100": 1,
+        "ring-slate-700": 1,
+        "text-slate-950": 1,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "bg-white": 1,
+        "text-white": 1
+      }
+    },
+    "frontend/src/app/dashboard/sales/products/[id]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "from-slate-50": 3,
+        "to-slate-100": 3,
+        "from-slate-900": 3,
+        "to-slate-800": 3,
+        "border-teal-500": 2,
+        "text-slate-800": 7,
+        "text-slate-200": 7,
+        "bg-teal-500": 3,
+        "bg-teal-600": 3,
+        "text-slate-600": 1,
+        "text-slate-400": 1,
+        "bg-slate-500": 2,
+        "bg-slate-600": 2,
+        "bg-slate-800/70": 5,
+        "border-slate-700/50": 5,
+        "text-slate-700": 16,
+        "text-slate-300": 16,
+        "bg-slate-100": 16,
+        "bg-slate-700": 16,
+        "border-slate-200": 5,
+        "border-slate-600": 5,
+        "bg-slate-700/50": 5,
+        "ring-teal-500": 4,
+        "bg-green-100": 2,
+        "text-green-800": 2,
+        "bg-green-900/30": 2,
+        "text-green-400": 2,
+        "bg-red-100": 2,
+        "text-red-800": 2,
+        "bg-red-900/30": 2,
+        "text-red-400": 2,
+        "text-white": 5,
+        "bg-white/70": 5,
+        "border-white/20": 5,
+        "bg-white/50": 5
+      },
+      "raw-control-risk": {
+        "<button": 5,
+        "<input": 1,
+        "<select": 1,
+        "<textarea": 1
+      }
+    },
+    "frontend/src/app/dashboard/sales/products/create/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-700": 2,
+        "text-slate-300": 3,
+        "text-gray-400": 1,
+        "border-slate-200": 5,
+        "border-slate-600": 3,
+        "bg-slate-700/50": 3,
+        "text-slate-800": 7,
+        "text-slate-200": 7,
+        "ring-teal-500": 2,
+        "text-slate-500": 6,
+        "text-slate-400": 9,
+        "bg-teal-50": 4,
+        "bg-teal-900/20": 4,
+        "border-teal-200": 4,
+        "border-teal-800": 3,
+        "bg-slate-50": 1,
+        "text-slate-600": 6,
+        "text-teal-500": 2,
+        "text-red-500": 3,
+        "text-teal-800": 2,
+        "text-teal-200": 2,
+        "text-teal-700": 1,
+        "text-teal-300": 1,
+        "text-teal-600": 3,
+        "text-teal-400": 2,
+        "border-slate-300": 2,
+        "border-teal-500": 1,
+        "border-slate-700": 3,
+        "text-teal-900": 1,
+        "text-teal-100": 1,
+        "bg-slate-800": 1,
+        "bg-slate-800/80": 1,
+        "border-teal-400": 1,
+        "from-slate-50": 1,
+        "to-slate-100": 1,
+        "from-slate-900": 1,
+        "to-slate-800": 1,
+        "text-red-600": 1,
+        "text-red-400": 1,
+        "text-red-800": 1,
+        "text-red-200": 1,
+        "bg-red-50": 1,
+        "bg-red-900/20": 1,
+        "border-red-200": 1,
+        "border-red-800": 1,
+        "bg-teal-500": 1,
+        "bg-green-500": 1,
+        "bg-slate-200": 1,
+        "bg-slate-700": 1,
+        "bg-slate-800/70": 1,
+        "border-slate-700/50": 1,
+        "bg-white/50": 2,
+        "bg-white": 1,
+        "bg-white/80": 1,
+        "text-white": 2,
+        "bg-white/70": 1,
+        "border-white/20": 1
+      },
+      "raw-control-risk": {
+        "<input": 3,
+        "<button": 2
+      }
+    },
+    "frontend/src/app/dashboard/sales/products/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-900": 3,
+        "text-slate-500": 1,
+        "text-slate-400": 1,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "text-amber-600": 1,
+        "text-amber-300": 1,
+        "text-white": 3,
+        "bg-black/50": 1
+      }
+    },
+    "frontend/src/app/dashboard/security/attendance/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 4,
+        "border-slate-200": 5,
+        "bg-slate-50": 3,
+        "text-slate-900": 5,
+        "border-slate-700": 4,
+        "bg-slate-800": 3,
+        "border-teal-500": 1,
+        "bg-slate-900": 3,
+        "text-slate-700": 3,
+        "text-slate-200": 3,
+        "border-slate-800": 3,
+        "bg-slate-900/70": 2,
+        "text-slate-500": 31,
+        "text-slate-950": 1,
+        "text-slate-400": 17,
+        "bg-slate-100": 2,
+        "text-teal-200": 2,
+        "border-slate-100": 2,
+        "bg-slate-800/70": 1,
+        "text-teal-700": 3,
+        "text-rose-700": 2,
+        "text-amber-700": 3,
+        "text-amber-300": 1,
+        "text-emerald-700": 1,
+        "text-emerald-300": 1,
+        "bg-slate-800/60": 1,
+        "text-slate-600": 4,
+        "text-slate-300": 4,
+        "bg-amber-50": 1,
+        "text-amber-800": 1,
+        "bg-amber-900/20": 1,
+        "text-amber-100": 1,
+        "bg-white": 5,
+        "text-white": 6
+      },
+      "raw-control-risk": {
+        "<select": 2,
+        "<input": 1,
+        "<button": 7,
+        "<textarea": 2
+      }
+    },
+    "frontend/src/app/dashboard/security/exceptions/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 4,
+        "text-slate-500": 2,
+        "text-slate-950": 1,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "text-slate-400": 1,
+        "border-slate-200": 2,
+        "border-slate-700": 2,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<button": 2
+      }
+    },
+    "frontend/src/app/dashboard/security/personnel/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 3,
+        "border-slate-200": 6,
+        "text-slate-900": 1,
+        "border-slate-700": 1,
+        "bg-slate-900": 1,
+        "text-slate-400": 1,
+        "text-slate-500": 11,
+        "border-slate-800": 6,
+        "bg-slate-900/70": 1,
+        "text-slate-950": 1,
+        "border-slate-100": 1,
+        "bg-white": 2,
+        "text-white": 3
+      },
+      "raw-control-risk": {
+        "<input": 2,
+        "<select": 4,
+        "<button": 1
+      }
+    },
+    "frontend/src/app/dashboard/security/reports/[personnelId]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 1,
+        "bg-slate-50": 1,
+        "bg-slate-800/60": 1,
+        "text-slate-500": 1,
+        "border-slate-200": 1,
+        "border-slate-800": 1
+      },
+      "raw-control-risk": {
+        "<button": 1
+      }
+    },
+    "frontend/src/app/dashboard/security/reports/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 8,
+        "border-slate-200": 2,
+        "border-slate-700": 2,
+        "bg-slate-900": 1,
+        "text-slate-500": 11,
+        "border-slate-100": 2,
+        "border-slate-800": 2,
+        "text-slate-400": 2,
+        "bg-slate-100": 1,
+        "text-slate-700": 2,
+        "bg-slate-800": 1,
+        "text-slate-200": 2,
+        "text-teal-200": 2,
+        "text-slate-950": 1,
+        "bg-teal-50": 1,
+        "bg-teal-950/30": 1,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "bg-white": 1,
+        "text-white": 3
+      },
+      "raw-control-risk": {
+        "<input": 2,
+        "<select": 1,
+        "<button": 3
+      }
+    },
+    "frontend/src/app/dashboard/security/reports/shifts/[slotId]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-950": 1,
+        "text-slate-500": 7,
+        "border-slate-100": 2,
+        "border-slate-800": 2,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "text-white": 1
+      }
+    },
+    "frontend/src/app/dashboard/security/settings/attendance-roster/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "bg-slate-900": 1,
+        "text-slate-400": 1,
+        "text-slate-500": 2,
+        "text-slate-950": 1,
+        "bg-white": 1,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<input": 1,
+        "<select": 1
+      }
+    },
+    "frontend/src/app/dashboard/security/settings/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "border-slate-200": 1,
+        "border-slate-800": 1,
+        "bg-slate-900/70": 1,
+        "bg-slate-50": 1,
+        "bg-slate-800/60": 1,
+        "bg-slate-100": 1,
+        "bg-slate-800": 1,
+        "text-teal-200": 1,
+        "text-slate-950": 1,
+        "text-slate-400": 1,
+        "bg-white": 1,
+        "text-white": 1
+      }
+    },
+    "frontend/src/app/dashboard/security/settings/report-structure/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "bg-slate-900": 1,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "text-slate-950": 1,
+        "text-slate-500": 2,
+        "bg-slate-50": 1,
+        "bg-slate-950/40": 1,
+        "bg-white": 1,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<input": 10,
+        "<select": 1
+      }
+    },
+    "frontend/src/app/dashboard/security/shifts/[slotId]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-500": 4,
+        "border-slate-100": 2,
+        "border-slate-800": 2,
+        "text-slate-600": 1,
+        "text-slate-300": 1
+      }
+    },
+    "frontend/src/app/dashboard/security/shifts/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 1,
+        "border-slate-200": 5,
+        "bg-slate-50": 5,
+        "text-slate-900": 5,
+        "border-teal-600": 1,
+        "border-slate-700": 4,
+        "bg-slate-800": 5,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "text-slate-600": 3,
+        "text-slate-300": 3,
+        "text-amber-700": 2,
+        "text-amber-300": 1,
+        "text-slate-500": 4,
+        "border-red-200": 1,
+        "border-red-900": 1,
+        "border-amber-200": 2,
+        "border-amber-900": 2,
+        "border-rose-200": 1,
+        "border-rose-900": 1,
+        "border-slate-800": 1,
+        "bg-amber-50": 1,
+        "text-amber-800": 1,
+        "text-white": 5
+      },
+      "raw-control-risk": {
+        "<select": 4,
+        "<input": 12,
+        "<textarea": 2
+      }
+    },
+    "frontend/src/app/dashboard/security/supervisor-reports/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 16,
+        "border-slate-200": 4,
+        "bg-slate-50": 4,
+        "text-slate-900": 2,
+        "border-slate-700": 5,
+        "bg-slate-800": 4,
+        "border-teal-500": 2,
+        "bg-slate-900": 3,
+        "text-slate-700": 2,
+        "text-slate-200": 2,
+        "text-slate-500": 7,
+        "border-amber-200": 1,
+        "bg-amber-50": 1,
+        "text-amber-800": 2,
+        "border-amber-800": 1,
+        "bg-amber-900/20": 1,
+        "text-amber-100": 2,
+        "text-slate-400": 3,
+        "text-teal-200": 2,
+        "bg-teal-900/30": 2,
+        "text-teal-100": 2,
+        "border-teal-300": 1,
+        "bg-teal-500": 1,
+        "border-slate-300": 2,
+        "border-slate-600": 1,
+        "bg-slate-900/70": 1,
+        "border-teal-700": 1,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "bg-red-600": 1,
+        "text-amber-700": 1,
+        "bg-white": 4,
+        "text-white": 4
+      },
+      "raw-control-risk": {
+        "<button": 4,
+        "<textarea": 2,
+        "<input": 1
+      }
+    },
+    "frontend/src/app/dashboard/security/vehicles/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 4,
+        "border-slate-200": 4,
+        "bg-slate-50": 2,
+        "text-slate-900": 5,
+        "border-slate-700": 4,
+        "bg-slate-800": 2,
+        "border-teal-500": 2,
+        "bg-slate-900": 2,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "bg-slate-200": 2,
+        "bg-slate-700": 1,
+        "text-red-600": 2,
+        "text-slate-500": 12,
+        "text-teal-700": 2,
+        "border-slate-300": 1,
+        "bg-white": 3,
+        "text-white": 4,
+        "bg-white/90": 2,
+        "bg-black/80": 1
+      },
+      "raw-control-risk": {
+        "<button": 7,
+        "<input": 13,
+        "<select": 3
+      }
+    },
+    "frontend/src/app/dashboard/users/[id]/edit/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "#0b5c5c": 1,
+        "border-red-200": 1,
+        "bg-red-50": 1,
+        "text-red-700": 1,
+        "border-red-800": 1,
+        "bg-red-900/20": 1,
+        "text-red-200": 1,
+        "text-slate-600": 8,
+        "text-slate-300": 8,
+        "border-slate-300": 1,
+        "text-teal-600": 1,
+        "ring-teal-500": 1,
+        "text-white": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-input": 7
+      },
+      "raw-control-risk": {
+        "<input": 6,
+        "<select": 2,
+        "<button": 1
+      }
+    },
+    "frontend/src/app/dashboard/users/[id]/page.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-amber-50": 1,
+        "text-amber-800": 1,
+        "text-slate-500": 3,
+        "border-slate-200": 1,
+        "text-slate-700": 1,
+        "border-red-200": 1,
+        "bg-slate-950/60": 1,
+        "bg-slate-900": 1,
+        "text-red-700": 1,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "bg-white": 1
+      },
+      "raw-control-risk": {
+        "<input": 4,
+        "<textarea": 1
+      }
+    },
+    "frontend/src/app/dashboard/users/[id]/permissions/page.tsx": {
+      "legacy-glass-style": {
+        "glass-liquid-card": 1
+      }
+    },
+    "frontend/src/app/dashboard/users/create/page.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 21,
+        "text-teal-500": 2,
+        "bg-red-500/20": 1,
+        "border-red-500/30": 1,
+        "text-red-500": 1,
+        "text-red-400": 1,
+        "text-slate-600": 2,
+        "text-slate-400": 2,
+        "border-slate-300": 1,
+        "border-slate-600": 1,
+        "bg-slate-800": 1,
+        "text-teal-400": 2,
+        "ring-teal-500": 2,
+        "border-teal-400/60": 1,
+        "bg-teal-500/20": 1,
+        "text-teal-100": 1,
+        "border-slate-200": 5,
+        "text-slate-950": 1,
+        "border-slate-700": 5,
+        "bg-slate-800/40": 5,
+        "text-slate-200": 1,
+        "border-teal-500/40": 1,
+        "bg-teal-500/10": 1,
+        "text-teal-300": 1,
+        "text-slate-500": 1,
+        "ring-slate-500": 1,
+        "text-slate-900": 1,
+        "text-slate-300": 1,
+        "border-teal-500/50": 2,
+        "bg-teal-500/15": 3,
+        "bg-slate-50": 2,
+        "text-amber-700": 2,
+        "text-amber-300": 1,
+        "border-teal-500/30": 1,
+        "text-teal-200": 1,
+        "border-amber-500/30": 1,
+        "bg-amber-500/10": 1,
+        "text-amber-800": 1,
+        "text-amber-200": 1,
+        "text-amber-100/80": 1,
+        "bg-white": 4,
+        "border-white": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 9,
+        "glass-liquid-btn": 3,
+        "glass-liquid-input": 10,
+        "glass-liquid-btn-primary": 1
+      },
+      "raw-control-risk": {
+        "<input": 12,
+        "<button": 5,
+        "<select": 3
+      }
+    },
+    "frontend/src/app/dashboard/users/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-900": 4,
+        "text-slate-500": 4,
+        "text-slate-400": 4,
+        "border-slate-200": 3,
+        "bg-slate-50": 3,
+        "border-emerald-200": 1,
+        "bg-emerald-50": 1,
+        "text-slate-600": 2,
+        "text-slate-300": 2,
+        "bg-slate-950/60": 1,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "border-slate-300": 1,
+        "border-rose-500": 1,
+        "ring-rose-100": 1,
+        "border-slate-700": 1,
+        "bg-slate-900": 1,
+        "bg-rose-50": 1,
+        "text-rose-700": 1,
+        "bg-rose-950/30": 1,
+        "text-rose-300": 1,
+        "text-white": 4,
+        "bg-white": 1
+      },
+      "raw-control-risk": {
+        "<input": 3,
+        "<select": 4
+      }
+    },
+    "frontend/src/app/globals.css": {
+      "hardcoded-semantic-color": {
+        "#074747": 3,
+        "#0b5c5c": 3,
+        "#f8fafc": 4,
+        "#ffffff": 9,
+        "#f1f5f9": 2,
+        "#0f172a": 5,
+        "#64748b": 1,
+        "#dbe3e6": 3,
+        "#80868b": 2,
+        "#ffbf00": 2,
+        "#14b8a6": 2,
+        "#202124": 2,
+        "#5f6368": 1,
+        "#081414": 1,
+        "#0f1f1f": 1,
+        "#132828": 1,
+        "#94a3b8": 1,
+        "#244141": 1,
+        "#808080": 1,
+        "#b8860b": 1,
+        "#06b6d4": 1,
+        "#1a1a1a": 1,
+        "#b0b0b0": 1,
+        "#020617": 3,
+        "#ccfbf1": 1,
+        "#d1fae5": 1,
+        "#fef3c7": 1,
+        "#e2e8f0": 1,
+        "#334155": 2,
+        "#1f2937": 1,
+        "#f9fafb": 1,
+        "#111827": 1,
+        "#1c1917": 3,
+        "#0f766e": 4,
+        "#57534e": 2,
+        "#f5f5f4": 1,
+        "#134e4a": 1,
+        "#d6d3d1": 2,
+        "#292524": 1,
+        "#e7e5e4": 4,
+        "text-gray-100": 2,
+        "text-gray-200": 2,
+        "text-slate-100": 1,
+        "text-slate-200": 1,
+        "text-slate-300": 1,
+        "text-teal-100": 1,
+        "text-teal-200": 1,
+        "text-teal-300": 1,
+        "text-blue-100": 1,
+        "text-blue-200": 1,
+        "text-blue-300": 1,
+        "text-green-100": 1,
+        "text-green-200": 1,
+        "text-green-300": 1,
+        "text-red-100": 1,
+        "text-red-200": 1,
+        "text-red-300": 1,
+        "text-yellow-100": 1,
+        "text-yellow-200": 1,
+        "text-yellow-300": 1,
+        "text-purple-100": 1,
+        "text-purple-200": 1,
+        "text-purple-300": 1,
+        "text-slate-400": 2,
+        "text-slate-500": 2,
+        "text-slate-600": 2,
+        "text-slate-700": 2,
+        "text-gray-300": 2,
+        "text-gray-400": 1,
+        "text-gray-500": 1,
+        "text-gray-600": 1,
+        "text-gray-700": 1,
+        "text-zinc-400": 1,
+        "text-zinc-500": 1,
+        "text-zinc-600": 1,
+        "text-neutral-400": 1,
+        "text-neutral-500": 1,
+        "text-neutral-600": 1,
+        "from-gray-900": 1,
+        "from-gray-800": 1,
+        "via-gray-900": 1,
+        "via-gray-800": 1,
+        "to-gray-900": 1,
+        "to-gray-800": 1,
+        "from-slate-950": 1,
+        "from-slate-900": 1,
+        "from-slate-800": 1,
+        "via-slate-950": 1,
+        "via-slate-900": 1,
+        "via-slate-800": 1,
+        "to-slate-950": 1,
+        "to-slate-900": 1,
+        "to-slate-800": 1,
+        "bg-gray-900": 5,
+        "bg-gray-800": 10,
+        "bg-gray-700": 3,
+        "bg-slate-950": 3,
+        "bg-slate-900": 7,
+        "bg-slate-800": 7,
+        "border-gray-700": 1,
+        "border-gray-600": 1,
+        "border-slate-800": 1,
+        "border-slate-700": 1,
+        "text-white": 2,
+        "bg-white": 3,
+        "rgba(255, 255, 255, 0.8)": 2,
+        "rgba(128, 134, 139, 0.3)": 2,
+        "rgba(0, 0, 0, 0.1)": 2,
+        "rgba(255, 255, 255, 0.1)": 3,
+        "rgba(255, 255, 255, 0.2)": 2,
+        "rgba(30, 30, 30, 0.8)": 1,
+        "rgba(128, 128, 128, 0.3)": 1,
+        "rgba(0, 0, 0, 0.3)": 1,
+        "rgba(255, 255, 255, 0.05)": 1,
+        "rgba(15, 23, 42, 0.06)": 1,
+        "rgba(15, 23, 42, 0.08)": 2,
+        "rgba(250, 250, 249, 0.96)": 1,
+        "rgba(255, 255, 255, 1)": 1,
+        "rgba(20, 184, 166, 0.1)": 1,
+        "rgba(255, 191, 0, 0.08)": 1,
+        "rgba(214, 211, 209, 0.72)": 1,
+        "rgba(255, 255, 255, 0.86)": 1,
+        "rgba(15, 118, 110, 0.22)": 1,
+        "rgba(19, 78, 74, 0.2)": 1,
+        "rgba(255, 255, 255, 0.88)": 1,
+        "rgba(41, 37, 36, 0.06)": 1,
+        "rgba(255, 255, 255, 0.96)": 1,
+        "rgba(245, 245, 244, 0.92)": 1,
+        "rgba(120, 113, 108, 0.08)": 2,
+        "rgba(41, 37, 36, 0.12)": 1,
+        "rgba(255, 255, 255, 0.9)": 1,
+        "rgba(214, 211, 209, 0.35)": 2,
+        "rgb(15 23 42)": 1,
+        "rgb(241 245 249)": 1,
+        "rgb(203 213 225)": 1,
+        "rgb(51 65 85)": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 3,
+        "glass-liquid-btn": 2,
+        "glass-liquid-btn-primary": 2,
+        "glass-liquid-input": 6
+      }
+    },
+    "frontend/src/app/layout.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 1
+      }
+    },
+    "frontend/src/app/login/page.tsx": {
+      "hardcoded-semantic-color": {
+        "from-gray-900": 1,
+        "via-gray-800": 1,
+        "to-gray-900": 1,
+        "text-teal-400": 2,
+        "text-gray-300": 6,
+        "bg-red-500/20": 1,
+        "border-red-500/50": 1,
+        "text-red-400": 3,
+        "text-gray-400": 3,
+        "border-red-500": 2,
+        "border-gray-300": 1,
+        "text-teal-600": 1,
+        "ring-teal-500": 1,
+        "text-teal-300": 1,
+        "text-slate-400": 1,
+        "text-white": 1,
+        "border-white": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 2,
+        "glass-liquid-input": 2,
+        "glass-liquid-btn-primary": 1
+      },
+      "raw-control-risk": {
+        "<input": 3,
+        "<button": 2
+      }
+    },
+    "frontend/src/app/page.tsx": {
+      "hardcoded-semantic-color": {
+        "text-stone-950": 4,
+        "text-stone-500": 2,
+        "bg-stone-950": 2,
+        "text-teal-300": 2,
+        "text-stone-300": 2,
+        "border-stone-200": 1,
+        "bg-stone-50": 1,
+        "text-teal-700": 2,
+        "bg-stone-200": 1,
+        "bg-teal-700": 1,
+        "bg-stone-100": 1,
+        "text-white": 4,
+        "border-white/10": 1,
+        "bg-white": 1
+      }
+    },
+    "frontend/src/app/register/page.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-slate-950": 1,
+        "text-teal-300": 1,
+        "text-slate-300": 1,
+        "bg-teal-500": 1,
+        "text-slate-950": 1,
+        "bg-teal-400": 1,
+        "border-white/10": 1,
+        "bg-white/5": 1,
+        "text-white": 1
+      }
+    },
+    "frontend/src/components/CatalogExcelSyncModal.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-200": 5,
+        "border-slate-700": 5,
+        "bg-slate-900": 1,
+        "text-slate-500": 9,
+        "text-slate-400": 4,
+        "text-slate-700": 2,
+        "text-slate-300": 1,
+        "border-slate-100": 1,
+        "border-slate-800": 1,
+        "bg-slate-800": 1,
+        "text-slate-900": 1,
+        "text-slate-600": 1,
+        "text-slate-200": 2,
+        "border-teal-600": 2,
+        "text-teal-600": 2,
+        "border-blue-200": 1,
+        "bg-blue-50": 1,
+        "border-blue-800": 1,
+        "bg-blue-900/20": 1,
+        "text-blue-600": 3,
+        "text-blue-300": 2,
+        "text-blue-900": 1,
+        "text-blue-100": 1,
+        "text-blue-700": 2,
+        "bg-blue-100": 1,
+        "bg-blue-200": 1,
+        "bg-teal-600": 2,
+        "bg-teal-700": 2,
+        "bg-slate-50": 1,
+        "bg-slate-900/50": 1,
+        "text-green-600": 2,
+        "text-amber-600": 2,
+        "text-orange-600": 2,
+        "text-red-600": 2,
+        "border-amber-200": 1,
+        "bg-amber-50": 1,
+        "text-amber-800": 1,
+        "border-amber-800": 1,
+        "bg-amber-900/20": 1,
+        "text-amber-200": 1,
+        "bg-emerald-600": 1,
+        "bg-emerald-700": 1,
+        "border-green-200": 1,
+        "bg-green-50": 1,
+        "text-green-800": 1,
+        "border-green-800": 1,
+        "bg-green-900/20": 1,
+        "text-green-200": 1,
+        "border-red-200": 1,
+        "bg-red-50": 1,
+        "text-red-700": 1,
+        "border-red-800": 1,
+        "bg-red-900/20": 1,
+        "text-red-200": 1,
+        "bg-slate-100": 1,
+        "bg-slate-200": 1,
+        "bg-slate-700": 1,
+        "bg-slate-600": 1,
+        "bg-white": 2,
+        "bg-black/50": 1,
+        "text-white": 4
+      },
+      "duplicate-primitive-risk": {
+        "CatalogExcelSyncModal": 1
+      },
+      "raw-control-risk": {
+        "<button": 8
+      }
+    },
+    "frontend/src/components/CatalogImagePicker.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-700": 1,
+        "text-slate-300": 2,
+        "border-slate-200": 2,
+        "bg-slate-50": 2,
+        "border-slate-700": 2,
+        "bg-slate-800": 2,
+        "bg-slate-950/70": 1,
+        "text-slate-600": 1,
+        "border-teal-300": 1,
+        "bg-teal-50": 1,
+        "text-teal-700": 1,
+        "bg-teal-100": 1,
+        "border-teal-700": 1,
+        "bg-teal-900/20": 1,
+        "text-teal-200": 1,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<button": 1,
+        "<input": 1
+      }
+    },
+    "frontend/src/components/crm/CrmGuide.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 4,
+        "#0b5c5c": 1,
+        "bg-slate-950/55": 1,
+        "border-teal-300": 1,
+        "border-teal-200": 1,
+        "border-teal-700": 1,
+        "bg-slate-900": 1,
+        "text-teal-200": 1,
+        "text-slate-950": 1,
+        "text-slate-500": 2,
+        "bg-slate-100": 1,
+        "text-slate-900": 1,
+        "text-slate-300": 1,
+        "bg-slate-800": 1,
+        "text-slate-700": 3,
+        "text-slate-200": 3,
+        "bg-slate-50": 1,
+        "bg-slate-800/70": 1,
+        "text-slate-400": 1,
+        "bg-amber-50": 1,
+        "bg-amber-900/20": 1,
+        "text-amber-700": 1,
+        "text-amber-200": 1,
+        "text-amber-800": 1,
+        "text-amber-100": 1,
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "bg-white": 1,
+        "text-white": 2
+      },
+      "raw-control-risk": {
+        "<button": 3
+      }
+    },
+    "frontend/src/components/DigitalSignature.tsx": {
+      "hardcoded-semantic-color": {
+        "#ffffff": 1,
+        "border-gray-600": 1,
+        "bg-gray-800/50": 1,
+        "text-gray-500": 2
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 1,
+        "glass-liquid-btn": 3,
+        "glass-liquid-btn-primary": 1
+      },
+      "raw-control-risk": {
+        "<button": 4
+      }
+    },
+    "frontend/src/components/EnhancedDropdown.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-500": 6,
+        "text-slate-400": 10,
+        "border-teal-500": 4,
+        "bg-teal-50": 2,
+        "text-teal-800": 2,
+        "bg-teal-950/60": 2,
+        "text-teal-200": 2,
+        "text-slate-800": 2,
+        "bg-slate-100": 2,
+        "text-slate-100": 4,
+        "bg-slate-800": 2,
+        "text-teal-500": 2,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "text-red-400": 1,
+        "bg-slate-950": 3,
+        "border-slate-200": 3,
+        "border-slate-800": 2,
+        "border-slate-300": 2,
+        "border-slate-700": 3,
+        "border-red-500": 2,
+        "ring-teal-500/15": 2,
+        "text-slate-900": 2,
+        "text-red-500": 2,
+        "bg-white": 3
+      },
+      "raw-control-risk": {
+        "<button": 1,
+        "<input": 1
+      }
+    },
+    "frontend/src/components/ErrorModal.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-red-500/20": 1,
+        "text-red-500": 1,
+        "text-slate-800": 1,
+        "text-slate-200": 1,
+        "text-slate-400": 1,
+        "text-slate-600": 1,
+        "text-slate-300": 3,
+        "text-slate-700": 2,
+        "bg-red-50": 2,
+        "bg-red-900/20": 2,
+        "border-red-200": 2,
+        "border-red-800": 2,
+        "text-red-700": 1,
+        "text-red-300": 1,
+        "bg-black/50": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 1,
+        "glass-liquid-btn": 1
+      },
+      "duplicate-primitive-risk": {
+        "ErrorModal": 1
+      },
+      "raw-control-risk": {
+        "<button": 2
+      }
+    },
+    "frontend/src/components/ExcelFileUpload.tsx": {
+      "hardcoded-semantic-color": {
+        "border-teal-500": 1,
+        "bg-teal-50": 1,
+        "bg-teal-900/20": 1,
+        "border-slate-300": 1,
+        "border-slate-600": 1,
+        "border-teal-400": 1,
+        "bg-slate-100": 1,
+        "bg-slate-700": 1,
+        "text-green-600": 2,
+        "text-green-400": 2,
+        "text-slate-700": 2,
+        "text-slate-300": 2,
+        "text-slate-500": 2,
+        "text-slate-400": 3,
+        "bg-teal-600": 1,
+        "bg-teal-700": 1,
+        "ring-teal-500": 1,
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "bg-slate-50": 1,
+        "bg-slate-800": 1,
+        "bg-green-100": 1,
+        "bg-green-900/30": 1,
+        "text-red-500": 1,
+        "bg-red-50": 1,
+        "bg-red-900/20": 1,
+        "border-red-200": 1,
+        "border-red-800": 1,
+        "text-red-600": 1,
+        "text-red-400": 1,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<input": 1,
+        "<button": 2
+      }
+    },
+    "frontend/src/components/ExceptionRequestForm.tsx": {
+      "hardcoded-semantic-color": {
+        "text-red-500": 6,
+        "border-red-500": 5
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 1,
+        "glass-liquid-input": 6,
+        "glass-liquid-btn": 1,
+        "glass-liquid-btn-primary": 1
+      },
+      "raw-control-risk": {
+        "<input": 4,
+        "<textarea": 2,
+        "<button": 2
+      }
+    },
+    "frontend/src/components/FormattedNumberInput.tsx": {
+      "duplicate-primitive-risk": {
+        "FormattedNumberInput": 1
+      },
+      "raw-control-risk": {
+        "<input": 1
+      }
+    },
+    "frontend/src/components/MissionAssignmentForm.tsx": {
+      "hardcoded-semantic-color": {
+        "text-red-500": 7,
+        "border-red-500": 5
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 1,
+        "glass-liquid-input": 5,
+        "glass-liquid-btn": 1,
+        "glass-liquid-btn-primary": 1
+      },
+      "raw-control-risk": {
+        "<input": 3,
+        "<textarea": 2,
+        "<button": 2
+      }
+    },
+    "frontend/src/components/MobileSecurityDashboard.tsx": {
+      "hardcoded-semantic-color": {
+        "text-green-500": 3,
+        "text-red-500": 4,
+        "text-yellow-500": 4,
+        "text-blue-500": 1,
+        "text-gray-500": 1,
+        "text-gray-400": 3,
+        "border-teal-500": 1,
+        "from-gray-900": 1,
+        "via-gray-800": 1,
+        "to-gray-900": 1,
+        "text-teal-400": 2,
+        "text-teal-300": 1,
+        "bg-yellow-500/20": 1,
+        "border-yellow-500/50": 1,
+        "bg-black/50": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-btn": 2,
+        "glass-liquid-card": 4,
+        "glass-liquid-btn-primary": 1
+      },
+      "raw-control-risk": {
+        "<button": 4
+      }
+    },
+    "frontend/src/components/PersianCalendar.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 18,
+        "#0b5c5c": 1,
+        "border-slate-200": 6,
+        "border-slate-700": 4,
+        "bg-slate-950": 1,
+        "bg-slate-300": 1,
+        "bg-slate-700": 1,
+        "text-slate-600": 2,
+        "bg-slate-100": 5,
+        "text-slate-200": 4,
+        "bg-slate-800": 6,
+        "text-slate-900": 4,
+        "bg-slate-900": 3,
+        "bg-slate-50": 1,
+        "text-slate-700": 3,
+        "text-slate-500": 7,
+        "text-slate-300": 1,
+        "ring-teal-500": 1,
+        "border-slate-800": 2,
+        "bg-teal-50": 1,
+        "text-teal-200": 1,
+        "bg-teal-950/40": 1,
+        "border-teal-700": 1,
+        "text-teal-600": 1,
+        "text-teal-300": 1,
+        "text-slate-400": 1,
+        "bg-white": 4,
+        "text-white": 7
+      },
+      "raw-control-risk": {
+        "<button": 10,
+        "<select": 1
+      }
+    },
+    "frontend/src/components/PersianTimePicker.tsx": {
+      "hardcoded-semantic-color": {
+        "text-teal-500": 1,
+        "text-slate-400": 1,
+        "border-slate-200": 3,
+        "border-slate-700": 2,
+        "bg-teal-500": 3,
+        "bg-slate-100": 3,
+        "bg-slate-800": 3,
+        "border-white/20": 1,
+        "text-white": 3
+      },
+      "legacy-glass-style": {
+        "glass-liquid-input": 1,
+        "glass-liquid-card": 1,
+        "glass-liquid-btn": 1,
+        "glass-liquid-btn-primary": 1
+      },
+      "raw-control-risk": {
+        "<button": 6
+      }
+    },
+    "frontend/src/components/ProductImportExportModal.tsx": {
+      "duplicate-primitive-risk": {
+        "ProductImportExportModal": 1
+      }
+    },
+    "frontend/src/components/public/PublicFooter.tsx": {
+      "hardcoded-semantic-color": {
+        "border-stone-200": 3,
+        "text-stone-950": 3,
+        "text-stone-500": 2,
+        "text-stone-600": 3,
+        "text-teal-700": 3,
+        "bg-white": 2
+      }
+    },
+    "frontend/src/components/public/PublicHeader.tsx": {
+      "hardcoded-semantic-color": {
+        "border-stone-200": 1,
+        "text-stone-950": 1,
+        "text-stone-500": 1,
+        "bg-white": 1
+      }
+    },
+    "frontend/src/components/public/PublicHeroVisual.tsx": {
+      "hardcoded-semantic-color": {
+        "#fafaf9": 1,
+        "#f5f5f4": 1,
+        "text-teal-700": 2,
+        "text-stone-950": 3,
+        "bg-emerald-50": 1,
+        "text-emerald-700": 1,
+        "bg-stone-200": 1,
+        "border-stone-200": 1,
+        "bg-stone-950": 1,
+        "text-stone-500": 2,
+        "text-teal-600": 1,
+        "border-stone-300": 1,
+        "bg-stone-100": 1,
+        "bg-teal-600": 1,
+        "bg-white": 1,
+        "text-white": 1
+      }
+    },
+    "frontend/src/components/reporting/RtlCharts.tsx": {
+      "hardcoded-semantic-color": {
+        "#ffffff": 1,
+        "#cbd5e1": 1,
+        "#0f172a": 1,
+        "#0f766e": 3,
+        "#f59e0b": 2,
+        "#7c3aed": 2,
+        "#dbe4ea": 2,
+        "#475569": 3,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "rgba(15, 23, 42, .14)": 1
+      }
+    },
+    "frontend/src/components/reporting/SalesReportingDashboard.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-200": 5,
+        "border-slate-700": 5,
+        "bg-slate-900": 7,
+        "text-slate-950": 4,
+        "text-slate-500": 9,
+        "text-slate-400": 4,
+        "border-slate-100": 1,
+        "border-slate-800": 1,
+        "bg-teal-50/60": 1,
+        "bg-teal-950/20": 1,
+        "text-slate-800": 1,
+        "text-slate-100": 1,
+        "bg-slate-950/40": 1,
+        "bg-slate-950": 2,
+        "text-teal-700": 2,
+        "bg-slate-50": 1,
+        "bg-teal-800": 3,
+        "text-slate-600": 6,
+        "bg-slate-100": 1,
+        "text-slate-300": 1,
+        "bg-slate-800": 2,
+        "border-rose-200": 1,
+        "bg-rose-50": 1,
+        "text-rose-700": 1,
+        "border-amber-200": 1,
+        "bg-amber-50": 2,
+        "text-amber-900": 2,
+        "border-sky-200": 1,
+        "bg-sky-50": 1,
+        "text-sky-900": 1,
+        "border-amber-300": 1,
+        "bg-rose-700": 1,
+        "bg-emerald-700": 1,
+        "bg-white": 9,
+        "text-white": 10
+      },
+      "raw-control-risk": {
+        "<button": 9,
+        "<select": 7,
+        "<input": 7,
+        "<textarea": 1
+      }
+    },
+    "frontend/src/components/SecurityNoticeHost.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 1,
+        "border-red-200": 1,
+        "bg-red-50": 1,
+        "text-red-800": 1,
+        "border-emerald-200": 1,
+        "bg-emerald-50": 1,
+        "text-emerald-800": 1,
+        "bg-slate-950/45": 1,
+        "bg-slate-900": 1,
+        "text-slate-600": 1,
+        "text-slate-300": 1,
+        "bg-white": 1,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<textarea": 1,
+        "<button": 2
+      }
+    },
+    "frontend/src/components/SignatureDisplay.tsx": {
+      "hardcoded-semantic-color": {
+        "text-gray-500": 1,
+        "bg-gray-700": 1,
+        "text-teal-400": 1,
+        "text-teal-300": 1,
+        "text-gray-400": 1,
+        "border-gray-600": 1,
+        "bg-black/50": 1,
+        "text-white": 1,
+        "bg-white": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 1,
+        "glass-liquid-btn": 1
+      },
+      "raw-control-risk": {
+        "<button": 3
+      }
+    },
+    "frontend/src/components/stone-cad/CADLayersPanel.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-gray-800": 1,
+        "border-gray-200": 1,
+        "border-gray-700": 1,
+        "text-gray-700": 2,
+        "text-gray-300": 2,
+        "bg-indigo-600": 2,
+        "bg-indigo-700": 1,
+        "bg-indigo-100": 1,
+        "bg-indigo-900/30": 1,
+        "border-indigo-300": 1,
+        "border-indigo-700": 1,
+        "bg-gray-100": 1,
+        "bg-gray-700": 2,
+        "text-gray-600": 2,
+        "text-gray-400": 3,
+        "text-gray-800": 3,
+        "text-gray-200": 2,
+        "text-yellow-600": 1,
+        "text-yellow-400": 1,
+        "border-gray-300": 2,
+        "border-gray-600": 2,
+        "ring-indigo-500": 1,
+        "bg-gray-200": 1,
+        "bg-gray-600": 1,
+        "bg-gray-300": 1,
+        "bg-gray-500": 1,
+        "text-red-600": 1,
+        "text-red-400": 1,
+        "bg-red-50": 1,
+        "bg-red-900/20": 1,
+        "text-gray-500": 1,
+        "bg-white": 2,
+        "text-white": 3
+      },
+      "raw-control-risk": {
+        "<button": 5,
+        "<input": 1
+      }
+    },
+    "frontend/src/components/stone-cad/CADToolbar.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-gray-800": 2,
+        "border-gray-200": 6,
+        "border-gray-700": 6,
+        "bg-indigo-600": 4,
+        "bg-gray-100": 12,
+        "bg-gray-700": 12,
+        "text-gray-700": 10,
+        "text-gray-300": 10,
+        "bg-gray-200": 7,
+        "bg-gray-600": 7,
+        "text-gray-400": 2,
+        "text-gray-600": 2,
+        "bg-white": 2,
+        "text-white": 4
+      },
+      "raw-control-risk": {
+        "<button": 10
+      }
+    },
+    "frontend/src/components/stone-cad/managers/GridManager.ts": {
+      "hardcoded-semantic-color": {
+        "#ddd": 1
+      }
+    },
+    "frontend/src/components/stone-cad/StoneCADDesigner.tsx": {
+      "hardcoded-semantic-color": {
+        "#e8e8e8": 2,
+        "#333": 4,
+        "#666": 1,
+        "#ddd": 1,
+        "#3b82f6": 1,
+        "#8b5cf6": 1,
+        "#ef4444": 1,
+        "#000000": 2,
+        "#10b981": 2,
+        "border-gray-300": 1,
+        "border-gray-600": 1,
+        "bg-gray-800": 1,
+        "text-gray-500": 1,
+        "text-gray-400": 1,
+        "bg-white": 1,
+        "rgba(59, 130, 246, 0.2)": 1,
+        "rgba(139, 92, 246, 0.2)": 1
+      }
+    },
+    "frontend/src/components/stone-cad/tools/CircleTool.ts": {
+      "hardcoded-semantic-color": {
+        "#8b5cf6": 2,
+        "rgba(139, 92, 246, 0.2)": 2
+      }
+    },
+    "frontend/src/components/stone-cad/tools/FreehandTool.ts": {
+      "hardcoded-semantic-color": {
+        "#000000": 2
+      }
+    },
+    "frontend/src/components/stone-cad/tools/LineTool.ts": {
+      "hardcoded-semantic-color": {
+        "#ef4444": 2
+      }
+    },
+    "frontend/src/components/stone-cad/tools/MeasurementTool.ts": {
+      "hardcoded-semantic-color": {
+        "#10b981": 2
+      }
+    },
+    "frontend/src/components/stone-cad/tools/RectangleTool.ts": {
+      "hardcoded-semantic-color": {
+        "#3b82f6": 2,
+        "rgba(59, 130, 246, 0.2)": 2
+      }
+    },
+    "frontend/src/components/stone-cad/tools/SelectTool.ts": {
+      "hardcoded-semantic-color": {
+        "#3b82f6": 1,
+        "rgba(59, 130, 246, 0.1)": 1
+      }
+    },
+    "frontend/src/components/stone-cad/tools/TextTool.ts": {
+      "hardcoded-semantic-color": {
+        "#000000": 2
+      }
+    },
+    "frontend/src/components/stone-cad/utils/exportUtils.ts": {
+      "hardcoded-semantic-color": {
+        "#10b981": 2,
+        "#ddd": 1,
+        "#e8e8e8": 1,
+        "#333": 1,
+        "#3b82f6": 1,
+        "#ef4444": 1,
+        "#000": 2,
+        "rgba(59, 130, 246, 0.2)": 1,
+        "rgba(0, 0, 255, 0.3)": 1
+      }
+    },
+    "frontend/src/components/StoneCanvas.tsx": {
+      "hardcoded-semantic-color": {
+        "#1e293b": 2,
+        "#f8fafc": 1,
+        "#ef4444": 2,
+        "#dc2626": 2,
+        "#475569": 2,
+        "#334155": 1,
+        "#e2e8f0": 2,
+        "#cbd5e1": 2,
+        "#64748b": 1,
+        "#94a3b8": 1,
+        "#000000": 1,
+        "#ffffff": 4,
+        "#3b82f6": 1,
+        "#22c55e": 1,
+        "#eab308": 1,
+        "#a855f7": 1,
+        "#06b6d4": 1,
+        "#ec4899": 1,
+        "#f97316": 1,
+        "#8b5cf6": 1,
+        "#14b8a6": 1,
+        "#fbbf24": 1,
+        "#0ea5e9": 1,
+        "#2563eb": 1,
+        "#16a34a": 1,
+        "#ca8a04": 1,
+        "#9333ea": 1,
+        "#0891b2": 1,
+        "#db2777": 1,
+        "#ea580c": 1,
+        "#7c3aed": 1,
+        "#115e59": 1,
+        "#d97706": 1,
+        "#0284c7": 1,
+        "text-slate-600": 2,
+        "text-slate-400": 3,
+        "text-slate-800": 1,
+        "text-slate-200": 1,
+        "text-slate-500": 1,
+        "border-gray-200": 1,
+        "border-gray-700": 1,
+        "ring-blue-500": 1,
+        "bg-slate-800": 1,
+        "bg-slate-900": 1,
+        "border-slate-700": 2,
+        "text-slate-300": 2,
+        "bg-slate-50": 1,
+        "bg-slate-800/50": 1,
+        "border-slate-200": 1,
+        "text-slate-700": 1,
+        "text-white": 1,
+        "rgba(168, 85, 247, 0.3)": 1,
+        "rgba(168, 85, 247, 0.25)": 1,
+        "rgba(59, 130, 246, 0.3)": 1,
+        "rgba(59, 130, 246, 0.25)": 1,
+        "rgba(236, 72, 153, 0.3)": 1,
+        "rgba(236, 72, 153, 0.25)": 1,
+        "rgba(20, 184, 166, 0.3)": 1,
+        "rgba(20, 184, 166, 0.25)": 1,
+        "rgba(251, 146, 60, 0.3)": 1,
+        "rgba(251, 146, 60, 0.25)": 1,
+        "rgba(34, 197, 94, 0.3)": 1,
+        "rgba(34, 197, 94, 0.25)": 1,
+        "rgba(168, 85, 247, 0.6)": 2,
+        "rgba(168, 85, 247, 0.5)": 2,
+        "rgba(59, 130, 246, 0.6)": 2,
+        "rgba(59, 130, 246, 0.5)": 2,
+        "rgba(236, 72, 153, 0.6)": 2,
+        "rgba(236, 72, 153, 0.5)": 2,
+        "rgba(20, 184, 166, 0.6)": 2,
+        "rgba(20, 184, 166, 0.5)": 2,
+        "rgba(251, 146, 60, 0.6)": 2,
+        "rgba(251, 146, 60, 0.5)": 2,
+        "rgba(34, 197, 94, 0.6)": 4,
+        "rgba(34, 197, 94, 0.5)": 4,
+        "rgba(255, 255, 255, 0.15)": 1,
+        "rgba(0, 0, 0, 0.1)": 1,
+        "rgba(239, 68, 68, 0.4)": 2,
+        "rgba(249, 115, 22, 0.35)": 3,
+        "rgba(239, 68, 68, 0.6)": 2,
+        "rgba(249, 115, 22, 0.5)": 2,
+        "rgba(239, 68, 68, 0.45)": 1,
+        "rgba(239, 68, 68, 0.75)": 1,
+        "rgba(239, 68, 68, 0.35)": 1,
+        "rgba(59, 130, 246, 0.45)": 1,
+        "rgba(59, 130, 246, 0.75)": 1,
+        "rgba(59, 130, 246, 0.35)": 1,
+        "rgba(34, 197, 94, 0.45)": 1,
+        "rgba(34, 197, 94, 0.75)": 1,
+        "rgba(34, 197, 94, 0.35)": 1,
+        "rgba(234, 179, 8, 0.45)": 1,
+        "rgba(234, 179, 8, 0.75)": 1,
+        "rgba(234, 179, 8, 0.35)": 1,
+        "rgba(168, 85, 247, 0.45)": 1,
+        "rgba(168, 85, 247, 0.75)": 1,
+        "rgba(168, 85, 247, 0.35)": 1,
+        "rgba(6, 182, 212, 0.45)": 1,
+        "rgba(6, 182, 212, 0.75)": 1,
+        "rgba(6, 182, 212, 0.35)": 1,
+        "rgba(236, 72, 153, 0.45)": 1,
+        "rgba(236, 72, 153, 0.75)": 1,
+        "rgba(236, 72, 153, 0.35)": 1,
+        "rgba(249, 115, 22, 0.45)": 1,
+        "rgba(249, 115, 22, 0.75)": 1,
+        "rgba(139, 92, 246, 0.45)": 1,
+        "rgba(139, 92, 246, 0.75)": 1,
+        "rgba(139, 92, 246, 0.35)": 1,
+        "rgba(20, 184, 166, 0.45)": 1,
+        "rgba(20, 184, 166, 0.75)": 1,
+        "rgba(20, 184, 166, 0.35)": 1,
+        "rgba(251, 191, 36, 0.45)": 1,
+        "rgba(251, 191, 36, 0.75)": 1,
+        "rgba(251, 191, 36, 0.35)": 1,
+        "rgba(14, 165, 233, 0.45)": 1,
+        "rgba(14, 165, 233, 0.75)": 1,
+        "rgba(14, 165, 233, 0.35)": 1,
+        "rgba(220, 38, 38, 0.4)": 1,
+        "rgba(220, 38, 38, 0.65)": 1,
+        "rgba(220, 38, 38, 0.3)": 1,
+        "rgba(37, 99, 235, 0.4)": 1,
+        "rgba(37, 99, 235, 0.65)": 1,
+        "rgba(37, 99, 235, 0.3)": 1,
+        "rgba(22, 163, 74, 0.4)": 1,
+        "rgba(22, 163, 74, 0.65)": 1,
+        "rgba(22, 163, 74, 0.3)": 1,
+        "rgba(202, 138, 4, 0.4)": 1,
+        "rgba(202, 138, 4, 0.65)": 1,
+        "rgba(202, 138, 4, 0.3)": 1,
+        "rgba(147, 51, 234, 0.4)": 1,
+        "rgba(147, 51, 234, 0.65)": 1,
+        "rgba(147, 51, 234, 0.3)": 1,
+        "rgba(8, 145, 178, 0.4)": 1,
+        "rgba(8, 145, 178, 0.65)": 1,
+        "rgba(8, 145, 178, 0.3)": 1,
+        "rgba(219, 39, 119, 0.4)": 1,
+        "rgba(219, 39, 119, 0.65)": 1,
+        "rgba(219, 39, 119, 0.3)": 1,
+        "rgba(234, 88, 12, 0.4)": 1,
+        "rgba(234, 88, 12, 0.65)": 1,
+        "rgba(234, 88, 12, 0.3)": 1,
+        "rgba(124, 58, 237, 0.4)": 1,
+        "rgba(124, 58, 237, 0.65)": 1,
+        "rgba(124, 58, 237, 0.3)": 1,
+        "rgba(17, 94, 89, 0.4)": 1,
+        "rgba(17, 94, 89, 0.65)": 1,
+        "rgba(17, 94, 89, 0.3)": 1,
+        "rgba(217, 119, 6, 0.4)": 1,
+        "rgba(217, 119, 6, 0.65)": 1,
+        "rgba(217, 119, 6, 0.3)": 1,
+        "rgba(2, 132, 199, 0.4)": 1,
+        "rgba(2, 132, 199, 0.65)": 1,
+        "rgba(2, 132, 199, 0.3)": 1,
+        "rgba(239, 68, 68, 0.3)": 1,
+        "rgba(249, 115, 22, 0.25)": 1,
+        "rgba(34, 197, 94, 0.4)": 3,
+        "rgba(59, 130, 246, 0.4)": 1,
+        "rgba(20, 184, 166, 0.4)": 1,
+        "rgba(168, 85, 247, 0.4)": 1,
+        "rgba(236, 72, 153, 0.4)": 1,
+        "rgba(251, 146, 60, 0.4)": 1,
+        "rgba(34, 197, 94, 0.7)": 3,
+        "rgba(59, 130, 246, 0.7)": 3,
+        "rgba(20, 184, 166, 0.7)": 1,
+        "rgba(168, 85, 247, 0.7)": 1,
+        "rgba(236, 72, 153, 0.7)": 1,
+        "rgba(251, 146, 60, 0.7)": 1,
+        "rgba(34, 197, 94, 0.9)": 2,
+        "rgba(34, 197, 94, 0.8)": 2,
+        "rgba(59, 130, 246, 0.8)": 2,
+        "rgba(30, 41, 59, 0.85)": 1,
+        "rgba(248, 250, 252, 0.85)": 1,
+        "rgba(30, 41, 59, 0.7)": 1,
+        "rgba(248, 250, 252, 0.7)": 1,
+        "rgba(239, 68, 68, 0.85)": 1,
+        "rgba(249, 115, 22, 0.85)": 1,
+        "rgba(34, 197, 94, 0.85)": 2,
+        "rgba(59, 130, 246, 0.85)": 2,
+        "rgba(20, 184, 166, 0.85)": 2,
+        "rgba(168, 85, 247, 0.85)": 2,
+        "rgba(236, 72, 153, 0.85)": 2,
+        "rgba(251, 146, 60, 0.85)": 2
+      },
+      "raw-control-risk": {
+        "<button": 1
+      }
+    },
+    "frontend/src/components/SuccessModal.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-green-500/20": 1,
+        "text-green-500": 1,
+        "text-slate-800": 1,
+        "text-slate-200": 1,
+        "text-slate-400": 2,
+        "text-slate-600": 1,
+        "text-slate-300": 2,
+        "text-slate-700": 1,
+        "text-slate-500": 1,
+        "bg-black/50": 1,
+        "text-white": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 1,
+        "glass-liquid-btn-primary": 1
+      },
+      "duplicate-primitive-risk": {
+        "SuccessModal": 1
+      },
+      "raw-control-risk": {
+        "<button": 2
+      }
+    },
+    "frontend/src/components/ThemeToggle.tsx": {
+      "hardcoded-semantic-color": {
+        "text-teal-500": 1
+      },
+      "raw-control-risk": {
+        "<button": 1
+      }
+    },
+    "frontend/src/components/WorkScheduleEditor.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-200": 3,
+        "bg-slate-50/60": 1,
+        "border-slate-700": 3,
+        "bg-slate-900/30": 1,
+        "text-red-600": 1,
+        "border-teal-500": 1,
+        "bg-teal-500": 1,
+        "bg-slate-800": 1,
+        "bg-slate-800/70": 1,
+        "border-teal-200": 1,
+        "bg-teal-50/60": 1,
+        "border-teal-900": 1,
+        "bg-teal-950/20": 1,
+        "text-white": 1,
+        "bg-white": 2
+      },
+      "legacy-glass-style": {
+        "glass-liquid-btn": 3,
+        "glass-liquid-btn-primary": 1
+      },
+      "raw-control-risk": {
+        "<button": 5
+      }
+    },
+    "frontend/src/components/WorkspaceNavigation.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-200": 3,
+        "border-slate-800": 1,
+        "bg-teal-500/20": 1,
+        "text-teal-400": 2,
+        "border-teal-500/30": 1,
+        "text-slate-950": 2,
+        "bg-slate-100": 1,
+        "text-slate-300": 2,
+        "border-gray-700/50": 2,
+        "text-slate-900": 1,
+        "bg-white/5": 1,
+        "text-white": 2
+      },
+      "legacy-glass-style": {
+        "glass-liquid-btn": 1,
+        "glass-liquid-card": 2
+      },
+      "raw-control-risk": {
+        "<button": 2
+      }
+    },
+    "frontend/src/components/WorkspaceSwitcher.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-blue-500/20": 1,
+        "text-blue-400": 1,
+        "bg-green-500/20": 1,
+        "text-green-400": 1,
+        "bg-purple-500/20": 1,
+        "text-purple-400": 1,
+        "ring-teal-500/50": 1,
+        "text-slate-700": 1,
+        "text-slate-300": 8,
+        "text-slate-950": 7,
+        "text-slate-900": 3,
+        "bg-teal-500/20": 2,
+        "text-teal-400": 2,
+        "border-teal-500/30": 1,
+        "bg-slate-100": 4,
+        "bg-white/10": 2,
+        "text-white": 7,
+        "bg-white/5": 4
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 6,
+        "glass-liquid-btn": 1
+      },
+      "raw-control-risk": {
+        "<button": 1
+      }
+    },
+    "frontend/src/features/accounting/AccountingActionModal.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 2,
+        "bg-slate-50": 2,
+        "text-slate-900": 1,
+        "bg-slate-900": 2,
+        "border-teal-500": 1,
+        "border-red-500": 1,
+        "border-red-400": 1,
+        "border-slate-200": 3,
+        "border-slate-700": 3,
+        "bg-slate-950/60": 1,
+        "text-slate-950": 1,
+        "text-slate-500": 2,
+        "text-slate-400": 1,
+        "text-slate-300": 2,
+        "bg-slate-800": 1,
+        "text-slate-600": 1,
+        "text-red-500": 1,
+        "text-red-600": 1,
+        "text-red-300": 1,
+        "border-red-200": 1,
+        "bg-red-50": 1,
+        "text-red-700": 1,
+        "border-red-900/60": 1,
+        "bg-red-950/30": 1,
+        "text-red-200": 1,
+        "bg-white": 2,
+        "text-white": 2
+      },
+      "duplicate-primitive-risk": {
+        "AccountingActionModal": 1
+      },
+      "raw-control-risk": {
+        "<button": 1,
+        "<textarea": 1,
+        "<input": 1
+      }
+    },
+    "frontend/src/features/accounting/accountingUi.tsx": {
+      "hardcoded-semantic-color": {
+        "#074747": 3,
+        "text-slate-900": 4,
+        "border-slate-200": 5,
+        "text-slate-500": 3,
+        "border-slate-700": 2,
+        "text-slate-400": 3,
+        "bg-slate-50": 3,
+        "border-slate-800": 3,
+        "bg-slate-950/40": 2,
+        "bg-teal-900/30": 1,
+        "text-teal-100": 1,
+        "text-teal-200": 1,
+        "border-teal-500": 1,
+        "ring-teal-500/20": 1,
+        "bg-slate-900": 1,
+        "border-red-500": 1,
+        "border-red-400": 1,
+        "text-slate-600": 4,
+        "text-slate-300": 4,
+        "bg-slate-950/30": 1,
+        "text-red-600": 4,
+        "text-red-300": 4,
+        "text-white": 4,
+        "bg-white": 1
+      },
+      "raw-control-risk": {
+        "<input": 1
+      }
+    },
+    "frontend/src/features/contract-creation/components/modals/CompactProductConfigurationModal.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-slate-950": 1,
+        "border-slate-200": 6,
+        "border-slate-800": 6,
+        "bg-slate-950/95": 2,
+        "text-slate-500": 4,
+        "text-slate-900": 1,
+        "border-slate-300": 1,
+        "border-teal-500": 1,
+        "border-slate-700": 1,
+        "bg-teal-600": 1,
+        "bg-teal-700": 1,
+        "bg-black/60": 1,
+        "bg-white": 1,
+        "bg-white/95": 2,
+        "text-white": 2
+      },
+      "duplicate-primitive-risk": {
+        "CompactProductConfigurationModal": 1
+      },
+      "raw-control-risk": {
+        "<button": 3,
+        "<input": 1
+      }
+    },
+    "frontend/src/features/contract-creation/components/modals/PaymentEntryModal.tsx": {
+      "hardcoded-semantic-color": {
+        "border-gray-300": 1,
+        "border-gray-600": 4,
+        "bg-gray-700": 3,
+        "text-gray-800": 2,
+        "ring-teal-500": 1,
+        "text-gray-600": 1,
+        "text-gray-400": 2,
+        "border-gray-200": 3,
+        "bg-gray-800": 2,
+        "text-gray-500": 2,
+        "text-gray-700": 2,
+        "text-gray-300": 2,
+        "bg-gray-100": 1,
+        "border-yellow-300": 2,
+        "bg-yellow-50": 2,
+        "text-yellow-800": 2,
+        "border-yellow-700": 2,
+        "bg-yellow-900/20": 2,
+        "text-yellow-200": 2,
+        "border-red-500": 8,
+        "border-red-400": 8,
+        "text-red-500": 9,
+        "bg-gray-200": 1,
+        "bg-teal-600": 1,
+        "bg-teal-700": 1,
+        "bg-white": 3,
+        "text-white": 3,
+        "bg-black/50": 1
+      },
+      "duplicate-primitive-risk": {
+        "PaymentEntryModal": 1
+      },
+      "raw-control-risk": {
+        "<button": 3,
+        "<select": 1,
+        "<input": 3
+      }
+    },
+    "frontend/src/features/contract-creation/components/modals/ProductConfigurationModal.tsx": {
+      "duplicate-primitive-risk": {
+        "ProductConfigurationModal": 1
+      }
+    },
+    "frontend/src/features/contract-creation/components/modals/RemainingStoneModal.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-100": 3,
+        "border-slate-800": 9,
+        "text-slate-500": 4,
+        "text-slate-400": 2,
+        "text-slate-800": 1,
+        "text-slate-100": 1,
+        "bg-slate-950": 1,
+        "border-slate-200": 6,
+        "bg-slate-950/95": 2,
+        "text-slate-900": 1,
+        "text-slate-600": 5,
+        "text-slate-300": 5,
+        "border-slate-300": 4,
+        "border-teal-500": 4,
+        "border-slate-700": 4,
+        "text-teal-700": 1,
+        "text-teal-300": 1,
+        "text-red-600": 5,
+        "text-red-300": 1,
+        "bg-teal-600": 1,
+        "bg-teal-700": 1,
+        "bg-black/60": 1,
+        "bg-white": 1,
+        "bg-white/95": 2,
+        "text-white": 2
+      },
+      "duplicate-primitive-risk": {
+        "RemainingStoneModal": 1
+      },
+      "raw-control-risk": {
+        "<button": 5,
+        "<input": 1
+      }
+    },
+    "frontend/src/features/contract-creation/components/modals/StairSystemModal.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-gray-800": 3,
+        "border-gray-200": 2,
+        "border-gray-700": 2,
+        "text-gray-800": 1,
+        "text-gray-500": 1,
+        "text-gray-700": 5,
+        "text-gray-400": 1,
+        "text-gray-200": 1,
+        "text-gray-600": 1,
+        "text-gray-300": 5,
+        "bg-teal-500": 4,
+        "bg-gray-100": 4,
+        "bg-gray-700": 3,
+        "bg-gray-50": 1,
+        "bg-gray-900": 1,
+        "border-gray-300": 1,
+        "border-gray-600": 1,
+        "bg-teal-600": 1,
+        "bg-black": 1,
+        "bg-white": 2,
+        "text-white": 5
+      },
+      "duplicate-primitive-risk": {
+        "StairSystemModal": 1
+      },
+      "raw-control-risk": {
+        "<button": 6
+      }
+    },
+    "frontend/src/features/contract-creation/components/product-modal-system/CanonicalStairLayerSummary.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-200": 1,
+        "border-slate-700": 1,
+        "text-red-600": 2,
+        "text-red-400": 2,
+        "text-slate-500": 1
+      }
+    },
+    "frontend/src/features/contract-creation/components/product-modal-system/ContractRemaindersSection.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-100": 3,
+        "border-slate-800": 4,
+        "text-slate-800": 3,
+        "text-slate-100": 3,
+        "text-slate-500": 4,
+        "text-slate-400": 2,
+        "text-teal-700": 2,
+        "text-teal-300": 2,
+        "text-red-600": 4,
+        "text-red-300": 2,
+        "border-slate-200": 1
+      },
+      "raw-control-risk": {
+        "<button": 5
+      }
+    },
+    "frontend/src/features/contract-creation/components/product-modal-system/LongitudinalProductSection.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-300": 1,
+        "border-teal-500": 1,
+        "ring-teal-500": 1,
+        "border-slate-700": 1,
+        "text-red-600": 2,
+        "text-red-300": 2,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "border-slate-200": 2,
+        "border-slate-800": 3,
+        "bg-slate-100": 1,
+        "bg-slate-800": 1,
+        "border-slate-100": 1,
+        "text-slate-500": 1,
+        "text-slate-800": 1,
+        "text-slate-100": 1
+      },
+      "duplicate-primitive-risk": {
+        "CompactDecimalField": 1
+      },
+      "raw-control-risk": {
+        "<input": 1
+      }
+    },
+    "frontend/src/features/contract-creation/components/product-modal-system/OperationCollectionsSection.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-100": 5,
+        "border-slate-800": 6,
+        "border-slate-300": 8,
+        "border-teal-500": 1,
+        "border-slate-700": 4,
+        "text-slate-500": 5,
+        "text-red-600": 8,
+        "text-teal-700": 7,
+        "text-teal-300": 4,
+        "border-teal-600": 1,
+        "bg-teal-50": 1,
+        "bg-teal-950": 1,
+        "border-amber-300": 1,
+        "bg-amber-50": 1,
+        "text-amber-800": 1,
+        "border-amber-900": 1,
+        "bg-amber-950/30": 1,
+        "text-amber-200": 1,
+        "border-slate-200": 1
+      },
+      "raw-control-risk": {
+        "<input": 5,
+        "<button": 18,
+        "<select": 2
+      }
+    },
+    "frontend/src/features/contract-creation/components/product-modal-system/PreparedProductSection.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-300": 1,
+        "border-teal-500": 1,
+        "ring-teal-500": 1,
+        "border-slate-700": 1,
+        "border-slate-200": 3,
+        "text-slate-600": 1,
+        "border-slate-800": 4,
+        "text-slate-300": 1,
+        "border-slate-100": 1,
+        "text-slate-500": 1
+      },
+      "raw-control-risk": {
+        "<input": 1
+      }
+    },
+    "frontend/src/features/contract-creation/components/product-modal-system/productModalPrimitives.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-300": 3,
+        "bg-slate-50": 1,
+        "border-slate-700": 2,
+        "bg-slate-900": 1,
+        "ring-teal-500": 3,
+        "bg-teal-600": 3,
+        "text-slate-600": 3,
+        "text-slate-300": 3,
+        "bg-slate-800": 2,
+        "bg-slate-300": 1,
+        "bg-slate-700": 1,
+        "border-teal-500": 1,
+        "bg-slate-100": 1,
+        "border-slate-200": 4,
+        "border-slate-800": 5,
+        "text-slate-800": 1,
+        "text-slate-100": 1,
+        "text-teal-700": 2,
+        "text-teal-300": 2,
+        "border-slate-100": 1,
+        "bg-slate-950/55": 1,
+        "bg-slate-950": 3,
+        "text-slate-500": 1,
+        "text-white": 2,
+        "bg-white": 5
+      },
+      "duplicate-primitive-risk": {
+        "CompactSegmentedControl": 1,
+        "CompactUnitSwitch": 1,
+        "CompactSwitch": 1
+      },
+      "raw-control-risk": {
+        "<button": 7,
+        "<textarea": 1
+      }
+    },
+    "frontend/src/features/contract-creation/components/product-modal-system/SlabProductSection.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-300": 1,
+        "border-teal-500": 1,
+        "ring-teal-500": 1,
+        "border-slate-700": 1,
+        "text-red-600": 2,
+        "text-red-300": 1,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "border-slate-100": 3,
+        "border-slate-800": 7,
+        "border-slate-200": 4,
+        "text-teal-700": 1,
+        "text-teal-300": 1,
+        "bg-slate-100": 1,
+        "bg-slate-800": 1,
+        "text-slate-500": 1
+      },
+      "duplicate-primitive-risk": {
+        "SlabField": 1
+      },
+      "raw-control-risk": {
+        "<input": 1,
+        "<button": 2
+      }
+    },
+    "frontend/src/features/contract-creation/components/product-modal-system/StairLayersSection.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-600": 5,
+        "text-slate-300": 5,
+        "border-slate-300": 3,
+        "border-teal-500": 2,
+        "border-slate-700": 3,
+        "text-red-600": 7,
+        "border-slate-200": 4,
+        "border-slate-800": 4,
+        "text-slate-900": 2,
+        "text-slate-100": 2,
+        "text-slate-500": 2,
+        "text-slate-400": 1,
+        "bg-teal-100": 1,
+        "text-teal-800": 1,
+        "bg-teal-950": 1,
+        "text-teal-200": 1,
+        "text-teal-700": 1,
+        "text-teal-300": 1
+      },
+      "duplicate-primitive-risk": {
+        "FlatInput": 1
+      },
+      "raw-control-risk": {
+        "<input": 2,
+        "<button": 3
+      }
+    },
+    "frontend/src/features/contract-creation/components/product-modal-system/StairProductSection.tsx": {
+      "hardcoded-semantic-color": {
+        "text-slate-600": 2,
+        "text-slate-300": 2,
+        "border-slate-300": 2,
+        "border-teal-500": 2,
+        "border-slate-700": 2,
+        "text-red-600": 1,
+        "border-slate-200": 2,
+        "border-slate-800": 2,
+        "text-slate-500": 1,
+        "text-teal-700": 1,
+        "text-teal-300": 1
+      },
+      "duplicate-primitive-risk": {
+        "CompactField": 1
+      },
+      "raw-control-risk": {
+        "<input": 1,
+        "<button": 1
+      }
+    },
+    "frontend/src/features/contract-creation/components/shared/WizardNavigation.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-gray-800/50": 1,
+        "border-gray-200/50": 2,
+        "border-gray-600/50": 2,
+        "text-gray-600": 2,
+        "text-gray-300": 1,
+        "bg-gray-100": 1,
+        "bg-gray-800": 1,
+        "text-gray-400": 1,
+        "border-gray-200": 1,
+        "border-gray-700": 1,
+        "bg-gray-800/80": 1,
+        "border-white": 1,
+        "bg-white/50": 1,
+        "bg-white/80": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-btn-primary": 2,
+        "glass-liquid-btn": 1
+      },
+      "raw-control-risk": {
+        "<button": 3
+      }
+    },
+    "frontend/src/features/contract-creation/components/shared/WizardProgressBar.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-700/70": 1,
+        "bg-slate-900/70": 1,
+        "border-teal-500/40": 1,
+        "bg-teal-500/15": 2,
+        "text-teal-300": 3,
+        "bg-slate-800": 2,
+        "from-teal-500": 3,
+        "to-teal-300": 1,
+        "border-teal-500": 2,
+        "text-teal-200": 1,
+        "border-teal-700/60": 1,
+        "bg-teal-900/20": 1,
+        "border-slate-700": 1,
+        "bg-slate-900/60": 1,
+        "text-slate-400": 2,
+        "bg-teal-500": 1,
+        "bg-teal-700": 1,
+        "bg-gray-200": 1,
+        "bg-gray-700": 1,
+        "to-teal-400": 1,
+        "to-teal-600": 1,
+        "shadow-teal-500/25": 1,
+        "from-teal-100": 1,
+        "to-teal-200": 1,
+        "from-teal-900/50": 1,
+        "to-teal-800/50": 1,
+        "text-teal-600": 2,
+        "text-teal-400": 3,
+        "shadow-teal-500/20": 1,
+        "bg-gray-800": 1,
+        "text-gray-400": 2,
+        "text-gray-500": 2,
+        "border-gray-200": 1,
+        "border-gray-600": 1,
+        "text-teal-500": 1,
+        "text-white": 4,
+        "bg-white": 1
+      },
+      "raw-control-risk": {
+        "<button": 2
+      }
+    },
+    "frontend/src/features/contract-creation/components/steps/Step1ContractDate.tsx": {
+      "hardcoded-semantic-color": {
+        "text-gray-800": 2,
+        "text-gray-600": 2,
+        "text-gray-300": 5,
+        "text-gray-700": 3,
+        "border-gray-300": 2,
+        "border-gray-600": 2,
+        "bg-gray-50": 2,
+        "bg-gray-700": 2,
+        "text-gray-200": 1,
+        "text-red-500": 1,
+        "text-gray-500": 1,
+        "text-gray-400": 1,
+        "text-white": 1
+      },
+      "raw-control-risk": {
+        "<input": 1
+      }
+    },
+    "frontend/src/features/contract-creation/components/steps/Step2CustomerSelection.tsx": {
+      "hardcoded-semantic-color": {
+        "text-teal-600": 1,
+        "text-teal-300": 1,
+        "text-slate-900": 4,
+        "text-slate-600": 4,
+        "text-slate-300": 5,
+        "border-teal-300": 3,
+        "text-teal-700": 3,
+        "bg-teal-50": 3,
+        "border-teal-700": 4,
+        "bg-slate-900/60": 3,
+        "text-teal-200": 3,
+        "bg-teal-900/20": 4,
+        "border-red-200": 1,
+        "bg-red-50": 1,
+        "text-red-700": 1,
+        "border-red-800": 1,
+        "bg-red-900/20": 1,
+        "text-red-300": 1,
+        "border-teal-200": 1,
+        "bg-teal-50/80": 1,
+        "border-teal-800": 1,
+        "bg-teal-600": 2,
+        "border-slate-200": 3,
+        "border-slate-700": 4,
+        "text-slate-400": 2,
+        "bg-slate-50": 1,
+        "border-teal-500": 1,
+        "ring-teal-500/20": 1,
+        "bg-slate-800": 3,
+        "border-teal-400": 2,
+        "bg-slate-900": 1,
+        "text-slate-500": 2,
+        "border-slate-300": 1,
+        "bg-slate-900/50": 1,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "bg-slate-100": 2,
+        "bg-blue-50": 1,
+        "text-blue-700": 1,
+        "bg-blue-900/30": 1,
+        "text-blue-200": 1,
+        "bg-emerald-50": 1,
+        "text-emerald-700": 1,
+        "bg-emerald-900/30": 1,
+        "text-emerald-200": 1,
+        "bg-purple-50": 1,
+        "text-purple-700": 1,
+        "bg-purple-900/30": 1,
+        "text-purple-200": 1,
+        "text-white": 6,
+        "bg-white": 5
+      },
+      "raw-control-risk": {
+        "<button": 3,
+        "<input": 1
+      }
+    },
+    "frontend/src/features/contract-creation/components/steps/Step3ProjectManagement.tsx": {
+      "hardcoded-semantic-color": {
+        "text-teal-600": 1,
+        "text-teal-300": 1,
+        "text-slate-900": 3,
+        "text-slate-600": 6,
+        "text-slate-300": 7,
+        "border-blue-300": 2,
+        "text-blue-700": 2,
+        "bg-blue-50": 2,
+        "border-blue-700": 2,
+        "bg-slate-900/60": 2,
+        "text-blue-200": 2,
+        "bg-blue-900/20": 2,
+        "border-red-200": 1,
+        "bg-red-50": 1,
+        "text-red-700": 1,
+        "border-red-800": 1,
+        "bg-red-900/20": 1,
+        "text-red-300": 1,
+        "border-teal-200": 1,
+        "bg-teal-50/80": 1,
+        "border-teal-800": 1,
+        "bg-teal-900/20": 2,
+        "bg-teal-600": 2,
+        "text-teal-700": 1,
+        "text-teal-200": 1,
+        "text-slate-700": 2,
+        "text-slate-200": 2,
+        "bg-slate-100": 4,
+        "bg-slate-800": 4,
+        "border-slate-300": 1,
+        "border-slate-700": 3,
+        "bg-slate-900/50": 1,
+        "border-teal-400": 1,
+        "bg-teal-50": 1,
+        "border-teal-700": 2,
+        "border-slate-200": 2,
+        "border-teal-300": 1,
+        "text-slate-500": 2,
+        "text-slate-400": 1,
+        "text-white": 5,
+        "bg-white": 3
+      },
+      "raw-control-risk": {
+        "<button": 3
+      }
+    },
+    "frontend/src/features/contract-creation/components/steps/Step5ProductSelection.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-100": 3,
+        "border-slate-800": 3,
+        "border-slate-200": 12,
+        "border-slate-700": 14,
+        "text-slate-500": 10,
+        "text-red-600": 5,
+        "text-teal-700": 5,
+        "text-teal-800": 1,
+        "text-teal-300": 5,
+        "bg-slate-50/70": 1,
+        "bg-slate-900/50": 1,
+        "text-slate-800": 1,
+        "text-slate-100": 1,
+        "text-slate-400": 6,
+        "border-slate-300": 3,
+        "text-slate-900": 8,
+        "border-teal-500": 2,
+        "ring-teal-500": 1,
+        "border-slate-600": 1,
+        "bg-slate-950": 1,
+        "bg-teal-600": 3,
+        "bg-teal-700": 1,
+        "text-slate-600": 6,
+        "text-slate-300": 6,
+        "text-slate-700": 2,
+        "text-slate-200": 2,
+        "border-amber-200": 1,
+        "text-amber-800": 1,
+        "border-amber-800": 1,
+        "text-amber-200": 1,
+        "border-red-300": 1,
+        "text-red-700": 1,
+        "border-red-800": 1,
+        "text-red-300": 1,
+        "ring-teal-500/20": 1,
+        "bg-teal-50": 1,
+        "bg-teal-950/30": 1,
+        "bg-white": 1,
+        "text-white": 11
+      },
+      "raw-control-risk": {
+        "<button": 20,
+        "<input": 7
+      }
+    },
+    "frontend/src/features/contract-creation/components/steps/Step6DeliverySchedule.tsx": {
+      "hardcoded-semantic-color": {
+        "text-gray-800": 12,
+        "text-gray-600": 2,
+        "text-gray-300": 14,
+        "border-red-300": 1,
+        "bg-red-50": 2,
+        "text-red-800": 1,
+        "border-red-700": 1,
+        "bg-red-900/20": 2,
+        "text-red-200": 2,
+        "border-red-400": 1,
+        "text-red-700": 1,
+        "bg-red-100": 1,
+        "bg-slate-900": 1,
+        "from-teal-500": 1,
+        "to-teal-600": 1,
+        "from-teal-600": 1,
+        "to-teal-700": 1,
+        "border-gray-300": 11,
+        "border-gray-600": 13,
+        "text-gray-500": 5,
+        "text-gray-400": 6,
+        "bg-teal-500": 1,
+        "bg-teal-600": 1,
+        "bg-gray-800": 1,
+        "border-gray-200": 3,
+        "border-gray-700": 1,
+        "text-red-600": 1,
+        "text-red-400": 1,
+        "text-gray-700": 13,
+        "text-red-500": 6,
+        "bg-gray-700": 10,
+        "bg-gray-50": 5,
+        "bg-gray-700/50": 1,
+        "bg-gray-800/50": 2,
+        "text-slate-500": 1,
+        "text-slate-400": 1,
+        "bg-gray-600": 4,
+        "text-teal-600": 4,
+        "text-teal-400": 4,
+        "border-emerald-200": 1,
+        "border-emerald-700": 1,
+        "text-white": 14,
+        "bg-white": 14
+      },
+      "raw-control-risk": {
+        "<button": 10,
+        "<input": 3,
+        "<textarea": 1
+      }
+    },
+    "frontend/src/features/contract-creation/components/steps/Step7PaymentMethod.tsx": {
+      "hardcoded-semantic-color": {
+        "text-gray-800": 7,
+        "text-gray-600": 6,
+        "text-gray-300": 5,
+        "bg-gray-800": 3,
+        "border-gray-200": 3,
+        "border-gray-700": 2,
+        "text-gray-500": 7,
+        "text-gray-400": 10,
+        "border-gray-300": 2,
+        "bg-gray-50": 2,
+        "ring-teal-500": 1,
+        "border-gray-600": 3,
+        "bg-gray-700/50": 2,
+        "border-yellow-200": 3,
+        "bg-yellow-50": 3,
+        "text-yellow-700": 3,
+        "border-yellow-800": 3,
+        "bg-yellow-900/20": 3,
+        "text-yellow-300": 3,
+        "border-emerald-200": 1,
+        "bg-emerald-50": 1,
+        "text-emerald-700": 1,
+        "border-emerald-800": 1,
+        "bg-emerald-900/20": 1,
+        "text-emerald-300": 1,
+        "text-green-600": 2,
+        "text-green-400": 2,
+        "text-yellow-600": 2,
+        "text-yellow-400": 2,
+        "text-blue-600": 2,
+        "text-blue-400": 2,
+        "border-blue-200": 2,
+        "bg-blue-50": 2,
+        "text-blue-800": 2,
+        "border-blue-800": 1,
+        "bg-blue-900/20": 2,
+        "text-blue-200": 1,
+        "ring-blue-400": 1,
+        "border-blue-700": 1,
+        "bg-green-50": 1,
+        "bg-green-900/20": 1,
+        "border-green-200": 1,
+        "border-green-800": 1,
+        "text-green-700": 1,
+        "text-green-300": 1,
+        "from-teal-500": 1,
+        "to-teal-600": 1,
+        "from-teal-600": 1,
+        "to-teal-700": 1,
+        "bg-teal-500": 1,
+        "bg-teal-600": 1,
+        "bg-blue-100": 1,
+        "bg-blue-900/30": 1,
+        "text-blue-300": 1,
+        "text-gray-700": 2,
+        "text-red-600": 1,
+        "text-red-400": 1,
+        "bg-red-50": 1,
+        "bg-red-900/20": 1,
+        "text-red-500": 1,
+        "text-white": 9,
+        "bg-white": 3
+      },
+      "raw-control-risk": {
+        "<select": 1,
+        "<button": 4
+      }
+    },
+    "frontend/src/features/contract-creation/components/steps/Step8DigitalSignature.tsx": {
+      "hardcoded-semantic-color": {
+        "bg-green-100": 1,
+        "text-green-700": 1,
+        "bg-green-900/30": 1,
+        "text-green-300": 1,
+        "bg-yellow-100": 1,
+        "text-yellow-700": 1,
+        "bg-yellow-900/30": 1,
+        "text-yellow-300": 1,
+        "bg-red-100": 1,
+        "text-red-700": 1,
+        "bg-red-900/30": 1,
+        "text-red-300": 1,
+        "bg-orange-100": 1,
+        "text-orange-700": 1,
+        "bg-orange-900/30": 1,
+        "text-orange-300": 1,
+        "text-gray-800": 17,
+        "text-gray-600": 17,
+        "text-gray-300": 35,
+        "from-teal-50": 1,
+        "to-blue-50": 1,
+        "from-teal-900/20": 1,
+        "to-blue-900/20": 1,
+        "border-teal-200": 1,
+        "border-teal-800": 1,
+        "text-teal-600": 5,
+        "text-teal-400": 2,
+        "bg-gray-800": 10,
+        "border-gray-200": 17,
+        "border-gray-700": 17,
+        "text-gray-700": 29,
+        "text-gray-400": 11,
+        "text-emerald-600": 1,
+        "text-emerald-400": 1,
+        "text-yellow-600": 1,
+        "text-yellow-400": 1,
+        "text-teal-500": 5,
+        "text-gray-500": 11,
+        "border-gray-100": 4,
+        "border-gray-700/60": 4,
+        "bg-teal-600": 1,
+        "bg-teal-700": 1,
+        "bg-blue-600": 1,
+        "bg-blue-700": 1,
+        "bg-slate-600": 1,
+        "bg-slate-700": 1,
+        "bg-red-600": 1,
+        "bg-red-700": 1,
+        "bg-emerald-600": 1,
+        "bg-emerald-700": 1,
+        "bg-purple-600": 1,
+        "bg-purple-700": 1,
+        "text-amber-600": 1,
+        "text-amber-400": 1,
+        "text-red-500": 2,
+        "text-white": 23,
+        "bg-white": 10
+      },
+      "raw-control-risk": {
+        "<button": 6
+      }
+    },
+    "frontend/src/features/contract-creation/CreateContractWizardClient.tsx": {
+      "hardcoded-semantic-color": {
+        "border-slate-200": 18,
+        "border-slate-700": 18,
+        "bg-amber-100": 1,
+        "bg-amber-900": 1,
+        "text-amber-700": 3,
+        "text-amber-200": 3,
+        "bg-amber-50": 3,
+        "bg-amber-900/20": 2,
+        "border-amber-200": 1,
+        "border-amber-800": 2,
+        "bg-purple-100": 7,
+        "bg-purple-900": 1,
+        "text-purple-700": 3,
+        "text-purple-200": 3,
+        "bg-purple-50": 4,
+        "bg-purple-900/20": 4,
+        "border-purple-200": 7,
+        "border-purple-800": 2,
+        "bg-blue-100": 2,
+        "text-blue-800": 1,
+        "bg-blue-900/40": 1,
+        "text-blue-200": 2,
+        "bg-blue-50": 1,
+        "bg-blue-900/20": 1,
+        "text-blue-700": 2,
+        "border-blue-200": 1,
+        "border-blue-800": 1,
+        "bg-teal-100": 3,
+        "text-teal-800": 3,
+        "bg-teal-900/40": 2,
+        "text-teal-200": 7,
+        "bg-teal-50": 8,
+        "bg-teal-900/20": 5,
+        "text-teal-700": 17,
+        "border-teal-200": 5,
+        "border-teal-700": 1,
+        "from-slate-50": 1,
+        "to-slate-100": 1,
+        "from-slate-900": 1,
+        "to-slate-800": 1,
+        "text-gray-800": 26,
+        "text-gray-600": 8,
+        "text-gray-300": 37,
+        "border-amber-300": 3,
+        "text-amber-900": 2,
+        "text-amber-100": 2,
+        "text-teal-300": 13,
+        "bg-red-50": 4,
+        "bg-red-900/20": 2,
+        "border-red-200": 3,
+        "border-red-800": 2,
+        "text-red-600": 8,
+        "text-red-400": 3,
+        "bg-slate-950/55": 1,
+        "text-slate-900": 7,
+        "border-slate-800": 10,
+        "bg-slate-950": 5,
+        "text-slate-100": 7,
+        "text-gray-500": 24,
+        "text-gray-700": 35,
+        "bg-gray-100": 1,
+        "bg-gray-700": 1,
+        "text-slate-600": 13,
+        "text-slate-300": 15,
+        "border-red-900": 2,
+        "text-red-300": 3,
+        "border-gray-200": 11,
+        "border-gray-700": 14,
+        "border-slate-100": 7,
+        "text-slate-500": 13,
+        "border-slate-300": 4,
+        "border-teal-500": 5,
+        "border-slate-600": 1,
+        "border-gray-300": 28,
+        "border-gray-600": 16,
+        "bg-gray-800": 16,
+        "text-gray-400": 22,
+        "border-gray-100": 3,
+        "bg-gray-50": 12,
+        "bg-gray-700/50": 12,
+        "ring-teal-500": 8,
+        "text-red-500": 14,
+        "text-slate-400": 9,
+        "ring-yellow-500": 1,
+        "from-purple-500": 1,
+        "to-purple-600": 1,
+        "text-purple-600": 8,
+        "text-purple-400": 3,
+        "ring-purple-500": 6,
+        "bg-gray-800/50": 1,
+        "text-purple-800": 1,
+        "bg-purple-900/30": 6,
+        "text-purple-300": 1,
+        "text-red-700": 2,
+        "border-purple-700": 5,
+        "text-teal-600": 5,
+        "text-teal-400": 2,
+        "ring-orange-500": 9,
+        "bg-orange-50": 2,
+        "bg-orange-900/20": 2,
+        "bg-gray-900/40": 1,
+        "border-orange-200": 13,
+        "border-orange-700": 9,
+        "text-orange-600": 15,
+        "text-orange-800": 2,
+        "bg-orange-100": 7,
+        "bg-orange-900/30": 7,
+        "text-red-800": 2,
+        "bg-red-900/30": 1,
+        "border-orange-100": 1,
+        "border-orange-800": 6,
+        "bg-gray-900/30": 2,
+        "bg-orange-500": 2,
+        "bg-orange-50/50": 1,
+        "bg-orange-900/10": 1,
+        "text-orange-400": 8,
+        "border-orange-300": 1,
+        "bg-slate-900/50": 1,
+        "text-orange-200": 2,
+        "border-orange-500": 1,
+        "text-orange-700": 2,
+        "border-orange-400": 1,
+        "bg-slate-900": 5,
+        "from-teal-500": 2,
+        "to-teal-600": 2,
+        "bg-teal-900/30": 1,
+        "text-gray-200": 1,
+        "border-teal-800": 3,
+        "text-teal-100": 3,
+        "bg-teal-800": 1,
+        "text-gray-100": 1,
+        "border-amber-700": 1,
+        "bg-teal-950/60": 2,
+        "bg-slate-50": 2,
+        "bg-slate-50/70": 1,
+        "bg-slate-900/70": 1,
+        "bg-blue-900/30": 1,
+        "text-blue-300": 1,
+        "text-orange-300": 1,
+        "bg-indigo-100": 1,
+        "bg-indigo-900/30": 1,
+        "text-indigo-700": 1,
+        "text-indigo-300": 1,
+        "text-slate-800": 1,
+        "text-slate-200": 1,
+        "text-slate-700": 1,
+        "bg-teal-50/70": 1,
+        "border-teal-900": 1,
+        "bg-teal-950/40": 1,
+        "text-teal-900": 1,
+        "border-red-300": 1,
+        "bg-red-950/40": 1,
+        "text-red-200": 1,
+        "border-amber-900": 1,
+        "bg-amber-950/30": 1,
+        "bg-teal-600": 1,
+        "bg-teal-500": 1,
+        "from-teal-600": 1,
+        "to-teal-700": 1,
+        "text-white": 28,
+        "bg-white": 28,
+        "bg-white/80": 1,
+        "rgb(226 232 240)": 1,
+        "rgb(15 23 42 / 0.28)": 1,
+        "rgb(30 41 59)": 1,
+        "rgb(51 65 85)": 1
+      },
+      "legacy-glass-style": {
+        "glass-liquid-card": 1
+      },
+      "raw-control-risk": {
+        "<button": 23,
+        "<input": 18,
+        "<textarea": 1
+      }
+    },
+    "frontend/src/features/contract-creation/services/contractHTMLService.ts": {
+      "hardcoded-semantic-color": {
+        "#f5f5f5": 1,
+        "#ddd": 12,
+        "#333": 1
+      }
+    },
+    "frontend/src/features/contract-creation/utils/contractHTMLGenerator.ts": {
+      "hardcoded-semantic-color": {
+        "#f5f5f5": 2,
+        "#ddd": 34,
+        "#333": 1
+      }
+    },
+    "frontend/src/features/hr-hiring/HiringLifecycle.tsx": {
+      "hardcoded-semantic-color": {
+        "border-emerald-500": 1,
+        "bg-emerald-50": 1,
+        "text-emerald-800": 1,
+        "bg-emerald-950/40": 1,
+        "text-emerald-200": 1,
+        "border-teal-500": 1,
+        "bg-teal-50": 2,
+        "text-teal-900": 2,
+        "bg-teal-950/40": 2,
+        "text-teal-100": 2,
+        "border-amber-400": 1,
+        "bg-amber-50": 1,
+        "text-amber-900": 1,
+        "bg-amber-950/30": 1,
+        "text-amber-100": 1,
+        "border-rose-500": 1,
+        "bg-rose-50": 2,
+        "text-rose-900": 2,
+        "bg-rose-950/30": 1,
+        "text-rose-100": 2,
+        "border-violet-500": 1,
+        "bg-violet-50": 1,
+        "text-violet-900": 1,
+        "bg-violet-950/30": 1,
+        "text-violet-100": 1,
+        "border-slate-300": 2,
+        "text-slate-500": 4,
+        "border-slate-700": 2,
+        "bg-slate-900": 2,
+        "text-slate-400": 4,
+        "border-slate-400": 1,
+        "bg-slate-100": 1,
+        "text-slate-600": 2,
+        "border-slate-600": 1,
+        "bg-slate-800": 1,
+        "text-slate-300": 2,
+        "ring-emerald-500": 2,
+        "border-slate-200": 2,
+        "bg-slate-50/70": 1,
+        "border-slate-800": 2,
+        "bg-slate-950/30": 1,
+        "text-slate-950": 2,
+        "border-teal-200": 1,
+        "border-teal-900": 1,
+        "border-rose-200": 1,
+        "border-rose-900": 1,
+        "bg-rose-950/40": 1,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "bg-white": 2,
+        "text-white": 2
+      },
+      "duplicate-primitive-risk": {
+        "PhaseButton": 1
+      },
+      "raw-control-risk": {
+        "<button": 1
+      }
+    },
+    "frontend/src/features/hr/hrUi.tsx": {
+      "hardcoded-semantic-color": {
+        "#0b6662": 2,
+        "border-slate-300": 1,
+        "text-slate-900": 1,
+        "border-slate-700": 1,
+        "bg-slate-900": 1,
+        "text-slate-100": 1,
+        "text-slate-700": 1,
+        "text-slate-200": 1,
+        "text-red-500": 1,
+        "text-slate-500": 1,
+        "text-slate-400": 1,
+        "border-emerald-300": 1,
+        "bg-emerald-50": 1,
+        "text-emerald-800": 1,
+        "border-emerald-800": 1,
+        "bg-emerald-950/40": 1,
+        "text-emerald-200": 1,
+        "border-amber-300": 1,
+        "bg-amber-50": 1,
+        "text-amber-800": 1,
+        "border-amber-800": 1,
+        "bg-amber-950/40": 1,
+        "text-amber-200": 1,
+        "border-red-300": 1,
+        "bg-red-50": 1,
+        "text-red-800": 1,
+        "border-red-800": 1,
+        "bg-red-950/40": 1,
+        "text-red-200": 1,
+        "bg-white": 1
+      },
+      "duplicate-primitive-risk": {
+        "HrField": 1
+      }
+    },
+    "frontend/src/lib/formErrors.tsx": {
+      "hardcoded-semantic-color": {
+        "text-red-400": 1
+      }
+    }
+  }
+}

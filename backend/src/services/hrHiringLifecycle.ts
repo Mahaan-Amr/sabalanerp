@@ -600,7 +600,7 @@ const conversionGate = (source: HiringLifecycleSource): Gate => {
   };
 };
 
-const onboardingGate = (source: HiringLifecycleSource): Gate => {
+const onboardingGate = (source: HiringLifecycleSource, viewerUserId?: string): Gate => {
   const contractApproved =
     Boolean(source.contracts?.[0]?.approvedAt) &&
     source.contractClearance === "APPROVED";
@@ -616,7 +616,7 @@ const onboardingGate = (source: HiringLifecycleSource): Gate => {
   const missingEmployment =
     Boolean(source.convertedAt || source.outcome === "HIRED") &&
     !source.employmentRelationship;
-  let nextAction = action(
+  let nextAction: HiringLifecycleAction | null = action(
     "UPLOAD_CONTRACT",
     "بارگذاری قرارداد امضاشده",
     "FINANCE_RECORDER",
@@ -643,11 +643,13 @@ const onboardingGate = (source: HiringLifecycleSource): Gate => {
       "FINANCE_RECORDER",
     );
   else if (contractState === "SUBMITTED")
-    nextAction = action(
-      "APPROVE_CONTRACT",
-      "تأیید قرارداد امضاشده",
-      "FINANCE_MANAGER",
-    );
+    nextAction = latestContract?.uploadedBy === viewerUserId
+      ? null
+      : action(
+          "APPROVE_CONTRACT",
+          "تأیید قرارداد امضاشده",
+          "FINANCE_MANAGER",
+        );
   else if (contractApproved && !payrollReady)
     nextAction = action(
       "CONFIGURE_PAYROLL",
@@ -698,25 +700,29 @@ const onboardingGate = (source: HiringLifecycleSource): Gate => {
 
 const activationGate = (source: HiringLifecycleSource): Gate => {
   const complete = source.employmentRelationship?.status === "ACTIVE";
+  const blockingTasks = source.onboardingTasks?.filter(
+    (task) => task.activationBlocker && !isCompleteTask(task.status),
+  ) || [];
+  const blockers = [
+    ...(!source.scheduledStartDate || new Date(source.scheduledStartDate) > new Date()
+      ? [blocker("PLANNED_START_NOT_REACHED", "تاریخ شروع برنامه‌ریزی‌شده هنوز نرسیده است.", "HR_MANAGER")]
+      : []),
+    ...(source.identityClearance !== "APPROVED" ? [blocker("IDENTITY_NOT_APPROVED", "تأیید هویت کامل نشده است.", "HR_MANAGER")] : []),
+    ...(source.collateralClearance !== "APPROVED" ? [blocker("COLLATERAL_NOT_APPROVED", "تأیید وثیقه کامل نشده است.", "FINANCE_MANAGER")] : []),
+    ...(source.contractClearance !== "APPROVED" ? [blocker("PAPER_CONTRACT_NOT_APPROVED", "قرارداد کاغذی تأیید نشده است.", "FINANCE_MANAGER")] : []),
+    ...(source.compensationClearance !== "APPROVED" ? [blocker("COMPENSATION_NOT_APPROVED", "حقوق و مزایای نهایی تأیید نشده است.", "HR_MANAGER")] : []),
+    ...(!source.payrollParticipation ? [blocker("PAYROLL_NOT_CONFIGURED", "مشارکت حقوق و دستمزد تنظیم نشده است.", "HR_PAYROLL_MANAGER")] : []),
+    ...blockingTasks.map((task) => blocker(`ONBOARDING_TASK:${task.title}`, `وظیفه «${task.title}» تکمیل نشده است.`, task.ownerAuthority || "HR_MANAGER")),
+    ...(source.employmentRelationship?.status === "ENDED" ? [blocker("EMPLOYMENT_ENDED", "رابطه استخدامی پایان یافته است.", "HR_MANAGER")] : []),
+  ];
   return {
     complete,
     requiredComplete: complete ? 1 : 0,
     requiredTotal: 1,
-    blockers:
-      source.employmentRelationship?.status === "ENDED"
-        ? [
-            blocker(
-              "EMPLOYMENT_ENDED",
-              "رابطه استخدامی پایان یافته است.",
-              "HR_MANAGER",
-            ),
-          ]
-        : [],
-    action: action(
-      "ACTIVATE_EMPLOYMENT",
-      "فعال‌سازی رابطه استخدامی",
-      "HR_MANAGER",
-    ),
+    blockers,
+    action: blockers.length === 0
+      ? action("ACTIVATE_EMPLOYMENT", "فعال‌سازی رابطه استخدامی", "HR_MANAGER")
+      : null,
     secondaryActions: [],
   };
 };
@@ -724,6 +730,7 @@ const activationGate = (source: HiringLifecycleSource): Gate => {
 export const projectHiringLifecycle = (
   source: HiringLifecycleSource,
   viewerAuthorities: Iterable<string> = [],
+  viewerUserId?: string,
 ): HiringLifecycleProjection => {
   const authorities = new Set(viewerAuthorities);
   const gates = [
@@ -733,7 +740,7 @@ export const projectHiringLifecycle = (
     assessmentGate(source),
     offerGate(source),
     conversionGate(source),
-    onboardingGate(source),
+    onboardingGate(source, viewerUserId),
     activationGate(source),
   ];
   const terminal = Boolean(source.outcome && source.outcome !== "HIRED");

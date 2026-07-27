@@ -786,7 +786,7 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
     };
     return buildHiringQueueItem(
     row as any,
-    summarizeHiringLifecycle(projectHiringLifecycle(row, authorities))
+    summarizeHiringLifecycle(projectHiringLifecycle(row, authorities, actorId(req)))
   );}).filter((row) => {
     if (requestedPhase && row.lifecycleSummary.phaseId !== requestedPhase) return false;
     if (requestedStatus && row.lifecycleSummary.status !== requestedStatus) return false;
@@ -820,7 +820,7 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   const canSeeFinanceSensitive = authorities.has('FINANCE_RECORDER') || authorities.has('FINANCE_MANAGER');
   const canSeeCompensation = canSeeFinanceSensitive || authorities.has('HIRING_MANAGER') || authorities.has('HR_PROCESSOR') || authorities.has('HR_PAYROLL_PROCESSOR') || authorities.has('HR_PAYROLL_MANAGER') || authorities.has('HR_MANAGER');
   const data: any = row;
-  data.lifecycle = projectHiringLifecycle(row, authorities);
+  data.lifecycle = projectHiringLifecycle(row, authorities, actorId(req));
   data.taskCapabilities = projectHiringTaskCapabilities(row, authorities, actorId(req));
   data.documentIndex = buildHiringDocumentIndex(row, authorities);
   data.activationReadiness = authorities.has('HR_MANAGER')

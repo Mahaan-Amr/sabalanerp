@@ -145,6 +145,7 @@ const base = (
       collateralClearance: "APPROVED",
       collateralItems: [{ required: true, status: "VERIFIED" }],
       convertedAt: new Date(),
+      scheduledStartDate: new Date("2020-01-01"),
       employmentRelationship: { status: "PLANNED" },
       contractClearance: "APPROVED",
       contracts: [{ approvedAt: new Date() }],
@@ -510,8 +511,10 @@ const base = (
       },
     ],
   });
-  const manager = projectHiringLifecycle(submittedSource, ["FINANCE_MANAGER"]);
+  const manager = projectHiringLifecycle(submittedSource, ["FINANCE_MANAGER"], "manager-2");
   assert.equal(manager.phases[6].primaryAction?.id, "APPROVE_CONTRACT");
+  const selfReview = projectHiringLifecycle(submittedSource, ["FINANCE_MANAGER"], "recorder-1");
+  assert.equal(selfReview.phases[6].primaryAction, null);
   assert.deepEqual(
     projectHiringTaskCapabilities(submittedSource, ["FINANCE_MANAGER"], "recorder-1")
       .find((task) => task.id === "SIGNED_CONTRACT")?.actionIds,

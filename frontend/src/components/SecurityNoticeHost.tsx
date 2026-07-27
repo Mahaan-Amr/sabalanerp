@@ -1,5 +1,6 @@
 'use client';
 
+import { ErpPressable, ErpTextarea } from '@/components/erp';
 import { useEffect, useState } from 'react';
 import EnhancedDropdown from './EnhancedDropdown';
 
@@ -49,16 +50,16 @@ export function SecurityNoticeHost() {
   return (
     <>
       {notice && (
-        <div role="status" className={`fixed left-5 top-5 z-[100] max-w-sm rounded-xl border px-4 py-3 text-sm font-semibold shadow-xl ${notice.tone === 'error' ? 'border-red-200 bg-red-50 text-red-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+        <div role="status" className={`fixed left-5 top-5 z-[100] max-w-sm rounded-xl border px-4 py-3 text-sm font-semibold shadow-xl ${notice.tone === 'error' ? 'border-[var(--sds-danger)] bg-[var(--sds-danger-soft)] text-[var(--sds-danger)]' : 'border-[var(--sds-success)] bg-[var(--sds-success-soft)] text-[var(--sds-success)]'}`}>
           {notice.message}
         </div>
       )}
 
       {dialog && (
-        <div className="fixed inset-0 z-[110] grid place-items-center bg-slate-950/45 p-4">
-          <div role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900">
-            <h2 className="text-lg font-bold">{dialog.title}</h2>
-            {dialog.description && <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{dialog.description}</p>}
+        <div className="fixed inset-0 z-[110] grid place-items-center bg-[var(--sds-surface-overlay)] p-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="security-action-title" className="w-full max-w-md rounded-[var(--sds-radius-dialog)] bg-[var(--sds-surface-panel)] p-5 shadow-[var(--sds-shadow-raised)]">
+            <h2 id="security-action-title" className="text-lg font-bold">{dialog.title}</h2>
+            {dialog.description && <p className="mt-2 text-sm sds-text-secondary ">{dialog.description}</p>}
             {dialog.options ? (
               <EnhancedDropdown
                 className="mt-4"
@@ -69,7 +70,7 @@ export function SecurityNoticeHost() {
                 searchable
               />
             ) : dialog.inputLabel && (
-              <textarea
+              <ErpTextarea
                 autoFocus
                 className="mt-4 min-h-24 w-full rounded-lg border p-3"
                 placeholder={dialog.inputLabel}
@@ -78,8 +79,8 @@ export function SecurityNoticeHost() {
               />
             )}
             <div className="mt-5 flex justify-end gap-2">
-              <button className="rounded-lg px-4 py-2" onClick={() => { dialog.resolve(null); setDialog(null); }}>انصراف</button>
-              <button className="rounded-lg bg-[#074747] px-4 py-2 font-semibold text-white" onClick={() => { dialog.resolve(dialog.inputLabel || dialog.options ? value.trim() || null : 'confirmed'); setDialog(null); }}>تأیید</button>
+              <ErpPressable className="px-4" onClick={() => { dialog.resolve(null); setDialog(null); }}>انصراف</ErpPressable>
+              <ErpPressable tone="primary" variant="solid" className="px-4 font-semibold" onClick={() => { dialog.resolve(dialog.inputLabel || dialog.options ? value.trim() || null : 'confirmed'); setDialog(null); }}>تأیید</ErpPressable>
             </div>
           </div>
         </div>

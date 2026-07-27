@@ -243,6 +243,23 @@ export const ErpTextarea = React.forwardRef<
   return <textarea ref={ref} className={cx(erpFieldClassName, 'min-h-24 resize-y', className)} {...props} />;
 });
 
+export const ErpCheckboxControl = React.forwardRef<
+  HTMLInputElement,
+  Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'>
+>(function ErpCheckboxControl({ className, ...props }, ref) {
+  return (
+    <input
+      {...props}
+      ref={ref}
+      type="checkbox"
+      className={cx(
+        'h-5 w-5 shrink-0 rounded border-[var(--sds-border-default)] accent-[var(--sds-accent)]',
+        className
+      )}
+    />
+  );
+});
+
 export function ErpCheckbox({
   label,
   className,
@@ -252,36 +269,35 @@ export function ErpCheckbox({
 }) {
   return (
     <label className={cx('sds-text-secondary inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm', className)}>
-      <input
-        {...props}
-        type="checkbox"
-        className="h-5 w-5 rounded border-[var(--sds-border-default)] accent-[var(--sds-accent)]"
-      />
+      <ErpCheckboxControl {...props} />
       <span>{label}</span>
     </label>
   );
 }
 
-export function ErpPressable({
+type ErpPressableProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  tone?: ErpTone;
+  variant?: ErpAction['variant'];
+};
+
+export const ErpPressable = React.forwardRef<HTMLButtonElement, ErpPressableProps>(function ErpPressable({
   children,
   className,
   tone = 'neutral',
   variant = 'ghost',
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  tone?: ErpTone;
-  variant?: ErpAction['variant'];
-}) {
+}, ref) {
   return (
     <button
       {...props}
+      ref={ref}
       type={props.type || 'button'}
       className={cx('sds-action', buttonClasses(tone, variant), className)}
     >
       {children}
     </button>
   );
-}
+});
 
 export function ErpBadge({ children, tone = 'neutral', variant = 'soft' }: WithChildren & { tone?: ErpTone; variant?: 'soft' | 'outline' | 'solid' }) {
   const solid = `sds-tone-${tone} sds-action-solid`;

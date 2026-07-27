@@ -13,6 +13,36 @@ const productSelectionSource = read(
 const layoutSource = read('frontend/src/app/layout.tsx');
 const guardAttendanceSource = read('frontend/src/app/dashboard/security/attendance/page.tsx');
 const guardVehiclesSource = read('frontend/src/app/dashboard/security/vehicles/page.tsx');
+const guardPageSources = [
+  'page.tsx',
+  'attendance/page.tsx',
+  'exceptions/page.tsx',
+  'personnel/page.tsx',
+  'reports/page.tsx',
+  'reports/[personnelId]/page.tsx',
+  'reports/shifts/[slotId]/page.tsx',
+  'settings/page.tsx',
+  'settings/attendance-roster/page.tsx',
+  'settings/report-structure/page.tsx',
+  'shifts/page.tsx',
+  'shifts/[slotId]/page.tsx',
+  'supervisor-reports/page.tsx',
+  'vehicles/page.tsx'
+].map((path) => [
+  path,
+  read(`frontend/src/app/dashboard/security/${path}`)
+]);
+const guardSupportingSources = [
+  'EnhancedDropdown.tsx',
+  'ExceptionRequestForm.tsx',
+  'MissionAssignmentForm.tsx',
+  'PersianCalendar.tsx',
+  'PersianTimePicker.tsx',
+  'SecurityNoticeHost.tsx'
+].map((path) => [
+  path,
+  read(`frontend/src/components/${path}`)
+]);
 
 const variablesIn = (source) =>
   new Set(Array.from(source.matchAll(/--(sds-[\w-]+)\s*:/g), (match) => match[1]));
@@ -160,5 +190,30 @@ test('Guard daily operations do not reimplement palette or native-control presen
     assert.match(source, /ErpSkeleton/, `${name} must retain a loading state`);
     assert.match(source, /ErpInlineState/, `${name} must retain an error state`);
     assert.match(source, /ErpEmptyState/, `${name} must retain an empty state`);
+  }
+});
+
+test('every Guard route consumes the shared semantic interface', () => {
+  const hardcodedPalette =
+    /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|gray|green|indigo|neutral|orange|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
+  const rawControl = /<(?:button|input|select|textarea)\b/;
+
+  for (const [path, source] of guardPageSources) {
+    assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
+    assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
+    assert.match(source, /ErpWorkspacePage/, `${path} must use the shared workspace frame`);
+  }
+});
+
+test('Guard dialogs and shared field widgets do not expose the legacy visual layer', () => {
+  const hardcodedPalette =
+    /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|gray|green|indigo|neutral|orange|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
+  const rawControl = /<(?:button|input|select|textarea)\b/;
+
+  for (const [path, source] of guardSupportingSources) {
+    assert.doesNotMatch(source, hardcodedPalette, `${path} must use semantic meanings`);
+    assert.doesNotMatch(source, rawControl, `${path} must consume canonical controls`);
+    assert.doesNotMatch(source, /glass-liquid/, `${path} must not expose the old glass layer`);
+    assert.match(source, /from '@\/components\/erp'/, `${path} must cross the canonical module seam`);
   }
 });

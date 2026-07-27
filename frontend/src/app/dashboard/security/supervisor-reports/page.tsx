@@ -4,12 +4,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { FaBan, FaCheck, FaChevronDown, FaClipboardCheck, FaClock, FaPaperclip, FaPlus, FaRedo, FaRoute, FaStop, FaTimes, FaUserPlus } from 'react-icons/fa';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpSection, ErpSheet, ErpShiftTimeline, ErpSkeleton, ErpStatus, ErpWorkspacePage } from '@/components/erp';
+import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
 import { securityAPI } from '@/lib/api';
 import { askSecurityAction } from '@/components/SecurityNoticeHost';
 import PersianCalendar from '@/lib/persian-calendar';
 
-const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
-const labelClass = 'mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200';
+const inputClass = 'sds-field min-h-12 w-full px-4 py-3 text-sm';
+const labelClass = 'mb-2 block text-sm font-medium sds-text-secondary ';
 
 const dateTimeFa = (value?: string | null) => value ? PersianCalendar.formatForDisplay(value, true) : '-';
 const durationMinutes = (start?: string, end?: string | null) => {
@@ -185,12 +186,12 @@ export default function SecuritySupervisorReportsPage() {
       {loading && !session ? <ErpSkeleton lines={6} /> : <>
       {!readOnly && message && <ErpInlineState kind="success" title={message} />}
       {error && <ErpInlineState kind={session ? 'stale' : 'error'} title={session ? 'آخرین به‌روزرسانی ناموفق بود؛ گزارش قبلی نمایش داده می‌شود.' : error} action={{ label: 'تلاش مجدد', onClick: () => loadData() }} />}
-      {readOnly && session && <div className="flex items-center gap-2"><ErpStatus label="فقط‌خواندنی مدیر" tone="info" /><span className="text-xs text-slate-500">کنترل‌های عملیاتی در دسترس نیست.</span></div>}
+      {readOnly && session && <div className="flex items-center gap-2"><ErpStatus label="فقط‌خواندنی مدیر" tone="info" /><span className="text-xs sds-text-muted">کنترل‌های عملیاتی در دسترس نیست.</span></div>}
       {session?.corrections?.length > 0 && (
         <ErpSection title="اصلاح زمان‌های شیفت">
-          <div className="flex flex-wrap items-center gap-2"><ErpStatus label="اصلاح‌شده توسط مدیر" tone="warning" /><span className="text-xs text-slate-500">{session.corrections.length.toLocaleString('fa-IR')} اصلاح حسابرسی‌شده</span></div>
-          <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
-            {session.corrections.map((item: any) => <div key={item.id} className="py-2 text-sm"><p className="font-semibold">{item.correctedByName} · {dateTimeFa(item.correctedAt)}</p><p className="mt-1 text-xs text-slate-500">زمان مؤثر: {dateTimeFa(item.effectiveStartedAt)} تا {dateTimeFa(item.effectiveEndedAt)}</p><p className="mt-1">{item.reason}</p></div>)}
+          <div className="flex flex-wrap items-center gap-2"><ErpStatus label="اصلاح‌شده توسط مدیر" tone="warning" /><span className="text-xs sds-text-muted">{session.corrections.length.toLocaleString('fa-IR')} اصلاح حسابرسی‌شده</span></div>
+          <div className="mt-3 divide-y divide-[var(--sds-border-subtle)] dark:divide-[var(--sds-border-subtle)]">
+            {session.corrections.map((item: any) => <div key={item.id} className="py-2 text-sm"><p className="font-semibold">{item.correctedByName} · {dateTimeFa(item.correctedAt)}</p><p className="mt-1 text-xs sds-text-muted">زمان مؤثر: {dateTimeFa(item.effectiveStartedAt)} تا {dateTimeFa(item.effectiveEndedAt)}</p><p className="mt-1">{item.reason}</p></div>)}
           </div>
         </ErpSection>
       )}
@@ -201,8 +202,8 @@ export default function SecuritySupervisorReportsPage() {
         <>
           {!readOnly && <ErpSheet open={entrySheetOpen} onClose={() => setEntrySheetOpen(false)} title="ثبت گزارش لحظه‌ای">
             {activePatrol && (
-              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
-                <p className="text-sm font-semibold text-amber-800 dark:text-amber-100">
+              <div className="mb-4 rounded-lg border border-[var(--sds-warning)] bg-[var(--sds-warning-soft)] p-3 text-[var(--sds-warning)] dark:border-[var(--sds-warning)] dark:bg-[var(--sds-warning-soft)] dark:text-[var(--sds-warning)]">
+                <p className="text-sm font-semibold text-[var(--sds-warning)] dark:text-[var(--sds-warning)]">
                   گشت‌زنی فعال است؛ عکس‌ها را از همین گزارش لحظه‌ای به عنوان شواهد همان بازه ثبت کنید.
                 </p>
               </div>
@@ -218,7 +219,7 @@ export default function SecuritySupervisorReportsPage() {
                   searchable
                   required
                 />
-                {selectedCategory?.description && <p className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">{selectedCategory.description}</p>}
+                {selectedCategory?.description && <p className="mt-2 text-xs leading-6 sds-text-muted ">{selectedCategory.description}</p>}
               </label>
               {showReportTypes && <label className="block">
                 <span className={labelClass}>نوع گزارش لحظه‌ای</span>
@@ -231,65 +232,65 @@ export default function SecuritySupervisorReportsPage() {
                   required
                   disabled={!form.categoryId}
                 />
-                {selectedType?.description && <p className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">{selectedType.description}</p>}
+                {selectedType?.description && <p className="mt-2 text-xs leading-6 sds-text-muted ">{selectedType.description}</p>}
               </label>}
               {showRelatedPersonnel && <div className="space-y-3">
                 <div ref={participantPickerRef} className="relative">
                   <span className={labelClass}>افراد مرتبط</span>
-                  <button
+                  <ErpPressable
                     type="button"
                     onClick={() => setParticipantPickerOpen((current) => !current)}
-                    className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none transition hover:border-[#074747]/40 focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900"
+                    className="sds-field flex min-h-12 w-full items-center justify-between gap-3 px-4 py-3 text-right text-sm"
                     aria-expanded={participantPickerOpen}
                   >
                     <span className="flex items-center gap-2">
-                      <FaUserPlus className="h-4 w-4 text-[#074747] dark:text-teal-200" />
+                      <FaUserPlus className="h-4 w-4 text-[var(--sds-accent)] dark:text-[var(--sds-accent)]" />
                       <span>{selectedParticipants.length ? `${selectedParticipants.length.toLocaleString('fa-IR')} نفر انتخاب شده` : 'انتخاب افراد مرتبط'}</span>
                     </span>
-                    <FaChevronDown className={`h-3.5 w-3.5 text-slate-400 transition ${participantPickerOpen ? 'rotate-180' : ''}`} />
-                  </button>
+                    <FaChevronDown className={`h-3.5 w-3.5 sds-text-muted transition ${participantPickerOpen ? 'rotate-180' : ''}`} />
+                  </ErpPressable>
                   {participantPickerOpen && (
-                    <div className="absolute z-20 mt-2 max-h-72 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                    <div className="absolute z-20 mt-2 max-h-72 w-full overflow-y-auto rounded-lg border border-[var(--sds-border-subtle)] bg-[var(--sds-surface-panel)] p-2 shadow-lg dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-panel)]">
                       {participants.length === 0 ? (
-                        <p className="px-3 py-4 text-center text-sm text-slate-500">فردی برای انتخاب وجود ندارد.</p>
+                        <p className="px-3 py-4 text-center text-sm sds-text-muted">فردی برای انتخاب وجود ندارد.</p>
                       ) : (
                         participants.map((user) => {
                           const selected = form.participantIds.includes(user.id);
                           return (
-                            <button
+                            <ErpPressable
                               key={user.id}
                               type="button"
                               onClick={() => toggleParticipant(user.id)}
-                              className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-right text-sm transition ${selected ? 'bg-[#074747]/10 text-[#074747] dark:bg-teal-900/30 dark:text-teal-100' : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+                              className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-right text-sm transition ${selected ? 'bg-[var(--sds-accent-soft)] text-[var(--sds-accent)]' : 'sds-text-secondary hover:bg-[var(--sds-surface-subtle)]'}`}
                             >
                               <span className="min-w-0">
                                 <span className="block font-semibold">{participantName(user)}</span>
                                 {participantMeta(user) && <span className="mt-0.5 block truncate text-xs opacity-70">{participantMeta(user)}</span>}
                               </span>
-                              <span className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border ${selected ? 'border-[#074747] bg-[#074747] text-white dark:border-teal-300 dark:bg-teal-500' : 'border-slate-300 text-transparent dark:border-slate-600'}`}>
+                              <span className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border ${selected ? 'border-[var(--sds-accent)] bg-[var(--sds-accent)] text-[var(--sds-on-accent)]' : 'border-[var(--sds-border-default)] text-transparent'}`}>
                                 <FaCheck className="h-3 w-3" />
                               </span>
-                            </button>
+                            </ErpPressable>
                           );
                         })
                       )}
                     </div>
                   )}
                 </div>
-                <div className="min-h-28 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900/70">
+                <div className="min-h-28 rounded-lg border border-[var(--sds-border-subtle)] bg-[var(--sds-surface-panel)] p-3 dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-panel)]">
                   {selectedParticipants.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {selectedParticipants.map((user) => (
-                        <button
+                        <ErpPressable
                           key={user.id}
                           type="button"
                           onClick={() => toggleParticipant(user.id)}
-                          className="inline-flex items-center gap-2 rounded-full border border-[#074747]/20 bg-[#074747]/10 px-3 py-1.5 text-xs font-semibold text-[#074747] transition hover:bg-[#074747]/15 dark:border-teal-700 dark:bg-teal-900/30 dark:text-teal-100"
+                          className="inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--sds-accent)] bg-[var(--sds-accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--sds-accent)] transition"
                           title="حذف از گزارش"
                         >
                           <span>{participantName(user)}</span>
                           <FaTimes className="h-3 w-3" />
-                        </button>
+                        </ErpPressable>
                       ))}
                     </div>
                   )}
@@ -299,22 +300,22 @@ export default function SecuritySupervisorReportsPage() {
             <div className="mt-4 grid grid-cols-1 gap-4">
               <label className="block">
                 <span className={labelClass}>توضیحات (اختیاری)</span>
-                <textarea className={`${inputClass} min-h-28 resize-y`} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
+                <ErpTextarea className={`${inputClass} min-h-28 resize-y`} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
               </label>
               <label className="block">
                 <span className={labelClass}>افزودن عکس</span>
-                <div className="flex min-h-12 items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600 transition hover:border-[#074747]/40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                  <FaPaperclip className="h-4 w-4 text-[#074747] dark:text-teal-200" />
+                <div className="flex min-h-12 items-center gap-3 rounded-lg border border-dashed border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-3 text-sm sds-text-secondary transition hover:border-[var(--sds-accent)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)] ">
+                  <FaPaperclip className="h-4 w-4 text-[var(--sds-accent)] dark:text-[var(--sds-accent)]" />
                   <span className="font-medium">{images.length ? `${images.length.toLocaleString('fa-IR')} عکس انتخاب شده` : 'انتخاب عکس‌ها'}</span>
-                  <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => setImages(Array.from(event.target.files || []))} className="sr-only" />
+                  <ErpInput type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => setImages(Array.from(event.target.files || []))} className="sr-only" />
                 </div>
               </label>
             </div>
-            {images.length > 0 && <div className="mt-3 flex flex-wrap gap-3">{images.map((image, index) => <div key={`${image.name}-${index}`} className="relative"><img src={URL.createObjectURL(image)} alt={image.name} className="h-20 w-20 rounded-lg object-cover" /><button type="button" className="absolute -right-2 -top-2 rounded-full bg-red-600 px-2 py-1 text-xs text-white" onClick={() => setImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>}
+            {images.length > 0 && <div className="mt-3 flex flex-wrap gap-3">{images.map((image, index) => <div key={`${image.name}-${index}`} className="relative"><img src={URL.createObjectURL(image)} alt={image.name} className="h-20 w-20 rounded-lg object-cover" /><ErpPressable type="button" tone="danger" variant="solid" aria-label={`حذف ${image.name}`} className="absolute -right-2 -top-2 h-11 w-11 rounded-full p-0 text-xs" onClick={() => setImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</ErpPressable></div>)}</div>}
             <div className="mt-4 flex flex-wrap justify-end gap-2">
               <ErpButton label="ثبت گزارش" icon={FaPlus} onClick={createEntry} disabled={saving || !form.categoryId || (showReportTypes && !form.reportTypeId) || !hasMeaningfulDetail} variant="solid" />
             </div>
-            {selectedCategory?.useReportTypes && categoryTypes.length === 0 && <p className="mt-3 text-sm text-amber-700">برای این دسته‌بندی هنوز نوع گزارش فعالی تعریف نشده است.</p>}
+            {selectedCategory?.useReportTypes && categoryTypes.length === 0 && <p className="mt-3 text-sm text-[var(--sds-warning)]">برای این دسته‌بندی هنوز نوع گزارش فعالی تعریف نشده است.</p>}
           </ErpSheet>}
 
           <ErpSection title="گشت‌زنی">
@@ -324,8 +325,8 @@ export default function SecuritySupervisorReportsPage() {
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
                 <label>
                   <span className={labelClass}>توضیحات پایان گشت‌زنی</span>
-                  <textarea className={`${inputClass} min-h-24`} value={patrolDescription} onChange={(event) => setPatrolDescription(event.target.value)} />
-                  <span className="mt-2 block text-xs text-slate-500">شروع: {dateTimeFa(activePatrol.startedAt)} · مدت: {durationMinutes(activePatrol.startedAt).toLocaleString('fa-IR')} دقیقه</span>
+                  <ErpTextarea className={`${inputClass} min-h-24`} value={patrolDescription} onChange={(event) => setPatrolDescription(event.target.value)} />
+                  <span className="mt-2 block text-xs sds-text-muted">شروع: {dateTimeFa(activePatrol.startedAt)} · مدت: {durationMinutes(activePatrol.startedAt).toLocaleString('fa-IR')} دقیقه</span>
                 </label>
                 <ErpButton label="پایان گشت‌زنی" icon={FaStop} onClick={finishPatrol} disabled={saving || !patrolDescription.trim()} tone="warning" variant="solid" />
               </div>

@@ -151,3 +151,62 @@ test('Guard attendance and vehicle operations use canonical fields and responsiv
   });
   expect(vehiclesFit).toBe(true);
 });
+
+test('remaining Guard management routes share one responsive semantic frame', async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page);
+
+  const routes = [
+    ['/dashboard/security/exceptions', 'استثناها و مأموریت‌ها'],
+    ['/dashboard/security/personnel', 'کارکنان گارد'],
+    ['/dashboard/security/reports', 'گزارش‌ها'],
+    ['/dashboard/security/settings', 'تنظیمات گارد'],
+    ['/dashboard/security/settings/attendance-roster', 'فهرست حضور و غیاب'],
+    ['/dashboard/security/settings/report-structure', 'ساختار گزارش شیفت'],
+    ['/dashboard/security/shifts', 'شیفت‌ها'],
+    ['/dashboard/security/supervisor-reports', 'گزارش شیفت']
+  ] as const;
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const [route, title] of routes) {
+    await page.goto(route);
+    const workspace = page.locator('main.sds-workspace');
+    await expect(workspace.getByRole('heading', { name: title, exact: true })).toBeVisible();
+    expect(await workspace.evaluate((element) => getComputedStyle(element).direction)).toBe('rtl');
+    expect(await workspace.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
+    })).toBe(true);
+    expect(await workspace.evaluate((element) =>
+      Array.from(element.querySelectorAll('input:not([type="checkbox"]), select, textarea'))
+        .every((field) => field.classList.contains('sds-field'))
+    )).toBe(true);
+  }
+});
+
+test('Guard exception dialog uses canonical dropdown and calendar interactions', async ({ page }) => {
+  await login(page);
+  await page.goto('/dashboard/security/exceptions');
+
+  const workspace = page.locator('main.sds-workspace');
+  await workspace.getByRole('button', { name: 'ثبت مورد', exact: true }).click();
+  const picker = page.getByRole('dialog');
+  await expect(picker.getByRole('heading', { name: 'نوع مورد جدید', exact: true })).toBeVisible();
+  await picker.getByRole('button', { name: 'استثنای حضور و غیاب', exact: true }).click();
+
+  const editor = page.getByRole('dialog');
+  await expect(editor.getByRole('heading', { name: 'ثبت استثنا', exact: true })).toBeVisible();
+  const comboboxes = editor.getByRole('combobox');
+  expect(await comboboxes.count()).toBeGreaterThanOrEqual(2);
+  await expect(comboboxes.nth(1)).toHaveClass(/sds-field/);
+  await comboboxes.nth(1).click();
+  await expect(page.getByRole('listbox')).toBeVisible();
+  await page.getByRole('option', { name: 'مرخصی ساعتی', exact: true }).click();
+
+  const dateTriggers = editor.locator('button[aria-haspopup="dialog"]');
+  expect(await dateTriggers.count()).toBeGreaterThanOrEqual(2);
+  await dateTriggers.first().click();
+  const calendar = page.getByRole('dialog', { name: 'انتخاب تاریخ شمسی' });
+  await expect(calendar).toBeVisible();
+  await expect(calendar.getByRole('gridcell').first()).toHaveClass(/sds-action/);
+});

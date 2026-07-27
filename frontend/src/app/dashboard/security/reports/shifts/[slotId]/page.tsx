@@ -54,21 +54,21 @@ export default function SecurityShiftReportDetailPage() {
           <ErpSection>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-black text-slate-950 dark:text-white">{report.effectivePersonnel?.name || report.plannedPersonnel?.name || 'شیفت گارد'}</h2>
-                <p className="mt-1 text-sm text-slate-500">{report.title}</p>
+                <h2 className="text-lg font-black sds-text-primary ">{report.effectivePersonnel?.name || report.plannedPersonnel?.name || 'شیفت گارد'}</h2>
+                <p className="mt-1 text-sm sds-text-muted">{report.title}</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <ErpStatus label={report.status === 'FORCE_CLOSED' ? 'بسته‌شده توسط مدیر' : 'تکمیل‌شده'} tone="neutral" emphasis="strong" />
                 {report.isManagerCorrected && <ErpStatus label="اصلاح‌شده توسط مدیر" tone="warning" emphasis="strong" />}
               </div>
             </div>
-            <dl className="mt-5 grid gap-4 border-t border-slate-100 pt-4 text-sm dark:border-slate-800 sm:grid-cols-3">
-              <div><dt className="text-xs text-slate-500">شروع واقعی</dt><dd className="mt-1 font-semibold">{dateTime(report.startedAt)}</dd></div>
-              <div><dt className="text-xs text-slate-500">پایان واقعی</dt><dd className="mt-1 font-semibold">{dateTime(report.endedAt)}</dd></div>
-              <div><dt className="text-xs text-slate-500">شناسه شیفت</dt><dd className="mt-1 break-all font-mono text-xs">{report.id}</dd></div>
+            <dl className="mt-5 grid gap-4 border-t border-[var(--sds-border-subtle)] pt-4 text-sm dark:border-[var(--sds-border-subtle)] sm:grid-cols-3">
+              <div><dt className="text-xs sds-text-muted">شروع واقعی</dt><dd className="mt-1 font-semibold">{dateTime(report.startedAt)}</dd></div>
+              <div><dt className="text-xs sds-text-muted">پایان واقعی</dt><dd className="mt-1 font-semibold">{dateTime(report.endedAt)}</dd></div>
+              <div><dt className="text-xs sds-text-muted">شناسه شیفت</dt><dd className="mt-1 break-all font-mono text-xs">{report.id}</dd></div>
             </dl>
             {(report.closureSummary || report.forceCloseReason) && (
-              <div className="mt-4 border-t border-slate-100 pt-4 text-sm leading-6 text-slate-700 dark:border-slate-800 dark:text-slate-200">
+              <div className="mt-4 border-t border-[var(--sds-border-subtle)] pt-4 text-sm leading-6 sds-text-secondary dark:border-[var(--sds-border-subtle)] ">
                 {report.closureSummary || report.forceCloseReason}
               </div>
             )}
@@ -76,12 +76,12 @@ export default function SecurityShiftReportDetailPage() {
 
           {report.corrections?.length > 0 && (
             <ErpSection title="تاریخچه اصلاح زمان‌های شیفت">
-              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              <div className="divide-y divide-[var(--sds-border-subtle)] dark:divide-[var(--sds-border-subtle)]">
                 {report.corrections.map((item: any) => (
                   <div key={item.id} className="py-3 first:pt-0 last:pb-0">
                     <p className="font-semibold">{item.correctedByName} · {dateTime(item.correctedAt)}</p>
-                    <p className="mt-1 text-xs text-slate-500">زمان قبلی یا ثبت‌نشده: {dateTime(item.previousStartedAt)} تا {dateTime(item.previousEndedAt)}</p>
-                    <p className="mt-1 text-xs text-slate-500">زمان مؤثر: {dateTime(item.effectiveStartedAt)} تا {dateTime(item.effectiveEndedAt)}</p>
+                    <p className="mt-1 text-xs sds-text-muted">زمان قبلی یا ثبت‌نشده: {dateTime(item.previousStartedAt)} تا {dateTime(item.previousEndedAt)}</p>
+                    <p className="mt-1 text-xs sds-text-muted">زمان مؤثر: {dateTime(item.effectiveStartedAt)} تا {dateTime(item.effectiveEndedAt)}</p>
                     <p className="mt-2 text-sm">{item.reason}</p>
                   </div>
                 ))}
@@ -90,11 +90,11 @@ export default function SecurityShiftReportDetailPage() {
           )}
 
           <ErpSection title="حضور و پوشش">
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            <div className="divide-y divide-[var(--sds-border-subtle)] dark:divide-[var(--sds-border-subtle)]">
               {(report.attendance || []).map((item: any) => (
                 <div key={item.id} className="grid gap-2 py-3 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-center">
                   <p className="font-bold">{item.name}</p>
-                  <p className="text-sm text-slate-500">ورود: {dateTime(item.arrivedAt)}</p>
+                  <p className="text-sm sds-text-muted">ورود: {dateTime(item.arrivedAt)}</p>
                   <ErpStatus label={item.delayMinutes > 0 ? `${item.delayMinutes.toLocaleString('fa-IR')} دقیقه تأخیر` : 'به‌موقع'} tone={item.delayMinutes > 0 ? 'warning' : 'success'} />
                 </div>
               ))}

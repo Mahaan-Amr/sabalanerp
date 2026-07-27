@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { FaCalendarAlt, FaCheck, FaClock, FaExclamationTriangle, FaHistory, FaPlay, FaRedo, FaStop, FaTrash, FaUserEdit, FaUsers } from 'react-icons/fa';
 import { ErpActionMenu, ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpSection, ErpSegmentedControl, ErpSkeleton, ErpStatus, ErpWorkspacePage } from '@/components/erp';
+import { ErpCheckboxControl, ErpInput, ErpSelect, ErpTextarea } from '@/components/erp';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
 import { securityAPI } from '@/lib/api';
@@ -14,8 +15,8 @@ type ShiftView = 'current' | 'plans' | 'history';
 type CoverageCategory = 'open' | 'finished';
 type DraftMode = 'replacement' | 'temporary' | 'force-close' | 'attendance-correction' | 'session-correction' | 'confirm-no-shift' | null;
 
-const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-teal-600 dark:border-slate-700 dark:bg-slate-800 dark:text-white';
-const labelClass = 'mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200';
+const inputClass = 'sds-field min-h-12 w-full px-4 py-3 text-sm';
+const labelClass = 'mb-2 block text-sm font-medium sds-text-secondary ';
 
 const coverageLabel: Record<string, string> = {
   COVERED: 'پوشش کامل',
@@ -319,24 +320,24 @@ export default function SecurityShiftsPage() {
         {currentShift?.activeSession ? (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="font-bold text-slate-900 dark:text-white">شیفت فعال: {personName(activeShiftWorker)}</p>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">از {dateTimeFa(currentShift.activeSession.startedAt)} · بازه برنامه {dateTimeFa(currentShift.activeSession.slot.startsAt)} تا {dateTimeFa(currentShift.activeSession.slot.endsAt)}</p>
+              <p className="font-bold sds-text-primary ">شیفت فعال: {personName(activeShiftWorker)}</p>
+              <p className="mt-1 text-sm sds-text-secondary ">از {dateTimeFa(currentShift.activeSession.startedAt)} · بازه برنامه {dateTimeFa(currentShift.activeSession.slot.startsAt)} تا {dateTimeFa(currentShift.activeSession.slot.endsAt)}</p>
             </div>
             <ErpBadge tone="success">فعال</ErpBadge>
           </div>
         ) : currentShift?.currentSlot ? (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="font-bold text-slate-900 dark:text-white">مسئول برنامه‌ریزی‌شده اکنون: {personName(scheduledCurrentWorker)}</p>
-              <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">برای بازه {dateTimeFa(currentShift.currentSlot.startsAt)} تا {dateTimeFa(currentShift.currentSlot.endsAt)} هنوز شیفت فعال شروع نشده است.</p>
+              <p className="font-bold sds-text-primary ">مسئول برنامه‌ریزی‌شده اکنون: {personName(scheduledCurrentWorker)}</p>
+              <p className="mt-1 text-sm text-[var(--sds-warning)]">برای بازه {dateTimeFa(currentShift.currentSlot.startsAt)} تا {dateTimeFa(currentShift.currentSlot.endsAt)} هنوز شیفت فعال شروع نشده است.</p>
             </div>
             <ErpBadge tone="warning">شروع نشده</ErpBadge>
           </div>
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="font-bold text-slate-900 dark:text-white">شیفت فعال وجود ندارد</p>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">برای زمان فعلی بازه برنامه‌ریزی‌شده‌ای پیدا نشد.</p>
+              <p className="font-bold sds-text-primary ">شیفت فعال وجود ندارد</p>
+              <p className="mt-1 text-sm sds-text-secondary ">برای زمان فعلی بازه برنامه‌ریزی‌شده‌ای پیدا نشد.</p>
             </div>
             <ErpBadge tone="neutral">بدون شیفت</ErpBadge>
           </div>
@@ -348,7 +349,7 @@ export default function SecurityShiftsPage() {
           <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[220px_minmax(0,1fr)]">
             <label>
               <span className={labelClass}>ماه برنامه</span>
-              <select className={inputClass} value={visibleMonth} onChange={(e) => setVisibleMonth(e.target.value)}>
+              <ErpSelect className={inputClass} value={visibleMonth} onChange={(e) => setVisibleMonth(e.target.value)}>
                 {Array.from({ length: 36 }, (_, index) => {
                   const [baseYear, baseMonth] = PersianCalendar.now().slice(0, 7).split('/').map(Number);
                   const offset = index - 12;
@@ -358,7 +359,7 @@ export default function SecurityShiftsPage() {
                   const value = `${year}/${String(month).padStart(2, '0')}`;
                   return <option key={value} value={value}>{value}</option>;
                 })}
-              </select>
+              </ErpSelect>
             </label>
             {workflow?.activeSession && (
               <ErpCard className="p-4" tone="success">
@@ -375,7 +376,7 @@ export default function SecurityShiftsPage() {
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
             {dayGroups.map(([day, items]) => (
               <ErpCard key={day} className="p-4">
-                <p className="font-semibold text-slate-900 dark:text-white">{day} · {PersianCalendar.getPersianDayOfWeek(day)}</p>
+                <p className="font-semibold sds-text-primary ">{day} · {PersianCalendar.getPersianDayOfWeek(day)}</p>
                 <div className="mt-3 space-y-3">
                   {items.map((slot: any) => {
                     const attendance = slot.attendance?.find((item: any) => item.personnelId === workflow.personnel.id);
@@ -383,12 +384,12 @@ export default function SecurityShiftsPage() {
                     const canAttend = isWorker && !attendance && now >= new Date(slot.startsAt).getTime() - slot.plan.earlyArrivalMinutes * 60_000;
                     const waiting = elapsedMinutes(slot.startsAt, now);
                     return (
-                      <div key={slot.id} className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+                      <div key={slot.id} className="rounded-lg border border-[var(--sds-border-subtle)] p-3 dark:border-[var(--sds-border-default)]">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <p className="font-semibold">{timeFa(slot.startsAt)} تا {timeFa(slot.endsAt)}</p>
                           {slotStatusBadge(slot)}
                         </div>
-                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                        <p className="mt-1 text-xs leading-5 sds-text-muted">
                           {slot.replacementPersonnelId === workflow.personnel.id ? 'وظیفه جایگزین' : 'شیفت برنامه‌ریزی‌شده'}
                           {attendance ? ` · حضور ${dateTimeFa(attendance.arrivedAt)}${attendance.delayMinutes ? ` · ${attendance.delayMinutes} دقیقه تأخیر` : ''}` : ` · انتظار ${waiting.toLocaleString('fa-IR')} دقیقه`}
                         </p>
@@ -427,7 +428,7 @@ export default function SecurityShiftsPage() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="font-semibold">{dateTimeFa(slot.startsAt)} تا {dateTimeFa(slot.endsAt)} · {personName(worker)}</p>
-                      <p className="mt-1 text-xs leading-5 text-slate-500">
+                      <p className="mt-1 text-xs leading-5 sds-text-muted">
                         برنامه: {personName(slot.plannedPersonnel)}
                         {slot.replacementPersonnel ? ` · جایگزین: ${personName(slot.replacementPersonnel)}` : ''}
                         {slot.probableNoShowAt ? ` · عدم حضور احتمالی از ${dateTimeFa(slot.probableNoShowAt)}` : ''}
@@ -443,53 +444,53 @@ export default function SecurityShiftsPage() {
                   </div>
 
                   {isDraft && draft.mode === 'replacement' && (
-                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-slate-200 p-3 md:grid-cols-3 dark:border-slate-700">
-                      <label><span className={labelClass}>نیروی جایگزین</span><select className={inputClass} value={replacement.personnelId} onChange={(e) => setReplacement({ ...replacement, personnelId: e.target.value })}><option value="">انتخاب کنید</option>{personnelOptions.map((person: any) => <option key={person.id} value={person.id}>{personName(person)}</option>)}</select></label>
-                      <label className="md:col-span-2"><span className={labelClass}>دلیل override در صورت هشدار استراحت/تداخل</span><input className={inputClass} value={replacement.overrideReason} onChange={(e) => setReplacement({ ...replacement, overrideReason: e.target.value })} /></label>
+                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-[var(--sds-border-subtle)] p-3 md:grid-cols-3 dark:border-[var(--sds-border-default)]">
+                      <label><span className={labelClass}>نیروی جایگزین</span><ErpSelect className={inputClass} value={replacement.personnelId} onChange={(e) => setReplacement({ ...replacement, personnelId: e.target.value })}><option value="">انتخاب کنید</option>{personnelOptions.map((person: any) => <option key={person.id} value={person.id}>{personName(person)}</option>)}</ErpSelect></label>
+                      <label className="md:col-span-2"><span className={labelClass}>دلیل override در صورت هشدار استراحت/تداخل</span><ErpInput className={inputClass} value={replacement.overrideReason} onChange={(e) => setReplacement({ ...replacement, overrideReason: e.target.value })} /></label>
                       <ErpButton label="ثبت جایگزین" icon={FaCheck} disabled={!replacement.personnelId} onClick={() => submitReplacement(slot)} />
                     </div>
                   )}
 
                   {isDraft && draft.mode === 'temporary' && (
-                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-slate-200 p-3 md:grid-cols-3 dark:border-slate-700">
-                      <label><span className={labelClass}>نیروی پوشش موقت</span><select className={inputClass} value={temporary.personnelId} onChange={(e) => setTemporary({ ...temporary, personnelId: e.target.value })}><option value="">انتخاب کنید</option>{personnelOptions.map((person: any) => <option key={person.id} value={person.id}>{personName(person)}</option>)}</select></label>
+                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-[var(--sds-border-subtle)] p-3 md:grid-cols-3 dark:border-[var(--sds-border-default)]">
+                      <label><span className={labelClass}>نیروی پوشش موقت</span><ErpSelect className={inputClass} value={temporary.personnelId} onChange={(e) => setTemporary({ ...temporary, personnelId: e.target.value })}><option value="">انتخاب کنید</option>{personnelOptions.map((person: any) => <option key={person.id} value={person.id}>{personName(person)}</option>)}</ErpSelect></label>
                       <label><span className={labelClass}>شروع پوشش</span><PersianCalendarComponent showTime value={temporary.startsAt} onChange={(startsAt) => setTemporary({ ...temporary, startsAt })} /></label>
                       <label><span className={labelClass}>پایان پوشش</span><PersianCalendarComponent showTime value={temporary.endsAt} onChange={(endsAt) => setTemporary({ ...temporary, endsAt })} /></label>
-                      <label><span className={labelClass}>یادداشت</span><input className={inputClass} value={temporary.note} onChange={(e) => setTemporary({ ...temporary, note: e.target.value })} /></label>
+                      <label><span className={labelClass}>یادداشت</span><ErpInput className={inputClass} value={temporary.note} onChange={(e) => setTemporary({ ...temporary, note: e.target.value })} /></label>
                       <ErpButton label="ثبت پوشش موقت" icon={FaCheck} disabled={!temporary.personnelId} onClick={() => submitTemporary(slot)} />
                     </div>
                   )}
 
                   {isDraft && draft.mode === 'force-close' && (
-                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-red-200 p-3 md:grid-cols-2 dark:border-red-900">
-                      <label><span className={labelClass}>دلیل بستن اجباری</span><input className={inputClass} value={forceClose.reason} onChange={(e) => setForceClose({ ...forceClose, reason: e.target.value })} /></label>
-                      <label><span className={labelClass}>خلاصه گزارش مدیر</span><input className={inputClass} value={forceClose.summary} onChange={(e) => setForceClose({ ...forceClose, summary: e.target.value })} /></label>
+                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-[var(--sds-danger)] p-3 md:grid-cols-2">
+                      <label><span className={labelClass}>دلیل بستن اجباری</span><ErpInput className={inputClass} value={forceClose.reason} onChange={(e) => setForceClose({ ...forceClose, reason: e.target.value })} /></label>
+                      <label><span className={labelClass}>خلاصه گزارش مدیر</span><ErpInput className={inputClass} value={forceClose.summary} onChange={(e) => setForceClose({ ...forceClose, summary: e.target.value })} /></label>
                       <ErpButton label="بستن با حسابرسی" tone="danger" disabled={!forceClose.reason.trim() || !forceClose.summary.trim()} onClick={() => submitForceClose(slot.session.id)} />
                     </div>
                   )}
 
                   {isDraft && draft.mode === 'attendance-correction' && (
-                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-amber-200 p-3 md:grid-cols-4 dark:border-amber-900">
+                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-[var(--sds-warning)] p-3 md:grid-cols-4">
                       <label className="md:col-span-2"><span className={labelClass}>زمان اصلاح‌شده حضور</span><PersianCalendarComponent showTime value={correction.arrivedAt} onChange={(arrivedAt) => setCorrection({ ...correction, arrivedAt })} /></label>
-                      <label className="md:col-span-2"><span className={labelClass}>دلیل اصلاح</span><input className={inputClass} value={correction.reason} onChange={(e) => setCorrection({ ...correction, reason: e.target.value })} /></label>
+                      <label className="md:col-span-2"><span className={labelClass}>دلیل اصلاح</span><ErpInput className={inputClass} value={correction.reason} onChange={(e) => setCorrection({ ...correction, reason: e.target.value })} /></label>
                       <ErpButton label="ثبت اصلاح حضور" tone="warning" disabled={!correction.attendanceId || !correction.reason.trim()} onClick={submitCorrection} />
                     </div>
                   )}
 
                   {isDraft && draft.mode === 'session-correction' && (
-                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-amber-200 p-3 md:grid-cols-2 dark:border-amber-900">
+                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-[var(--sds-warning)] p-3 md:grid-cols-2">
                       <label><span className={labelClass}>شروع مؤثر شیفت</span><PersianCalendarComponent showTime value={sessionCorrection.startedAt} onChange={(startedAt) => setSessionCorrection({ ...sessionCorrection, startedAt })} /></label>
                       <label><span className={labelClass}>پایان مؤثر شیفت</span><PersianCalendarComponent showTime value={sessionCorrection.endedAt} onChange={(endedAt) => setSessionCorrection({ ...sessionCorrection, endedAt })} clearable /></label>
-                      <label className="md:col-span-2"><span className={labelClass}>دلیل اصلاح یا بازسازی</span><textarea className={`${inputClass} min-h-24`} value={sessionCorrection.reason} onChange={(event) => setSessionCorrection({ ...sessionCorrection, reason: event.target.value })} /></label>
-                      <label className="md:col-span-2 flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={sessionCorrection.deviationConfirmed} onChange={(event) => setSessionCorrection({ ...sessionCorrection, deviationConfirmed: event.target.checked })} className="h-5 w-5 accent-[#074747]" />خروج احتمالی زمان مؤثر از بازه برنامه را بررسی و تأیید می‌کنم.</label>
+                      <label className="md:col-span-2"><span className={labelClass}>دلیل اصلاح یا بازسازی</span><ErpTextarea className={`${inputClass} min-h-24`} value={sessionCorrection.reason} onChange={(event) => setSessionCorrection({ ...sessionCorrection, reason: event.target.value })} /></label>
+                      <label className="md:col-span-2 flex min-h-11 items-center gap-2 text-sm"><ErpCheckboxControl checked={sessionCorrection.deviationConfirmed} onChange={(event) => setSessionCorrection({ ...sessionCorrection, deviationConfirmed: event.target.checked })} className="h-5 w-5 accent-[var(--sds-accent)]" />خروج احتمالی زمان مؤثر از بازه برنامه را بررسی و تأیید می‌کنم.</label>
                       <ErpButton label="ثبت اصلاح زمان‌های شیفت" tone="warning" disabled={!sessionCorrection.startedAt || !sessionCorrection.reason.trim()} onClick={() => submitSessionCorrection(slot)} />
                     </div>
                   )}
 
                   {isDraft && draft.mode === 'confirm-no-shift' && (
-                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-rose-200 p-3 dark:border-rose-900">
+                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg border border-[var(--sds-danger)] p-3">
                       <ErpInlineState kind="stale" title="این تصمیم تأیید می‌کند که در این بازه هیچ جلسه عملیاتی شیفت انجام نشده است." />
-                      <label><span className={labelClass}>دلیل عدم انجام شیفت</span><textarea className={`${inputClass} min-h-24`} value={noShiftReason} onChange={(event) => setNoShiftReason(event.target.value)} /></label>
+                      <label><span className={labelClass}>دلیل عدم انجام شیفت</span><ErpTextarea className={`${inputClass} min-h-24`} value={noShiftReason} onChange={(event) => setNoShiftReason(event.target.value)} /></label>
                       <ErpButton label="تأیید عدم انجام شیفت" tone="danger" disabled={!noShiftReason.trim()} onClick={() => submitNoShiftConfirmation(slot)} />
                     </div>
                   )}
@@ -503,23 +504,23 @@ export default function SecurityShiftsPage() {
 
       {view === 'plans' && defaults && (
         <ErpSection title="برنامه شیفت‌ها">
-          {publishedPlan && <div className="mb-5 rounded-xl border border-slate-200 p-4 dark:border-slate-800"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold">جمعیت عملیاتی جاری</h3><ErpStatus label="برنامه منتشرشده" tone="success" /></div><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{personName(publishedPlan.primaryA)} ← {personName(publishedPlan.primaryB)} ← {personName(publishedPlan.primaryC)}</p></div>}
+          {publishedPlan && <div className="mb-5 rounded-xl border border-[var(--sds-border-subtle)] p-4 dark:border-[var(--sds-border-subtle)]"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold">جمعیت عملیاتی جاری</h3><ErpStatus label="برنامه منتشرشده" tone="success" /></div><p className="mt-2 text-sm sds-text-secondary ">{personName(publishedPlan.primaryA)} ← {personName(publishedPlan.primaryB)} ← {personName(publishedPlan.primaryC)}</p></div>}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3 [&>label:nth-child(4)]:hidden [&>label:nth-child(6)]:hidden">
-            <label><span className={labelClass}>عنوان</span><input className={inputClass} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
-            <label><span className={labelClass}>سال شمسی</span><input className={inputClass} type="number" value={form.persianYear} onChange={(e) => setForm({ ...form, persianYear: Number(e.target.value) })} /></label>
+            <label><span className={labelClass}>عنوان</span><ErpInput className={inputClass} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
+            <label><span className={labelClass}>سال شمسی</span><ErpInput className={inputClass} type="number" value={form.persianYear} onChange={(e) => setForm({ ...form, persianYear: Number(e.target.value) })} /></label>
             <label><span className={labelClass}>تاریخ شروع</span><PersianCalendarComponent value={form.anchorDate} onChange={(anchorDate) => setForm({ ...form, anchorDate })} /></label>
-            <label><span className={labelClass}>ساعت شروع</span><input className={inputClass} type="time" value={form.anchorTime} onChange={(e) => setForm({ ...form, anchorTime: e.target.value })} /></label>
+            <label><span className={labelClass}>ساعت شروع</span><ErpInput className={inputClass} type="time" value={form.anchorTime} onChange={(e) => setForm({ ...form, anchorTime: e.target.value })} /></label>
             <label><span className={labelClass}>تاریخ پایان تولید</span><PersianCalendarComponent value={form.untilDate} onChange={(untilDate) => setForm({ ...form, untilDate })} /></label>
-            <label><span className={labelClass}>مدت هر شیفت (دقیقه)</span><input className={inputClass} type="number" min={60} value={form.slotDurationMinutes} onChange={(e) => setForm({ ...form, slotDurationMinutes: Number(e.target.value) })} /></label>
-            <label><span className={labelClass}>پنجره حضور زودهنگام</span><input className={inputClass} type="number" value={form.earlyArrivalMinutes} onChange={(e) => setForm({ ...form, earlyArrivalMinutes: Number(e.target.value) })} /></label>
-            <label><span className={labelClass}>آستانه هشدار تأخیر</span><input className={inputClass} type="number" value={form.lateAlertMinutes} onChange={(e) => setForm({ ...form, lateAlertMinutes: Number(e.target.value) })} /></label>
+            <label><span className={labelClass}>مدت هر شیفت (دقیقه)</span><ErpInput className={inputClass} type="number" min={60} value={form.slotDurationMinutes} onChange={(e) => setForm({ ...form, slotDurationMinutes: Number(e.target.value) })} /></label>
+            <label><span className={labelClass}>پنجره حضور زودهنگام</span><ErpInput className={inputClass} type="number" value={form.earlyArrivalMinutes} onChange={(e) => setForm({ ...form, earlyArrivalMinutes: Number(e.target.value) })} /></label>
+            <label><span className={labelClass}>آستانه هشدار تأخیر</span><ErpInput className={inputClass} type="number" value={form.lateAlertMinutes} onChange={(e) => setForm({ ...form, lateAlertMinutes: Number(e.target.value) })} /></label>
             {[0, 1, 2].map((index) => (
               <label key={index}>
                 <span className={labelClass}>نیروی اصلی {['A', 'B', 'C'][index]}</span>
-                <select className={inputClass} value={form.primaryPersonnelIds[index]} onChange={(e) => { const ids = [...form.primaryPersonnelIds]; ids[index] = e.target.value; setForm({ ...form, primaryPersonnelIds: ids }); }}>
+                <ErpSelect className={inputClass} value={form.primaryPersonnelIds[index]} onChange={(e) => { const ids = [...form.primaryPersonnelIds]; ids[index] = e.target.value; setForm({ ...form, primaryPersonnelIds: ids }); }}>
                   <option value="">انتخاب کنید</option>
                   {personnelOptions.map((person: any) => <option key={person.id} value={person.id}>{personName(person)}</option>)}
-                </select>
+                </ErpSelect>
               </label>
             ))}
           </div>
@@ -532,7 +533,7 @@ export default function SecurityShiftsPage() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="font-semibold">{plan.title} · بازنگری {plan.revision.toLocaleString('fa-IR')}</p>
-                    <p className="mt-1 text-xs text-slate-500">{personName(plan.primaryA)} ← {personName(plan.primaryB)} ← {personName(plan.primaryC)} · {plan._count.slots.toLocaleString('fa-IR')} بازه</p>
+                    <p className="mt-1 text-xs sds-text-muted">{personName(plan.primaryA)} ← {personName(plan.primaryB)} ← {personName(plan.primaryC)} · {plan._count.slots.toLocaleString('fa-IR')} بازه</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {plan.status === 'DRAFT' && <ErpButton label="حذف پیش‌نویس" icon={FaTrash} tone="danger" variant="outline" onClick={() => deletePlan(plan)} />}
@@ -554,7 +555,7 @@ export default function SecurityShiftsPage() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="font-semibold">{dateTimeFa(slot.startsAt)} · {personName(slotWorker(slot))}</p>
-                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                    <p className="mt-1 text-xs leading-5 sds-text-muted">
                       برنامه: {personName(slot.plannedPersonnel)}
                       {slot.replacementPersonnel ? ` · جایگزین: ${personName(slot.replacementPersonnel)}${slot.overrideReason ? ` · دلیل: ${slot.overrideReason}` : ''}` : ''}
                       {slot.leaveRequestId ? ' · ناشی از مرخصی تأییدشده' : ''}
@@ -564,15 +565,15 @@ export default function SecurityShiftsPage() {
                 </div>
                 <div className="mt-3 grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
                   {slot.attendance?.map((item: any) => (
-                    <div key={item.id} className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
+                    <div key={item.id} className="rounded-lg bg-[var(--sds-surface-subtle)] p-3 dark:bg-[var(--sds-surface-subtle)]">
                       حضور: {dateTimeFa(item.arrivedAt)} · تأخیر {item.delayMinutes.toLocaleString('fa-IR')} دقیقه
-                      {item.originalArrivedAt && <span className="block text-xs text-amber-700">اصلاح‌شده از {dateTimeFa(item.originalArrivedAt)} · دلیل: {item.correctionReason}</span>}
+                      {item.originalArrivedAt && <span className="block text-xs text-[var(--sds-warning)]">اصلاح‌شده از {dateTimeFa(item.originalArrivedAt)} · دلیل: {item.correctionReason}</span>}
                     </div>
                   ))}
-                  {slot.session && <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">جلسه: {sessionLabel[slot.session.status]} · شروع {dateTimeFa(slot.session.startedAt)}{slot.session.endedAt ? ` · پایان ${dateTimeFa(slot.session.endedAt)}` : ''}{slot.session.forceCloseReason ? ` · دلیل مدیر: ${slot.session.forceCloseReason}` : ''}</div>}
-                  {slot.temporaryCoverage?.map((coverage: any) => <div key={coverage.id} className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">پوشش موقت: {personName(coverage.personnel)} · {dateTimeFa(coverage.startsAt)} تا {dateTimeFa(coverage.endsAt)}{coverage.note ? ` · ${coverage.note}` : ''}</div>)}
-                  {slot.report && <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">گزارش شیفت: {slot.report.summary}</div>}
-                  {slot.probableNoShowAt && <div className="rounded-lg bg-amber-50 p-3 text-amber-800">عدم حضور احتمالی در {dateTimeFa(slot.probableNoShowAt)}</div>}
+                  {slot.session && <div className="rounded-lg bg-[var(--sds-surface-subtle)] p-3 dark:bg-[var(--sds-surface-subtle)]">جلسه: {sessionLabel[slot.session.status]} · شروع {dateTimeFa(slot.session.startedAt)}{slot.session.endedAt ? ` · پایان ${dateTimeFa(slot.session.endedAt)}` : ''}{slot.session.forceCloseReason ? ` · دلیل مدیر: ${slot.session.forceCloseReason}` : ''}</div>}
+                  {slot.temporaryCoverage?.map((coverage: any) => <div key={coverage.id} className="rounded-lg bg-[var(--sds-surface-subtle)] p-3 dark:bg-[var(--sds-surface-subtle)]">پوشش موقت: {personName(coverage.personnel)} · {dateTimeFa(coverage.startsAt)} تا {dateTimeFa(coverage.endsAt)}{coverage.note ? ` · ${coverage.note}` : ''}</div>)}
+                  {slot.report && <div className="rounded-lg bg-[var(--sds-surface-subtle)] p-3 dark:bg-[var(--sds-surface-subtle)]">گزارش شیفت: {slot.report.summary}</div>}
+                  {slot.probableNoShowAt && <div className="rounded-lg bg-[var(--sds-warning-soft)] p-3 text-[var(--sds-warning)]">عدم حضور احتمالی در {dateTimeFa(slot.probableNoShowAt)}</div>}
                 </div>
               </ErpCard>
             ))}

@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { FaChevronDown, FaChevronUp, FaHistory, FaRedo } from 'react-icons/fa';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { ErpButton, ErpInlineState, ErpSection, ErpShiftTimeline, ErpSkeleton, ErpStatus, ErpWorkspacePage } from '@/components/erp';
+import { ErpPressable } from '@/components/erp';
 import { securityAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 
@@ -62,7 +63,7 @@ export default function SecurityPersonnelHistoryPage() {
             {!data.shifts.length ? (
               <ErpInlineState kind="empty" title="شیفت پایان‌یافته‌ای در این بازه وجود ندارد." />
             ) : (
-              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              <div className="divide-y divide-[var(--sds-border-subtle)] dark:divide-[var(--sds-border-subtle)]">
                 {data.shifts.map((slot: any) => {
                   const open = expanded === slot.id;
                   const session = slot.session;
@@ -81,18 +82,18 @@ export default function SecurityPersonnelHistoryPage() {
                   }));
                   return (
                     <article key={slot.id} className="py-3 first:pt-0 last:pb-0">
-                      <button type="button" onClick={() => setExpanded(open ? null : slot.id)} className="flex min-h-12 w-full items-center justify-between gap-3 rounded-xl px-2 text-right outline-none transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-[#074747] dark:hover:bg-slate-800/60" aria-expanded={open}>
+                      <ErpPressable type="button" onClick={() => setExpanded(open ? null : slot.id)} className="flex min-h-12 w-full items-center justify-between gap-3 rounded-xl px-2 text-right outline-none transition hover:bg-[var(--sds-surface-subtle)] focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)] dark:hover:bg-[var(--sds-surface-subtle)]" aria-expanded={open}>
                         <span className="min-w-0">
                           <span className="block font-bold">{dateTime(slot.startsAt)} تا {dateTime(slot.endsAt)}</span>
-                          <span className="mt-1 block text-xs text-slate-500">پایان واقعی: {dateTime(session?.endedAt)}</span>
+                          <span className="mt-1 block text-xs sds-text-muted">پایان واقعی: {dateTime(session?.endedAt)}</span>
                         </span>
                         <span className="flex items-center gap-2">
                           <ErpStatus label={session?.status === 'FORCE_CLOSED' ? 'بسته‌شده توسط مدیر' : 'تکمیل‌شده'} tone="neutral" />
                           {open ? <FaChevronUp aria-hidden="true" /> : <FaChevronDown aria-hidden="true" />}
                         </span>
-                      </button>
+                      </ErpPressable>
                       {open && (
-                        <div className="mr-2 mt-4 border-r border-slate-200 pr-4 dark:border-slate-800">
+                        <div className="mr-2 mt-4 border-r border-[var(--sds-border-subtle)] pr-4 dark:border-[var(--sds-border-subtle)]">
                           <ErpShiftTimeline title="خط زمانی" entries={timeline} formatTimestamp={dateTime} compact />
                         </div>
                       )}

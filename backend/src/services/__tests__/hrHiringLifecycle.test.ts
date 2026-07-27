@@ -435,7 +435,7 @@ const base = (
       { id: "SIGNED_CONTRACT", status: "IN_PROGRESS", detailVisible: false, actionIds: [] },
       { id: "INSURANCE", status: "IN_PROGRESS", detailVisible: false, actionIds: [] },
       { id: "PAYROLL_PARTICIPATION", status: "PENDING", detailVisible: false, actionIds: [] },
-      { id: "EMPLOYMENT_ACTIVATION", status: "BLOCKED", detailVisible: true, actionIds: ["ACTIVATE_EMPLOYMENT"] },
+      { id: "EMPLOYMENT_ACTIVATION", status: "BLOCKED", detailVisible: true, actionIds: [] },
       { id: "ONBOARDING_TASK", status: "PENDING", detailVisible: false, actionIds: [] },
     ],
   );

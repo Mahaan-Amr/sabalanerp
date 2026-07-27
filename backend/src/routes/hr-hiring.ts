@@ -1735,7 +1735,7 @@ router.post('/applications/:id/pre-identity/items/:itemId/resolve', requireAutho
   res.json({ success: true, data: row });
 }));
 
-router.get('/applications/:id/pre-identity/items/:itemId/evidence/download', requireAuthority('HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.get('/applications/:id/pre-identity/items/:itemId/evidence/download', requireAuthority('HR_PROCESSOR', 'HR_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const item = await prisma.hrPreIdentityChecklistItem.findFirst({ where: { id: req.params.itemId, applicationId: req.params.id } });
   if (!item?.storageName || !item.originalName) return res.status(404).json({ success: false, error: 'فایل گزارش این الزام پیدا نشد.' });
   await audit(req.params.id, 'PRE_IDENTITY_EVIDENCE_DOWNLOADED', req, { itemId: item.id });
@@ -1855,6 +1855,10 @@ router.post('/applications/:id/collateral-requirements', requireAuthority('COMPA
 router.get('/applications/:id/assessments/:assessmentId/download', requireAuthority('HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const row = await prisma.hrCandidateAssessment.findFirst({ where: { id: req.params.assessmentId, applicationId: req.params.id } });
   if (!row?.storageName || !row.originalName) return res.status(404).json({ success: false, error: 'فایل ارزیابی پیدا نشد.' });
+  if (row.assessmentType === 'OTHER') {
+    const hrAuthority = await prisma.hrHiringAuthority.findFirst({ where: { userId: actorId(req), authority: { in: ['HR_PROCESSOR', 'HR_MANAGER'] }, isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { id: true } });
+    if (!hrAuthority) return res.status(403).json({ success: false, error: 'این مدرک ارزیابی برای نقش شما قابل دسترسی نیست.' });
+  }
   await audit(req.params.id, 'CANDIDATE_ASSESSMENT_DOWNLOADED', req, { assessmentId: row.id });
   await audit(req.params.id, 'SENSITIVE_RECRUITMENT_EVIDENCE_ACCESSED', req, { evidenceType: 'ASSESSMENT', evidenceId: row.id, action: 'DOWNLOAD' });
   res.download(safeHiringStoragePath(row.storageName), row.originalName);

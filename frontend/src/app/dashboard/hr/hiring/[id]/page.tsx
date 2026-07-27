@@ -28,6 +28,7 @@ import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentSc
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
 import {
   dateTimeFa,
+  dateFa,
   fromIsoDate,
   fromIsoDateTime,
   HrField,
@@ -403,7 +404,9 @@ export default function HiringCasePage() {
   };
   const downloadIndexedEvidence = (item: any) => {
     const request =
-      item.downloadKind === "DOCUMENT"
+      item.downloadKind === "PRE_IDENTITY"
+        ? () => hiringAPI.downloadPreIdentityEvidence(id, item.id)
+        : item.downloadKind === "DOCUMENT"
         ? () => hiringAPI.downloadDocument(id, item.id)
         : item.downloadKind === "ASSESSMENT"
           ? () => hiringAPI.downloadAssessment(id, item.id)
@@ -2208,7 +2211,7 @@ export default function HiringCasePage() {
                   <ErpCard className="space-y-2 p-4">
                     <p className="font-bold">مشارکت حقوق و دستمزد</p>
                     <div className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800">
-                      <p>تاریخ شروع برنامه‌ریزی‌شده: {plannedStartDate || "—"}</p>
+                      <p>تاریخ شروع برنامه‌ریزی‌شده: {dateFa(data.scheduledStartDate)}</p>
                       <p className="mt-2 font-semibold">حقوق و مزایای تأییدشده</p>
                       {(compensation?.componentsJson || []).map((item: any, index: number) => (
                         <div key={`${item.label}-${index}`} className="flex justify-between gap-3">
@@ -2287,7 +2290,7 @@ export default function HiringCasePage() {
           >
             <ErpCard className="space-y-3 p-4">
               <div className="grid gap-2 text-sm md:grid-cols-4">
-                <p>شروع برنامه‌ریزی‌شده: {fromIsoDate(data.activationReadiness.plannedStartDate) || "—"}</p>
+                <p>شروع برنامه‌ریزی‌شده: {dateFa(data.activationReadiness.plannedStartDate)}</p>
                 <p>قرارداد: {hrDisplayLabel(data.activationReadiness.paperContractClearance)}</p>
                 <p>حقوق و دستمزد: {data.activationReadiness.payrollConfigured ? "تنظیم‌شده" : "تنظیم‌نشده"}</p>
                 <p>

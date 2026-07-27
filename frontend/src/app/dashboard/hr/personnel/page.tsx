@@ -14,6 +14,7 @@ import {
 } from '@/components/erp';
 import { hrAPI } from '@/lib/api';
 import { hiringAPI } from '@/lib/hiringApi';
+import { hrDisplayLabel } from '@/features/hr/hrDisplay';
 import {
   apiError, assignmentTypeLabel, dateFa, employmentStatusLabel,
   fieldClass, HrField, HrMessage, toIsoDate,
@@ -244,7 +245,7 @@ function PersonnelCard(props: any) {
             <Info label="وضعیت" value={relationship ? employmentStatusLabel[relationship.status] : '—'} />
             <Info label="تعداد تخصیص‌ها" value={(relationship?.assignments?.length || 0).toLocaleString('fa-IR')} />
           </div>
-          <PersonnelScheduleEditor key={`${person.workSchedules?.[0]?.id || 'new-schedule'}-${person.workScheduleChanges?.[0]?.id || 'no-change'}`} person={person} saving={saving} run={run} authorities={authorities} />
+          <PersonnelScheduleEditor key={`${person.workSchedules?.[0]?.id || 'new-schedule'}-${person.workScheduleChanges?.[0]?.id || 'no-change'}`} person={person} saving={saving} run={run} />
           {relationship && (
             <>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -270,7 +271,7 @@ function PersonnelCard(props: any) {
   );
 }
 
-function PersonnelScheduleEditor({ person, saving, run, authorities }: any) {
+function PersonnelScheduleEditor({ person, saving, run }: any) {
   const schedule = person.workSchedules?.[0];
   const change = person.workScheduleChanges?.[0];
   const draftSchedule = change?.effectiveFrom && Array.isArray(change.daysJson)
@@ -279,8 +280,7 @@ function PersonnelScheduleEditor({ person, saving, run, authorities }: any) {
   const [value, setValue] = useState<WorkScheduleValue>(() => workScheduleFromApi(draftSchedule));
   const [proposalNote, setProposalNote] = useState('');
   const [returnReason, setReturnReason] = useState('');
-  const canPrepare = authorities.includes('HR_PROCESSOR');
-  const canReview = authorities.includes('HR_MANAGER');
+  const capabilities = person.workScheduleCapabilities || {};
 
   return (
     <div className="mt-4">
@@ -289,20 +289,23 @@ function PersonnelScheduleEditor({ person, saving, run, authorities }: any) {
         <p className="mt-1 text-xs text-slate-500">
           سرپرست مسئول پیشنهاد می‌دهد؛ کارشناس منابع انسانی آماده و ارسال می‌کند؛ مدیر منابع انسانی دیگری تأیید می‌کند.
         </p>
-        <p className="mt-2">وضعیت آخرین درخواست: {change?.status || 'بدون درخواست باز'}</p>
+        <p className="mt-2">وضعیت آخرین درخواست: {change ? hrDisplayLabel(change.status) : 'بدون درخواست باز'}</p>
         {change?.returnReason && <p className="mt-1 text-rose-700">دلیل بازگشت: {change.returnReason}</p>}
       </div>
-      {(!change || change.status === 'APPROVED') && (
-        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
-          <input className={fieldClass} placeholder="دلیل یا توضیح پیشنهاد سرپرست مسئول" value={proposalNote} onChange={(event) => setProposalNote(event.target.value)} />
+      {capabilities.canPropose && (
+        <div className="mt-3 space-y-3">
+          <WorkScheduleEditor value={value} onChange={setValue} />
+          <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+            <input className={fieldClass} placeholder="دلیل پیشنهاد سرپرست مسئول" value={proposalNote} onChange={(event) => setProposalNote(event.target.value)} />
           <ErpButton
             label="ثبت پیشنهاد توسط سرپرست مسئول"
-            disabled={saving}
-            onClick={() => run(() => hrAPI.proposePersonnelWorkSchedule(person.id, proposalNote), 'پیشنهاد تغییر ساعت کاری ثبت شد.')}
+            disabled={saving || !proposalNote.trim() || !value.effectiveDate}
+            onClick={() => run(() => hrAPI.proposePersonnelWorkSchedule(person.id, { ...workSchedulePayload(value), proposalNote: proposalNote.trim() }), 'پیشنهاد تغییر ساعت کاری ثبت شد.')}
           />
+          </div>
         </div>
       )}
-      {change && ['PROPOSED', 'RETURNED', 'DRAFT'].includes(change.status) && canPrepare && (
+      {change && capabilities.canPrepare && (
         <div className="mt-3">
           <WorkScheduleEditor value={value} onChange={setValue} />
           <div className="mt-3 flex flex-wrap gap-2">
@@ -312,7 +315,7 @@ function PersonnelScheduleEditor({ person, saving, run, authorities }: any) {
               disabled={saving || !value.effectiveDate}
               onClick={() => run(() => hrAPI.preparePersonnelWorkSchedule(person.id, change.id, workSchedulePayload(value)), 'پیش‌نویس برنامه کاری ذخیره شد.')}
             />
-            {change.status === 'DRAFT' && (
+            {capabilities.canSubmit && (
               <ErpButton
                 label="ارسال برای تأیید مدیر منابع انسانی"
                 disabled={saving}
@@ -323,21 +326,21 @@ function PersonnelScheduleEditor({ person, saving, run, authorities }: any) {
           </div>
         </div>
       )}
-      {change?.status === 'SUBMITTED' && canReview && (
+      {change?.status === 'SUBMITTED' && (capabilities.canApprove || capabilities.canReturn) && (
         <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto_auto]">
           <input className={fieldClass} placeholder="دلیل بازگرداندن برای اصلاح" value={returnReason} onChange={(event) => setReturnReason(event.target.value)} />
-          <ErpButton
+          {capabilities.canReturn && <ErpButton
             label="بازگرداندن"
             disabled={saving || !returnReason.trim()}
             onClick={() => run(() => hrAPI.returnPersonnelWorkSchedule(person.id, change.id, returnReason), 'برنامه کاری برای اصلاح بازگردانده شد.')}
             tone="warning"
-          />
-          <ErpButton
+          />}
+          {capabilities.canApprove && <ErpButton
             label="تأیید و ایجاد نسخه اجرایی"
             disabled={saving}
             onClick={() => run(() => hrAPI.approvePersonnelWorkSchedule(person.id, change.id), 'نسخه اجرایی برنامه کاری تأیید شد.')}
             tone="success"
-          />
+          />}
         </div>
       )}
       {!change && schedule && (

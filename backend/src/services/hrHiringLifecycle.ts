@@ -144,6 +144,7 @@ export interface HiringLifecycleSource {
   collateralClearance?: string | null;
   collateralItems?: CollateralLike[];
   convertedAt?: Date | string | null;
+  scheduledStartDate?: Date | string | null;
   employmentRelationship?: { status: string } | null;
   contractClearance?: string | null;
   contracts?: ContractLike[];
@@ -176,7 +177,12 @@ export const projectHiringTaskCapabilities = (
   const blockingTasks =
     source.onboardingTasks?.filter((task) => task.activationBlocker) || [];
   const activationBlocked =
+    !source.scheduledStartDate ||
+    new Date(source.scheduledStartDate) > new Date() ||
+    source.identityClearance !== "APPROVED" ||
+    source.collateralClearance !== "APPROVED" ||
     source.contractClearance !== "APPROVED" ||
+    source.compensationClearance !== "APPROVED" ||
     !source.payrollParticipation ||
     blockingTasks.some((task) => !isCompleteTask(task.status));
   const employmentActive = source.employmentRelationship?.status === "ACTIVE";
@@ -243,7 +249,9 @@ export const projectHiringTaskCapabilities = (
       ownerAuthorities: ["HR_MANAGER"],
       detailVisible: activationVisible,
       actionIds:
-        activationVisible && !employmentActive ? ["ACTIVATE_EMPLOYMENT"] : [],
+        activationVisible && !employmentActive && !activationBlocked
+          ? ["ACTIVATE_EMPLOYMENT"]
+          : [],
     },
   ];
 

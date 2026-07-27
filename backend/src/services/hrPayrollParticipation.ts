@@ -11,16 +11,16 @@ export const normalizePayrollParticipationCommand = (
   scheduledStartDate: Date
 ) => {
   if (input.reviewConfirmed !== true) {
-    throw new Error('Payroll review must be explicitly confirmed.');
+    throw new Error('بررسی حقوق و مزایا باید به‌صورت صریح تأیید شود.');
   }
   const effectiveFrom = new Date(String(input.effectiveFrom || scheduledStartDate.toISOString()));
   if (Number.isNaN(effectiveFrom.getTime())) {
-    throw new Error('Payroll effective date is invalid.');
+    throw new Error('تاریخ شروع مشارکت حقوق و دستمزد معتبر نیست.');
   }
   const differs = utcDay(effectiveFrom) !== utcDay(scheduledStartDate);
   const startMismatchReason = String(input.startMismatchReason || '').trim();
   if (differs && !startMismatchReason) {
-    throw new Error('A reason is required when the payroll date differs from the planned start date.');
+    throw new Error('در صورت تفاوت تاریخ حقوق با تاریخ شروع برنامه‌ریزی‌شده، ثبت دلیل الزامی است.');
   }
   return { effectiveFrom, startMismatchReason: differs ? startMismatchReason : null };
 };

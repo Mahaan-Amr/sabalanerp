@@ -15,14 +15,14 @@ assert.throws(
     { effectiveFrom: '2026-07-24', reviewConfirmed: true },
     planned
   ),
-  /reason/i
+  /دلیل/
 );
 assert.throws(
   () => normalizePayrollParticipationCommand(
     { effectiveFrom: '2026-07-23' },
     planned
   ),
-  /confirm/i
+  /تأیید/
 );
 assert.equal(
   normalizePayrollParticipationCommand(

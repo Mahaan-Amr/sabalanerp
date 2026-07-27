@@ -31,7 +31,19 @@ test.describe('cross-role HR operational journeys', () => {
     const premature = await manager.post(`/hr-hiring/applications/${applicationId}/contracts/${contract.id}/approve`);
     expect(premature.ok()).toBeFalsy();
     expect((await recorder.post(`/hr-hiring/applications/${applicationId}/contracts/${contract.id}/submit`)).ok()).toBeTruthy();
-    expect((await manager.post(`/hr-hiring/applications/${applicationId}/contracts/${contract.id}/approve`)).ok()).toBeTruthy();
+    expect((await manager.post(`/hr-hiring/applications/${applicationId}/contracts/${contract.id}/return`, { data: { reason: 'E2E correction required' } })).ok()).toBeTruthy();
+    const replacementUpload = await recorder.post(`/hr-hiring/applications/${applicationId}/contracts`, {
+      multipart: {
+        contractNumber: `E2E-REPLACEMENT-${Date.now()}`,
+        effectiveFrom: env('HR_E2E_CONTRACT_START') || '2026-07-01',
+        effectiveTo: env('HR_E2E_CONTRACT_END') || '2026-12-31',
+        file: { name: 'employment-contract-replacement.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF') },
+      },
+    });
+    expect(replacementUpload.ok()).toBeTruthy();
+    const replacement = (await replacementUpload.json()).data;
+    expect((await recorder.post(`/hr-hiring/applications/${applicationId}/contracts/${replacement.id}/submit`)).ok()).toBeTruthy();
+    expect((await manager.post(`/hr-hiring/applications/${applicationId}/contracts/${replacement.id}/approve`)).ok()).toBeTruthy();
     await recorder.dispose();
     await manager.dispose();
   });
@@ -49,9 +61,15 @@ test.describe('cross-role HR operational journeys', () => {
       effectiveFrom: env('HR_E2E_PLANNED_START'), reviewConfirmed: true,
     } })).ok()).toBeTruthy();
     const detail = await manager.get(`/hr-hiring/applications/${applicationId}`);
-    const readiness = (await detail.json()).data.activationReadiness;
+    const detailData = (await detail.json()).data;
+    const readiness = detailData.activationReadiness;
     expect(readiness.insurance.blocking).toBe(false);
     expect(readiness.blockers).toEqual([]);
+    const restrictedContract = detailData.documentIndex?.find((item: any) => item.category === 'FINANCE_CONTRACT');
+    if (restrictedContract) {
+      expect(restrictedContract.restricted).toBe(true);
+      expect((await manager.get(`/hr-hiring/applications/${applicationId}/contracts/${restrictedContract.id}/download`)).status()).toBe(403);
+    }
     expect((await manager.post(`/hr-hiring/applications/${applicationId}/activate`)).ok()).toBeTruthy();
     await Promise.all([processor.dispose(), payroll.dispose(), manager.dispose()]);
   });
@@ -67,9 +85,20 @@ test.describe('cross-role HR operational journeys', () => {
     const change = (await proposalResponse.json()).data;
     const payload = { effectiveDate: env('HR_E2E_SCHEDULE_DATE'), days: [{ weekday: 0, startTime: '08:00', endTime: '17:00' }] };
     expect((await processor.put(`/hr/personnel/${personnelId}/work-schedule/changes/${change.id}/prepare`, { data: payload })).ok()).toBeTruthy();
+    const beforeApproval = await processor.get('/hr/personnel');
+    const personnelBeforeApproval = (await beforeApproval.json()).data.find((item: any) => item.id === personnelId);
+    expect(personnelBeforeApproval.workSchedules.some((item: any) => String(item.effectiveFrom).startsWith(payload.effectiveDate))).toBe(false);
     expect((await processor.post(`/hr/personnel/${personnelId}/work-schedule/changes/${change.id}/submit`)).ok()).toBeTruthy();
     expect((await manager.post(`/hr/personnel/${personnelId}/work-schedule/changes/${change.id}/approve`)).ok()).toBeTruthy();
     await Promise.all([supervisor.dispose(), processor.dispose(), manager.dispose()]);
+  });
+
+  test('generic workspace access cannot substitute for HR business authority', async () => {
+    test.skip(!env('HR_E2E_GENERIC_HR_WORKSPACE_TOKEN'));
+    const generic = await roleRequest(env('HR_E2E_GENERIC_HR_WORKSPACE_TOKEN'));
+    const response = await generic.put(`/hr-hiring/applications/${env('HR_E2E_APPLICATION_ID')}/insurance`, { data: { registrationPath: 'COMPANY', status: 'IN_PROGRESS' } });
+    expect(response.status()).toBe(403);
+    await generic.dispose();
   });
 });
 

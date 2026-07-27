@@ -1,3 +1,5 @@
+import { paperContractReviewState } from './hrEmploymentContract';
+
 type Authority = string;
 
 const identityTitle = (row: any) =>
@@ -19,9 +21,20 @@ export const buildHiringDocumentIndex = (
   authorities: Set<Authority>
 ) => {
   const canHr = authorities.has('HR_PROCESSOR') || authorities.has('HR_MANAGER');
-  const canManagement = canHr || authorities.has('COMPANY_MANAGER');
+  const canCompanyManagement = authorities.has('COMPANY_MANAGER');
   const canFinance = authorities.has('FINANCE_RECORDER') || authorities.has('FINANCE_MANAGER');
   const entries: any[] = [];
+
+  for (const row of application.preIdentityChecklistItems || []) {
+    if (!row.originalName) continue;
+    const entry = {
+      id: row.id, title: row.title, category: 'PRE_IDENTITY', version: row.attempt,
+      uploader: row.recordedBy, date: row.recordedAt || row.createdAt, reviewStatus: row.status,
+      safeOwner: 'منابع انسانی', originalName: row.originalName,
+      downloadKind: 'PRE_IDENTITY', canOpen: canHr, restricted: !canHr,
+    };
+    entries.push(canHr ? entry : restricted(entry));
+  }
 
   for (const row of application.documents || []) {
     const entry = {
@@ -33,19 +46,21 @@ export const buildHiringDocumentIndex = (
     entries.push(canHr ? entry : restricted(entry));
   }
   for (const row of application.assessments || []) {
+    const companySafe = row.assessmentType !== 'OTHER';
+    const canOpenAssessment = canHr || (canCompanyManagement && companySafe);
     const entry = {
       id: row.id, title: `ارزیابی ${row.assessmentType}`, category: 'ASSESSMENT', version: row.version,
       uploader: row.recordedBy, date: row.recordedAt, reviewStatus: row.status,
       safeOwner: 'منابع انسانی', originalName: row.originalName,
-      downloadKind: 'ASSESSMENT', canOpen: canManagement && Boolean(row.originalName), restricted: !canManagement,
+      downloadKind: 'ASSESSMENT', canOpen: canOpenAssessment && Boolean(row.originalName), restricted: !canOpenAssessment,
     };
-    entries.push(canManagement ? entry : restricted(entry));
+    entries.push(canOpenAssessment ? entry : restricted(entry));
   }
   for (const row of application.contracts || []) {
     const entry = {
       id: row.id, title: 'قرارداد استخدامی امضاشده', category: 'FINANCE_CONTRACT', version: row.version,
       uploader: row.uploadedBy, date: row.createdAt,
-      reviewStatus: row.approvedAt ? 'APPROVED' : row.returnedAt ? 'RETURNED' : row.submittedAt ? 'SUBMITTED' : 'DRAFT',
+      reviewStatus: paperContractReviewState(row),
       safeOwner: 'امور مالی', originalName: row.originalName,
       downloadKind: 'CONTRACT', canOpen: canFinance, restricted: !canFinance,
     };

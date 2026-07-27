@@ -11,20 +11,20 @@ type Context = {
 
 export const assertWorkScheduleAction = (action: ScheduleAction, context: Context) => {
   if (action === 'PROPOSE') {
-    if (!context.isResponsibleSupervisor) throw new Error('Only the current responsible supervisor may propose a schedule change.');
+    if (!context.isResponsibleSupervisor) throw new Error('فقط سرپرست مسئول فعلی می‌تواند تغییر برنامه کاری را پیشنهاد دهد.');
     return;
   }
   if (action === 'PREPARE') {
     if (!context.hasHrProcessor || !['PROPOSED', 'RETURNED', 'DRAFT'].includes(context.status || '')) {
-      throw new Error('HR Processor may prepare a proposed or returned schedule change.');
+      throw new Error('فقط کارشناس منابع انسانی می‌تواند درخواست پیشنهادی یا بازگشتی را آماده کند.');
     }
     return;
   }
   if (action === 'SUBMIT') {
-    if (!context.hasHrProcessor || context.status !== 'DRAFT') throw new Error('A prepared draft is required before submission.');
+    if (!context.hasHrProcessor || context.status !== 'DRAFT') throw new Error('پیش از ارسال، پیش‌نویس آماده‌شده توسط کارشناس منابع انسانی الزامی است.');
     return;
   }
-  if (!context.hasHrManager || context.status !== 'SUBMITTED') throw new Error('HR Manager may review only a submitted schedule change.');
-  if (action === 'APPROVE' && context.preparedBy === context.actorId) throw new Error('A different HR Manager must approve the prepared schedule.');
-  if (action === 'RETURN' && !String(context.returnReason || '').trim()) throw new Error('A return reason is required.');
+  if (!context.hasHrManager || context.status !== 'SUBMITTED') throw new Error('مدیر منابع انسانی فقط می‌تواند برنامه کاری ارسال‌شده را بررسی کند.');
+  if (context.preparedBy && context.preparedBy === context.actorId) throw new Error('بررسی برنامه کاری باید توسط مدیر منابع انسانی دیگری انجام شود.');
+  if (action === 'RETURN' && !String(context.returnReason || '').trim()) throw new Error('ثبت دلیل بازگرداندن الزامی است.');
 };

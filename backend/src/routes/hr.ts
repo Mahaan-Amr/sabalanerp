@@ -85,7 +85,7 @@ const assignmentInclude = {
   responsibleSupervisorAssignment: {
     include: {
       position: { select: { id: true, code: true, title: true } },
-      employmentRelationship: { include: { personnel: { select: { id: true, firstName: true, lastName: true } } } }
+      employmentRelationship: { include: { personnel: { select: { id: true, firstName: true, lastName: true, user: { select: { id: true } } } } } }
     }
   }
 } as const;
@@ -342,8 +342,31 @@ router.put('/positions/:id', editAccess, async (req: WorkspaceRequest, res) => {
 router.get('/personnel', viewAccess, async (req, res) => {
   try {
     const search = textValue(req.query.search);
-    const rows = await prisma.personnel.findMany({ where: search ? { OR: [{ firstName: { contains: search, mode: 'insensitive' } }, { lastName: { contains: search, mode: 'insensitive' } }, { employeeNumber: { contains: search, mode: 'insensitive' } }, { nationalCode: { contains: search } }] } : {}, include: personnelInclude, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }] });
-    res.json({ success: true, data: rows });
+    const [rows, authorityRows] = await Promise.all([
+      prisma.personnel.findMany({ where: search ? { OR: [{ firstName: { contains: search, mode: 'insensitive' } }, { lastName: { contains: search, mode: 'insensitive' } }, { employeeNumber: { contains: search, mode: 'insensitive' } }, { nationalCode: { contains: search } }] } : {}, include: personnelInclude, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }] }),
+      prisma.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { authority: true } })
+    ]);
+    const authorities = new Set(authorityRows.map((row) => row.authority));
+    const data = rows.map((person) => {
+      const relationship = person.hrEmploymentRelationships[0];
+      const primary = relationship?.assignments.find((assignment) => assignment.type === 'PRIMARY' && !assignment.effectiveTo);
+      const change = person.workScheduleChanges[0];
+      const isResponsibleSupervisor = primary?.responsibleSupervisorAssignment?.employmentRelationship.personnel.user?.id === actorId(req);
+      const separateReviewer = change?.preparedBy !== actorId(req);
+      const canSeeChangeDetails = Boolean(isResponsibleSupervisor) || authorities.has('HR_PROCESSOR') || authorities.has('HR_MANAGER');
+      return {
+        ...person,
+        workScheduleChanges: canSeeChangeDetails ? person.workScheduleChanges : [],
+        workScheduleCapabilities: {
+          canPropose: Boolean(isResponsibleSupervisor) && (!change || change.status === 'APPROVED'),
+          canPrepare: authorities.has('HR_PROCESSOR') && Boolean(change && ['PROPOSED', 'RETURNED', 'DRAFT'].includes(change.status)),
+          canSubmit: authorities.has('HR_PROCESSOR') && change?.status === 'DRAFT',
+          canApprove: authorities.has('HR_MANAGER') && change?.status === 'SUBMITTED' && separateReviewer,
+          canReturn: authorities.has('HR_MANAGER') && change?.status === 'SUBMITTED' && separateReviewer
+        }
+      };
+    });
+    res.json({ success: true, data });
   } catch (error) { handleError(res, error, 'List HR personnel'); }
 });
 
@@ -419,13 +442,18 @@ router.post('/personnel/:id/work-schedule/proposals', viewAccess, async (req: Wo
       select: { id: true }
     });
     assertWorkScheduleAction('PROPOSE', { isResponsibleSupervisor: Boolean(supervisorLink) });
+    const schedule = normalizeWorkSchedule(req.body);
+    const proposalNote = textValue(req.body.proposalNote);
+    if (!schedule || !proposalNote) throw new Error('تاریخ اجرا، روزهای برنامه کاری و دلیل پیشنهاد الزامی است.');
     const row = await prisma.$transaction(async (tx) => {
       const created = await tx.hrWorkScheduleChange.create({ data: {
         personnelId: req.params.id,
-        proposalNote: textValue(req.body.proposalNote) || null,
+        effectiveFrom: parseDate(schedule.effectiveDate, 'تاریخ اجرا'),
+        daysJson: schedule.days as any,
+        proposalNote,
         proposedBy: actorId(req)
       } });
-      await tx.hrPersonnelAudit.create({ data: { personnelId: req.params.id, actorUserId: actorId(req), eventType: 'WORK_SCHEDULE_PROPOSED', sourceCategory: 'WORK_SCHEDULE', reason: textValue(req.body.proposalNote) || 'پیشنهاد تغییر برنامه کاری', payloadJson: { changeId: created.id } } });
+      await tx.hrPersonnelAudit.create({ data: { personnelId: req.params.id, actorUserId: actorId(req), eventType: 'WORK_SCHEDULE_PROPOSED', sourceCategory: 'WORK_SCHEDULE', reason: proposalNote, payloadJson: { changeId: created.id, effectiveDate: schedule.effectiveDate, days: schedule.days } as any } });
       return created;
     });
     res.status(201).json({ success: true, data: row });

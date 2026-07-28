@@ -1,8 +1,9 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import crypto from 'node:crypto';
 import { restoreStagedHiringFiles } from './hrDeletionFileTransaction';
 
 const RECOVERY_INTERVAL_MS = 60_000;
-const STALE_PREPARATION_MS = 5 * 60_000;
+export const PERSONNEL_ERASURE_LEASE_MS = 5 * 60_000;
 
 type AccessRecoverySnapshot = {
   users: Array<{ id: string; isActive: boolean }>;
@@ -28,12 +29,21 @@ export const recoverInterruptedPersonnelErasures = async (prisma: PrismaClient, 
   const receipts = await prisma.hrDeletionReceipt.findMany({
     where: {
       targetType: 'PERSONNEL',
-      status: { in: ['PREPARING', 'ACCESS_PREPARED', 'RECOVERY_FAILED'] },
-      updatedAt: { lt: new Date(now.getTime() - STALE_PREPARATION_MS) }
+      status: { in: ['PREPARING', 'ACCESS_PREPARED', 'RECOVERING', 'RECOVERY_FAILED'] },
+      leaseExpiresAt: { lt: now }
     }
   });
   let recovered = 0;
   for (const receipt of receipts) {
+    const recoveryToken = `RECOVERY:${crypto.randomUUID()}`;
+    const claimed = await prisma.hrDeletionReceipt.updateMany({
+      where: {
+        id: receipt.id, status: receipt.status, operationToken: receipt.operationToken,
+        leaseExpiresAt: { lt: now }
+      },
+      data: { status: 'RECOVERING', operationToken: recoveryToken, leaseExpiresAt: new Date(now.getTime() + PERSONNEL_ERASURE_LEASE_MS) }
+    });
+    if (claimed.count !== 1) continue;
     try {
       const cleanupRows = await prisma.hrDeletionFileCleanup.findMany({ where: { receiptId: receipt.id } });
       restoreStagedHiringFiles(cleanupRows.map((row) => ({ storageName: row.storageName, originalPath: row.originalPath, stagedPath: row.stagedPath })));
@@ -47,14 +57,18 @@ export const recoverInterruptedPersonnelErasures = async (prisma: PrismaClient, 
         await tx.hrDeletionFileCleanup.deleteMany({ where: { receiptId: receipt.id } });
         await tx.hrDeletionReceipt.update({
           where: { id: receipt.id },
-          data: { status: 'ABORTED', recordCounts: { aborted: true }, fileCounts: { restored: cleanupRows.length } }
+          data: { status: 'ABORTED', operationToken: null, leaseExpiresAt: null, recordCounts: { aborted: true }, fileCounts: { restored: cleanupRows.length } }
         });
       });
       recovered += 1;
     } catch (error) {
       await prisma.hrDeletionReceipt.update({
         where: { id: receipt.id },
-        data: { status: 'RECOVERY_FAILED', fileCounts: { recoveryError: error instanceof Error ? error.message : 'UNKNOWN_RECOVERY_ERROR' } }
+        data: {
+          status: 'RECOVERY_FAILED', operationToken: recoveryToken,
+          leaseExpiresAt: new Date(Date.now() + PERSONNEL_ERASURE_LEASE_MS),
+          fileCounts: { recoveryError: error instanceof Error ? error.message : 'UNKNOWN_RECOVERY_ERROR' }
+        }
       }).catch(() => undefined);
     }
   }

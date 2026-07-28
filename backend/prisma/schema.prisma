@@ -3881,6 +3881,8 @@ model HrDeletionReceipt {
   reason             String
   previewFingerprint String
   status             String
+  operationToken     String?
+  leaseExpiresAt     DateTime?
   recordCounts       Json
   fileCounts         Json
   deletedAt          DateTime?
@@ -3890,6 +3892,7 @@ model HrDeletionReceipt {
   @@index([targetType, targetId])
   @@index([actorUserId, createdAt])
   @@index([status, createdAt])
+  @@index([status, leaseExpiresAt])
   @@map("hr_deletion_receipts")
 }
 

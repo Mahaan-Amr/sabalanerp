@@ -20,9 +20,10 @@ const tx = {
 const fakePrisma = {
   hrDeletionReceipt: {
     findMany: async () => [{
-      id: 'receipt-1', actorUserId: 'admin-1', status: 'ACCESS_PREPARED',
+      id: 'receipt-1', actorUserId: 'admin-1', status: 'ACCESS_PREPARED', operationToken: 'operation-1',
       recordCounts: { accessRecovery: { users: [{ id: 'user-1', isActive: true }], sessionIds: ['session-1'] } }
     }],
+    updateMany: async () => { actions.push('claim'); return { count: 1 }; },
     update: async () => undefined,
   },
   hrDeletionFileCleanup: { findMany: async () => staged },
@@ -32,7 +33,7 @@ const fakePrisma = {
 const run = async () => {
   assert.equal(await recoverInterruptedPersonnelErasures(fakePrisma), 1);
   assert.equal(fs.readFileSync(path.join(root, 'evidence.pdf'), 'utf8'), 'evidence');
-  assert.deepEqual(actions, ['sessions', 'user', 'cleanup', 'receipt:ABORTED']);
+  assert.deepEqual(actions, ['claim', 'sessions', 'user', 'cleanup', 'receipt:ABORTED']);
   fs.rmSync(root, { recursive: true, force: true });
   console.log('HR Personnel erasure recovery tests passed.');
 };

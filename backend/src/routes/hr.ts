@@ -11,6 +11,7 @@ import { dateOnlyRangeIncludes, plannedStartHasArrived } from '../services/hrEmp
 import { assertArchiveReason, assertArchivedRecordMutable, assertPermanentDeletionConfirmation, assertPersonnelErasureTarget, projectRecordRetentionCapabilities } from '../services/hrRecordRetentionPolicy';
 import { buildPersonnelErasurePlan, executePersonnelErasureGraph } from '../services/hrPersonnelErasureGraph';
 import { commitStagedHiringFiles, planHiringFilesForDeletion, restoreStagedHiringFiles, stagePlannedHiringFiles, type StagedHiringFile } from '../services/hrDeletionFileTransaction';
+import { PERSONNEL_ERASURE_LEASE_MS } from '../services/hrPersonnelErasureRecovery';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -515,11 +516,14 @@ router.post('/personnel/:id/permanent-delete', viewAccess, requireSystemAdmin, a
     if (!actor || !(await bcrypt.compare(String(req.body.adminPassword || ''), actor.password))) return res.status(403).json({ success: false, error: 'رمز عبور مدیر سامانه صحیح نیست.' });
     assertPermanentDeletionConfirmation({ expectedFingerprint: impact.plan.fingerprint, suppliedFingerprint: req.body.fingerprint, expectedFullName: impact.data.displayName, suppliedFullName: req.body.fullName, reason: req.body.reason, confirmed: req.body.confirmed });
     const receiptId = crypto.randomUUID();
+    const operationToken = crypto.randomUUID();
+    const leaseExpiry = () => new Date(Date.now() + PERSONNEL_ERASURE_LEASE_MS);
     const staged: StagedHiringFile[] = [];
     const deletionReason = assertArchiveReason(req.body.reason);
     let preparedPlan = impact.plan;
     let accessPrepared = false;
     let operationRecorded = false;
+    let leaseOwned = true;
     let revokedSessionIds: string[] = [];
     let previousUserStates: Array<{ id: string; isActive: boolean }> = [];
     try {
@@ -531,13 +535,25 @@ router.post('/personnel/:id/permanent-delete', viewAccess, requireSystemAdmin, a
         await tx.hrDeletionReceipt.create({ data: {
           id: receiptId, targetType: 'PERSONNEL', targetId: req.params.id, actorUserId: actorId(req), reason: deletionReason,
           previewFingerprint: impact.plan.fingerprint, status: 'PREPARING', recordCounts: impact.plan.counts,
-          fileCounts: impact.data.fileCounts
+          fileCounts: impact.data.fileCounts, operationToken, leaseExpiresAt: leaseExpiry()
         } });
         if (planned.length) await tx.hrDeletionFileCleanup.createMany({ data: planned.map((item) => ({ receiptId, storageName: item.storageName, originalPath: item.originalPath, stagedPath: item.stagedPath, status: 'PREPARING' })) });
       });
       operationRecorded = true;
-      staged.push(...stagePlannedHiringFiles(planned));
+      for (const item of planned) {
+        const renewed = await prisma.hrDeletionReceipt.updateMany({
+          where: { id: receiptId, status: 'PREPARING', operationToken },
+          data: { leaseExpiresAt: leaseExpiry() }
+        });
+        if (renewed.count !== 1) { leaseOwned = false; throw new Error('مالکیت عملیات حذف منقضی شده است؛ بازیابی خودکار وضعیت را بررسی کنید.'); }
+        staged.push(...stagePlannedHiringFiles([item]));
+      }
       await prisma.$transaction(async (tx) => {
+        const renewed = await tx.hrDeletionReceipt.updateMany({
+          where: { id: receiptId, status: 'PREPARING', operationToken },
+          data: { leaseExpiresAt: leaseExpiry() }
+        });
+        if (renewed.count !== 1) { leaseOwned = false; throw new Error('مالکیت عملیات حذف منقضی شده است؛ بازیابی خودکار وضعیت را بررسی کنید.'); }
         const currentPlan = await buildPersonnelErasurePlan(tx, req.params.id);
         if (currentPlan.fingerprint !== impact.plan.fingerprint) throw new Error('پیش‌نمایش حذف منقضی شده است؛ دوباره بررسی کنید.');
         const targetUserIds = currentPlan.nodes.User || [];
@@ -549,27 +565,36 @@ router.post('/personnel/:id/permanent-delete', viewAccess, requireSystemAdmin, a
           await tx.user.updateMany({ where: { id: { in: targetUserIds } }, data: { isActive: false } });
         }
         preparedPlan = await buildPersonnelErasurePlan(tx, req.params.id);
-        await tx.hrDeletionReceipt.update({
-          where: { id: receiptId },
+        const prepared = await tx.hrDeletionReceipt.updateMany({
+          where: { id: receiptId, status: 'PREPARING', operationToken },
           data: {
             status: 'ACCESS_PREPARED',
+            leaseExpiresAt: leaseExpiry(),
             recordCounts: { counts: impact.plan.counts, accessRecovery: { users: previousUserStates, sessionIds: revokedSessionIds } }
           }
         });
+        if (prepared.count !== 1) { leaseOwned = false; throw new Error('مالکیت عملیات حذف منقضی شده است؛ بازیابی خودکار وضعیت را بررسی کنید.'); }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60_000 });
       accessPrepared = true;
       await prisma.$transaction(async (tx) => {
+        const renewed = await tx.hrDeletionReceipt.updateMany({
+          where: { id: receiptId, status: 'ACCESS_PREPARED', operationToken },
+          data: { leaseExpiresAt: leaseExpiry() }
+        });
+        if (renewed.count !== 1) { leaseOwned = false; throw new Error('مالکیت عملیات حذف منقضی شده است؛ بازیابی خودکار وضعیت را بررسی کنید.'); }
         const currentPlan = await buildPersonnelErasurePlan(tx, req.params.id);
         if (currentPlan.fingerprint !== preparedPlan.fingerprint) throw new Error('دامنه حذف پس از لغو دسترسی تغییر کرده است؛ پیش‌نمایش تازه دریافت کنید.');
         const targetUserIds = currentPlan.nodes.User || [];
         await assertCurrentPersonnelErasureAdminProtection(tx, targetUserIds, actorId(req));
         await executePersonnelErasureGraph(tx, currentPlan);
         await tx.hrDeletionReceipt.update({ where: { id: receiptId }, data: {
-          status: 'FILE_CLEANUP_PENDING', recordCounts: currentPlan.counts, fileCounts: impact.data.fileCounts, deletedAt: new Date()
+          status: 'FILE_CLEANUP_PENDING', operationToken: null, leaseExpiresAt: null,
+          recordCounts: currentPlan.counts, fileCounts: impact.data.fileCounts, deletedAt: new Date()
         } });
         await tx.hrDeletionFileCleanup.updateMany({ where: { receiptId }, data: { status: 'PENDING' } });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60_000 });
     } catch (error) {
+      if (!leaseOwned) throw error;
       let recoveryError: unknown = null;
       try {
         restoreStagedHiringFiles(staged);
@@ -593,7 +618,10 @@ router.post('/personnel/:id/permanent-delete', viewAccess, requireSystemAdmin, a
           try {
             await prisma.$transaction([
               prisma.hrDeletionFileCleanup.deleteMany({ where: { receiptId } }),
-              prisma.hrDeletionReceipt.update({ where: { id: receiptId }, data: { status: 'ABORTED', recordCounts: { aborted: true }, fileCounts: { restored: staged.length } } })
+              prisma.hrDeletionReceipt.update({ where: { id: receiptId }, data: {
+                status: 'ABORTED', operationToken: null, leaseExpiresAt: null,
+                recordCounts: { aborted: true }, fileCounts: { restored: staged.length }
+              } })
             ]);
           } catch (receiptRecoveryError) {
             recoveryError = receiptRecoveryError;

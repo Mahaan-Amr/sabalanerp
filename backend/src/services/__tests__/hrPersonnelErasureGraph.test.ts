@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildDeletionRelationIndex, deletionModelOrder } from '../hrPersonnelErasureGraph';
+import { buildDeletionRelationIndex, deletionModelOrder, localUploadStorageName } from '../hrPersonnelErasureGraph';
 
 const models = [
   { name: 'Personnel', fields: [{ name: 'id', kind: 'scalar' }] },
@@ -35,8 +35,14 @@ assert.deepEqual(relations.map((item) => `${item.childModel}.${item.childField}-
 ]);
 assert.deepEqual(deletionModelOrder(new Set(['Personnel', 'User', 'Attendance', 'Session']), relations), ['Attendance', 'Session', 'User', 'Personnel']);
 assert.throws(() => deletionModelOrder(new Set(['A', 'B']), [
-  { childModel: 'A', childField: 'bId', parentModel: 'B' },
-  { childModel: 'B', childField: 'aId', parentModel: 'A' },
+  { childModel: 'A', childField: 'bId', parentModel: 'B', childRequired: true },
+  { childModel: 'B', childField: 'aId', parentModel: 'A', childRequired: true },
 ]), /چرخه/);
+assert.deepEqual(deletionModelOrder(new Set(['A', 'B']), [
+  { childModel: 'A', childField: 'bId', parentModel: 'B', childRequired: true },
+  { childModel: 'B', childField: 'aId', parentModel: 'A', childRequired: false },
+]), ['A', 'B']);
+assert.equal(localUploadStorageName('/files/uploads/images/evidence-1.jpg?download=1'), 'evidence-1.jpg');
+assert.equal(localUploadStorageName('https://example.com/unmanaged.jpg'), null);
 
 console.log('HR Personnel erasure graph tests passed.');

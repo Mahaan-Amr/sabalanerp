@@ -7,8 +7,12 @@ const normalizePersian = (value: unknown) => String(value || '')
   .replace(/ك/g, 'ک');
 
 const canonicalize = (value: unknown): unknown => {
+  if (typeof value === 'bigint') return value.toString();
   if (Array.isArray(value)) return value.map(canonicalize);
+  if (value instanceof Date) return value.toISOString();
   if (value && typeof value === 'object') {
+    const jsonValue = (value as { toJSON?: () => unknown }).toJSON?.();
+    if (jsonValue !== undefined && jsonValue !== value) return canonicalize(jsonValue);
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
         .sort(([left], [right]) => left.localeCompare(right))

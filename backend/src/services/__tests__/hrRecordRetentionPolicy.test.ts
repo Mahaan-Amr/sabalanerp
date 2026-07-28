@@ -27,6 +27,10 @@ const impact = { targetId: 'application-1', updatedAt: '2026-07-27T10:00:00.000Z
 const fingerprint = stableDeletionFingerprint(impact, 'test-secret');
 assert.equal(fingerprint, stableDeletionFingerprint({ ...impact, counts: { tasks: 1, documents: 2 } }, 'test-secret'));
 assert.notEqual(fingerprint, stableDeletionFingerprint({ ...impact, counts: { documents: 3, tasks: 1 } }, 'test-secret'));
+assert.notEqual(
+  stableDeletionFingerprint({ decidedAt: new Date('2026-07-27T10:00:00.000Z') }, 'test-secret'),
+  stableDeletionFingerprint({ decidedAt: new Date('2026-07-27T10:00:01.000Z') }, 'test-secret'),
+);
 
 assert.doesNotThrow(() => assertPermanentDeletionConfirmation({
   expectedFingerprint: fingerprint,

@@ -26,7 +26,7 @@ const requireHrManagerAuthority = async (req: WorkspaceRequest, res: Response, n
   try {
     if (req.user!.role === 'ADMIN') return next();
     const authority = await prisma.hrHiringAuthority.findFirst({
-      where: { userId: req.user!.id, authority: 'HR_MANAGER', isActive: true }
+      where: { userId: req.user!.id, authority: 'HR_MANAGER', isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }
     });
     if (!authority) {
       return res.status(403).json({ success: false, error: 'اختیار سازمانی HR_MANAGER برای ثبت استثنایی پرسنل الزامی است.' });
@@ -419,6 +419,7 @@ router.post('/personnel/:id/archive', viewAccess, requireHrManagerAuthority, asy
     const result = await prisma.$transaction(async (tx) => {
       const person = await tx.personnel.findUniqueOrThrow({ where: { id: req.params.id }, include: { user: true, hiringCandidate: { include: { applications: { select: { id: true } } } } } });
       if (person.archivedAt) throw new Error('پرسنل قبلاً بایگانی شده است.');
+      if (req.user!.role !== 'ADMIN' && person.user?.role === 'ADMIN') throw new Error('مدیر منابع انسانی نمی‌تواند حساب مدیر سامانه را غیرفعال کند.');
       const applicationIds = person.hiringCandidate?.applications.map((application) => application.id) || [];
       const relationships = await tx.hrEmploymentRelationship.findMany({ where: { personnelId: person.id, status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] } }, select: { id: true, effectiveFrom: true } });
       const relationshipIds = relationships.map((relationship) => relationship.id);
@@ -513,23 +514,34 @@ router.post('/personnel/:id/permanent-delete', viewAccess, requireSystemAdmin, a
     if (!impact) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
     if (!actor || !(await bcrypt.compare(String(req.body.adminPassword || ''), actor.password))) return res.status(403).json({ success: false, error: 'رمز عبور مدیر سامانه صحیح نیست.' });
     assertPermanentDeletionConfirmation({ expectedFingerprint: impact.plan.fingerprint, suppliedFingerprint: req.body.fingerprint, expectedFullName: impact.data.displayName, suppliedFullName: req.body.fullName, reason: req.body.reason, confirmed: req.body.confirmed });
+    let preparedPlan = impact.plan;
+    await prisma.$transaction(async (tx) => {
+      const currentPlan = await buildPersonnelErasurePlan(tx, req.params.id);
+      if (currentPlan.fingerprint !== impact.plan.fingerprint) throw new Error('پیش‌نمایش حذف منقضی شده است؛ دوباره بررسی کنید.');
+      const targetUserIds = currentPlan.nodes.User || [];
+      await assertCurrentPersonnelErasureAdminProtection(tx, targetUserIds, actorId(req));
+      if (targetUserIds.length) {
+        await tx.authSession.updateMany({ where: { userId: { in: targetUserIds }, revokedAt: null }, data: { revokedAt: new Date(), revokedById: actorId(req), revocationReason: 'PERMANENT_PERSONNEL_ERASURE' } });
+        await tx.user.updateMany({ where: { id: { in: targetUserIds } }, data: { isActive: false } });
+      }
+      preparedPlan = await buildPersonnelErasurePlan(tx, req.params.id);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60_000 });
     const receiptId = crypto.randomUUID();
     const staged: StagedHiringFile[] = [];
     try {
       const groups = new Map<string, string[]>();
-      for (const file of impact.plan.files) groups.set(file.storageRoot, [...(groups.get(file.storageRoot) || []), file.storageName]);
+      for (const file of preparedPlan.files) groups.set(file.storageRoot, [...(groups.get(file.storageRoot) || []), file.storageName]);
       let index = 0;
       for (const [storageRoot, names] of groups) staged.push(...stageHiringFilesForDeletion(names, `${receiptId}-${index++}`, storageRoot));
       await prisma.$transaction(async (tx) => {
         const currentPlan = await buildPersonnelErasurePlan(tx, req.params.id);
-        if (currentPlan.fingerprint !== impact.plan.fingerprint) throw new Error('پیش‌نمایش حذف منقضی شده است؛ دوباره بررسی کنید.');
+        if (currentPlan.fingerprint !== preparedPlan.fingerprint) throw new Error('دامنه حذف پس از لغو دسترسی تغییر کرده است؛ پیش‌نمایش تازه دریافت کنید.');
         const targetUserIds = currentPlan.nodes.User || [];
         await assertCurrentPersonnelErasureAdminProtection(tx, targetUserIds, actorId(req));
-        if (targetUserIds.length) await tx.authSession.updateMany({ where: { userId: { in: targetUserIds }, revokedAt: null }, data: { revokedAt: new Date(), revokedById: actorId(req), revocationReason: 'PERMANENT_PERSONNEL_ERASURE' } });
         await executePersonnelErasureGraph(tx, currentPlan);
         await tx.hrDeletionReceipt.create({ data: {
           id: receiptId, targetType: 'PERSONNEL', targetId: req.params.id, actorUserId: actorId(req), reason: assertArchiveReason(req.body.reason),
-          previewFingerprint: currentPlan.fingerprint, status: 'FILE_CLEANUP_PENDING', recordCounts: currentPlan.counts,
+          previewFingerprint: impact.plan.fingerprint, status: 'FILE_CLEANUP_PENDING', recordCounts: currentPlan.counts,
           fileCounts: impact.data.fileCounts, deletedAt: new Date()
         } });
         if (staged.length) await tx.hrDeletionFileCleanup.createMany({ data: staged.map((item) => ({ receiptId, storageName: item.storageName, originalPath: item.originalPath, stagedPath: item.stagedPath })) });
@@ -560,6 +572,24 @@ router.use('/personnel/:id', async (req: WorkspaceRequest, res, next) => {
   } catch (error) {
     res.status(409).json({ success: false, error: error instanceof Error ? error.message : 'پرسنل بایگانی‌شده قابل تغییر نیست.' });
   }
+});
+
+router.use('/relationships/:id', async (req: WorkspaceRequest, res, next) => {
+  if (req.method === 'GET') return next();
+  try {
+    const relationship = await prisma.hrEmploymentRelationship.findUnique({ where: { id: req.params.id }, select: { personnel: { select: { archivedAt: true } } } });
+    assertArchivedRecordMutable(relationship?.personnel.archivedAt);
+    next();
+  } catch (error) { handleError(res, error, 'Reject archived Personnel relationship mutation'); }
+});
+
+router.use('/assignments/:id', async (req: WorkspaceRequest, res, next) => {
+  if (req.method === 'GET') return next();
+  try {
+    const assignment = await prisma.hrEmploymentAssignment.findUnique({ where: { id: req.params.id }, select: { employmentRelationship: { select: { personnel: { select: { archivedAt: true } } } } } });
+    assertArchivedRecordMutable(assignment?.employmentRelationship.personnel.archivedAt);
+    next();
+  } catch (error) { handleError(res, error, 'Reject archived Personnel assignment mutation'); }
 });
 
 router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, async (req: WorkspaceRequest, res) => {

@@ -335,12 +335,23 @@ const applicationDeletionImpact = async (applicationId: string, client: PrismaCl
     where: { id: applicationId },
     include: {
       candidate: { select: { firstName: true, lastName: true } },
-      employmentRelationship: { select: { id: true } },
-      documents: { select: { storageName: true } },
-      assessments: { select: { storageName: true } },
-      preIdentityChecklistItems: { select: { storageName: true } },
-      collateralItems: { select: { storageName: true, returnEvidenceStorageName: true } },
-      contracts: { select: { storageName: true } },
+      employmentRelationship: true,
+      invitations: true,
+      formRevisions: true,
+      documents: true,
+      identityChecks: true,
+      collateralItems: true,
+      compensationSnapshots: true,
+      contracts: true,
+      insuranceEnrollment: true,
+      payrollParticipation: true,
+      onboardingTasks: true,
+      audits: true,
+      assessments: true,
+      preIdentityChecklistItems: { include: { events: true } },
+      hiringDecisions: true,
+      reopenings: true,
+      collateralRequirements: true,
       _count: true
     }
   });
@@ -353,7 +364,8 @@ const applicationDeletionImpact = async (applicationId: string, client: PrismaCl
     ...application.contracts.map((item) => item.storageName)
   ].filter(Boolean).sort() as string[];
   const counts = Object.fromEntries(Object.entries(application._count).sort(([left], [right]) => left.localeCompare(right)));
-  const fingerprintSource = { targetId: application.id, updatedAt: application.updatedAt.toISOString(), counts, files };
+  const { _count, ...affectedSnapshot } = application;
+  const fingerprintSource = { targetId: application.id, affectedSnapshot, counts, files };
   const fingerprint = stableDeletionFingerprint(fingerprintSource, process.env.JWT_SECRET || 'development-secret');
   return {
     application,

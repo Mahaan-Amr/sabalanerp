@@ -12,6 +12,27 @@ type Preview = {
   fingerprint: string;
 };
 
+const impactCategoryLabel = (category: string) => {
+  const direct: Record<string, string> = {
+    invitations: "دعوت‌نامه‌ها", formRevisions: "نسخه‌های فرم", documents: "اسناد استخدامی",
+    identityChecks: "بررسی‌های هویتی", collateralItems: "تضمین‌ها", compensationSnapshots: "سوابق جبران خدمات",
+    contracts: "قراردادها", insuranceEnrollment: "ثبت بیمه", payrollParticipation: "مشارکت حقوق و دستمزد",
+    onboardingTasks: "وظایف شروع همکاری", audits: "رویدادهای ممیزی", assessments: "ارزیابی‌ها",
+    preIdentityChecklistItems: "الزامات پیش از احراز هویت", hiringDecisions: "تصمیم‌های استخدامی",
+    reopenings: "بازگشایی‌ها", collateralRequirements: "الزامات تضمین",
+  };
+  if (direct[category]) return direct[category];
+  if (/^(User|Auth|Recognized|Authentication|Workspace|Feature)/.test(category)) return "حساب کاربری، دسترسی و نشست‌ها";
+  if (/^(Personnel|Hr)/.test(category)) return "سوابق منابع انسانی";
+  if (/^(Attendance|Exception|Mission)/.test(category)) return "حضور، مأموریت و مرخصی";
+  if (/^Security/.test(category)) return "سوابق انتظامات و امنیت";
+  if (/^Crm/.test(category)) return "سوابق مدیریت ارتباط با مشتری";
+  if (/^(Sales|Contract|Order|Delivery)/.test(category)) return "سوابق فروش، قرارداد و تحویل";
+  if (/^(Accounting|Journal|Payment)/.test(category)) return "سوابق مالی و حسابداری";
+  if (/^Logistics/.test(category)) return "سوابق لجستیک";
+  return "سایر سوابق مرتبط";
+};
+
 export default function PermanentDeletionDialog({
   title,
   preview,
@@ -29,7 +50,13 @@ export default function PermanentDeletionDialog({
   const [fullName, setFullName] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
   const [confirmed, setConfirmed] = useState(false);
-  const counts = Object.entries(preview.counts || {}).filter(([, count]) => count > 0);
+  const groupedCounts = Object.entries(preview.counts || {}).reduce((groups, [category, count]) => {
+    if (count <= 0) return groups;
+    const label = impactCategoryLabel(category);
+    groups.set(label, (groups.get(label) || 0) + count);
+    return groups;
+  }, new Map<string, number>());
+  const counts = [...groupedCounts.entries()];
   const totalFiles = preview.totalFiles ?? Object.values(preview.fileCounts || {}).reduce((sum, count) => sum + Number(count), 0);
   const ready = reason.trim().length >= 3 && fullName.trim() === preview.displayName.trim() && adminPassword.length > 0 && confirmed;
 

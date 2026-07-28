@@ -52,10 +52,12 @@ import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import { startAuthenticationRetentionCleanup } from './services/authenticationRetentionService';
 import { startHiringInvitationDeliveryPolling } from './services/hrHiringDeliveryPollingService';
+import { startPersonnelErasureRecovery } from './services/hrPersonnelErasureRecovery';
 
 const prisma = new PrismaClient();
 startAuthenticationRetentionCleanup(prisma);
 startHiringInvitationDeliveryPolling(prisma);
+startPersonnelErasureRecovery(prisma);
 const app = express();
 app.set('trust proxy', 1);
 const server = createServer(app);

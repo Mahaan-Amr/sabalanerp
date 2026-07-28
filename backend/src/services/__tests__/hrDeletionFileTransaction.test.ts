@@ -2,12 +2,19 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { commitStagedHiringFiles, restoreStagedHiringFiles, stageHiringFilesForDeletion } from '../hrDeletionFileTransaction';
+import { commitStagedHiringFiles, planHiringFilesForDeletion, restoreStagedHiringFiles, stageHiringFilesForDeletion, stagePlannedHiringFiles } from '../hrDeletionFileTransaction';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sabalan-hr-delete-'));
 fs.writeFileSync(path.join(root, 'one.pdf'), 'one');
 fs.writeFileSync(path.join(root, 'two.jpg'), 'two');
 fs.writeFileSync(path.join(root, 'three.png'), 'three');
+
+const planned = planHiringFilesForDeletion(['three.png'], 'planned-operation', root);
+assert.equal(planned.length, 1);
+assert.equal(fs.existsSync(path.join(root, 'three.png')), true, 'durable operation metadata can be recorded before the file moves');
+const stagedFromPlan = stagePlannedHiringFiles(planned);
+assert.equal(fs.existsSync(path.join(root, 'three.png')), false);
+restoreStagedHiringFiles(stagedFromPlan);
 
 const staged = stageHiringFilesForDeletion(['one.pdf', 'missing.pdf', 'two.jpg', 'one.pdf'], 'operation-1', root);
 assert.equal(staged.length, 2);

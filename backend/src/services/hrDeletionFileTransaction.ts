@@ -29,23 +29,32 @@ const restoreStagedFileList = (staged: StagedHiringFile[]) => {
   }
 };
 
-export const stageHiringFilesForDeletion = (
+export const planHiringFilesForDeletion = (
   storageNames: Array<string | null | undefined>,
   operationId: string,
   storageRoot = HR_HIRING_STORAGE_DIR,
 ) => {
   const safeOperationId = safeSegment(operationId, 'شناسه عملیات حذف');
   const trashDirectory = path.join(storageRoot, '.deletion-trash', safeOperationId);
+  const planned: StagedHiringFile[] = [];
+  for (const storageName of [...new Set(storageNames.filter(Boolean) as string[])]) {
+    const safeName = safeSegment(storageName, 'نام فایل');
+    const originalPath = path.join(storageRoot, safeName);
+    if (!fs.existsSync(originalPath)) continue;
+    planned.push({ originalPath, stagedPath: path.join(trashDirectory, safeName), storageName: safeName });
+  }
+  return planned;
+};
+
+export const stagePlannedHiringFiles = (planned: StagedHiringFile[]) => {
   const staged: StagedHiringFile[] = [];
   try {
-    for (const storageName of [...new Set(storageNames.filter(Boolean) as string[])]) {
-      const safeName = safeSegment(storageName, 'نام فایل');
-      const originalPath = path.join(storageRoot, safeName);
-      if (!fs.existsSync(originalPath)) continue;
-      fs.mkdirSync(trashDirectory, { recursive: true });
-      const stagedPath = path.join(trashDirectory, safeName);
-      fs.renameSync(originalPath, stagedPath);
-      staged.push({ originalPath, stagedPath, storageName: safeName });
+    for (const item of planned) {
+      assertStagedRecord(item);
+      if (!fs.existsSync(item.originalPath)) continue;
+      fs.mkdirSync(path.dirname(item.stagedPath), { recursive: true });
+      fs.renameSync(item.originalPath, item.stagedPath);
+      staged.push(item);
     }
   } catch (error) {
     restoreStagedFileList(staged);
@@ -53,6 +62,12 @@ export const stageHiringFilesForDeletion = (
   }
   return staged;
 };
+
+export const stageHiringFilesForDeletion = (
+  storageNames: Array<string | null | undefined>,
+  operationId: string,
+  storageRoot = HR_HIRING_STORAGE_DIR,
+) => stagePlannedHiringFiles(planHiringFilesForDeletion(storageNames, operationId, storageRoot));
 
 export const restoreStagedHiringFiles = (staged: StagedHiringFile[]) => {
   restoreStagedFileList(staged);

@@ -10,7 +10,7 @@ import { assertWorkScheduleAction } from '../services/hrWorkScheduleGovernance';
 import { dateOnlyRangeIncludes, plannedStartHasArrived } from '../services/hrEmploymentActivation';
 import { assertArchiveReason, assertArchivedRecordMutable, assertPermanentDeletionConfirmation, assertPersonnelErasureTarget, projectRecordRetentionCapabilities } from '../services/hrRecordRetentionPolicy';
 import { buildPersonnelErasurePlan, executePersonnelErasureGraph } from '../services/hrPersonnelErasureGraph';
-import { commitStagedHiringFiles, restoreStagedHiringFiles, stageHiringFilesForDeletion, type StagedHiringFile } from '../services/hrDeletionFileTransaction';
+import { commitStagedHiringFiles, planHiringFilesForDeletion, restoreStagedHiringFiles, stagePlannedHiringFiles, type StagedHiringFile } from '../services/hrDeletionFileTransaction';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -516,15 +516,27 @@ router.post('/personnel/:id/permanent-delete', viewAccess, requireSystemAdmin, a
     assertPermanentDeletionConfirmation({ expectedFingerprint: impact.plan.fingerprint, suppliedFingerprint: req.body.fingerprint, expectedFullName: impact.data.displayName, suppliedFullName: req.body.fullName, reason: req.body.reason, confirmed: req.body.confirmed });
     const receiptId = crypto.randomUUID();
     const staged: StagedHiringFile[] = [];
+    const deletionReason = assertArchiveReason(req.body.reason);
     let preparedPlan = impact.plan;
     let accessPrepared = false;
+    let operationRecorded = false;
     let revokedSessionIds: string[] = [];
     let previousUserStates: Array<{ id: string; isActive: boolean }> = [];
     try {
       const groups = new Map<string, string[]>();
       for (const file of impact.plan.files) groups.set(file.storageRoot, [...(groups.get(file.storageRoot) || []), file.storageName]);
       let index = 0;
-      for (const [storageRoot, names] of groups) staged.push(...stageHiringFilesForDeletion(names, `${receiptId}-${index++}`, storageRoot));
+      const planned = [...groups.entries()].flatMap(([storageRoot, names]) => planHiringFilesForDeletion(names, `${receiptId}-${index++}`, storageRoot));
+      await prisma.$transaction(async (tx) => {
+        await tx.hrDeletionReceipt.create({ data: {
+          id: receiptId, targetType: 'PERSONNEL', targetId: req.params.id, actorUserId: actorId(req), reason: deletionReason,
+          previewFingerprint: impact.plan.fingerprint, status: 'PREPARING', recordCounts: impact.plan.counts,
+          fileCounts: impact.data.fileCounts
+        } });
+        if (planned.length) await tx.hrDeletionFileCleanup.createMany({ data: planned.map((item) => ({ receiptId, storageName: item.storageName, originalPath: item.originalPath, stagedPath: item.stagedPath, status: 'PREPARING' })) });
+      });
+      operationRecorded = true;
+      staged.push(...stagePlannedHiringFiles(planned));
       await prisma.$transaction(async (tx) => {
         const currentPlan = await buildPersonnelErasurePlan(tx, req.params.id);
         if (currentPlan.fingerprint !== impact.plan.fingerprint) throw new Error('پیش‌نمایش حذف منقضی شده است؛ دوباره بررسی کنید.');
@@ -537,6 +549,13 @@ router.post('/personnel/:id/permanent-delete', viewAccess, requireSystemAdmin, a
           await tx.user.updateMany({ where: { id: { in: targetUserIds } }, data: { isActive: false } });
         }
         preparedPlan = await buildPersonnelErasurePlan(tx, req.params.id);
+        await tx.hrDeletionReceipt.update({
+          where: { id: receiptId },
+          data: {
+            status: 'ACCESS_PREPARED',
+            recordCounts: { counts: impact.plan.counts, accessRecovery: { users: previousUserStates, sessionIds: revokedSessionIds } }
+          }
+        });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60_000 });
       accessPrepared = true;
       await prisma.$transaction(async (tx) => {
@@ -545,12 +564,10 @@ router.post('/personnel/:id/permanent-delete', viewAccess, requireSystemAdmin, a
         const targetUserIds = currentPlan.nodes.User || [];
         await assertCurrentPersonnelErasureAdminProtection(tx, targetUserIds, actorId(req));
         await executePersonnelErasureGraph(tx, currentPlan);
-        await tx.hrDeletionReceipt.create({ data: {
-          id: receiptId, targetType: 'PERSONNEL', targetId: req.params.id, actorUserId: actorId(req), reason: assertArchiveReason(req.body.reason),
-          previewFingerprint: impact.plan.fingerprint, status: 'FILE_CLEANUP_PENDING', recordCounts: currentPlan.counts,
-          fileCounts: impact.data.fileCounts, deletedAt: new Date()
+        await tx.hrDeletionReceipt.update({ where: { id: receiptId }, data: {
+          status: 'FILE_CLEANUP_PENDING', recordCounts: currentPlan.counts, fileCounts: impact.data.fileCounts, deletedAt: new Date()
         } });
-        if (staged.length) await tx.hrDeletionFileCleanup.createMany({ data: staged.map((item) => ({ receiptId, storageName: item.storageName, originalPath: item.originalPath, stagedPath: item.stagedPath })) });
+        await tx.hrDeletionFileCleanup.updateMany({ where: { receiptId }, data: { status: 'PENDING' } });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60_000 });
     } catch (error) {
       let recoveryError: unknown = null;
@@ -570,6 +587,16 @@ router.post('/personnel/:id/permanent-delete', viewAccess, requireSystemAdmin, a
             });
           } catch (accessRecoveryError) {
             recoveryError = accessRecoveryError;
+          }
+        }
+        if (!recoveryError && operationRecorded) {
+          try {
+            await prisma.$transaction([
+              prisma.hrDeletionFileCleanup.deleteMany({ where: { receiptId } }),
+              prisma.hrDeletionReceipt.update({ where: { id: receiptId }, data: { status: 'ABORTED', recordCounts: { aborted: true }, fileCounts: { restored: staged.length } } })
+            ]);
+          } catch (receiptRecoveryError) {
+            recoveryError = receiptRecoveryError;
           }
         }
       }

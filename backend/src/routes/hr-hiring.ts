@@ -402,8 +402,8 @@ const applicantSession = async (req: ApplicantRequest, res: Response, next: Next
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET || 'development-secret') as any;
     if (payload.kind !== 'HR_APPLICANT') throw new Error('Wrong token kind');
-    const invitation = await prisma.hrCandidateInvitation.findUnique({ where: { id: payload.invitationId }, include: { application: { select: { stage: true } } } });
-    if (!invitation || invitation.applicationId !== payload.applicationId || invitation.revokedAt || invitation.expiresAt <= new Date() || invitation.application.stage === 'CLOSED') throw new Error('Expired invitation');
+    const invitation = await prisma.hrCandidateInvitation.findUnique({ where: { id: payload.invitationId }, include: { application: { select: { stage: true, archivedAt: true } } } });
+    if (!invitation || invitation.applicationId !== payload.applicationId || invitation.revokedAt || invitation.expiresAt <= new Date() || invitation.application.stage === 'CLOSED' || invitation.application.archivedAt) throw new Error('Expired invitation');
     req.applicant = { applicationId: payload.applicationId, invitationId: payload.invitationId };
     next();
   } catch {
@@ -471,7 +471,7 @@ router.post('/public/invitations/verify', asyncHandler(async (req: express.Reque
       mobileSnapshot: mobile,
       otpHash: applicantOtpHash(mobile, otp),
       ...invitationIsUsableWhere(),
-      application: { stage: { not: 'CLOSED' } }
+      application: { stage: { not: 'CLOSED' }, archivedAt: null }
     },
     include: { application: { include: { candidate: true } } }
   }) : null;
@@ -483,7 +483,7 @@ router.post('/public/invitations/verify', asyncHandler(async (req: express.Reque
     ]);
     if (phoneThrottle.failedAttempts >= PHONE_FAILURE_LIMIT && mobile) {
       const activeApplications = await prisma.hrCandidateInvitation.findMany({
-        where: { mobileSnapshot: mobile, ...invitationIsUsableWhere(), application: { stage: { not: 'CLOSED' } } },
+        where: { mobileSnapshot: mobile, ...invitationIsUsableWhere(), application: { stage: { not: 'CLOSED' }, archivedAt: null } },
         select: { applicationId: true }, distinct: ['applicationId']
       });
       // A wrong code cannot identify the intended Application. Revoke credentials

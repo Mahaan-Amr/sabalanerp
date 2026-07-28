@@ -126,6 +126,10 @@ import {
 import { validatePartitions, calculateRemainingAreasAfterPartitions } from '@/features/contract-creation/services/stoneCuttingService';
 import { calculatePartitionPositions } from '@/features/contract-creation/services/partitionPositioningService';
 import {
+  resolveLayerBulkOperationView,
+  selectNewLayerStone
+} from '@/features/contract-creation/services/stairLayerInteractionState';
+import {
   validateDraftNumericFields,
   validateDraftRequiredFields,
   clearDraftFieldError
@@ -1000,7 +1004,10 @@ export default function CreateContractWizard({
 
   // stairSystemV2.ensureStairSessionId is now provided by useStairSystemV2 hook
 
-  const getActiveDraft = (): [StairPartDraftV2, (d: StairPartDraftV2) => void] => {
+  const getActiveDraft = (): [
+    StairPartDraftV2,
+    React.Dispatch<React.SetStateAction<StairPartDraftV2>>
+  ] => {
     if (stairSystemV2.stairActivePart === 'tread') return [stairSystemV2.draftTread, stairSystemV2.setDraftTread];
     if (stairSystemV2.stairActivePart === 'riser') return [stairSystemV2.draftRiser, stairSystemV2.setDraftRiser];
     return [stairSystemV2.draftLanding, stairSystemV2.setDraftLanding];
@@ -7476,18 +7483,18 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                                     key={p.id}
                                                     type="button"
                                                     className="w-full text-right px-4 py-2.5 hover:bg-[var(--sds-warning-surface)] text-sm border-b border-[var(--sds-border-subtle)] dark:border-[var(--sds-border-subtle)] last:border-0 transition-colors"
+                                                    onMouseDown={(event) => {
+                                                      event.preventDefault();
+                                                    }}
                                                     onClick={() => {
                                                       const altLabel = (p as any).fullName || generateFullProductName(p as Product) || p.namePersian || p.name;
-                                                      setDraft({
-                                                        ...draft,
-                                                        layerUseDifferentStone: true,
-                                                        layerStoneProductId: p.id,
-                                                        layerStoneProduct: p,
-                                                        layerStoneLabel: altLabel,
-                                                        layerPricePerSquareMeter: null,
-                                                        layerUseMandatory: draft.layerUseMandatory ?? true,
-                                                        layerMandatoryPercentage: draft.layerMandatoryPercentage ?? 20
-                                                      });
+                                                      setDraft(current =>
+                                                        selectNewLayerStone(
+                                                          current,
+                                                          p,
+                                                          altLabel
+                                                        )
+                                                      );
                                                       stairSystemV2.setLayerStoneSearchTerm('');
                                                       stairSystemV2.setLayerStoneDropdownOpen(false);
                                                       clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'layerStone');
@@ -7835,17 +7842,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     selectedSides.includes(requestedScope)
                                       ? requestedScope
                                       : 'all';
-                                  const referenceSide =
-                                    editingScope === 'all'
-                                      ? selectedSides[0]
-                                      : editingScope;
-                                  const referenceInput =
-                                    createLayerSideOperationInput(
-                                      stairSystemV2.stairActivePart,
-                                      draft,
-                                      referenceSide,
-                                      draft.stoneProduct!.id
-                                    );
                                   const sideBreakdown = selectedSides.map(side => {
                                     const input = createLayerSideOperationInput(
                                       stairSystemV2.stairActivePart,
@@ -7861,6 +7857,19 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       calculation
                                     };
                                   });
+                                  const bulkView = editingScope === 'all'
+                                    ? resolveLayerBulkOperationView(
+                                      sideBreakdown.map(({ input }) => input)
+                                    )
+                                    : null;
+                                  const referenceInput = editingScope === 'all'
+                                    ? bulkView!.input
+                                    : createLayerSideOperationInput(
+                                      stairSystemV2.stairActivePart,
+                                      draft,
+                                      editingScope,
+                                      draft.stoneProduct!.id
+                                    );
                                   return (
                                     <div className="md:col-span-2 border-t border-[var(--sds-border-default)] pt-3 dark:border-[var(--sds-border-subtle)]">
                                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -7889,6 +7898,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           })}
                                         />
                                       </div>
+                                      {bulkView?.mixed && (
+                                        <ErpInlineState
+                                          kind="stale"
+                                          title={bulkView.message!}
+                                          className="mb-3"
+                                        />
+                                      )}
                                       <OperationCollectionsSection
                                         input={referenceInput}
                                         onChange={operationInput => {

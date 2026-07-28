@@ -37,6 +37,7 @@ import {
 } from '../../utils/preparedProductUtils';
 import { getPartDisplayLabel } from '../../utils/stairSystemHelpers';
 import { hasUnresolvedLegacyRemainingChildAddOns } from '../../services/remainingStoneChildAddOnService';
+import { nextStandaloneServiceCatalogState } from '../../services/standaloneServiceCatalog';
 import {
   moveCatalogHighlight,
   resolveHighlightedCatalogProduct
@@ -458,9 +459,11 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   const [pendingRowId, setPendingRowId] = useState<string | null>(null);
   const [serviceDeleteId, setServiceDeleteId] = useState<string | null>(null);
   const [showServiceCatalog, setShowServiceCatalog] = useState(false);
+  const [showServiceResults, setShowServiceResults] = useState(false);
   const highlightedRef = useRef<HTMLButtonElement | null>(null);
   const catalogStartRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const serviceSearchRef = useRef<HTMLInputElement | null>(null);
   const projectedRows = useMemo(() => buildContractCartRows(cart.items), [cart.items]);
 
   useEffect(() => {
@@ -494,6 +497,46 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   const selectHighlighted = () => {
     const product = resolveHighlightedCatalogProduct(catalog.products, highlightedIndex);
     if (product) catalog.selectProduct(product);
+  };
+
+  const focusServiceSearch = () => {
+    requestAnimationFrame(() => {
+      serviceSearchRef.current?.focus({ preventScroll: true });
+    });
+  };
+
+  const selectServiceCategory = (
+    sourceType: ContractServiceRowSourceType
+  ) => {
+    const next = nextStandaloneServiceCatalogState(
+      {
+        open: showServiceResults,
+        sourceType: services.sourceType,
+        query: services.query
+      },
+      { type: 'select-category', sourceType }
+    );
+    services.setSourceType(next.sourceType);
+    services.setQuery(next.query);
+    setShowServiceResults(next.open);
+    if (next.focusSearch) focusServiceSearch();
+  };
+
+  const addStandaloneService = (
+    item: Parameters<typeof services.addRow>[1]
+  ) => {
+    services.addRow(services.sourceType, item);
+    const next = nextStandaloneServiceCatalogState(
+      {
+        open: showServiceResults,
+        sourceType: services.sourceType,
+        query: services.query
+      },
+      { type: 'service-added' }
+    );
+    services.setQuery(next.query);
+    setShowServiceResults(next.open);
+    if (next.focusSearch) focusServiceSearch();
   };
 
   const confirmDelete = (rowId: string) => {
@@ -671,7 +714,12 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
           <h4 className="sds-text-primary text-sm font-semibold">خدمات مستقل</h4>
           <ErpButton
             label={showServiceCatalog ? 'بستن' : 'افزودن خدمت'}
-            onClick={() => setShowServiceCatalog(value => !value)}
+            onClick={() => {
+              setShowServiceCatalog(value => {
+                if (value) setShowServiceResults(false);
+                return !value;
+              });
+            }}
             variant="ghost"
           />
         </div>
@@ -683,7 +731,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                 <ErpPressable
                   key={sourceType}
                   type="button"
-                  onClick={() => services.setSourceType(sourceType)}
+                  onClick={() => selectServiceCategory(sourceType)}
                   className={services.sourceType === sourceType ? 'font-semibold text-[var(--sds-accent)] ' : ''}
                 >
                   {getServiceRowSourceLabel(sourceType)}
@@ -693,18 +741,26 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
             <label className="mt-3 block text-xs">
               جستجوی خدمت
               <ErpInput
+                ref={serviceSearchRef}
                 type="search"
                 value={services.query}
                 onChange={event => services.setQuery(event.target.value)}
+                onFocus={() => setShowServiceResults(true)}
                 className="sds-field mt-1 w-full px-3 py-2 text-sm"
+                aria-controls="standalone-service-results"
+                aria-expanded={showServiceResults}
               />
             </label>
-            <div className="mt-2 max-h-48 overflow-y-auto">
+            {showServiceResults && (
+            <div
+              id="standalone-service-results"
+              className="mt-2 max-h-48 overflow-y-auto"
+            >
               {services.rows.map(item => (
                 <ErpPressable
                   key={`${services.sourceType}-${item.id}`}
                   type="button"
-                  onClick={() => services.addRow(services.sourceType, item)}
+                  onClick={() => addStandaloneService(item)}
                   className="flex w-full items-center justify-between border-b border-[var(--sds-border-subtle)] py-2 text-right text-xs last:border-b-0"
                 >
                   <span>{item.namePersian || item.name}</span>
@@ -714,10 +770,11 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                   </span>
                 </ErpPressable>
               ))}
-              {services.hasSearch && services.rows.length === 0 && (
+              {services.rows.length === 0 && (
                 <div className="py-3 text-xs sds-text-muted">خدمتی پیدا نشد</div>
               )}
             </div>
+            )}
           </div>
         )}
 

@@ -6,6 +6,10 @@ const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), '
 
 const tokenSource = read('frontend/src/styles/design-system-tokens.css');
 const sharedModuleSource = read('frontend/src/components/erp/index.tsx');
+const hrRetentionDialogSources = [
+  read('frontend/src/features/hr/RetentionActionSheet.tsx'),
+  read('frontend/src/features/hr/PermanentDeletionDialog.tsx')
+];
 const guardSource = read('frontend/src/app/dashboard/security/page.tsx');
 const productSelectionSource = read(
   'frontend/src/features/contract-creation/components/steps/Step5ProductSelection.tsx'
@@ -422,6 +426,17 @@ test('the application shell preserves shared behavior through canonical accessib
   assert.match(shell, /authAPI\.logout/);
   assert.match(shell, /aria-label="بازکردن منوی اصلی"/);
   assert.match(shell, /event\.key === 'Escape'/);
+});
+
+test('HR retention dialogs use the centered responsive overlay presentation', () => {
+  assert.match(sharedModuleSource, /presentation\?: 'sheet' \| 'modal'/);
+  assert.match(sharedModuleSource, /!m-0 flex items-center justify-center p-3 sm:p-4/);
+  assert.match(sharedModuleSource, /max-h-\[calc\(100dvh-1\.5rem\)\]/);
+  assert.match(sharedModuleSource, /bg-\[var\(--sds-surface-overlay\)\] backdrop-blur-sm/);
+  for (const source of hrRetentionDialogSources) {
+    assert.match(source, /<ErpSheet/);
+    assert.match(source, /presentation="modal"/);
+  }
 });
 
 test('shared formatted numeric entry consumes the canonical field primitive', () => {

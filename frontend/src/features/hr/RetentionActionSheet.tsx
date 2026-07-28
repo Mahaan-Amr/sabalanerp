@@ -31,6 +31,7 @@ export default function RetentionAction({
   return (
     <ErpSheet
       open
+      presentation="modal"
       onClose={busy ? () => undefined : onClose}
       title={title}
       footer={

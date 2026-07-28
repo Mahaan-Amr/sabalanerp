@@ -751,10 +751,10 @@ router.post('/authorities', requireAuthorityAdministrator, asyncHandler(async (r
   const [actorAuthorities, activeCompanyManagerCount, targetUser] = await Promise.all([
     prisma.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { authority: true } }),
     prisma.hrHiringAuthority.count({ where: { authority: 'COMPANY_MANAGER', isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] } }),
-    prisma.user.findFirst({ where: { id: targetUserId, isActive: true }, select: { id: true } })
+    prisma.user.findFirst({ where: { id: targetUserId, isActive: true }, select: { id: true, role: true } })
   ]);
   if (!targetUser) throw new Error('کاربر فعال پیدا نشد.');
-  assertHiringAuthorityMutationAllowed({ actorRole: req.user!.role, actorUserId: actorId(req), actorAuthorities: actorAuthorities.map((item) => item.authority), action: 'GRANT', targetUserId, authority, activeCompanyManagerCount });
+  assertHiringAuthorityMutationAllowed({ actorRole: req.user!.role, actorUserId: actorId(req), actorAuthorities: actorAuthorities.map((item) => item.authority), action: 'GRANT', targetUserId, targetRole: targetUser.role, authority, activeCompanyManagerCount });
   const previous = await prisma.hrHiringAuthority.findUnique({ where: { userId_authority: { userId: req.body.userId, authority: req.body.authority } } });
   const row = await prisma.hrHiringAuthority.upsert({
     where: { userId_authority: { userId: targetUserId, authority: authority as any } },
@@ -775,11 +775,12 @@ router.post('/authorities/:id/revoke', requireAuthorityAdministrator, asyncHandl
   const row = await prisma.$transaction(async (tx) => {
     const current = await tx.hrHiringAuthority.findUniqueOrThrow({ where: { id: req.params.id } });
     if (!current.isActive || (current.expiresAt && current.expiresAt <= new Date())) throw new Error('این اختیار فعال نیست.');
-    const [actorAuthorities, activeCompanyManagerCount] = await Promise.all([
+    const [actorAuthorities, activeCompanyManagerCount, targetUser] = await Promise.all([
       tx.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { authority: true } }),
-      tx.hrHiringAuthority.count({ where: { authority: 'COMPANY_MANAGER', isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] } })
+      tx.hrHiringAuthority.count({ where: { authority: 'COMPANY_MANAGER', isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] } }),
+      tx.user.findUniqueOrThrow({ where: { id: current.userId }, select: { role: true } })
     ]);
-    assertHiringAuthorityMutationAllowed({ actorRole: req.user!.role, actorUserId: actorId(req), actorAuthorities: actorAuthorities.map((item) => item.authority), action: 'REVOKE', targetUserId: current.userId, authority: current.authority, activeCompanyManagerCount });
+    assertHiringAuthorityMutationAllowed({ actorRole: req.user!.role, actorUserId: actorId(req), actorAuthorities: actorAuthorities.map((item) => item.authority), action: 'REVOKE', targetUserId: current.userId, targetRole: targetUser.role, authority: current.authority, activeCompanyManagerCount });
     const updated = await tx.hrHiringAuthority.update({ where: { id: current.id }, data: { isActive: false, revokedAt: new Date(), revokedBy: actorId(req), revocationReason: reason } });
     await tx.hrHiringAuthorityAudit.create({ data: { authorityId: updated.id, actorUserId: actorId(req), eventType: 'AUTHORITY_REVOKED', beforeJson: JSON.parse(JSON.stringify(current)), afterJson: JSON.parse(JSON.stringify(updated)) } });
     return updated;

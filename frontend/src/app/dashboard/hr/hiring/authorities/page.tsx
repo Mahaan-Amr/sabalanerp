@@ -109,7 +109,7 @@ export default function HiringAuthoritiesPage() {
       )}
       <ErpSection title="واگذاری اختیار">
         <ErpCard className="grid gap-3 p-4 md:grid-cols-3">
-          <ErpSelect value={userId} onChange={(event) => setUserId(event.target.value)}>
+          <ErpSelect aria-label="کاربر دریافت‌کننده اختیار" value={userId} onChange={(event) => setUserId(event.target.value)}>
             <option value="">انتخاب کاربر</option>
             {users.map((item) => (
               <option key={item.id} value={item.id}>
@@ -117,7 +117,7 @@ export default function HiringAuthoritiesPage() {
               </option>
             ))}
           </ErpSelect>
-          <ErpSelect value={authority} onChange={(event) => setAuthority(event.target.value)}>
+          <ErpSelect aria-label="نوع اختیار استخدام" value={authority} onChange={(event) => setAuthority(event.target.value)}>
             {availableAuthorities.map((item) => (
               <option key={item} value={item}>
                 {authorityLabel(item)}
@@ -162,6 +162,8 @@ export default function HiringAuthoritiesPage() {
           title="سلب اختیار"
           targetName={`${displayName(revokeTarget.userId)} · ${authorityLabel(revokeTarget.authority)}`}
           busy={busy}
+          confirmLabel="سلب اختیار"
+          confirmTone="danger"
           onClose={() => setRevokeTarget(null)}
           onConfirm={revoke}
         />

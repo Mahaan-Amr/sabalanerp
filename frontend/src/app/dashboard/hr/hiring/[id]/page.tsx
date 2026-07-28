@@ -728,6 +728,7 @@ export default function HiringCasePage() {
                       {document.inspectionSource === "COPY_RECEIVED" && (
                         <ErpInput
                           type="file"
+                          aria-label="فایل کپی سند"
                           accept=".pdf,.jpg,.jpeg,.png"
                           className={field}
                           onChange={(e) =>

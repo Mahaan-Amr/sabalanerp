@@ -94,6 +94,21 @@ test("latest pre-identity decisions and identity evidence modes persist through 
     "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-release-application/pre-identity/release",
   );
   expect(release.ok(), await release.text()).toBe(true);
+  await page.goto("/dashboard/hr/hiring/hr-e2e-release-application");
+  await expect(page.locator('[aria-current="step"]').first()).toHaveAttribute(
+    "aria-label",
+    /^مرحله 3: بررسی و احراز هویت/,
+    { timeout: 30_000 },
+  );
+
+  const blockedRelease = await page.request.post(
+    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-blocked-application/pre-identity/release",
+  );
+  expect(blockedRelease.ok()).toBe(false);
+  expect(await blockedRelease.json()).toMatchObject({
+    success: false,
+    error: "سه تصمیم مرحله پیش از احراز هویت باید در آخرین نسخه مثبت باشند.",
+  });
 
   const originalSeen = await page.request.post(
     "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application/documents",
@@ -103,6 +118,16 @@ test("latest pre-identity decisions and identity evidence modes persist through 
   expect(await originalSeen.json()).toMatchObject({
     success: true,
     data: { customTitle: "گواهی حرفه‌ای", version: 1, storageName: null },
+  });
+
+  const replacement = await page.request.post(
+    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application/documents",
+    { form: { category: "OTHER", customTitle: "گواهی حرفه‌ای", inspectionSource: "ORIGINAL_SEEN" } },
+  );
+  expect(replacement.status()).toBe(201);
+  expect(await replacement.json()).toMatchObject({
+    success: true,
+    data: { customTitle: "گواهی حرفه‌ای", version: 2, storageName: null },
   });
 
   const secondSeries = await page.request.post(
@@ -123,6 +148,26 @@ test("latest pre-identity decisions and identity evidence modes persist through 
   expect(await missingCopy.json()).toMatchObject({
     success: false,
     error: "فایل کپی دریافت‌شده الزامی است.",
+  });
+
+  const receivedCopy = await page.request.post(
+    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application/documents",
+    {
+      multipart: {
+        category: "NATIONAL_ID_FRONT",
+        inspectionSource: "COPY_RECEIVED",
+        file: {
+          name: "national-id.png",
+          mimeType: "image/png",
+          buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+        },
+      },
+    },
+  );
+  expect(receivedCopy.status()).toBe(201);
+  expect(await receivedCopy.json()).toMatchObject({
+    success: true,
+    data: { category: "NATIONAL_ID_FRONT", version: 1, originalName: "national-id.png" },
   });
 });
 

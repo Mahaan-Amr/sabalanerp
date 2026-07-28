@@ -1,5 +1,6 @@
 import { paperContractReviewState } from "./hrEmploymentContract";
 import { buildEmploymentActivationReadiness } from "./hrEmploymentActivation";
+import { latestDecisionsByKind } from "./hrApplicationDecisionVersions";
 
 export const HIRING_LIFECYCLE_PHASES = [
   { id: "APPLICATION", number: 1, title: "تشکیل پرونده و فرم متقاضی" },
@@ -122,7 +123,7 @@ interface PreIdentityChecklistLike {
 interface HiringDecisionLike {
   kind: string;
   outcome: string;
-  version?: number;
+  version: number;
 }
 
 export interface HiringLifecycleSource {
@@ -363,9 +364,7 @@ const applicationGate = (source: HiringLifecycleSource): Gate => {
 };
 
 const latestDecision = (source: HiringLifecycleSource, kind: string) =>
-  (source.hiringDecisions || [])
-    .filter((decision) => decision.kind === kind)
-    .sort((left, right) => (right.version || 0) - (left.version || 0))[0];
+  latestDecisionsByKind(source.hiringDecisions || []).get(kind);
 
 const preIdentityGate = (source: HiringLifecycleSource): Gate => {
   if (source.preIdentityGrandfatheredAt) {
@@ -847,7 +846,9 @@ export const summarizeHiringLifecycle = (
 export const buildHiringQueueItem = (
   source: HiringQueueSource,
   lifecycleSummary: HiringLifecycleSummary,
-) => ({
+) => {
+  const latestDecisionMap = latestDecisionsByKind(source.hiringDecisions || []);
+  return ({
   id: source.id,
   stage: source.stage,
   outcome: source.outcome || null,
@@ -867,9 +868,7 @@ export const buildHiringQueueItem = (
   },
   decisions: ["HR_INTERVIEW", "HR_PRELIMINARY_APPROVAL", "COMPANY_APPROVAL"].reduce(
     (result, kind) => {
-      const latest = (source.hiringDecisions || [])
-        .filter((decision) => decision.kind === kind)
-        .sort((left, right) => (right.version || 0) - (left.version || 0))[0];
+      const latest = latestDecisionMap.get(kind);
       result[kind] = latest || null;
       return result;
     },
@@ -886,4 +885,5 @@ export const buildHiringQueueItem = (
   ),
   decisionDetailsVisible: Boolean(source.decisionDetailsVisible),
   lifecycleSummary,
-});
+  });
+};

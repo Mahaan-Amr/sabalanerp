@@ -588,6 +588,8 @@ export default function HrPersonnelPage() {
           title={retentionTarget.archivedAt ? "بازیابی پرسنل از بایگانی" : "بایگانی پرسنل"}
           targetName={`${retentionTarget.firstName} ${retentionTarget.lastName}`}
           busy={saving}
+          confirmLabel={retentionTarget.archivedAt ? "بازیابی" : "بایگانی"}
+          confirmTone={retentionTarget.archivedAt ? "success" : "warning"}
           effectiveDate={retentionTarget.archivedAt ? undefined : today()}
           onClose={() => setRetentionTarget(null)}
           onConfirm={confirmRetentionAction}

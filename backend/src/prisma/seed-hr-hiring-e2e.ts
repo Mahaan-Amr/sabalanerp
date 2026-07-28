@@ -12,6 +12,7 @@ const fixture = {
   otp: "123456",
   applicationId: "hr-e2e-application",
   releaseApplicationId: "hr-e2e-release-application",
+  blockedApplicationId: "hr-e2e-blocked-application",
   candidateId: "hr-e2e-candidate",
   releaseCandidateId: "hr-e2e-release-candidate",
   invitationId: "hr-e2e-invitation",
@@ -201,6 +202,22 @@ async function main() {
       preIdentityManagementApprovedAt: new Date(),
     },
   });
+  await prisma.hrApplicationFormRevision.upsert({
+    where: {
+      applicationId_revisionNumber: {
+        applicationId: fixture.releaseApplicationId,
+        revisionNumber: 1,
+      },
+    },
+    update: { status: "SUBMITTED", dataJson: {}, submittedAt: new Date() },
+    create: {
+      applicationId: fixture.releaseApplicationId,
+      revisionNumber: 1,
+      status: "SUBMITTED",
+      dataJson: {},
+      submittedAt: new Date(),
+    },
+  });
   await prisma.hrApplicationDecision.deleteMany({
     where: { applicationId: fixture.releaseApplicationId },
   });
@@ -221,6 +238,31 @@ async function main() {
         decidedBy: user.id,
       },
     ]),
+  });
+  await prisma.hrJobApplication.upsert({
+    where: { id: fixture.blockedApplicationId },
+    update: {
+      candidateId: fixture.releaseCandidateId,
+      positionId: fixture.positionId,
+      stage: "SCREENING",
+      outcome: null,
+      createdBy: user.id,
+      preIdentityRequirementsFinalizedAt: new Date(),
+      preIdentityManagementApprovedAt: new Date(),
+      preIdentityReleasedAt: null,
+    },
+    create: {
+      id: fixture.blockedApplicationId,
+      candidateId: fixture.releaseCandidateId,
+      positionId: fixture.positionId,
+      stage: "SCREENING",
+      createdBy: user.id,
+      preIdentityRequirementsFinalizedAt: new Date(),
+      preIdentityManagementApprovedAt: new Date(),
+    },
+  });
+  await prisma.hrApplicationDecision.deleteMany({
+    where: { applicationId: fixture.blockedApplicationId },
   });
 
   await prisma.hrApplicationFormRevision.upsert({

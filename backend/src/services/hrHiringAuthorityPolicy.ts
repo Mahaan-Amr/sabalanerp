@@ -4,12 +4,16 @@ export const assertHiringAuthorityMutationAllowed = (input: {
   actorAuthorities: string[];
   action: 'GRANT' | 'REVOKE';
   targetUserId: string;
+  targetRole: string;
   authority: string;
   activeCompanyManagerCount: number;
 }) => {
   const superAdmin = input.actorRole === 'ADMIN';
   const companyManager = input.actorAuthorities.includes('COMPANY_MANAGER');
   if (!superAdmin && !companyManager) throw new Error('اختیار مدیریت شرکت یا نقش مدیر سامانه الزامی است.');
+  if (!superAdmin && input.targetRole === 'ADMIN') {
+    throw new Error('مدیر شرکت نمی‌تواند اختیارهای مدیر سامانه را تغییر دهد.');
+  }
   if (!superAdmin && input.authority === 'COMPANY_MANAGER') {
     throw new Error('فقط مدیر سامانه می‌تواند اختیار مدیریت شرکت را واگذار یا سلب کند.');
   }

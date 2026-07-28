@@ -757,6 +757,8 @@ export default function HiringCasesPage() {
           title={retentionTarget.archivedAt ? "بازیابی پرونده از بایگانی" : "بایگانی پرونده متقاضی"}
           targetName={`${retentionTarget.candidate.firstName} ${retentionTarget.candidate.lastName}`}
           busy={busy}
+          confirmLabel={retentionTarget.archivedAt ? "بازیابی" : "بایگانی"}
+          confirmTone={retentionTarget.archivedAt ? "success" : "warning"}
           onClose={() => setRetentionTarget(null)}
           onConfirm={confirmRetentionAction}
         />

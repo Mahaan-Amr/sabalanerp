@@ -10,6 +10,8 @@ export default function RetentionAction({
   targetName,
   busy,
   effectiveDate,
+  confirmLabel,
+  confirmTone = "warning",
   onClose,
   onConfirm,
 }: {
@@ -17,6 +19,8 @@ export default function RetentionAction({
   targetName: string;
   busy: boolean;
   effectiveDate?: string;
+  confirmLabel: string;
+  confirmTone?: "warning" | "danger" | "success";
   onClose: () => void;
   onConfirm: (data: { reason: string; effectiveDate?: string }) => Promise<void> | void;
 }) {
@@ -33,8 +37,8 @@ export default function RetentionAction({
         <div className="flex flex-wrap justify-end gap-2">
           <ErpButton label="انصراف" variant="soft" disabled={busy} onClick={onClose} />
           <ErpButton
-            label="تأیید"
-            tone="warning"
+            label={confirmLabel}
+            tone={confirmTone}
             disabled={busy || !ready}
             onClick={() => onConfirm({ reason: reason.trim(), effectiveDate: date || undefined })}
           />

@@ -9,6 +9,8 @@ import {
 assert.equal(convertCompactLengthUnit('1.5', 'm', 'cm'), '150');
 assert.equal(convertCompactLengthUnit('150', 'cm', 'm'), '1.5');
 assert.equal(convertCompactLengthUnit('0.3', 'cm', 'm'), '0.003');
+assert.equal(convertCompactLengthUnit('12,500.75', 'm', 'cm'), '1250075');
+assert.equal(convertCompactLengthUnit('۱۲٬۵۰۰٫۷۵', 'm', 'cm'), '1250075');
 assert.equal(convertCompactLengthUnit('', 'm', 'cm'), '');
 
 {

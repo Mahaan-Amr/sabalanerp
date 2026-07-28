@@ -1,3 +1,5 @@
+import { normalizeDigits } from '@/lib/numberFormat';
+
 export type ProductModalView =
   | 'main'
   | 'contract-remainders'
@@ -66,7 +68,7 @@ export const reduceProductModalDraft = <Draft>(
 };
 
 const normalizeUnsignedDecimal = (value: string): string => {
-  const trimmed = value.trim();
+  const trimmed = normalizeDigits(value).replace(/[,\s]/g, '').trim();
   if (!/^\d+(?:\.\d*)?$/.test(trimmed)) return value;
   const [integer, fraction = ''] = trimmed.split('.');
   const normalizedInteger = integer.replace(/^0+(?=\d)/, '') || '0';

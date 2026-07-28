@@ -46,6 +46,12 @@ import { buildContractCartRows } from './contractCartRows';
 interface Step5ProductSelectionProps {
   controller: ContractProductCartController;
   errors: Record<string, string>;
+  saveFeedback: {
+    id: number;
+    mode: 'created' | 'edited';
+    rowId?: string;
+  } | null;
+  onSaveFeedbackExpired: (id: number) => void;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -241,6 +247,7 @@ const ContractRow: React.FC<{
   onDeleteRequest: (rowId: string) => void;
   onDeleteCancel: () => void;
   onDeleteConfirm: (rowId: string) => void;
+  editSaved?: boolean;
 }> = ({
   product,
   depth = 0,
@@ -249,7 +256,8 @@ const ContractRow: React.FC<{
   deleteConfirmRowId,
   onDeleteRequest,
   onDeleteCancel,
-  onDeleteConfirm
+  onDeleteConfirm,
+  editSaved = false
 }) => {
   const rowId = product.rowId;
   if (!rowId) return null;
@@ -270,6 +278,13 @@ const ContractRow: React.FC<{
       className={`border-b border-[var(--sds-border-subtle)] py-3 last:border-b-0 ${depth ? 'mr-5 border-r pr-4' : ''}`}
       data-contract-row-id={rowId}
     >
+      {editSaved && (
+        <ErpInlineState
+          kind="success"
+          title="تغییرات محصول با موفقیت ذخیره شد"
+          className="mb-2"
+        />
+      )}
       <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -433,7 +448,9 @@ const ServiceRow: React.FC<{
 
 export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   controller,
-  errors
+  errors,
+  saveFeedback,
+  onSaveFeedbackExpired
 }) => {
   const { catalog, services, cart } = controller;
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
@@ -442,6 +459,8 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   const [serviceDeleteId, setServiceDeleteId] = useState<string | null>(null);
   const [showServiceCatalog, setShowServiceCatalog] = useState(false);
   const highlightedRef = useRef<HTMLButtonElement | null>(null);
+  const catalogStartRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const projectedRows = useMemo(() => buildContractCartRows(cart.items), [cart.items]);
 
   useEffect(() => {
@@ -451,6 +470,26 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   useEffect(() => {
     highlightedRef.current?.scrollIntoView({ block: 'nearest' });
   }, [highlightedIndex]);
+
+  useEffect(() => {
+    if (!saveFeedback) return;
+    if (saveFeedback.mode === 'created') {
+      requestAnimationFrame(() => {
+        catalogStartRef.current?.scrollIntoView({
+          block: 'start',
+          behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? 'auto'
+            : 'smooth'
+        });
+        searchRef.current?.focus({ preventScroll: true });
+      });
+    }
+    const timer = window.setTimeout(
+      () => onSaveFeedbackExpired(saveFeedback.id),
+      5000
+    );
+    return () => window.clearTimeout(timer);
+  }, [onSaveFeedbackExpired, saveFeedback]);
 
   const selectHighlighted = () => {
     const product = resolveHighlightedCatalogProduct(catalog.products, highlightedIndex);
@@ -473,7 +512,19 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
         <ErpInlineState kind="error" title={errors.products} />
       )}
 
-      <section className="sds-workspace-surface p-4" aria-label="کاتالوگ محصولات">
+      <div ref={catalogStartRef} className="scroll-mt-4" />
+
+      {saveFeedback?.mode === 'created' && (
+        <ErpInlineState
+          kind="success"
+          title="ثبت محصول با موفقیت انجام شد"
+        />
+      )}
+
+      <section
+        className="sds-workspace-surface p-4"
+        aria-label="کاتالوگ محصولات"
+      >
         <div className="flex gap-1 overflow-x-auto pb-3" role="tablist" aria-label="نوع محصول">
           <ErpPressable
             type="button"
@@ -506,6 +557,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
           جستجوی محصول
         </label>
         <ErpInput
+          ref={searchRef}
           id="contract-product-search"
           type="search"
           value={catalog.query}
@@ -588,6 +640,10 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
               onDeleteRequest={setDeleteConfirmRowId}
               onDeleteCancel={() => setDeleteConfirmRowId(null)}
               onDeleteConfirm={confirmDelete}
+              editSaved={
+                saveFeedback?.mode === 'edited' &&
+                saveFeedback.rowId === product.rowId
+              }
             />
             {children.map(child => (
               <ContractRow
@@ -600,6 +656,10 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                 onDeleteRequest={setDeleteConfirmRowId}
                 onDeleteCancel={() => setDeleteConfirmRowId(null)}
                 onDeleteConfirm={confirmDelete}
+                editSaved={
+                  saveFeedback?.mode === 'edited' &&
+                  saveFeedback.rowId === child.rowId
+                }
               />
             ))}
           </React.Fragment>

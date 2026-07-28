@@ -248,7 +248,7 @@ export function SlabProductSection({
     if (field === 'baseMaterialRateToman') return 'قیمت را وارد کنید';
     if (field === 'squareMeterCutRateToman') return 'نرخ برش را وارد کنید';
     if (field === 'sourceRows') return 'منابع واردشده برای تأمین سفارش کافی نیستند';
-    return message;
+    return 'اطلاعات این بخش را بررسی و اصلاح کنید';
   };
   const resolved = calculation?.ok ? calculation.result : undefined;
   const commitDimension = (

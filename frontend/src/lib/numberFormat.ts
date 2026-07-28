@@ -7,7 +7,71 @@ export const normalizeDigits = (value: string): string => {
     .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0))
     .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
     .replace(/\u066B/g, '.')
-    .replace(/[\u066C،]/g, ',');
+    .replace(/[\u060C\u066C]/g, ',');
+};
+
+const canonicalNumericText = (
+  value: string,
+  maximumFractionDigits: number | null
+): string => {
+  const normalized = normalizeDigits(value);
+  let result = '';
+  let hasDecimal = false;
+  let fractionDigits = 0;
+
+  for (const character of normalized) {
+    if (character >= '0' && character <= '9') {
+      if (
+        hasDecimal &&
+        maximumFractionDigits !== null &&
+        fractionDigits >= maximumFractionDigits
+      ) {
+        continue;
+      }
+      result += character;
+      if (hasDecimal) fractionDigits += 1;
+      continue;
+    }
+    if (character === '.' && !hasDecimal) {
+      result += character;
+      hasDecimal = true;
+      continue;
+    }
+    if (character === '-' && result.length === 0) {
+      result = '-';
+    }
+  }
+
+  return result;
+};
+
+const groupCanonicalNumericText = (canonicalText: string): string => {
+  const negative = canonicalText.startsWith('-');
+  const unsigned = negative ? canonicalText.slice(1) : canonicalText;
+  const hasDecimal = unsigned.includes('.');
+  const [integerPart, fractionPart = ''] = unsigned.split('.');
+  const groupedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${negative ? '-' : ''}${groupedInteger}${hasDecimal ? `.${fractionPart}` : ''}`;
+};
+
+export interface FormattedNumericInputText {
+  canonicalText: string;
+  displayText: string;
+  caretPosition: number;
+}
+
+export const formatNumericInputText = (
+  value: string,
+  selectionStart: number = value.length,
+  maximumFractionDigits: number | null = null
+): FormattedNumericInputText => {
+  const canonicalText = canonicalNumericText(value, maximumFractionDigits);
+  const displayText = groupCanonicalNumericText(canonicalText);
+  const prefix = value.slice(0, Math.max(0, selectionStart));
+  const canonicalPrefix = canonicalNumericText(prefix, maximumFractionDigits);
+  const caretPosition = groupCanonicalNumericText(canonicalPrefix).length;
+
+  return { canonicalText, displayText, caretPosition };
 };
 
 export const parseFormattedNumber = (formattedValue: string): number => {

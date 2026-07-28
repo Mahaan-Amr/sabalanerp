@@ -70,23 +70,40 @@ const ensureWholeProductGroup = (input: ProductOperationsInput) => {
 function CatalogResults({
   kind,
   items,
-  onSelect
+  onSelect,
+  focusOnMount = false
 }: {
   kind: 'tool' | 'finishing';
   items: readonly OperationCatalogItem[];
   onSelect: (item: OperationCatalogItem) => void;
+  focusOnMount?: boolean;
 }) {
   const [query, setQuery] = React.useState('');
+  const searchRef = React.useRef<HTMLInputElement>(null);
+  const searchId =
+    kind === 'tool' ? 'contract-product-tool-search' : 'contract-product-finishing-search';
+  React.useEffect(() => {
+    if (!focusOnMount) return;
+    const frame = requestAnimationFrame(() => {
+      const field = searchRef.current;
+      if (!field) return;
+      field.scrollIntoView({ block: 'nearest' });
+      field.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusOnMount]);
   const normalized = query.trim().toLocaleLowerCase('fa');
   const results = normalized
     ? items.filter(item => item.name.toLocaleLowerCase('fa').includes(normalized))
     : items;
   return (
     <div className="border-y border-[var(--sds-border-subtle)] py-2 dark:border-[var(--sds-border-subtle)]">
-      <label className="mb-1 block text-xs font-semibold">
+      <label htmlFor={searchId} className="mb-1 block text-xs font-semibold">
         {kind === 'tool' ? 'جستجوی ابزار' : 'جستجوی پرداخت'}
       </label>
       <ErpInput
+        id={searchId}
+        ref={searchRef}
         value={query}
         onChange={event => setQuery(event.target.value)}
         className="min-h-9 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 text-sm outline-none focus:border-[var(--sds-accent)] dark:border-[var(--sds-border-default)]"
@@ -180,7 +197,7 @@ export function OperationCollectionsSection({
     if (conflict.code === 'inventory-rate-missing') {
       return 'نرخ در موجودی ثبت نشده است';
     }
-    return conflict.message;
+    return 'اطلاعات این عملیات را بررسی و اصلاح کنید';
   };
   const groupsCoveringWholeProduct = () => {
     const ensured = ensureWholeProductGroup(input);
@@ -309,7 +326,10 @@ export function OperationCollectionsSection({
         clonedFinishingSelectionIds
       });
       if (!split.ok) {
-        setSplitDraft({ ...splitDraft, error: split.message });
+        setSplitDraft({
+          ...splitDraft,
+          error: 'مقدار بخش‌بندی عملیات معتبر نیست'
+        });
         return;
       }
       onChange(splitDraft.kind === 'tool'
@@ -350,6 +370,7 @@ export function OperationCollectionsSection({
                     kind="tool"
                     items={toolCatalog.data ?? []}
                     onSelect={addTool}
+                    focusOnMount
                   />
                 )
         )}
@@ -365,6 +386,8 @@ export function OperationCollectionsSection({
           return (
             <div
               key={tool.toolSelectionId}
+              data-operation-conflict={conflict ? 'true' : undefined}
+              tabIndex={conflict ? -1 : undefined}
               className="border-t border-[var(--sds-border-subtle)] py-2 text-xs dark:border-[var(--sds-border-subtle)]"
             >
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -592,6 +615,8 @@ export function OperationCollectionsSection({
           return (
             <div
               key={finishing.finishingSelectionId}
+              data-operation-conflict={conflict ? 'true' : undefined}
+              tabIndex={conflict ? -1 : undefined}
               className="border-t border-[var(--sds-border-subtle)] py-2 text-xs dark:border-[var(--sds-border-subtle)]"
             >
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

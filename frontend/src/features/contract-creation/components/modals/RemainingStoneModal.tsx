@@ -109,6 +109,10 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
   setRemainingStoneSawKerfEnabled
 }) => {
   const reducedMotion = useReducedMotion();
+  const [showValidation, setShowValidation] = React.useState(false);
+  React.useEffect(() => {
+    if (isOpen) setShowValidation(false);
+  }, [isOpen, remainingStone?.id]);
   if (!isOpen || !remainingStone) return null;
 
   const normalizedRows = partitions
@@ -187,8 +191,21 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
 
   const submit = () => {
     if (!previewIsValid) {
+      setShowValidation(true);
+      const firstInvalid = partitions.find(partition =>
+        partition.width <= 0 ||
+        partition.length <= 0 ||
+        preview.rowErrors.has(partition.id)
+      );
+      const invalidAxis = firstInvalid?.width && firstInvalid.width > 0
+        ? 'length'
+        : 'width';
       focusProductModalError(
-        document.querySelector<HTMLInputElement>('[data-remainder-first] input'),
+        firstInvalid
+          ? document.getElementById(
+              `remainder-${firstInvalid.id}-${invalidAxis}`
+            )
+          : document.querySelector<HTMLInputElement>('[data-remainder-first] input'),
         Boolean(reducedMotion)
       );
       return;
@@ -204,6 +221,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
       onClose={resetAndClose}
       primaryLabel="افزودن از باقی‌مانده"
       pending={false}
+      error={previewIsValid ? errors.products : undefined}
       onPrimary={submit}
     >
         <div className="px-0 py-0">
@@ -264,13 +282,15 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                           )}
                         </span>
                         <FormattedNumberInput
+                          id={`remainder-${partition.id}-width`}
                           value={partition.width || ''}
                           onChange={value =>
                             handleUpdatePartition(partition.id, 'width', value)}
+                          decimalScale={null}
                           min={0}
                           className="h-9 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-2 text-sm focus:border-[var(--sds-accent)] focus:outline-none border-[var(--sds-border-default)]"
                         />
-                        {widthInvalid && errors.products && (
+                        {widthInvalid && showValidation && (
                           <span className="mt-1 block text-[11px] text-[var(--sds-danger)]">
                             عرض را وارد کنید
                           </span>
@@ -290,13 +310,15 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                           )}
                         </span>
                         <FormattedNumberInput
+                          id={`remainder-${partition.id}-length`}
                           value={partition.length || ''}
                           onChange={value =>
                             handleUpdatePartition(partition.id, 'length', value)}
+                          decimalScale={null}
                           min={0}
                           className="h-9 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-2 text-sm focus:border-[var(--sds-accent)] focus:outline-none border-[var(--sds-border-default)]"
                         />
-                        {lengthInvalid && errors.products && (
+                        {lengthInvalid && showValidation && (
                           <span className="mt-1 block text-[11px] text-[var(--sds-danger)]">
                             طول را وارد کنید
                           </span>
@@ -438,9 +460,9 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                   : '—'}
               />
             </div>
-            {!previewIsValid && (preview.summaryError || errors.products) && (
+            {!previewIsValid && showValidation && (
               <p className="mt-2 text-xs text-[var(--sds-danger)] text-[var(--sds-danger)]">
-                {preview.summaryError || errors.products}
+                {preview.summaryError || 'ابعاد محصول باقی‌مانده را بررسی کنید'}
               </p>
             )}
           </section>

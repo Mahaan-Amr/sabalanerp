@@ -1,12 +1,16 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ErpInput } from '@/components/erp';
-import { normalizeDigits, parseFormattedNumber } from '@/lib/numberFormat';
+import {
+  formatNumericInputText,
+  parseFormattedNumber
+} from '@/lib/numberFormat';
 
 interface FormattedNumberInputProps {
   value: number | string | null | undefined;
-  onChange: (value: number) => void;
+  onChange?: (value: number) => void;
+  onTextChange?: (value: string) => void;
   placeholder?: string;
   className?: string;
   min?: number;
@@ -18,12 +22,15 @@ interface FormattedNumberInputProps {
   onFocus?: () => void;
   onBlur?: () => void;
   formatWhileTyping?: boolean;
-  decimalScale?: number;
+  decimalScale?: number | null;
+  'aria-invalid'?: boolean;
+  'aria-describedby'?: string;
 }
 
 const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
   value,
   onChange,
+  onTextChange,
   placeholder,
   className = '',
   min,
@@ -35,18 +42,25 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
   onFocus,
   onBlur,
   formatWhileTyping = true,
-  decimalScale = 4
+  decimalScale = 4,
+  'aria-invalid': ariaInvalid,
+  'aria-describedby': ariaDescribedBy
 }) => {
   const [displayValue, setDisplayValue] = useState<string>('');
   const [isFocused, setIsFocused] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const roundToScale = useCallback((numValue: number): number => {
+    if (decimalScale === null) return numValue;
     const factor = 10 ** decimalScale;
     return Math.round(numValue * factor) / factor;
   }, [decimalScale]);
 
   const formatNumberForScale = useCallback((input: number | string | null | undefined): string => {
     if (input === null || input === undefined || input === '') return '';
+    if (decimalScale === null) {
+      return formatNumericInputText(String(input)).displayText;
+    }
     const num = typeof input === 'string' ? parseFormattedNumber(input) : input;
     if (!Number.isFinite(num)) return '';
 
@@ -55,21 +69,6 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
       maximumFractionDigits: decimalScale
     });
   }, [decimalScale, formatWhileTyping, roundToScale]);
-
-  const formatTypingValue = useCallback((input: string): string => {
-    if (!formatWhileTyping) return input;
-
-    const isNegative = input.startsWith('-');
-    const signlessInput = isNegative ? input.slice(1) : input;
-    const hasDecimal = signlessInput.includes('.');
-    const [rawIntegerPart, decimalPart = ''] = signlessInput.split('.');
-    const integerPart = rawIntegerPart.replace(/[^\d]/g, '');
-    const formattedInteger = integerPart
-      ? Number(integerPart).toLocaleString('en-US', { maximumFractionDigits: 0 })
-      : '';
-
-    return `${isNegative ? '-' : ''}${formattedInteger}${hasDecimal ? `.${decimalPart}` : ''}`;
-  }, [formatWhileTyping]);
 
   useEffect(() => {
     if (!isFocused) {
@@ -96,28 +95,48 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
 
     if (!rawValue) {
       setDisplayValue('');
-      onChange(min ?? 0);
+      onTextChange?.('');
+      onChange?.(min ?? 0);
       onBlur?.();
       return;
     }
 
     const roundedValue = roundToScale(clamp(parseFormattedNumber(rawValue)));
     setDisplayValue(formatNumberForScale(roundedValue));
-    onChange(roundedValue);
+    onTextChange?.(
+      decimalScale === null
+        ? formatNumericInputText(rawValue).canonicalText
+        : String(roundedValue)
+    );
+    onChange?.(roundedValue);
     onBlur?.();
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const inputValue = normalizeDigits(e.target.value);
-    const decimalIndex = inputValue.indexOf('.');
-    const normalizedValue =
-      decimalIndex !== -1 && inputValue.length - decimalIndex - 1 > decimalScale
-        ? inputValue.substring(0, decimalIndex + decimalScale + 1)
-        : inputValue;
-    const numValue = clamp(parseFormattedNumber(normalizedValue));
+    const inputValue = e.target.value;
+    const selectionStart = e.target.selectionStart ?? inputValue.length;
+    const formatted = formatNumericInputText(
+      inputValue,
+      selectionStart,
+      decimalScale
+    );
+    const nextDisplayValue = formatWhileTyping
+      ? formatted.displayText
+      : formatted.canonicalText;
+    const numValue = clamp(parseFormattedNumber(formatted.canonicalText));
 
-    setDisplayValue(formatTypingValue(normalizedValue));
-    onChange(numValue);
+    setDisplayValue(nextDisplayValue);
+    onTextChange?.(formatted.canonicalText);
+    onChange?.(numValue);
+    requestAnimationFrame(() => {
+      const field = inputRef.current;
+      if (!field || document.activeElement !== field) return;
+      const caretPosition = Math.min(
+        formatted.caretPosition,
+        nextDisplayValue.length
+      );
+      field.setSelectionRange(caretPosition, caretPosition);
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -153,6 +172,7 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
 
   return (
     <ErpInput
+      ref={inputRef}
       type="text"
       inputMode="decimal"
       value={displayValue}
@@ -168,6 +188,8 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
       min={min}
       max={max}
       step={step}
+      aria-invalid={ariaInvalid}
+      aria-describedby={ariaDescribedBy}
     />
   );
 };

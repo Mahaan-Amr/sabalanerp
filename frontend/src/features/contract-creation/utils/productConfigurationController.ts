@@ -391,7 +391,7 @@ export const resolveLongitudinalQuantityOptimizationFailure = (
   if (!quantityOptimizationRequested) return null;
   if (plan.derivedQuantity && plan.requestedQuantity > 0) return null;
 
-  return plan.warnings[0] || 'بهینه‌سازی تعداد با ابعاد واردشده ممکن نیست. ابعاد سنگ و محصول را بررسی کنید.';
+  return 'بهینه‌سازی تعداد با ابعاد واردشده ممکن نیست. ابعاد سنگ و محصول را بررسی کنید.';
 };
 
 export const getOriginalWidthForProduct = (

@@ -145,6 +145,7 @@ export interface CompactProductConfigurationModalProps {
   readonly getCuttingTypePricePerMeter: (code: string) => number | null;
   readonly subServices: readonly SubService[];
   readonly stoneFinishings: readonly StoneFinishing[];
+  readonly error?: string;
 }
 
 export function CompactProductConfigurationModal({
@@ -162,7 +163,8 @@ export function CompactProductConfigurationModal({
   onSave,
   getCuttingTypePricePerMeter,
   subServices,
-  stoneFinishings
+  stoneFinishings,
+  error
 }: CompactProductConfigurationModalProps) {
   const [pending, setPending] = React.useState(false);
   const pendingRef = React.useRef(false);
@@ -615,11 +617,22 @@ export function CompactProductConfigurationModal({
         return false;
       }
     }
-    if (currentOperations) {
+    if (currentProductType !== 'prepared' && currentOperations) {
       const result = calculateProductOperations(currentOperations);
       if (!result.ok) {
         setShowValidation(true);
-        focusValidationTarget('product-operations');
+        requestAnimationFrame(() => {
+          const target =
+            document.querySelector<HTMLElement>('[data-operation-conflict="true"]') ||
+            document.getElementById('product-operations');
+          target?.scrollIntoView({
+            block: 'center',
+            behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+              ? 'auto'
+              : 'smooth'
+          });
+          target?.focus({ preventScroll: true });
+        });
         return false;
       }
     }
@@ -635,6 +648,7 @@ export function CompactProductConfigurationModal({
       primaryLabel={isEditMode ? 'ذخیره تغییرات' : 'افزودن محصول'}
       pendingLabel="در حال ذخیره…"
       pending={pending}
+      error={error}
       onPrimary={() => {
         if (pendingRef.current) return;
         if (!validateDraft()) return;

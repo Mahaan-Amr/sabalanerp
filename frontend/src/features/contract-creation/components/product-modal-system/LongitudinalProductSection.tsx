@@ -45,7 +45,8 @@ function CompactDecimalField({
   onValueChange,
   error,
   inputMode = 'decimal',
-  monetary = false
+  monetary = false,
+  grouped = false
 }: {
   id: string;
   label: string;
@@ -56,6 +57,7 @@ function CompactDecimalField({
   error?: string;
   inputMode?: 'decimal' | 'numeric';
   monetary?: boolean;
+  grouped?: boolean;
 }) {
   const [draft, setDraft] = React.useState(value);
   const editingRef = React.useRef(false);
@@ -80,11 +82,11 @@ function CompactDecimalField({
           />
         )}
       </div>
-      {monetary ? (
+      {monetary || grouped ? (
         <FormattedNumberInput
           id={id}
           value={draft}
-          decimalScale={0}
+          decimalScale={monetary ? 0 : null}
           min={0}
           onFocus={() => {
             editingRef.current = true;
@@ -92,11 +94,17 @@ function CompactDecimalField({
           onBlur={() => {
             editingRef.current = false;
           }}
-          onChange={next => {
+          onChange={monetary ? next => {
             const canonical = String(next);
             setDraft(canonical);
             onValueChange(canonical);
-          }}
+          } : undefined}
+          onTextChange={grouped ? canonical => {
+            setDraft(canonical);
+            onValueChange(canonical);
+          } : undefined}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? `${id}-error` : undefined}
           className={fieldClass}
         />
       ) : (
@@ -158,7 +166,7 @@ export function LongitudinalProductSection({
     if (field === 'widthMeters') {
       return `حداکثر عرض این سنگ ${Number(input.motherWidthMeters) * 100} سانتی‌متر است`;
     }
-    return message;
+    return 'اطلاعات این بخش را بررسی و اصلاح کنید';
   };
   const commitDecimal = (
     field: 'lengthMeters' | 'widthMeters' | 'requestedAreaSquareMeters' | 'baseRateToman',
@@ -218,6 +226,7 @@ export function LongitudinalProductSection({
             'length',
             input.lengthDisplayUnit
           )}
+          grouped
         />
         <CompactDecimalField
           id="longitudinal-width"

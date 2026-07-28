@@ -286,7 +286,7 @@ const materializeOperationSnapshots = (
   if (!calculation.ok) {
     return {
       ok: false as const,
-      message: calculation.conflicts.map(conflict => conflict.message).join(' | ')
+      message: 'اطلاعات ابزار و پرداخت را بررسی و خطاهای مشخص‌شده را برطرف کنید'
     };
   }
 
@@ -724,6 +724,26 @@ export default function CreateContractWizard({
   const [discountPercentInput, setDiscountPercentInput] = useState<number>(0);
   const [serviceSearchTerm, setServiceSearchTerm] = useState('');
   const [serviceSourceType, setServiceSourceType] = useState<ContractServiceRowSourceType>('tool');
+  const [productSaveFeedback, setProductSaveFeedback] = useState<{
+    id: number;
+    mode: 'created' | 'edited';
+    rowId?: string;
+  } | null>(null);
+  const productSaveFeedbackIdRef = useRef(0);
+  const publishProductSaveFeedback = useCallback((
+    mode: 'created' | 'edited',
+    rowId?: string
+  ) => {
+    productSaveFeedbackIdRef.current += 1;
+    setProductSaveFeedback({
+      id: productSaveFeedbackIdRef.current,
+      mode,
+      rowId
+    });
+  }, []);
+  const expireProductSaveFeedback = useCallback((id: number) => {
+    setProductSaveFeedback(current => current?.id === id ? null : current);
+  }, []);
   const effectiveContractKind = wizardData.contractKind || contractKind;
   const isCollaborationContract = effectiveContractKind === 'collaboration';
   const baseVisibleWizardSteps = useMemo(
@@ -2222,7 +2242,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     calculatePartitionPositions,
     setErrors,
     handleSmartCalculation: productCalculations.handleSmartCalculation,
-    getEffectiveQuantity: productCalculations.getEffectiveQuantity
+    getEffectiveQuantity: productCalculations.getEffectiveQuantity,
+    onProductCreated: rowId =>
+      publishProductSaveFeedback('created', rowId)
   });
 
   // Initialize payment handlers hook
@@ -4166,7 +4188,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
     const resolution = resolveLegacyRemainingChildAddOns(product, action);
     if (!resolution.ok) {
-      setErrors({ products: resolution.reason || 'افزونه‌های قدیمی با هندسه این محصول سازگار نیستند.' });
+      setErrors({ products: 'افزونه‌های قدیمی با هندسه این محصول سازگار نیستند.' });
       return;
     }
 
@@ -4529,6 +4551,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         updateWizardData({ products: [...wizardData.products, finalProduct], selectedProductTypeForAddition: 'prepared' });
       }
 
+      publishProductSaveFeedback(
+        isEditMode ? 'edited' : 'created',
+        finalProduct.rowId
+      );
       setShowProductModal(false);
       setSelectedProduct(null);
       setProductConfig({});
@@ -4550,9 +4576,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       const canonicalSlabCalculation = calculateSlab(productConfig.slabPolicyInput);
       if (!canonicalSlabCalculation.ok) {
         setErrors({
-          products: canonicalSlabCalculation.conflicts
-            .map(conflict => conflict.message)
-            .join(' | ')
+          products: 'ابعاد، تعداد، قیمت و چیدمان اسلب را بررسی کنید'
         });
         return;
       }
@@ -4791,6 +4815,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         });
       }
 
+      publishProductSaveFeedback(
+        isEditMode ? 'edited' : 'created',
+        finalProduct.rowId
+      );
       setShowProductModal(false);
       setSelectedProduct(null);
       setProductConfig({});
@@ -5173,7 +5201,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     if (smartCutPlan.derivedQuantity) {
       const recalculatedAddOns = recalculateRemainingChildAddOns(finalProduct);
       if (!recalculatedAddOns.ok) {
-        setErrors({ products: recalculatedAddOns.reason || 'افزونه‌های محصول با خروجی بهینه‌سازی‌شده سازگار نیستند.' });
+        setErrors({ products: 'افزونه‌های محصول با خروجی بهینه‌سازی‌شده سازگار نیستند.' });
         return;
       }
       Object.assign(finalProduct, recalculatedAddOns.product);
@@ -5233,6 +5261,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }
 
 
+    publishProductSaveFeedback(
+      isEditMode ? 'edited' : 'created',
+      finalProduct.rowId
+    );
     // Close modal and reset state
     setShowProductModal(false);
     setSelectedProduct(null);
@@ -5521,6 +5553,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           <Step5ProductSelection
             controller={productCartController}
             errors={errors}
+            saveFeedback={productSaveFeedback}
+            onSaveFeedbackExpired={expireProductSaveFeedback}
           />
         );
 
@@ -10489,6 +10523,16 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     clearProductAdditionSearches();
                   }
 
+                  const savedStairRowId =
+                    isEditMode && editingProductIndex !== null
+                      ? wizardData.products[editingProductIndex]?.rowId
+                      : stairSystemV2.stairSessionItems.find(
+                          item => !((item.meta as any)?.isLayer)
+                        )?.rowId;
+                  publishProductSaveFeedback(
+                    isEditMode ? 'edited' : 'created',
+                    savedStairRowId
+                  );
                   resetStairConfigurationSession();
                   setShowProductModal(false);
                   } catch {
@@ -10531,6 +10575,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           getCuttingTypePricePerMeter={productCalculations.getCuttingTypePricePerMeter}
           stoneFinishings={stoneFinishings}
           subServices={subServices}
+          error={errors.products}
         />
 
         <RemainingStoneModal

@@ -35,6 +35,7 @@ interface ProductConfigurationModalProps {
   readonly subServices?: readonly SubService[];
   readonly stoneFinishings?: readonly StoneFinishing[];
   readonly wizardData: ContractWizardData;
+  readonly error?: string;
 }
 
 export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps> = ({
@@ -53,7 +54,8 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
   getCuttingTypePricePerMeter,
   subServices = [],
   stoneFinishings = [],
-  wizardData
+  wizardData,
+  error
 }) => {
   if (!isOpen || !selectedProduct) return null;
 
@@ -87,6 +89,7 @@ export const ProductConfigurationModal: React.FC<ProductConfigurationModalProps>
       getCuttingTypePricePerMeter={getCuttingTypePricePerMeter}
       subServices={subServices}
       stoneFinishings={stoneFinishings}
+      error={error}
     />
   );
 };

@@ -50,6 +50,7 @@ interface UseRemainingStoneModalOptions {
     effectiveQuantity?: number
   ) => { length: number; width: number; squareMeters: number };
   getEffectiveQuantity?: () => number;
+  onProductCreated?: (rowId: string) => void;
 }
 
 const createEmptyPartition = (): StonePartition => ({
@@ -68,7 +69,8 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     calculatePartitionPositions,
     setErrors,
     handleSmartCalculation,
-    getEffectiveQuantity
+    getEffectiveQuantity,
+    onProductCreated
   } = options;
 
   // Modal visibility
@@ -528,6 +530,9 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     updateWizardData({
       products: replay.products
     });
+    if (childProducts[0]?.rowId) {
+      onProductCreated?.(childProducts[0].rowId);
+    }
 
     if (warningMessage) {
       setErrors({ products: warningMessage });
@@ -560,7 +565,8 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
     resolveSourceProduct,
     remainingStoneSawKerfEnabled,
     remainingStoneConfig,
-    wizardData.products
+    wizardData.products,
+    onProductCreated
   ]);
 
   return {

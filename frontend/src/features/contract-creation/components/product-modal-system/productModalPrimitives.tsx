@@ -2,7 +2,12 @@
 
 import React from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { ErpPressable, ErpSkeleton, ErpTextarea } from '@/components/erp';
+import {
+  ErpInlineState,
+  ErpPressable,
+  ErpSkeleton,
+  ErpTextarea
+} from '@/components/erp';
 import {
   convertCompactLengthUnit,
   type CompactLengthUnit,
@@ -304,7 +309,8 @@ export function CentralProductModalShell({
   primaryLabel,
   pendingLabel = 'در حال ذخیره…',
   pending,
-  onPrimary
+  onPrimary,
+  error
 }: {
   open: boolean;
   title: string;
@@ -316,9 +322,16 @@ export function CentralProductModalShell({
   pendingLabel?: string;
   pending: boolean;
   onPrimary: () => void;
+  error?: string;
 }) {
   const reducedMotion = useReducedMotion();
   const dialogRef = React.useRef<HTMLElement>(null);
+  const onCloseRef = React.useRef(onClose);
+  const onBackRef = React.useRef(onBack);
+  const pendingRef = React.useRef(pending);
+  onCloseRef.current = onClose;
+  onBackRef.current = onBack;
+  pendingRef.current = pending;
   React.useEffect(() => {
     if (!open) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -335,9 +348,9 @@ export function CentralProductModalShell({
     };
     const focusTimer = window.setTimeout(focusFirst, reducedMotion ? 0 : 30);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !pending) {
+      if (event.key === 'Escape' && !pendingRef.current) {
         event.preventDefault();
-        view === 'main' ? onClose() : onBack?.();
+        view === 'main' ? onCloseRef.current() : onBackRef.current?.();
       } else if (event.key === 'Tab') {
         const focusable = Array.from(
           dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []
@@ -363,7 +376,7 @@ export function CentralProductModalShell({
       document.removeEventListener('keydown', onKeyDown);
       previouslyFocused?.focus();
     };
-  }, [onBack, onClose, open, pending, reducedMotion, view]);
+  }, [open, reducedMotion, view]);
 
   return (
     <AnimatePresence>
@@ -409,21 +422,30 @@ export function CentralProductModalShell({
             >
               {children}
             </motion.div>
-            <footer className="sticky bottom-0 z-10 flex min-h-16 items-center justify-end gap-2 border-t border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-4">
-              <ErpPressable type="button" onClick={view === 'main' ? onClose : onBack} disabled={pending} variant="ghost" className="px-4 text-sm font-semibold">
-                {view === 'main' ? 'انصراف' : 'بازگشت'}
-              </ErpPressable>
-              <ErpPressable
-                type="button"
-                onClick={onPrimary}
-                disabled={pending}
-                aria-busy={pending}
-                tone="primary"
-                variant="solid"
-                className="min-w-28 px-4 text-sm font-bold disabled:cursor-wait disabled:opacity-70"
-              >
-                {pending ? pendingLabel : primaryLabel}
-              </ErpPressable>
+            <footer className="sticky bottom-0 z-10 border-t border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)]">
+              {error && (
+                <ErpInlineState
+                  kind="error"
+                  title={error}
+                  className="border-x-0 border-t-0"
+                />
+              )}
+              <div className="flex min-h-16 items-center justify-end gap-2 px-4">
+                <ErpPressable type="button" onClick={view === 'main' ? onClose : onBack} disabled={pending} variant="ghost" className="px-4 text-sm font-semibold">
+                  {view === 'main' ? 'انصراف' : 'بازگشت'}
+                </ErpPressable>
+                <ErpPressable
+                  type="button"
+                  onClick={onPrimary}
+                  disabled={pending}
+                  aria-busy={pending}
+                  tone="primary"
+                  variant="solid"
+                  className="min-w-28 px-4 text-sm font-bold disabled:cursor-wait disabled:opacity-70"
+                >
+                  {pending ? pendingLabel : primaryLabel}
+                </ErpPressable>
+              </div>
             </footer>
           </motion.section>
         </motion.div>

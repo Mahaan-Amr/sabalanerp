@@ -24,10 +24,15 @@ const models = [
     { name: 'id', kind: 'scalar', type: 'String' },
     { name: 'approvedBy', kind: 'scalar', type: 'String' },
   ] },
+  { name: 'AccountingFinancialRecord', fields: [
+    { name: 'id', kind: 'scalar', type: 'String' },
+    { name: 'createdBy', kind: 'scalar', type: 'String', isRequired: true },
+  ] },
 ];
 
 const relations = buildDeletionRelationIndex(models as any);
 assert.deepEqual(relations.map((item) => `${item.childModel}.${item.childField}->${item.parentModel}`).sort(), [
+  'AccountingFinancialRecord.createdBy->User',
   'Attendance.personnelId->Personnel',
   'OperationalAudit.approvedBy->User',
   'Session.userId->User',

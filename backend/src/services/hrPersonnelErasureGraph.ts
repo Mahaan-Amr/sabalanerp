@@ -16,6 +16,9 @@ export type PersonnelErasurePlan = {
 };
 
 const excludedModels = new Set(['HrDeletionReceipt', 'HrDeletionFileCleanup']);
+// Actor-only scalar columns in identity roots must not make one person's erasure
+// absorb another identity record merely because that person created/archived it.
+const scalarAttributionExcludedModels = new Set(['User', 'Personnel', 'HrCandidate']);
 const delegateName = (model: string) => model.charAt(0).toLowerCase() + model.slice(1);
 
 export const buildDeletionRelationIndex = (models: ModelShape[]): DeletionRelation[] => models.flatMap((model) => {
@@ -30,8 +33,8 @@ export const buildDeletionRelationIndex = (models: ModelShape[]): DeletionRelati
     return [{ childModel: model.name, childField, parentModel: field.type, childRequired: scalar?.isRequired !== false }];
   });
   const scalarUserReferences = model.fields.flatMap((field) => {
+    if (scalarAttributionExcludedModels.has(model.name)) return [];
     if (field.kind !== 'scalar' || field.type !== 'String' || relationBackedFields.has(field.name)) return [];
-    if (!/(Audit|Event|Log|History|Notification|Report)/.test(model.name)) return [];
     if (!/(?:By|ById|UserId|userId)$/.test(field.name)) return [];
     return [{ childModel: model.name, childField: field.name, parentModel: 'User', childRequired: field.isRequired !== false }];
   });

@@ -514,25 +514,31 @@ router.post('/personnel/:id/permanent-delete', viewAccess, requireSystemAdmin, a
     if (!impact) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
     if (!actor || !(await bcrypt.compare(String(req.body.adminPassword || ''), actor.password))) return res.status(403).json({ success: false, error: 'رمز عبور مدیر سامانه صحیح نیست.' });
     assertPermanentDeletionConfirmation({ expectedFingerprint: impact.plan.fingerprint, suppliedFingerprint: req.body.fingerprint, expectedFullName: impact.data.displayName, suppliedFullName: req.body.fullName, reason: req.body.reason, confirmed: req.body.confirmed });
-    let preparedPlan = impact.plan;
-    await prisma.$transaction(async (tx) => {
-      const currentPlan = await buildPersonnelErasurePlan(tx, req.params.id);
-      if (currentPlan.fingerprint !== impact.plan.fingerprint) throw new Error('پیش‌نمایش حذف منقضی شده است؛ دوباره بررسی کنید.');
-      const targetUserIds = currentPlan.nodes.User || [];
-      await assertCurrentPersonnelErasureAdminProtection(tx, targetUserIds, actorId(req));
-      if (targetUserIds.length) {
-        await tx.authSession.updateMany({ where: { userId: { in: targetUserIds }, revokedAt: null }, data: { revokedAt: new Date(), revokedById: actorId(req), revocationReason: 'PERMANENT_PERSONNEL_ERASURE' } });
-        await tx.user.updateMany({ where: { id: { in: targetUserIds } }, data: { isActive: false } });
-      }
-      preparedPlan = await buildPersonnelErasurePlan(tx, req.params.id);
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60_000 });
     const receiptId = crypto.randomUUID();
     const staged: StagedHiringFile[] = [];
+    let preparedPlan = impact.plan;
+    let accessPrepared = false;
+    let revokedSessionIds: string[] = [];
+    let previousUserStates: Array<{ id: string; isActive: boolean }> = [];
     try {
       const groups = new Map<string, string[]>();
-      for (const file of preparedPlan.files) groups.set(file.storageRoot, [...(groups.get(file.storageRoot) || []), file.storageName]);
+      for (const file of impact.plan.files) groups.set(file.storageRoot, [...(groups.get(file.storageRoot) || []), file.storageName]);
       let index = 0;
       for (const [storageRoot, names] of groups) staged.push(...stageHiringFilesForDeletion(names, `${receiptId}-${index++}`, storageRoot));
+      await prisma.$transaction(async (tx) => {
+        const currentPlan = await buildPersonnelErasurePlan(tx, req.params.id);
+        if (currentPlan.fingerprint !== impact.plan.fingerprint) throw new Error('پیش‌نمایش حذف منقضی شده است؛ دوباره بررسی کنید.');
+        const targetUserIds = currentPlan.nodes.User || [];
+        await assertCurrentPersonnelErasureAdminProtection(tx, targetUserIds, actorId(req));
+        if (targetUserIds.length) {
+          previousUserStates = await tx.user.findMany({ where: { id: { in: targetUserIds } }, select: { id: true, isActive: true } });
+          revokedSessionIds = (await tx.authSession.findMany({ where: { userId: { in: targetUserIds }, revokedAt: null }, select: { id: true } })).map((session) => session.id);
+          if (revokedSessionIds.length) await tx.authSession.updateMany({ where: { id: { in: revokedSessionIds } }, data: { revokedAt: new Date(), revokedById: actorId(req), revocationReason: 'PERMANENT_PERSONNEL_ERASURE' } });
+          await tx.user.updateMany({ where: { id: { in: targetUserIds } }, data: { isActive: false } });
+        }
+        preparedPlan = await buildPersonnelErasurePlan(tx, req.params.id);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60_000 });
+      accessPrepared = true;
       await prisma.$transaction(async (tx) => {
         const currentPlan = await buildPersonnelErasurePlan(tx, req.params.id);
         if (currentPlan.fingerprint !== preparedPlan.fingerprint) throw new Error('دامنه حذف پس از لغو دسترسی تغییر کرده است؛ پیش‌نمایش تازه دریافت کنید.');
@@ -547,7 +553,31 @@ router.post('/personnel/:id/permanent-delete', viewAccess, requireSystemAdmin, a
         if (staged.length) await tx.hrDeletionFileCleanup.createMany({ data: staged.map((item) => ({ receiptId, storageName: item.storageName, originalPath: item.originalPath, stagedPath: item.stagedPath })) });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60_000 });
     } catch (error) {
-      restoreStagedHiringFiles(staged);
+      let recoveryError: unknown = null;
+      try {
+        restoreStagedHiringFiles(staged);
+      } catch (restoreError) {
+        recoveryError = restoreError;
+      } finally {
+        if (accessPrepared) {
+          try {
+            await prisma.$transaction(async (tx) => {
+              if (revokedSessionIds.length) await tx.authSession.updateMany({
+                where: { id: { in: revokedSessionIds }, revocationReason: 'PERMANENT_PERSONNEL_ERASURE', revokedById: actorId(req) },
+                data: { revokedAt: null, revokedById: null, revocationReason: null }
+              });
+              for (const user of previousUserStates) await tx.user.update({ where: { id: user.id }, data: { isActive: user.isActive } });
+            });
+          } catch (accessRecoveryError) {
+            recoveryError = accessRecoveryError;
+          }
+        }
+      }
+      if (recoveryError) {
+        const recoveryFailure = new Error('حذف انجام نشد و بازگردانی کامل وضعیت آماده‌سازی نیز ناموفق بود؛ بررسی فوری مدیر سامانه لازم است.') as Error & { cause?: unknown };
+        recoveryFailure.cause = recoveryError;
+        throw recoveryFailure;
+      }
       throw error;
     }
     const failures: string[] = [];

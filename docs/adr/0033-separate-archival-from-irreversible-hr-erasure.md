@@ -5,3 +5,5 @@ Sabalan will provide reversible Applicant and Personnel archives for ordinary li
 ## Consequences
 
 Applicant and Personnel archive views remain searchable, restorable, and read-only until restoration. Personnel archival atomically ends the person's employment and payroll participation, cancels incomplete Human Resources work, deactivates the linked User, and revokes sessions without deleting completed history; restoration does not automatically reactivate those relationships. Permanent deletion is never available as a bulk operation, and application deletion must detach rather than destroy a surviving Employment Relationship.
+
+For Permanent Personnel Erasure, referenced files are staged first. The target User and sessions are then deactivated and durably revoked before destructive graph mutation; if the database erasure does not commit, an explicit compensation transaction restores only the access state changed by that attempt and the staged files are returned. Once database erasure commits, failed live-file cleanup remains visible and retryable through the non-personal receipt rather than being reported as complete.

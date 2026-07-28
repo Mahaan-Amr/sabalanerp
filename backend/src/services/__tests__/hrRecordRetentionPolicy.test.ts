@@ -18,6 +18,12 @@ assert.deepEqual(projectRecordRetentionCapabilities({ role: 'ADMIN', authorities
 assert.deepEqual(projectRecordRetentionCapabilities({ role: 'MANAGER', authorities: [], archived: false }), {
   canArchive: false, canRestore: false, canPermanentlyDelete: false,
 });
+assert.deepEqual(projectRecordRetentionCapabilities({ role: 'USER', authorities: ['HR_MANAGER'], archived: false, archiveEligible: false }), {
+  canArchive: false, canRestore: false, canPermanentlyDelete: false,
+});
+assert.deepEqual(projectRecordRetentionCapabilities({ role: 'ADMIN', authorities: [], archived: false, archiveEligible: false }), {
+  canArchive: false, canRestore: false, canPermanentlyDelete: true,
+});
 
 assert.throws(() => assertArchiveReason('  '), /دلیل/);
 assert.doesNotThrow(() => assertArchiveReason('ثبت تکراری پرونده'));

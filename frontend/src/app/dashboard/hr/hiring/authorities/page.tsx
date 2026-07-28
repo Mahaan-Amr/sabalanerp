@@ -8,9 +8,9 @@ import {
   ErpSection,
   ErpSelect,
 } from "@/components/erp";
-import { useAuth } from "@/contexts/AuthContext";
 import { authorityLabel } from "@/features/hr/hrDisplay";
 import RetentionAction from "@/features/hr/RetentionActionSheet";
+import { authAPI } from "@/lib/api";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 
 const authorityTypes = [
@@ -25,7 +25,7 @@ const authorityTypes = [
 ];
 
 export default function HiringAuthoritiesPage() {
-  const { user } = useAuth();
+  const [user, setUser] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
   const [rows, setRows] = useState<any[]>([]);
   const [userId, setUserId] = useState("");
@@ -42,10 +42,12 @@ export default function HiringAuthoritiesPage() {
   const load = async () => {
     try {
       setError("");
-      const [userResponse, authorityResponse] = await Promise.all([
+      const [currentUserResponse, userResponse, authorityResponse] = await Promise.all([
+        authAPI.getMe(),
         hiringAPI.authorityUsers(),
         hiringAPI.authorities(),
       ]);
+      setUser(currentUserResponse.data.data);
       setUsers(userResponse.data.data || []);
       setRows(authorityResponse.data.data || []);
     } catch (cause) {

@@ -914,7 +914,12 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
     const row = {
       ...source,
       archivedByDisplayName: source.archivedBy ? archivedActorNames.get(source.archivedBy) || source.archivedBy : null,
-      retentionCapabilities: projectRecordRetentionCapabilities({ role: req.user!.role, authorities, archived: Boolean(source.archivedAt) }),
+      retentionCapabilities: projectRecordRetentionCapabilities({
+        role: req.user!.role,
+        authorities,
+        archived: Boolean(source.archivedAt),
+        archiveEligible: source.stage === 'CLOSED' && Boolean(source.outcome),
+      }),
       decisionDetailsVisible: canSeeDecisionDetails,
       candidate: { ...source.candidate, mobile: canSeeFullMobile ? source.candidate.mobile : `${source.candidate.mobile.slice(0, 4)}***${source.candidate.mobile.slice(-2)}` },
       hiringDecisions: source.hiringDecisions.map((decision) => canSeeDecisionDetails ? decision : ({ kind: decision.kind, outcome: decision.outcome, version: decision.version }))
@@ -955,7 +960,12 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   const canSeeFinanceSensitive = authorities.has('FINANCE_RECORDER') || authorities.has('FINANCE_MANAGER');
   const canSeeCompensation = canSeeFinanceSensitive || authorities.has('HIRING_MANAGER') || authorities.has('HR_PROCESSOR') || authorities.has('HR_PAYROLL_PROCESSOR') || authorities.has('HR_PAYROLL_MANAGER') || authorities.has('HR_MANAGER');
   const data: any = row;
-  data.retentionCapabilities = projectRecordRetentionCapabilities({ role: req.user!.role, authorities: [...authorities], archived: Boolean(row.archivedAt) });
+  data.retentionCapabilities = projectRecordRetentionCapabilities({
+    role: req.user!.role,
+    authorities: [...authorities],
+    archived: Boolean(row.archivedAt),
+    archiveEligible: row.stage === 'CLOSED' && Boolean(row.outcome),
+  });
   data.readOnlyArchived = Boolean(row.archivedAt);
   data.lifecycle = projectHiringLifecycle(row, authorities, actorId(req));
   data.taskCapabilities = projectHiringTaskCapabilities(row, authorities, actorId(req));

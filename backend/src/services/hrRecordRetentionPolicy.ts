@@ -26,10 +26,11 @@ export const projectRecordRetentionCapabilities = (input: {
   role: string;
   authorities: string[];
   archived: boolean;
+  archiveEligible?: boolean;
 }) => {
   const archiveManager = input.role === 'ADMIN' || input.authorities.includes('HR_MANAGER');
   return {
-    canArchive: archiveManager && !input.archived,
+    canArchive: archiveManager && !input.archived && (input.archiveEligible ?? true),
     canRestore: archiveManager && input.archived,
     canPermanentlyDelete: input.role === 'ADMIN',
   };

@@ -13,7 +13,14 @@ import {
   useSearchParams,
 } from "next/navigation";
 import Link from "next/link";
-import { FaCheck, FaFileUpload, FaSync } from "react-icons/fa";
+import {
+  FaArchive,
+  FaCheck,
+  FaFileUpload,
+  FaSync,
+  FaTrash,
+  FaUndo,
+} from "react-icons/fa";
 import {
   ErpBadge,
   ErpButton,
@@ -31,6 +38,8 @@ import {
 import { insuranceSubmissionBlocker } from "@/features/hr-hiring/insuranceViewModel";
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
+import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
+import RetentionAction from "@/features/hr/RetentionActionSheet";
 import {
   dateTimeFa,
   dateFa,
@@ -135,6 +144,8 @@ export default function HiringCasePage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [deletionTarget, setDeletionTarget] = useState<any>(null);
+  const [retentionTarget, setRetentionTarget] = useState<any>(null);
   const [authorities, setAuthorities] = useState<string[]>([]);
   const [correctionExplanations, setCorrectionExplanations] = useState<
     Record<string, string>
@@ -276,6 +287,52 @@ export default function HiringCasePage() {
       await load();
     } catch (e) {
       setError(hiringError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const confirmRetentionAction = async ({ reason }: { reason: string }) => {
+    if (!retentionTarget) return;
+    try {
+      setBusy(true);
+      setError("");
+      if (retentionTarget.archivedAt)
+        await hiringAPI.restore(retentionTarget.id, reason);
+      else await hiringAPI.archive(retentionTarget.id, reason);
+      setRetentionTarget(null);
+      setMessage(
+        retentionTarget.archivedAt
+          ? "پرونده از بایگانی بازیابی شد."
+          : "پرونده بایگانی شد.",
+      );
+      await load();
+    } catch (cause) {
+      setError(hiringError(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const beginPermanentDeletion = async () => {
+    try {
+      setBusy(true);
+      setError("");
+      const preview = (await hiringAPI.getDeletionPreview(id)).data.data;
+      setDeletionTarget({ row: data, preview });
+    } catch (cause) {
+      setError(hiringError(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const confirmPermanentDeletion = async (payload: any) => {
+    if (!deletionTarget) return;
+    try {
+      setBusy(true);
+      setError("");
+      await hiringAPI.permanentlyDelete(id, payload);
+      router.replace("/dashboard/hr/hiring");
+    } catch (cause) {
+      setError(hiringError(cause));
     } finally {
       setBusy(false);
     }
@@ -455,7 +512,34 @@ export default function HiringCasePage() {
       title={`${data.candidate.firstName} ${data.candidate.lastName}`}
       description={`${data.position.title} · ${data.candidate.mobile}`}
       backHref="/dashboard/hr/hiring"
-      actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: load }]}
+      actions={[
+        { label: "به‌روزرسانی", icon: FaSync, onClick: load, disabled: busy },
+        ...(data.retentionCapabilities?.canArchive ||
+        data.retentionCapabilities?.canRestore
+          ? [
+              {
+                label: data.archivedAt ? "بازیابی از بایگانی" : "بایگانی",
+                icon: data.archivedAt ? FaUndo : FaArchive,
+                tone: "warning" as const,
+                variant: "outline" as const,
+                onClick: () => setRetentionTarget(data),
+                disabled: busy,
+              },
+            ]
+          : []),
+        ...(data.retentionCapabilities?.canPermanentlyDelete
+          ? [
+              {
+                label: "حذف دائمی",
+                icon: FaTrash,
+                tone: "danger" as const,
+                variant: "outline" as const,
+                onClick: beginPermanentDeletion,
+                disabled: busy,
+              },
+            ]
+          : []),
+      ]}
     >
       {error && (
         <p className="rounded-xl bg-[var(--sds-danger-surface)] p-3 text-[var(--sds-danger)]">
@@ -2560,6 +2644,30 @@ export default function HiringCasePage() {
           applicationId={id}
           busy={busy}
           run={run}
+        />
+      )}
+      {deletionTarget && (
+        <PermanentDeletionDialog
+          title="حذف دائمی پرونده متقاضی"
+          preview={deletionTarget.preview}
+          busy={busy}
+          onClose={() => setDeletionTarget(null)}
+          onConfirm={confirmPermanentDeletion}
+        />
+      )}
+      {retentionTarget && (
+        <RetentionAction
+          title={
+            retentionTarget.archivedAt
+              ? "بازیابی پرونده از بایگانی"
+              : "بایگانی پرونده متقاضی"
+          }
+          targetName={`${retentionTarget.candidate.firstName} ${retentionTarget.candidate.lastName}`}
+          busy={busy}
+          confirmLabel={retentionTarget.archivedAt ? "بازیابی" : "بایگانی"}
+          confirmTone={retentionTarget.archivedAt ? "success" : "warning"}
+          onClose={() => setRetentionTarget(null)}
+          onConfirm={confirmRetentionAction}
         />
       )}
     </ErpPage>

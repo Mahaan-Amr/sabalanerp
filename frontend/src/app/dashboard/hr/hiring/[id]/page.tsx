@@ -2643,20 +2643,24 @@ function PreIdentitySection({
               <option value="FILE_OPTIONAL">فایل اختیاری</option>
               <option value="NO_FILE">بدون فایل</option>
             </select>
-            <input
-              className={field}
-              type="datetime-local"
-              value={requirement.dueAt}
-              onChange={(event) =>
-                setRequirement({ ...requirement, dueAt: event.target.value })
-              }
-            />
+            <HrField label="مهلت انجام" hint="تاریخ و ساعت شمسی">
+              <HrPersianCalendar
+                value={requirement.dueAt}
+                onChange={(dueAt) => setRequirement({ ...requirement, dueAt })}
+                placeholder="انتخاب مهلت انجام"
+                showTime
+                clearable
+              />
+            </HrField>
             <ErpButton
               label="افزودن به چک‌لیست"
               disabled={busy || !requirement.title.trim()}
               onClick={() =>
                 run(
-                  () => hiringAPI.addPreIdentityItem(applicationId, requirement),
+                  () => hiringAPI.addPreIdentityItem(applicationId, {
+                    ...requirement,
+                    dueAt: requirement.dueAt ? toIsoDateTime(requirement.dueAt) : "",
+                  }),
                   "الزام جدید به چک‌لیست افزوده شد.",
                 )
               }

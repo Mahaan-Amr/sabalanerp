@@ -23,7 +23,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
 import { WorkspaceNavigation } from '@/components/WorkspaceNavigation';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
-import { authAPI, dashboardAPI } from '@/lib/api';
+import { authAPI, dashboardAPI, systemRecoveryAPI } from '@/lib/api';
 import { SecurityNoticeHost } from '@/components/SecurityNoticeHost';
 import { ErpPressable } from '@/components/erp';
 
@@ -65,6 +65,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [profileDropdownPosition, setProfileDropdownPosition] = useState({ top: 0, left: 0 });
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sanitizedEnvironment, setSanitizedEnvironment] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const { currentWorkspace, accessibleWorkspaces } = useWorkspace();
@@ -138,6 +139,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         return;
       }
       setUser(response.data.data);
+      const recoveryEnvironment = await systemRecoveryAPI.getEnvironment();
+      setSanitizedEnvironment(Boolean(recoveryEnvironment.data.data.sanitizedEnvironment));
     } catch (error) {
       console.error('Auth check error:', error);
       router.push('/login');
@@ -405,6 +408,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
         {/* Page Content */}
         <main data-dashboard-main className="p-4 sm:p-6">
+          {sanitizedEnvironment && (
+            <div dir="rtl" className="mb-4 rounded-xl border-2 border-amber-500 bg-amber-50 p-3 text-center font-bold text-amber-950 dark:bg-amber-950 dark:text-amber-100">
+              محیط آزمایشی با داده‌های پاک‌سازی‌شده — استفاده عملیاتی ممنوع
+            </div>
+          )}
           {children}
         </main>
       </div>

@@ -9,6 +9,7 @@ import {
   FaCheck,
   FaClock,
   FaCog,
+  FaDatabase,
   FaEdit,
   FaExclamationTriangle,
   FaFileContract,
@@ -263,6 +264,7 @@ export default function DashboardPage() {
                     { title: 'تقویم سالیانه سبلان', description: 'تعریف تعطیلی‌ها و رویدادهای شرکت', href: '/dashboard/admin/sabalan-calendar', icon: FaCalendarAlt, tone: 'info' },
                     { title: 'امنیت سیستم', description: 'نظارت بر امنیت و فعالیت‌ها', href: '/dashboard/admin/security', icon: FaUserShield, tone: 'danger' },
                     { title: 'گزارشات مدیریتی', description: 'گزارش‌های جامع و تحلیل‌های سیستم', href: '/dashboard/admin/reports', icon: FaChartLine, tone: 'primary' },
+                    { title: 'پشتیبان‌گیری و بازیابی', description: 'ساخت، دانلود، اعتبارسنجی و بازیابی امن کل سامانه', href: '/dashboard/admin/system-recovery', icon: FaDatabase, tone: 'warning' },
                   ]}
                 />
               </ErpSection>

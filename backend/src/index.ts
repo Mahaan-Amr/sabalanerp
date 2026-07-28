@@ -46,16 +46,18 @@ import catalogExcelRoutes from './routes/catalog-excel';
 import publicContractsRoutes from './routes/public-contracts';
 import uploadsRoutes from './routes/uploads';
 import testHrHiringSmsRoutes from './routes/test-hr-hiring-sms';
+import systemRecoveryRoutes from './routes/system-recovery';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import { startAuthenticationRetentionCleanup } from './services/authenticationRetentionService';
 import { startHiringInvitationDeliveryPolling } from './services/hrHiringDeliveryPollingService';
+import { getRecoveryRuntimeState, initializeRecoveryRuntime, recoveryWriteGuard } from './services/recoveryRuntime';
+import { initializeSystemRecovery, startSystemRecoveryMaintenance } from './services/systemRecoveryLifecycle';
 
 const prisma = new PrismaClient();
-startAuthenticationRetentionCleanup(prisma);
-startHiringInvitationDeliveryPolling(prisma);
+initializeRecoveryRuntime();
 const app = express();
 app.set('trust proxy', 1);
 const server = createServer(app);
@@ -129,8 +131,10 @@ app.use(cors({
 app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(recoveryWriteGuard);
 
 // Routes
+app.use('/api/system-recovery', systemRecoveryRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/posts', postRoutes);
@@ -270,10 +274,17 @@ io.on('connection', (socket) => {
 app.use(notFound);
 app.use(errorHandler);
 
-// Start server
-server.listen(PORT, () => {
-  console.log(`? Server running on port ${PORT}`);
-  console.log(`? Health check: http://localhost:${PORT}/api/health`);
+// Start only after interrupted recovery has been finalized or safely rolled back.
+initializeSystemRecovery(prisma).finally(() => {
+  if (getRecoveryRuntimeState().mode === 'NORMAL') {
+    startAuthenticationRetentionCleanup(prisma);
+    startHiringInvitationDeliveryPolling(prisma);
+    startSystemRecoveryMaintenance(prisma);
+  }
+  server.listen(PORT, () => {
+    console.log(`? Server running on port ${PORT}`);
+    console.log(`? Health check: http://localhost:${PORT}/api/health`);
+  });
 });
 
 export { io };

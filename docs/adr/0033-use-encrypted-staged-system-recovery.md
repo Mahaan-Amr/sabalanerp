@@ -1,0 +1,3 @@
+# Use encrypted staged system recovery
+
+Sabalan ERP will expose ADMIN-only Complete Recovery Backups and non-production Sanitized Test Backups rather than treating a PostgreSQL dump as a complete system backup. Packages are passphrase-encrypted, contain integrity and compatibility metadata, and capture the main database, inquiry data, and business-owned files at one read-only snapshot boundary; production restores validate and stage every component before atomic promotion, require a second ADMIN when available, revoke all sessions, and fail closed to the preserved pre-restore state because portability, confidentiality, and recoverability outweigh uninterrupted writes during the short capture and restore windows.

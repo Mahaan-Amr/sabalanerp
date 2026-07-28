@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import hrHiringSmsGateway from './hrHiringSmsGateway';
+import { getRecoveryRuntimeState } from './recoveryRuntime';
 
 const POLL_INTERVAL_MS = 5 * 60_000;
 const REPORT_WINDOW_MS = 24 * 60 * 60_000;
@@ -88,10 +89,13 @@ export const notifyOverduePreIdentityChecklist = async (prisma: PrismaClient, no
 };
 
 export const startHiringInvitationDeliveryPolling = (prisma: PrismaClient) => {
-  const run = () => Promise.all([
-    pollHiringInvitationDelivery(prisma),
-    notifyOverduePreIdentityChecklist(prisma)
-  ]).catch((error) => console.error('HR hiring background polling failed:', error));
+  const run = () => {
+    if (getRecoveryRuntimeState().mode !== 'NORMAL') return Promise.resolve();
+    return Promise.all([
+      pollHiringInvitationDelivery(prisma),
+      notifyOverduePreIdentityChecklist(prisma)
+    ]).then(() => undefined).catch((error) => console.error('HR hiring background polling failed:', error));
+  };
   run();
   const timer = setInterval(run, POLL_INTERVAL_MS);
   timer.unref();

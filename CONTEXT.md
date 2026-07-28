@@ -2462,3 +2462,51 @@ _Avoid_: converting mission time into fake attendance movements, hiding real pre
 **تعارض زمانی استثنا و ماموریت**:
 Pending authorities may overlap with a visible warning, but approval rejects overlapping leaves, overlapping missions, or a leave/mission conflict for the same person. Adjacent missions are valid. Physical presence may overlap any authority because it records fact, and accounted work uses the union of presence and mission windows so time is counted once.
 _Avoid_: blocking factual entry/exit, approving contradictory authorities, counting overlapping work twice, or treating leave as worked time
+
+**Complete Recovery Backup**:
+An administrator-created portable recovery package containing Sabalan ERP's main business database, business-owned stored files, inquiry-service data, and integrity and compatibility metadata, while excluding deployment secrets and disposable generated data.
+_Avoid_: database-only export, server image, secret bundle, ordinary report export
+
+**Staged Recovery Restore**:
+An administrator-directed recovery in which a Complete Recovery Backup is uploaded and validated before a separately confirmed replacement of system data, with the current state preserved as a safety recovery point.
+_Avoid_: immediate restore on upload, unvalidated replacement, ordinary data import
+
+**Backup Passphrase**:
+Administrator-held secret material required to encrypt and open a Complete Recovery Backup; Sabalan ERP never retains or logs it, so losing both the backup and passphrase makes that recovery point unusable.
+_Avoid_: account password, stored recovery key, deployment secret
+
+**Sanitized Test Backup**:
+An encrypted, production-shaped package restricted to explicitly enabled non-production environments that preserves realistic business relationships and workflow state while consistently replacing personal identifiers and excluding credentials, sessions, authentication evidence, and original sensitive files. Its package and recovered environment remain unmistakably marked as sanitized test data.
+_Avoid_: Complete Recovery Backup, raw production clone, seed data
+
+**Consistent Recovery Snapshot**:
+The single recoverable state captured across business records and their stored files while Sabalan ERP temporarily permits reads but rejects writes; packaging may continue after normal writes resume.
+_Avoid_: live best-effort copy, database-only point in time, prolonged packaging outage
+
+**Recovery Step-Up Verification**:
+A one-action confirmation of the acting administrator's current account password required before creating, downloading, or restoring a recovery package, separate from the Backup Passphrase that protects package contents.
+_Avoid_: active session alone, reusable verification window, Backup Passphrase as account proof
+
+**Recovery Package Retention**:
+The temporary availability of an encrypted recovery package on the application server for at most 24 hours, while its non-sensitive creation, handling, integrity, and outcome evidence remains part of permanent history.
+_Avoid_: server-hosted backup archive, indefinite uploaded package, deleting audit history with the package
+
+**Forward-Only Recovery Compatibility**:
+A recovery package may return to its originating Sabalan ERP release or advance through a validated, available migration path to a newer release, but may never restore into an older or otherwise incompatible application, backup-format, or database-engine version.
+_Avoid_: schema downgrade, best-effort incompatible restore, migration after unvalidated replacement
+
+**Atomic Recovery Promotion**:
+The fail-closed replacement of active business records and stored files only after a staged recovery has proven their joint integrity and readiness; any interruption retains or returns to the pre-restore state before writes reopen.
+_Avoid_: in-place overwrite, partially promoted restore, reopening an unproven state
+
+**Post-Recovery Global Sign-In**:
+The mandatory fresh authentication of every user after a successful recovery, with all active sessions from the recovered state revoked while retained authentication history and the accountable recovery event remain visible.
+_Avoid_: reviving backed-up sessions, preserving the restoring administrator's session, deleting historical authentication evidence
+
+**Production Recovery Approval**:
+Authorization to promote a validated Complete Recovery Backup in production, normally granted by a second active ADMIN for that exact package and impact preview; a sole active ADMIN may instead use a reasoned, strongly confirmed break-glass path.
+_Avoid_: creator self-approval when another admin is available, reusable approval, approval detached from package integrity
+
+**Recovery Backup Freshness**:
+The age of the most recent Complete Recovery Backup confirmed as downloaded beyond the application server; after seven days without one, administrators are warned that server-only or absent packages do not provide disaster protection.
+_Avoid_: creation time alone, treating temporary server retention as offsite protection, silently stale recovery coverage

@@ -105,6 +105,9 @@ model User {
   securityNotifications                      SecurityNotification[]
   personnelBulkOperations                    PersonnelBulkOperation[]             @relation("PersonnelBulkOperationActor")
   userBulkOperations                         UserBulkOperation[]                  @relation("UserBulkOperationActor")
+  createdRecoveryOperations                  RecoveryOperation[]                  @relation("RecoveryOperationCreator")
+  approvedRecoveryOperations                 RecoveryOperation[]                  @relation("RecoveryOperationApprover")
+  recoveryAuditEvents                        RecoveryAuditEvent[]                 @relation("RecoveryAuditActor")
 
   @@index([createdByUserId])
   @@index([erasedAt])
@@ -250,6 +253,61 @@ model UserBulkOperation {
 
   @@index([actorId, createdAt])
   @@map("user_bulk_operations")
+}
+
+model RecoveryOperation {
+  id                    String               @id @default(cuid())
+  packageType           String
+  source                String
+  status                String
+  progress              Int                  @default(0)
+  storageName           String?
+  originalName          String?
+  encryptedSha256       String?
+  size                   BigInt?
+  formatVersion         Int                  @default(1)
+  sourceAppVersion      String?
+  sourceCommit          String?
+  sourcePostgresVersion String?
+  compatibility         Json?
+  errorCode             String?
+  errorMessage          String?
+  createdById           String?
+  approvedById          String?
+  approvalExpiresAt     DateTime?
+  breakGlassReason      String?
+  readyAt               DateTime?
+  downloadedAt          DateTime?
+  validatedAt           DateTime?
+  restoreStartedAt      DateTime?
+  completedAt           DateTime?
+  expiresAt             DateTime?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  createdBy             User?                @relation("RecoveryOperationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedBy            User?                @relation("RecoveryOperationApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  auditEvents           RecoveryAuditEvent[]
+
+  @@index([status, createdAt])
+  @@index([packageType, downloadedAt])
+  @@index([expiresAt])
+  @@map("recovery_operations")
+}
+
+model RecoveryAuditEvent {
+  id              String             @id @default(cuid())
+  operationId     String?
+  actorId         String?
+  eventType       String
+  packageChecksum String?
+  details         Json?
+  createdAt       DateTime           @default(now())
+  operation       RecoveryOperation? @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  actor           User?              @relation("RecoveryAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([operationId, createdAt])
+  @@index([eventType, createdAt])
+  @@map("recovery_audit_events")
 }
 
 model Personnel {

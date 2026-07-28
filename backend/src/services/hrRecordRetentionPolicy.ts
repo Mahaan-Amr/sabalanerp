@@ -45,6 +45,12 @@ export const assertArchivedRecordMutable = (archivedAt?: Date | string | null) =
   if (archivedAt) throw new Error('رکورد بایگانی‌شده تا زمان بازیابی قابل تغییر نیست.');
 };
 
+export const assertJobApplicationArchivable = (stage?: string | null, outcome?: string | null) => {
+  if (stage !== 'CLOSED' || !outcome) {
+    throw new Error('پرونده متقاضی پیش از بایگانی باید بسته یا انصراف آن ثبت شده باشد.');
+  }
+};
+
 export const stableDeletionFingerprint = (impact: unknown, secret: string) =>
   crypto.createHmac('sha256', secret).update(JSON.stringify(canonicalize(impact))).digest('hex');
 

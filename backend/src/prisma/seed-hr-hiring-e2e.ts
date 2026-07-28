@@ -11,7 +11,9 @@ const fixture = {
   mobile: "09120000001",
   otp: "123456",
   applicationId: "hr-e2e-application",
+  releaseApplicationId: "hr-e2e-release-application",
   candidateId: "hr-e2e-candidate",
+  releaseCandidateId: "hr-e2e-release-candidate",
   invitationId: "hr-e2e-invitation",
   unitId: "hr-e2e-unit",
   jobId: "hr-e2e-job",
@@ -143,6 +145,7 @@ async function main() {
       assessmentReviewRequired: false,
       assessmentReviewAcknowledgedBy: null,
       assessmentReviewAcknowledgedAt: null,
+      preIdentityReleasedAt: new Date(),
     },
     create: {
       id: fixture.applicationId,
@@ -157,7 +160,67 @@ async function main() {
       assessmentDecision: "APPROVED",
       assessmentDecisionBy: user.id,
       assessmentDecisionAt: new Date(),
+      preIdentityReleasedAt: new Date(),
     },
+  });
+
+  await prisma.hrCandidate.upsert({
+    where: { id: fixture.releaseCandidateId },
+    update: {
+      firstName: "تصمیم",
+      lastName: "آزمایشی",
+      mobile: "09120000002",
+    },
+    create: {
+      id: fixture.releaseCandidateId,
+      firstName: "تصمیم",
+      lastName: "آزمایشی",
+      mobile: "09120000002",
+    },
+  });
+
+  await prisma.hrJobApplication.upsert({
+    where: { id: fixture.releaseApplicationId },
+    update: {
+      candidateId: fixture.releaseCandidateId,
+      positionId: fixture.positionId,
+      stage: "SCREENING",
+      outcome: null,
+      createdBy: user.id,
+      preIdentityRequirementsFinalizedAt: new Date(),
+      preIdentityManagementApprovedAt: new Date(),
+      preIdentityReleasedAt: null,
+    },
+    create: {
+      id: fixture.releaseApplicationId,
+      candidateId: fixture.releaseCandidateId,
+      positionId: fixture.positionId,
+      stage: "SCREENING",
+      createdBy: user.id,
+      preIdentityRequirementsFinalizedAt: new Date(),
+      preIdentityManagementApprovedAt: new Date(),
+    },
+  });
+  await prisma.hrApplicationDecision.deleteMany({
+    where: { applicationId: fixture.releaseApplicationId },
+  });
+  await prisma.hrApplicationDecision.createMany({
+    data: ["HR_INTERVIEW", "HR_PRELIMINARY_APPROVAL", "COMPANY_APPROVAL"].flatMap((kind) => [
+      {
+        applicationId: fixture.releaseApplicationId,
+        kind: kind as "HR_INTERVIEW" | "HR_PRELIMINARY_APPROVAL" | "COMPANY_APPROVAL",
+        outcome: "NEGATIVE" as const,
+        version: 1,
+        decidedBy: user.id,
+      },
+      {
+        applicationId: fixture.releaseApplicationId,
+        kind: kind as "HR_INTERVIEW" | "HR_PRELIMINARY_APPROVAL" | "COMPANY_APPROVAL",
+        outcome: "POSITIVE" as const,
+        version: 2,
+        decidedBy: user.id,
+      },
+    ]),
   });
 
   await prisma.hrApplicationFormRevision.upsert({

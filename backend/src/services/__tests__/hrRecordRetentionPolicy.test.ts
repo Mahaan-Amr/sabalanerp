@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  assertJobApplicationArchivable,
   assertArchiveReason,
   assertArchivedRecordMutable,
   assertPermanentDeletionConfirmation,
@@ -22,6 +23,9 @@ assert.throws(() => assertArchiveReason('  '), /دلیل/);
 assert.doesNotThrow(() => assertArchiveReason('ثبت تکراری پرونده'));
 assert.throws(() => assertArchivedRecordMutable(new Date()), /بایگانی/);
 assert.doesNotThrow(() => assertArchivedRecordMutable(null));
+assert.throws(() => assertJobApplicationArchivable('SCREENING', null), /بسته یا انصراف/);
+assert.doesNotThrow(() => assertJobApplicationArchivable('CLOSED', 'REJECTED'));
+assert.doesNotThrow(() => assertJobApplicationArchivable('CLOSED', 'WITHDRAWN'));
 
 const impact = { targetId: 'application-1', updatedAt: '2026-07-27T10:00:00.000Z', counts: { documents: 2, tasks: 1 }, files: ['a.pdf'] };
 const fingerprint = stableDeletionFingerprint(impact, 'test-secret');

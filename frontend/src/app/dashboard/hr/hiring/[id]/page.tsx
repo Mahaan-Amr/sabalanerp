@@ -142,12 +142,14 @@ export default function HiringCasePage() {
   const [document, setDocument] = useState<any>({
     category: "BIRTH_CERTIFICATE_ALL_PAGES",
     side: "",
+    customTitle: "",
     inspectionSource: "ORIGINAL_SEEN",
+    note: "",
     file: null,
   });
   const [components, setComponents] = useState([
     { label: "حقوق پایه", category: "BASE_SALARY", amountRials: "" },
-    { label: "مزایا", category: "FIXED_BENEFIT", amountRials: "" },
+    { label: "مزایای ثابت", category: "FIXED_BENEFIT", amountRials: "" },
   ]);
   const [collateral, setCollateral] = useState<any>({
     itemId: "",
@@ -338,13 +340,29 @@ export default function HiringCasePage() {
       : requiredAssessmentScores.every(
           ({ key }) => assessmentScoreValidation[key]?.value !== undefined,
         );
+  const compensationRowsValid =
+    components.length > 0 &&
+    components.every(
+      (item) =>
+        Boolean(item.category) &&
+        /^\d+$/.test(String(item.amountRials || "")) &&
+        (item.category !== "OTHER" || Boolean(item.label.trim())),
+    );
   const uploadDocument = () => {
     const fd = new FormData();
     fd.append("category", document.category);
     if (document.side) fd.append("side", document.side);
+    if (document.customTitle) fd.append("customTitle", document.customTitle);
     fd.append("inspectionSource", document.inspectionSource);
-    fd.append("file", document.file);
-    return run(() => hiringAPI.uploadDocument(id, fd), "سند هویتی ثبت شد.");
+    if (document.note) fd.append("note", document.note);
+    if (document.inspectionSource === "COPY_RECEIVED" && document.file)
+      fd.append("file", document.file);
+    return run(
+      () => hiringAPI.uploadDocument(id, fd),
+      document.inspectionSource === "ORIGINAL_SEEN"
+        ? "مشاهده اصل سند ثبت شد."
+        : "کپی سند ثبت شد.",
+    );
   };
   const addCollateral = () => {
     const fd = new FormData();
@@ -660,7 +678,11 @@ export default function HiringCasePage() {
                         className={field}
                         value={document.category}
                         onChange={(e) =>
-                          setDocument({ ...document, category: e.target.value })
+                          setDocument({
+                            ...document,
+                            category: e.target.value,
+                            customTitle: e.target.value === "OTHER" ? document.customTitle : "",
+                          })
                         }
                       >
                         {documentCategories.map((x) => (
@@ -669,6 +691,17 @@ export default function HiringCasePage() {
                           </option>
                         ))}
                       </ErpSelect>
+                      {document.category === "OTHER" && (
+                        <ErpInput
+                          className={field}
+                          aria-label="عنوان سند"
+                          placeholder="عنوان سند"
+                          value={document.customTitle}
+                          onChange={(e) =>
+                            setDocument({ ...document, customTitle: e.target.value })
+                          }
+                        />
+                      )}
                       <ErpSelect
                         className={field}
                         value={document.inspectionSource}
@@ -676,6 +709,7 @@ export default function HiringCasePage() {
                           setDocument({
                             ...document,
                             inspectionSource: e.target.value,
+                            file: null,
                           })
                         }
                       >
@@ -683,20 +717,39 @@ export default function HiringCasePage() {
                         <option value="COPY_RECEIVED">کپی دریافت شد</option>
                       </ErpSelect>
                       <ErpInput
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
                         className={field}
+                        aria-label="یادداشت سند"
+                        placeholder="یادداشت اختیاری"
+                        value={document.note}
                         onChange={(e) =>
-                          setDocument({
-                            ...document,
-                            file: e.target.files?.[0],
-                          })
+                          setDocument({ ...document, note: e.target.value })
                         }
                       />
+                      {document.inspectionSource === "COPY_RECEIVED" && (
+                        <ErpInput
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          className={field}
+                          onChange={(e) =>
+                            setDocument({
+                              ...document,
+                              file: e.target.files?.[0],
+                            })
+                          }
+                        />
+                      )}
                       <ErpButton
-                        label="بارگذاری سند"
+                        label={
+                          document.inspectionSource === "ORIGINAL_SEEN"
+                            ? "ثبت مشاهده اصل"
+                            : "بارگذاری کپی"
+                        }
                         icon={FaFileUpload}
-                        disabled={busy || !document.file}
+                        disabled={
+                          busy ||
+                          (document.category === "OTHER" && !document.customTitle.trim()) ||
+                          (document.inspectionSource === "COPY_RECEIVED" && !document.file)
+                        }
                         onClick={uploadDocument}
                       />
                     </div>
@@ -708,21 +761,26 @@ export default function HiringCasePage() {
                         className="flex justify-between rounded-lg border p-2 text-xs"
                       >
                         <span>
-                          {hrDisplayLabel(doc.category)} · نسخه {doc.version}
+                          {doc.category === "OTHER"
+                            ? doc.customTitle
+                            : hrDisplayLabel(doc.category)}{" "}
+                          · نسخه {doc.version}
                         </span>
                         <span className="flex gap-2">
-                          <ErpPressable
-                            type="submit"
-                            onClick={() =>
-                              download(
-                                () => hiringAPI.downloadDocument(id, doc.id),
-                                doc.originalName,
-                              )
-                            }
-                            className="text-[var(--sds-info)]"
-                          >
-                            دریافت
-                          </ErpPressable>
+                          {doc.originalName && (
+                            <ErpPressable
+                              type="submit"
+                              onClick={() =>
+                                download(
+                                  () => hiringAPI.downloadDocument(id, doc.id),
+                                  doc.originalName,
+                                )
+                              }
+                              className="text-[var(--sds-info)]"
+                            >
+                              دریافت
+                            </ErpPressable>
+                          )}
                           <ErpBadge>{hrDisplayLabel(doc.status)}</ErpBadge>
                         </span>
                       </div>
@@ -1223,25 +1281,20 @@ export default function HiringCasePage() {
               <ErpCard className="p-4">
                 <div className="space-y-2">
                   {components.map((item, i) => (
-                    <div key={i} className="grid gap-2 md:grid-cols-3">
-                      <ErpInput
-                        className={field}
-                        value={item.label}
-                        onChange={(e) =>
-                          setComponents(
-                            components.map((x, j) =>
-                              j === i ? { ...x, label: e.target.value } : x,
-                            ),
-                          )
-                        }
-                      />
+                    <div key={i} className={`grid gap-2 ${item.category === "OTHER" ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
                       <ErpSelect
                         className={field}
                         value={item.category || ""}
                         onChange={(e) =>
                           setComponents(
                             components.map((x, j) =>
-                              j === i ? { ...x, category: e.target.value } : x,
+                              j === i
+                                ? {
+                                    ...x,
+                                    category: e.target.value,
+                                    label: e.target.value === "OTHER" ? "" : x.label,
+                                  }
+                                : x,
                             ),
                           )
                         }
@@ -1253,6 +1306,21 @@ export default function HiringCasePage() {
                         <option value="ALLOWANCE">کمک‌هزینه</option>
                         <option value="OTHER">سایر</option>
                       </ErpSelect>
+                      {item.category === "OTHER" && (
+                        <ErpInput
+                          className={field}
+                          aria-label="عنوان مورد سایر"
+                          placeholder="عنوان مورد سایر"
+                          value={item.label}
+                          onChange={(e) =>
+                            setComponents(
+                              components.map((x, j) =>
+                                j === i ? { ...x, label: e.target.value } : x,
+                              ),
+                            )
+                          }
+                        />
+                      )}
                       <ErpInput
                         className={field}
                         inputMode="numeric"
@@ -1302,7 +1370,7 @@ export default function HiringCasePage() {
                           "پیشنهاد ثبت شد.",
                         )
                       }
-                      disabled={busy}
+                      disabled={busy || !compensationRowsValid}
                     />
                   )}
                   {hasAuthority("HR_PAYROLL_PROCESSOR") && (
@@ -1317,7 +1385,7 @@ export default function HiringCasePage() {
                           "نسخه توسط کارشناس حقوق و دستمزد آماده شد.",
                         )
                       }
-                      disabled={busy || !compensation}
+                      disabled={busy || !compensation || !compensationRowsValid}
                     />
                   )}
                   {hasAuthority("HR_PAYROLL_MANAGER") && (
@@ -3132,7 +3200,6 @@ function CollateralRequirementPanel({
   const [draft, setDraft] = useState({
     type: current?.type || "PROMISSORY_NOTE",
     amountRials: current?.amountRials || "",
-    obligation: current?.obligation || "",
     dueTiming: current?.dueTiming || "",
     candidateExplanation: current?.candidateExplanation || "",
   });
@@ -3146,7 +3213,7 @@ function CollateralRequirementPanel({
           </p>
         )}
       </div>
-      <div className="grid gap-2 md:grid-cols-5">
+      <div className="grid gap-2 md:grid-cols-4">
         <ErpSelect
           className={field}
           value={draft.type}
@@ -3164,14 +3231,6 @@ function CollateralRequirementPanel({
           value={draft.amountRials}
           onChange={(event) =>
             setDraft({ ...draft, amountRials: event.target.value })
-          }
-        />
-        <ErpInput
-          className={field}
-          placeholder="تعهد"
-          value={draft.obligation}
-          onChange={(event) =>
-            setDraft({ ...draft, obligation: event.target.value })
           }
         />
         <ErpInput

@@ -43,6 +43,7 @@ import { hrAPI } from "@/lib/api";
 import { hiringAPI } from "@/lib/hiringApi";
 import { hrDisplayLabel } from "@/features/hr/hrDisplay";
 import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
+import RetentionAction from "@/features/hr/RetentionActionSheet";
 import {
   apiError,
   assignmentTypeLabel,
@@ -104,6 +105,7 @@ export default function HrPersonnelPage() {
   const [page, setPage] = useState(1);
   const [meta, setMeta] = useState({ page: 1, total: 0, totalPages: 1 });
   const [deletionTarget, setDeletionTarget] = useState<any>(null);
+  const [retentionTarget, setRetentionTarget] = useState<any>(null);
   const canCreateExceptionalPersonnel = authorities.includes("HR_MANAGER");
 
   const load = useCallback(async () => {
@@ -200,27 +202,23 @@ export default function HrPersonnelPage() {
   };
 
   const changeArchiveState = async (person: any) => {
-    const reason = window.prompt(
-      person.archivedAt ? "دلیل بازیابی از بایگانی" : "دلیل بایگانی پرسنل",
-    );
-    if (!reason?.trim()) return;
-    if (person.archivedAt)
-      return run(
-        () => hrAPI.restorePersonnel(person.id, reason.trim()),
+    setRetentionTarget(person);
+  };
+
+  const confirmRetentionAction = async ({ reason, effectiveDate }: { reason: string; effectiveDate?: string }) => {
+    if (!retentionTarget) return;
+    if (retentionTarget.archivedAt) {
+      await run(
+        () => hrAPI.restorePersonnel(retentionTarget.id, reason),
         "پرسنل از بایگانی بازیابی شد.",
+        () => setRetentionTarget(null),
       );
-    const effectiveDate = window.prompt(
-      "تاریخ اجرای بایگانی (YYYY-MM-DD)",
-      new Date().toISOString().slice(0, 10),
-    );
-    if (!effectiveDate) return;
-    return run(
-      () =>
-        hrAPI.archivePersonnel(person.id, {
-          reason: reason.trim(),
-          effectiveDate,
-        }),
+      return;
+    }
+    await run(
+      () => hrAPI.archivePersonnel(retentionTarget.id, { reason, effectiveDate: toIsoDate(effectiveDate || "") }),
       "پرسنل بایگانی و دسترسی‌های مرتبط غیرفعال شد.",
+      () => setRetentionTarget(null),
     );
   };
 
@@ -583,6 +581,16 @@ export default function HrPersonnelPage() {
           busy={saving}
           onClose={() => setDeletionTarget(null)}
           onConfirm={confirmPermanentDeletion}
+        />
+      )}
+      {retentionTarget && (
+        <RetentionAction
+          title={retentionTarget.archivedAt ? "بازیابی پرسنل از بایگانی" : "بایگانی پرسنل"}
+          targetName={`${retentionTarget.firstName} ${retentionTarget.lastName}`}
+          busy={saving}
+          effectiveDate={retentionTarget.archivedAt ? undefined : today()}
+          onClose={() => setRetentionTarget(null)}
+          onConfirm={confirmRetentionAction}
         />
       )}
     </ErpPage>

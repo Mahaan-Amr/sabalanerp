@@ -24,6 +24,7 @@ import { hiringAPI, hiringError } from "@/lib/hiringApi";
 import { dateTimeFa } from "@/features/hr/hrUi";
 import { hrDisplayLabel } from "@/features/hr/hrDisplay";
 import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
+import RetentionAction from "@/features/hr/RetentionActionSheet";
 import {
   hiringLifecyclePhaseOptions,
   hiringLifecycleStatusLabel,
@@ -75,6 +76,7 @@ export default function HiringCasesPage() {
   const [decisionDetail, setDecisionDetail] = useState<any>(null);
   const [archiveView, setArchiveView] = useState(false);
   const [deletionTarget, setDeletionTarget] = useState<any>(null);
+  const [retentionTarget, setRetentionTarget] = useState<any>(null);
 
   const load = async (nextFilters: HiringQueueFilters = filters) => {
     try {
@@ -142,18 +144,20 @@ export default function HiringCasesPage() {
   };
 
   const changeArchiveState = async (row: any) => {
-    const reason = window.prompt(
-      row.archivedAt ? "دلیل بازیابی از بایگانی" : "دلیل بایگانی پرونده",
-    );
-    if (!reason?.trim()) return;
+    setRetentionTarget(row);
+  };
+
+  const confirmRetentionAction = async ({ reason }: { reason: string }) => {
+    if (!retentionTarget) return;
     try {
       setBusy(true);
       setError("");
-      if (row.archivedAt) await hiringAPI.restore(row.id, reason.trim());
-      else await hiringAPI.archive(row.id, reason.trim());
+      if (retentionTarget.archivedAt) await hiringAPI.restore(retentionTarget.id, reason);
+      else await hiringAPI.archive(retentionTarget.id, reason);
       setMessage(
-        row.archivedAt ? "پرونده از بایگانی بازیابی شد." : "پرونده بایگانی شد.",
+        retentionTarget.archivedAt ? "پرونده از بایگانی بازیابی شد." : "پرونده بایگانی شد.",
       );
+      setRetentionTarget(null);
       await load();
     } catch (cause) {
       setError(hiringError(cause));
@@ -746,6 +750,15 @@ export default function HiringCasesPage() {
           busy={busy}
           onClose={() => setDeletionTarget(null)}
           onConfirm={confirmPermanentDeletion}
+        />
+      )}
+      {retentionTarget && (
+        <RetentionAction
+          title={retentionTarget.archivedAt ? "بازیابی پرونده از بایگانی" : "بایگانی پرونده متقاضی"}
+          targetName={`${retentionTarget.candidate.firstName} ${retentionTarget.candidate.lastName}`}
+          busy={busy}
+          onClose={() => setRetentionTarget(null)}
+          onConfirm={confirmRetentionAction}
         />
       )}
     </ErpPage>

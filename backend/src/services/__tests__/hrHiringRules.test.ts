@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { compensationTotalRials, unresolvedActivationRequirements, validateHiringQuestionnaire } from '../hrHiringRules';
+import { compensationTotalRials, normalizeCompensationComponents, unresolvedActivationRequirements, validateHiringQuestionnaire } from '../hrHiringRules';
 import { validateHiringFileSignature } from '../hrHiringFileStorage';
 
 const complete = {
@@ -23,6 +23,22 @@ assert.equal(validateHiringQuestionnaire({ ...complete, identityKind: 'FOREIGN',
 assert.equal(compensationTotalRials([{ label: 'حقوق پایه', amountRials: '1000' }, { label: 'مزایا', amountRials: 250 }]), 1250n);
 assert.throws(() => compensationTotalRials([{ label: 'حقوق پایه', amountRials: '12.5' }]), /عدد صحیح ریال/);
 assert.throws(() => compensationTotalRials([{ label: '', amountRials: '1000' }]), /عنوان/);
+
+assert.deepEqual(normalizeCompensationComponents([
+  { category: 'BASE_SALARY', label: 'عنوان دلخواه', amountRials: '1000' },
+  { category: 'OTHER', label: '  حق ایاب و ذهاب ویژه  ', amountRials: '250' },
+]), [
+  { category: 'BASE_SALARY', label: 'حقوق پایه', amountRials: '1000' },
+  { category: 'OTHER', label: 'حق ایاب و ذهاب ویژه', amountRials: '250' },
+]);
+assert.throws(
+  () => normalizeCompensationComponents([{ category: 'OTHER', label: '  ', amountRials: '1000' }]),
+  /عنوان مورد سایر/,
+);
+assert.throws(
+  () => normalizeCompensationComponents([{ category: 'UNKNOWN', label: 'ناشناخته', amountRials: '1000' }]),
+  /طبقه‌بندی/,
+);
 
 const ready = unresolvedActivationRequirements({
   scheduledStartDate: new Date('2026-01-01'), identityClearance: 'APPROVED', collateralClearance: 'APPROVED',

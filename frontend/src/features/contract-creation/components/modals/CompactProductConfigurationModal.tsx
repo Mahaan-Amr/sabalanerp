@@ -34,6 +34,7 @@ import {
   createEmptySlabDraft,
   createSlabSourceRow
 } from '../product-modal-system/slabProductState';
+import { longitudinalCutRateSnapshot } from '../product-modal-system/productModalState';
 import {
   useLongitudinalCalculationWorker,
   useSlabCalculationWorker
@@ -227,9 +228,7 @@ export function CompactProductConfigurationModal({
           String(productConfig.mandatoryPercentage || 20)
         ),
         sawKerfMeters: parseCanonicalDecimal('0.003'),
-        ...(longitudinalCutRate === null
-          ? {}
-          : { longitudinalCutRateToman: parseCanonicalDecimal(String(longitudinalCutRate)) })
+        ...longitudinalCutRateSnapshot(longitudinalCutRate)
       });
       const existingLengthMeters = Number(productConfig.length) > 0
         ? parseCanonicalDecimal(String(
@@ -416,6 +415,43 @@ export function CompactProductConfigurationModal({
     setProductConfig
   ]);
 
+  React.useEffect(() => {
+    if (currentProductType !== 'longitudinal') return;
+    const input = productConfig.longitudinalPolicyInput;
+    if (!input) return;
+    if (
+      input.longitudinalCutRateToman !== undefined &&
+      input.calibrationCutRateToman !== undefined
+    ) return;
+    const snapshot = input.longitudinalCutRateToman === undefined
+      ? longitudinalCutRateSnapshot(getCuttingTypePricePerMeter('LONG'))
+      : {
+          longitudinalCutRateToman: input.longitudinalCutRateToman,
+          calibrationCutRateToman: input.longitudinalCutRateToman
+        };
+    if (snapshot.longitudinalCutRateToman === undefined) return;
+    setProductConfig(previous => {
+      const current = previous.longitudinalPolicyInput;
+      if (!current) return previous;
+      if (
+        current.longitudinalCutRateToman !== undefined &&
+        current.calibrationCutRateToman !== undefined
+      ) return previous;
+      return {
+        ...previous,
+        longitudinalPolicyInput: {
+          ...current,
+          ...snapshot
+        }
+      };
+    });
+  }, [
+    currentProductType,
+    getCuttingTypePricePerMeter,
+    productConfig.longitudinalPolicyInput,
+    setProductConfig
+  ]);
+
   const updateLongitudinal = (input: LongitudinalProductInput) => {
     setLengthUnit(input.lengthDisplayUnit);
     setWidthUnit(input.widthDisplayUnit);
@@ -589,9 +625,15 @@ export function CompactProductConfigurationModal({
       );
       if (!result.ok) {
         setShowValidation(true);
+        const missingLongRate = result.conflicts.some(conflict =>
+          conflict.code === 'longitudinal-cut-rate-missing' ||
+          conflict.code === 'calibration-cut-rate-missing'
+        );
         const first = result.conflicts[0]?.field;
         focusValidationTarget(
-          first === 'baseRateToman'
+          missingLongRate
+            ? 'longitudinal-cut-rate-error'
+            : first === 'baseRateToman'
             ? 'longitudinal-base-rate'
             : first === 'widthMeters'
               ? 'longitudinal-width'

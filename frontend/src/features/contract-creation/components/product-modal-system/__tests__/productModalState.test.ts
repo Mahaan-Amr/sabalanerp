@@ -3,6 +3,7 @@ import {
   convertCompactLengthUnit,
   createProductModalDraftState,
   currentProductModalView,
+  longitudinalCutRateSnapshot,
   reduceProductModalDraft
 } from '../productModalState';
 
@@ -12,6 +13,15 @@ assert.equal(convertCompactLengthUnit('0.3', 'cm', 'm'), '0.003');
 assert.equal(convertCompactLengthUnit('12,500.75', 'm', 'cm'), '1250075');
 assert.equal(convertCompactLengthUnit('۱۲٬۵۰۰٫۷۵', 'm', 'cm'), '1250075');
 assert.equal(convertCompactLengthUnit('', 'm', 'cm'), '');
+assert.deepEqual(longitudinalCutRateSnapshot(null), {});
+assert.deepEqual(longitudinalCutRateSnapshot(0), {
+  longitudinalCutRateToman: '0',
+  calibrationCutRateToman: '0'
+});
+assert.deepEqual(longitudinalCutRateSnapshot(20000), {
+  longitudinalCutRateToman: '20000',
+  calibrationCutRateToman: '20000'
+});
 
 {
   const initial = createProductModalDraftState({ title: 'Original' });

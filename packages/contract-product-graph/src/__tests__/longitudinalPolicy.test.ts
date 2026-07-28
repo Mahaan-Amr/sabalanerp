@@ -142,6 +142,22 @@ if (exactWidthUse.ok) {
   assert.equal(exactWidthUse.result.remainders.length, 0);
 }
 
+const threeExactStripsFromOneBand = calculateLongitudinalProduct(baseInput({
+  motherWidthMeters: c('0.6'),
+  widthMeters: c('0.2'),
+  quantity: 3,
+  calibrationCutRateToman: c('10000')
+}));
+assert.equal(threeExactStripsFromOneBand.ok, true);
+if (threeExactStripsFromOneBand.ok) {
+  assert.equal(threeExactStripsFromOneBand.result.requestedAreaSquareMeters, '0.9');
+  assert.equal(threeExactStripsFromOneBand.result.sourcePiecesConsumed, 1);
+  assert.equal(threeExactStripsFromOneBand.result.remainders.length, 0);
+  assert.equal(threeExactStripsFromOneBand.result.calibrationEnabled, true);
+  assert.equal(threeExactStripsFromOneBand.result.packingPlan.longitudinalCutMeters, '3');
+  assert.equal(threeExactStripsFromOneBand.result.packingPlan.calibrationMeters, '1.5');
+}
+
 const kerfPreventsFalseExactUse = calculateLongitudinalProduct(baseInput({
   widthMeters: c('0.2'),
   quantity: 2,
@@ -151,6 +167,24 @@ assert.equal(kerfPreventsFalseExactUse.ok, true);
 if (kerfPreventsFalseExactUse.ok) {
   assert.equal(kerfPreventsFalseExactUse.result.sourcePiecesConsumed, 2);
   assert.equal(kerfPreventsFalseExactUse.result.calibrationEnabled, false);
+}
+
+const kerfUsesTwoBandsForThreeStrips = calculateLongitudinalProduct(baseInput({
+  motherWidthMeters: c('0.6'),
+  widthMeters: c('0.2'),
+  quantity: 3,
+  sawKerfEnabled: true,
+  calibrationEnabled: true,
+  calibrationSelection: 'manual',
+  calibrationCutRateToman: c('10000')
+}));
+assert.equal(kerfUsesTwoBandsForThreeStrips.ok, true);
+if (kerfUsesTwoBandsForThreeStrips.ok) {
+  assert.equal(kerfUsesTwoBandsForThreeStrips.result.requestedAreaSquareMeters, '0.9');
+  assert.equal(kerfUsesTwoBandsForThreeStrips.result.sourcePiecesConsumed, 2);
+  assert.equal(kerfUsesTwoBandsForThreeStrips.result.remainders.length, 2);
+  assert.equal(kerfUsesTwoBandsForThreeStrips.result.calibrationEnabled, true);
+  assert.equal(kerfUsesTwoBandsForThreeStrips.result.packingPlan.calibrationMeters, '3');
 }
 
 const manualCalibrationSurvives = calculateLongitudinalProduct(baseInput({
@@ -219,15 +253,45 @@ if (!missingCutRate.ok) {
   assert.equal(missingCutRate.conflicts[0]?.code, 'longitudinal-cut-rate-missing');
 }
 
+const missingCutRateAppearsWithValidGeometryBeforeBasePrice = calculateLongitudinalProduct(
+  baseInput({
+    motherWidthMeters: c('0.6'),
+    widthMeters: c('0.2'),
+    quantity: 3,
+    baseRateToman: undefined,
+    longitudinalCutRateToman: undefined,
+    calibrationCutRateToman: undefined
+  })
+);
+assert.equal(missingCutRateAppearsWithValidGeometryBeforeBasePrice.ok, false);
+if (!missingCutRateAppearsWithValidGeometryBeforeBasePrice.ok) {
+  assert.equal(
+    missingCutRateAppearsWithValidGeometryBeforeBasePrice.conflicts.some(
+      conflict => conflict.code === 'longitudinal-cut-rate-missing'
+    ),
+    true
+  );
+}
+
 const freeInventoryCutRate = calculateLongitudinalProduct(baseInput({
   widthMeters: c('0.2'),
-  quantity: 1,
-  longitudinalCutRateToman: c('0')
+  quantity: 2,
+  longitudinalCutRateToman: c('0'),
+  calibrationCutRateToman: c('0')
 }));
 assert.equal(freeInventoryCutRate.ok, true);
 if (freeInventoryCutRate.ok) {
+  assert.equal(freeInventoryCutRate.result.packingPlan.longitudinalCutMeters, '1.5');
+  assert.equal(freeInventoryCutRate.result.packingPlan.calibrationMeters, '1.5');
   assert.equal(freeInventoryCutRate.result.longitudinalCutAmountToman, '0');
+  assert.equal(freeInventoryCutRate.result.calibrationCutAmountToman, '0');
 }
+
+const fullWidthDoesNotRequireLongRate = calculateLongitudinalProduct(baseInput({
+  longitudinalCutRateToman: undefined,
+  calibrationCutRateToman: undefined
+}));
+assert.equal(fullWidthDoesNotRequireLongRate.ok, true);
 
 assert.deepEqual(
   transitionLongitudinalQuantity({

@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { ErpButton, ErpCard } from "@/components/erp";
+import {
+  ErpButton,
+  ErpCheckbox,
+  ErpInput,
+  ErpSheet,
+  ErpTextarea,
+} from "@/components/erp";
 
 type Preview = {
   displayName: string;
@@ -47,7 +53,7 @@ const impactCategoryLabel = (category: string) => {
   return "سایر سوابق مرتبط";
 };
 
-export default function PermanentDeletionDialog({
+export default function PermanentDeletionWorkflow({
   title,
   preview,
   busy,
@@ -92,25 +98,39 @@ export default function PermanentDeletionDialog({
     adminPassword.length > 0 &&
     confirmed;
 
+  const footer = (
+    <div className="flex flex-wrap justify-end gap-2">
+      <ErpButton
+        label="انصراف"
+        variant="soft"
+        disabled={busy}
+        onClick={onClose}
+      />
+      <ErpButton
+        label="حذف دائمی"
+        tone="danger"
+        disabled={busy || !ready}
+        onClick={() =>
+          onConfirm({
+            reason: reason.trim(),
+            fullName,
+            adminPassword,
+            fingerprint: preview.fingerprint,
+            confirmed: true,
+          })
+        }
+      />
+    </div>
+  );
+
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="permanent-delete-title"
-    >
-      <ErpCard className="max-h-[90vh] w-full max-w-2xl overflow-y-auto p-5">
-        <h2
-          id="permanent-delete-title"
-          className="text-lg font-black text-rose-700"
-        >
-          {title}
-        </h2>
+    <ErpSheet open onClose={busy ? () => undefined : onClose} title={title} footer={footer}>
+      <div className="space-y-4">
         <p className="mt-2 text-sm">
           این عملیات برگشت‌پذیر نیست. پیش‌نمایش زیر باید پیش از اجرا دوباره در
           سرور اعتبارسنجی شود.
         </p>
-        <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm dark:bg-rose-950/30">
+        <div className="sds-tone-danger sds-tone-surface rounded-xl border p-3 text-sm">
           <p className="font-bold">نام هدف: {preview.displayName}</p>
           <p className="mt-1">
             تعداد فایل‌های زنده: {totalFiles.toLocaleString("fa-IR")}
@@ -123,73 +143,48 @@ export default function PermanentDeletionDialog({
             ))}
           </div>
           {preview.backupNotice && (
-            <p className="mt-2 text-xs text-amber-800">
+            <p className="sds-text-secondary mt-2 text-xs">
               {preview.backupNotice}
             </p>
           )}
         </div>
-        <div className="mt-4 space-y-3">
-          <label className="block text-sm font-bold">
+        <div className="space-y-3">
+          <label className="sds-text-primary block text-sm font-bold">
             دلیل حذف دائمی
-            <textarea
-              className="mt-1 w-full rounded-xl border p-3 font-normal dark:bg-slate-900"
+            <ErpTextarea
+              className="mt-1 font-normal"
               value={reason}
               onChange={(event) => setReason(event.target.value)}
               rows={3}
             />
           </label>
-          <label className="block text-sm font-bold">
+          <label className="sds-text-primary block text-sm font-bold">
             برای تأیید، نام «{preview.displayName}» را دقیق وارد کنید
-            <input
-              className="mt-1 w-full rounded-xl border p-3 font-normal dark:bg-slate-900"
+            <ErpInput
+              className="mt-1 font-normal"
               value={fullName}
               onChange={(event) => setFullName(event.target.value)}
               autoComplete="off"
             />
           </label>
-          <label className="block text-sm font-bold">
+          <label className="sds-text-primary block text-sm font-bold">
             رمز عبور مدیر سامانه
-            <input
+            <ErpInput
               type="password"
-              className="mt-1 w-full rounded-xl border p-3 font-normal dark:bg-slate-900"
+              className="mt-1 font-normal"
               value={adminPassword}
               onChange={(event) => setAdminPassword(event.target.value)}
               autoComplete="current-password"
             />
           </label>
-          <label className="flex items-start gap-2 rounded-xl border border-rose-300 p-3 text-sm font-bold text-rose-700">
-            <input
-              type="checkbox"
-              checked={confirmed}
-              onChange={(event) => setConfirmed(event.target.checked)}
-              className="mt-1"
-            />
-            پیامدهای پیش‌نمایش را بررسی کردم و حذف دائمی را تأیید می‌کنم.
-          </label>
-        </div>
-        <div className="mt-5 flex flex-wrap justify-end gap-2">
-          <ErpButton
-            label="انصراف"
-            variant="soft"
-            disabled={busy}
-            onClick={onClose}
-          />
-          <ErpButton
-            label="حذف دائمی"
-            tone="danger"
-            disabled={busy || !ready}
-            onClick={() =>
-              onConfirm({
-                reason: reason.trim(),
-                fullName,
-                adminPassword,
-                fingerprint: preview.fingerprint,
-                confirmed: true,
-              })
-            }
+          <ErpCheckbox
+            checked={confirmed}
+            onChange={(event) => setConfirmed(event.target.checked)}
+            className="sds-tone-danger sds-tone-surface w-full rounded-xl border p-3 font-bold"
+            label="پیامدهای پیش‌نمایش را بررسی کردم و حذف دائمی را تأیید می‌کنم."
           />
         </div>
-      </ErpCard>
-    </div>
+      </div>
+    </ErpSheet>
   );
 }

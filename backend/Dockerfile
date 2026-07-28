@@ -2,8 +2,8 @@ FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
-ARG DEBIAN_MIRROR=http://mirror.iranserver.com/debian
-ARG DEBIAN_SECURITY_MIRROR=http://mirror.iranserver.com/debian-security
+ARG DEBIAN_MIRROR=http://deb.debian.org/debian
+ARG DEBIAN_SECURITY_MIRROR=http://security.debian.org/debian-security
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG http_proxy
@@ -48,8 +48,8 @@ FROM node:20-bookworm-slim AS runner
 
 WORKDIR /app
 
-ARG DEBIAN_MIRROR=http://mirror.iranserver.com/debian
-ARG DEBIAN_SECURITY_MIRROR=http://mirror.iranserver.com/debian-security
+ARG DEBIAN_MIRROR=http://deb.debian.org/debian
+ARG DEBIAN_SECURITY_MIRROR=http://security.debian.org/debian-security
 
 RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: %s\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' "$DEBIAN_MIRROR" "$DEBIAN_SECURITY_MIRROR" > /etc/apt/sources.list.d/debian.sources \
   && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \

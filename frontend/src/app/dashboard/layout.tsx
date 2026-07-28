@@ -409,7 +409,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         {/* Page Content */}
         <main data-dashboard-main className="p-4 sm:p-6">
           {sanitizedEnvironment && (
-            <div dir="rtl" className="mb-4 rounded-xl border-2 border-amber-500 bg-amber-50 p-3 text-center font-bold text-amber-950 dark:bg-amber-950 dark:text-amber-100">
+                <div dir="rtl" className="mb-4 rounded-xl border-2 border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-3 text-center font-bold text-[var(--sds-warning)]">
               محیط آزمایشی با داده‌های پاک‌سازی‌شده — استفاده عملیاتی ممنوع
             </div>
           )}

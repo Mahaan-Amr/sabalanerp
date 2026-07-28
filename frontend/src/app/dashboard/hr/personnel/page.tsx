@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import moment from 'moment-jalaali';
 import Link from 'next/link';
 import {
-  FaBriefcase, FaChevronDown, FaChevronUp, FaPause, FaPlay,
-  FaPlus, FaSearch, FaStop, FaSync, FaUserPlus, FaUsers,
+  FaArchive, FaBriefcase, FaChevronDown, FaChevronUp, FaPause, FaPlay,
+  FaPlus, FaSearch, FaStop, FaSync, FaTrash, FaUndo, FaUserPlus, FaUsers,
 } from 'react-icons/fa';
 import HrPersianCalendar from '@/features/hr/HrPersianCalendar';
 import WorkScheduleEditor, { workScheduleFromApi, workSchedulePayload, type WorkScheduleValue } from '@/components/WorkScheduleEditor';
@@ -15,8 +15,9 @@ import {
 import { hrAPI } from '@/lib/api';
 import { hiringAPI } from '@/lib/hiringApi';
 import { hrDisplayLabel } from '@/features/hr/hrDisplay';
+import PermanentDeletionDialog from '@/features/hr/PermanentDeletionDialog';
 import {
-  apiError, assignmentTypeLabel, dateFa, employmentStatusLabel,
+  apiError, assignmentTypeLabel, dateFa, dateTimeFa, employmentStatusLabel,
   fieldClass, HrField, HrMessage, toIsoDate,
 } from '@/features/hr/hrUi';
 
@@ -47,6 +48,10 @@ export default function HrPersonnelPage() {
   const [assignmentSupervisors, setAssignmentSupervisors] = useState<any[]>([]);
   const [endDates, setEndDates] = useState<Record<string, string>>({});
   const [authorities, setAuthorities] = useState<string[]>([]);
+  const [archiveView, setArchiveView] = useState(false);
+  const [page, setPage] = useState(1);
+  const [meta, setMeta] = useState({ page: 1, total: 0, totalPages: 1 });
+  const [deletionTarget, setDeletionTarget] = useState<any>(null);
   const canCreateExceptionalPersonnel = authorities.includes('HR_MANAGER');
 
   const load = useCallback(async () => {
@@ -54,11 +59,12 @@ export default function HrPersonnelPage() {
       setLoading(true);
       setError('');
       const [people, base, authorityResponse] = await Promise.all([
-        hrAPI.getPersonnel(search ? { search } : undefined),
+        hrAPI.getPersonnel({ ...(search ? { search } : {}), archived: archiveView, page, pageSize: 50 }),
         hrAPI.getFoundation(),
         hiringAPI.myAuthorities(),
       ]);
       setRows(people.data.data);
+      setMeta(people.data.meta || { page: 1, total: people.data.data.length, totalPages: 1 });
       setFoundation(base.data.data);
       setAuthorities(authorityResponse.data.data || []);
     } catch (err) {
@@ -66,7 +72,7 @@ export default function HrPersonnelPage() {
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [search, archiveView, page]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
@@ -112,6 +118,36 @@ export default function HrPersonnelPage() {
     finally { setSaving(false); }
   };
 
+  const changeArchiveState = async (person: any) => {
+    const reason = window.prompt(person.archivedAt ? 'دلیل بازیابی از بایگانی' : 'دلیل بایگانی پرسنل');
+    if (!reason?.trim()) return;
+    if (person.archivedAt) return run(() => hrAPI.restorePersonnel(person.id, reason.trim()), 'پرسنل از بایگانی بازیابی شد.');
+    const effectiveDate = window.prompt('تاریخ اجرای بایگانی (YYYY-MM-DD)', new Date().toISOString().slice(0, 10));
+    if (!effectiveDate) return;
+    return run(() => hrAPI.archivePersonnel(person.id, { reason: reason.trim(), effectiveDate }), 'پرسنل بایگانی و دسترسی‌های مرتبط غیرفعال شد.');
+  };
+
+  const permanentlyDelete = async (person: any) => {
+    try {
+      setSaving(true); setError(''); setSuccess('');
+      const preview = (await hrAPI.getPersonnelDeletionPreview(person.id)).data.data;
+      setDeletionTarget({ person, preview });
+    } catch (err) { setError(apiError(err)); }
+    finally { setSaving(false); }
+  };
+
+  const confirmPermanentDeletion = async (payload: any) => {
+    if (!deletionTarget) return;
+    try {
+      setSaving(true); setError(''); setSuccess('');
+      await hrAPI.permanentlyDeletePersonnel(deletionTarget.person.id, payload);
+      setDeletionTarget(null);
+      setSuccess('پرسنل و همه سوابق مرتبط به‌صورت دائمی حذف شد.');
+      await load();
+    } catch (err) { setError(apiError(err)); }
+    finally { setSaving(false); }
+  };
+
   if (loading && !rows.length) return <ErpLoading />;
 
   return (
@@ -119,7 +155,10 @@ export default function HrPersonnelPage() {
       eyebrow="منابع انسانی · پرسنل"
       title="پرسنل و روابط استخدامی"
       description="هویت فرد از دسترسی سامانه جداست؛ رابطه استخدامی و تخصیص جایگاه تاریخ خود را حفظ می‌کنند."
-      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: load, tone: 'neutral' }]}
+      actions={[
+        { label: archiveView ? 'فهرست فعال' : 'بایگانی پرسنل', icon: archiveView ? FaUndo : FaArchive, onClick: () => { setPage(1); setArchiveView((value) => !value); }, tone: 'neutral' },
+        { label: 'به‌روزرسانی', icon: FaSync, onClick: load, tone: 'neutral' },
+      ]}
       backHref="/dashboard/hr"
     >
       {error && <HrMessage>{error}</HrMessage>}
@@ -197,8 +236,8 @@ export default function HrPersonnelPage() {
         </ErpCard>
       </ErpSection>}
 
-      <ErpSection title="فهرست پرسنل" description={`${rows.length.toLocaleString('fa-IR')} پرونده`} actions={[{ label: 'جستجو', icon: FaSearch, onClick: load, tone: 'neutral' }]}>
-        <div className="mb-4"><input className={fieldClass} placeholder="نام، کد ملی یا شماره پرسنلی" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+      <ErpSection title={archiveView ? 'بایگانی پرسنل' : 'فهرست پرسنل'} description={`${meta.total.toLocaleString('fa-IR')} پرونده`} actions={[{ label: 'جستجو', icon: FaSearch, onClick: load, tone: 'neutral' }]}>
+        <div className="mb-4"><input className={fieldClass} placeholder="نام، کد ملی یا شماره پرسنلی" value={search} onChange={(e) => { setPage(1); setSearch(e.target.value); }} /></div>
         <div className="space-y-3">
           {rows.map((person) => (
             <PersonnelCard
@@ -207,17 +246,34 @@ export default function HrPersonnelPage() {
               saving={saving} foundation={foundation} assignment={assignment} setAssignment={setAssignment}
               assignmentRelationship={assignmentRelationship} setAssignmentRelationship={setAssignmentRelationship}
               assignmentSupervisors={assignmentSupervisors} endDates={endDates} setEndDates={setEndDates} run={run} authorities={authorities}
+              changeArchiveState={changeArchiveState} permanentlyDelete={permanentlyDelete}
             />
           ))}
           {!rows.length && <ErpEmptyState icon={FaUsers} title="پرسنلی برای نمایش وجود ندارد" />}
         </div>
+        <div className="mt-4 flex items-center justify-between gap-3 text-xs text-slate-500">
+          <span>صفحه {meta.page.toLocaleString('fa-IR')} از {meta.totalPages.toLocaleString('fa-IR')}</span>
+          <div className="flex gap-2">
+            <button className="rounded-lg border px-3 py-2 disabled:opacity-50" disabled={loading || page <= 1} onClick={() => setPage((value) => value - 1)}>صفحه قبل</button>
+            <button className="rounded-lg border px-3 py-2 disabled:opacity-50" disabled={loading || page >= meta.totalPages} onClick={() => setPage((value) => value + 1)}>صفحه بعد</button>
+          </div>
+        </div>
       </ErpSection>
+      {deletionTarget && (
+        <PermanentDeletionDialog
+          title="حذف دائمی شخص و همه سوابق مرتبط"
+          preview={deletionTarget.preview}
+          busy={saving}
+          onClose={() => setDeletionTarget(null)}
+          onConfirm={confirmPermanentDeletion}
+        />
+      )}
     </ErpPage>
   );
 }
 
 function PersonnelCard(props: any) {
-  const { person, open, onToggle, saving, foundation, assignment, setAssignment, assignmentRelationship, setAssignmentRelationship, assignmentSupervisors, endDates, setEndDates, run, authorities } = props;
+  const { person, open, onToggle, saving, foundation, assignment, setAssignment, assignmentRelationship, setAssignmentRelationship, assignmentSupervisors, endDates, setEndDates, run, authorities, changeArchiveState, permanentlyDelete } = props;
   const relationship = person.hrEmploymentRelationships?.[0];
   const primary = relationship?.assignments?.find((item: any) => item.type === 'PRIMARY' && !item.effectiveTo);
   return (
@@ -236,8 +292,33 @@ function PersonnelCard(props: any) {
         {open ? <FaChevronUp /> : <FaChevronDown />}
       </button>
       {relationship?.hiringApplication && <Link className="mt-2 inline-block text-xs font-bold text-emerald-700 hover:underline" href={`/dashboard/hr/hiring/${relationship.hiringApplication.id}`}>ایجادشده از پرونده جذب · مشاهده پرونده</Link>}
+      {(person.retentionCapabilities?.canArchive || person.retentionCapabilities?.canRestore) && (
+        <div className="mt-3">
+          <ErpButton
+            label={person.archivedAt ? 'بازیابی از بایگانی' : 'بایگانی'}
+            icon={person.archivedAt ? FaUndo : FaArchive}
+            tone="warning"
+            variant="soft"
+            disabled={saving}
+            onClick={() => changeArchiveState(person)}
+          />
+        </div>
+      )}
+      {person.retentionCapabilities?.canPermanentlyDelete && (
+        <div className="mt-2">
+          <ErpButton
+            label="حذف دائمی"
+            icon={FaTrash}
+            tone="danger"
+            variant="soft"
+            disabled={saving}
+            onClick={() => permanentlyDelete(person)}
+          />
+        </div>
+      )}
+      {person.archivedAt && <p className="mt-2 text-xs text-slate-500">بایگانی‌شده در {dateTimeFa(person.archivedAt)} توسط {person.archivedByDisplayName || 'کاربر نامشخص'} · دلیل: {person.archiveReason || 'ثبت نشده'}</p>}
       {!relationship?.hiringApplication && person.hrPersonnelAudits?.[0]?.eventType === 'EXCEPTIONAL_PERSONNEL_REGISTERED' && <p className="mt-2 text-xs font-bold text-amber-700">ثبت استثنایی · {person.hrPersonnelAudits[0].reason}</p>}
-      {open && (
+      {open && !person.archivedAt && (
         <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-700">
           <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
             <Info label="کد ملی" value={person.nationalCode || 'ثبت نشده'} />

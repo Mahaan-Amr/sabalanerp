@@ -1,0 +1,122 @@
+import path from 'node:path';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { HR_HIRING_STORAGE_DIR } from './hrHiringFileStorage';
+import { stableDeletionFingerprint } from './hrRecordRetentionPolicy';
+
+export type DeletionRelation = { childModel: string; childField: string; parentModel: string };
+type ModelShape = { name: string; fields: Array<{ name: string; kind: string; type?: string; relationFromFields?: string[]; relationToFields?: string[] }> };
+export type PersonnelErasurePlan = {
+  personnelId: string;
+  nodes: Record<string, string[]>;
+  counts: Record<string, number>;
+  order: string[];
+  versionRows: Array<{ model: string; id: string; updatedAt?: string }>;
+  files: Array<{ storageName: string; storageRoot: string; category: string }>;
+  fingerprint: string;
+};
+
+const excludedModels = new Set(['HrDeletionReceipt', 'HrDeletionFileCleanup']);
+const delegateName = (model: string) => model.charAt(0).toLowerCase() + model.slice(1);
+
+export const buildDeletionRelationIndex = (models: ModelShape[]): DeletionRelation[] => models.flatMap((model) => {
+  if (excludedModels.has(model.name)) return [];
+  const relationBackedFields = new Set(model.fields.flatMap((field) => field.kind === 'object' ? field.relationFromFields || [] : []));
+  const declared = model.fields.flatMap((field) => {
+    if (field.kind !== 'object' || !field.type) return [];
+    if (field.relationFromFields?.length !== 1 || field.relationToFields?.length !== 1 || field.relationToFields[0] !== 'id') return [];
+    if (model.name === field.type) return [];
+    return [{ childModel: model.name, childField: field.relationFromFields[0], parentModel: field.type }];
+  });
+  const scalarUserReferences = model.fields.flatMap((field) => {
+    if (field.kind !== 'scalar' || field.type !== 'String' || relationBackedFields.has(field.name)) return [];
+    if (!/(?:By|ById|UserId|userId)$/.test(field.name)) return [];
+    return [{ childModel: model.name, childField: field.name, parentModel: 'User' }];
+  });
+  return [...declared, ...scalarUserReferences];
+});
+
+export const deletionModelOrder = (selectedModels: Set<string>, relations: DeletionRelation[]) => {
+  const remaining = new Set(selectedModels);
+  const order: string[] = [];
+  while (remaining.size) {
+    const blockedParents = new Set(relations
+      .filter((relation) => relation.childModel !== relation.parentModel && remaining.has(relation.childModel) && remaining.has(relation.parentModel))
+      .map((relation) => relation.parentModel));
+    const ready = [...remaining].filter((model) => !blockedParents.has(model)).sort();
+    if (!ready.length) throw new Error('چرخه وابستگی پشتیبانی‌نشده در دامنه حذف پرسنل شناسایی شد.');
+    for (const model of ready) { order.push(model); remaining.delete(model); }
+  }
+  return order;
+};
+
+const fileFields: Record<string, { fields: string[]; storageRoot: string; category: string }> = {
+  HrHiringDocument: { fields: ['storageName'], storageRoot: HR_HIRING_STORAGE_DIR, category: 'HIRING_DOCUMENT' },
+  HrPreIdentityChecklistItem: { fields: ['storageName'], storageRoot: HR_HIRING_STORAGE_DIR, category: 'PRE_IDENTITY_EVIDENCE' },
+  HrCollateralItem: { fields: ['storageName', 'returnEvidenceStorageName'], storageRoot: HR_HIRING_STORAGE_DIR, category: 'COLLATERAL_EVIDENCE' },
+  HrCandidateAssessment: { fields: ['storageName'], storageRoot: HR_HIRING_STORAGE_DIR, category: 'ASSESSMENT' },
+  HrEmploymentContractDocument: { fields: ['storageName'], storageRoot: HR_HIRING_STORAGE_DIR, category: 'EMPLOYMENT_CONTRACT' },
+  SecurityShiftLogAttachment: { fields: ['storageName'], storageRoot: path.join(process.cwd(), 'uploads', 'security-shift-log'), category: 'SECURITY_SHIFT_ATTACHMENT' },
+  SecurityVehiclePairPhoto: { fields: ['storageName'], storageRoot: path.join(process.cwd(), 'uploads', 'security-vehicle-pairs'), category: 'SECURITY_VEHICLE_PHOTO' },
+};
+
+export const buildPersonnelErasurePlan = async (
+  client: PrismaClient | Prisma.TransactionClient,
+  personnelId: string,
+  secret = process.env.JWT_SECRET || 'development-secret',
+  maximumNodes = 50_000,
+): Promise<PersonnelErasurePlan> => {
+  const models = Prisma.dmmf.datamodel.models as unknown as ModelShape[];
+  const relations = buildDeletionRelationIndex(models);
+  const selected = new Map<string, Set<string>>([['Personnel', new Set([personnelId])]]);
+  const versionRows = new Map<string, { model: string; id: string; updatedAt?: string }>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const relation of relations) {
+      const parentIds = [...(selected.get(relation.parentModel) || [])];
+      if (!parentIds.length) continue;
+      const childSet = selected.get(relation.childModel) || new Set<string>();
+      const model = models.find((candidate) => candidate.name === relation.childModel);
+      const hasUpdatedAt = Boolean(model?.fields.some((field) => field.name === 'updatedAt'));
+      const rows = await (client as any)[delegateName(relation.childModel)].findMany({
+        where: { [relation.childField]: { in: parentIds } },
+        select: { id: true, ...(hasUpdatedAt ? { updatedAt: true } : {}) }
+      });
+      for (const row of rows) {
+        if (!childSet.has(row.id)) { childSet.add(row.id); changed = true; }
+        versionRows.set(`${relation.childModel}:${row.id}`, { model: relation.childModel, id: row.id, updatedAt: row.updatedAt?.toISOString?.() });
+      }
+      if (childSet.size) selected.set(relation.childModel, childSet);
+      const total = [...selected.values()].reduce((sum, ids) => sum + ids.size, 0);
+      if (total > maximumNodes) throw new Error(`دامنه حذف بیش از ${maximumNodes.toLocaleString('fa-IR')} رکورد است و نیازمند بررسی فنی مستقل است.`);
+    }
+  }
+  const root = await (client as any).personnel.findUnique({ where: { id: personnelId }, select: { id: true, updatedAt: true } });
+  if (!root) throw new Error('پرسنل پیدا نشد.');
+  versionRows.set(`Personnel:${root.id}`, { model: 'Personnel', id: root.id, updatedAt: root.updatedAt.toISOString() });
+  const nodes: Record<string, string[]> = Object.fromEntries([...selected.entries()].map(([model, ids]) => [model, [...ids].sort()]));
+  const counts = Object.fromEntries(Object.entries(nodes).sort(([left], [right]) => left.localeCompare(right)).map(([model, ids]) => [model, ids.length]));
+  const files: PersonnelErasurePlan['files'] = [];
+  for (const [modelName, descriptor] of Object.entries(fileFields)) {
+    const ids = nodes[modelName];
+    if (!ids?.length) continue;
+    const rows = await (client as any)[delegateName(modelName)].findMany({
+      where: { id: { in: ids } },
+      select: Object.fromEntries(descriptor.fields.map((field) => [field, true]))
+    });
+    for (const row of rows) for (const field of descriptor.fields) if (row[field]) files.push({ storageName: row[field], storageRoot: descriptor.storageRoot, category: descriptor.category });
+  }
+  files.sort((left, right) => `${left.storageRoot}/${left.storageName}`.localeCompare(`${right.storageRoot}/${right.storageName}`));
+  const sortedVersions = [...versionRows.values()].sort((left, right) => `${left.model}:${left.id}`.localeCompare(`${right.model}:${right.id}`));
+  const order = deletionModelOrder(new Set(Object.keys(nodes)), relations);
+  const fingerprint = stableDeletionFingerprint({ personnelId, nodes, versionRows: sortedVersions, files }, secret);
+  return { personnelId, nodes, counts, order, versionRows: sortedVersions, files, fingerprint };
+};
+
+export const executePersonnelErasureGraph = async (client: Prisma.TransactionClient, plan: PersonnelErasurePlan) => {
+  for (const model of plan.order) {
+    const ids = plan.nodes[model];
+    if (!ids?.length) continue;
+    await (client as any)[delegateName(model)].deleteMany({ where: { id: { in: ids } } });
+  }
+};

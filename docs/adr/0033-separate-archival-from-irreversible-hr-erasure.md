@@ -1,0 +1,7 @@
+# Separate archival from irreversible Human Resources erasure
+
+Sabalan will provide reversible Applicant and Personnel archives for ordinary list removal, while also permitting ADMIN-only irreversible deletion through two deliberately different boundaries: deleting a Job Application removes only that application and its application-specific records, whereas deleting Personnel erases the linked person across Candidate, User, Human Resources, and non-Human-Resources operational history. This exceptional destructive capability was chosen over history-preserving retirement, so it requires an exact impact preview, mandatory reason, administrator password and exact-name challenges, final confirmation, atomic live database/storage deletion, protection for the acting and last active administrators, and a permanent non-personal deletion receipt; immutable disaster-recovery backups expire through their normal retention cycle.
+
+## Consequences
+
+Applicant and Personnel archive views remain searchable, restorable, and read-only until restoration. Personnel archival atomically ends the person's employment and payroll participation, cancels incomplete Human Resources work, deactivates the linked User, and revokes sessions without deleting completed history; restoration does not automatically reactivate those relationships. Permanent deletion is never available as a bulk operation, and application deletion must detach rather than destroy a surviving Employment Relationship.

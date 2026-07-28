@@ -2380,8 +2380,32 @@ Changing one's own password revokes every other session while retaining the veri
 _Avoid_: leaving suspected sessions active after a password reset, allowing a deactivated account to retain access, or revoking sessions without accountable audit evidence
 
 **Personnel Record Retirement**:
-A completely unused Personnel record created by mistake may be hard-deleted. Once linked to a User or referenced by attendance, mission, leave, shift, report, Human Resources, or other operational history, the Personnel identity is retained and retired through deactivation or archival instead.
-_Avoid_: hard-deleting a real organizational identity, relying on attendance count alone to decide deletability, or removing historical attribution to satisfy CRUD expectations
+The normal removal path for Personnel is the reversible Personnel Archival Transition, which preserves history and supports controlled restoration. ADMIN may instead choose Permanent Personnel Erasure through its separate high-risk workflow.
+_Avoid_: presenting irreversible erasure as ordinary offboarding, treating archive as deletion, or bypassing the permanent-erasure safeguards
+
+**Applicant and Personnel Archive**:
+The retained, restorable collection of Applicant and Personnel records intentionally removed from ordinary active lists while all personal, operational, document, and audit history remains intact. Applicant and Personnel archives are separate lists; HR_MANAGER and ADMIN may archive or restore with a mandatory reason and accountable audit, while irreversible erasure remains ADMIN-only.
+_Avoid_: treating archive as deletion, hiding archived records without a dedicated archive view, including archived identities in ordinary active work queues, or allowing routine processors and supervisors to archive records
+
+**Archived Job Application**:
+A Job Application hidden from ordinary hiring queues with its current hiring stage, outcome, evidence, documents, and decisions preserved exactly; it permits no hiring workflow action until HR_MANAGER or ADMIN restores it with a reason. Archival is orthogonal to rejection, withdrawal, cancellation, and closure, and restoration resumes the same recorded workflow state.
+_Avoid_: changing the hiring outcome during archival, treating an archived application as rejected, continuing workflow actions while archived, or restoring into a newly inferred stage
+
+**Permanent Job Application Deletion**:
+An ADMIN-only irreversible deletion of one selected Job Application and its application-specific forms, assessments, invitations, contracts, onboarding tasks, uploads, audits, and live-storage files, leaving only a non-personal deletion receipt. A surviving Employment Relationship is detached from the deleted application; Candidate, Personnel, User, payroll, attendance, other applications, and non-Human-Resources history remain intact.
+_Avoid_: treating an application-row deletion as erasure of the person, cascading into a converted Personnel or User, deleting other applications, or leaving application-specific files behind
+
+**Personnel Archival Transition**:
+The atomic transition that ends the person's active, planned, or suspended Employment Relationship and Payroll Participation on the archive effective date, cancels incomplete onboarding and Human Resources tasks with the archive reason, deactivates the linked User and revokes active sessions, then places the Personnel record in the Personnel archive while preserving completed operational history. Failure of any required transition leaves the entire record unchanged, and archiving one person never closes a shared company payroll period.
+_Avoid_: treating archival as list filtering only, partially applying offboarding, silently deleting completed history, leaving login sessions active, or closing payroll work belonging to other personnel
+
+**Permanent Personnel Erasure**:
+An ADMIN-only irreversible operation that removes the selected Personnel, linked Candidate applications and User, every related Human Resources and non-Human-Resources operational record, credentials, sessions, personal data, and live-storage file; immutable backups age out under normal retention rather than being selectively rewritten. It cannot erase the acting ADMIN or the last active ADMIN, is never bulk-operated, and requires an exact impact preview, mandatory reason, current-password verification, exact-name challenge, final confirmation, atomic execution, and a Permanent Person Erasure Receipt.
+_Avoid_: treating Personnel erasure as ordinary deletion, preserving undisclosed live copies, partial cascading, deleting oneself or the final administrator, executing without preview and reauthentication, or claiming immediate selective removal from disaster-recovery backups
+
+**Permanent Person Erasure Receipt**:
+The immutable non-personal evidence retained after an ADMIN irreversibly erases a person, containing the deleting administrator, time, mandatory reason, erased identity identifiers, and record/file counts by category without the erased person's name, contact details, national code, documents, or other personal information.
+_Avoid_: retaining erased personal information in the receipt, allowing deletion without accountable evidence, or making the receipt editable or deletable
 
 **Personnel Bulk Operation**:
 An administrator or otherwise authorized operator's reviewed action over selected Personnel records. Initial operations are activate, deactivate, change department, and apply work schedule; every submission first previews selected, eligible, skipped, and conflicting records and requires confirmation tied to that exact preview. Any intervening selected-record change invalidates the whole operation. Confirmed eligible changes execute atomically while skipped and conflicting records remain untouched, with a parent audit event, per-record before/after results, completion counts, and downloadable results. Bulk hard-delete is not supported.
@@ -2400,8 +2424,8 @@ After an Administrator Password Reset, the affected User must replace the tempor
 _Avoid_: allowing normal ERP access with an administrator-known temporary password, logging either password, or clearing the forced-change requirement before a successful owner-selected replacement
 
 **User Account Erasure**:
-An ADMIN-only irreversible removal for a User who is no longer part of the system. It permanently removes credentials, sessions, personal profile data, and access permissions while unlinking and preserving Personnel and all business records. Historical attribution survives only through an inert actor snapshot containing the former user ID, display name, and deletion time and is displayed as `Deleted user — [name]`; the erased account cannot be reactivated, and a returning person receives a new User account. Execution requires administrator password confirmation, impact preview, mandatory reason, and audit evidence, and cannot target the acting administrator or the last active administrator.
-_Avoid_: cascading account deletion into business records, retaining usable credentials after erasure, reactivating an erased identity, deleting oneself, or removing the final active administrator
+An ADMIN-only irreversible removal initiated from User Management that permanently removes credentials, sessions, personal profile data, and access permissions while unlinking and preserving Personnel and business records; Permanent Personnel Erasure is the explicit exception that cascades through the linked User and business history. Historical attribution normally survives through an inert actor snapshot, and User Account Erasure requires administrator reauthentication, impact preview, reason, audit evidence, and protection for the acting and last active administrators.
+_Avoid_: accidentally invoking Permanent Personnel Erasure from User Management, retaining usable credentials after erasure, reactivating an erased identity, deleting oneself, or removing the final active administrator
 
 **Authentication Evidence Retention**:
 Active sessions remain while authorized; successful, expired, and revoked session history remains for 180 days after session end; Failed Authentication Events remain for 90 days. Account-erasure and administrator-revocation audit events remain permanently. Scheduled cleanup enforces the finite periods, and administrator views separate active sessions, session history, and failed attempts.
@@ -2412,7 +2436,7 @@ A random identifier stored in a secure cookie after successful authentication an
 _Avoid_: treating browser recognition as proof of hardware identity, silently fingerprinting users, trusting a recognized browser with extra permission, or forcing a password change after every user-reported session
 
 **User and Personnel Administration Boundary**:
-ADMIN and MANAGER may create and edit non-admin Users and may create, edit, activate, deactivate, and run approved bulk operations for Personnel. Only ADMIN may hard-delete an unused Personnel record, reset passwords, erase accounts, inspect organization-wide authentication evidence, revoke another user's sessions, correct historical creator attribution, change roles, or apply bulk permissions. Managers may never modify, deactivate, or erase an ADMIN.
+ADMIN and MANAGER may create and edit non-admin Users and may create, edit, activate, deactivate, and run approved bulk operations for Personnel. HR_MANAGER and ADMIN may archive or restore Applicants and Personnel with a mandatory reason; only ADMIN may permanently delete a Job Application, perform Permanent Personnel Erasure, reset passwords, erase accounts, inspect organization-wide authentication evidence, revoke another user's sessions, correct historical creator attribution, change roles, or apply bulk permissions. Managers may never modify, deactivate, or erase an ADMIN.
 _Avoid_: granting sensitive identity or authentication control through the manager role, blocking managers from routine personnel maintenance, or allowing a manager to affect an administrator account
 
 **Failed Login Monitoring Without Throttling**:

@@ -116,6 +116,92 @@ test.describe('HR browser scope', () => {
   });
 });
 
+test.describe('HR archive and permanent-erasure acceptance', () => {
+  test.skip(!env('HR_E2E_API_URL'), 'Set HR_E2E_API_URL and disposable archive/erasure fixtures.');
+
+  test('HR Manager archives and restores one application while HR Processor is rejected', async () => {
+    test.skip(!env('HR_E2E_ARCHIVE_APPLICATION_ID') || !env('HR_E2E_HR_MANAGER_TOKEN') || !env('HR_E2E_HR_PROCESSOR_TOKEN'));
+    const id = env('HR_E2E_ARCHIVE_APPLICATION_ID');
+    const manager = await roleRequest(env('HR_E2E_HR_MANAGER_TOKEN'));
+    const processor = await roleRequest(env('HR_E2E_HR_PROCESSOR_TOKEN'));
+    expect((await processor.post(`/hr-hiring/applications/${id}/archive`, { data: { reason: 'E2E unauthorized archive' } })).status()).toBe(403);
+    expect((await manager.post(`/hr-hiring/applications/${id}/archive`, { data: { reason: 'E2E reversible application archive' } })).ok()).toBeTruthy();
+    const archived = await manager.get('/hr-hiring/applications', { params: { archived: 'true' } });
+    expect((await archived.json()).data.some((item: any) => item.id === id)).toBe(true);
+    const detail = await manager.get(`/hr-hiring/applications/${id}`);
+    expect((await detail.json()).data.readOnlyArchived).toBe(true);
+    expect((await manager.post(`/hr-hiring/applications/${id}/restore`, { data: { reason: 'E2E restore exact workflow state' } })).ok()).toBeTruthy();
+    await Promise.all([manager.dispose(), processor.dispose()]);
+  });
+
+  test('Personnel archive offboards atomically and restore does not reactivate', async () => {
+    test.skip(!env('HR_E2E_ARCHIVE_PERSONNEL_ID') || !env('HR_E2E_HR_MANAGER_TOKEN'));
+    const id = env('HR_E2E_ARCHIVE_PERSONNEL_ID');
+    const manager = await roleRequest(env('HR_E2E_HR_MANAGER_TOKEN'));
+    const effectiveDate = env('HR_E2E_ARCHIVE_EFFECTIVE_DATE') || new Date().toISOString().slice(0, 10);
+    expect((await manager.post(`/hr/personnel/${id}/archive`, { data: { reason: 'E2E controlled Personnel offboarding', effectiveDate } })).ok()).toBeTruthy();
+    const archived = await manager.get('/hr/personnel', { params: { archived: 'true', pageSize: '100' } });
+    const archivedPerson = (await archived.json()).data.find((item: any) => item.id === id);
+    expect(archivedPerson).toBeTruthy();
+    expect(archivedPerson.user?.isActive).toBe(false);
+    expect((await manager.post(`/hr/personnel/${id}/restore`, { data: { reason: 'E2E restore list visibility only' } })).ok()).toBeTruthy();
+    const active = await manager.get('/hr/personnel', { params: { pageSize: '100' } });
+    const restored = (await active.json()).data.find((item: any) => item.id === id);
+    expect(restored.user?.isActive).toBe(false);
+    expect(restored.hrEmploymentRelationships.every((item: any) => item.status === 'ENDED')).toBe(true);
+    await manager.dispose();
+  });
+
+  test('ADMIN permanently deletes only a disposable application after exact preview confirmation', async () => {
+    test.skip(!env('HR_E2E_DELETE_APPLICATION_ID') || !env('HR_E2E_ADMIN_TOKEN') || !env('HR_E2E_ADMIN_PASSWORD'));
+    const id = env('HR_E2E_DELETE_APPLICATION_ID');
+    const admin = await roleRequest(env('HR_E2E_ADMIN_TOKEN'));
+    const previewResponse = await admin.get(`/hr-hiring/applications/${id}/deletion-preview`);
+    expect(previewResponse.ok()).toBeTruthy();
+    const preview = (await previewResponse.json()).data;
+    const deletion = await admin.post(`/hr-hiring/applications/${id}/permanent-delete`, { data: {
+      reason: 'E2E permanent deletion of disposable application', fullName: preview.displayName,
+      adminPassword: env('HR_E2E_ADMIN_PASSWORD'), fingerprint: preview.fingerprint, confirmed: true,
+    } });
+    expect([200, 202]).toContain(deletion.status());
+    expect((await admin.get(`/hr-hiring/applications/${id}`)).status()).toBe(404);
+    await admin.dispose();
+  });
+
+  test('ADMIN erasure rejects a stale Personnel preview before any deletion', async () => {
+    test.skip(!env('HR_E2E_STALE_PERSONNEL_ID') || !env('HR_E2E_ADMIN_TOKEN') || !env('HR_E2E_ADMIN_PASSWORD'));
+    const id = env('HR_E2E_STALE_PERSONNEL_ID');
+    const admin = await roleRequest(env('HR_E2E_ADMIN_TOKEN'));
+    const preview = (await (await admin.get(`/hr/personnel/${id}/deletion-preview`)).json()).data;
+    expect((await admin.post(`/hr/personnel/${id}/archive`, { data: {
+      reason: 'E2E fingerprint invalidation', effectiveDate: new Date().toISOString().slice(0, 10),
+    } })).ok()).toBeTruthy();
+    const deletion = await admin.post(`/hr/personnel/${id}/permanent-delete`, { data: {
+      reason: 'E2E stale preview rejection', fullName: preview.displayName,
+      adminPassword: env('HR_E2E_ADMIN_PASSWORD'), fingerprint: preview.fingerprint, confirmed: true,
+    } });
+    expect(deletion.ok()).toBe(false);
+    expect(JSON.stringify(await deletion.json())).toContain('منقضی');
+    await admin.dispose();
+  });
+
+  test('ADMIN permanently erases one disposable Personnel graph after exact preview confirmation', async () => {
+    test.skip(!env('HR_E2E_DELETE_PERSONNEL_ID') || !env('HR_E2E_ADMIN_TOKEN') || !env('HR_E2E_ADMIN_PASSWORD'));
+    const id = env('HR_E2E_DELETE_PERSONNEL_ID');
+    const admin = await roleRequest(env('HR_E2E_ADMIN_TOKEN'));
+    const previewResponse = await admin.get(`/hr/personnel/${id}/deletion-preview`);
+    expect(previewResponse.ok()).toBeTruthy();
+    const preview = (await previewResponse.json()).data;
+    const deletion = await admin.post(`/hr/personnel/${id}/permanent-delete`, { data: {
+      reason: 'E2E permanent Personnel erasure fixture', fullName: preview.displayName,
+      adminPassword: env('HR_E2E_ADMIN_PASSWORD'), fingerprint: preview.fingerprint, confirmed: true,
+    } });
+    expect([200, 202]).toContain(deletion.status());
+    expect((await admin.get(`/hr/personnel/${id}/deletion-preview`)).status()).toBe(404);
+    await admin.dispose();
+  });
+});
+
 test.describe('browser-visible cross-role workflow controls', () => {
   test.skip(
     !env('HR_E2E_APPLICATION_ID') ||

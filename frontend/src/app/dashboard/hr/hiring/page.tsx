@@ -4,9 +4,12 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   FaCog,
+  FaArchive,
   FaFilter,
   FaPlus,
   FaSync,
+  FaTrash,
+  FaUndo,
 } from "react-icons/fa";
 import {
   ErpBadge,
@@ -20,6 +23,7 @@ import { hrAPI } from "@/lib/api";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 import { dateTimeFa } from "@/features/hr/hrUi";
 import { hrDisplayLabel } from "@/features/hr/hrDisplay";
+import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
 import {
   hiringLifecyclePhaseOptions,
   hiringLifecycleStatusLabel,
@@ -69,13 +73,15 @@ export default function HiringCasesPage() {
   const [message, setMessage] = useState("");
   const [meta, setMeta] = useState({ page: 1, totalPages: 1, total: 0 });
   const [decisionDetail, setDecisionDetail] = useState<any>(null);
+  const [archiveView, setArchiveView] = useState(false);
+  const [deletionTarget, setDeletionTarget] = useState<any>(null);
 
   const load = async (nextFilters: HiringQueueFilters = filters) => {
     try {
       setLoading(true);
       setError("");
       const [cases, foundation] = await Promise.all([
-        hiringAPI.list(buildHiringQueueParams(nextFilters)),
+        hiringAPI.list({ ...buildHiringQueueParams(nextFilters), archived: String(archiveView) }),
         hrAPI.getFoundation(),
       ]);
       setRows(cases.data.data);
@@ -92,7 +98,7 @@ export default function HiringCasesPage() {
     void load(blankFilters);
     // Initial queue load intentionally uses the stable empty filter set.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [archiveView]);
 
   const create = async () => {
     try {
@@ -126,6 +132,48 @@ export default function HiringCasesPage() {
     }
   };
 
+  const changeArchiveState = async (row: any) => {
+    const reason = window.prompt(row.archivedAt ? "دلیل بازیابی از بایگانی" : "دلیل بایگانی پرونده");
+    if (!reason?.trim()) return;
+    try {
+      setBusy(true);
+      setError("");
+      if (row.archivedAt) await hiringAPI.restore(row.id, reason.trim());
+      else await hiringAPI.archive(row.id, reason.trim());
+      setMessage(row.archivedAt ? "پرونده از بایگانی بازیابی شد." : "پرونده بایگانی شد.");
+      await load();
+    } catch (cause) {
+      setError(hiringError(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const permanentlyDelete = async (row: any) => {
+    try {
+      setBusy(true);
+      setError("");
+      const preview = (await hiringAPI.getDeletionPreview(row.id)).data.data;
+      setDeletionTarget({ row, preview });
+    } catch (cause) {
+      setError(hiringError(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmPermanentDeletion = async (payload: any) => {
+    if (!deletionTarget) return;
+    try {
+      setBusy(true); setError("");
+      await hiringAPI.permanentlyDelete(deletionTarget.row.id, payload);
+      setDeletionTarget(null);
+      setMessage("پرونده به‌صورت دائمی حذف شد.");
+      await load();
+    } catch (cause) { setError(hiringError(cause)); }
+    finally { setBusy(false); }
+  };
+
   if (loading && !rows.length) return <ErpLoading />;
 
   return (
@@ -135,6 +183,11 @@ export default function HiringCasesPage() {
       description="جریان یکپارچه متقاضی، بررسی، پیشنهاد همکاری، تبدیل به پرسنل و فعال‌سازی"
       backHref="/dashboard/hr"
       actions={[
+        {
+          label: archiveView ? "فهرست فعال" : "بایگانی متقاضیان",
+          icon: archiveView ? FaUndo : FaArchive,
+          onClick: () => setArchiveView((value) => !value),
+        },
         {
           label: "اختیارها",
           icon: FaCog,
@@ -434,17 +487,40 @@ export default function HiringCasesPage() {
                     </td>
                     <td className="whitespace-nowrap p-3">{dateTimeFa(row.updatedAt)}</td>
                     <td className="p-3">
+                      {row.archivedAt && (
+                        <p className="mb-2 max-w-56 whitespace-normal text-xs text-slate-500">
+                          بایگانی‌شده در {dateTimeFa(row.archivedAt)} توسط {row.archivedByDisplayName || "کاربر نامشخص"} · دلیل: {row.archiveReason || "ثبت نشده"}
+                        </p>
+                      )}
                       <div className="flex flex-col gap-2">
                         <Link className="rounded-lg bg-slate-900 px-3 py-2 text-center font-bold text-white dark:bg-slate-100 dark:text-slate-900" href={`/dashboard/hr/hiring/${row.id}`}>
                           بازکردن پرونده
                         </Link>
-                        <button
+                        {!row.archivedAt && <button
                           disabled={busy || row.stage === "CLOSED"}
                           onClick={() => invite(row.id)}
                           className="rounded-lg border px-3 py-2 disabled:opacity-50"
                         >
                           ارسال مجدد دعوت
-                        </button>
+                        </button>}
+                        {(row.retentionCapabilities?.canArchive || row.retentionCapabilities?.canRestore) && (
+                          <button
+                            disabled={busy}
+                            onClick={() => changeArchiveState(row)}
+                            className="rounded-lg border border-amber-500 px-3 py-2 font-bold text-amber-700 disabled:opacity-50"
+                          >
+                            {row.archivedAt ? "بازیابی از بایگانی" : "بایگانی"}
+                          </button>
+                        )}
+                        {row.retentionCapabilities?.canPermanentlyDelete && (
+                          <button
+                            disabled={busy}
+                            onClick={() => permanentlyDelete(row)}
+                            className="rounded-lg border border-rose-600 px-3 py-2 font-bold text-rose-700 disabled:opacity-50"
+                          >
+                            <FaTrash className="ml-1 inline" /> حذف دائمی
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -499,6 +575,15 @@ export default function HiringCasesPage() {
             )}
           </ErpCard>
         </div>
+      )}
+      {deletionTarget && (
+        <PermanentDeletionDialog
+          title="حذف دائمی پرونده متقاضی"
+          preview={deletionTarget.preview}
+          busy={busy}
+          onClose={() => setDeletionTarget(null)}
+          onConfirm={confirmPermanentDeletion}
+        />
       )}
     </ErpPage>
   );

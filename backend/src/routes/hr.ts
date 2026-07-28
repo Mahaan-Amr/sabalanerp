@@ -1,11 +1,16 @@
 import express, { Response } from 'express';
 import { Prisma, PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
 import { normalizeWorkSchedule } from '../utils/personnelWorkSchedule';
 import { assertSubsequentEmploymentRelationship } from '../services/hrPersonnelBoundary';
 import { assertWorkScheduleAction } from '../services/hrWorkScheduleGovernance';
-import { dateOnlyRangeIncludes } from '../services/hrEmploymentActivation';
+import { dateOnlyRangeIncludes, plannedStartHasArrived } from '../services/hrEmploymentActivation';
+import { assertArchiveReason, assertArchivedRecordMutable, assertPermanentDeletionConfirmation, assertPersonnelErasureTarget, projectRecordRetentionCapabilities } from '../services/hrRecordRetentionPolicy';
+import { buildPersonnelErasurePlan, executePersonnelErasureGraph } from '../services/hrPersonnelErasureGraph';
+import { commitStagedHiringFiles, restoreStagedHiringFiles, stageHiringFilesForDeletion, type StagedHiringFile } from '../services/hrDeletionFileTransaction';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -19,6 +24,7 @@ const EXCEPTIONAL_PERSONNEL_SOURCES = new Set(['DATA_MIGRATION', 'HISTORICAL_COR
 
 const requireHrManagerAuthority = async (req: WorkspaceRequest, res: Response, next: express.NextFunction) => {
   try {
+    if (req.user!.role === 'ADMIN') return next();
     const authority = await prisma.hrHiringAuthority.findFirst({
       where: { userId: req.user!.id, authority: 'HR_MANAGER', isActive: true }
     });
@@ -29,6 +35,11 @@ const requireHrManagerAuthority = async (req: WorkspaceRequest, res: Response, n
   } catch (error) {
     next(error);
   }
+};
+
+const requireSystemAdmin = (req: WorkspaceRequest, res: Response, next: express.NextFunction) => {
+  if (req.user!.role !== 'ADMIN') return res.status(403).json({ success: false, error: 'فقط مدیر سامانه می‌تواند حذف دائمی انجام دهد.' });
+  next();
 };
 
 const textValue = (value: unknown) => String(value ?? '').trim();
@@ -340,13 +351,24 @@ router.put('/positions/:id', editAccess, async (req: WorkspaceRequest, res) => {
   } catch (error) { handleError(res, error, 'Update HR position'); }
 });
 
-router.get('/personnel', viewAccess, async (req, res) => {
+router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
   try {
     const search = textValue(req.query.search);
-    const [rows, authorityRows] = await Promise.all([
-      prisma.personnel.findMany({ where: search ? { OR: [{ firstName: { contains: search, mode: 'insensitive' } }, { lastName: { contains: search, mode: 'insensitive' } }, { employeeNumber: { contains: search, mode: 'insensitive' } }, { nationalCode: { contains: search } }] } : {}, include: personnelInclude, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }] }),
+    const archived = textValue(req.query.archived) === 'true';
+    const page = Math.max(1, Number(req.query.page || 1));
+    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || 50)));
+    const sortDirection = textValue(req.query.sortDirection) === 'desc' ? 'desc' : 'asc';
+    const where: Prisma.PersonnelWhereInput = { archivedAt: archived ? { not: null } : null, ...(search ? { OR: [{ firstName: { contains: search, mode: 'insensitive' } }, { lastName: { contains: search, mode: 'insensitive' } }, { employeeNumber: { contains: search, mode: 'insensitive' } }, { nationalCode: { contains: search } }] } : {}) };
+    const [rows, total, authorityRows] = await Promise.all([
+      prisma.personnel.findMany({ where, include: personnelInclude, orderBy: [{ lastName: sortDirection }, { firstName: sortDirection }], skip: (page - 1) * pageSize, take: pageSize }),
+      prisma.personnel.count({ where }),
       prisma.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { authority: true } })
     ]);
+    const archivedActorIds = [...new Set(rows.map((person) => person.archivedBy).filter(Boolean) as string[])];
+    const archivedActors = archivedActorIds.length
+      ? await prisma.user.findMany({ where: { id: { in: archivedActorIds } }, select: { id: true, firstName: true, lastName: true, username: true } })
+      : [];
+    const archivedActorNames = new Map(archivedActors.map((actor) => [actor.id, `${actor.firstName} ${actor.lastName}`.trim() || actor.username]));
     const authorities = new Set(authorityRows.map((row) => row.authority));
     const now = new Date();
     const isEffective = (from: Date, to: Date | null) => dateOnlyRangeIncludes(from, to, now);
@@ -372,6 +394,8 @@ router.get('/personnel', viewAccess, async (req, res) => {
       const canSeeChangeDetails = Boolean(isResponsibleSupervisor) || authorities.has('HR_PROCESSOR') || authorities.has('HR_MANAGER');
       return {
         ...person,
+        archivedByDisplayName: person.archivedBy ? archivedActorNames.get(person.archivedBy) || person.archivedBy : null,
+        retentionCapabilities: projectRecordRetentionCapabilities({ role: req.user!.role, authorities: [...authorities], archived: Boolean(person.archivedAt) }),
         workScheduleChanges: canSeeChangeDetails ? person.workScheduleChanges : [],
         workScheduleCapabilities: {
           canPropose: Boolean(isResponsibleSupervisor) && (!change || change.status === 'APPROVED'),
@@ -382,8 +406,160 @@ router.get('/personnel', viewAccess, async (req, res) => {
         }
       };
     });
-    res.json({ success: true, data });
+    res.json({ success: true, data, meta: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } });
   } catch (error) { handleError(res, error, 'List HR personnel'); }
+});
+
+router.post('/personnel/:id/archive', viewAccess, requireHrManagerAuthority, async (req: WorkspaceRequest, res) => {
+  try {
+    const reason = assertArchiveReason(req.body.reason);
+    const effectiveDate = parseDate(req.body.effectiveDate, 'تاریخ اجرای بایگانی');
+    if (!plannedStartHasArrived(effectiveDate)) throw new Error('تاریخ اجرای بایگانی نمی‌تواند در آینده باشد.');
+    const now = new Date();
+    const result = await prisma.$transaction(async (tx) => {
+      const person = await tx.personnel.findUniqueOrThrow({ where: { id: req.params.id }, include: { user: true, hiringCandidate: { include: { applications: { select: { id: true } } } } } });
+      if (person.archivedAt) throw new Error('پرسنل قبلاً بایگانی شده است.');
+      const applicationIds = person.hiringCandidate?.applications.map((application) => application.id) || [];
+      const relationships = await tx.hrEmploymentRelationship.findMany({ where: { personnelId: person.id, status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] } }, select: { id: true, effectiveFrom: true } });
+      const relationshipIds = relationships.map((relationship) => relationship.id);
+      if (relationshipIds.length) {
+        const assignments = await tx.hrEmploymentAssignment.findMany({ where: { employmentRelationshipId: { in: relationshipIds }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: effectiveDate } }] }, select: { id: true, effectiveFrom: true } });
+        for (const assignment of assignments) await tx.hrEmploymentAssignment.update({ where: { id: assignment.id }, data: { effectiveTo: assignment.effectiveFrom > effectiveDate ? assignment.effectiveFrom : effectiveDate } });
+        for (const relationship of relationships) await tx.hrEmploymentRelationship.update({ where: { id: relationship.id }, data: { status: 'ENDED', effectiveTo: relationship.effectiveFrom > effectiveDate ? relationship.effectiveFrom : effectiveDate, endReason: reason } });
+      }
+      if (applicationIds.length) {
+        const payrollParticipations = await tx.hrPayrollParticipation.findMany({ where: { applicationId: { in: applicationIds }, effectiveTo: null }, select: { id: true, effectiveFrom: true } });
+        for (const participation of payrollParticipations) await tx.hrPayrollParticipation.update({ where: { id: participation.id }, data: { effectiveTo: participation.effectiveFrom > effectiveDate ? participation.effectiveFrom : effectiveDate, endedBy: actorId(req), endReason: reason } });
+        await tx.hrOnboardingTask.updateMany({ where: { applicationId: { in: applicationIds }, status: { in: ['PENDING', 'IN_PROGRESS'] } }, data: { status: 'WAIVED', evidenceNote: `بایگانی پرسنل: ${reason}`, completedBy: actorId(req), completedAt: now } });
+      }
+      await tx.hrWorkScheduleChange.updateMany({
+        where: { personnelId: person.id, status: { in: ['PROPOSED', 'DRAFT', 'SUBMITTED', 'RETURNED'] } },
+        data: { status: 'CANCELLED', returnedBy: actorId(req), returnedAt: now, returnReason: `بایگانی پرسنل: ${reason}` }
+      });
+      if (person.user) {
+        await tx.authSession.updateMany({ where: { userId: person.user.id, revokedAt: null }, data: { revokedAt: now, revokedById: actorId(req), revocationReason: `بایگانی پرسنل: ${reason}` } });
+        await tx.user.update({ where: { id: person.user.id }, data: { isActive: false } });
+      }
+      await tx.hrPersonnelAudit.create({ data: { personnelId: person.id, actorUserId: actorId(req), eventType: 'PERSONNEL_ARCHIVED', sourceCategory: 'PERSONNEL_ARCHIVE', reason, payloadJson: { effectiveDate: effectiveDate.toISOString(), linkedUserDeactivated: Boolean(person.user), endedRelationshipCount: relationshipIds.length } } });
+      return tx.personnel.update({ where: { id: person.id }, data: { isActive: false, archivedAt: now, archivedBy: actorId(req), archiveReason: reason, archiveEffectiveDate: effectiveDate } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    res.json({ success: true, data: result });
+  } catch (error) { handleError(res, error, 'Archive HR personnel'); }
+});
+
+router.post('/personnel/:id/restore', viewAccess, requireHrManagerAuthority, async (req: WorkspaceRequest, res) => {
+  try {
+    const reason = assertArchiveReason(req.body.reason);
+    const result = await prisma.$transaction(async (tx) => {
+      const person = await tx.personnel.findUniqueOrThrow({ where: { id: req.params.id } });
+      if (!person.archivedAt) throw new Error('پرسنل در بایگانی نیست.');
+      await tx.hrPersonnelAudit.create({ data: { personnelId: person.id, actorUserId: actorId(req), eventType: 'PERSONNEL_RESTORED', sourceCategory: 'PERSONNEL_ARCHIVE', reason, payloadJson: { restoredAt: new Date().toISOString(), employmentReactivated: false, userReactivated: false, payrollReactivated: false } } });
+      return tx.personnel.update({ where: { id: person.id }, data: { archivedAt: null, archivedBy: null, archiveReason: null, archiveEffectiveDate: null } });
+    });
+    res.json({ success: true, data: result });
+  } catch (error) { handleError(res, error, 'Restore HR personnel'); }
+});
+
+const assertCurrentPersonnelErasureAdminProtection = async (client: PrismaClient | Prisma.TransactionClient, userIds: string[], actorUserId: string) => {
+  const [users, activeAdminCount] = await Promise.all([
+    userIds.length ? (client as any).user.findMany({ where: { id: { in: userIds } }, select: { id: true, role: true, isActive: true } }) : [],
+    (client as any).user.count({ where: { role: 'ADMIN', isActive: true, erasedAt: null } })
+  ]);
+  if (userIds.includes(actorUserId)) assertPersonnelErasureTarget({ actorUserId, targetUserId: actorUserId, targetIsActiveAdmin: true, activeAdminCount });
+  const activeAdminTargets = users.filter((user: any) => user.role === 'ADMIN' && user.isActive).length;
+  if (activeAdminTargets > 0 && activeAdminCount - activeAdminTargets < 1) {
+    assertPersonnelErasureTarget({ actorUserId, targetUserId: users.find((user: any) => user.role === 'ADMIN' && user.isActive)?.id, targetIsActiveAdmin: true, activeAdminCount: 1 });
+  }
+};
+
+const personnelErasureImpact = async (personnelId: string, actorUserId: string) => {
+  const person = await prisma.personnel.findUnique({ where: { id: personnelId }, include: { user: { select: { id: true, role: true, isActive: true } } } });
+  if (!person) return null;
+  const plan = await buildPersonnelErasurePlan(prisma, personnelId);
+  const userIds = plan.nodes.User || [];
+  await assertCurrentPersonnelErasureAdminProtection(prisma, userIds, actorUserId);
+  const fileCounts = Object.fromEntries(Object.entries(plan.files.reduce<Record<string, number>>((counts, file) => ({ ...counts, [file.category]: (counts[file.category] || 0) + 1 }), {})).sort(([left], [right]) => left.localeCompare(right)));
+  return {
+    person,
+    plan,
+    data: {
+      targetId: person.id,
+      displayName: `${person.firstName} ${person.lastName}`.trim(),
+      linkedUserIds: userIds,
+      counts: plan.counts,
+      fileCounts,
+      totalRecords: Object.values(plan.counts).reduce((sum, count) => sum + count, 0),
+      totalFiles: plan.files.length,
+      fingerprint: plan.fingerprint,
+      backupNotice: 'نسخه‌های پشتیبان تغییر داده نمی‌شوند و داده طبق دوره نگهداری عادی منقضی می‌شود.'
+    }
+  };
+};
+
+router.get('/personnel/:id/deletion-preview', viewAccess, requireSystemAdmin, async (req: WorkspaceRequest, res) => {
+  try {
+    const impact = await personnelErasureImpact(req.params.id, actorId(req));
+    if (!impact) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
+    res.json({ success: true, data: impact.data });
+  } catch (error) { handleError(res, error, 'Preview permanent Personnel erasure'); }
+});
+
+router.post('/personnel/:id/permanent-delete', viewAccess, requireSystemAdmin, async (req: WorkspaceRequest, res) => {
+  try {
+    const [impact, actor] = await Promise.all([
+      personnelErasureImpact(req.params.id, actorId(req)),
+      prisma.user.findUnique({ where: { id: actorId(req) }, select: { password: true } })
+    ]);
+    if (!impact) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
+    if (!actor || !(await bcrypt.compare(String(req.body.adminPassword || ''), actor.password))) return res.status(403).json({ success: false, error: 'رمز عبور مدیر سامانه صحیح نیست.' });
+    assertPermanentDeletionConfirmation({ expectedFingerprint: impact.plan.fingerprint, suppliedFingerprint: req.body.fingerprint, expectedFullName: impact.data.displayName, suppliedFullName: req.body.fullName, reason: req.body.reason, confirmed: req.body.confirmed });
+    const receiptId = crypto.randomUUID();
+    const staged: StagedHiringFile[] = [];
+    try {
+      const groups = new Map<string, string[]>();
+      for (const file of impact.plan.files) groups.set(file.storageRoot, [...(groups.get(file.storageRoot) || []), file.storageName]);
+      let index = 0;
+      for (const [storageRoot, names] of groups) staged.push(...stageHiringFilesForDeletion(names, `${receiptId}-${index++}`, storageRoot));
+      await prisma.$transaction(async (tx) => {
+        const currentPlan = await buildPersonnelErasurePlan(tx, req.params.id);
+        if (currentPlan.fingerprint !== impact.plan.fingerprint) throw new Error('پیش‌نمایش حذف منقضی شده است؛ دوباره بررسی کنید.');
+        const targetUserIds = currentPlan.nodes.User || [];
+        await assertCurrentPersonnelErasureAdminProtection(tx, targetUserIds, actorId(req));
+        if (targetUserIds.length) await tx.authSession.updateMany({ where: { userId: { in: targetUserIds }, revokedAt: null }, data: { revokedAt: new Date(), revokedById: actorId(req), revocationReason: 'PERMANENT_PERSONNEL_ERASURE' } });
+        await executePersonnelErasureGraph(tx, currentPlan);
+        await tx.hrDeletionReceipt.create({ data: {
+          id: receiptId, targetType: 'PERSONNEL', targetId: req.params.id, actorUserId: actorId(req), reason: assertArchiveReason(req.body.reason),
+          previewFingerprint: currentPlan.fingerprint, status: 'FILE_CLEANUP_PENDING', recordCounts: currentPlan.counts,
+          fileCounts: impact.data.fileCounts, deletedAt: new Date()
+        } });
+        if (staged.length) await tx.hrDeletionFileCleanup.createMany({ data: staged.map((item) => ({ receiptId, storageName: item.storageName, originalPath: item.originalPath, stagedPath: item.stagedPath })) });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60_000 });
+    } catch (error) {
+      restoreStagedHiringFiles(staged);
+      throw error;
+    }
+    const failures: string[] = [];
+    for (const item of staged) {
+      const failed = commitStagedHiringFiles([item]);
+      if (failed.length) {
+        failures.push(item.storageName);
+        await prisma.hrDeletionFileCleanup.updateMany({ where: { receiptId, stagedPath: item.stagedPath }, data: { status: 'FAILED', lastError: 'FILE_UNLINK_FAILED' } });
+      } else await prisma.hrDeletionFileCleanup.deleteMany({ where: { receiptId, stagedPath: item.stagedPath } });
+    }
+    const receipt = await prisma.hrDeletionReceipt.update({ where: { id: receiptId }, data: { status: failures.length ? 'FILE_CLEANUP_PENDING' : 'COMPLETED', fileCounts: { ...impact.data.fileCounts, staged: staged.length, failed: failures.length } } });
+    res.status(failures.length ? 202 : 200).json({ success: !failures.length, data: { receiptId, status: receipt.status }, error: failures.length ? 'حذف پایگاه داده انجام شد اما پاک‌سازی برخی فایل‌ها نیازمند تلاش مجدد است.' : undefined });
+  } catch (error) { handleError(res, error, 'Execute permanent Personnel erasure'); }
+});
+
+router.use('/personnel/:id', async (req: WorkspaceRequest, res, next) => {
+  if (req.method === 'GET' || /\/(archive|restore|deletion-preview|permanent-delete)$/.test(req.path)) return next();
+  try {
+    const person = await prisma.personnel.findUnique({ where: { id: req.params.id }, select: { archivedAt: true } });
+    assertArchivedRecordMutable(person?.archivedAt);
+    next();
+  } catch (error) {
+    res.status(409).json({ success: false, error: error instanceof Error ? error.message : 'پرسنل بایگانی‌شده قابل تغییر نیست.' });
+  }
 });
 
 router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, async (req: WorkspaceRequest, res) => {

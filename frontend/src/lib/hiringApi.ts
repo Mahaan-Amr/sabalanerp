@@ -26,6 +26,10 @@ applicant.interceptors.request.use((config) => {
 export const hiringAPI = {
   list: (params?: Record<string, string>) =>
     internal.get("/applications", { params }),
+  archive: (id: string, reason: string) => internal.post(`/applications/${id}/archive`, { reason }),
+  restore: (id: string, reason: string) => internal.post(`/applications/${id}/restore`, { reason }),
+  getDeletionPreview: (id: string) => internal.get(`/applications/${id}/deletion-preview`),
+  permanentlyDelete: (id: string, data: any) => internal.post(`/applications/${id}/permanent-delete`, data),
   get: (id: string) => internal.get(`/applications/${id}`),
   myAuthorities: () => internal.get("/me/authorities"),
   create: (data: any) => internal.post("/applications", data),

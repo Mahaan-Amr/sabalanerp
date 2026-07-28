@@ -262,6 +262,10 @@ model Personnel {
   isActive                            Boolean                              @default(true)
   createdAt                           DateTime                             @default(now())
   updatedAt                           DateTime                             @updatedAt
+  archivedAt                          DateTime?
+  archivedBy                          String?
+  archiveReason                       String?
+  archiveEffectiveDate                DateTime?
   attendanceRecords                   AttendanceRecord[]
   workSchedules                       PersonnelWorkSchedule[]
   workScheduleChanges                 HrWorkScheduleChange[]
@@ -277,6 +281,7 @@ model Personnel {
   hrPersonnelAudits                   HrPersonnelAudit[]
 
   @@index([isActive, departmentId])
+  @@index([archivedAt, lastName, firstName])
   @@index([lastName, firstName])
   @@map("personnel")
 }
@@ -330,6 +335,7 @@ enum HrWorkScheduleChangeStatus {
   SUBMITTED
   RETURNED
   APPROVED
+  CANCELLED
 }
 
 model HrWorkScheduleChange {
@@ -3325,6 +3331,9 @@ model HrJobApplication {
   createdBy                          String
   createdAt                          DateTime                       @default(now())
   updatedAt                          DateTime                       @updatedAt
+  archivedAt                         DateTime?
+  archivedBy                         String?
+  archiveReason                      String?
   candidate                          HrCandidate                    @relation(fields: [candidateId], references: [id], onDelete: Restrict)
   position                           HrPosition                     @relation(fields: [positionId], references: [id], onDelete: Restrict)
   employmentRelationship             HrEmploymentRelationship?
@@ -3348,6 +3357,7 @@ model HrJobApplication {
   collateralTemplate                 HrCollateralChecklistTemplate? @relation(fields: [collateralTemplateId], references: [id], onDelete: SetNull)
 
   @@index([stage, outcome, updatedAt])
+  @@index([archivedAt, updatedAt])
   @@index([candidateId, createdAt])
   @@index([positionId, stage])
   @@map("hr_job_applications")
@@ -3849,15 +3859,54 @@ model HrInsuranceEnrollment {
 }
 
 model HrPayrollParticipation {
-  id            String           @id @default(cuid())
-  applicationId String           @unique
-  effectiveFrom DateTime
+  id                  String           @id @default(cuid())
+  applicationId       String           @unique
+  effectiveFrom       DateTime
   startMismatchReason String?
-  configuredBy  String
-  configuredAt  DateTime         @default(now())
-  application   HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  configuredBy        String
+  configuredAt        DateTime         @default(now())
+  effectiveTo         DateTime?
+  endedBy             String?
+  endReason           String?
+  application         HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
   @@map("hr_payroll_participations")
+}
+
+model HrDeletionReceipt {
+  id                 String    @id @default(cuid())
+  targetType         String
+  targetId           String
+  actorUserId        String
+  reason             String
+  previewFingerprint String
+  status             String
+  recordCounts       Json
+  fileCounts         Json
+  deletedAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([targetType, targetId])
+  @@index([actorUserId, createdAt])
+  @@index([status, createdAt])
+  @@map("hr_deletion_receipts")
+}
+
+model HrDeletionFileCleanup {
+  id           String   @id @default(cuid())
+  receiptId    String
+  storageName  String
+  originalPath String
+  stagedPath   String
+  status       String   @default("PENDING")
+  lastError    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([receiptId, status])
+  @@index([status, createdAt])
+  @@map("hr_deletion_file_cleanups")
 }
 
 model HrOnboardingTask {

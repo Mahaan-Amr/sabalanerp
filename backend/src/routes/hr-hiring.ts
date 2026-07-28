@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import express, { NextFunction, Response } from 'express';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { AuthRequest, protect } from '../middleware/auth';
@@ -48,6 +49,15 @@ import { normalizeInsuranceEnrollmentCommand } from '../services/hrInsuranceEnro
 import { normalizePayrollParticipationCommand } from '../services/hrPayrollParticipation';
 import { buildHiringDocumentIndex } from '../services/hrHiringDocumentIndex';
 import { buildEmploymentActivationReadiness } from '../services/hrEmploymentActivation';
+import {
+  assertArchiveReason,
+  assertArchivedRecordMutable,
+  assertPermanentDeletionConfirmation,
+  stableDeletionFingerprint,
+  projectRecordRetentionCapabilities
+} from '../services/hrRecordRetentionPolicy';
+import { commitStagedHiringFiles, restoreStagedHiringFiles, stageHiringFilesForDeletion } from '../services/hrDeletionFileTransaction';
+import { latestDecisionsByKind } from '../services/hrApplicationDecisionVersions';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -304,6 +314,61 @@ const requireAuthority = (...authorities: string[]) => asyncHandler(async (req: 
   (req as any).hiringAuthority = assigned.authority;
   next();
 });
+
+const requireArchiveManager = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (req.user!.role === 'ADMIN') return next();
+  const authority = await prisma.hrHiringAuthority.findFirst({
+    where: { userId: actorId(req), authority: 'HR_MANAGER', isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+    select: { id: true }
+  });
+  if (!authority) return res.status(403).json({ success: false, error: 'فقط مدیر منابع انسانی یا مدیر سامانه می‌تواند بایگانی را مدیریت کند.' });
+  next();
+});
+
+const requireSystemAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (req.user!.role !== 'ADMIN') return res.status(403).json({ success: false, error: 'فقط مدیر سامانه می‌تواند حذف دائمی انجام دهد.' });
+  next();
+};
+
+const applicationDeletionImpact = async (applicationId: string, client: PrismaClient | Prisma.TransactionClient = prisma) => {
+  const application = await (client as any).hrJobApplication.findUnique({
+    where: { id: applicationId },
+    include: {
+      candidate: { select: { firstName: true, lastName: true } },
+      employmentRelationship: { select: { id: true } },
+      documents: { select: { storageName: true } },
+      assessments: { select: { storageName: true } },
+      preIdentityChecklistItems: { select: { storageName: true } },
+      collateralItems: { select: { storageName: true, returnEvidenceStorageName: true } },
+      contracts: { select: { storageName: true } },
+      _count: true
+    }
+  });
+  if (!application) return null;
+  const files = [
+    ...application.documents.map((item) => item.storageName),
+    ...application.assessments.map((item) => item.storageName),
+    ...application.preIdentityChecklistItems.map((item) => item.storageName),
+    ...application.collateralItems.flatMap((item) => [item.storageName, item.returnEvidenceStorageName]),
+    ...application.contracts.map((item) => item.storageName)
+  ].filter(Boolean).sort() as string[];
+  const counts = Object.fromEntries(Object.entries(application._count).sort(([left], [right]) => left.localeCompare(right)));
+  const fingerprintSource = { targetId: application.id, updatedAt: application.updatedAt.toISOString(), counts, files };
+  const fingerprint = stableDeletionFingerprint(fingerprintSource, process.env.JWT_SECRET || 'development-secret');
+  return {
+    application,
+    data: {
+      targetId: application.id,
+      displayName: `${application.candidate.firstName} ${application.candidate.lastName}`.trim(),
+      counts,
+      fileCounts: { liveReferences: files.length },
+      files,
+      detachesEmploymentRelationship: Boolean(application.employmentRelationship),
+      preserves: ['CANDIDATE', 'OTHER_APPLICATIONS', 'PERSONNEL', 'USER', 'PAYROLL', 'ATTENDANCE', 'NON_HR_HISTORY'],
+      fingerprint
+    }
+  };
+};
 
 const requireHrAdmin = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
   const [direct, role] = await Promise.all([
@@ -626,8 +691,15 @@ router.use(protect, requireHiringRead);
 // A disposition pauses the case without destroying evidence. Ordinary mutations must
 // resume through the explicit reactivation command before work can continue.
 router.use('/applications/:id', asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
-  if (req.method === 'GET' || /\/(disposition\/reactivate|reopen\/authorize|reopen\/execute|close)$/.test(req.path)) return next();
-  const application = await prisma.hrJobApplication.findUnique({ where: { id: req.params.id }, select: { disposition: true } });
+  if (req.method === 'GET') return next();
+  const application = await prisma.hrJobApplication.findUnique({ where: { id: req.params.id }, select: { disposition: true, archivedAt: true } });
+  const retentionAction = /\/(archive|restore|deletion-preview|permanent-delete)$/.test(req.path);
+  if (!retentionAction) {
+    try { assertArchivedRecordMutable(application?.archivedAt); } catch (error) {
+      return res.status(409).json({ success: false, error: error instanceof Error ? error.message : 'پرونده بایگانی‌شده قابل تغییر نیست.' });
+    }
+  }
+  if (retentionAction || /\/(disposition\/reactivate|reopen\/authorize|reopen\/execute|close)$/.test(req.path)) return next();
   if (application?.disposition) return res.status(409).json({ success: false, error: 'پرونده متوقف است؛ پیش از ادامه باید صریحاً دوباره فعال شود.' });
   next();
 }));
@@ -735,6 +807,7 @@ router.patch('/collateral-templates/:id/active', requireAuthority('FINANCE_MANAG
 
 router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response) => {
   const search = String(req.query.search || '').trim();
+  const archived = String(req.query.archived || '') === 'true';
   const authorityRows = await prisma.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { authority: true } });
   const authorities = authorityRows.map((item) => item.authority);
   // The hiring workspace intentionally shows the complete contact number for operational follow-up.
@@ -742,6 +815,7 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
   const canSeeDecisionDetails = authorities.some((authority) => ['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER'].includes(authority));
   const rows = await prisma.hrJobApplication.findMany({
     where: {
+      archivedAt: archived ? { not: null } : null,
       stage: req.query.stage ? req.query.stage as any : undefined,
       ...(req.query.outcome
         ? { outcome: req.query.outcome as any }
@@ -774,12 +848,19 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
     },
     orderBy: { updatedAt: 'desc' }
   });
+  const archivedActorIds = [...new Set(rows.map((application) => application.archivedBy).filter(Boolean) as string[])];
+  const archivedActors = archivedActorIds.length
+    ? await prisma.user.findMany({ where: { id: { in: archivedActorIds } }, select: { id: true, firstName: true, lastName: true, username: true } })
+    : [];
+  const archivedActorNames = new Map(archivedActors.map((actor) => [actor.id, `${actor.firstName} ${actor.lastName}`.trim() || actor.username]));
   const requestedPhase = String(req.query.phase || '').trim();
   const requestedStatus = String(req.query.lifecycleStatus || '').trim();
   const myActions = String(req.query.myActions || '') === 'true';
   const projected = rows.map((source) => {
     const row = {
       ...source,
+      archivedByDisplayName: source.archivedBy ? archivedActorNames.get(source.archivedBy) || source.archivedBy : null,
+      retentionCapabilities: projectRecordRetentionCapabilities({ role: req.user!.role, authorities, archived: Boolean(source.archivedAt) }),
       decisionDetailsVisible: canSeeDecisionDetails,
       candidate: { ...source.candidate, mobile: canSeeFullMobile ? source.candidate.mobile : `${source.candidate.mobile.slice(0, 4)}***${source.candidate.mobile.slice(-2)}` },
       hiringDecisions: source.hiringDecisions.map((decision) => canSeeDecisionDetails ? decision : ({ kind: decision.kind, outcome: decision.outcome, version: decision.version }))
@@ -820,6 +901,8 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   const canSeeFinanceSensitive = authorities.has('FINANCE_RECORDER') || authorities.has('FINANCE_MANAGER');
   const canSeeCompensation = canSeeFinanceSensitive || authorities.has('HIRING_MANAGER') || authorities.has('HR_PROCESSOR') || authorities.has('HR_PAYROLL_PROCESSOR') || authorities.has('HR_PAYROLL_MANAGER') || authorities.has('HR_MANAGER');
   const data: any = row;
+  data.retentionCapabilities = projectRecordRetentionCapabilities({ role: req.user!.role, authorities: [...authorities], archived: Boolean(row.archivedAt) });
+  data.readOnlyArchived = Boolean(row.archivedAt);
   data.lifecycle = projectHiringLifecycle(row, authorities, actorId(req));
   data.taskCapabilities = projectHiringTaskCapabilities(row, authorities, actorId(req));
   data.documentIndex = buildHiringDocumentIndex(row, authorities);
@@ -906,6 +989,110 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   if (!authorities.has('HR_MANAGER')) data.audits = [];
   await audit(row.id, 'HIRING_CASE_VIEWED', req, undefined);
   res.json({ success: true, data });
+}));
+
+router.post('/applications/:id/archive', requireArchiveManager, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const reason = assertArchiveReason(req.body.reason);
+  const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, select: { archivedAt: true } });
+  if (application.archivedAt) return res.status(409).json({ success: false, error: 'پرونده قبلاً بایگانی شده است.' });
+  const archivedAt = new Date();
+  const row = await prisma.$transaction(async (tx) => {
+    const updated = await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { archivedAt, archivedBy: actorId(req), archiveReason: reason } });
+    await tx.hrHiringAudit.create({ data: { applicationId: req.params.id, actorUserId: actorId(req), actorKind: 'USER', eventType: 'APPLICATION_ARCHIVED', payloadJson: { reason, archivedAt: archivedAt.toISOString() } } });
+    return updated;
+  });
+  res.json({ success: true, data: row });
+}));
+
+router.post('/applications/:id/restore', requireArchiveManager, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const reason = assertArchiveReason(req.body.reason);
+  const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, select: { archivedAt: true } });
+  if (!application.archivedAt) return res.status(409).json({ success: false, error: 'پرونده در بایگانی نیست.' });
+  const row = await prisma.$transaction(async (tx) => {
+    await tx.hrHiringAudit.create({ data: { applicationId: req.params.id, actorUserId: actorId(req), actorKind: 'USER', eventType: 'APPLICATION_RESTORED', payloadJson: { reason, restoredAt: new Date().toISOString() } } });
+    return tx.hrJobApplication.update({ where: { id: req.params.id }, data: { archivedAt: null, archivedBy: null, archiveReason: null } });
+  });
+  res.json({ success: true, data: row });
+}));
+
+router.get('/applications/:id/deletion-preview', requireSystemAdmin, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const impact = await applicationDeletionImpact(req.params.id);
+  if (!impact) return res.status(404).json({ success: false, error: 'پرونده استخدام پیدا نشد.' });
+  res.json({ success: true, data: impact.data });
+}));
+
+router.post('/applications/:id/permanent-delete', requireSystemAdmin, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const [impact, actor] = await Promise.all([
+    applicationDeletionImpact(req.params.id),
+    prisma.user.findUnique({ where: { id: actorId(req) }, select: { password: true } })
+  ]);
+  if (!impact) return res.status(404).json({ success: false, error: 'پرونده استخدام پیدا نشد.' });
+  if (!actor || !(await bcrypt.compare(String(req.body.adminPassword || ''), actor.password))) {
+    return res.status(403).json({ success: false, error: 'رمز عبور مدیر سامانه صحیح نیست.' });
+  }
+  assertPermanentDeletionConfirmation({
+    expectedFingerprint: impact.data.fingerprint,
+    suppliedFingerprint: req.body.fingerprint,
+    expectedFullName: impact.data.displayName,
+    suppliedFullName: req.body.fullName,
+    reason: req.body.reason,
+    confirmed: req.body.confirmed
+  });
+  const receiptId = crypto.randomUUID();
+  const staged = stageHiringFilesForDeletion(impact.data.files, receiptId);
+  try {
+    await prisma.$transaction(async (tx) => {
+      const currentImpact = await applicationDeletionImpact(req.params.id, tx);
+      if (!currentImpact || currentImpact.data.fingerprint !== impact.data.fingerprint) throw new Error('پیش‌نمایش حذف منقضی شده است؛ دوباره بررسی کنید.');
+      if (currentImpact.application.employmentRelationship) {
+        await tx.hrEmploymentRelationship.update({
+          where: { id: currentImpact.application.employmentRelationship.id },
+          data: { hiringApplicationId: null }
+        });
+      }
+      await tx.hrJobApplication.delete({ where: { id: req.params.id } });
+      await tx.hrDeletionReceipt.create({ data: {
+        id: receiptId,
+        targetType: 'JOB_APPLICATION', targetId: req.params.id, actorUserId: actorId(req), reason: assertArchiveReason(req.body.reason),
+        previewFingerprint: impact.data.fingerprint, status: 'FILE_CLEANUP_PENDING', recordCounts: impact.data.counts as Prisma.InputJsonValue,
+        fileCounts: impact.data.fileCounts, deletedAt: new Date()
+      } });
+      if (staged.length) await tx.hrDeletionFileCleanup.createMany({ data: staged.map((item) => ({ receiptId, storageName: item.storageName, originalPath: item.originalPath, stagedPath: item.stagedPath })) });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  } catch (error) {
+    restoreStagedHiringFiles(staged);
+    throw error;
+  }
+  const failures: string[] = [];
+  for (const item of staged) {
+    const failed = commitStagedHiringFiles([item]);
+    if (failed.length) {
+      failures.push(item.storageName);
+      await prisma.hrDeletionFileCleanup.updateMany({ where: { receiptId, stagedPath: item.stagedPath }, data: { status: 'FAILED', lastError: 'FILE_UNLINK_FAILED' } });
+    } else {
+      await prisma.hrDeletionFileCleanup.deleteMany({ where: { receiptId, stagedPath: item.stagedPath } });
+    }
+  }
+  const receipt = await prisma.hrDeletionReceipt.update({
+    where: { id: receiptId },
+    data: { status: failures.length ? 'FILE_CLEANUP_PENDING' : 'COMPLETED', fileCounts: { ...impact.data.fileCounts, staged: staged.length, failed: failures.length } }
+  });
+  res.status(failures.length ? 202 : 200).json({ success: !failures.length, data: { receiptId: receipt.id, status: receipt.status }, error: failures.length ? 'حذف پایگاه داده انجام شد اما پاک‌سازی برخی فایل‌ها نیازمند تلاش مجدد است.' : undefined });
+}));
+
+router.post('/deletion-receipts/:id/retry-files', requireSystemAdmin, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const cleanupRows = await prisma.hrDeletionFileCleanup.findMany({ where: { receiptId: req.params.id }, orderBy: { createdAt: 'asc' } });
+  const failures: string[] = [];
+  for (const row of cleanupRows) {
+    const failed = commitStagedHiringFiles([{ storageName: row.storageName, originalPath: row.originalPath, stagedPath: row.stagedPath }]);
+    if (failed.length) {
+      failures.push(row.storageName);
+      await prisma.hrDeletionFileCleanup.update({ where: { id: row.id }, data: { status: 'FAILED', lastError: 'FILE_UNLINK_FAILED' } });
+    } else await prisma.hrDeletionFileCleanup.delete({ where: { id: row.id } });
+  }
+  const remaining = await prisma.hrDeletionFileCleanup.count({ where: { receiptId: req.params.id } });
+  const receipt = await prisma.hrDeletionReceipt.update({ where: { id: req.params.id }, data: { status: remaining ? 'FILE_CLEANUP_PENDING' : 'COMPLETED' } });
+  res.status(remaining ? 202 : 200).json({ success: !remaining, data: { receiptId: receipt.id, status: receipt.status, remaining }, error: failures.length ? 'پاک‌سازی برخی فایل‌ها دوباره ناموفق بود.' : undefined });
 }));
 
 router.post('/applications', requireAuthority('HR_PROCESSOR', 'HR_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -1599,7 +1786,7 @@ router.post('/applications/:id/decisions/:kind', asyncHandler(async (req: AuthRe
   if (kind === 'COMPANY_APPROVAL' && outcome === 'POSITIVE') {
     const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { preIdentityChecklistItems: true } });
     const prior = await prisma.hrApplicationDecision.findMany({ where: { applicationId: req.params.id, kind: { in: ['HR_INTERVIEW', 'HR_PRELIMINARY_APPROVAL'] } }, orderBy: { version: 'desc' } });
-    const latestPrior = new Map(prior.map((decision) => [decision.kind, decision]));
+    const latestPrior = latestDecisionsByKind(prior);
     if (latestPrior.get('HR_INTERVIEW')?.outcome !== 'POSITIVE' || latestPrior.get('HR_PRELIMINARY_APPROVAL')?.outcome !== 'POSITIVE') throw new Error('مصاحبه اولیه و تأیید اولیه HR باید مثبت باشند.');
     if (!application.preIdentityRequirementsFinalizedAt) throw new Error('الزامات پرونده هنوز توسط مدیریت نهایی نشده است.');
     if (application.preIdentityChecklistItems.some((item) => ['PENDING', 'IN_PROGRESS'].includes(item.status) || (item.status === 'NEGATIVE' && !item.managementResolution))) throw new Error('همه الزامات باید نتیجه نهایی یا تعیین تکلیف مدیریتی داشته باشند.');
@@ -1653,7 +1840,7 @@ router.post('/applications/:id/pre-identity/finalize', requireAuthority('COMPANY
   const decisions = await prisma.hrApplicationDecision.findMany({
     where: { applicationId: req.params.id, kind: { in: ['HR_INTERVIEW', 'HR_PRELIMINARY_APPROVAL'] } }, orderBy: { version: 'desc' }
   });
-  const latest = new Map(decisions.map((decision) => [decision.kind, decision]));
+  const latest = latestDecisionsByKind(decisions);
   if (latest.get('HR_INTERVIEW')?.outcome !== 'POSITIVE' || latest.get('HR_PRELIMINARY_APPROVAL')?.outcome !== 'POSITIVE') throw new Error('مصاحبه اولیه و تأیید اولیه HR باید پیش از نهایی‌سازی مثبت باشند.');
   const row = await prisma.hrJobApplication.update({ where: { id: req.params.id }, data: { preIdentityRequirementsFinalizedBy: actorId(req), preIdentityRequirementsFinalizedAt: new Date() } });
   await audit(req.params.id, 'PRE_IDENTITY_REQUIREMENTS_FINALIZED', req);

@@ -288,7 +288,7 @@ export default function HiringCasePage() {
   );
   const latestContract = data.contracts?.[0];
   const hasAuthority = (...values: string[]) =>
-    values.some((value) => authorities.includes(value));
+    !data.readOnlyArchived && values.some((value) => authorities.includes(value));
   const canHrSensitive = hasAuthority("HR_PROCESSOR", "HR_MANAGER");
   const canCompanyManager = hasAuthority("COMPANY_MANAGER");
   const canFinance = hasAuthority("FINANCE_RECORDER", "FINANCE_MANAGER");
@@ -437,6 +437,11 @@ export default function HiringCasePage() {
       {message && (
         <p className="rounded-xl bg-emerald-50 p-3 text-emerald-700">
           {message}
+        </p>
+      )}
+      {data.readOnlyArchived && (
+        <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 font-bold text-amber-800">
+          این پرونده بایگانی شده و تا زمان بازیابی فقط قابل مشاهده است.
         </p>
       )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">

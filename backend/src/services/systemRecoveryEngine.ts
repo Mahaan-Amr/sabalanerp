@@ -254,7 +254,8 @@ const extractRecoveryArchive = async (archivePath: string, payloadRoot: string) 
   if (!entries.length || entries.length > 250_000) throw Object.assign(new Error('Recovery archive entry count is invalid.'), { code: 'INVALID_RECOVERY_ARCHIVE' });
   for (const entry of entries) {
     const normalized = entry.replace(/\\/g, '/').replace(/^\.\//, '');
-    if (!normalized || normalized.startsWith('/') || /^[a-z]:/i.test(normalized) || normalized.split('/').includes('..')) {
+    const isArchiveRoot = entry === '.' || entry === './';
+    if ((!normalized && !isArchiveRoot) || normalized.startsWith('/') || /^[a-z]:/i.test(normalized) || normalized.split('/').includes('..')) {
       throw Object.assign(new Error('Recovery archive contains an unsafe path.'), { code: 'UNSAFE_RECOVERY_ARCHIVE' });
     }
   }
